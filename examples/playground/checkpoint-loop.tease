@@ -1,0 +1,16 @@
+/*
+ * Step until a loop message appears, save a checkpoint, step again,
+ * then restore to see the exact loop position and event sequence resume.
+ */
+let labels = ["one", "two", "three", "four"]
+
+for label in labels {
+    say `Checkpoint step: ${label}`
+}
+
+for number in 1..4 {
+    say `Range step: ${number}`
+}
+
+say `Final deterministic integer: ${randomInteger(10..=20)}`
+exit

@@ -54,18 +54,19 @@ test("serves required JavaScript and CSS assets", async () => {
   assert.match(css.body, /runtime-summary/u);
 });
 
-test("serves the repository playground example", async () => {
-  const response = await get("/examples/playground/main.tease");
-
-  assert.equal(response.status, 200);
-  assert.match(response.contentType, /^text\/plain/u);
-  assert.match(response.body, /speaker guide/u);
-  assert.match(response.body, /greetings\.random/u);
+test("serves every fixed repository playground example", async () => {
+  for (const name of ["main", "control-flow", "checkpoint-loop"]) {
+    const response = await get(`/examples/playground/${name}.tease`);
+    assert.equal(response.status, 200, name);
+    assert.match(response.contentType, /^text\/plain/u);
+  }
 });
 
 test("returns 404 for missing or unexposed paths", async () => {
   assert.equal((await get("/missing.txt")).status, 404);
   assert.equal((await get("/package.json")).status, 404);
+  assert.equal((await get("/examples/playground/not-allowed.tease")).status, 404);
+  assert.equal((await get("/examples/other.tease")).status, 404);
 });
 
 test("rejects encoded path traversal", async () => {
@@ -75,22 +76,33 @@ test("rejects encoded path traversal", async () => {
   assert.match(response.body, /unsafe request path/u);
 });
 
+test("query and encoded example-path manipulation cannot select a file", async () => {
+  assert.equal(
+    (await get("/examples/playground/not-allowed.tease?name=main")).status,
+    404,
+  );
+  assert.equal(
+    (await get("/examples/playground/%2e%2e/main.tease")).status,
+    400,
+  );
+});
+
 test("rejects symlinks that escape an exposed static root", async (context) => {
   const projectRoot = await mkdtemp(join(tmpdir(), "teasescript-playground-"));
   context.after(async () => rm(projectRoot, { recursive: true, force: true }));
   await mkdir(join(projectRoot, "playground"), { recursive: true });
   await mkdir(join(projectRoot, "dist"), { recursive: true });
-  await mkdir(join(projectRoot, "examples"), { recursive: true });
+  await mkdir(join(projectRoot, "examples", "playground"), { recursive: true });
   await writeFile(join(projectRoot, "secret.txt"), "not public", "utf8");
   await symlink(
     join(projectRoot, "secret.txt"),
-    join(projectRoot, "examples", "leak.tease"),
+    join(projectRoot, "examples", "playground", "main.tease"),
   );
 
   const isolatedServer = createPlaygroundServer({ projectRoot });
   const isolatedPort = await listen(isolatedServer);
   context.after(async () => close(isolatedServer));
-  const response = await get("/examples/leak.tease", isolatedPort);
+  const response = await get("/examples/playground/main.tease", isolatedPort);
 
   assert.equal(response.status, 400);
   assert.match(response.body, /unsafe request path/u);

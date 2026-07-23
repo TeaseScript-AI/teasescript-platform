@@ -1,0 +1,41 @@
+// Control flow uses deterministic, checkpointable runtime state.
+let values = ["alpha", "beta", "gamma"]
+let uniqueValues = set["first", "second", "first"]
+
+repeat 2 {
+    say "Repeated"
+}
+
+for value in values {
+    if value == "beta" {
+        continue
+    }
+    say value
+}
+
+for value in uniqueValues {
+    say value
+}
+
+for number in 1..=5 {
+    if number == 4 {
+        break
+    }
+    say number
+}
+
+let counter = 0
+while counter < 2 {
+    counter = counter + 1
+    say `Counter ${counter}`
+}
+
+if chance(50) {
+    say `Random branch, value ${random()}`
+} else if randomInteger(1..=6) == 6 {
+    say "Rolled six"
+} else {
+    say "Deterministic fallback"
+}
+
+exit

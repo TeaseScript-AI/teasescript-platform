@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import {
+  PLAYGROUND_EXAMPLES,
+  checkpointStorageKey,
+} from "../playground/examples.js";
 import { compileSource } from "../src/compiler.js";
 import { run } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
@@ -28,4 +32,26 @@ test("executes the repository playground example deterministically", async () =>
     ],
   );
   assert.deepEqual(first.events.map((event) => event.sequence), [1, 2, 3, 4, 5]);
+});
+
+test("every fixed repository playground example compiles and completes", async () => {
+  for (const [name, example] of Object.entries(PLAYGROUND_EXAMPLES)) {
+    const source = await readFile(`examples/playground/${example.file}`, "utf8");
+    const compilation = compileSource(source);
+    assert.deepEqual(compilation.diagnostics, [], name);
+    assert.notEqual(compilation.plan, null, name);
+    const result = run(
+      compilation.plan!,
+      createFreshRuntimeSnapshot(compilation.plan!),
+    );
+    assert.equal(result.snapshot.status, "halted", name);
+  }
+});
+
+test("checkpoint storage keys are format-versioned and example-specific", () => {
+  const keys = Object.keys(PLAYGROUND_EXAMPLES).map((name) =>
+    checkpointStorageKey(name as keyof typeof PLAYGROUND_EXAMPLES)
+  );
+  assert.equal(new Set(keys).size, keys.length);
+  assert.ok(keys.every((key) => /checkpoint-v2:/u.test(key)));
 });
