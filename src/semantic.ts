@@ -2,6 +2,7 @@ import type {
   AssignmentTarget,
   Block,
   Expression,
+  FunctionDeclaration,
   Program,
   Statement,
 } from "./ast.js";
@@ -21,7 +22,7 @@ export interface SemanticValidationResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
-type BindingKind = "variable" | "speaker" | "global";
+type BindingKind = "variable" | "speaker" | "global" | "function";
 
 interface Binding {
   readonly kind: BindingKind;
@@ -40,6 +41,22 @@ const semanticCode = {
   invalidRangeOperand: "TSV010",
   invalidRepeatCount: "TSV011",
   invalidLoopSource: "TSV012",
+  duplicateFunction: "TSV013",
+  duplicateParameter: "TSV014",
+  requiredAfterDefault: "TSV015",
+  nestedFunction: "TSV016",
+  returnOutsideFunction: "TSV017",
+  unknownFunction: "TSV018",
+  nonCallable: "TSV019",
+  argumentCount: "TSV020",
+  mixedArguments: "TSV021",
+  unknownNamedArgument: "TSV022",
+  duplicateNamedArgument: "TSV023",
+  missingNamedArgument: "TSV024",
+  laterParameterDefault: "TSV025",
+  functionAssignment: "TSV026",
+  unsupportedFunctionAnnotation: "TSV027",
+  functionValue: "TSV028",
 } as const;
 
 const coreBuiltinNames = Object.freeze([
@@ -77,6 +94,8 @@ class SemanticValidator {
   readonly diagnostics: Diagnostic[] = [];
   readonly #builtins: ReadonlySet<string>;
   readonly #root = new SemanticScope();
+  readonly #functions = new Map<string, FunctionDeclaration>();
+  #functionDepth = 0;
 
   public constructor(options: SemanticValidationOptions) {
     this.#builtins = new Set([
@@ -89,7 +108,33 @@ class SemanticValidator {
   }
 
   public validate(program: Program): void {
-    this.#validateStatements(program.statements, this.#root, 0);
+    for (const statement of program.statements) {
+      if (statement.kind !== "functionDeclaration") continue;
+      if (this.#functions.has(statement.name.name)) {
+        this.#report(
+          semanticCode.duplicateFunction,
+          `Duplicate function declaration '${statement.name.name}'.`,
+          statement.name.span,
+        );
+        continue;
+      }
+      if (this.#declare(statement.name.name, "function", statement.name.span, this.#root)) {
+        this.#functions.set(statement.name.name, statement);
+      }
+    }
+    for (const statement of program.statements) {
+      if (statement.kind !== "functionDeclaration") {
+        this.#validateStatement(statement, this.#root, 0);
+      }
+    }
+    for (const statement of program.statements) {
+      if (
+        statement.kind === "functionDeclaration" &&
+        this.#functions.get(statement.name.name) === statement
+      ) {
+        this.#validateFunction(statement);
+      }
+    }
   }
 
   #validateStatements(
@@ -237,8 +282,89 @@ class SemanticValidator {
           );
         }
         return;
+      case "functionDeclaration":
+        this.#report(
+          semanticCode.nestedFunction,
+          "Nested function declarations are not supported in this milestone.",
+          statement.span,
+        );
+        return;
+      case "returnStatement":
+        if (this.#functionDepth === 0) {
+          this.#report(
+            semanticCode.returnOutsideFunction,
+            "'return' may only appear inside a function.",
+            statement.span,
+          );
+        }
+        if (statement.value !== null) {
+          this.#validateExpression(statement.value, scope, null);
+        }
+        return;
       case "exitStatement":
         return;
+    }
+  }
+
+  #validateFunction(declaration: FunctionDeclaration): void {
+    if (declaration.returnTypeAnnotation !== null) {
+      this.#report(
+        semanticCode.unsupportedFunctionAnnotation,
+        "Function return-type annotations are parsed but not implemented in this milestone.",
+        declaration.returnTypeAnnotation.span,
+      );
+    }
+    const names = new Set<string>();
+    let sawDefault = false;
+    const bodyScope = new SemanticScope(this.#root);
+    for (const parameter of declaration.parameters) {
+      const duplicate = names.has(parameter.name.name);
+      if (duplicate) {
+        this.#report(
+          semanticCode.duplicateParameter,
+          `Duplicate function parameter '${parameter.name.name}'.`,
+          parameter.name.span,
+        );
+      }
+      names.add(parameter.name.name);
+      if (parameter.typeAnnotation !== null) {
+        this.#report(
+          semanticCode.unsupportedFunctionAnnotation,
+          "Function parameter annotations are parsed but not implemented in this milestone.",
+          parameter.typeAnnotation.span,
+        );
+      }
+      if (parameter.defaultValue === null && sawDefault) {
+        this.#report(
+          semanticCode.requiredAfterDefault,
+          "Required parameters must precede parameters with defaults.",
+          parameter.span,
+        );
+      }
+      sawDefault ||= parameter.defaultValue !== null;
+      if (!duplicate) {
+        this.#declare(parameter.name.name, "variable", parameter.name.span, bodyScope);
+      }
+    }
+
+    const defaultScope = new SemanticScope(this.#root);
+    for (let index = 0; index < declaration.parameters.length; index += 1) {
+      const parameter = declaration.parameters[index]!;
+      if (parameter.defaultValue !== null) {
+        const laterNames = new Set(
+          declaration.parameters.slice(index + 1).map((item) => item.name.name),
+        );
+        this.#reportLaterParameterReferences(parameter.defaultValue, laterNames);
+        this.#validateExpression(parameter.defaultValue, defaultScope, null);
+      }
+      defaultScope.declare(parameter.name.name, { kind: "variable" });
+    }
+
+    this.#functionDepth += 1;
+    try {
+      this.#validateStatements(declaration.body.statements, bodyScope, 0);
+    } finally {
+      this.#functionDepth -= 1;
     }
   }
 
@@ -264,6 +390,12 @@ class SemanticValidator {
         this.#report(
           semanticCode.unknownAssignment,
           `Cannot assign to unknown variable '${target.name}'.`,
+          target.span,
+        );
+      } else if (binding.kind === "function") {
+        this.#report(
+          semanticCode.functionAssignment,
+          `Cannot assign to function '${target.name}'.`,
           target.span,
         );
       } else if (binding.kind !== "variable") {
@@ -295,13 +427,20 @@ class SemanticValidator {
         return;
       case "identifier":
         if (expression.name === "speaker" && contextualSpeaker !== null) return;
+        const binding = scope.resolve(expression.name);
         if (
-          scope.resolve(expression.name) === undefined &&
+          binding === undefined &&
           !this.#builtins.has(expression.name)
         ) {
           this.#report(
             semanticCode.unknownVariable,
             `Unknown variable '${expression.name}'.`,
+            expression.span,
+          );
+        } else if (binding?.kind === "function") {
+          this.#report(
+            semanticCode.functionValue,
+            `Function '${expression.name}' is not a first-class runtime value.`,
             expression.span,
           );
         }
@@ -356,7 +495,30 @@ class SemanticValidator {
         this.#validateExpression(expression.index, scope, contextualSpeaker);
         return;
       case "callExpression":
-        this.#validateExpression(expression.callee, scope, contextualSpeaker);
+        if (expression.callee.kind === "identifier") {
+          const name = expression.callee.name;
+          const binding = scope.resolve(name);
+          const declaration = this.#functions.get(name);
+          if (declaration !== undefined && binding?.kind === "function") {
+            this.#validateFunctionCall(expression, declaration);
+          } else if (this.#builtins.has(name)) {
+            // Injected and core built-ins validate their values at runtime.
+          } else if (binding !== undefined) {
+            this.#report(
+              semanticCode.nonCallable,
+              `'${name}' is a ${binding.kind}, not a callable function.`,
+              expression.callee.span,
+            );
+          } else {
+            this.#report(
+              semanticCode.unknownFunction,
+              `Unknown function '${name}'.`,
+              expression.callee.span,
+            );
+          }
+        } else {
+          this.#validateExpression(expression.callee, scope, contextualSpeaker);
+        }
         for (const argument of expression.arguments) {
           this.#validateExpression(argument.value, scope, contextualSpeaker);
         }
@@ -410,6 +572,85 @@ class SemanticValidator {
         }
         return;
     }
+  }
+
+  #validateFunctionCall(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+    declaration: FunctionDeclaration,
+  ): void {
+    const positional = expression.arguments.filter(
+      (argument) => argument.kind === "positionalArgument",
+    );
+    const named = expression.arguments.filter(
+      (argument) => argument.kind === "namedArgument",
+    );
+    if (positional.length > 0 && named.length > 0) {
+      this.#report(
+        semanticCode.mixedArguments,
+        "Positional and named arguments may not be mixed in one call.",
+        expression.span,
+      );
+      return;
+    }
+    const required = declaration.parameters.filter(
+      (parameter) => parameter.defaultValue === null,
+    ).length;
+    if (named.length === 0) {
+      if (
+        positional.length < required ||
+        positional.length > declaration.parameters.length
+      ) {
+        this.#report(
+          semanticCode.argumentCount,
+          `Function '${declaration.name.name}' expects ${required} through ${declaration.parameters.length} positional argument(s), received ${positional.length}.`,
+          expression.span,
+        );
+      }
+      return;
+    }
+    const parameters = new Map(
+      declaration.parameters.map((parameter) => [parameter.name.name, parameter]),
+    );
+    const supplied = new Set<string>();
+    for (const argument of named) {
+      if (!parameters.has(argument.name.name)) {
+        this.#report(
+          semanticCode.unknownNamedArgument,
+          `Unknown argument '${argument.name.name}' for function '${declaration.name.name}'.`,
+          argument.name.span,
+        );
+      } else if (supplied.has(argument.name.name)) {
+        this.#report(
+          semanticCode.duplicateNamedArgument,
+          `Duplicate named argument '${argument.name.name}'.`,
+          argument.name.span,
+        );
+      }
+      supplied.add(argument.name.name);
+    }
+    for (const parameter of declaration.parameters) {
+      if (parameter.defaultValue === null && !supplied.has(parameter.name.name)) {
+        this.#report(
+          semanticCode.missingNamedArgument,
+          `Missing required named argument '${parameter.name.name}'.`,
+          expression.span,
+        );
+      }
+    }
+  }
+
+  #reportLaterParameterReferences(
+    expression: Expression,
+    laterNames: ReadonlySet<string>,
+  ): void {
+    visitExpression(expression, (identifier) => {
+      if (!laterNames.has(identifier.name)) return;
+      this.#report(
+        semanticCode.laterParameterDefault,
+        `Default expression may not reference later parameter '${identifier.name}'.`,
+        identifier.span,
+      );
+    });
   }
 
   #declare(
@@ -525,4 +766,59 @@ function isDefinitelyComposite(
     expression.kind === "identifier" &&
     scope.resolve(expression.name)?.kind === "speaker"
   );
+}
+
+function visitExpression(
+  expression: Expression,
+  visitor: (identifier: Extract<Expression, { kind: "identifier" }>) => void,
+): void {
+  switch (expression.kind) {
+    case "identifier":
+      visitor(expression);
+      return;
+    case "booleanLiteral":
+    case "nullLiteral":
+    case "numberLiteral":
+    case "stringLiteral":
+      return;
+    case "parenthesizedExpression":
+      visitExpression(expression.expression, visitor);
+      return;
+    case "listLiteral":
+    case "setLiteral":
+      expression.elements.forEach((element) => visitExpression(element, visitor));
+      return;
+    case "objectLiteral":
+      expression.properties.forEach((property) => visitExpression(property.value, visitor));
+      return;
+    case "templateLiteral":
+      expression.parts.forEach((part) => {
+        if (part.kind === "templateInterpolation") {
+          visitExpression(part.expression, visitor);
+        }
+      });
+      return;
+    case "propertyAccessExpression":
+      visitExpression(expression.object, visitor);
+      return;
+    case "indexExpression":
+      visitExpression(expression.object, visitor);
+      visitExpression(expression.index, visitor);
+      return;
+    case "callExpression":
+      visitExpression(expression.callee, visitor);
+      expression.arguments.forEach((argument) => visitExpression(argument.value, visitor));
+      return;
+    case "unaryExpression":
+      visitExpression(expression.operand, visitor);
+      return;
+    case "binaryExpression":
+      visitExpression(expression.left, visitor);
+      visitExpression(expression.right, visitor);
+      return;
+    case "rangeExpression":
+      visitExpression(expression.start, visitor);
+      visitExpression(expression.end, visitor);
+      return;
+  }
 }

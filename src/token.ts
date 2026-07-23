@@ -30,6 +30,8 @@ export const TokenKind = {
   KeywordWhile: "keywordWhile",
   KeywordBreak: "keywordBreak",
   KeywordContinue: "keywordContinue",
+  KeywordFunction: "keywordFunction",
+  KeywordReturn: "keywordReturn",
 
   LeftBrace: "leftBrace",
   RightBrace: "rightBrace",

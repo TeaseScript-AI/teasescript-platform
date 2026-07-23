@@ -19,6 +19,8 @@ export type Statement =
   | WhileStatement
   | BreakStatement
   | ContinueStatement
+  | FunctionDeclaration
+  | ReturnStatement
   | ExpressionStatement;
 
 export interface Block {
@@ -134,6 +136,29 @@ export interface BreakStatement {
 
 export interface ContinueStatement {
   readonly kind: "continueStatement";
+  readonly span: SourceSpan;
+}
+
+export interface FunctionDeclaration {
+  readonly kind: "functionDeclaration";
+  readonly name: Identifier;
+  readonly parameters: readonly FunctionParameter[];
+  readonly returnTypeAnnotation: TypeAnnotation | null;
+  readonly body: Block;
+  readonly span: SourceSpan;
+}
+
+export interface FunctionParameter {
+  readonly kind: "functionParameter";
+  readonly name: Identifier;
+  readonly typeAnnotation: TypeAnnotation | null;
+  readonly defaultValue: Expression | null;
+  readonly span: SourceSpan;
+}
+
+export interface ReturnStatement {
+  readonly kind: "returnStatement";
+  readonly value: Expression | null;
   readonly span: SourceSpan;
 }
 
