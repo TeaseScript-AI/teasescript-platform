@@ -91,4 +91,8 @@ test("playground restore refuses detached source plans and renders source safely
   assert.match(browserSource, /does not match the currently displayed example source/u);
   assert.match(browserSource, /elements\.source\.textContent = source/u);
   assert.doesNotMatch(browserSource, /source\.innerHTML/u);
+  assert.match(
+    browserSource,
+    /plan = null;\s+snapshot = null;\s+source = "";\s+eventLog = \[\];/u,
+  );
 });

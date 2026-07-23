@@ -1717,6 +1717,7 @@ function validateFunctionDefinitions(
     if (!isRecord(implicitReturnInstruction) || implicitReturnInstruction.kind !== "returnVoid") {
       errors.push(planError("TSC002", "Function implicit-return boundary is invalid.", `${path}.implicitReturnInstruction`));
     }
+    validateFunctionPrologue(definition, instructions, path, errors);
     expectedEntry = end;
   });
   if (expectedEntry !== instructions.length) {
@@ -1788,6 +1789,88 @@ function validateFunctionDefinitions(
       }
     }
   });
+}
+
+function validateFunctionPrologue(
+  definition: Record<string, unknown>,
+  instructions: readonly unknown[],
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (
+    !Array.isArray(definition.parameters) ||
+    !nonNegativeInteger(definition.entryInstruction) ||
+    !nonNegativeInteger(definition.bodyEntryInstruction) ||
+    !nonNegativeInteger(definition.id)
+  ) {
+    return;
+  }
+  let cursor = definition.entryInstruction;
+  for (let index = 0; index < definition.parameters.length; index += 1) {
+    const instruction = instructions[cursor];
+    if (
+      !isRecord(instruction) ||
+      instruction.kind !== "bindSuppliedParameter" ||
+      instruction.functionId !== definition.id ||
+      instruction.parameterIndex !== index
+    ) {
+      errors.push(planError("TSC002", "Function supplied-parameter prologue is malformed.", `${path}.entryInstruction`));
+      return;
+    }
+    cursor += 1;
+  }
+  const beginDefaults = instructions[cursor];
+  if (
+    !isRecord(beginDefaults) ||
+    beginDefaults.kind !== "beginFunctionDefaults" ||
+    beginDefaults.functionId !== definition.id
+  ) {
+    errors.push(planError("TSC002", "Function default-parameter prologue is missing.", `${path}.entryInstruction`));
+    return;
+  }
+  cursor += 1;
+  for (let index = 0; index < definition.parameters.length; index += 1) {
+    const parameter = definition.parameters[index];
+    const prepare = instructions[cursor];
+    if (
+      !isRecord(parameter) ||
+      !isRecord(prepare) ||
+      prepare.kind !== "prepareParameterDefault" ||
+      prepare.functionId !== definition.id ||
+      prepare.parameterIndex !== index ||
+      !nonNegativeInteger(prepare.target) ||
+      prepare.target <= cursor ||
+      prepare.target >= definition.bodyEntryInstruction
+    ) {
+      errors.push(planError("TSC002", "Function parameter-default sequence is malformed.", `${path}.parameters[${index}]`));
+      return;
+    }
+    const defaultBindings = instructions
+      .slice(cursor + 1, prepare.target)
+      .filter(
+        (instruction) =>
+          isRecord(instruction) &&
+          instruction.kind === "bindDefaultParameter" &&
+          instruction.functionId === definition.id &&
+          instruction.parameterIndex === index,
+      );
+    if (
+      (parameter.hasDefault === true && defaultBindings.length !== 1) ||
+      (parameter.hasDefault === false && prepare.target !== cursor + 1)
+    ) {
+      errors.push(planError("TSC002", "Function parameter default does not match its metadata.", `${path}.parameters[${index}]`));
+    }
+    cursor = prepare.target;
+  }
+  const bodyMarker = instructions[cursor];
+  if (
+    !isRecord(bodyMarker) ||
+    bodyMarker.kind !== "enterFunctionBody" ||
+    bodyMarker.functionId !== definition.id ||
+    cursor + 1 !== definition.bodyEntryInstruction
+  ) {
+    errors.push(planError("TSC002", "Function body-entry prologue marker is malformed.", `${path}.bodyEntryInstruction`));
+  }
 }
 
 function validateFunctionParameters(

@@ -588,6 +588,7 @@ function validateCallFrames(
       ids.add(frame.id);
     }
     const definition = plan?.functions.find((item) => item.id === frame.functionId);
+    let callInstruction: InstructionPlan["instructions"][number] | undefined;
     if (
       !nonNegativeInteger(frame.functionId) ||
       frame.functionId < 1 ||
@@ -614,6 +615,8 @@ function validateCallFrames(
         call.returnInstruction !== frame.returnInstruction
       ) {
         errors.push("Runtime call frame return target does not match its call instruction.");
+      } else {
+        callInstruction = call;
       }
     }
     if (
@@ -629,6 +632,17 @@ function validateCallFrames(
       "Runtime caller temporaries",
       errors,
     );
+    if (
+      nonNegativeInteger(frame.destinationTemporary) &&
+      Array.isArray(frame.callerTemporaries) &&
+      frame.callerTemporaries.some(
+        (temporary) =>
+          isPlainRecord(temporary) &&
+          temporary.id === frame.destinationTemporary,
+      )
+    ) {
+      errors.push("Runtime caller temporaries already contain the result destination.");
+    }
     if (
       !nonNegativeInteger(frame.scopeBaseDepth) ||
       frame.scopeBaseDepth < 1 ||
@@ -647,7 +661,37 @@ function validateCallFrames(
     }
     if (nonNegativeInteger(frame.loopBaseDepth)) previousLoopBase = frame.loopBaseDepth;
     validateCallArguments(frame.arguments, definition, errors);
+    validateCallArgumentConsistency(
+      frame.arguments,
+      frame.callerTemporaries,
+      callInstruction,
+      errors,
+    );
     validateParameterState(frame.parameterState, definition, errors);
+    validateParameterBindings(
+      frame,
+      frames,
+      definition,
+      errors,
+    );
+
+    if (plan !== undefined && nonNegativeInteger(frame.returnInstruction)) {
+      const callIndex = frame.returnInstruction - 1;
+      const callerDefinition = frameIndex === 0
+        ? undefined
+        : plan.functions.find(
+            (item) => item.id === (value[frameIndex - 1] as Record<string, unknown>)?.functionId,
+          );
+      if (
+        (frameIndex === 0 && callIndex >= plan.rootEndInstruction) ||
+        (frameIndex > 0 &&
+          (callerDefinition === undefined ||
+            callIndex < callerDefinition.entryInstruction ||
+            callIndex >= callerDefinition.endInstruction))
+      ) {
+        errors.push("Runtime call frame return instruction is outside its caller.");
+      }
+    }
 
     if (frameIndex === value.length - 1 && definition !== undefined) {
       if (
@@ -668,6 +712,83 @@ function validateCallFrames(
     }
   });
   return ids;
+}
+
+function validateCallArgumentConsistency(
+  argumentsValue: unknown,
+  callerTemporaries: unknown,
+  callInstruction: InstructionPlan["instructions"][number] | undefined,
+  errors: string[],
+): void {
+  if (
+    !Array.isArray(argumentsValue) ||
+    !Array.isArray(callerTemporaries) ||
+    callInstruction?.kind !== "callFunction"
+  ) {
+    return;
+  }
+  for (const argument of argumentsValue) {
+    if (!isPlainRecord(argument) || typeof argument.parameterName !== "string") continue;
+    const prepared = callInstruction.arguments.find(
+      (item) => item.parameterName === argument.parameterName,
+    );
+    if (argument.supplied === true) {
+      const temporary = prepared === undefined
+        ? undefined
+        : callerTemporaries.find(
+            (item) => isPlainRecord(item) && item.id === prepared.temporaryId,
+          );
+      if (
+        !isPlainRecord(temporary) ||
+        JSON.stringify(temporary.value) !== JSON.stringify(argument.value)
+      ) {
+        errors.push("Runtime supplied argument does not match caller temporary state.");
+      }
+    } else if (prepared !== undefined) {
+      errors.push("Runtime missing argument is marked as supplied by the call instruction.");
+    }
+  }
+}
+
+function validateParameterBindings(
+  frame: Record<string, unknown>,
+  frames: unknown,
+  definition: InstructionPlan["functions"][number] | undefined,
+  errors: string[],
+): void {
+  if (
+    definition === undefined ||
+    !Array.isArray(frames) ||
+    !nonNegativeInteger(frame.scopeBaseDepth) ||
+    !Array.isArray(frame.arguments) ||
+    !isPlainRecord(frame.parameterState) ||
+    !nonNegativeInteger(frame.parameterState.parameterIndex)
+  ) {
+    return;
+  }
+  const scope = frames[frame.scopeBaseDepth];
+  if (!isPlainRecord(scope) || !Array.isArray(scope.bindings)) return;
+  const argumentsList = frame.arguments as unknown[];
+  const parameterState = frame.parameterState as Record<string, unknown>;
+  const bindingNames = new Set(
+    scope.bindings
+      .filter(isPlainRecord)
+      .map((binding) => binding.name)
+      .filter((name): name is string => typeof name === "string"),
+  );
+  definition.parameters.forEach((parameter, index) => {
+    const argument = argumentsList[index];
+    if (!isPlainRecord(argument) || typeof argument.supplied !== "boolean") return;
+    const phase = parameterState.phase;
+    const progress = parameterState.parameterIndex as number;
+    const shouldBeBound =
+      phase === "body" ||
+      (phase === "supplied" && argument.supplied && index < progress) ||
+      (phase === "defaults" && (argument.supplied || index < progress));
+    if (bindingNames.has(parameter.name) !== shouldBeBound) {
+      errors.push("Runtime parameter bindings do not match prologue progress.");
+    }
+  });
 }
 
 function validateCallArguments(

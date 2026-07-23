@@ -163,6 +163,27 @@ test("rejects malformed active call-frame identity and return state", () => {
   }
 });
 
+test("rejects inconsistent argument temporaries and parameter bindings", () => {
+  const compiled = plan("function echo(input) { return input }\necho(1)");
+  let snapshot = createFreshRuntimeSnapshot(compiled);
+  snapshot = executeInstruction(compiled, snapshot).snapshot;
+  snapshot = executeInstruction(compiled, snapshot).snapshot;
+
+  const changedArgument = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  changedArgument.snapshot.callFrames[0]!.arguments[0]!.value = 99;
+  assertCheckpointRejected(changedArgument, "TSK002");
+
+  const occupiedDestination = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  const frame = occupiedDestination.snapshot.callFrames[0]!;
+  frame.callerTemporaries.push({ id: frame.destinationTemporary, value: null });
+  assertCheckpointRejected(occupiedDestination, "TSK002");
+
+  snapshot = executeInstruction(compiled, snapshot).snapshot;
+  const missingBinding = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  missingBinding.snapshot.frames[1]!.bindings = [];
+  assertCheckpointRejected(missingBinding, "TSK002");
+});
+
 test("rejects empty serialized names and impossible status combinations", () => {
   const compiled = plan("let value = 1\nfunction read(input) { return input }\nread(value)");
   let active = createFreshRuntimeSnapshot(compiled);

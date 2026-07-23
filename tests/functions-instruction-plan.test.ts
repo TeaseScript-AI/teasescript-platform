@@ -147,6 +147,14 @@ test("rejects malformed v3 function metadata, targets, and temporaries", () => {
   assert.ok(unknownCall?.kind === "callFunction");
   if (unknownCall?.kind === "callFunction") unknownCall.functionId = 999;
   assertInvalid(unknownFunction, /unknown function/u);
+
+  const malformedPrologue = mutable(original);
+  const prepare = malformedPrologue.instructions.find(
+    (instruction) => instruction.kind === "beginFunctionDefaults",
+  );
+  assert.ok(prepare !== undefined);
+  prepare.kind = "enterFunctionBody";
+  assertInvalid(malformedPrologue, /prologue|entry/u);
 });
 
 test("rejects instruction-plan versions 1 and 2", () => {

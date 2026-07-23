@@ -226,6 +226,7 @@ function executePlannedInstruction(
       if (speaker.properties.some((property) => property.name === instruction.name)) {
         throw fault("TSR007", `Duplicate speaker property '${instruction.name}'.`, instruction.span);
       }
+      snapshot.contextualSpeaker = speaker.id;
       speaker.properties.push({
         name: instruction.name,
         value: cloneSerializableValue(evaluator.evaluate(instruction.value)),

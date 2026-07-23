@@ -105,6 +105,18 @@ test("returned lists, objects, and sets are independent deep copies", () => {
   assert.deepEqual((rootValue(result.snapshot, "copiedSet") as SerializableRuntimeSet).items, [1, 2, 3]);
 });
 
+test("speaker parameters preserve speaker identity", () => {
+  const result = runSource([
+    'speaker vera { displayName: "Vera"\ntitle: "Mistress" }',
+    "function rename(character) { character.title = \"Director\"\nreturn character }",
+    "let returned = rename(vera)",
+    "say returned.title",
+    "say vera.title",
+  ].join("\n"));
+
+  assert.deepEqual(sayTexts(result), ["Director", "Director"]);
+});
+
 test("early return unwinds if and every loop kind", () => {
   const result = runSource([
     "function fromIf { if true { return 1 }\nreturn 9 }",
