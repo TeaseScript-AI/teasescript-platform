@@ -29,6 +29,13 @@ export interface SerializableSpeakerReference {
   readonly identifier: string;
 }
 
+export interface SerializableRuntimeRange {
+  readonly kind: "range";
+  readonly start: number;
+  readonly end: number;
+  readonly inclusive: boolean;
+}
+
 export interface SerializableRuntimeProperty {
   readonly name: string;
   value: SerializableRuntimeValue;
@@ -39,6 +46,7 @@ export type SerializableRuntimeValue =
   | SerializableRuntimeList
   | SerializableRuntimeObject
   | SerializableRuntimeSet
+  | SerializableRuntimeRange
   | SerializableSpeakerReference;
 
 export class SerializableValueError extends Error {
@@ -82,6 +90,8 @@ export function cloneSerializableValue(
 ): SerializableRuntimeValue {
   if (value === null || typeof value !== "object") return value;
   switch (value.kind) {
+    case "range":
+      return { ...value };
     case "speakerReference":
       return {
         kind: "speakerReference",
@@ -173,6 +183,11 @@ export function fromHostRuntimeValue(value: RuntimeValue): SerializableRuntimeVa
 export function toHostRuntimeValue(value: SerializableRuntimeValue): RuntimeValue {
   if (value === null || typeof value !== "object") return value;
   switch (value.kind) {
+    case "range":
+      throw new SerializableValueError(
+        "invalid",
+        "Legacy host runtime values do not support ranges.",
+      );
     case "list":
       return createRuntimeList(value.items.map(toHostRuntimeValue));
     case "set":
@@ -215,6 +230,15 @@ export function validateSerializableValue(
       value.identifier.length > 0
       ? null
       : `${path} contains a malformed speaker reference.`;
+  }
+  if (value.kind === "range") {
+    return typeof value.start === "number" &&
+      Number.isFinite(value.start) &&
+      typeof value.end === "number" &&
+      Number.isFinite(value.end) &&
+      typeof value.inclusive === "boolean"
+      ? null
+      : `${path} contains a malformed range.`;
   }
   if (value.kind === "list") {
     if (!Array.isArray(value.items)) return `${path}.items must be an array.`;

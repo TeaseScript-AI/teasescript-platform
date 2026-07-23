@@ -9,7 +9,7 @@ import type {
 import { createSourceSpan, type SourceSpan } from "./source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 1;
+export const INSTRUCTION_PLAN_VERSION = 2;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
@@ -28,6 +28,8 @@ export type Instruction =
   | EvaluateInstruction
   | JumpIfFalseInstruction
   | JumpInstruction
+  | LoopStartInstruction
+  | LoopControlInstruction
   | SayInstruction
   | ExitInstruction;
 
@@ -82,6 +84,37 @@ export interface JumpInstruction extends InstructionBase {
   readonly target: number;
 }
 
+export type LoopStartInstruction =
+  | (InstructionBase & {
+      readonly kind: "loopStart";
+      readonly loopKind: "repeat";
+      readonly loopId: number;
+      readonly expression: ExpressionPlan;
+      readonly target: number;
+    })
+  | (InstructionBase & {
+      readonly kind: "loopStart";
+      readonly loopKind: "for";
+      readonly loopId: number;
+      readonly variable: string;
+      readonly expression: ExpressionPlan;
+      readonly target: number;
+    })
+  | (InstructionBase & {
+      readonly kind: "loopStart";
+      readonly loopKind: "while";
+      readonly loopId: number;
+      readonly expression: ExpressionPlan;
+      readonly target: number;
+    });
+
+export interface LoopControlInstruction extends InstructionBase {
+  readonly kind: "loopControl";
+  readonly action: "break" | "continue";
+  readonly loopId: number;
+  readonly target: number;
+}
+
 export interface SayInstruction extends InstructionBase {
   readonly kind: "say";
   readonly speaker: string | null;
@@ -115,7 +148,8 @@ export type ExpressionPlan =
   | IndexExpressionPlan
   | CallExpressionPlan
   | UnaryExpressionPlan
-  | BinaryExpressionPlan;
+  | BinaryExpressionPlan
+  | RangeExpressionPlan;
 
 interface ExpressionPlanBase {
   readonly span: SourceSpan;
@@ -225,6 +259,13 @@ export interface BinaryExpressionPlan extends ExpressionPlanBase {
   readonly right: ExpressionPlan;
 }
 
+export interface RangeExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "range";
+  readonly start: ExpressionPlan;
+  readonly end: ExpressionPlan;
+  readonly inclusive: boolean;
+}
+
 export interface PlanValidationError {
   readonly code: "TSC001" | "TSC002";
   readonly message: string;
@@ -274,6 +315,7 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
         errors,
       );
     }
+    validateLoopStructure(value.instructions, errors);
   }
   return Object.freeze({
     valid: errors.length === 0,
@@ -281,8 +323,49 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
   });
 }
 
+function validateLoopStructure(
+  instructions: readonly unknown[],
+  errors: PlanValidationError[],
+): void {
+  const starts = new Map<number, { index: number; target: number }>();
+  for (let index = 0; index < instructions.length; index += 1) {
+    const instruction = instructions[index];
+    if (!isRecord(instruction) || instruction.kind !== "loopStart") continue;
+    if (!Number.isInteger(instruction.loopId) || !Number.isInteger(instruction.target)) continue;
+    const loopId = instruction.loopId as number;
+    if (starts.has(loopId)) {
+      errors.push(planError("TSC002", "Loop IDs must be unique.", `$.instructions[${index}].loopId`));
+    } else {
+      starts.set(loopId, { index, target: instruction.target as number });
+    }
+    if ((instruction.target as number) <= index) {
+      errors.push(planError("TSC002", "Loop exit target must follow its start.", `$.instructions[${index}].target`));
+    }
+  }
+  for (let index = 0; index < instructions.length; index += 1) {
+    const instruction = instructions[index];
+    if (!isRecord(instruction) || instruction.kind !== "loopControl") continue;
+    if (!Number.isInteger(instruction.loopId) || !Number.isInteger(instruction.target)) continue;
+    const start = starts.get(instruction.loopId as number);
+    if (start === undefined) {
+      errors.push(planError("TSC002", "Loop control refers to an unknown loop.", `$.instructions[${index}].loopId`));
+      continue;
+    }
+    const expected = instruction.action === "continue" ? start.index : start.target;
+    if (instruction.target !== expected || index <= start.index || index >= start.target) {
+      errors.push(planError("TSC002", "Loop-control target does not match its loop.", `$.instructions[${index}].target`));
+    }
+  }
+}
+
 class InstructionCompiler {
   public readonly instructions: Instruction[] = [];
+  readonly #loops: Array<{
+    readonly loopId: number;
+    readonly continueTarget: number;
+    readonly breaks: number[];
+  }> = [];
+  #nextLoopId = 1;
 
   public compileStatements(statements: readonly Statement[]): void {
     for (const statement of statements) this.#compileStatement(statement);
@@ -346,6 +429,39 @@ class InstructionCompiler {
       case "ifStatement":
         this.#compileIf(statement);
         return;
+      case "repeatStatement":
+        this.#compileLoop("repeat", statement.count, statement.body, null, statement.span);
+        return;
+      case "forStatement":
+        this.#compileLoop(
+          "for",
+          statement.iterable,
+          statement.body,
+          statement.variable.name,
+          statement.span,
+        );
+        return;
+      case "whileStatement":
+        this.#compileLoop("while", statement.condition, statement.body, null, statement.span);
+        return;
+      case "breakStatement":
+      case "continueStatement": {
+        const loop = this.#loops.at(-1);
+        if (loop === undefined) {
+          throw new TypeError("Semantically invalid loop control reached compilation.");
+        }
+        const index = this.instructions.length;
+        this.instructions.push({
+          kind: "loopControl",
+          action: statement.kind === "breakStatement" ? "break" : "continue",
+          loopId: loop.loopId,
+          target:
+            statement.kind === "breakStatement" ? -1 : loop.continueTarget,
+          span: copySpan(statement.span),
+        });
+        if (statement.kind === "breakStatement") loop.breaks.push(index);
+        return;
+      }
     }
   }
 
@@ -376,7 +492,11 @@ class InstructionCompiler {
       ...(this.instructions[conditional] as JumpIfFalseInstruction),
       target: this.instructions.length,
     };
-    this.#compileBlock(statement.elseBlock);
+    if (statement.elseBlock.kind === "ifStatement") {
+      this.#compileIf(statement.elseBlock);
+    } else {
+      this.#compileBlock(statement.elseBlock);
+    }
     this.instructions[jump] = {
       ...(this.instructions[jump] as JumpInstruction),
       target: this.instructions.length,
@@ -387,6 +507,56 @@ class InstructionCompiler {
     this.instructions.push({ kind: "enterScope", span: copySpan(block.span) });
     this.compileStatements(block.statements);
     this.instructions.push({ kind: "leaveScope", span: copySpan(block.span) });
+  }
+
+  #compileLoop(
+    loopKind: "repeat" | "for" | "while",
+    expression: Expression,
+    body: Block,
+    variable: string | null,
+    span: SourceSpan,
+  ): void {
+    const loopId = this.#nextLoopId;
+    this.#nextLoopId += 1;
+    const start = this.instructions.length;
+    const instruction: LoopStartInstruction = loopKind === "for"
+      ? {
+          kind: "loopStart",
+          loopKind,
+          loopId,
+          variable: variable!,
+          expression: compileExpression(expression),
+          target: -1,
+          span: copySpan(span),
+        }
+      : {
+          kind: "loopStart",
+          loopKind,
+          loopId,
+          expression: compileExpression(expression),
+          target: -1,
+          span: copySpan(span),
+        };
+    this.instructions.push(instruction);
+    const context = { loopId, continueTarget: start, breaks: [] as number[] };
+    this.#loops.push(context);
+    this.compileStatements(body.statements);
+    this.instructions.push({
+      kind: "loopControl",
+      action: "continue",
+      loopId,
+      target: start,
+      span: copySpan(body.span),
+    });
+    this.#loops.pop();
+    const exit = this.instructions.length;
+    this.instructions[start] = { ...instruction, target: exit };
+    for (const index of context.breaks) {
+      this.instructions[index] = {
+        ...(this.instructions[index] as LoopControlInstruction),
+        target: exit,
+      };
+    }
   }
 }
 
@@ -477,6 +647,14 @@ function compileExpression(expression: Expression): ExpressionPlan {
         right: compileExpression(expression.right),
         span: copySpan(expression.span),
       };
+    case "rangeExpression":
+      return {
+        kind: "range",
+        start: compileExpression(expression.start),
+        end: compileExpression(expression.end),
+        inclusive: expression.inclusive,
+        span: copySpan(expression.span),
+      };
   }
 }
 
@@ -542,6 +720,22 @@ function validateInstruction(
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
       return;
     case "jump":
+      validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
+      return;
+    case "loopStart":
+      if (!["repeat", "for", "while"].includes(String(value.loopKind))) {
+        errors.push(planError("TSC002", "Invalid loop kind.", `${path}.loopKind`));
+      }
+      requirePositiveInteger(value.loopId, `${path}.loopId`, errors);
+      if (value.loopKind === "for") requireString(value.variable, `${path}.variable`, errors);
+      validateExpression(value.expression, `${path}.expression`, errors);
+      validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
+      return;
+    case "loopControl":
+      if (!["break", "continue"].includes(String(value.action))) {
+        errors.push(planError("TSC002", "Invalid loop-control action.", `${path}.action`));
+      }
+      requirePositiveInteger(value.loopId, `${path}.loopId`, errors);
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
       return;
     case "say":
@@ -613,6 +807,13 @@ function validateExpression(
       }
       validateExpression(value.left, `${path}.left`, errors);
       validateExpression(value.right, `${path}.right`, errors);
+      return;
+    case "range":
+      validateExpression(value.start, `${path}.start`, errors);
+      validateExpression(value.end, `${path}.end`, errors);
+      if (typeof value.inclusive !== "boolean") {
+        errors.push(planError("TSC002", "Range inclusivity must be boolean.", `${path}.inclusive`));
+      }
       return;
     default:
       errors.push(planError("TSC002", `Unknown expression kind '${value.kind}'.`, `${path}.kind`));
@@ -721,6 +922,16 @@ function validateJumpTarget(
 function requireString(value: unknown, path: string, errors: PlanValidationError[]): void {
   if (typeof value !== "string" || value.length === 0) {
     errors.push(planError("TSC002", "Expected a non-empty string.", path));
+  }
+}
+
+function requirePositiveInteger(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    errors.push(planError("TSC002", "Expected a positive integer.", path));
   }
 }
 

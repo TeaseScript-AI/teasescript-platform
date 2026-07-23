@@ -5,8 +5,11 @@ import type {
   Block,
   CallArgument,
   CallExpression,
+  BreakStatement,
+  ContinueStatement,
   Expression,
   ExpressionStatement,
+  ForStatement,
   Identifier,
   IfStatement,
   LetStatement,
@@ -19,6 +22,7 @@ import type {
   PropertyAccessExpression,
   ScalarTypeName,
   SayStatement,
+  RepeatStatement,
   SetLiteral,
   SpeakerDeclaration,
   SpeakerProperty,
@@ -30,6 +34,7 @@ import type {
   TemplateText,
   TypeAnnotation,
   UnaryExpression,
+  WhileStatement,
 } from "./ast.js";
 import {
   createDiagnostic,
@@ -71,6 +76,8 @@ const parserDiagnosticCode = {
   mixedArguments: "TSP019",
   chainedComparison: "TSP020",
   invalidType: "TSP021",
+  chainedRange: "TSP022",
+  expectedIn: "TSP023",
 } as const;
 
 /** Parses the accepted core-language milestone. */
@@ -138,6 +145,16 @@ class Parser {
         return this.#parseLetStatement();
       case TokenKind.KeywordIf:
         return this.#parseIfStatement();
+      case TokenKind.KeywordRepeat:
+        return this.#parseRepeatStatement();
+      case TokenKind.KeywordFor:
+        return this.#parseForStatement();
+      case TokenKind.KeywordWhile:
+        return this.#parseWhileStatement();
+      case TokenKind.KeywordBreak:
+        return this.#parseLoopControl("breakStatement");
+      case TokenKind.KeywordContinue:
+        return this.#parseLoopControl("continueStatement");
       default:
         if (isExpressionStart(this.#peek())) {
           return this.#parseAssignmentOrExpressionStatement();
@@ -406,10 +423,12 @@ class Parser {
 
     const beforePotentialElse = this.#current;
     this.#skipNewlines();
-    let elseBlock: Block | null = null;
+    let elseBlock: Block | IfStatement | null = null;
     if (this.#match(TokenKind.KeywordElse)) {
       this.#skipContinuationNewlines();
-      elseBlock = this.#parseBlock();
+      elseBlock = this.#check(TokenKind.KeywordIf)
+        ? this.#parseIfStatement()
+        : this.#parseBlock();
       if (elseBlock === null) return null;
     } else {
       this.#current = beforePotentialElse;
@@ -421,6 +440,85 @@ class Parser {
       elseBlock,
       span: spanFrom(keyword.span, (elseBlock ?? thenBlock).span),
     });
+  }
+
+  #parseRepeatStatement(): RepeatStatement | null {
+    const keyword = this.#advance();
+    const count = this.#parseRequiredExpression();
+    if (count === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    this.#skipContinuationNewlines();
+    const body = this.#parseBlock();
+    if (body === null) return null;
+    return Object.freeze({
+      kind: "repeatStatement",
+      count,
+      body,
+      span: spanFrom(keyword.span, body.span),
+    });
+  }
+
+  #parseForStatement(): ForStatement | null {
+    const keyword = this.#advance();
+    if (!this.#check(TokenKind.Identifier)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedIdentifier,
+        "Expected a loop-variable identifier after 'for'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const variable = this.#identifier(this.#advance());
+    if (!this.#match(TokenKind.KeywordIn)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedIn,
+        "Expected 'in' after the loop variable.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const iterable = this.#parseRequiredExpression();
+    if (iterable === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    this.#skipContinuationNewlines();
+    const body = this.#parseBlock();
+    if (body === null) return null;
+    return Object.freeze({
+      kind: "forStatement",
+      variable,
+      iterable,
+      body,
+      span: spanFrom(keyword.span, body.span),
+    });
+  }
+
+  #parseWhileStatement(): WhileStatement | null {
+    const keyword = this.#advance();
+    const condition = this.#parseRequiredExpression();
+    if (condition === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    this.#skipContinuationNewlines();
+    const body = this.#parseBlock();
+    if (body === null) return null;
+    return Object.freeze({
+      kind: "whileStatement",
+      condition,
+      body,
+      span: spanFrom(keyword.span, body.span),
+    });
+  }
+
+  #parseLoopControl(
+    kind: "breakStatement" | "continueStatement",
+  ): BreakStatement | ContinueStatement {
+    const keyword = this.#advance();
+    return Object.freeze({ kind, span: copySpan(keyword.span) });
   }
 
   #parseBlock(): Block | null {
@@ -583,11 +681,11 @@ class Parser {
   }
 
   #parseComparison(): Expression | null {
-    const left = this.#parseAdditive();
+    const left = this.#parseRange();
     if (left === null || !isComparisonKind(this.#peek().kind)) return left;
     const operator = this.#advance();
     this.#skipContinuationNewlines();
-    const right = this.#parseAdditive();
+    const right = this.#parseRange();
     if (right === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedExpression,
@@ -608,6 +706,53 @@ class Parser {
         this.#peek(),
       );
       while (isComparisonKind(this.#peek().kind)) {
+        this.#advance();
+        this.#skipContinuationNewlines();
+        this.#parseRange();
+      }
+    }
+    return expression;
+  }
+
+  #parseRange(): Expression | null {
+    const left = this.#parseAdditive();
+    if (
+      left === null ||
+      (!this.#check(TokenKind.RangeExclusive) &&
+        !this.#check(TokenKind.RangeInclusive))
+    ) {
+      return left;
+    }
+    const operator = this.#advance();
+    this.#skipContinuationNewlines();
+    const right = this.#parseAdditive();
+    if (right === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected an expression after the range operator.",
+      );
+      return null;
+    }
+    const expression: Expression = Object.freeze({
+      kind: "rangeExpression",
+      start: left,
+      end: right,
+      inclusive: operator.kind === TokenKind.RangeInclusive,
+      span: spanFrom(left.span, right.span),
+    });
+    if (
+      this.#check(TokenKind.RangeExclusive) ||
+      this.#check(TokenKind.RangeInclusive)
+    ) {
+      this.#reportToken(
+        parserDiagnosticCode.chainedRange,
+        "Ranges may not be chained.",
+        this.#peek(),
+      );
+      while (
+        this.#check(TokenKind.RangeExclusive) ||
+        this.#check(TokenKind.RangeInclusive)
+      ) {
         this.#advance();
         this.#skipContinuationNewlines();
         this.#parseAdditive();
@@ -1364,6 +1509,11 @@ function isStatementStart(kind: TokenKind): boolean {
     kind === TokenKind.KeywordExit ||
     kind === TokenKind.KeywordLet ||
     kind === TokenKind.KeywordIf
+    || kind === TokenKind.KeywordRepeat
+    || kind === TokenKind.KeywordFor
+    || kind === TokenKind.KeywordWhile
+    || kind === TokenKind.KeywordBreak
+    || kind === TokenKind.KeywordContinue
   );
 }
 

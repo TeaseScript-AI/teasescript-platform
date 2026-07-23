@@ -30,6 +30,12 @@ const keywordKinds: Readonly<Record<string, TokenKind>> = {
   and: TokenKind.KeywordAnd,
   or: TokenKind.KeywordOr,
   set: TokenKind.KeywordSet,
+  repeat: TokenKind.KeywordRepeat,
+  for: TokenKind.KeywordFor,
+  in: TokenKind.KeywordIn,
+  while: TokenKind.KeywordWhile,
+  break: TokenKind.KeywordBreak,
+  continue: TokenKind.KeywordContinue,
 };
 
 const diagnosticCodes = {
@@ -83,6 +89,10 @@ class Lexer {
     }
     if (this.#isNewline()) {
       this.#scanNewline();
+      return;
+    }
+    if (character === "." && this.#peek(1) === ".") {
+      this.#scanRangeToken();
       return;
     }
     if (isDigit(character) || (character === "." && isDigit(this.#peek(1)))) {
@@ -167,7 +177,7 @@ class Lexer {
       this.#consumeDigits();
     } else {
       this.#consumeDigits();
-      if (this.#peek() === ".") {
+      if (this.#peek() === "." && this.#peek(1) !== ".") {
         this.#advanceCodeUnit();
         this.#consumeDigits();
       }
@@ -198,6 +208,18 @@ class Lexer {
       this.#position(),
       lexeme,
     );
+  }
+
+  #scanRangeToken(): void {
+    const startOffset = this.#offset;
+    const start = this.#position();
+    this.#advanceCodeUnit();
+    this.#advanceCodeUnit();
+    const kind = this.#peek() === "="
+      ? TokenKind.RangeInclusive
+      : TokenKind.RangeExclusive;
+    if (kind === TokenKind.RangeInclusive) this.#advanceCodeUnit();
+    this.#emitToken(kind, startOffset, start, this.#position());
   }
 
   #consumeDigits(): void {

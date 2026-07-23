@@ -11,7 +11,7 @@ import {
 } from "./state.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 1;
+export const CHECKPOINT_VERSION = 2;
 
 export interface RuntimeCheckpoint {
   readonly format: typeof CHECKPOINT_FORMAT;
@@ -42,7 +42,7 @@ export function createCheckpoint(
   return Object.freeze({
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
-    plan,
+    plan: clonePlan(plan),
     snapshot: cloneRuntimeSnapshot(snapshot),
   });
 }
@@ -68,9 +68,13 @@ export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {
   return Object.freeze({
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
-    plan: deepFreeze(value.plan) as InstructionPlan,
+    plan: clonePlan(value.plan as InstructionPlan),
     snapshot: cloneRuntimeSnapshot(value.snapshot as RuntimeSnapshot),
   });
+}
+
+function clonePlan(plan: InstructionPlan): InstructionPlan {
+  return deepFreeze(JSON.parse(JSON.stringify(plan)) as InstructionPlan);
 }
 
 export function deserializeCheckpoint(json: string): RuntimeCheckpoint {

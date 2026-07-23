@@ -14,6 +14,11 @@ export type Statement =
   | LetStatement
   | AssignmentStatement
   | IfStatement
+  | RepeatStatement
+  | ForStatement
+  | WhileStatement
+  | BreakStatement
+  | ContinueStatement
   | ExpressionStatement;
 
 export interface Block {
@@ -96,7 +101,39 @@ export interface IfStatement {
   readonly kind: "ifStatement";
   readonly condition: Expression;
   readonly thenBlock: Block;
-  readonly elseBlock: Block | null;
+  readonly elseBlock: Block | IfStatement | null;
+  readonly span: SourceSpan;
+}
+
+export interface RepeatStatement {
+  readonly kind: "repeatStatement";
+  readonly count: Expression;
+  readonly body: Block;
+  readonly span: SourceSpan;
+}
+
+export interface ForStatement {
+  readonly kind: "forStatement";
+  readonly variable: Identifier;
+  readonly iterable: Expression;
+  readonly body: Block;
+  readonly span: SourceSpan;
+}
+
+export interface WhileStatement {
+  readonly kind: "whileStatement";
+  readonly condition: Expression;
+  readonly body: Block;
+  readonly span: SourceSpan;
+}
+
+export interface BreakStatement {
+  readonly kind: "breakStatement";
+  readonly span: SourceSpan;
+}
+
+export interface ContinueStatement {
+  readonly kind: "continueStatement";
   readonly span: SourceSpan;
 }
 
@@ -121,7 +158,8 @@ export type Expression =
   | IndexExpression
   | CallExpression
   | UnaryExpression
-  | BinaryExpression;
+  | BinaryExpression
+  | RangeExpression;
 
 /** Kept as a compatibility alias for the initial parser POC public API. */
 export type StringExpression = StringLiteral | TemplateLiteral;
@@ -276,5 +314,13 @@ export interface BinaryExpression {
     | "or";
   readonly left: Expression;
   readonly right: Expression;
+  readonly span: SourceSpan;
+}
+
+export interface RangeExpression {
+  readonly kind: "rangeExpression";
+  readonly start: Expression;
+  readonly end: Expression;
+  readonly inclusive: boolean;
   readonly span: SourceSpan;
 }
