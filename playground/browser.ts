@@ -13,9 +13,12 @@ import {
   type RuntimeOperationResult,
   type RuntimeSnapshot,
 } from "../src/index.js";
-
-const exampleUrl = "/examples/playground/main.tease";
-const checkpointStorageKey = "teasescript-playground-checkpoint-v1";
+import {
+  PLAYGROUND_EXAMPLES,
+  checkpointStorageKey,
+  exampleUrl,
+  type PlaygroundExampleName,
+} from "./examples.js";
 
 const elements = {
   source: requiredElement("source-code"),
@@ -27,6 +30,8 @@ const elements = {
   instructionPlan: requiredElement("instruction-plan"),
   runtimeState: requiredElement("runtime-state"),
   actionStatus: requiredElement("action-status"),
+  loadedExampleName: requiredElement("loaded-example-name"),
+  exampleSelect: requiredSelect("example-select"),
   run: requiredButton("run"),
   step: requiredButton("step"),
   reset: requiredButton("reset"),
@@ -40,6 +45,15 @@ let source = "";
 let plan: InstructionPlan | null = null;
 let snapshot: RuntimeSnapshot | null = null;
 let eventLog: InterpreterEvent[] = [];
+let currentExample: PlaygroundExampleName = "main";
+
+for (const [name, example] of Object.entries(PLAYGROUND_EXAMPLES)) {
+  const option = document.createElement("option");
+  option.value = name;
+  option.textContent = example.label;
+  elements.exampleSelect.append(option);
+}
+elements.exampleSelect.value = currentExample;
 
 elements.run.addEventListener("click", () => execute("run"));
 elements.step.addEventListener("click", () => execute("step"));
@@ -48,13 +62,26 @@ elements.saveCheckpoint.addEventListener("click", saveCheckpoint);
 elements.restoreCheckpoint.addEventListener("click", restoreSavedCheckpoint);
 elements.clearCheckpoint.addEventListener("click", clearSavedCheckpoint);
 elements.reloadExample.addEventListener("click", () => void reloadExample());
+elements.exampleSelect.addEventListener("change", () => {
+  const selected = elements.exampleSelect.value as PlaygroundExampleName;
+  if (!Object.hasOwn(PLAYGROUND_EXAMPLES, selected)) return;
+  currentExample = selected;
+  void reloadExample();
+});
 
 void reloadExample();
 
 async function reloadExample(): Promise<void> {
-  setActionStatus("Loading repository example…");
+  plan = null;
+  snapshot = null;
+  source = "";
+  eventLog = [];
+  elements.transcript.replaceChildren();
+  elements.loadedExampleName.textContent = PLAYGROUND_EXAMPLES[currentExample].label;
+  renderState();
+  setActionStatus(`Loading ${PLAYGROUND_EXAMPLES[currentExample].label}…`);
   try {
-    const response = await fetch(exampleUrl, { cache: "no-store" });
+    const response = await fetch(exampleUrl(currentExample), { cache: "no-store" });
     if (!response.ok) {
       throw new Error(`Example request failed with HTTP ${response.status}.`);
     }
@@ -123,7 +150,7 @@ function saveCheckpoint(): void {
   }
   try {
     localStorage.setItem(
-      checkpointStorageKey,
+      checkpointStorageKey(currentExample),
       serializeCheckpoint(createCheckpoint(plan, snapshot)),
     );
     setActionStatus("Checkpoint saved in localStorage.");
@@ -134,7 +161,7 @@ function saveCheckpoint(): void {
 
 function restoreSavedCheckpoint(): void {
   try {
-    const serialized = localStorage.getItem(checkpointStorageKey);
+    const serialized = localStorage.getItem(checkpointStorageKey(currentExample));
     if (serialized === null) {
       setActionStatus("No saved checkpoint exists.");
       return;
@@ -157,7 +184,7 @@ function restoreSavedCheckpoint(): void {
 
 function clearSavedCheckpoint(): void {
   try {
-    localStorage.removeItem(checkpointStorageKey);
+    localStorage.removeItem(checkpointStorageKey(currentExample));
     setActionStatus("Saved checkpoint cleared.");
   } catch (error) {
     setActionStatus(errorMessage(error));
@@ -246,6 +273,14 @@ function requiredButton(id: string): HTMLButtonElement {
   const element = requiredElement(id);
   if (!(element instanceof HTMLButtonElement)) {
     throw new Error(`Playground element #${id} is not a button.`);
+  }
+  return element;
+}
+
+function requiredSelect(id: string): HTMLSelectElement {
+  const element = requiredElement(id);
+  if (!(element instanceof HTMLSelectElement)) {
+    throw new Error(`Playground element #${id} is not a select.`);
   }
   return element;
 }

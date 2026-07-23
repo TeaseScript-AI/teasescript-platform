@@ -851,6 +851,27 @@ Also potentially:
 
 These should be functions/methods, not grammar keywords.
 
+## 8.3 Control-flow milestone edge behavior (not accepted semantics)
+
+The `feature/control-flow-runtime` implementation needs conservative behavior
+where V30 does not yet fix an edge case. These choices are implementation notes,
+not additions to accepted language semantics:
+
+- descending integer ranges currently iterate zero times;
+- an empty range passed to `randomInteger(...)` is a structured runtime error;
+- range iteration and `randomInteger(...)` currently require safe integer
+  bounds, while a range value itself may retain finite numeric bounds;
+- negative, fractional, non-finite, or unsafe dynamic `repeat` counts are
+  structured runtime errors; statically known negative or fractional counts are
+  semantic errors;
+- `chance(0)` and `chance(100)` still consume one value from the deterministic
+  session RNG;
+- `for` copies its list or set iteration source when the loop starts, so later
+  mutation of the original collection does not change the active iterator.
+
+These details should be reviewed before they are documented as permanent
+language behavior.
+
 ---
 
 # 9. Date, time and duration
@@ -1326,4 +1347,3 @@ The broad Phase 1 from the previous backlog—functions, all control flow, RNG, 
 11. Global/cross-script data, player-to-player features and distribution.
 
 This is a planning sequence, not a new accepted architecture decision.
-

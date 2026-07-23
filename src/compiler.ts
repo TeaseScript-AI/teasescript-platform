@@ -17,6 +17,12 @@ export interface CompilationResult {
   readonly plan: InstructionPlan | null;
 }
 
+export const CORE_RUNTIME_BUILTINS = Object.freeze([
+  "random",
+  "chance",
+  "randomInteger",
+] as const);
+
 /** Parses, validates, and compiles source without executing it. */
 export function compileSource(
   source: string,
@@ -26,7 +32,13 @@ export function compileSource(
   const hasParserErrors = hasErrors(parsed.diagnostics);
   const semantic = hasParserErrors
     ? Object.freeze({ diagnostics: Object.freeze([]) })
-    : validateSemantics(parsed.program, options);
+    : validateSemantics(parsed.program, {
+        ...options,
+        builtins: Object.freeze([
+          ...CORE_RUNTIME_BUILTINS,
+          ...(options.builtins ?? []),
+        ]),
+      });
   const diagnostics = Object.freeze([
     ...parsed.diagnostics,
     ...semantic.diagnostics,

@@ -3,6 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { PLAYGROUND_EXAMPLES } from "./examples.js";
 
 export interface PlaygroundServerOptions {
   readonly projectRoot?: string;
@@ -147,7 +148,11 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
     return resolveInside(roots.distRoot, pathname.slice("/dist/".length));
   }
   if (pathname.startsWith("/examples/")) {
-    return resolveInside(roots.examplesRoot, pathname.slice("/examples/".length));
+    const relativePath = pathname.slice("/examples/".length);
+    const allowed = Object.values(PLAYGROUND_EXAMPLES).some(
+      (example) => relativePath === `playground/${example.file}`,
+    );
+    return allowed ? resolveInside(roots.examplesRoot, relativePath) : null;
   }
   return null;
 }

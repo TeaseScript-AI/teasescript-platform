@@ -35,7 +35,18 @@ const semanticCode = {
   unknownSpeaker: "TSV005",
   invalidSetElement: "TSV006",
   duplicateProperty: "TSV007",
+  invalidLoopControl: "TSV008",
+  chainedRange: "TSV009",
+  invalidRangeOperand: "TSV010",
+  invalidRepeatCount: "TSV011",
+  invalidLoopSource: "TSV012",
 } as const;
+
+const coreBuiltinNames = Object.freeze([
+  "random",
+  "chance",
+  "randomInteger",
+] as const);
 
 export function validateSemantics(
   program: Program,
@@ -68,24 +79,34 @@ class SemanticValidator {
   readonly #root = new SemanticScope();
 
   public constructor(options: SemanticValidationOptions) {
-    this.#builtins = new Set(options.builtins ?? []);
+    this.#builtins = new Set([
+      ...coreBuiltinNames,
+      ...(options.builtins ?? []),
+    ]);
     for (const name of options.globals ?? []) {
       this.#root.declare(name, { kind: "global" });
     }
   }
 
   public validate(program: Program): void {
-    this.#validateStatements(program.statements, this.#root);
+    this.#validateStatements(program.statements, this.#root, 0);
   }
 
   #validateStatements(
     statements: readonly Statement[],
     scope: SemanticScope,
+    loopDepth: number,
   ): void {
-    for (const statement of statements) this.#validateStatement(statement, scope);
+    for (const statement of statements) {
+      this.#validateStatement(statement, scope, loopDepth);
+    }
   }
 
-  #validateStatement(statement: Statement, scope: SemanticScope): void {
+  #validateStatement(
+    statement: Statement,
+    scope: SemanticScope,
+    loopDepth: number,
+  ): void {
     switch (statement.kind) {
       case "letStatement":
         this.#validateExpression(statement.initializer, scope, null);
@@ -142,9 +163,78 @@ class SemanticValidator {
         return;
       case "ifStatement":
         this.#validateExpression(statement.condition, scope, null);
-        this.#validateBlock(statement.thenBlock, scope);
+        this.#validateBlock(statement.thenBlock, scope, loopDepth);
         if (statement.elseBlock !== null) {
-          this.#validateBlock(statement.elseBlock, scope);
+          if (statement.elseBlock.kind === "ifStatement") {
+            this.#validateStatement(statement.elseBlock, scope, loopDepth);
+          } else {
+            this.#validateBlock(statement.elseBlock, scope, loopDepth);
+          }
+        }
+        return;
+      case "repeatStatement":
+        this.#validateExpression(statement.count, scope, null);
+        const knownCount = knownNumber(statement.count);
+        if (
+          knownCount !== undefined &&
+          (!Number.isInteger(knownCount) || knownCount < 0)
+        ) {
+          this.#report(
+            semanticCode.invalidRepeatCount,
+            "A statically known repeat count must be a non-negative integer.",
+            statement.count.span,
+          );
+        } else if (isDefinitelyNonNumeric(statement.count)) {
+          this.#report(
+            semanticCode.invalidRepeatCount,
+            "A repeat count must be an integer value.",
+            statement.count.span,
+          );
+        }
+        this.#validateBlock(statement.body, scope, loopDepth + 1);
+        return;
+      case "forStatement": {
+        this.#validateExpression(statement.iterable, scope, null);
+        if (isDefinitelyNonIterable(statement.iterable)) {
+          this.#report(
+            semanticCode.invalidLoopSource,
+            "A for-loop source must be a list, set, or integer range.",
+            statement.iterable.span,
+          );
+        }
+        if (
+          statement.iterable.kind === "rangeExpression" &&
+          (!isKnownInteger(statement.iterable.start) ||
+            !isKnownInteger(statement.iterable.end))
+        ) {
+          this.#report(
+            semanticCode.invalidRangeOperand,
+            "A statically known iterated range must have integer bounds.",
+            statement.iterable.span,
+          );
+        }
+        const loopScope = new SemanticScope(scope);
+        this.#declare(
+          statement.variable.name,
+          "variable",
+          statement.variable.span,
+          loopScope,
+        );
+        this.#validateStatements(statement.body.statements, loopScope, loopDepth + 1);
+        return;
+      }
+      case "whileStatement":
+        this.#validateExpression(statement.condition, scope, null);
+        this.#validateBlock(statement.body, scope, loopDepth + 1);
+        return;
+      case "breakStatement":
+      case "continueStatement":
+        if (loopDepth === 0) {
+          this.#report(
+            semanticCode.invalidLoopControl,
+            `'${statement.kind === "breakStatement" ? "break" : "continue"}' may only appear inside a loop.`,
+            statement.span,
+          );
         }
         return;
       case "exitStatement":
@@ -152,8 +242,16 @@ class SemanticValidator {
     }
   }
 
-  #validateBlock(block: Block, parent: SemanticScope): void {
-    this.#validateStatements(block.statements, new SemanticScope(parent));
+  #validateBlock(
+    block: Block,
+    parent: SemanticScope,
+    loopDepth: number,
+  ): void {
+    this.#validateStatements(
+      block.statements,
+      new SemanticScope(parent),
+      loopDepth,
+    );
   }
 
   #validateAssignmentTarget(
@@ -262,6 +360,23 @@ class SemanticValidator {
         for (const argument of expression.arguments) {
           this.#validateExpression(argument.value, scope, contextualSpeaker);
         }
+        if (
+          expression.callee.kind === "identifier" &&
+          expression.callee.name === "randomInteger" &&
+          expression.arguments.length === 1
+        ) {
+          const argument = expression.arguments[0]!.value;
+          if (
+            argument.kind === "rangeExpression" &&
+            (!isKnownInteger(argument.start) || !isKnownInteger(argument.end))
+          ) {
+            this.#report(
+              semanticCode.invalidRangeOperand,
+              "A statically known randomInteger range must have integer bounds.",
+              argument.span,
+            );
+          }
+        }
         return;
       case "unaryExpression":
         this.#validateExpression(expression.operand, scope, contextualSpeaker);
@@ -269,6 +384,30 @@ class SemanticValidator {
       case "binaryExpression":
         this.#validateExpression(expression.left, scope, contextualSpeaker);
         this.#validateExpression(expression.right, scope, contextualSpeaker);
+        return;
+      case "rangeExpression":
+        this.#validateExpression(expression.start, scope, contextualSpeaker);
+        this.#validateExpression(expression.end, scope, contextualSpeaker);
+        if (
+          expression.start.kind === "rangeExpression" ||
+          expression.end.kind === "rangeExpression"
+        ) {
+          this.#report(
+            semanticCode.chainedRange,
+            "Ranges may not be chained.",
+            expression.span,
+          );
+        }
+        if (
+          isDefinitelyNonNumeric(expression.start) ||
+          isDefinitelyNonNumeric(expression.end)
+        ) {
+          this.#report(
+            semanticCode.invalidRangeOperand,
+            "Range bounds must be numeric values.",
+            expression.span,
+          );
+        }
         return;
     }
   }
@@ -279,6 +418,14 @@ class SemanticValidator {
     span: SourceSpan,
     scope: SemanticScope,
   ): boolean {
+    if (this.#builtins.has(name)) {
+      this.#report(
+        semanticCode.duplicateDeclaration,
+        `Declaration '${name}' conflicts with a protected built-in.`,
+        span,
+      );
+      return false;
+    }
     if (scope.declare(name, { kind })) return true;
     this.#report(
       semanticCode.duplicateDeclaration,
@@ -307,6 +454,57 @@ class SemanticValidator {
       createDiagnostic(DiagnosticSeverity.Error, code, message, span),
     );
   }
+}
+
+function isKnownInteger(expression: Expression): boolean {
+  const value = knownNumber(expression);
+  return value === undefined || Number.isInteger(value);
+}
+
+function knownNumber(expression: Expression): number | undefined {
+  if (expression.kind === "numberLiteral") return expression.value;
+  if (expression.kind === "parenthesizedExpression") {
+    return knownNumber(expression.expression);
+  }
+  if (
+    expression.kind === "unaryExpression" &&
+    (expression.operator === "+" || expression.operator === "-")
+  ) {
+    const operand = knownNumber(expression.operand);
+    if (operand === undefined) return undefined;
+    return expression.operator === "+" ? operand : -operand;
+  }
+  return undefined;
+}
+
+function isDefinitelyNonNumeric(expression: Expression): boolean {
+  if (expression.kind === "parenthesizedExpression") {
+    return isDefinitelyNonNumeric(expression.expression);
+  }
+  return (
+    expression.kind === "stringLiteral" ||
+    expression.kind === "booleanLiteral" ||
+    expression.kind === "nullLiteral" ||
+    expression.kind === "listLiteral" ||
+    expression.kind === "setLiteral" ||
+    expression.kind === "objectLiteral" ||
+    expression.kind === "templateLiteral" ||
+    expression.kind === "rangeExpression"
+  );
+}
+
+function isDefinitelyNonIterable(expression: Expression): boolean {
+  if (expression.kind === "parenthesizedExpression") {
+    return isDefinitelyNonIterable(expression.expression);
+  }
+  return (
+    expression.kind === "stringLiteral" ||
+    expression.kind === "booleanLiteral" ||
+    expression.kind === "nullLiteral" ||
+    expression.kind === "numberLiteral" ||
+    expression.kind === "objectLiteral" ||
+    expression.kind === "templateLiteral"
+  );
 }
 
 function isDefinitelyComposite(

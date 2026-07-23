@@ -47,7 +47,7 @@ source spans, literals and expressions, variables and assignments, lexical
 `if`/`else` blocks, speakers, `say`, `say as`, `exit`, lists, objects, and the
 accepted ordered scalar set.
 
-### 2. Serializable runtime and standalone playground — current
+### 2. Serializable runtime and standalone playground — complete on `feature/runtime-playground`
 
 The current vertical slice adds:
 
@@ -66,6 +66,24 @@ transcript remains UI state rather than runtime snapshot state.
 
 The playground does not yet implement the future cross-origin iframe host,
 Laravel communication, persistence, accounts, media, input, or timers.
+
+### 3. Serializable control flow — complete on `feature/control-flow-runtime`
+
+The stacked control-flow branch adds the accepted V30 subset for line and block
+comments, exclusive and inclusive range expressions, `random()`, `chance(...)`,
+`randomInteger(...)`, two-word `else if`, `repeat`, list/set/range `for`,
+`while`, `break`, and `continue`.
+
+Loops compile to explicit loop-start and loop-control instructions. Runtime
+snapshots store a JSON-safe loop-frame stack containing loop identity, lexical
+scope depth, remaining repeat count, or a copied iteration source and next
+position. No generator, closure, suspended JavaScript stack, or AST execution
+is involved. Instruction plans, snapshots, and checkpoints are version 2.
+
+The read-only playground provides three fixed repository examples and scopes
+saved checkpoints by example and checkpoint format. The development server
+allowlists those examples and rejects traversal and symlink escapes. A minimal
+GitHub Actions workflow runs the pinned Node.js checks and build.
 
 ## Required design discipline
 
@@ -106,3 +124,6 @@ The following are not parser-POC blockers:
 - LLM, camera, distribution, and moderation systems.
 
 Consult the V30-to-V31 review and post-POC backlog before designing these.
+Functions, return, recursion, switch, labels/goto, timers, input, storage,
+media, units, date/time, modules, TypeScript linkage, Laravel integration, and
+iframe messaging remain deliberately deferred.

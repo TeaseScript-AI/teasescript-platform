@@ -21,6 +21,8 @@
 
     <main>
       <section class="controls" aria-label="Runtime controls">
+        <label for="example-select">Example</label>
+        <select id="example-select"></select>
         <button id="run" type="button">Run</button>
         <button id="step" type="button">Step</button>
         <button id="reset" type="button">Reset</button>
@@ -34,7 +36,7 @@
 
       <div class="primary-grid">
         <section class="panel source-panel">
-          <h2>Source</h2>
+          <h2>Source: <span id="loaded-example-name">loading</span></h2>
           <pre id="source-code" tabindex="0">Loading example…</pre>
         </section>
 

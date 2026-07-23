@@ -33,6 +33,7 @@ import {
   validateSerializableValue,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
+  type SerializableRuntimeRange,
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
   type SerializableSpeakerReference,
@@ -43,6 +44,7 @@ import {
   type RuntimeBindingSnapshot,
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
+  type RuntimeLoopFrameSnapshot,
 } from "./state.js";
 
 export interface RuntimeCapabilityCall {
@@ -265,6 +267,12 @@ function executePlannedInstruction(
     case "jump":
       snapshot.nextInstruction = instruction.target;
       return;
+    case "loopStart":
+      executeLoopStart(instruction, snapshot, evaluator);
+      return;
+    case "loopControl":
+      executeLoopControl(instruction, snapshot);
+      return;
     case "say": {
       const speaker =
         instruction.speaker !== null
@@ -289,6 +297,9 @@ function executePlannedInstruction(
     }
     case "exit":
       snapshot.defaultSpeaker = null;
+      snapshot.contextualSpeaker = null;
+      snapshot.frames.splice(1);
+      snapshot.loopFrames.length = 0;
       snapshot.status = "halted";
       snapshot.nextInstruction += 1;
       events.push(
@@ -302,6 +313,146 @@ function executePlannedInstruction(
   }
 }
 
+function executeLoopStart(
+  instruction: Extract<Instruction, { kind: "loopStart" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+): void {
+  let frame = snapshot.loopFrames.at(-1);
+  if (frame?.loopId !== instruction.loopId) {
+    if (snapshot.loopFrames.some((item) => item.loopId === instruction.loopId)) {
+      throw fault("TSR042", "Loop-frame nesting does not match the instruction plan.", instruction.span);
+    }
+    const scopeDepth = snapshot.frames.length;
+    if (instruction.loopKind === "repeat") {
+      const value = evaluator.evaluate(instruction.expression);
+      if (
+        typeof value !== "number" ||
+        !Number.isSafeInteger(value) ||
+        value < 0
+      ) {
+        throw fault("TSR043", "repeat requires a non-negative integer count.", instruction.expression.span);
+      }
+      frame = { kind: "repeat", loopId: instruction.loopId, scopeDepth, remaining: value };
+    } else if (instruction.loopKind === "while") {
+      frame = { kind: "while", loopId: instruction.loopId, scopeDepth };
+    } else {
+      const source = evaluator.evaluate(instruction.expression);
+      if (!isList(source) && !isSet(source) && !isRange(source)) {
+        throw fault("TSR044", "for requires a list, set, or range source.", instruction.expression.span);
+      }
+      if (isRange(source)) assertIntegerRange(source, instruction.expression.span);
+      frame = {
+        kind: "for",
+        loopId: instruction.loopId,
+        scopeDepth,
+        variable: instruction.variable,
+        source: cloneSerializableValue(source) as Extract<RuntimeLoopFrameSnapshot, { kind: "for" }>["source"],
+        position: 0,
+      };
+    }
+    snapshot.loopFrames.push(frame);
+  }
+
+  if (frame.kind !== instruction.loopKind) {
+    throw fault("TSR042", "Loop-frame kind does not match the instruction plan.", instruction.span);
+  }
+  if (snapshot.frames.length !== frame.scopeDepth) {
+    throw fault("TSR042", "Loop scope state does not match the next instruction.", instruction.span);
+  }
+
+  if (frame.kind === "repeat") {
+    if (frame.remaining === 0) {
+      snapshot.loopFrames.pop();
+      snapshot.nextInstruction = instruction.target;
+      return;
+    }
+    frame.remaining -= 1;
+    pushIterationScope(snapshot, []);
+    advance(snapshot);
+    return;
+  }
+  if (frame.kind === "while") {
+    const condition = evaluator.evaluate(instruction.expression);
+    if (typeof condition !== "boolean") {
+      throw fault("TSR026", "Expected a boolean value.", instruction.expression.span);
+    }
+    if (!condition) {
+      snapshot.loopFrames.pop();
+      snapshot.nextInstruction = instruction.target;
+      return;
+    }
+    pushIterationScope(snapshot, []);
+    advance(snapshot);
+    return;
+  }
+
+  const length = iterationLength(frame.source);
+  if (frame.position >= length) {
+    snapshot.loopFrames.pop();
+    snapshot.nextInstruction = instruction.target;
+    return;
+  }
+  const value = iterationValue(frame.source, frame.position);
+  frame.position += 1;
+  pushIterationScope(snapshot, [
+    { name: frame.variable, value: cloneSerializableValue(value) },
+  ]);
+  advance(snapshot);
+}
+
+function executeLoopControl(
+  instruction: Extract<Instruction, { kind: "loopControl" }>,
+  snapshot: RuntimeSnapshot,
+): void {
+  const frame = snapshot.loopFrames.at(-1);
+  if (frame === undefined || frame.loopId !== instruction.loopId) {
+    throw fault("TSR042", "Loop control does not match the active innermost loop.", instruction.span);
+  }
+  if (snapshot.frames.length <= frame.scopeDepth) {
+    throw fault("TSR042", "Active loop iteration scope is missing.", instruction.span);
+  }
+  snapshot.frames.splice(frame.scopeDepth);
+  if (instruction.action === "break") snapshot.loopFrames.pop();
+  snapshot.nextInstruction = instruction.target;
+}
+
+function pushIterationScope(
+  snapshot: RuntimeSnapshot,
+  bindings: RuntimeBindingSnapshot[],
+): void {
+  snapshot.frames.push({ id: snapshot.nextScopeId, bindings });
+  snapshot.nextScopeId += 1;
+}
+
+function iterationLength(
+  source: SerializableRuntimeList | SerializableRuntimeSet | SerializableRuntimeRange,
+): number {
+  return isRange(source) ? rangeLength(source) : source.items.length;
+}
+
+function iterationValue(
+  source: SerializableRuntimeList | SerializableRuntimeSet | SerializableRuntimeRange,
+  position: number,
+): SerializableRuntimeValue {
+  return isRange(source) ? source.start + position : source.items[position]!;
+}
+
+function rangeLength(range: SerializableRuntimeRange): number {
+  return Math.max(0, range.end - range.start + (range.inclusive ? 1 : 0));
+}
+
+function assertIntegerRange(range: SerializableRuntimeRange, span: SourceSpan): void {
+  const length = rangeLength(range);
+  if (
+    !Number.isSafeInteger(range.start) ||
+    !Number.isSafeInteger(range.end) ||
+    !Number.isSafeInteger(length)
+  ) {
+    throw fault("TSR045", "Range iteration requires safe integer bounds.", span);
+  }
+}
+
 class Evaluator {
   readonly #builtins: Readonly<Record<string, RuntimeBuiltinFunction>>;
 
@@ -309,7 +460,12 @@ class Evaluator {
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
   ) {
-    this.#builtins = capabilities.builtins ?? {};
+    this.#builtins = {
+      ...(capabilities.builtins ?? {}),
+      random: (call) => this.#randomBuiltin(call),
+      chance: (call) => this.#chanceBuiltin(call),
+      randomInteger: (call) => this.#randomIntegerBuiltin(call),
+    };
   }
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
@@ -399,6 +555,11 @@ class Evaluator {
       }
       case "binary":
         return this.#binary(expression);
+      case "range": {
+        const start = this.#number(this.evaluate(expression.start), expression.start.span);
+        const end = this.#number(this.evaluate(expression.end), expression.end.span);
+        return { kind: "range", start, end, inclusive: expression.inclusive };
+      }
     }
   }
 
@@ -526,6 +687,7 @@ class Evaluator {
         const equal = serializableEquals(left, right);
         return expression.operator === "==" ? equal : !equal;
       } catch (error) {
+        if (error instanceof RuntimeFault) throw error;
         throw this.#translateValueError(error, expression.span);
       }
     }
@@ -693,6 +855,59 @@ class Evaluator {
       throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
     }
     return random;
+  }
+
+  #randomBuiltin(call: RuntimeCapabilityCall): number {
+    this.#expectBuiltinArguments("random", call, 0);
+    return this.#findRandom(call.span);
+  }
+
+  #chanceBuiltin(call: RuntimeCapabilityCall): boolean {
+    this.#expectBuiltinArguments("chance", call, 1);
+    const percent = call.positional[0];
+    if (typeof percent !== "number" || percent < 0 || percent > 100) {
+      throw fault(
+        "TSR039",
+        "chance(percent) requires a finite percentage from 0 through 100.",
+        call.span,
+      );
+    }
+    return this.#findRandom(call.span) * 100 < percent;
+  }
+
+  #randomIntegerBuiltin(call: RuntimeCapabilityCall): number {
+    this.#expectBuiltinArguments("randomInteger", call, 1);
+    const range = call.positional[0]!;
+    if (!isRange(range)) {
+      throw fault(
+        "TSR040",
+        "randomInteger(range) requires a range value.",
+        call.span,
+      );
+    }
+    assertIntegerRange(range, call.span);
+    const length = rangeLength(range);
+    if (length < 1) {
+      throw fault("TSR041", "randomInteger(range) requires a non-empty range.", call.span);
+    }
+    return range.start + Math.floor(this.#findRandom(call.span) * length);
+  }
+
+  #expectBuiltinArguments(
+    name: string,
+    call: RuntimeCapabilityCall,
+    count: number,
+  ): void {
+    if (
+      call.positional.length !== count ||
+      Object.keys(call.named).length !== 0
+    ) {
+      throw fault(
+        "TSR028",
+        `${name} expects ${count} positional argument(s) and no named arguments.`,
+        call.span,
+      );
+    }
   }
 
   #findValue(
@@ -888,6 +1103,10 @@ function isSet(value: SerializableRuntimeValue): value is SerializableRuntimeSet
 
 function isObject(value: SerializableRuntimeValue): value is SerializableRuntimeObject {
   return typeof value === "object" && value !== null && value.kind === "object";
+}
+
+function isRange(value: SerializableRuntimeValue): value is SerializableRuntimeRange {
+  return typeof value === "object" && value !== null && value.kind === "range";
 }
 
 function isSpeakerReference(value: SerializableRuntimeValue): value is SerializableSpeakerReference {
