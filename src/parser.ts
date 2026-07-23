@@ -1,20 +1,35 @@
 import type {
-  ExitStatement,
+  AssignmentStatement,
+  AssignmentTarget,
+  BinaryExpression,
+  Block,
+  CallArgument,
+  CallExpression,
+  Expression,
+  ExpressionStatement,
   Identifier,
-  InterpolationExpression,
+  IfStatement,
+  LetStatement,
+  NamedArgument,
+  ObjectLiteral,
+  ObjectProperty,
+  ParenthesizedExpression,
+  PositionalArgument,
   Program,
   PropertyAccessExpression,
+  ScalarTypeName,
   SayStatement,
+  SetLiteral,
   SpeakerDeclaration,
   SpeakerProperty,
   SpeakerSetterStatement,
   Statement,
-  StringExpression,
-  StringLiteral,
   TemplateInterpolation,
   TemplateLiteral,
   TemplatePart,
   TemplateText,
+  TypeAnnotation,
+  UnaryExpression,
 } from "./ast.js";
 import {
   createDiagnostic,
@@ -46,9 +61,19 @@ const parserDiagnosticCode = {
   unsupportedTemplateExpression: "TSP009",
   expectedPropertyAfterDot: "TSP010",
   expectedPropertyEnd: "TSP011",
+  expectedExpression: "TSP012",
+  expectedIdentifier: "TSP013",
+  expectedEqual: "TSP014",
+  invalidAssignmentTarget: "TSP015",
+  invalidExpressionStatement: "TSP016",
+  expectedDelimiter: "TSP017",
+  expectedBlock: "TSP018",
+  mixedArguments: "TSP019",
+  chainedComparison: "TSP020",
+  invalidType: "TSP021",
 } as const;
 
-/** Parses the approved initial TeaseScript grammar slice. */
+/** Parses the accepted core-language milestone. */
 export function parse(source: string): ParseResult {
   const lexResult = lex(source);
   const parser = new Parser(lexResult.tokens);
@@ -77,32 +102,27 @@ class Parser {
   public parseProgram(): Program {
     const statements: Statement[] = [];
     this.#skipNewlines();
-
     while (!this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
       const statement = this.#parseStatement();
-
-      if (statement !== null) {
-        statements.push(statement);
-      }
-
-      if (this.#current === startIndex) {
-        this.#advance();
-      }
+      if (statement !== null) statements.push(statement);
+      if (this.#current === startIndex) this.#advance();
 
       if (this.#recoveredAtStatementBoundary) {
         this.#recoveredAtStatementBoundary = false;
       } else {
-        this.#finishStatement();
+        this.#finishStatement(false);
       }
       this.#skipNewlines();
     }
 
-    const end = this.#peek().span.end;
     return Object.freeze({
       kind: "program",
       statements: Object.freeze(statements),
-      span: createSourceSpan(createSourcePosition(0, 0, 0), end),
+      span: createSourceSpan(
+        createSourcePosition(0, 0, 0),
+        this.#peek().span.end,
+      ),
     });
   }
 
@@ -114,7 +134,14 @@ class Parser {
         return this.#parseSayStatement();
       case TokenKind.KeywordExit:
         return this.#parseExitStatement();
+      case TokenKind.KeywordLet:
+        return this.#parseLetStatement();
+      case TokenKind.KeywordIf:
+        return this.#parseIfStatement();
       default:
+        if (isExpressionStart(this.#peek())) {
+          return this.#parseAssignmentOrExpressionStatement();
+        }
         this.#reportToken(
           parserDiagnosticCode.expectedStatement,
           "Expected a supported TeaseScript statement.",
@@ -130,27 +157,20 @@ class Parser {
     | SpeakerSetterStatement
     | null {
     const keyword = this.#advance();
-
     if (!this.#check(TokenKind.Identifier)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedSpeakerIdentifier,
         "Expected a speaker identifier after 'speaker'.",
       );
-
-      if (this.#check(TokenKind.LeftBrace)) {
-        this.#skipMalformedBlock();
-      } else {
-        this.#synchronizeStatement();
-      }
+      if (this.#check(TokenKind.LeftBrace)) this.#skipMalformedBlock();
+      else this.#synchronizeStatement();
       return null;
     }
 
     const name = this.#identifier(this.#advance());
-
     if (this.#match(TokenKind.LeftBrace)) {
       return this.#parseSpeakerDeclaration(keyword, name);
     }
-
     return Object.freeze({
       kind: "speakerSetterStatement",
       speaker: name,
@@ -168,29 +188,21 @@ class Parser {
 
     while (!this.#check(TokenKind.EndOfFile)) {
       this.#skipNewlines();
-
       if (this.#match(TokenKind.RightBrace)) {
-        const rightBrace = this.#previous();
         return this.#speakerDeclaration(
           keyword,
           name,
           properties,
-          rightBrace.span,
+          this.#previous().span,
         );
       }
-
       if (this.#isRecoveredTopLevelStatement()) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedRightBrace,
           "Expected '}' to close the speaker declaration.",
         );
         this.#recoveredAtStatementBoundary = true;
-        return this.#speakerDeclaration(
-          keyword,
-          name,
-          properties,
-          lastSpan,
-        );
+        return this.#speakerDeclaration(keyword, name, properties, lastSpan);
       }
 
       const property = this.#parseSpeakerProperty();
@@ -198,7 +210,6 @@ class Parser {
         properties.push(property);
         lastSpan = property.span;
       }
-
       if (
         !this.#check(TokenKind.Newline) &&
         !this.#check(TokenKind.RightBrace) &&
@@ -216,12 +227,7 @@ class Parser {
       parserDiagnosticCode.expectedRightBrace,
       "Expected '}' to close the speaker declaration.",
     );
-    return this.#speakerDeclaration(
-      keyword,
-      name,
-      properties,
-      lastSpan,
-    );
+    return this.#speakerDeclaration(keyword, name, properties, lastSpan);
   }
 
   #parseSpeakerProperty(): SpeakerProperty | null {
@@ -233,9 +239,7 @@ class Parser {
       this.#synchronizeProperty();
       return null;
     }
-
     const name = this.#identifier(this.#advance());
-
     if (!this.#match(TokenKind.Colon)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedColon,
@@ -244,15 +248,15 @@ class Parser {
       this.#synchronizeProperty();
       return null;
     }
-
-    const value = this.#parseStringExpression(
-      "Expected a string or template for the speaker property.",
-    );
+    const value = this.#parseExpression();
     if (value === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedString,
+        "Expected a string or template for the speaker property.",
+      );
       this.#synchronizeProperty();
       return null;
     }
-
     return Object.freeze({
       kind: "speakerProperty",
       name,
@@ -264,7 +268,6 @@ class Parser {
   #parseSayStatement(): SayStatement | null {
     const keyword = this.#advance();
     let speaker: Identifier | null = null;
-
     if (this.#match(TokenKind.KeywordAs)) {
       if (!this.#check(TokenKind.Identifier)) {
         this.#reportInsertion(
@@ -277,14 +280,20 @@ class Parser {
       speaker = this.#identifier(this.#advance());
     }
 
-    const value = this.#parseStringExpression(
-      "Expected a string or template after 'say'.",
-    );
+    const valueStart = this.#peek().kind;
+    const value = this.#parseExpression();
     if (value === null) {
+      if (valueStart === TokenKind.TemplateStart) {
+        this.#synchronizeStatement();
+        return null;
+      }
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedString,
+        "Expected a string or template after 'say'.",
+      );
       this.#synchronizeStatement();
       return null;
     }
-
     return Object.freeze({
       kind: "sayStatement",
       speaker,
@@ -293,7 +302,7 @@ class Parser {
     });
   }
 
-  #parseExitStatement(): ExitStatement {
+  #parseExitStatement(): Statement {
     const keyword = this.#advance();
     return Object.freeze({
       kind: "exitStatement",
@@ -301,24 +310,697 @@ class Parser {
     });
   }
 
-  #parseStringExpression(message: string): StringExpression | null {
-    if (this.#match(TokenKind.StringLiteral)) {
-      const token = this.#previous();
-      return this.#stringLiteral(token);
+  #parseLetStatement(): LetStatement | null {
+    const keyword = this.#advance();
+    if (!this.#check(TokenKind.Identifier)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedIdentifier,
+        "Expected a variable identifier after 'let'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const name = this.#identifier(this.#advance());
+    let typeAnnotation: TypeAnnotation | null = null;
+    if (this.#match(TokenKind.Colon)) {
+      typeAnnotation = this.#parseTypeAnnotation();
+      if (typeAnnotation === null) {
+        this.#synchronizeStatement();
+        return null;
+      }
+    }
+    if (!this.#match(TokenKind.Equal)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedEqual,
+        "Expected '=' in the variable declaration.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    this.#skipContinuationNewlines();
+    const initializer = this.#parseRequiredExpression();
+    if (initializer === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    return Object.freeze({
+      kind: "letStatement",
+      name,
+      typeAnnotation,
+      initializer,
+      span: spanFrom(keyword.span, initializer.span),
+    });
+  }
+
+  #parseTypeAnnotation(): TypeAnnotation | null {
+    const token = this.#peek();
+    if (token.kind !== TokenKind.Identifier || !isScalarType(token.lexeme)) {
+      this.#reportToken(
+        parserDiagnosticCode.invalidType,
+        "Expected an accepted scalar type name.",
+        token,
+      );
+      return null;
+    }
+    this.#advance();
+    let collection: "list" | "set" | null = null;
+    let end = token.span;
+    if (this.#match(TokenKind.LeftBracket)) {
+      if (!this.#match(TokenKind.RightBracket)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedDelimiter,
+          "Expected ']' in the list type annotation.",
+        );
+        return null;
+      }
+      collection = "list";
+      end = this.#previous().span;
+    } else if (this.#match(TokenKind.KeywordSet)) {
+      collection = "set";
+      end = this.#previous().span;
+    }
+    let optional = false;
+    if (this.#match(TokenKind.Question)) {
+      optional = true;
+      end = this.#previous().span;
+    }
+    return Object.freeze({
+      kind: "typeAnnotation",
+      name: token.lexeme as ScalarTypeName,
+      collection,
+      optional,
+      span: spanFrom(token.span, end),
+    });
+  }
+
+  #parseIfStatement(): IfStatement | null {
+    const keyword = this.#advance();
+    const condition = this.#parseRequiredExpression();
+    if (condition === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    this.#skipContinuationNewlines();
+    const thenBlock = this.#parseBlock();
+    if (thenBlock === null) return null;
+
+    const beforePotentialElse = this.#current;
+    this.#skipNewlines();
+    let elseBlock: Block | null = null;
+    if (this.#match(TokenKind.KeywordElse)) {
+      this.#skipContinuationNewlines();
+      elseBlock = this.#parseBlock();
+      if (elseBlock === null) return null;
+    } else {
+      this.#current = beforePotentialElse;
+    }
+    return Object.freeze({
+      kind: "ifStatement",
+      condition,
+      thenBlock,
+      elseBlock,
+      span: spanFrom(keyword.span, (elseBlock ?? thenBlock).span),
+    });
+  }
+
+  #parseBlock(): Block | null {
+    if (!this.#match(TokenKind.LeftBrace)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedBlock,
+        "Expected '{' to start the block.",
+      );
+      return null;
+    }
+    const leftBrace = this.#previous();
+    const statements: Statement[] = [];
+    this.#skipNewlines();
+    while (
+      !this.#check(TokenKind.RightBrace) &&
+      !this.#check(TokenKind.EndOfFile)
+    ) {
+      const startIndex = this.#current;
+      const statement = this.#parseStatement();
+      if (statement !== null) statements.push(statement);
+      if (this.#current === startIndex) this.#advance();
+      this.#finishStatement(true);
+      this.#skipNewlines();
+    }
+    if (!this.#match(TokenKind.RightBrace)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedRightBrace,
+        "Expected '}' to close the block.",
+      );
+      return null;
+    }
+    return Object.freeze({
+      kind: "block",
+      statements: Object.freeze(statements),
+      span: spanFrom(leftBrace.span, this.#previous().span),
+    });
+  }
+
+  #parseAssignmentOrExpressionStatement():
+    | AssignmentStatement
+    | ExpressionStatement
+    | null {
+    const expression = this.#parseExpression();
+    if (expression === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    if (this.#match(TokenKind.Equal)) {
+      this.#skipContinuationNewlines();
+      const value = this.#parseRequiredExpression();
+      if (value === null) {
+        this.#synchronizeStatement();
+        return null;
+      }
+      if (!isAssignmentTarget(expression)) {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidAssignmentTarget,
+          "The left side of an assignment must be a variable, property, or index.",
+          expression.span,
+        );
+        return null;
+      }
+      return Object.freeze({
+        kind: "assignmentStatement",
+        target: expression,
+        value,
+        span: spanFrom(expression.span, value.span),
+      });
+    }
+    if (expression.kind !== "callExpression") {
+      if (expression.kind === "identifier") {
+        this.#reportSpan(
+          parserDiagnosticCode.expectedStatement,
+          "Expected a supported TeaseScript statement.",
+          expression.span,
+        );
+        this.#synchronizeStatement();
+        return null;
+      }
+      this.#reportSpan(
+        parserDiagnosticCode.invalidExpressionStatement,
+        "Only function or method calls may be used as expression statements.",
+        expression.span,
+      );
+      return null;
+    }
+    return Object.freeze({
+      kind: "expressionStatement",
+      expression,
+      span: copySpan(expression.span),
+    });
+  }
+
+  #parseRequiredExpression(): Expression | null {
+    const expression = this.#parseExpression();
+    if (expression === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected an expression.",
+      );
+    }
+    return expression;
+  }
+
+  #parseExpression(): Expression | null {
+    return this.#parseOr();
+  }
+
+  #parseOr(): Expression | null {
+    let expression = this.#parseAnd();
+    while (expression !== null && this.#match(TokenKind.KeywordOr)) {
+      const operator = this.#previous();
+      this.#skipContinuationNewlines();
+      const right = this.#parseAnd();
+      if (right === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected an expression after 'or'.",
+        );
+        return null;
+      }
+      expression = this.#binary(expression, operator, right, "or");
+    }
+    return expression;
+  }
+
+  #parseAnd(): Expression | null {
+    let expression = this.#parseNot();
+    while (expression !== null && this.#match(TokenKind.KeywordAnd)) {
+      const operator = this.#previous();
+      this.#skipContinuationNewlines();
+      const right = this.#parseNot();
+      if (right === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected an expression after 'and'.",
+        );
+        return null;
+      }
+      expression = this.#binary(expression, operator, right, "and");
+    }
+    return expression;
+  }
+
+  #parseNot(): Expression | null {
+    if (this.#match(TokenKind.KeywordNot)) {
+      const operator = this.#previous();
+      this.#skipContinuationNewlines();
+      const operand = this.#parseNot();
+      if (operand === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected an expression after 'not'.",
+        );
+        return null;
+      }
+      return this.#unary(operator, operand, "not");
+    }
+    return this.#parseComparison();
+  }
+
+  #parseComparison(): Expression | null {
+    const left = this.#parseAdditive();
+    if (left === null || !isComparisonKind(this.#peek().kind)) return left;
+    const operator = this.#advance();
+    this.#skipContinuationNewlines();
+    const right = this.#parseAdditive();
+    if (right === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected an expression after the comparison operator.",
+      );
+      return null;
+    }
+    const expression = this.#binary(
+      left,
+      operator,
+      right,
+      binaryOperator(operator),
+    );
+    if (isComparisonKind(this.#peek().kind)) {
+      this.#reportToken(
+        parserDiagnosticCode.chainedComparison,
+        "Comparisons may not be chained.",
+        this.#peek(),
+      );
+      while (isComparisonKind(this.#peek().kind)) {
+        this.#advance();
+        this.#skipContinuationNewlines();
+        this.#parseAdditive();
+      }
+    }
+    return expression;
+  }
+
+  #parseAdditive(): Expression | null {
+    let expression = this.#parseMultiplicative();
+    while (
+      expression !== null &&
+      (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus))
+    ) {
+      const operator = this.#advance();
+      this.#skipContinuationNewlines();
+      const right = this.#parseMultiplicative();
+      if (right === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected an expression after the arithmetic operator.",
+        );
+        return null;
+      }
+      expression = this.#binary(
+        expression,
+        operator,
+        right,
+        binaryOperator(operator),
+      );
+    }
+    return expression;
+  }
+
+  #parseMultiplicative(): Expression | null {
+    let expression = this.#parseUnaryArithmetic();
+    while (
+      expression !== null &&
+      (this.#check(TokenKind.Star) ||
+        this.#check(TokenKind.Slash) ||
+        this.#check(TokenKind.Percent))
+    ) {
+      const operator = this.#advance();
+      this.#skipContinuationNewlines();
+      const right = this.#parseUnaryArithmetic();
+      if (right === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected an expression after the arithmetic operator.",
+        );
+        return null;
+      }
+      expression = this.#binary(
+        expression,
+        operator,
+        right,
+        binaryOperator(operator),
+      );
+    }
+    return expression;
+  }
+
+  #parseUnaryArithmetic(): Expression | null {
+    if (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus)) {
+      const operator = this.#advance();
+      this.#skipContinuationNewlines();
+      const operand = this.#parseUnaryArithmetic();
+      if (operand === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected an expression after the unary operator.",
+        );
+        return null;
+      }
+      return this.#unary(operator, operand, operator.lexeme as "+" | "-");
+    }
+    return this.#parsePostfix();
+  }
+
+  #parsePostfix(): Expression | null {
+    let expression = this.#parsePrimary();
+    while (expression !== null) {
+      if (this.#match(TokenKind.Dot)) {
+        if (!isPropertyName(this.#peek())) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedPropertyAfterDot,
+            "Expected a property name after '.'.",
+          );
+          return expression;
+        }
+        const property = this.#identifier(this.#advance());
+        expression = Object.freeze({
+          kind: "propertyAccessExpression",
+          object: expression,
+          property,
+          span: spanFrom(expression.span, property.span),
+        } satisfies PropertyAccessExpression);
+        continue;
+      }
+      if (this.#match(TokenKind.LeftBracket)) {
+        const start = expression;
+        this.#skipNewlines();
+        const index = this.#parseRequiredExpression();
+        this.#skipNewlines();
+        if (index === null || !this.#match(TokenKind.RightBracket)) {
+          if (index !== null) {
+            this.#reportInsertion(
+              parserDiagnosticCode.expectedDelimiter,
+              "Expected ']' after the index expression.",
+            );
+          }
+          return expression;
+        }
+        expression = Object.freeze({
+          kind: "indexExpression",
+          object: start,
+          index,
+          span: spanFrom(start.span, this.#previous().span),
+        });
+        continue;
+      }
+      if (this.#match(TokenKind.LeftParenthesis)) {
+        expression = this.#finishCall(expression, this.#previous());
+        continue;
+      }
+      break;
+    }
+    return expression;
+  }
+
+  #finishCall(callee: Expression, left: Token): CallExpression {
+    const argumentsList: CallArgument[] = [];
+    let style: "none" | "positional" | "named" = "none";
+    this.#skipNewlines();
+    while (
+      !this.#check(TokenKind.RightParenthesis) &&
+      !this.#check(TokenKind.EndOfFile)
+    ) {
+      let argument: CallArgument | null = null;
+      if (isPropertyName(this.#peek()) && this.#peek(1).kind === TokenKind.Colon) {
+        const name = this.#identifier(this.#advance());
+        this.#advance();
+        this.#skipContinuationNewlines();
+        const value = this.#parseRequiredExpression();
+        if (value !== null) {
+          argument = Object.freeze({
+            kind: "namedArgument",
+            name,
+            value,
+            span: spanFrom(name.span, value.span),
+          } satisfies NamedArgument);
+        }
+        if (style === "positional") this.#reportMixedArguments(name.span);
+        style = "named";
+      } else {
+        const value = this.#parseRequiredExpression();
+        if (value !== null) {
+          argument = Object.freeze({
+            kind: "positionalArgument",
+            value,
+            span: copySpan(value.span),
+          } satisfies PositionalArgument);
+        }
+        if (style === "named" && value !== null) {
+          this.#reportMixedArguments(value.span);
+        }
+        style = "positional";
+      }
+      if (argument !== null) argumentsList.push(argument);
+      this.#skipNewlines();
+      if (!this.#match(TokenKind.Comma)) break;
+      this.#skipNewlines();
+      if (this.#check(TokenKind.RightParenthesis)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected an argument after ','.",
+        );
+        break;
+      }
     }
 
+    let end = left.span;
+    if (this.#match(TokenKind.RightParenthesis)) end = this.#previous().span;
+    else {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedDelimiter,
+        "Expected ')' after the function arguments.",
+      );
+      if (argumentsList.length > 0) end = argumentsList.at(-1)!.span;
+    }
+    return Object.freeze({
+      kind: "callExpression",
+      callee,
+      arguments: Object.freeze(argumentsList),
+      argumentStyle: style,
+      span: spanFrom(callee.span, end),
+    });
+  }
+
+  #parsePrimary(): Expression | null {
+    const token = this.#peek();
+    if (this.#match(TokenKind.NumberLiteral)) {
+      return Object.freeze({
+        kind: "numberLiteral",
+        raw: token.lexeme,
+        value: Number(token.lexeme),
+        numericType: /[.eE]/u.test(token.lexeme) ? "number" : "integer",
+        span: copySpan(token.span),
+      });
+    }
+    if (this.#match(TokenKind.StringLiteral)) return this.#stringLiteral(token);
+    if (this.#match(TokenKind.KeywordTrue)) {
+      return Object.freeze({
+        kind: "booleanLiteral",
+        value: true,
+        span: copySpan(token.span),
+      });
+    }
+    if (this.#match(TokenKind.KeywordFalse)) {
+      return Object.freeze({
+        kind: "booleanLiteral",
+        value: false,
+        span: copySpan(token.span),
+      });
+    }
+    if (this.#match(TokenKind.KeywordNull)) {
+      return Object.freeze({
+        kind: "nullLiteral",
+        value: null,
+        span: copySpan(token.span),
+      });
+    }
+    if (
+      this.#match(TokenKind.Identifier) ||
+      this.#match(TokenKind.KeywordSpeaker)
+    ) {
+      return this.#identifier(token);
+    }
     if (this.#match(TokenKind.TemplateStart)) {
-      return this.#parseTemplateLiteral(this.#previous());
+      return this.#parseTemplateLiteral(token);
     }
-
-    this.#reportInsertion(parserDiagnosticCode.expectedString, message);
+    if (this.#match(TokenKind.LeftParenthesis)) {
+      return this.#parseParenthesized(token);
+    }
+    if (this.#match(TokenKind.LeftBracket)) {
+      return this.#parseListLiteral(token);
+    }
+    if (this.#match(TokenKind.LeftBrace)) {
+      return this.#parseObjectLiteral(token);
+    }
+    if (this.#match(TokenKind.KeywordSet)) {
+      if (!this.#match(TokenKind.LeftBracket)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedDelimiter,
+          "Expected '[' after 'set'.",
+        );
+        return null;
+      }
+      return this.#parseSetLiteral(token);
+    }
     return null;
+  }
+
+  #parseParenthesized(start: Token): ParenthesizedExpression | null {
+    this.#skipNewlines();
+    const expression = this.#parseRequiredExpression();
+    this.#skipNewlines();
+    if (expression === null || !this.#match(TokenKind.RightParenthesis)) {
+      if (expression !== null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedDelimiter,
+          "Expected ')' after the expression.",
+        );
+      }
+      return null;
+    }
+    return Object.freeze({
+      kind: "parenthesizedExpression",
+      expression,
+      span: spanFrom(start.span, this.#previous().span),
+    });
+  }
+
+  #parseListLiteral(start: Token): Expression {
+    const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
+    const end = this.#consumeClosingDelimiter(
+      TokenKind.RightBracket,
+      "Expected ']' after the list literal.",
+    );
+    return Object.freeze({
+      kind: "listLiteral",
+      elements: Object.freeze(elements),
+      span: spanFrom(start.span, end),
+    });
+  }
+
+  #parseSetLiteral(start: Token): SetLiteral {
+    const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
+    const end = this.#consumeClosingDelimiter(
+      TokenKind.RightBracket,
+      "Expected ']' after the set literal.",
+    );
+    return Object.freeze({
+      kind: "setLiteral",
+      elements: Object.freeze(elements),
+      span: spanFrom(start.span, end),
+    });
+  }
+
+  #parseDelimitedElements(closing: TokenKind): Expression[] {
+    const elements: Expression[] = [];
+    this.#skipNewlines();
+    while (!this.#check(closing) && !this.#check(TokenKind.EndOfFile)) {
+      const value = this.#parseRequiredExpression();
+      if (value === null) {
+        this.#synchronizeDelimited(closing);
+      } else {
+        elements.push(value);
+      }
+      this.#skipNewlines();
+      if (!this.#match(TokenKind.Comma)) break;
+      this.#skipNewlines();
+      if (this.#check(closing)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected a collection element after ','.",
+        );
+        break;
+      }
+    }
+    return elements;
+  }
+
+  #parseObjectLiteral(start: Token): ObjectLiteral {
+    const properties: ObjectProperty[] = [];
+    this.#skipNewlines();
+    while (
+      !this.#check(TokenKind.RightBrace) &&
+      !this.#check(TokenKind.EndOfFile)
+    ) {
+      if (!isPropertyName(this.#peek())) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedPropertyName,
+          "Expected an object property name.",
+        );
+        this.#synchronizeDelimited(TokenKind.RightBrace);
+        break;
+      }
+      const name = this.#identifier(this.#advance());
+      if (!this.#match(TokenKind.Colon)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedColon,
+          "Expected ':' after the object property name.",
+        );
+        this.#synchronizeDelimited(TokenKind.RightBrace);
+        break;
+      }
+      this.#skipContinuationNewlines();
+      const value = this.#parseRequiredExpression();
+      if (value === null) break;
+      properties.push(
+        Object.freeze({
+          kind: "objectProperty",
+          name,
+          value,
+          span: spanFrom(name.span, value.span),
+        }),
+      );
+      this.#skipNewlines();
+      if (!this.#match(TokenKind.Comma)) break;
+      this.#skipNewlines();
+      if (this.#check(TokenKind.RightBrace)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedPropertyName,
+          "Expected an object property after ','.",
+        );
+        break;
+      }
+    }
+    const end = this.#consumeClosingDelimiter(
+      TokenKind.RightBrace,
+      "Expected '}' after the object literal.",
+    );
+    return Object.freeze({
+      kind: "objectLiteral",
+      properties: Object.freeze(properties),
+      span: spanFrom(start.span, end),
+    });
   }
 
   #parseTemplateLiteral(start: Token): TemplateLiteral | null {
     const parts: TemplatePart[] = [];
     let valid = true;
-
     while (
       !this.#check(TokenKind.TemplateEnd) &&
       !this.#check(TokenKind.EndOfFile)
@@ -327,20 +1009,12 @@ class Parser {
         parts.push(this.#templateText(this.#previous()));
         continue;
       }
-
       if (this.#match(TokenKind.InterpolationStart)) {
-        const interpolationStart = this.#previous();
-        const interpolation = this.#parseTemplateInterpolation(
-          interpolationStart,
-        );
-        if (interpolation === null) {
-          valid = false;
-        } else {
-          parts.push(interpolation);
-        }
+        const interpolation = this.#parseTemplateInterpolation(this.#previous());
+        if (interpolation === null) valid = false;
+        else parts.push(interpolation);
         continue;
       }
-
       this.#reportToken(
         parserDiagnosticCode.unsupportedTemplateExpression,
         "Unexpected token in template string.",
@@ -349,26 +1023,16 @@ class Parser {
       valid = false;
       this.#advance();
     }
-
-    if (!this.#match(TokenKind.TemplateEnd)) {
-      return null;
-    }
-
-    const end = this.#previous();
-    if (!valid) {
-      return null;
-    }
-
+    if (!this.#match(TokenKind.TemplateEnd)) return null;
+    if (!valid) return null;
     return Object.freeze({
       kind: "templateLiteral",
       parts: Object.freeze(parts),
-      span: spanFrom(start.span, end.span),
+      span: spanFrom(start.span, this.#previous().span),
     });
   }
 
-  #parseTemplateInterpolation(
-    start: Token,
-  ): TemplateInterpolation | null {
+  #parseTemplateInterpolation(start: Token): TemplateInterpolation | null {
     if (this.#check(TokenKind.InterpolationEnd)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedTemplateExpression,
@@ -377,30 +1041,40 @@ class Parser {
       this.#advance();
       return null;
     }
-
     if (
       this.#check(TokenKind.TemplateEnd) ||
       this.#check(TokenKind.EndOfFile)
     ) {
-      // The lexer already reports an unterminated interpolation here.
       return null;
     }
-
-    const expression = this.#parseInterpolationExpression();
+    const diagnosticCount = this.#diagnostics.length;
+    const expression = this.#parseExpression();
     if (expression === null) {
+      this.#reportToken(
+        parserDiagnosticCode.unsupportedTemplateExpression,
+        "Expected a supported expression inside the template interpolation.",
+        this.#peek(),
+      );
       this.#synchronizeInterpolation();
       this.#match(TokenKind.InterpolationEnd);
       return null;
     }
-
+    if (this.#diagnostics.length !== diagnosticCount) {
+      this.#synchronizeInterpolation();
+      this.#match(TokenKind.InterpolationEnd);
+      return null;
+    }
     if (!this.#match(TokenKind.InterpolationEnd)) {
       if (
         !this.#check(TokenKind.TemplateEnd) &&
         !this.#check(TokenKind.EndOfFile)
       ) {
+        const message = this.#check(TokenKind.Colon)
+          ? "Only identifiers and chained property access are supported in template interpolation."
+          : "Only one complete expression is allowed in template interpolation.";
         this.#reportToken(
           parserDiagnosticCode.unsupportedTemplateExpression,
-          "Only identifiers and chained property access are supported in template interpolation.",
+          message,
           this.#peek(),
         );
       }
@@ -408,7 +1082,6 @@ class Parser {
       this.#match(TokenKind.InterpolationEnd);
       return null;
     }
-
     return Object.freeze({
       kind: "templateInterpolation",
       expression,
@@ -416,38 +1089,32 @@ class Parser {
     });
   }
 
-  #parseInterpolationExpression(): InterpolationExpression | null {
-    if (!isInterpolationRoot(this.#peek())) {
-      this.#reportToken(
-        parserDiagnosticCode.unsupportedTemplateExpression,
-        "Only identifiers and chained property access are supported in template interpolation.",
-        this.#peek(),
-      );
-      return null;
-    }
+  #binary(
+    left: Expression,
+    _operatorToken: Token,
+    right: Expression,
+    operator: BinaryExpression["operator"],
+  ): BinaryExpression {
+    return Object.freeze({
+      kind: "binaryExpression",
+      operator,
+      left,
+      right,
+      span: spanFrom(left.span, right.span),
+    });
+  }
 
-    let expression: InterpolationExpression = this.#identifier(this.#advance());
-
-    while (this.#match(TokenKind.Dot)) {
-      if (!this.#check(TokenKind.Identifier)) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedPropertyAfterDot,
-          "Expected a property name after '.'.",
-        );
-        return null;
-      }
-
-      const property = this.#identifier(this.#advance());
-      const access: PropertyAccessExpression = Object.freeze({
-        kind: "propertyAccessExpression",
-        object: expression,
-        property,
-        span: spanFrom(expression.span, property.span),
-      });
-      expression = access;
-    }
-
-    return expression;
+  #unary(
+    operatorToken: Token,
+    operand: Expression,
+    operator: UnaryExpression["operator"],
+  ): UnaryExpression {
+    return Object.freeze({
+      kind: "unaryExpression",
+      operator,
+      operand,
+      span: spanFrom(operatorToken.span, operand.span),
+    });
   }
 
   #speakerDeclaration(
@@ -472,7 +1139,7 @@ class Parser {
     });
   }
 
-  #stringLiteral(token: Token): StringLiteral {
+  #stringLiteral(token: Token): Expression {
     return Object.freeze({
       kind: "stringLiteral",
       raw: token.lexeme,
@@ -490,48 +1157,47 @@ class Parser {
     });
   }
 
-  #finishStatement(): void {
+  #consumeClosingDelimiter(kind: TokenKind, message: string): SourceSpan {
+    this.#skipNewlines();
+    if (this.#match(kind)) return this.#previous().span;
+    this.#reportInsertion(parserDiagnosticCode.expectedDelimiter, message);
+    return this.#previous().span;
+  }
+
+  #finishStatement(inBlock: boolean): void {
     if (this.#check(TokenKind.Newline)) {
       this.#skipNewlines();
       return;
     }
-
-    if (this.#check(TokenKind.EndOfFile)) {
+    if (
+      this.#check(TokenKind.EndOfFile) ||
+      (inBlock && this.#check(TokenKind.RightBrace))
+    ) {
       return;
     }
-
     this.#reportInsertion(
       parserDiagnosticCode.expectedStatementEnd,
       "Expected a newline after the statement.",
     );
-    this.#synchronizeStatement();
+    this.#synchronizeStatement(inBlock);
   }
 
   #skipMalformedBlock(): void {
     let depth = 0;
-
     while (!this.#check(TokenKind.EndOfFile)) {
-      if (this.#match(TokenKind.LeftBrace)) {
-        depth += 1;
-        continue;
-      }
-
-      if (this.#match(TokenKind.RightBrace)) {
+      if (this.#match(TokenKind.LeftBrace)) depth += 1;
+      else if (this.#match(TokenKind.RightBrace)) {
         depth -= 1;
-        if (depth === 0) {
-          return;
-        }
-        continue;
-      }
-
-      this.#advance();
+        if (depth === 0) return;
+      } else this.#advance();
     }
   }
 
-  #synchronizeStatement(): void {
+  #synchronizeStatement(stopAtRightBrace = false): void {
     while (
       !this.#check(TokenKind.Newline) &&
-      !this.#check(TokenKind.EndOfFile)
+      !this.#check(TokenKind.EndOfFile) &&
+      !(stopAtRightBrace && this.#check(TokenKind.RightBrace))
     ) {
       this.#advance();
     }
@@ -541,6 +1207,16 @@ class Parser {
     while (
       !this.#check(TokenKind.Newline) &&
       !this.#check(TokenKind.RightBrace) &&
+      !this.#check(TokenKind.EndOfFile)
+    ) {
+      this.#advance();
+    }
+  }
+
+  #synchronizeDelimited(closing: TokenKind): void {
+    while (
+      !this.#check(TokenKind.Comma) &&
+      !this.#check(closing) &&
       !this.#check(TokenKind.EndOfFile)
     ) {
       this.#advance();
@@ -559,15 +1235,27 @@ class Parser {
 
   #isRecoveredTopLevelStatement(): boolean {
     return (
-      isTopLevelStatementKind(this.#peek().kind) &&
+      isStatementStart(this.#peek().kind) &&
       this.#peek(1).kind !== TokenKind.Colon
     );
   }
 
   #skipNewlines(): void {
     while (this.#match(TokenKind.Newline)) {
-      // Newline tokens separate statements but are not AST nodes.
+      // Newline tokens delimit statements unless a caller explicitly skips them.
     }
+  }
+
+  #skipContinuationNewlines(): void {
+    this.#skipNewlines();
+  }
+
+  #reportMixedArguments(span: SourceSpan): void {
+    this.#reportSpan(
+      parserDiagnosticCode.mixedArguments,
+      "Positional and named arguments may not be mixed in one call.",
+      span,
+    );
   }
 
   #reportInsertion(
@@ -590,20 +1278,21 @@ class Parser {
     message: string,
     token: Token,
   ): void {
+    this.#reportSpan(code, message, token.span);
+  }
+
+  #reportSpan(
+    code: (typeof parserDiagnosticCode)[keyof typeof parserDiagnosticCode],
+    message: string,
+    span: SourceSpan,
+  ): void {
     this.#diagnostics.push(
-      createDiagnostic(
-        DiagnosticSeverity.Error,
-        code,
-        message,
-        token.span,
-      ),
+      createDiagnostic(DiagnosticSeverity.Error, code, message, span),
     );
   }
 
   #match(kind: TokenKind): boolean {
-    if (!this.#check(kind)) {
-      return false;
-    }
+    if (!this.#check(kind)) return false;
     this.#advance();
     return true;
   }
@@ -614,14 +1303,14 @@ class Parser {
 
   #advance(): Token {
     const token = this.#peek();
-    if (token.kind !== TokenKind.EndOfFile) {
-      this.#current += 1;
-    }
+    if (token.kind !== TokenKind.EndOfFile) this.#current += 1;
     return token;
   }
 
   #peek(distance = 0): Token {
-    return this.tokens[Math.min(this.#current + distance, this.tokens.length - 1)]!;
+    return this.tokens[
+      Math.min(this.#current + distance, this.tokens.length - 1)
+    ]!;
   }
 
   #previous(): Token {
@@ -629,29 +1318,76 @@ class Parser {
   }
 }
 
+const scalarTypes = new Set<ScalarTypeName>([
+  "string",
+  "boolean",
+  "integer",
+  "number",
+  "date",
+  "time",
+  "datetime",
+  "duration",
+]);
+
+function isScalarType(value: string): value is ScalarTypeName {
+  return scalarTypes.has(value as ScalarTypeName);
+}
+
 function isPropertyName(token: Token): boolean {
+  return token.kind === TokenKind.Identifier || token.kind.startsWith("keyword");
+}
+
+function isExpressionStart(token: Token): boolean {
   return (
     token.kind === TokenKind.Identifier ||
+    token.kind === TokenKind.NumberLiteral ||
+    token.kind === TokenKind.StringLiteral ||
+    token.kind === TokenKind.TemplateStart ||
     token.kind === TokenKind.KeywordSpeaker ||
-    token.kind === TokenKind.KeywordSay ||
-    token.kind === TokenKind.KeywordAs ||
-    token.kind === TokenKind.KeywordExit
+    token.kind === TokenKind.KeywordTrue ||
+    token.kind === TokenKind.KeywordFalse ||
+    token.kind === TokenKind.KeywordNull ||
+    token.kind === TokenKind.KeywordSet ||
+    token.kind === TokenKind.KeywordNot ||
+    token.kind === TokenKind.LeftParenthesis ||
+    token.kind === TokenKind.LeftBracket ||
+    token.kind === TokenKind.LeftBrace ||
+    token.kind === TokenKind.Plus ||
+    token.kind === TokenKind.Minus
   );
 }
 
-function isInterpolationRoot(token: Token): boolean {
-  return (
-    token.kind === TokenKind.Identifier ||
-    token.kind === TokenKind.KeywordSpeaker
-  );
-}
-
-function isTopLevelStatementKind(kind: TokenKind): boolean {
+function isStatementStart(kind: TokenKind): boolean {
   return (
     kind === TokenKind.KeywordSpeaker ||
     kind === TokenKind.KeywordSay ||
-    kind === TokenKind.KeywordExit
+    kind === TokenKind.KeywordExit ||
+    kind === TokenKind.KeywordLet ||
+    kind === TokenKind.KeywordIf
   );
+}
+
+function isAssignmentTarget(expression: Expression): expression is AssignmentTarget {
+  return (
+    expression.kind === "identifier" ||
+    expression.kind === "propertyAccessExpression" ||
+    expression.kind === "indexExpression"
+  );
+}
+
+function isComparisonKind(kind: TokenKind): boolean {
+  return (
+    kind === TokenKind.EqualEqual ||
+    kind === TokenKind.BangEqual ||
+    kind === TokenKind.Less ||
+    kind === TokenKind.LessEqual ||
+    kind === TokenKind.Greater ||
+    kind === TokenKind.GreaterEqual
+  );
+}
+
+function binaryOperator(token: Token): BinaryExpression["operator"] {
+  return token.lexeme as BinaryExpression["operator"];
 }
 
 function tokenValue(token: Token): string {

@@ -4,7 +4,12 @@ Browser-first platform and deterministic scripting language for interactive teas
 
 Start with [`README-FIRST.md`](README-FIRST.md).
 
-Current development stage: initial local parser POC. The implemented grammar slice is limited to speaker declarations, default-speaker selection, `say`, `say as`, strings, template interpolation, property access in interpolation, and `exit`. Runtime execution remains out of scope.
+Current development stage: first core-language foundation. The TypeScript core
+implements the accepted milestone slice for literals, expressions, variables,
+assignment, lexical `if`/`else` blocks, speakers, `say`, `say as`, and `exit`.
+Its small deterministic interpreter emits typed events and accepts injected
+built-ins and a deterministic random source. The wider V30 language and full
+static type checking remain out of scope.
 
 ## Parser POC development
 

@@ -43,15 +43,40 @@ test("creates immutable structural tokens without a value", () => {
   assert.equal(Object.isFrozen(newline), true);
 });
 
-test("defines only the keywords and punctuation required by the initial slice", () => {
+test("defines the preserved and core-milestone keywords and punctuation", () => {
   assert.deepEqual(
     [
       TokenKind.KeywordSpeaker,
       TokenKind.KeywordSay,
       TokenKind.KeywordAs,
       TokenKind.KeywordExit,
+      TokenKind.KeywordLet,
+      TokenKind.KeywordIf,
+      TokenKind.KeywordElse,
+      TokenKind.KeywordTrue,
+      TokenKind.KeywordFalse,
+      TokenKind.KeywordNull,
+      TokenKind.KeywordNot,
+      TokenKind.KeywordAnd,
+      TokenKind.KeywordOr,
+      TokenKind.KeywordSet,
     ],
-    ["keywordSpeaker", "keywordSay", "keywordAs", "keywordExit"],
+    [
+      "keywordSpeaker",
+      "keywordSay",
+      "keywordAs",
+      "keywordExit",
+      "keywordLet",
+      "keywordIf",
+      "keywordElse",
+      "keywordTrue",
+      "keywordFalse",
+      "keywordNull",
+      "keywordNot",
+      "keywordAnd",
+      "keywordOr",
+      "keywordSet",
+    ],
   );
   assert.deepEqual(
     [
@@ -59,8 +84,25 @@ test("defines only the keywords and punctuation required by the initial slice", 
       TokenKind.RightBrace,
       TokenKind.Colon,
       TokenKind.Dot,
+      TokenKind.LeftBracket,
+      TokenKind.RightBracket,
+      TokenKind.LeftParenthesis,
+      TokenKind.RightParenthesis,
+      TokenKind.Comma,
+      TokenKind.Question,
     ],
-    ["leftBrace", "rightBrace", "colon", "dot"],
+    [
+      "leftBrace",
+      "rightBrace",
+      "colon",
+      "dot",
+      "leftBracket",
+      "rightBracket",
+      "leftParenthesis",
+      "rightParenthesis",
+      "comma",
+      "question",
+    ],
   );
 });
 
