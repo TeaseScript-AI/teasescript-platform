@@ -184,6 +184,18 @@ test("rejects inconsistent argument temporaries and parameter bindings", () => {
   assertCheckpointRejected(missingBinding, "TSK002");
 });
 
+test("rejects a missing temporary required by the next instruction", () => {
+  const compiled = plan("function value { return 1 }\nlet result = value()");
+  let snapshot = createFreshRuntimeSnapshot(compiled);
+  while (snapshot.callFrames.length > 0 || snapshot.temporaries.length === 0) {
+    snapshot = executeInstruction(compiled, snapshot).snapshot;
+  }
+
+  const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  checkpoint.snapshot.temporaries = [];
+  assertCheckpointRejected(checkpoint, "TSK002");
+});
+
 test("rejects empty serialized names and impossible status combinations", () => {
   const compiled = plan("let value = 1\nfunction read(input) { return input }\nread(value)");
   let active = createFreshRuntimeSnapshot(compiled);

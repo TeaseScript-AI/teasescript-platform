@@ -1,4 +1,8 @@
-import type { InstructionPlan } from "../instructions.js";
+import type {
+  ExpressionPlan,
+  Instruction,
+  InstructionPlan,
+} from "../instructions.js";
 import { validateInstructionPlan } from "../instructions.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
@@ -345,6 +349,14 @@ export function validateRuntimeSnapshot(
     value.nextInstruction,
     value.callFrames,
     callFrameIds,
+    plan,
+    errors,
+  );
+  validateCurrentTemporaryRequirements(
+    value.temporaries,
+    value.loopFrames,
+    value.nextInstruction,
+    value.status,
     plan,
     errors,
   );
@@ -927,6 +939,160 @@ function validateStatusConsistency(
     ) {
       errors.push("Root execution position is outside the root instruction range.");
     }
+  }
+}
+
+function validateCurrentTemporaryRequirements(
+  temporaries: unknown,
+  loopFrames: unknown,
+  nextInstruction: unknown,
+  status: unknown,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  if (
+    plan === undefined ||
+    status === "halted" ||
+    !Array.isArray(temporaries) ||
+    !nonNegativeInteger(nextInstruction)
+  ) {
+    return;
+  }
+  const instruction = plan.instructions[nextInstruction];
+  if (instruction === undefined) return;
+  const required = requiredInstructionTemporaries(instruction, loopFrames);
+  const present = new Set(
+    temporaries
+      .filter(isPlainRecord)
+      .map((temporary) => temporary.id)
+      .filter((id): id is number => nonNegativeInteger(id)),
+  );
+  if ([...required].some((id) => !present.has(id))) {
+    errors.push("Runtime state is missing a temporary required by the next instruction.");
+  }
+}
+
+function requiredInstructionTemporaries(
+  instruction: Instruction,
+  loopFrames: unknown,
+): ReadonlySet<number> {
+  const output = new Set<number>();
+  const collect = (expression: ExpressionPlan): void => {
+    collectExpressionTemporaries(expression, output);
+  };
+  switch (instruction.kind) {
+    case "declareSpeaker":
+      instruction.properties.forEach((property) => collect(property.value));
+      break;
+    case "setDeclaredSpeakerProperty":
+    case "declareBinding":
+      collect(instruction.value);
+      break;
+    case "assign":
+      collect(instruction.value);
+      collect(instruction.target);
+      break;
+    case "evaluate":
+      collect(instruction.expression);
+      break;
+    case "jumpIfFalse":
+      collect(instruction.condition);
+      break;
+    case "loopStart": {
+      const active = Array.isArray(loopFrames)
+        ? loopFrames.at(-1)
+        : undefined;
+      if (
+        instruction.loopKind === "while" ||
+        !isPlainRecord(active) ||
+        active.loopId !== instruction.loopId
+      ) {
+        collect(instruction.expression);
+      }
+      break;
+    }
+    case "storeTemporary":
+    case "bindDefaultParameter":
+    case "returnValue":
+      collect(instruction.value);
+      break;
+    case "callFunction":
+      instruction.arguments.forEach((argument) => output.add(argument.temporaryId));
+      break;
+    case "setDefaultSpeaker":
+    case "enterScope":
+    case "leaveScope":
+    case "jump":
+    case "loopControl":
+    case "clearTemporary":
+    case "bindSuppliedParameter":
+    case "beginFunctionDefaults":
+    case "prepareParameterDefault":
+    case "enterFunctionBody":
+    case "returnVoid":
+    case "exit":
+      break;
+    case "say":
+      collect(instruction.value);
+      break;
+  }
+  return output;
+}
+
+function collectExpressionTemporaries(
+  expression: ExpressionPlan,
+  output: Set<number>,
+): void {
+  switch (expression.kind) {
+    case "temporary":
+      output.add(expression.temporaryId);
+      return;
+    case "literal":
+    case "identifier":
+      return;
+    case "list":
+    case "set":
+      expression.elements.forEach((item) => collectExpressionTemporaries(item, output));
+      return;
+    case "object":
+      expression.properties.forEach((property) =>
+        collectExpressionTemporaries(property.value, output)
+      );
+      return;
+    case "group":
+      collectExpressionTemporaries(expression.expression, output);
+      return;
+    case "template":
+      expression.parts.forEach((part) => {
+        if (part.kind === "expression") {
+          collectExpressionTemporaries(part.expression, output);
+        }
+      });
+      return;
+    case "property":
+      collectExpressionTemporaries(expression.object, output);
+      return;
+    case "index":
+      collectExpressionTemporaries(expression.object, output);
+      collectExpressionTemporaries(expression.index, output);
+      return;
+    case "call":
+      collectExpressionTemporaries(expression.callee, output);
+      expression.arguments.forEach((argument) =>
+        collectExpressionTemporaries(argument.value, output)
+      );
+      return;
+    case "unary":
+      collectExpressionTemporaries(expression.operand, output);
+      return;
+    case "binary":
+      collectExpressionTemporaries(expression.left, output);
+      collectExpressionTemporaries(expression.right, output);
+      return;
+    case "range":
+      collectExpressionTemporaries(expression.start, output);
+      collectExpressionTemporaries(expression.end, output);
+      return;
   }
 }
 
