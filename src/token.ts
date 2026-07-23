@@ -2,20 +2,51 @@ import { createSourceSpan, type SourceSpan } from "./source.js";
 
 export const TokenKind = {
   Identifier: "identifier",
-  KeywordSpeaker: "keywordSpeaker",
-  KeywordSay: "keywordSay",
-  KeywordAs: "keywordAs",
-  KeywordExit: "keywordExit",
-  LeftBrace: "leftBrace",
-  RightBrace: "rightBrace",
-  Colon: "colon",
-  Dot: "dot",
+  NumberLiteral: "numberLiteral",
   StringLiteral: "stringLiteral",
   TemplateStart: "templateStart",
   TemplateText: "templateText",
   InterpolationStart: "interpolationStart",
   InterpolationEnd: "interpolationEnd",
   TemplateEnd: "templateEnd",
+
+  KeywordSpeaker: "keywordSpeaker",
+  KeywordSay: "keywordSay",
+  KeywordAs: "keywordAs",
+  KeywordExit: "keywordExit",
+  KeywordLet: "keywordLet",
+  KeywordIf: "keywordIf",
+  KeywordElse: "keywordElse",
+  KeywordTrue: "keywordTrue",
+  KeywordFalse: "keywordFalse",
+  KeywordNull: "keywordNull",
+  KeywordNot: "keywordNot",
+  KeywordAnd: "keywordAnd",
+  KeywordOr: "keywordOr",
+  KeywordSet: "keywordSet",
+
+  LeftBrace: "leftBrace",
+  RightBrace: "rightBrace",
+  LeftBracket: "leftBracket",
+  RightBracket: "rightBracket",
+  LeftParenthesis: "leftParenthesis",
+  RightParenthesis: "rightParenthesis",
+  Colon: "colon",
+  Comma: "comma",
+  Dot: "dot",
+  Question: "question",
+  Plus: "plus",
+  Minus: "minus",
+  Star: "star",
+  Slash: "slash",
+  Percent: "percent",
+  Equal: "equal",
+  EqualEqual: "equalEqual",
+  BangEqual: "bangEqual",
+  Less: "less",
+  LessEqual: "lessEqual",
+  Greater: "greater",
+  GreaterEqual: "greaterEqual",
   Newline: "newline",
   EndOfFile: "endOfFile",
 } as const;
@@ -24,6 +55,7 @@ export type TokenKind = (typeof TokenKind)[keyof typeof TokenKind];
 
 type TokenWithValueKind =
   | typeof TokenKind.Identifier
+  | typeof TokenKind.NumberLiteral
   | typeof TokenKind.StringLiteral
   | typeof TokenKind.TemplateText;
 
