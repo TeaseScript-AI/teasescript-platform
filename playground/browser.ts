@@ -167,7 +167,12 @@ function restoreSavedCheckpoint(): void {
       return;
     }
     const checkpoint = deserializeCheckpoint(serialized);
-    plan = checkpoint.plan;
+    if (plan === null || !samePlan(plan, checkpoint.plan)) {
+      setActionStatus(
+        "Checkpoint restore refused: its compiled plan does not match the currently displayed example source.",
+      );
+      return;
+    }
     snapshot = checkpoint.snapshot;
     eventLog = [];
     elements.transcript.replaceChildren();
@@ -180,6 +185,10 @@ function restoreSavedCheckpoint(): void {
         : errorMessage(error);
     setActionStatus(message);
   }
+}
+
+function samePlan(left: InstructionPlan, right: InstructionPlan): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function clearSavedCheckpoint(): void {

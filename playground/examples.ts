@@ -10,6 +10,10 @@ export const PLAYGROUND_EXAMPLES = Object.freeze({
     label: "Checkpoint inside a loop",
     file: "checkpoint-loop.tease",
   }),
+  functions: Object.freeze({
+    label: "Functions and serializable call frames",
+    file: "functions.tease",
+  }),
 });
 
 export type PlaygroundExampleName = keyof typeof PLAYGROUND_EXAMPLES;

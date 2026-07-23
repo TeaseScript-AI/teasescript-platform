@@ -1,0 +1,53 @@
+speaker vera {
+    displayName: "Mistress Vera"
+}
+
+speaker vera
+
+function kneel {
+    say "Kneel."
+}
+
+function greet(name, title = "pet") {
+    say `Hello, ${title} ${name}.`
+}
+
+function add(left, right) {
+    return left + right
+}
+
+function stopEarly(value) {
+    if value > 0 {
+        return "Stopped early."
+    }
+
+    return "Reached the end."
+}
+
+function countdown(value) {
+    if value == 0 {
+        return "Done."
+    }
+
+    say `Countdown ${value}`
+    return countdown(value - 1)
+}
+
+kneel()
+greet("Alex")
+greet(
+    name: "Alex",
+    title: "puppy"
+)
+
+let result = add(2, 3)
+say `Two plus three is ${result}.`
+say `A nested result is ${add(add(1, 2), 3)}.`
+
+repeat 2 {
+    say `Loop result: ${add(4, 1)}`
+}
+
+say stopEarly(1)
+say countdown(3)
+exit
