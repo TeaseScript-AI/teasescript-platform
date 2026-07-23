@@ -200,8 +200,18 @@ export function validateRuntimeSnapshot(
   if (!nonNegativeInteger(value.nextEventSequence) || value.nextEventSequence < 1) {
     errors.push("Runtime nextEventSequence must be a positive integer.");
   }
-  if (!nonNegativeInteger(value.nextScopeId) || value.nextScopeId < 1) {
-    errors.push("Runtime nextScopeId must be a positive integer.");
+  const frameIds = Array.isArray(value.frames)
+    ? value.frames
+        .filter(isPlainRecord)
+        .map((frame) => frame.id)
+        .filter(nonNegativeInteger)
+    : [];
+  if (
+    !nonNegativeInteger(value.nextScopeId) ||
+    value.nextScopeId < 1 ||
+    frameIds.some((id) => id >= (value.nextScopeId as number))
+  ) {
+    errors.push("Runtime nextScopeId must be a positive unused ID.");
   }
   if (
     !nonNegativeInteger(value.nextSpeakerId) ||
@@ -241,6 +251,9 @@ function validateFrames(value: unknown, errors: string[]): void {
       const failure = validateSerializableValue(binding.value);
       if (failure !== null) errors.push(failure);
     }
+  }
+  if (isPlainRecord(value[0]) && value[0].id !== 0) {
+    errors.push("Runtime root scope frame must have ID 0.");
   }
 }
 

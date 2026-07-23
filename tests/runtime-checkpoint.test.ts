@@ -194,6 +194,24 @@ test("rejects corrupted checkpoint data through structured errors", () => {
   });
 });
 
+test("rejects colliding or malformed scope-frame identity state", () => {
+  const compiled = plan('if true {\n  say "inside"\n}\nexit');
+  const conditional = executeInstruction(
+    compiled,
+    createFreshRuntimeSnapshot(compiled),
+  );
+  const entered = executeInstruction(compiled, conditional.snapshot);
+  const checkpoint = JSON.parse(
+    serializeCheckpoint(createCheckpoint(compiled, entered.snapshot)),
+  ) as { snapshot: RuntimeSnapshot };
+
+  checkpoint.snapshot.nextScopeId = checkpoint.snapshot.frames[1]!.id;
+  assertCheckpointCode(checkpoint, "TSK002");
+  checkpoint.snapshot.nextScopeId = 2;
+  (checkpoint.snapshot.frames[0] as { id: number }).id = 9;
+  assertCheckpointCode(checkpoint, "TSK002");
+});
+
 test("fails structurally when the configurable instruction budget is exhausted", () => {
   const compiled = plan("let first = 1\nlet second = 2\nexit");
   const result = run(compiled, createFreshRuntimeSnapshot(compiled), {}, {

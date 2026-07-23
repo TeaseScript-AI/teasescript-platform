@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -93,20 +93,28 @@ async function serveRequest(
     return;
   }
   try {
-    const information = await stat(target);
+    const [canonicalRoot, canonicalPath] = await Promise.all([
+      realpath(target.root),
+      realpath(target.path),
+    ]);
+    if (!isInside(canonicalRoot, canonicalPath)) {
+      sendText(response, 400, "Rejected unsafe request path.\n", method === "HEAD");
+      return;
+    }
+    const information = await stat(canonicalPath);
     if (!information.isFile()) {
       sendText(response, 404, "Not found.\n", method === "HEAD");
       return;
     }
     response.statusCode = 200;
-    response.setHeader("Content-Type", contentType(target));
+    response.setHeader("Content-Type", contentType(target.path));
     response.setHeader("Content-Length", information.size);
     response.setHeader("Cache-Control", "no-store");
     if (method === "HEAD") {
       response.end();
       return;
     }
-    const stream = createReadStream(target);
+    const stream = createReadStream(canonicalPath);
     stream.on("error", () => {
       if (!response.headersSent) sendText(response, 500, "Unable to read file.\n", false);
       else response.destroy();
@@ -123,10 +131,17 @@ async function serveRequest(
   }
 }
 
-function resolveTarget(pathname: string, roots: StaticRoots): string | null {
-  if (pathname === "/") return resolve(roots.playgroundRoot, "index.html");
+interface StaticTarget {
+  readonly root: string;
+  readonly path: string;
+}
+
+function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | null {
+  if (pathname === "/") {
+    return { root: roots.playgroundRoot, path: resolve(roots.playgroundRoot, "index.html") };
+  }
   if (pathname === "/playground.css") {
-    return resolve(roots.playgroundRoot, "playground.css");
+    return { root: roots.playgroundRoot, path: resolve(roots.playgroundRoot, "playground.css") };
   }
   if (pathname.startsWith("/dist/")) {
     return resolveInside(roots.distRoot, pathname.slice("/dist/".length));
@@ -137,10 +152,14 @@ function resolveTarget(pathname: string, roots: StaticRoots): string | null {
   return null;
 }
 
-function resolveInside(root: string, relativePath: string): string | null {
+function resolveInside(root: string, relativePath: string): StaticTarget | null {
   if (relativePath.length === 0) return null;
   const target = resolve(root, relativePath);
-  return target.startsWith(`${root}${sep}`) ? target : null;
+  return isInside(root, target) ? { root, path: target } : null;
+}
+
+function isInside(root: string, target: string): boolean {
+  return target === root || target.startsWith(`${root}${sep}`);
 }
 
 function unsafePath(pathname: string): boolean {

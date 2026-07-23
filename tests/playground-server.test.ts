@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { request } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test, { after, before } from "node:test";
 
 import { createPlaygroundServer } from "../playground/server.js";
@@ -72,18 +75,39 @@ test("rejects encoded path traversal", async () => {
   assert.match(response.body, /unsafe request path/u);
 });
 
+test("rejects symlinks that escape an exposed static root", async (context) => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "teasescript-playground-"));
+  context.after(async () => rm(projectRoot, { recursive: true, force: true }));
+  await mkdir(join(projectRoot, "playground"), { recursive: true });
+  await mkdir(join(projectRoot, "dist"), { recursive: true });
+  await mkdir(join(projectRoot, "examples"), { recursive: true });
+  await writeFile(join(projectRoot, "secret.txt"), "not public", "utf8");
+  await symlink(
+    join(projectRoot, "secret.txt"),
+    join(projectRoot, "examples", "leak.tease"),
+  );
+
+  const isolatedServer = createPlaygroundServer({ projectRoot });
+  const isolatedPort = await listen(isolatedServer);
+  context.after(async () => close(isolatedServer));
+  const response = await get("/examples/leak.tease", isolatedPort);
+
+  assert.equal(response.status, 400);
+  assert.match(response.body, /unsafe request path/u);
+});
+
 interface HttpResult {
   readonly status: number;
   readonly contentType: string;
   readonly body: string;
 }
 
-function get(path: string): Promise<HttpResult> {
+function get(path: string, requestPort = port): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
     const outgoing = request(
       {
         host: "127.0.0.1",
-        port,
+        port: requestPort,
         method: "GET",
         path,
       },
@@ -104,5 +128,26 @@ function get(path: string): Promise<HttpResult> {
     );
     outgoing.on("error", reject);
     outgoing.end();
+  });
+}
+
+function listen(target: typeof server): Promise<number> {
+  return new Promise((resolve, reject) => {
+    target.once("error", reject);
+    target.listen(0, "127.0.0.1", () => {
+      target.off("error", reject);
+      const address = target.address();
+      if (address === null || typeof address === "string") {
+        reject(new Error("Expected an IP server address."));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+}
+
+function close(target: typeof server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    target.close((error) => (error === undefined ? resolve() : reject(error)));
   });
 }
