@@ -1,25 +1,49 @@
 import type {
-  AssignmentTarget,
   Block,
   CallArgument,
   Expression,
+  FunctionDeclaration,
   Program,
   Statement,
 } from "./ast.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 2;
+export const INSTRUCTION_PLAN_VERSION = 3;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
   readonly version: typeof INSTRUCTION_PLAN_VERSION;
   readonly sourceSpan: SourceSpan;
+  readonly rootEndInstruction: number;
+  readonly temporaryCount: number;
+  readonly functions: readonly CompiledFunctionDefinition[];
   readonly instructions: readonly Instruction[];
+}
+
+export interface CompiledFunctionParameter {
+  readonly name: string;
+  readonly index: number;
+  readonly hasDefault: boolean;
+  readonly declarationSpan: SourceSpan;
+  readonly defaultSpan: SourceSpan | null;
+}
+
+export interface CompiledFunctionDefinition {
+  readonly id: number;
+  readonly name: string;
+  readonly declarationSpan: SourceSpan;
+  readonly parameters: readonly CompiledFunctionParameter[];
+  readonly entryInstruction: number;
+  readonly bodyEntryInstruction: number;
+  readonly implicitReturnInstruction: number;
+  readonly endInstruction: number;
+  readonly bodySpan: SourceSpan;
 }
 
 export type Instruction =
   | DeclareSpeakerInstruction
+  | SetDeclaredSpeakerPropertyInstruction
   | SetDefaultSpeakerInstruction
   | EnterScopeInstruction
   | LeaveScopeInstruction
@@ -30,6 +54,16 @@ export type Instruction =
   | JumpInstruction
   | LoopStartInstruction
   | LoopControlInstruction
+  | StoreTemporaryInstruction
+  | ClearTemporaryInstruction
+  | CallFunctionInstruction
+  | BindSuppliedParameterInstruction
+  | BeginFunctionDefaultsInstruction
+  | PrepareParameterDefaultInstruction
+  | BindDefaultParameterInstruction
+  | EnterFunctionBodyInstruction
+  | ReturnValueInstruction
+  | ReturnVoidInstruction
   | SayInstruction
   | ExitInstruction;
 
@@ -41,6 +75,13 @@ export interface DeclareSpeakerInstruction extends InstructionBase {
   readonly kind: "declareSpeaker";
   readonly name: string;
   readonly properties: readonly PlannedProperty[];
+}
+
+export interface SetDeclaredSpeakerPropertyInstruction extends InstructionBase {
+  readonly kind: "setDeclaredSpeakerProperty";
+  readonly speaker: string;
+  readonly name: string;
+  readonly value: ExpressionPlan;
 }
 
 export interface SetDefaultSpeakerInstruction extends InstructionBase {
@@ -90,6 +131,7 @@ export type LoopStartInstruction =
       readonly loopKind: "repeat";
       readonly loopId: number;
       readonly expression: ExpressionPlan;
+      readonly continueTarget: number;
       readonly target: number;
     })
   | (InstructionBase & {
@@ -98,6 +140,7 @@ export type LoopStartInstruction =
       readonly loopId: number;
       readonly variable: string;
       readonly expression: ExpressionPlan;
+      readonly continueTarget: number;
       readonly target: number;
     })
   | (InstructionBase & {
@@ -105,6 +148,7 @@ export type LoopStartInstruction =
       readonly loopKind: "while";
       readonly loopId: number;
       readonly expression: ExpressionPlan;
+      readonly continueTarget: number;
       readonly target: number;
     });
 
@@ -113,6 +157,70 @@ export interface LoopControlInstruction extends InstructionBase {
   readonly action: "break" | "continue";
   readonly loopId: number;
   readonly target: number;
+}
+
+export interface StoreTemporaryInstruction extends InstructionBase {
+  readonly kind: "storeTemporary";
+  readonly temporaryId: number;
+  readonly value: ExpressionPlan;
+  readonly expectBoolean: boolean;
+}
+
+export interface ClearTemporaryInstruction extends InstructionBase {
+  readonly kind: "clearTemporary";
+  readonly temporaryId: number;
+}
+
+export interface PreparedCallArgument {
+  readonly parameterName: string;
+  readonly temporaryId: number;
+  readonly span: SourceSpan;
+}
+
+export interface CallFunctionInstruction extends InstructionBase {
+  readonly kind: "callFunction";
+  readonly functionId: number;
+  readonly arguments: readonly PreparedCallArgument[];
+  readonly destinationTemporary: number;
+  readonly returnInstruction: number;
+}
+
+interface FunctionParameterInstructionBase extends InstructionBase {
+  readonly functionId: number;
+  readonly parameterIndex: number;
+}
+
+export interface BindSuppliedParameterInstruction extends FunctionParameterInstructionBase {
+  readonly kind: "bindSuppliedParameter";
+}
+
+export interface BeginFunctionDefaultsInstruction extends InstructionBase {
+  readonly kind: "beginFunctionDefaults";
+  readonly functionId: number;
+}
+
+export interface PrepareParameterDefaultInstruction extends FunctionParameterInstructionBase {
+  readonly kind: "prepareParameterDefault";
+  readonly target: number;
+}
+
+export interface BindDefaultParameterInstruction extends FunctionParameterInstructionBase {
+  readonly kind: "bindDefaultParameter";
+  readonly value: ExpressionPlan;
+}
+
+export interface EnterFunctionBodyInstruction extends InstructionBase {
+  readonly kind: "enterFunctionBody";
+  readonly functionId: number;
+}
+
+export interface ReturnValueInstruction extends InstructionBase {
+  readonly kind: "returnValue";
+  readonly value: ExpressionPlan;
+}
+
+export interface ReturnVoidInstruction extends InstructionBase {
+  readonly kind: "returnVoid";
 }
 
 export interface SayInstruction extends InstructionBase {
@@ -149,7 +257,8 @@ export type ExpressionPlan =
   | CallExpressionPlan
   | UnaryExpressionPlan
   | BinaryExpressionPlan
-  | RangeExpressionPlan;
+  | RangeExpressionPlan
+  | TemporaryExpressionPlan;
 
 interface ExpressionPlanBase {
   readonly span: SourceSpan;
@@ -163,6 +272,11 @@ export interface LiteralExpressionPlan extends ExpressionPlanBase {
 export interface IdentifierExpressionPlan extends ExpressionPlanBase {
   readonly kind: "identifier";
   readonly name: string;
+}
+
+export interface TemporaryExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "temporary";
+  readonly temporaryId: number;
 }
 
 export interface ListExpressionPlan extends ExpressionPlanBase {
@@ -278,12 +392,25 @@ export interface PlanValidationResult {
 }
 
 export function compileProgram(program: Program): InstructionPlan {
-  const compiler = new InstructionCompiler();
-  compiler.compileStatements(program.statements);
+  const declarations = program.statements.filter(
+    (statement): statement is FunctionDeclaration =>
+      statement.kind === "functionDeclaration",
+  );
+  const compiler = new InstructionCompiler(declarations);
+  compiler.compileStatements(
+    program.statements.filter(
+      (statement) => statement.kind !== "functionDeclaration",
+    ),
+  );
+  const rootEndInstruction = compiler.instructions.length;
+  compiler.compileFunctions();
   return deepFreeze({
     format: INSTRUCTION_PLAN_FORMAT,
     version: INSTRUCTION_PLAN_VERSION,
     sourceSpan: copySpan(program.span),
+    rootEndInstruction,
+    temporaryCount: compiler.temporaryCount,
+    functions: compiler.functions,
     instructions: compiler.instructions,
   });
 }
@@ -304,18 +431,40 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
     errors.push(planError("TSC001", "Unsupported instruction-plan version.", "$.version"));
   }
   validateSpan(value.sourceSpan, "$.sourceSpan", errors);
+  const temporaryCount = nonNegativeInteger(value.temporaryCount)
+    ? value.temporaryCount
+    : -1;
+  if (temporaryCount < 0) {
+    errors.push(planError("TSC002", "temporaryCount must be a non-negative integer.", "$.temporaryCount"));
+  }
   if (!Array.isArray(value.instructions)) {
     errors.push(planError("TSC002", "Instructions must be an array.", "$.instructions"));
   } else {
+    if (
+      !nonNegativeInteger(value.rootEndInstruction) ||
+      value.rootEndInstruction > value.instructions.length
+    ) {
+      errors.push(planError("TSC002", "Root execution boundary is invalid.", "$.rootEndInstruction"));
+    }
+    const functionIds = collectFunctionIds(value.functions);
     for (let index = 0; index < value.instructions.length; index += 1) {
       validateInstruction(
         value.instructions[index],
         `$.instructions[${index}]`,
         value.instructions.length,
+        index,
+        temporaryCount,
+        functionIds,
         errors,
       );
     }
     validateLoopStructure(value.instructions, errors);
+    validateFunctionDefinitions(
+      value.functions,
+      value.instructions,
+      value.rootEndInstruction,
+      errors,
+    );
   }
   return Object.freeze({
     valid: errors.length === 0,
@@ -327,19 +476,33 @@ function validateLoopStructure(
   instructions: readonly unknown[],
   errors: PlanValidationError[],
 ): void {
-  const starts = new Map<number, { index: number; target: number }>();
+  const starts = new Map<number, { index: number; target: number; continueTarget: number }>();
   for (let index = 0; index < instructions.length; index += 1) {
     const instruction = instructions[index];
     if (!isRecord(instruction) || instruction.kind !== "loopStart") continue;
-    if (!Number.isInteger(instruction.loopId) || !Number.isInteger(instruction.target)) continue;
+    if (
+      !Number.isInteger(instruction.loopId) ||
+      !Number.isInteger(instruction.target) ||
+      !Number.isInteger(instruction.continueTarget)
+    ) continue;
     const loopId = instruction.loopId as number;
     if (starts.has(loopId)) {
       errors.push(planError("TSC002", "Loop IDs must be unique.", `$.instructions[${index}].loopId`));
     } else {
-      starts.set(loopId, { index, target: instruction.target as number });
+      starts.set(loopId, {
+        index,
+        target: instruction.target as number,
+        continueTarget: instruction.continueTarget as number,
+      });
     }
     if ((instruction.target as number) <= index) {
       errors.push(planError("TSC002", "Loop exit target must follow its start.", `$.instructions[${index}].target`));
+    }
+    if (
+      (instruction.loopKind === "while" && (instruction.continueTarget as number) > index) ||
+      (instruction.loopKind !== "while" && instruction.continueTarget !== index)
+    ) {
+      errors.push(planError("TSC002", "Loop continue target is invalid.", `$.instructions[${index}].continueTarget`));
     }
   }
   for (let index = 0; index < instructions.length; index += 1) {
@@ -351,7 +514,7 @@ function validateLoopStructure(
       errors.push(planError("TSC002", "Loop control refers to an unknown loop.", `$.instructions[${index}].loopId`));
       continue;
     }
-    const expected = instruction.action === "continue" ? start.index : start.target;
+    const expected = instruction.action === "continue" ? start.continueTarget : start.target;
     if (instruction.target !== expected || index <= start.index || index >= start.target) {
       errors.push(planError("TSC002", "Loop-control target does not match its loop.", `$.instructions[${index}].target`));
     }
@@ -360,12 +523,37 @@ function validateLoopStructure(
 
 class InstructionCompiler {
   public readonly instructions: Instruction[] = [];
+  public readonly functions: CompiledFunctionDefinition[] = [];
   readonly #loops: Array<{
     readonly loopId: number;
     readonly continueTarget: number;
     readonly breaks: number[];
   }> = [];
+  readonly #functionByName: ReadonlyMap<
+    string,
+    { readonly id: number; readonly declaration: FunctionDeclaration }
+  >;
   #nextLoopId = 1;
+  #nextTemporaryId = 1;
+
+  public constructor(private readonly declarations: readonly FunctionDeclaration[]) {
+    this.#functionByName = new Map(
+      declarations.map((declaration, index) => [
+        declaration.name.name,
+        { id: index + 1, declaration },
+      ]),
+    );
+  }
+
+  public get temporaryCount(): number {
+    return this.#nextTemporaryId - 1;
+  }
+
+  public compileFunctions(): void {
+    for (const declaration of this.declarations) {
+      this.#compileFunction(declaration);
+    }
+  }
 
   public compileStatements(statements: readonly Statement[]): void {
     for (const statement of statements) this.#compileStatement(statement);
@@ -374,6 +562,26 @@ class InstructionCompiler {
   #compileStatement(statement: Statement): void {
     switch (statement.kind) {
       case "speakerDeclaration":
+        if (statement.properties.some((property) => this.#containsUserCall(property.value))) {
+          this.instructions.push({
+            kind: "declareSpeaker",
+            name: statement.name.name,
+            properties: [],
+            span: copySpan(statement.span),
+          });
+          for (const property of statement.properties) {
+            const lowered = this.#lowerExpression(property.value);
+            this.instructions.push({
+              kind: "setDeclaredSpeakerProperty",
+              speaker: statement.name.name,
+              name: property.name.name,
+              value: lowered.plan,
+              span: copySpan(property.span),
+            });
+            this.#emitTemporaryCleanup(lowered.temporaryIds, property.span);
+          }
+          return;
+        }
         this.instructions.push({
           kind: "declareSpeaker",
           name: statement.name.name,
@@ -393,39 +601,66 @@ class InstructionCompiler {
         });
         return;
       case "sayStatement":
+        {
+        const lowered = this.#lowerExpression(statement.value);
         this.instructions.push({
           kind: "say",
           speaker: statement.speaker?.name ?? null,
-          value: compileExpression(statement.value),
+          value: lowered.plan,
           span: copySpan(statement.span),
         });
+        this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
+        }
       case "exitStatement":
         this.instructions.push({ kind: "exit", span: copySpan(statement.span) });
         return;
       case "letStatement":
+        {
+        const lowered = this.#lowerExpression(statement.initializer);
         this.instructions.push({
           kind: "declareBinding",
           name: statement.name.name,
-          value: compileExpression(statement.initializer),
+          value: lowered.plan,
           span: copySpan(statement.span),
         });
+        this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
+        }
       case "assignmentStatement":
+        {
+        const value = this.#lowerExpression(statement.value);
+        const target = this.#lowerExpression(statement.target);
+        if (
+          target.plan.kind !== "identifier" &&
+          target.plan.kind !== "property" &&
+          target.plan.kind !== "index"
+        ) {
+          throw new TypeError("AST assignment target is not assignable.");
+        }
         this.instructions.push({
           kind: "assign",
-          target: compileAssignmentTarget(statement.target),
-          value: compileExpression(statement.value),
+          target: target.plan,
+          value: value.plan,
           span: copySpan(statement.span),
         });
+        this.#emitTemporaryCleanup(
+          [...value.temporaryIds, ...target.temporaryIds],
+          statement.span,
+        );
         return;
+        }
       case "expressionStatement":
+        {
+        const lowered = this.#lowerExpression(statement.expression);
         this.instructions.push({
           kind: "evaluate",
-          expression: compileExpression(statement.expression),
+          expression: lowered.plan,
           span: copySpan(statement.span),
         });
+        this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
+        }
       case "ifStatement":
         this.#compileIf(statement);
         return;
@@ -462,23 +697,42 @@ class InstructionCompiler {
         if (statement.kind === "breakStatement") loop.breaks.push(index);
         return;
       }
+      case "returnStatement": {
+        if (statement.value === null) {
+          this.instructions.push({ kind: "returnVoid", span: copySpan(statement.span) });
+          return;
+        }
+        const lowered = this.#lowerExpression(statement.value);
+        this.instructions.push({
+          kind: "returnValue",
+          value: lowered.plan,
+          span: copySpan(statement.span),
+        });
+        return;
+      }
+      case "functionDeclaration":
+        throw new TypeError("Nested function declaration reached compilation.");
     }
   }
 
   #compileIf(statement: Extract<Statement, { kind: "ifStatement" }>): void {
+    const lowered = this.#lowerExpression(statement.condition);
     const conditional = this.instructions.length;
     this.instructions.push({
       kind: "jumpIfFalse",
-      condition: compileExpression(statement.condition),
+      condition: lowered.plan,
       target: -1,
       span: copySpan(statement.condition.span),
     });
+    this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
     this.#compileBlock(statement.thenBlock);
     if (statement.elseBlock === null) {
+      const falseCleanup = this.instructions.length;
       this.instructions[conditional] = {
         ...(this.instructions[conditional] as JumpIfFalseInstruction),
-        target: this.instructions.length,
+        target: falseCleanup,
       };
+      this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
       return;
     }
 
@@ -488,10 +742,12 @@ class InstructionCompiler {
       target: -1,
       span: copySpan(statement.span),
     });
+    const falseCleanup = this.instructions.length;
     this.instructions[conditional] = {
       ...(this.instructions[conditional] as JumpIfFalseInstruction),
-      target: this.instructions.length,
+      target: falseCleanup,
     };
+    this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
     if (statement.elseBlock.kind === "ifStatement") {
       this.#compileIf(statement.elseBlock);
     } else {
@@ -518,14 +774,18 @@ class InstructionCompiler {
   ): void {
     const loopId = this.#nextLoopId;
     this.#nextLoopId += 1;
+    const continueTarget = this.instructions.length;
+    const lowered = this.#lowerExpression(expression);
     const start = this.instructions.length;
+    const loopContinueTarget = loopKind === "while" ? continueTarget : start;
     const instruction: LoopStartInstruction = loopKind === "for"
       ? {
           kind: "loopStart",
           loopKind,
           loopId,
           variable: variable!,
-          expression: compileExpression(expression),
+          expression: lowered.plan,
+          continueTarget: loopContinueTarget,
           target: -1,
           span: copySpan(span),
         }
@@ -533,24 +793,32 @@ class InstructionCompiler {
           kind: "loopStart",
           loopKind,
           loopId,
-          expression: compileExpression(expression),
+          expression: lowered.plan,
+          continueTarget: loopContinueTarget,
           target: -1,
           span: copySpan(span),
         };
     this.instructions.push(instruction);
-    const context = { loopId, continueTarget: start, breaks: [] as number[] };
+    this.#emitTemporaryCleanup(lowered.temporaryIds, expression.span);
+    const context = {
+      loopId,
+      continueTarget: instruction.continueTarget,
+      breaks: [] as number[],
+    };
     this.#loops.push(context);
     this.compileStatements(body.statements);
     this.instructions.push({
       kind: "loopControl",
       action: "continue",
       loopId,
-      target: start,
+      target: context.continueTarget,
       span: copySpan(body.span),
     });
     this.#loops.pop();
+    const falseCleanup = this.instructions.length;
+    this.instructions[start] = { ...instruction, target: falseCleanup };
+    this.#emitTemporaryCleanup(lowered.temporaryIds, expression.span);
     const exit = this.instructions.length;
-    this.instructions[start] = { ...instruction, target: exit };
     for (const index of context.breaks) {
       this.instructions[index] = {
         ...(this.instructions[index] as LoopControlInstruction),
@@ -558,6 +826,410 @@ class InstructionCompiler {
       };
     }
   }
+
+  #compileFunction(declaration: FunctionDeclaration): void {
+    const registered = this.#functionByName.get(declaration.name.name);
+    if (registered === undefined) {
+      throw new TypeError("Semantically invalid function reached compilation.");
+    }
+    const entryInstruction = this.instructions.length;
+    declaration.parameters.forEach((parameter, parameterIndex) => {
+      this.instructions.push({
+        kind: "bindSuppliedParameter",
+        functionId: registered.id,
+        parameterIndex,
+        span: copySpan(parameter.span),
+      });
+    });
+    this.instructions.push({
+      kind: "beginFunctionDefaults",
+      functionId: registered.id,
+      span: copySpan(declaration.span),
+    });
+    declaration.parameters.forEach((parameter, parameterIndex) => {
+      const prepareIndex = this.instructions.length;
+      this.instructions.push({
+        kind: "prepareParameterDefault",
+        functionId: registered.id,
+        parameterIndex,
+        target: -1,
+        span: copySpan(parameter.span),
+      });
+      if (parameter.defaultValue !== null) {
+        const lowered = this.#lowerExpression(parameter.defaultValue);
+        this.instructions.push({
+          kind: "bindDefaultParameter",
+          functionId: registered.id,
+          parameterIndex,
+          value: lowered.plan,
+          span: copySpan(parameter.span),
+        });
+        this.#emitTemporaryCleanup(lowered.temporaryIds, parameter.span);
+      }
+      this.instructions[prepareIndex] = {
+        ...(this.instructions[prepareIndex] as PrepareParameterDefaultInstruction),
+        target: this.instructions.length,
+      };
+    });
+    this.instructions.push({
+      kind: "enterFunctionBody",
+      functionId: registered.id,
+      span: copySpan(declaration.body.span),
+    });
+    const bodyEntryInstruction = this.instructions.length;
+    this.compileStatements(declaration.body.statements);
+    const implicitReturnInstruction = this.instructions.length;
+    this.instructions.push({
+      kind: "returnVoid",
+      span: copySpan(declaration.body.span),
+    });
+    const endInstruction = this.instructions.length;
+    this.functions.push({
+      id: registered.id,
+      name: declaration.name.name,
+      declarationSpan: copySpan(declaration.span),
+      parameters: declaration.parameters.map((parameter, index) => ({
+        name: parameter.name.name,
+        index,
+        hasDefault: parameter.defaultValue !== null,
+        declarationSpan: copySpan(parameter.span),
+        defaultSpan:
+          parameter.defaultValue === null
+            ? null
+            : copySpan(parameter.defaultValue.span),
+      })),
+      entryInstruction,
+      bodyEntryInstruction,
+      implicitReturnInstruction,
+      endInstruction,
+      bodySpan: copySpan(declaration.body.span),
+    });
+  }
+
+  #lowerExpression(expression: Expression): LoweredExpression {
+    if (
+      expression.kind === "callExpression" &&
+      expression.callee.kind === "identifier" &&
+      this.#functionByName.has(expression.callee.name)
+    ) {
+      return this.#lowerUserFunctionCall(expression);
+    }
+    if (
+      expression.kind === "binaryExpression" &&
+      (expression.operator === "and" || expression.operator === "or") &&
+      this.#containsUserCall(expression)
+    ) {
+      return this.#lowerLogicalExpression(expression);
+    }
+    switch (expression.kind) {
+      case "booleanLiteral":
+      case "nullLiteral":
+      case "numberLiteral":
+      case "stringLiteral":
+      case "identifier":
+        return { plan: compileExpression(expression), temporaryIds: [] };
+      case "parenthesizedExpression": {
+        const nested = this.#lowerExpression(expression.expression);
+        return {
+          plan: { kind: "group", expression: nested.plan, span: copySpan(expression.span) },
+          temporaryIds: nested.temporaryIds,
+        };
+      }
+      case "listLiteral":
+      case "setLiteral": {
+        const lowered = expression.elements.map((item) => this.#lowerExpression(item));
+        return {
+          plan: {
+            kind: expression.kind === "listLiteral" ? "list" : "set",
+            elements: lowered.map((item) => item.plan),
+            span: copySpan(expression.span),
+          },
+          temporaryIds: lowered.flatMap((item) => item.temporaryIds),
+        };
+      }
+      case "objectLiteral": {
+        const lowered = expression.properties.map((property) => ({
+          property,
+          lowered: this.#lowerExpression(property.value),
+        }));
+        return {
+          plan: {
+            kind: "object",
+            properties: lowered.map(({ property, lowered: value }) => ({
+              name: property.name.name,
+              value: value.plan,
+              span: copySpan(property.span),
+            })),
+            span: copySpan(expression.span),
+          },
+          temporaryIds: lowered.flatMap((item) => item.lowered.temporaryIds),
+        };
+      }
+      case "templateLiteral": {
+        const ids: number[] = [];
+        const parts = expression.parts.map((part): TemplatePartPlan => {
+          if (part.kind === "templateText") {
+            return { kind: "text", value: part.value, span: copySpan(part.span) };
+          }
+          const lowered = this.#lowerExpression(part.expression);
+          ids.push(...lowered.temporaryIds);
+          return {
+            kind: "expression",
+            expression: lowered.plan,
+            span: copySpan(part.span),
+          };
+        });
+        return { plan: { kind: "template", parts, span: copySpan(expression.span) }, temporaryIds: ids };
+      }
+      case "propertyAccessExpression": {
+        const object = this.#lowerExpression(expression.object);
+        return {
+          plan: { kind: "property", object: object.plan, name: expression.property.name, span: copySpan(expression.span) },
+          temporaryIds: object.temporaryIds,
+        };
+      }
+      case "indexExpression": {
+        const object = this.#lowerExpression(expression.object);
+        const index = this.#lowerExpression(expression.index);
+        return {
+          plan: { kind: "index", object: object.plan, index: index.plan, span: copySpan(expression.span) },
+          temporaryIds: [...object.temporaryIds, ...index.temporaryIds],
+        };
+      }
+      case "callExpression": {
+        const argumentsList = expression.arguments.map((argument) => ({
+          argument,
+          lowered: this.#lowerExpression(argument.value),
+        }));
+        const callee = this.#lowerExpression(expression.callee);
+        return {
+          plan: {
+            kind: "call",
+            callee: callee.plan,
+            arguments: argumentsList.map(({ argument, lowered }) =>
+              argument.kind === "positionalArgument"
+                ? { kind: "positional", value: lowered.plan, span: copySpan(argument.span) }
+                : { kind: "named", name: argument.name.name, value: lowered.plan, span: copySpan(argument.span) },
+            ),
+            span: copySpan(expression.span),
+          },
+          temporaryIds: [
+            ...argumentsList.flatMap((item) => item.lowered.temporaryIds),
+            ...callee.temporaryIds,
+          ],
+        };
+      }
+      case "unaryExpression": {
+        const operand = this.#lowerExpression(expression.operand);
+        return {
+          plan: { kind: "unary", operator: expression.operator, operand: operand.plan, span: copySpan(expression.span) },
+          temporaryIds: operand.temporaryIds,
+        };
+      }
+      case "binaryExpression": {
+        const left = this.#lowerExpression(expression.left);
+        const right = this.#lowerExpression(expression.right);
+        return {
+          plan: { kind: "binary", operator: expression.operator, left: left.plan, right: right.plan, span: copySpan(expression.span) },
+          temporaryIds: [...left.temporaryIds, ...right.temporaryIds],
+        };
+      }
+      case "rangeExpression": {
+        const start = this.#lowerExpression(expression.start);
+        const end = this.#lowerExpression(expression.end);
+        return {
+          plan: { kind: "range", start: start.plan, end: end.plan, inclusive: expression.inclusive, span: copySpan(expression.span) },
+          temporaryIds: [...start.temporaryIds, ...end.temporaryIds],
+        };
+      }
+    }
+  }
+
+  #lowerUserFunctionCall(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): LoweredExpression {
+    const name = (expression.callee as Extract<Expression, { kind: "identifier" }>).name;
+    const registered = this.#functionByName.get(name)!;
+    const temporaryIds: number[] = [];
+    const prepared: PreparedCallArgument[] = [];
+    expression.arguments.forEach((argument, index) => {
+      const lowered = this.#lowerExpression(argument.value);
+      temporaryIds.push(...lowered.temporaryIds);
+      const temporaryId = this.#allocateTemporary();
+      temporaryIds.push(temporaryId);
+      this.instructions.push({
+        kind: "storeTemporary",
+        temporaryId,
+        value: lowered.plan,
+        expectBoolean: false,
+        span: copySpan(argument.span),
+      });
+      const parameterName =
+        argument.kind === "namedArgument"
+          ? argument.name.name
+          : registered.declaration.parameters[index]!.name.name;
+      prepared.push({
+        parameterName,
+        temporaryId,
+        span: copySpan(argument.span),
+      });
+    });
+    const destinationTemporary = this.#allocateTemporary();
+    temporaryIds.push(destinationTemporary);
+    const callIndex = this.instructions.length;
+    this.instructions.push({
+      kind: "callFunction",
+      functionId: registered.id,
+      arguments: prepared,
+      destinationTemporary,
+      returnInstruction: callIndex + 1,
+      span: copySpan(expression.span),
+    });
+    return {
+      plan: {
+        kind: "temporary",
+        temporaryId: destinationTemporary,
+        span: copySpan(expression.span),
+      },
+      temporaryIds,
+    };
+  }
+
+  #lowerLogicalExpression(
+    expression: Extract<Expression, { kind: "binaryExpression" }>,
+  ): LoweredExpression {
+    const left = this.#lowerExpression(expression.left);
+    const resultTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: resultTemporary,
+      value: left.plan,
+      expectBoolean: true,
+      span: copySpan(expression.left.span),
+    });
+    const condition: TemporaryExpressionPlan = {
+      kind: "temporary",
+      temporaryId: resultTemporary,
+      span: copySpan(expression.left.span),
+    };
+    if (expression.operator === "and") {
+      const conditional = this.instructions.length;
+      this.instructions.push({
+        kind: "jumpIfFalse",
+        condition,
+        target: -1,
+        span: copySpan(expression.span),
+      });
+      const right = this.#lowerExpression(expression.right);
+      this.instructions.push({
+        kind: "storeTemporary",
+        temporaryId: resultTemporary,
+        value: right.plan,
+        expectBoolean: true,
+        span: copySpan(expression.right.span),
+      });
+      this.instructions[conditional] = {
+        ...(this.instructions[conditional] as JumpIfFalseInstruction),
+        target: this.instructions.length,
+      };
+      return {
+        plan: { ...condition, span: copySpan(expression.span) },
+        temporaryIds: [...left.temporaryIds, ...right.temporaryIds, resultTemporary],
+      };
+    }
+    const conditional = this.instructions.length;
+    this.instructions.push({
+      kind: "jumpIfFalse",
+      condition,
+      target: -1,
+      span: copySpan(expression.span),
+    });
+    const skipRight = this.instructions.length;
+    this.instructions.push({ kind: "jump", target: -1, span: copySpan(expression.span) });
+    this.instructions[conditional] = {
+      ...(this.instructions[conditional] as JumpIfFalseInstruction),
+      target: this.instructions.length,
+    };
+    const right = this.#lowerExpression(expression.right);
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: resultTemporary,
+      value: right.plan,
+      expectBoolean: true,
+      span: copySpan(expression.right.span),
+    });
+    this.instructions[skipRight] = {
+      ...(this.instructions[skipRight] as JumpInstruction),
+      target: this.instructions.length,
+    };
+    return {
+      plan: { ...condition, span: copySpan(expression.span) },
+      temporaryIds: [...left.temporaryIds, ...right.temporaryIds, resultTemporary],
+    };
+  }
+
+  #containsUserCall(expression: Expression): boolean {
+    if (
+      expression.kind === "callExpression" &&
+      expression.callee.kind === "identifier" &&
+      this.#functionByName.has(expression.callee.name)
+    ) {
+      return true;
+    }
+    switch (expression.kind) {
+      case "booleanLiteral":
+      case "nullLiteral":
+      case "numberLiteral":
+      case "stringLiteral":
+      case "identifier":
+        return false;
+      case "parenthesizedExpression":
+        return this.#containsUserCall(expression.expression);
+      case "listLiteral":
+      case "setLiteral":
+        return expression.elements.some((item) => this.#containsUserCall(item));
+      case "objectLiteral":
+        return expression.properties.some((item) => this.#containsUserCall(item.value));
+      case "templateLiteral":
+        return expression.parts.some((part) =>
+          part.kind === "templateInterpolation" && this.#containsUserCall(part.expression)
+        );
+      case "propertyAccessExpression":
+        return this.#containsUserCall(expression.object);
+      case "indexExpression":
+        return this.#containsUserCall(expression.object) || this.#containsUserCall(expression.index);
+      case "callExpression":
+        return this.#containsUserCall(expression.callee) ||
+          expression.arguments.some((argument) => this.#containsUserCall(argument.value));
+      case "unaryExpression":
+        return this.#containsUserCall(expression.operand);
+      case "binaryExpression":
+        return this.#containsUserCall(expression.left) || this.#containsUserCall(expression.right);
+      case "rangeExpression":
+        return this.#containsUserCall(expression.start) || this.#containsUserCall(expression.end);
+    }
+  }
+
+  #allocateTemporary(): number {
+    const id = this.#nextTemporaryId;
+    this.#nextTemporaryId += 1;
+    return id;
+  }
+
+  #emitTemporaryCleanup(ids: readonly number[], span: SourceSpan): void {
+    for (const temporaryId of new Set(ids)) {
+      this.instructions.push({
+        kind: "clearTemporary",
+        temporaryId,
+        span: copySpan(span),
+      });
+    }
+  }
+}
+
+interface LoweredExpression {
+  readonly plan: ExpressionPlan;
+  readonly temporaryIds: readonly number[];
 }
 
 function compileExpression(expression: Expression): ExpressionPlan {
@@ -673,18 +1345,13 @@ function compileArgument(argument: CallArgument): ArgumentPlan {
       };
 }
 
-function compileAssignmentTarget(target: AssignmentTarget): AssignmentTargetPlan {
-  const plan = compileExpression(target);
-  if (plan.kind !== "identifier" && plan.kind !== "property" && plan.kind !== "index") {
-    throw new TypeError("AST assignment target is not assignable.");
-  }
-  return plan;
-}
-
 function validateInstruction(
   value: unknown,
   path: string,
   instructionCount: number,
+  instructionIndex: number,
+  temporaryCount: number,
+  functionIds: ReadonlySet<number>,
   errors: PlanValidationError[],
 ): void {
   if (!isRecord(value) || typeof value.kind !== "string") {
@@ -695,7 +1362,12 @@ function validateInstruction(
   switch (value.kind) {
     case "declareSpeaker":
       requireString(value.name, `${path}.name`, errors);
-      validateProperties(value.properties, `${path}.properties`, errors);
+      validateProperties(value.properties, `${path}.properties`, errors, temporaryCount);
+      return;
+    case "setDeclaredSpeakerProperty":
+      requireString(value.speaker, `${path}.speaker`, errors);
+      requireString(value.name, `${path}.name`, errors);
+      validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       return;
     case "setDefaultSpeaker":
       requireString(value.name, `${path}.name`, errors);
@@ -706,17 +1378,17 @@ function validateInstruction(
       return;
     case "declareBinding":
       requireString(value.name, `${path}.name`, errors);
-      validateExpression(value.value, `${path}.value`, errors);
+      validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       return;
     case "assign":
-      validateExpression(value.target, `${path}.target`, errors, true);
-      validateExpression(value.value, `${path}.value`, errors);
+      validateExpression(value.target, `${path}.target`, errors, true, temporaryCount);
+      validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       return;
     case "evaluate":
-      validateExpression(value.expression, `${path}.expression`, errors);
+      validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
       return;
     case "jumpIfFalse":
-      validateExpression(value.condition, `${path}.condition`, errors);
+      validateExpression(value.condition, `${path}.condition`, errors, false, temporaryCount);
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
       return;
     case "jump":
@@ -728,7 +1400,8 @@ function validateInstruction(
       }
       requirePositiveInteger(value.loopId, `${path}.loopId`, errors);
       if (value.loopKind === "for") requireString(value.variable, `${path}.variable`, errors);
-      validateExpression(value.expression, `${path}.expression`, errors);
+      validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
+      validateJumpTarget(value.continueTarget, `${path}.continueTarget`, instructionCount, errors);
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
       return;
     case "loopControl":
@@ -738,9 +1411,54 @@ function validateInstruction(
       requirePositiveInteger(value.loopId, `${path}.loopId`, errors);
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
       return;
+    case "storeTemporary":
+      validateTemporaryId(value.temporaryId, `${path}.temporaryId`, temporaryCount, errors);
+      validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      if (typeof value.expectBoolean !== "boolean") {
+        errors.push(planError("TSC002", "Temporary boolean expectation must be boolean.", `${path}.expectBoolean`));
+      }
+      return;
+    case "clearTemporary":
+      validateTemporaryId(value.temporaryId, `${path}.temporaryId`, temporaryCount, errors);
+      return;
+    case "callFunction":
+      validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
+      validatePreparedArguments(value.arguments, `${path}.arguments`, temporaryCount, errors);
+      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      validateJumpTarget(value.returnInstruction, `${path}.returnInstruction`, instructionCount, errors);
+      if (value.returnInstruction !== instructionIndex + 1) {
+        errors.push(planError("TSC002", "Function return target must be the instruction after the call.", `${path}.returnInstruction`));
+      }
+      return;
+    case "bindSuppliedParameter":
+      validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
+      requireNonNegativeInteger(value.parameterIndex, `${path}.parameterIndex`, errors);
+      return;
+    case "beginFunctionDefaults":
+    case "enterFunctionBody":
+      validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
+      return;
+    case "prepareParameterDefault":
+      validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
+      requireNonNegativeInteger(value.parameterIndex, `${path}.parameterIndex`, errors);
+      validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
+      if (typeof value.target === "number" && value.target <= instructionIndex) {
+        errors.push(planError("TSC002", "Parameter-default target must move forward.", `${path}.target`));
+      }
+      return;
+    case "bindDefaultParameter":
+      validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
+      requireNonNegativeInteger(value.parameterIndex, `${path}.parameterIndex`, errors);
+      validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      return;
+    case "returnValue":
+      validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      return;
+    case "returnVoid":
+      return;
     case "say":
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
-      validateExpression(value.value, `${path}.value`, errors);
+      validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));
@@ -752,6 +1470,7 @@ function validateExpression(
   path: string,
   errors: PlanValidationError[],
   assignmentTarget = false,
+  temporaryCount = -1,
 ): void {
   if (!isRecord(value) || typeof value.kind !== "string") {
     errors.push(planError("TSC002", "Expression must be an object with a kind.", path));
@@ -770,47 +1489,50 @@ function validateExpression(
     case "identifier":
       requireString(value.name, `${path}.name`, errors);
       return;
+    case "temporary":
+      validateTemporaryId(value.temporaryId, `${path}.temporaryId`, temporaryCount, errors);
+      return;
     case "list":
     case "set":
-      validateExpressionArray(value.elements, `${path}.elements`, errors);
+      validateExpressionArray(value.elements, `${path}.elements`, errors, temporaryCount);
       return;
     case "object":
-      validateProperties(value.properties, `${path}.properties`, errors);
+      validateProperties(value.properties, `${path}.properties`, errors, temporaryCount);
       return;
     case "group":
-      validateExpression(value.expression, `${path}.expression`, errors);
+      validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
       return;
     case "template":
-      validateTemplateParts(value.parts, `${path}.parts`, errors);
+      validateTemplateParts(value.parts, `${path}.parts`, errors, temporaryCount);
       return;
     case "property":
-      validateExpression(value.object, `${path}.object`, errors);
+      validateExpression(value.object, `${path}.object`, errors, false, temporaryCount);
       requireString(value.name, `${path}.name`, errors);
       return;
     case "index":
-      validateExpression(value.object, `${path}.object`, errors);
-      validateExpression(value.index, `${path}.index`, errors);
+      validateExpression(value.object, `${path}.object`, errors, false, temporaryCount);
+      validateExpression(value.index, `${path}.index`, errors, false, temporaryCount);
       return;
     case "call":
-      validateExpression(value.callee, `${path}.callee`, errors);
-      validateArguments(value.arguments, `${path}.arguments`, errors);
+      validateExpression(value.callee, `${path}.callee`, errors, false, temporaryCount);
+      validateArguments(value.arguments, `${path}.arguments`, errors, temporaryCount);
       return;
     case "unary":
       if (!["+", "-", "not"].includes(String(value.operator))) {
         errors.push(planError("TSC002", "Invalid unary operator.", `${path}.operator`));
       }
-      validateExpression(value.operand, `${path}.operand`, errors);
+      validateExpression(value.operand, `${path}.operand`, errors, false, temporaryCount);
       return;
     case "binary":
       if (!binaryOperators.has(String(value.operator))) {
         errors.push(planError("TSC002", "Invalid binary operator.", `${path}.operator`));
       }
-      validateExpression(value.left, `${path}.left`, errors);
-      validateExpression(value.right, `${path}.right`, errors);
+      validateExpression(value.left, `${path}.left`, errors, false, temporaryCount);
+      validateExpression(value.right, `${path}.right`, errors, false, temporaryCount);
       return;
     case "range":
-      validateExpression(value.start, `${path}.start`, errors);
-      validateExpression(value.end, `${path}.end`, errors);
+      validateExpression(value.start, `${path}.start`, errors, false, temporaryCount);
+      validateExpression(value.end, `${path}.end`, errors, false, temporaryCount);
       if (typeof value.inclusive !== "boolean") {
         errors.push(planError("TSC002", "Range inclusivity must be boolean.", `${path}.inclusive`));
       }
@@ -820,7 +1542,12 @@ function validateExpression(
   }
 }
 
-function validateProperties(value: unknown, path: string, errors: PlanValidationError[]): void {
+function validateProperties(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+  temporaryCount: number,
+): void {
   if (!Array.isArray(value)) {
     errors.push(planError("TSC002", "Properties must be an array.", path));
     return;
@@ -833,20 +1560,32 @@ function validateProperties(value: unknown, path: string, errors: PlanValidation
       continue;
     }
     requireString(property.name, `${propertyPath}.name`, errors);
-    validateExpression(property.value, `${propertyPath}.value`, errors);
+    validateExpression(property.value, `${propertyPath}.value`, errors, false, temporaryCount);
     validateSpan(property.span, `${propertyPath}.span`, errors);
   }
 }
 
-function validateExpressionArray(value: unknown, path: string, errors: PlanValidationError[]): void {
+function validateExpressionArray(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+  temporaryCount: number,
+): void {
   if (!Array.isArray(value)) {
     errors.push(planError("TSC002", "Expression list must be an array.", path));
     return;
   }
-  value.forEach((item, index) => validateExpression(item, `${path}[${index}]`, errors));
+  value.forEach((item, index) =>
+    validateExpression(item, `${path}[${index}]`, errors, false, temporaryCount)
+  );
 }
 
-function validateTemplateParts(value: unknown, path: string, errors: PlanValidationError[]): void {
+function validateTemplateParts(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+  temporaryCount: number,
+): void {
   if (!Array.isArray(value)) {
     errors.push(planError("TSC002", "Template parts must be an array.", path));
     return;
@@ -860,14 +1599,19 @@ function validateTemplateParts(value: unknown, path: string, errors: PlanValidat
     validateSpan(part.span, `${partPath}.span`, errors);
     if (part.kind === "text") requireString(part.value, `${partPath}.value`, errors);
     else if (part.kind === "expression") {
-      validateExpression(part.expression, `${partPath}.expression`, errors);
+      validateExpression(part.expression, `${partPath}.expression`, errors, false, temporaryCount);
     } else {
       errors.push(planError("TSC002", "Unknown template part kind.", `${partPath}.kind`));
     }
   });
 }
 
-function validateArguments(value: unknown, path: string, errors: PlanValidationError[]): void {
+function validateArguments(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+  temporaryCount: number,
+): void {
   if (!Array.isArray(value)) {
     errors.push(planError("TSC002", "Arguments must be an array.", path));
     return;
@@ -883,8 +1627,255 @@ function validateArguments(value: unknown, path: string, errors: PlanValidationE
     else if (argument.kind !== "positional") {
       errors.push(planError("TSC002", "Unknown argument kind.", `${argumentPath}.kind`));
     }
-    validateExpression(argument.value, `${argumentPath}.value`, errors);
+    validateExpression(argument.value, `${argumentPath}.value`, errors, false, temporaryCount);
   });
+}
+
+function collectFunctionIds(value: unknown): ReadonlySet<number> {
+  if (!Array.isArray(value)) return new Set<number>();
+  return new Set(
+    value
+      .filter(isRecord)
+      .map((item) => item.id)
+      .filter((id): id is number => Number.isInteger(id) && (id as number) > 0),
+  );
+}
+
+function validateFunctionDefinitions(
+  value: unknown,
+  instructions: readonly unknown[],
+  rootEndInstruction: unknown,
+  errors: PlanValidationError[],
+): void {
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Function definitions must be an array.", "$.functions"));
+    return;
+  }
+  const ids = new Set<number>();
+  const names = new Set<string>();
+  const definitions = new Map<number, Record<string, unknown>>();
+  let expectedEntry = nonNegativeInteger(rootEndInstruction)
+    ? rootEndInstruction
+    : -1;
+  value.forEach((definition, definitionIndex) => {
+    const path = `$.functions[${definitionIndex}]`;
+    if (!isRecord(definition)) {
+      errors.push(planError("TSC002", "Function definition must be an object.", path));
+      return;
+    }
+    requirePositiveInteger(definition.id, `${path}.id`, errors);
+    requireString(definition.name, `${path}.name`, errors);
+    validateSpan(definition.declarationSpan, `${path}.declarationSpan`, errors);
+    validateSpan(definition.bodySpan, `${path}.bodySpan`, errors);
+    if (typeof definition.id === "number") {
+      if (ids.has(definition.id)) {
+        errors.push(planError("TSC002", "Function IDs must be unique.", `${path}.id`));
+      }
+      if (definition.id !== definitionIndex + 1) {
+        errors.push(planError("TSC002", "Function IDs must follow deterministic source order.", `${path}.id`));
+      }
+      ids.add(definition.id);
+      definitions.set(definition.id, definition);
+    }
+    if (typeof definition.name === "string") {
+      if (names.has(definition.name)) {
+        errors.push(planError("TSC002", "Function names must be unique.", `${path}.name`));
+      }
+      names.add(definition.name);
+    }
+    validateFunctionParameters(definition.parameters, `${path}.parameters`, errors);
+    const points = [
+      definition.entryInstruction,
+      definition.bodyEntryInstruction,
+      definition.implicitReturnInstruction,
+      definition.endInstruction,
+    ];
+    if (points.some((point) => !nonNegativeInteger(point))) {
+      errors.push(planError("TSC002", "Function instruction boundaries must be non-negative integers.", path));
+      return;
+    }
+    const [entry, bodyEntry, implicitReturn, end] = points as [
+      number,
+      number,
+      number,
+      number,
+    ];
+    if (
+      entry !== expectedEntry ||
+      entry >= bodyEntry ||
+      bodyEntry > implicitReturn ||
+      implicitReturn + 1 !== end ||
+      end > instructions.length
+    ) {
+      errors.push(planError("TSC002", "Function instruction range is overlapping or impossible.", path));
+    }
+    const bodyEntryMarker = instructions[bodyEntry - 1];
+    if (!isRecord(bodyEntryMarker) || bodyEntryMarker.kind !== "enterFunctionBody") {
+      errors.push(planError("TSC002", "Function body entry point is invalid.", `${path}.bodyEntryInstruction`));
+    }
+    const implicitReturnInstruction = instructions[implicitReturn];
+    if (!isRecord(implicitReturnInstruction) || implicitReturnInstruction.kind !== "returnVoid") {
+      errors.push(planError("TSC002", "Function implicit-return boundary is invalid.", `${path}.implicitReturnInstruction`));
+    }
+    expectedEntry = end;
+  });
+  if (expectedEntry !== instructions.length) {
+    errors.push(planError("TSC002", "Function ranges do not cover the non-root instruction region.", "$.functions"));
+  }
+
+  instructions.forEach((instruction, index) => {
+    if (!isRecord(instruction)) return;
+    const owner = [...definitions.values()].find((definition) =>
+      typeof definition.entryInstruction === "number" &&
+      typeof definition.endInstruction === "number" &&
+      index >= definition.entryInstruction &&
+      index < definition.endInstruction
+    );
+    const functionOnly = [
+      "bindSuppliedParameter",
+      "beginFunctionDefaults",
+      "prepareParameterDefault",
+      "bindDefaultParameter",
+      "enterFunctionBody",
+      "returnValue",
+      "returnVoid",
+    ].includes(String(instruction.kind));
+    if (functionOnly && owner === undefined) {
+      errors.push(planError("TSC002", "Function-only instruction appears in root execution.", `$.instructions[${index}]`));
+    }
+    if (
+      owner !== undefined &&
+      instruction.kind !== "callFunction" &&
+      "functionId" in instruction &&
+      instruction.functionId !== owner.id
+    ) {
+      errors.push(planError("TSC002", "Function prologue instruction has the wrong function ID.", `$.instructions[${index}].functionId`));
+    }
+    if (instruction.kind === "callFunction" && typeof instruction.functionId === "number") {
+      const target = definitions.get(instruction.functionId);
+      if (target !== undefined && Array.isArray(target.parameters) && Array.isArray(instruction.arguments)) {
+        const parameterNames = new Set(
+          target.parameters
+            .filter(isRecord)
+            .map((parameter) => parameter.name)
+            .filter((name): name is string => typeof name === "string"),
+        );
+        const supplied = new Set<string>();
+        instruction.arguments.forEach((argument, argumentIndex) => {
+          if (!isRecord(argument) || typeof argument.parameterName !== "string") return;
+          if (!parameterNames.has(argument.parameterName)) {
+            errors.push(planError("TSC002", "Call refers to an unknown function parameter.", `$.instructions[${index}].arguments[${argumentIndex}].parameterName`));
+          }
+          if (supplied.has(argument.parameterName)) {
+            errors.push(planError("TSC002", "Call supplies a function parameter more than once.", `$.instructions[${index}].arguments[${argumentIndex}].parameterName`));
+          }
+          supplied.add(argument.parameterName);
+        });
+        target.parameters.forEach((parameter, parameterIndex) => {
+          if (
+            isRecord(parameter) &&
+            parameter.hasDefault === false &&
+            typeof parameter.name === "string" &&
+            !supplied.has(parameter.name)
+          ) {
+            errors.push(planError(
+              "TSC002",
+              "Call omits a required function parameter.",
+              `$.instructions[${index}].arguments[${parameterIndex}]`,
+            ));
+          }
+        });
+      }
+    }
+  });
+}
+
+function validateFunctionParameters(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Function parameters must be an array.", path));
+    return;
+  }
+  const names = new Set<string>();
+  let sawDefault = false;
+  value.forEach((parameter, index) => {
+    const parameterPath = `${path}[${index}]`;
+    if (!isRecord(parameter)) {
+      errors.push(planError("TSC002", "Function parameter must be an object.", parameterPath));
+      return;
+    }
+    requireString(parameter.name, `${parameterPath}.name`, errors);
+    if (typeof parameter.name === "string") {
+      if (names.has(parameter.name)) {
+        errors.push(planError("TSC002", "Function parameter names must be unique.", `${parameterPath}.name`));
+      }
+      names.add(parameter.name);
+    }
+    if (parameter.index !== index) {
+      errors.push(planError("TSC002", "Function parameter indexes must be contiguous.", `${parameterPath}.index`));
+    }
+    if (typeof parameter.hasDefault !== "boolean") {
+      errors.push(planError("TSC002", "Function parameter default metadata is malformed.", `${parameterPath}.hasDefault`));
+    } else {
+      if (!parameter.hasDefault && sawDefault) {
+        errors.push(planError("TSC002", "Required parameter follows a defaulted parameter.", parameterPath));
+      }
+      sawDefault ||= parameter.hasDefault;
+    }
+    validateSpan(parameter.declarationSpan, `${parameterPath}.declarationSpan`, errors);
+    if (parameter.hasDefault === true) {
+      validateSpan(parameter.defaultSpan, `${parameterPath}.defaultSpan`, errors);
+    } else if (parameter.defaultSpan !== null) {
+      errors.push(planError("TSC002", "Required parameter must not have a default span.", `${parameterPath}.defaultSpan`));
+    }
+  });
+}
+
+function validatePreparedArguments(
+  value: unknown,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Prepared function arguments must be an array.", path));
+    return;
+  }
+  value.forEach((argument, index) => {
+    const argumentPath = `${path}[${index}]`;
+    if (!isRecord(argument)) {
+      errors.push(planError("TSC002", "Prepared function argument must be an object.", argumentPath));
+      return;
+    }
+    requireString(argument.parameterName, `${argumentPath}.parameterName`, errors);
+    validateTemporaryId(argument.temporaryId, `${argumentPath}.temporaryId`, temporaryCount, errors);
+    validateSpan(argument.span, `${argumentPath}.span`, errors);
+  });
+}
+
+function validateTemporaryId(
+  value: unknown,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > temporaryCount) {
+    errors.push(planError("TSC002", "Temporary reference is outside the plan's temporary range.", path));
+  }
+}
+
+function validateFunctionId(
+  value: unknown,
+  path: string,
+  functionIds: ReadonlySet<number>,
+  errors: PlanValidationError[],
+): void {
+  if (!Number.isInteger(value) || !functionIds.has(value as number)) {
+    errors.push(planError("TSC002", "Instruction refers to an unknown function ID.", path));
+  }
 }
 
 function validateSpan(value: unknown, path: string, errors: PlanValidationError[]): void {
@@ -932,6 +1923,16 @@ function requirePositiveInteger(
 ): void {
   if (!Number.isInteger(value) || (value as number) < 1) {
     errors.push(planError("TSC002", "Expected a positive integer.", path));
+  }
+}
+
+function requireNonNegativeInteger(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!nonNegativeInteger(value)) {
+    errors.push(planError("TSC002", "Expected a non-negative integer.", path));
   }
 }
 
