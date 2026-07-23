@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/instructions.js";
-import { run } from "../src/runtime/engine.js";
+import { run, type RuntimeBuiltinFunction } from "../src/runtime/engine.js";
 import type {
   SerializableRuntimeList,
   SerializableRuntimeObject,
@@ -156,6 +156,58 @@ test("preserves left-to-right call and named-argument side effects", () => {
   ].join("\n"));
 
   assert.deepEqual(sayTexts(result), ["ab", "cd", "abdc"]);
+});
+
+test("evaluates a property-call receiver before its arguments", () => {
+  const result = runSource([
+    "let order = []",
+    "let values = []",
+    'function receiver { order.add("receiver")\nreturn values }',
+    'function argument { order.add("argument")\nreturn 7 }',
+    "receiver().add(argument())",
+    "say `${order[0]}:${order[1]}`",
+  ].join("\n"));
+
+  assert.deepEqual(sayTexts(result), ["receiver:argument"]);
+});
+
+test("evaluates assignment indexes before right-hand values", () => {
+  const result = runSource([
+    "let order = []",
+    "let items = [0]",
+    'function indexFunction { order.add("index")\nreturn 0 }',
+    'function valueFunction { order.add("value")\nreturn 7 }',
+    "items[indexFunction()] = valueFunction()",
+    "say `${order[0]}:${order[1]}:${items[0]}`",
+  ].join("\n"));
+
+  assert.deepEqual(sayTexts(result), ["index:value:7"]);
+});
+
+test("evaluates observable built-ins in assignment target-before-value order", () => {
+  const compiledResult = compileSource(
+    "let items = [0]\nitems[indexBuiltin()] = valueBuiltin()\nsay items[0]",
+    { builtins: ["indexBuiltin", "valueBuiltin"] },
+  );
+  assert.deepEqual(compiledResult.diagnostics, []);
+  const compiled = compiledResult.plan!;
+  const order: string[] = [];
+  const indexBuiltin: RuntimeBuiltinFunction = () => {
+    order.push("index");
+    return 0;
+  };
+  const valueBuiltin: RuntimeBuiltinFunction = () => {
+    order.push("value");
+    return 9;
+  };
+  const result = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled),
+    { builtins: { indexBuiltin, valueBuiltin } },
+  );
+
+  assert.deepEqual(order, ["index", "value"]);
+  assert.deepEqual(sayTexts(result), ["9"]);
 });
 
 test("functions read and assign package-global variables without leaking locals", () => {

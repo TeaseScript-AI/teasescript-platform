@@ -687,6 +687,24 @@ function validateCallFrames(
       errors,
     );
 
+    if (
+      plan !== undefined &&
+      nonNegativeInteger(frame.returnInstruction) &&
+      nonNegativeInteger(frame.destinationTemporary) &&
+      Array.isArray(frame.callerTemporaries)
+    ) {
+      validateSuspendedContinuationTemporaries(
+        frame.callerTemporaries,
+        frame.destinationTemporary,
+        frame.returnInstruction,
+        Array.isArray(loopFrames) && nonNegativeInteger(frame.loopBaseDepth)
+          ? loopFrames.slice(0, frame.loopBaseDepth)
+          : [],
+        plan,
+        errors,
+      );
+    }
+
     if (plan !== undefined && nonNegativeInteger(frame.returnInstruction)) {
       const callIndex = frame.returnInstruction - 1;
       const callerDefinition = frameIndex === 0
@@ -705,18 +723,37 @@ function validateCallFrames(
       }
     }
 
-    if (frameIndex === value.length - 1 && definition !== undefined) {
+    if (definition !== undefined) {
+      const child = frameIndex < value.length - 1
+        ? value[frameIndex + 1]
+        : undefined;
       if (
-        !nonNegativeInteger(nextInstruction) ||
-        nextInstruction < definition.entryInstruction ||
-        nextInstruction >= definition.endInstruction
+        frameIndex === value.length - 1 &&
+        (!nonNegativeInteger(nextInstruction) ||
+          nextInstruction < definition.entryInstruction ||
+          nextInstruction >= definition.endInstruction)
       ) {
         errors.push("Runtime next instruction is outside the active function.");
-      } else {
-        validateCurrentParameterPosition(
+      } else if (frameIndex === value.length - 1 && nonNegativeInteger(nextInstruction)) {
+        validateExactParameterPosition(
           frame.parameterState,
           definition,
           nextInstruction,
+          plan!,
+          errors,
+        );
+      } else if (isPlainRecord(child) && nonNegativeInteger(child.returnInstruction)) {
+        validateExactParameterPosition(
+          frame.parameterState,
+          definition,
+          child.returnInstruction - 1,
+          plan!,
+          errors,
+        );
+        validateExactParameterPosition(
+          frame.parameterState,
+          definition,
+          child.returnInstruction,
           plan!,
           errors,
         );
@@ -788,6 +825,14 @@ function validateParameterBindings(
       .map((binding) => binding.name)
       .filter((name): name is string => typeof name === "string"),
   );
+  if (
+    parameterState.phase !== "body" &&
+    [...bindingNames].some(
+      (name) => !definition.parameters.some((parameter) => parameter.name === name),
+    )
+  ) {
+    errors.push("Runtime function prologue contains a non-parameter binding.");
+  }
   definition.parameters.forEach((parameter, index) => {
     const argument = argumentsList[index];
     if (!isPlainRecord(argument) || typeof argument.supplied !== "boolean") return;
@@ -858,48 +903,101 @@ function validateParameterState(
   }
 }
 
-function validateCurrentParameterPosition(
+function validateExactParameterPosition(
   value: unknown,
   definition: InstructionPlan["functions"][number],
-  nextInstruction: number,
+  instructionPosition: number,
   plan: InstructionPlan,
   errors: string[],
 ): void {
   if (!isPlainRecord(value) || !nonNegativeInteger(value.parameterIndex)) return;
-  if (value.phase === "body") {
-    if (nextInstruction < definition.bodyEntryInstruction) {
-      errors.push("Runtime function body state precedes the body entry.");
-    }
-    return;
+  const expected = expectedParameterProgress(definition, instructionPosition, plan);
+  if (
+    expected === null ||
+    value.phase !== expected.phase ||
+    value.parameterIndex !== expected.parameterIndex
+  ) {
+    errors.push("Runtime parameter progress does not match its exact instruction position.");
   }
-  if (value.phase === "supplied") {
-    const instruction = plan.instructions[nextInstruction];
-    if (value.parameterIndex < definition.parameters.length) {
-      if (
-        instruction?.kind !== "bindSuppliedParameter" ||
-        instruction.parameterIndex !== value.parameterIndex
-      ) {
-        errors.push("Runtime supplied-parameter progress does not match the next instruction.");
-      }
-    } else if (instruction?.kind !== "beginFunctionDefaults") {
-      errors.push("Runtime supplied-parameter phase has an invalid boundary.");
-    }
-    return;
+}
+
+function expectedParameterProgress(
+  definition: InstructionPlan["functions"][number],
+  instructionPosition: number,
+  plan: InstructionPlan,
+): RuntimeParameterStateSnapshot | null {
+  const parameterCount = definition.parameters.length;
+  if (
+    instructionPosition >= definition.entryInstruction &&
+    instructionPosition < definition.entryInstruction + parameterCount
+  ) {
+    return {
+      phase: "supplied",
+      parameterIndex: instructionPosition - definition.entryInstruction,
+    };
   }
-  if (value.phase === "defaults") {
-    const beginDefaults = plan.instructions.findIndex(
+  let cursor = definition.entryInstruction + parameterCount;
+  if (instructionPosition === cursor) {
+    return { phase: "supplied", parameterIndex: parameterCount };
+  }
+  cursor += 1;
+  for (let parameterIndex = 0; parameterIndex < parameterCount; parameterIndex += 1) {
+    const prepare = plan.instructions[cursor];
+    if (prepare?.kind !== "prepareParameterDefault") return null;
+    if (instructionPosition === cursor) {
+      return { phase: "defaults", parameterIndex };
+    }
+    const bindIndex = plan.instructions.findIndex(
       (instruction, index) =>
-        index >= definition.entryInstruction &&
-        index < definition.bodyEntryInstruction &&
-        instruction.kind === "beginFunctionDefaults",
+        index > cursor &&
+        index < prepare.target &&
+        instruction.kind === "bindDefaultParameter" &&
+        instruction.functionId === definition.id &&
+        instruction.parameterIndex === parameterIndex,
     );
-    if (
-      beginDefaults < 0 ||
-      nextInstruction <= beginDefaults ||
-      nextInstruction >= definition.bodyEntryInstruction
-    ) {
-      errors.push("Runtime default-parameter progress does not match the next instruction.");
+    if (instructionPosition > cursor && instructionPosition < prepare.target) {
+      return {
+        phase: "defaults",
+        parameterIndex:
+          bindIndex >= 0 && instructionPosition > bindIndex
+            ? parameterIndex + 1
+            : parameterIndex,
+      };
     }
+    cursor = prepare.target;
+  }
+  if (instructionPosition === definition.bodyEntryInstruction - 1) {
+    return { phase: "defaults", parameterIndex: parameterCount };
+  }
+  if (
+    instructionPosition >= definition.bodyEntryInstruction &&
+    instructionPosition < definition.endInstruction
+  ) {
+    return { phase: "body", parameterIndex: parameterCount };
+  }
+  return null;
+}
+
+function validateSuspendedContinuationTemporaries(
+  callerTemporaries: unknown[],
+  destinationTemporary: number,
+  returnInstruction: number,
+  callerLoopFrames: unknown,
+  plan: InstructionPlan,
+  errors: string[],
+): void {
+  const continuation = plan.instructions[returnInstruction];
+  if (continuation === undefined) return;
+  const present = new Set(
+    callerTemporaries
+      .filter(isPlainRecord)
+      .map((temporary) => temporary.id)
+      .filter((id): id is number => nonNegativeInteger(id)),
+  );
+  present.add(destinationTemporary);
+  const required = requiredInstructionTemporaries(continuation, callerLoopFrames);
+  if ([...required].some((temporaryId) => !present.has(temporaryId))) {
+    errors.push("Runtime caller temporaries cannot resume the suspended continuation.");
   }
 }
 

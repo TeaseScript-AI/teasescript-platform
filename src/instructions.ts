@@ -629,15 +629,8 @@ class InstructionCompiler {
         }
       case "assignmentStatement":
         {
+        const target = this.#lowerAssignmentTarget(statement.target);
         const value = this.#lowerExpression(statement.value);
-        const target = this.#lowerExpression(statement.target);
-        if (
-          target.plan.kind !== "identifier" &&
-          target.plan.kind !== "property" &&
-          target.plan.kind !== "index"
-        ) {
-          throw new TypeError("AST assignment target is not assignable.");
-        }
         this.instructions.push({
           kind: "assign",
           target: target.plan,
@@ -645,7 +638,7 @@ class InstructionCompiler {
           span: copySpan(statement.span),
         });
         this.#emitTemporaryCleanup(
-          [...value.temporaryIds, ...target.temporaryIds],
+          [...target.temporaryIds, ...value.temporaryIds],
           statement.span,
         );
         return;
@@ -997,11 +990,11 @@ class InstructionCompiler {
         };
       }
       case "callExpression": {
+        const callee = this.#lowerExpression(expression.callee);
         const argumentsList = expression.arguments.map((argument) => ({
           argument,
           lowered: this.#lowerExpression(argument.value),
         }));
-        const callee = this.#lowerExpression(expression.callee);
         return {
           plan: {
             kind: "call",
@@ -1014,8 +1007,8 @@ class InstructionCompiler {
             span: copySpan(expression.span),
           },
           temporaryIds: [
-            ...argumentsList.flatMap((item) => item.lowered.temporaryIds),
             ...callee.temporaryIds,
+            ...argumentsList.flatMap((item) => item.lowered.temporaryIds),
           ],
         };
       }
@@ -1043,6 +1036,113 @@ class InstructionCompiler {
         };
       }
     }
+  }
+
+  #lowerAssignmentTarget(expression: Expression): {
+    readonly plan: AssignmentTargetPlan;
+    readonly temporaryIds: readonly number[];
+  } {
+    if (expression.kind === "identifier") {
+      return {
+        plan: { kind: "identifier", name: expression.name, span: copySpan(expression.span) },
+        temporaryIds: [],
+      };
+    }
+    if (expression.kind === "propertyAccessExpression") {
+      const object = this.#lowerAssignmentObject(expression.object);
+      return {
+        plan: {
+          kind: "property",
+          object: object.plan,
+          name: expression.property.name,
+          span: copySpan(expression.span),
+        },
+        temporaryIds: object.temporaryIds,
+      };
+    }
+    if (expression.kind === "indexExpression") {
+      const object = this.#lowerAssignmentObject(expression.object);
+      const index = this.#materializeExpression(
+        this.#lowerExpression(expression.index),
+        expression.index.span,
+      );
+      return {
+        plan: {
+          kind: "index",
+          object: object.plan,
+          index: index.plan,
+          span: copySpan(expression.span),
+        },
+        temporaryIds: [...object.temporaryIds, ...index.temporaryIds],
+      };
+    }
+    throw new TypeError("AST assignment target is not assignable.");
+  }
+
+  #lowerAssignmentObject(expression: Expression): LoweredExpression {
+    if (expression.kind === "identifier") {
+      return { plan: compileExpression(expression), temporaryIds: [] };
+    }
+    if (expression.kind === "parenthesizedExpression") {
+      const nested = this.#lowerAssignmentObject(expression.expression);
+      return {
+        plan: { kind: "group", expression: nested.plan, span: copySpan(expression.span) },
+        temporaryIds: nested.temporaryIds,
+      };
+    }
+    if (expression.kind === "propertyAccessExpression") {
+      const object = this.#lowerAssignmentObject(expression.object);
+      const property: LoweredExpression = {
+        plan: {
+          kind: "property",
+          object: object.plan,
+          name: expression.property.name,
+          span: copySpan(expression.span),
+        },
+        temporaryIds: object.temporaryIds,
+      };
+      return expression.property.name === "random"
+        ? this.#materializeExpression(property, expression.span)
+        : property;
+    }
+    if (expression.kind === "indexExpression") {
+      const object = this.#lowerAssignmentObject(expression.object);
+      const index = this.#materializeExpression(
+        this.#lowerExpression(expression.index),
+        expression.index.span,
+      );
+      return {
+        plan: {
+          kind: "index",
+          object: object.plan,
+          index: index.plan,
+          span: copySpan(expression.span),
+        },
+        temporaryIds: [...object.temporaryIds, ...index.temporaryIds],
+      };
+    }
+    const lowered = this.#lowerExpression(expression);
+    return planRequiresEarlyEvaluation(lowered.plan)
+      ? this.#materializeExpression(lowered, expression.span)
+      : lowered;
+  }
+
+  #materializeExpression(
+    lowered: LoweredExpression,
+    span: SourceSpan,
+  ): LoweredExpression {
+    const temporaryId = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId,
+      value: lowered.plan,
+      expectBoolean: false,
+      span: copySpan(span),
+    });
+    return {
+      plan: { kind: "temporary", temporaryId, span: copySpan(span) },
+      temporaryIds: [...lowered.temporaryIds, temporaryId],
+    };
   }
 
   #lowerUserFunctionCall(
@@ -1345,6 +1445,43 @@ function compileArgument(argument: CallArgument): ArgumentPlan {
       };
 }
 
+function planRequiresEarlyEvaluation(expression: ExpressionPlan): boolean {
+  switch (expression.kind) {
+    case "literal":
+    case "identifier":
+    case "temporary":
+      return false;
+    case "list":
+    case "set":
+      return expression.elements.some(planRequiresEarlyEvaluation);
+    case "object":
+      return expression.properties.some((property) =>
+        planRequiresEarlyEvaluation(property.value)
+      );
+    case "group":
+      return planRequiresEarlyEvaluation(expression.expression);
+    case "template":
+      return expression.parts.some(
+        (part) => part.kind === "expression" && planRequiresEarlyEvaluation(part.expression),
+      );
+    case "property":
+      return expression.name === "random" || planRequiresEarlyEvaluation(expression.object);
+    case "index":
+      return planRequiresEarlyEvaluation(expression.object) ||
+        planRequiresEarlyEvaluation(expression.index);
+    case "call":
+      return true;
+    case "unary":
+      return planRequiresEarlyEvaluation(expression.operand);
+    case "binary":
+      return planRequiresEarlyEvaluation(expression.left) ||
+        planRequiresEarlyEvaluation(expression.right);
+    case "range":
+      return planRequiresEarlyEvaluation(expression.start) ||
+        planRequiresEarlyEvaluation(expression.end);
+  }
+}
+
 function validateInstruction(
   value: unknown,
   path: string,
@@ -1382,6 +1519,7 @@ function validateInstruction(
       return;
     case "assign":
       validateExpression(value.target, `${path}.target`, errors, true, temporaryCount);
+      validatePreparedAssignmentTarget(value.target, `${path}.target`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       return;
     case "evaluate":
@@ -1425,6 +1563,21 @@ function validateInstruction(
       validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
       validatePreparedArguments(value.arguments, `${path}.arguments`, temporaryCount, errors);
       validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      if (
+        Number.isInteger(value.destinationTemporary) &&
+        Array.isArray(value.arguments) &&
+        value.arguments.some(
+          (argument) =>
+            isRecord(argument) &&
+            argument.temporaryId === value.destinationTemporary,
+        )
+      ) {
+        errors.push(planError(
+          "TSC002",
+          "Function result destination must not alias an argument temporary.",
+          `${path}.destinationTemporary`,
+        ));
+      }
       validateJumpTarget(value.returnInstruction, `${path}.returnInstruction`, instructionCount, errors);
       if (value.returnInstruction !== instructionIndex + 1) {
         errors.push(planError("TSC002", "Function return target must be the instruction after the call.", `${path}.returnInstruction`));
@@ -1540,6 +1693,86 @@ function validateExpression(
     default:
       errors.push(planError("TSC002", `Unknown expression kind '${value.kind}'.`, `${path}.kind`));
   }
+}
+
+function validatePreparedAssignmentTarget(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!isRecord(value)) return;
+  if (value.kind === "identifier") return;
+  if (value.kind === "property") {
+    validatePreparedAssignmentObject(value.object, `${path}.object`, errors);
+    return;
+  }
+  if (value.kind === "index") {
+    if (!isRecord(value.index) || value.index.kind !== "temporary") {
+      errors.push(planError(
+        "TSC002",
+        "Assignment indexes must be prepared in a temporary before the right-hand value.",
+        `${path}.index`,
+      ));
+    }
+    validatePreparedAssignmentObject(value.object, `${path}.object`, errors);
+  }
+}
+
+function validatePreparedAssignmentObject(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!isRecord(value)) return;
+  if (value.kind === "identifier" || value.kind === "temporary") return;
+  if (value.kind === "group") {
+    validatePreparedAssignmentObject(value.expression, `${path}.expression`, errors);
+    return;
+  }
+  if (value.kind === "property") {
+    if (value.name === "random") {
+      errors.push(planError(
+        "TSC002",
+        "Random assignment receivers must be prepared before the right-hand value.",
+        path,
+      ));
+    }
+    validatePreparedAssignmentObject(value.object, `${path}.object`, errors);
+    return;
+  }
+  if (value.kind === "index") {
+    if (!isRecord(value.index) || value.index.kind !== "temporary") {
+      errors.push(planError(
+        "TSC002",
+        "Nested assignment indexes must be prepared before the right-hand value.",
+        `${path}.index`,
+      ));
+    }
+    validatePreparedAssignmentObject(value.object, `${path}.object`, errors);
+    return;
+  }
+  if (value.kind === "call" || containsDeferredAssignmentEffect(value)) {
+    errors.push(planError(
+      "TSC002",
+      "Observable assignment receiver expressions must be prepared before the right-hand value.",
+      path,
+    ));
+  }
+}
+
+function containsDeferredAssignmentEffect(value: Record<string, unknown>): boolean {
+  if (value.kind === "call") return true;
+  if (value.kind === "property" && value.name === "random") return true;
+  for (const nested of Object.values(value)) {
+    if (Array.isArray(nested)) {
+      if (nested.some(
+        (item) => isRecord(item) && containsDeferredAssignmentEffect(item),
+      )) return true;
+    } else if (isRecord(nested) && containsDeferredAssignmentEffect(nested)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function validateProperties(
@@ -1845,20 +2078,88 @@ function validateFunctionPrologue(
       errors.push(planError("TSC002", "Function parameter-default sequence is malformed.", `${path}.parameters[${index}]`));
       return;
     }
-    const defaultBindings = instructions
-      .slice(cursor + 1, prepare.target)
-      .filter(
-        (instruction) =>
-          isRecord(instruction) &&
-          instruction.kind === "bindDefaultParameter" &&
-          instruction.functionId === definition.id &&
-          instruction.parameterIndex === index,
-      );
+    const regionStart = cursor + 1;
+    const regionEnd = prepare.target;
+    const defaultBindings: Record<string, unknown>[] = [];
+    for (let instructionIndex = regionStart; instructionIndex < regionEnd; instructionIndex += 1) {
+      const nested = instructions[instructionIndex];
+      if (!isRecord(nested)) continue;
+      if (nested.kind === "bindDefaultParameter") {
+        if (
+          nested.functionId !== definition.id ||
+          nested.parameterIndex !== index
+        ) {
+          errors.push(planError(
+            "TSC002",
+            "Default binding does not match its parameter segment.",
+            `$.instructions[${instructionIndex}]`,
+          ));
+        }
+        defaultBindings.push(nested);
+        continue;
+      }
+      if (
+        ![
+          "storeTemporary",
+          "clearTemporary",
+          "callFunction",
+          "jumpIfFalse",
+          "jump",
+        ].includes(String(nested.kind))
+      ) {
+        errors.push(planError(
+          "TSC002",
+          "Function default-expression region contains an invalid instruction.",
+          `$.instructions[${instructionIndex}]`,
+        ));
+      }
+      if (
+        (nested.kind === "jump" || nested.kind === "jumpIfFalse") &&
+        (!nonNegativeInteger(nested.target) ||
+          nested.target <= instructionIndex ||
+          nested.target > regionEnd)
+      ) {
+        errors.push(planError(
+          "TSC002",
+          "Default-expression jump escapes its parameter segment.",
+          `$.instructions[${instructionIndex}].target`,
+        ));
+      }
+    }
     if (
       (parameter.hasDefault === true && defaultBindings.length !== 1) ||
-      (parameter.hasDefault === false && prepare.target !== cursor + 1)
+      (parameter.hasDefault === false && regionEnd !== regionStart)
     ) {
       errors.push(planError("TSC002", "Function parameter default does not match its metadata.", `${path}.parameters[${index}]`));
+    }
+    if (parameter.hasDefault === true && defaultBindings.length === 1) {
+      const bindingIndex = instructions.indexOf(defaultBindings[0]);
+      for (
+        let instructionIndex = regionStart;
+        instructionIndex < regionEnd;
+        instructionIndex += 1
+      ) {
+        const nested = instructions[instructionIndex];
+        if (!isRecord(nested)) continue;
+        if (instructionIndex > bindingIndex && nested.kind !== "clearTemporary") {
+          errors.push(planError(
+            "TSC002",
+            "Only temporary cleanup may follow a default binding.",
+            `$.instructions[${instructionIndex}]`,
+          ));
+        }
+        if (
+          (nested.kind === "jump" || nested.kind === "jumpIfFalse") &&
+          nonNegativeInteger(nested.target) &&
+          nested.target > bindingIndex
+        ) {
+          errors.push(planError(
+            "TSC002",
+            "Default-expression control flow may not bypass its binding.",
+            `$.instructions[${instructionIndex}].target`,
+          ));
+        }
+      }
     }
     cursor = prepare.target;
   }
@@ -1870,6 +2171,27 @@ function validateFunctionPrologue(
     cursor + 1 !== definition.bodyEntryInstruction
   ) {
     errors.push(planError("TSC002", "Function body-entry prologue marker is malformed.", `${path}.bodyEntryInstruction`));
+  }
+  const prologueOnly = new Set([
+    "bindSuppliedParameter",
+    "beginFunctionDefaults",
+    "prepareParameterDefault",
+    "bindDefaultParameter",
+    "enterFunctionBody",
+  ]);
+  for (
+    let instructionIndex = definition.bodyEntryInstruction;
+    instructionIndex < (definition.endInstruction as number);
+    instructionIndex += 1
+  ) {
+    const instruction = instructions[instructionIndex];
+    if (isRecord(instruction) && prologueOnly.has(String(instruction.kind))) {
+      errors.push(planError(
+        "TSC002",
+        "Function prologue instruction appears inside the function body.",
+        `$.instructions[${instructionIndex}]`,
+      ));
+    }
   }
 }
 
@@ -1927,6 +2249,7 @@ function validatePreparedArguments(
     errors.push(planError("TSC002", "Prepared function arguments must be an array.", path));
     return;
   }
+  const temporaryIds = new Set<number>();
   value.forEach((argument, index) => {
     const argumentPath = `${path}[${index}]`;
     if (!isRecord(argument)) {
@@ -1935,6 +2258,16 @@ function validatePreparedArguments(
     }
     requireString(argument.parameterName, `${argumentPath}.parameterName`, errors);
     validateTemporaryId(argument.temporaryId, `${argumentPath}.temporaryId`, temporaryCount, errors);
+    if (typeof argument.temporaryId === "number") {
+      if (temporaryIds.has(argument.temporaryId)) {
+        errors.push(planError(
+          "TSC002",
+          "Prepared function argument temporary IDs must be unique.",
+          `${argumentPath}.temporaryId`,
+        ));
+      }
+      temporaryIds.add(argument.temporaryId);
+    }
     validateSpan(argument.span, `${argumentPath}.span`, errors);
   });
 }

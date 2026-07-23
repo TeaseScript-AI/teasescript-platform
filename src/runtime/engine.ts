@@ -1048,6 +1048,9 @@ class Evaluator {
   }
 
   #call(expression: Extract<ExpressionPlan, { kind: "call" }>): SerializableRuntimeValue {
+    const receiver = expression.callee.kind === "property"
+      ? this.evaluate(expression.callee.object)
+      : null;
     const positional: SerializableRuntimeValue[] = [];
     const named: Record<string, SerializableRuntimeValue> = {};
     for (const argument of expression.arguments) {
@@ -1092,8 +1095,7 @@ class Evaluator {
       return cloneSerializableValue(returned);
     }
     if (expression.callee.kind === "property") {
-      const receiver = this.evaluate(expression.callee.object);
-      return this.#callCollection(receiver, expression.callee.name, positional, named, expression.span);
+      return this.#callCollection(receiver!, expression.callee.name, positional, named, expression.span);
     }
     throw fault("TSR014", "Only injected built-ins and supported collection methods are callable.", expression.callee.span);
   }

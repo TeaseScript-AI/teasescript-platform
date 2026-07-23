@@ -196,6 +196,191 @@ test("rejects a missing temporary required by the next instruction", () => {
   assertCheckpointRejected(checkpoint, "TSK002");
 });
 
+test("restores between assignment-target and right-hand call evaluation", () => {
+  const observations = assertEveryInstructionResume([
+    "let order = []",
+    "let items = [0]",
+    'function indexFunction { order.add("index")\nreturn 0 }',
+    'function valueFunction { order.add("value")\nreturn 7 }',
+    "items[indexFunction()] = valueFunction()",
+    "let randomItems = [0, 0]",
+    "randomItems[randomInteger(0..=1)] = randomInteger(7..=9)",
+    "say `${order[0]}:${order[1]}:${items[0]}`",
+  ].join("\n"));
+
+  assert.ok(observations.some((snapshot) =>
+    snapshot.callFrames.at(-1)?.functionName === "valueFunction" &&
+    snapshot.callFrames.at(-1)!.callerTemporaries.length > 0
+  ));
+});
+
+test("rejects missing temporaries in every suspended caller continuation", () => {
+  const source = [
+    "function one { return 1 }",
+    "function two { return 2 }",
+    "function total { return one() + two() }",
+    "say total()",
+  ].join("\n");
+  const compiled = plan(source);
+  const snapshot = executeUntil(compiled, (candidate) =>
+    candidate.callFrames.map((frame) => frame.functionName).join(",") === "total,two"
+  );
+  const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  checkpoint.snapshot.callFrames.at(-1)!.callerTemporaries = [];
+  assertCheckpointRejected(checkpoint, "TSK002");
+});
+
+test("rejects missing suspended results at multiple recursion depths", () => {
+  const compiled = plan([
+    "function one { return 1 }",
+    "function recurse(depth) {",
+    "  if depth == 0 { return 0 }",
+    "  return one() + recurse(depth - 1)",
+    "}",
+    "say recurse(4)",
+  ].join("\n"));
+  const snapshot = executeUntil(compiled, (candidate) =>
+    candidate.callFrames.length >= 4 &&
+    candidate.callFrames.every((frame) => frame.functionName === "recurse")
+  );
+
+  for (let frameIndex = 1; frameIndex < snapshot.callFrames.length; frameIndex += 1) {
+    const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+    const frame = checkpoint.snapshot.callFrames[frameIndex]!;
+    const call = checkpoint.plan.instructions[frame.returnInstruction - 1];
+    assert.equal(call.kind, "callFunction");
+    const argumentIds = new Set(call.arguments.map((argument: any) => argument.temporaryId));
+    const missingIndex = frame.callerTemporaries.findIndex(
+      (temporary: any) => !argumentIds.has(temporary.id),
+    );
+    assert.ok(missingIndex >= 0);
+    frame.callerTemporaries.splice(missingIndex, 1);
+    assertCheckpointRejected(checkpoint, "TSK002");
+  }
+});
+
+test("rejects parameter progress that disagrees with exact default segments", () => {
+  const compiled = plan([
+    "function helper { return 1 }",
+    "function sample(first = helper(), second = helper()) { return first + second }",
+    "say sample()",
+  ].join("\n"));
+  const snapshot = executeUntil(compiled, (candidate) => {
+    const frame = candidate.callFrames.at(-1);
+    return frame?.functionName === "sample" &&
+      frame.parameterState.phase === "defaults" &&
+      frame.parameterState.parameterIndex === 1;
+  });
+
+  for (const corruptedIndex of [0, 2]) {
+    const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+    checkpoint.snapshot.callFrames.at(-1)!.parameterState.parameterIndex = corruptedIndex;
+    assertCheckpointRejected(checkpoint, "TSK002");
+  }
+});
+
+test("rejects corrupted outer default progress while an inner call is active", () => {
+  const compiled = plan([
+    "function inner { return 1 }",
+    "function outer(value = inner()) { return value }",
+    "say outer()",
+  ].join("\n"));
+  const snapshot = executeUntil(compiled, (candidate) =>
+    candidate.callFrames.map((frame) => frame.functionName).join(",") === "outer,inner"
+  );
+  const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  checkpoint.snapshot.callFrames[0]!.parameterState.parameterIndex = 1;
+  assertCheckpointRejected(checkpoint, "TSK002");
+});
+
+test("rejects structurally valid non-parameter bindings during a prologue", () => {
+  const compiled = plan("function sample(value = 1) { return value }\nsay sample()");
+  const snapshot = executeUntil(compiled, (candidate) =>
+    candidate.callFrames.at(-1)?.parameterState.phase === "defaults"
+  );
+  const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  const frame = checkpoint.snapshot.callFrames.at(-1)!;
+  checkpoint.snapshot.frames[frame.scopeBaseDepth]!.bindings.push({
+    name: "unexpected",
+    value: null,
+  });
+  assertCheckpointRejected(checkpoint, "TSK002");
+});
+
+test("rejects malformed function-region plans inside checkpoints", () => {
+  const defaults = plan([
+    "function helper { return 1 }",
+    "function sample(value = helper()) { say value\nreturn value }",
+    "say sample()",
+  ].join("\n"));
+  const sample = defaults.functions.find((definition) => definition.name === "sample")!;
+  const plans: any[] = [];
+
+  const statementInDefault = mutablePlan(defaults);
+  const clearIndex = statementInDefault.instructions.findIndex(
+    (instruction: any, index: number) =>
+      index >= sample.entryInstruction &&
+      index < sample.bodyEntryInstruction &&
+      instruction.kind === "clearTemporary",
+  );
+  statementInDefault.instructions[clearIndex] = {
+    kind: "returnVoid",
+    span: statementInDefault.instructions[clearIndex].span,
+  };
+  plans.push(statementInDefault);
+
+  const suppliedInBody = mutablePlan(defaults);
+  suppliedInBody.instructions[sample.bodyEntryInstruction] = {
+    kind: "bindSuppliedParameter",
+    functionId: sample.id,
+    parameterIndex: 0,
+    span: suppliedInBody.instructions[sample.bodyEntryInstruction].span,
+  };
+  plans.push(suppliedInBody);
+
+  const returnBeforeBody = mutablePlan(defaults);
+  const bindIndex = returnBeforeBody.instructions.findIndex(
+    (instruction: any, index: number) =>
+      index >= sample.entryInstruction &&
+      index < sample.bodyEntryInstruction &&
+      instruction.kind === "bindDefaultParameter",
+  );
+  returnBeforeBody.instructions[bindIndex] = {
+    kind: "returnValue",
+    value: returnBeforeBody.instructions[bindIndex].value,
+    span: returnBeforeBody.instructions[bindIndex].span,
+  };
+  plans.push(returnBeforeBody);
+
+  const calls = plan("function pair(left, right) { return left + right }\nsay pair(1, 2)");
+  const aliasedDestination = mutablePlan(calls);
+  const aliasedCall = aliasedDestination.instructions.find(
+    (instruction: any) => instruction.kind === "callFunction",
+  );
+  aliasedCall.destinationTemporary = aliasedCall.arguments[0].temporaryId;
+  plans.push(aliasedDestination);
+
+  const duplicateArgument = mutablePlan(calls);
+  const duplicateCall = duplicateArgument.instructions.find(
+    (instruction: any) => instruction.kind === "callFunction",
+  );
+  duplicateCall.arguments[1].temporaryId = duplicateCall.arguments[0].temporaryId;
+  plans.push(duplicateArgument);
+
+  for (const malformedPlan of plans) {
+    assertCheckpointRejected({
+      format: "teasescript-checkpoint",
+      version: 3,
+      plan: malformedPlan,
+      snapshot: createFreshRuntimeSnapshot(
+        malformedPlan === aliasedDestination || malformedPlan === duplicateArgument
+          ? calls
+          : defaults,
+      ),
+    }, "TSK002");
+  }
+});
+
 test("rejects empty serialized names and impossible status combinations", () => {
   const compiled = plan("let value = 1\nfunction read(input) { return input }\nread(value)");
   let active = createFreshRuntimeSnapshot(compiled);
@@ -291,6 +476,22 @@ function recursiveSnapshot(depth: number): {
     snapshot = executeInstruction(compiled, snapshot).snapshot;
   }
   return { plan: compiled, snapshot };
+}
+
+function executeUntil(
+  compiled: InstructionPlan,
+  predicate: (snapshot: RuntimeSnapshot) => boolean,
+): RuntimeSnapshot {
+  let snapshot = createFreshRuntimeSnapshot(compiled);
+  let guard = 0;
+  while (!predicate(snapshot)) {
+    assert.notEqual(snapshot.status, "halted");
+    assert.notEqual(snapshot.status, "failed");
+    snapshot = executeInstruction(compiled, snapshot).snapshot;
+    guard += 1;
+    assert.ok(guard < 2_000, "checkpoint fixture did not reach its target state");
+  }
+  return snapshot;
 }
 
 function plan(source: string): InstructionPlan {
