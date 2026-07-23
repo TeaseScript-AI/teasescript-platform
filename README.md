@@ -4,13 +4,17 @@ Browser-first platform and deterministic scripting language for interactive teas
 
 Start with [`README-FIRST.md`](README-FIRST.md).
 
-Current development stage: serializable runtime and standalone browser
-playground. The TypeScript core implements the accepted milestone slice for
-literals, expressions, variables, assignment, lexical `if`/`else` blocks,
-speakers, `say`, `say as`, and `exit`. It compiles that slice to a versioned
-JSON-safe instruction plan and executes it with explicit checkpointable runtime
-state and typed events. The wider V30 language and full static type checking
-remain out of scope.
+On `main`, the TypeScript core contains the parser and core-language foundation.
+The stacked `feature/runtime-playground` branch adds a serializable runtime and
+standalone browser playground. This `feature/control-flow-runtime` branch adds
+accepted comments, ranges, deterministic random built-ins, two-word `else if`,
+`repeat`, list/set/range `for`, `while`, `break`, and `continue`.
+
+The implemented subset compiles to a versioned JSON-safe instruction plan and
+executes with explicit checkpointable runtime state and typed events. Plans,
+snapshots, and checkpoints use version 2 on the control-flow branch and reject
+unsupported older versions. The wider V30 language and full static type
+checking remain out of scope.
 
 ## Core development
 
@@ -41,6 +45,12 @@ HOST=0.0.0.0 PORT=4173 npm run playground
 Binding to `0.0.0.0` exposes this development server to every network that can
 reach the container. The playground is not production-ready and is not a
 public Node backend; Laravel remains the only eventual public backend.
+
+The page offers only the repository-backed `main`, `control-flow`, and
+`checkpoint-loop` examples. Selecting another example resets runtime UI state.
+Saved checkpoints are namespaced by example and checkpoint format version.
+Use event-boundary Step and save during `checkpoint-loop` to inspect and restore
+an active serialized loop frame.
 
 Fresh playground runs use the fixed unsigned seed `0x6d2b79f5`
 (`1831565813`) with the versioned `xorshift32-v1` runtime RNG. This makes the
