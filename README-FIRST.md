@@ -16,15 +16,26 @@ When sources conflict, do not silently reconcile them. V30 leads over older synt
 
 ## Current POC scope
 
-The first milestone is a local parser POC:
+The parser and core-language foundation are complete. The current milestone is
+a local, standalone runtime and browser-playground vertical slice:
 
 ```text
-TeaseScript source -> lexer -> parser -> AST -> diagnostics
+TeaseScript source
+    -> lexer and parser
+    -> semantic validation
+    -> versioned serializable instruction plan
+    -> versioned serializable deterministic runtime state
+    -> typed runtime events
+    -> standalone browser playground
 ```
 
-The next small milestone is a speaker execution POC that interprets only the speaker-related AST and emits testable events. It is not the complete runtime engine.
+The runtime executes compiled instructions rather than AST nodes. Its POC
+checkpoint is a self-contained plan-and-snapshot bundle. The playground is a
+development page, not the future public backend or cross-origin host/iframe
+integration.
 
-Do not add Laravel, media, storage, account APIs, custom views, module selection, or continuous-personality services to the first parser POC.
+Do not add Laravel, media, storage, account APIs, custom views, module selection,
+or continuous-personality services to this milestone.
 
 ## Language and architecture boundaries
 

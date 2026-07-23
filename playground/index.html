@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TeaseScript Runtime Playground</title>
+    <link rel="stylesheet" href="/playground.css">
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Serializable runtime POC</p>
+        <h1>TeaseScript Playground</h1>
+        <p class="subtitle">Repository example → validated plan → deterministic events</p>
+      </div>
+      <div class="runtime-summary" aria-live="polite">
+        <span>Instruction <strong id="instruction-position">—</strong></span>
+        <span>Status <strong id="runtime-status">loading</strong></span>
+      </div>
+    </header>
+
+    <main>
+      <section class="controls" aria-label="Runtime controls">
+        <button id="run" type="button">Run</button>
+        <button id="step" type="button">Step</button>
+        <button id="reset" type="button">Reset</button>
+        <span class="control-divider" aria-hidden="true"></span>
+        <button id="save-checkpoint" type="button">Save checkpoint</button>
+        <button id="restore-checkpoint" type="button">Restore checkpoint</button>
+        <button id="clear-checkpoint" type="button">Clear saved checkpoint</button>
+        <button id="reload-example" type="button">Reload example</button>
+        <span id="action-status" class="action-status" role="status"></span>
+      </section>
+
+      <div class="primary-grid">
+        <section class="panel source-panel">
+          <h2>Source</h2>
+          <pre id="source-code" tabindex="0">Loading example…</pre>
+        </section>
+
+        <section class="panel player-panel">
+          <h2>Player transcript</h2>
+          <ol id="transcript" class="transcript" aria-live="polite"></ol>
+        </section>
+      </div>
+
+      <section class="panel diagnostics-panel">
+        <h2>Diagnostics</h2>
+        <ol id="diagnostics" class="diagnostics"></ol>
+      </section>
+
+      <div class="detail-grid">
+        <section class="panel">
+          <h2>Runtime event log</h2>
+          <pre id="event-log" tabindex="0">[]</pre>
+        </section>
+        <section class="panel">
+          <h2>Instruction plan</h2>
+          <pre id="instruction-plan" tabindex="0">null</pre>
+        </section>
+        <section class="panel">
+          <h2>Runtime state</h2>
+          <pre id="runtime-state" tabindex="0">null</pre>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="/dist/playground/browser.js"></script>
+  </body>
+</html>

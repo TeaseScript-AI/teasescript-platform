@@ -1,47 +1,20 @@
-import type {
-  AssignmentTarget,
-  BinaryExpression,
-  Block,
-  CallExpression,
-  Expression,
-  Program,
-  Statement,
-} from "../ast.js";
+import type { Program } from "../ast.js";
+import { compileProgram } from "../instructions.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
-  assertListIndex,
-  callCollectionMethod,
-  getCollectionProperty,
-} from "./collections.js";
-import { resolveOutputSpeaker, toVisibleText } from "./display.js";
-import { Environment } from "./environment.js";
-import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
-import type {
-  InterpreterEvent,
-  SayEvent,
-} from "./events.js";
+  run,
+  type RuntimeBuiltinFunction,
+  type RuntimeCapabilityCall,
+} from "./engine.js";
+import type { RuntimeErrorInfo } from "./errors.js";
+import type { InterpreterEvent } from "./events.js";
 import type { RandomSource } from "./random.js";
 import {
-  isRuntimeList,
-  isRuntimeObject,
-  isRuntimeSet,
-  isRuntimeSpeaker,
-} from "./value-guards.js";
-import {
-  addSetValue,
-  cloneRuntimeValue,
-  createRuntimeList,
-  createRuntimeObject,
-  createRuntimeSet,
-  createRuntimeSpeaker,
-  runtimeEquals,
-  RuntimeCopyError,
-  RuntimeEqualityError,
-  RuntimeSetElementError,
-  type RuntimeSpeaker,
-  type RuntimeValue,
-  validateRuntimeValue,
-} from "./values.js";
+  fromHostRuntimeValue,
+  toHostRuntimeValue,
+} from "./serializable-values.js";
+import { createFreshRuntimeSnapshot } from "./state.js";
+import type { RuntimeValue } from "./values.js";
 import {
   createRuntimeWarning,
   type RuntimeWarningInfo,
@@ -70,6 +43,7 @@ export interface ExecutionResult {
   readonly exited: boolean;
 }
 
+/** Compatibility wrapper: AST -> serializable plan -> explicit runtime state. */
 export function execute(
   program: Program,
   options: InterpreterOptions,
@@ -78,15 +52,7 @@ export function execute(
 }
 
 export class Interpreter {
-  readonly #events: InterpreterEvent[] = [];
-  readonly #errors: RuntimeErrorInfo[] = [];
-  readonly #warnings: RuntimeWarningInfo[] = [];
-  readonly #warnedFallbackSpeakers = new Set<RuntimeSpeaker>();
-  readonly #globals = new Environment();
-  readonly #builtins: Readonly<Record<string, BuiltinFunction>>;
-  readonly #random: RandomSource;
-  #defaultSpeaker: RuntimeSpeaker | null = null;
-  #exited = false;
+  readonly #options: InterpreterOptions;
 
   public constructor(options: InterpreterOptions) {
     if (options === null || typeof options !== "object") {
@@ -95,663 +61,75 @@ export class Interpreter {
     if (typeof options.random?.next !== "function") {
       throw new TypeError("A deterministic random source is required.");
     }
-    this.#random = options.random;
-    this.#builtins = Object.freeze({ ...(options.builtins ?? {}) });
-
-    for (const [name, value] of Object.entries(options.globals ?? {})) {
-      const failure = validateRuntimeValue(value);
-      if (failure !== null) {
-        throw new TypeError(`Global ${JSON.stringify(name)} is not a runtime value.`);
-      }
-      if (!this.#globals.declare(name, cloneRuntimeValue(value))) {
-        throw new TypeError(`Duplicate global ${JSON.stringify(name)}.`);
-      }
-    }
+    this.#options = options;
   }
 
   public execute(program: Program): ExecutionResult {
-    try {
-      this.#executeStatements(program.statements, this.#globals);
-    } catch (error) {
-      if (error instanceof RuntimeFault) {
-        this.#errors.push(error.toInfo());
-      } else {
-        throw error;
-      }
-    }
+    const plan = compileProgram(program);
+    const globals = Object.fromEntries(
+      Object.entries(this.#options.globals ?? {}).map(([name, value]) => [
+        name,
+        fromHostRuntimeValue(value),
+      ]),
+    );
+    const builtins = Object.fromEntries(
+      Object.entries(this.#options.builtins ?? {}).map(([name, builtin]) => [
+        name,
+        adaptBuiltin(builtin),
+      ]),
+    );
+    const initial = createFreshRuntimeSnapshot(plan, { globals });
+    const execution = run(
+      plan,
+      initial,
+      { builtins, random: this.#options.random },
+      { instructionBudget: 100_000 },
+    );
+    const errors: RuntimeErrorInfo[] = execution.snapshot.failure === null
+      ? []
+      : [
+          Object.freeze({
+            code: execution.snapshot.failure.code,
+            message: execution.snapshot.failure.message,
+            span: createSourceSpan(
+              execution.snapshot.failure.span.start,
+              execution.snapshot.failure.span.end,
+            ),
+          }),
+        ];
+    const warnings = execution.events
+      .filter((event) => event.kind === "developerWarning")
+      .map((event) =>
+        createRuntimeWarning(event.code, event.message, event.span),
+      );
+    const compatibilityEvents = execution.events.filter(
+      (event) => event.kind === "say" || event.kind === "exit",
+    );
     return Object.freeze({
-      events: Object.freeze([...this.#events]),
-      errors: Object.freeze([...this.#errors]),
-      warnings: Object.freeze([...this.#warnings]),
-      exited: this.#exited,
+      events: Object.freeze(compatibilityEvents),
+      errors: Object.freeze(errors),
+      warnings: Object.freeze(warnings),
+      exited: compatibilityEvents.some((event) => event.kind === "exit"),
     });
   }
+}
 
-  #executeStatements(
-    statements: readonly Statement[],
-    environment: Environment,
-  ): void {
-    for (const statement of statements) {
-      if (this.#exited) return;
-      this.#executeStatement(statement, environment);
-    }
-  }
-
-  #executeStatement(statement: Statement, environment: Environment): void {
-    switch (statement.kind) {
-      case "letStatement": {
-        const value = this.#evaluate(statement.initializer, environment, null);
-        if (
-          !environment.declare(
-            statement.name.name,
-            this.#copyValue(value, statement.initializer.span),
-          )
-        ) {
-          throw this.#fault(
-            "TSR001",
-            `Variable '${statement.name.name}' is already visible in this scope.`,
-            statement.name.span,
-          );
-        }
-        return;
-      }
-      case "assignmentStatement": {
-        const value = this.#evaluate(statement.value, environment, null);
-        this.#assign(statement.target, value, environment, statement.value.span);
-        return;
-      }
-      case "expressionStatement":
-        this.#evaluate(statement.expression, environment, null);
-        return;
-      case "ifStatement": {
-        const condition = this.#evaluate(statement.condition, environment, null);
-        this.#expectBoolean(condition, statement.condition.span);
-        if (condition) this.#executeBlock(statement.thenBlock, environment);
-        else if (statement.elseBlock !== null) {
-          this.#executeBlock(statement.elseBlock, environment);
-        }
-        return;
-      }
-      case "speakerDeclaration": {
-        const speaker = createRuntimeSpeaker(statement.name.name);
-        if (!environment.declare(statement.name.name, speaker)) {
-          throw this.#fault(
-            "TSR001",
-            `Speaker '${statement.name.name}' is already visible in this scope.`,
-            statement.name.span,
-          );
-        }
-        for (const property of statement.properties) {
-          speaker.properties.set(
-            property.name.name,
-            this.#copyValue(
-              this.#evaluate(property.value, environment, speaker),
-              property.value.span,
-            ),
-          );
-        }
-        return;
-      }
-      case "speakerSetterStatement":
-        this.#defaultSpeaker = this.#getSpeaker(
-          statement.speaker.name,
-          environment,
-          statement.speaker.span,
-        );
-        return;
-      case "sayStatement": {
-        const speaker =
-          statement.speaker === null
-            ? this.#defaultSpeaker
-            : this.#getSpeaker(
-                statement.speaker.name,
-                environment,
-                statement.speaker.span,
-              );
-        const value = this.#evaluate(statement.value, environment, speaker);
-        const text = toVisibleText(value, statement.value.span, this.#random);
-        const resolvedSpeaker =
-          speaker === null
-            ? null
-            : resolveOutputSpeaker(speaker, statement.span);
-        if (
-          speaker !== null &&
-          resolvedSpeaker?.usedIdentifierFallback === true &&
-          !this.#warnedFallbackSpeakers.has(speaker)
-        ) {
-          this.#warnedFallbackSpeakers.add(speaker);
-          this.#warnings.push(
-            createRuntimeWarning(
-              "TSW001",
-              `Speaker '${speaker.identifier}' uses its identifier as the display name.`,
-              statement.span,
-            ),
-          );
-        }
-        const event: SayEvent = Object.freeze({
-          kind: "say",
-          speaker: resolvedSpeaker?.speaker ?? null,
-          text,
-          span: createSourceSpan(statement.span.start, statement.span.end),
-        });
-        this.#events.push(event);
-        return;
-      }
-      case "exitStatement":
-        this.#defaultSpeaker = null;
-        this.#exited = true;
-        this.#events.push(
-          Object.freeze({
-            kind: "exit",
-            span: createSourceSpan(statement.span.start, statement.span.end),
-          }),
-        );
-        return;
-    }
-  }
-
-  #executeBlock(block: Block, parent: Environment): void {
-    this.#executeStatements(block.statements, new Environment(parent));
-  }
-
-  #assign(
-    target: AssignmentTarget,
-    value: RuntimeValue,
-    environment: Environment,
-    valueSpan: SourceSpan,
-  ): void {
-    const copied = this.#copyValue(value, valueSpan);
-    if (target.kind === "identifier") {
-      if (!environment.assign(target.name, copied)) {
-        throw this.#fault(
-          "TSR002",
-          `Cannot assign to unknown variable '${target.name}'.`,
-          target.span,
-        );
-      }
-      return;
-    }
-    if (target.kind === "propertyAccessExpression") {
-      const object = this.#evaluate(target.object, environment, null);
-      if (isRuntimeObject(object) || isRuntimeSpeaker(object)) {
-        object.properties.set(target.property.name, copied);
-        return;
-      }
-      throw this.#fault(
-        "TSR003",
-        "Only objects and speakers have assignable properties.",
-        target.span,
-      );
-    }
-
-    const object = this.#evaluate(target.object, environment, null);
-    if (isRuntimeSet(object)) {
-      throw this.#fault(
-        "TSR004",
-        "Sets are not indexable.",
-        target.span,
-      );
-    }
-    if (!isRuntimeList(object)) {
-      throw this.#fault(
-        "TSR005",
-        "Only lists have assignable numeric indexes.",
-        target.span,
-      );
-    }
-    const index = this.#evaluateIndex(target.index, environment);
-    assertListIndex(object, index, target.index.span);
-    object.items[index] = copied;
-  }
-
-  #evaluate(
-    expression: Expression,
-    environment: Environment,
-    contextualSpeaker: RuntimeSpeaker | null,
-  ): RuntimeValue {
-    switch (expression.kind) {
-      case "booleanLiteral":
-      case "numberLiteral":
-      case "stringLiteral":
-      case "nullLiteral":
-        return expression.value;
-      case "identifier": {
-        if (expression.name === "speaker" && contextualSpeaker !== null) {
-          return contextualSpeaker;
-        }
-        const value = environment.get(expression.name);
-        if (value === undefined) {
-          throw this.#fault(
-            "TSR006",
-            `Unknown identifier '${expression.name}'.`,
-            expression.span,
-          );
-        }
-        return value;
-      }
-      case "listLiteral":
-        return createRuntimeList(
-          expression.elements.map((element) =>
-            this.#copyValue(
-              this.#evaluate(element, environment, contextualSpeaker),
-              element.span,
+function adaptBuiltin(builtin: BuiltinFunction): RuntimeBuiltinFunction {
+  return (call: RuntimeCapabilityCall) =>
+    fromHostRuntimeValue(
+      builtin(
+        Object.freeze({
+          positional: Object.freeze(call.positional.map(toHostRuntimeValue)),
+          named: Object.freeze(
+            Object.fromEntries(
+              Object.entries(call.named).map(([name, value]) => [
+                name,
+                toHostRuntimeValue(value),
+              ]),
             ),
           ),
-        );
-      case "setLiteral": {
-        const set = createRuntimeSet([]);
-        for (const element of expression.elements) {
-          const value = this.#evaluate(element, environment, contextualSpeaker);
-          try {
-            addSetValue(set, value);
-          } catch (error) {
-            this.#translateValueError(error, element.span);
-          }
-        }
-        return set;
-      }
-      case "objectLiteral": {
-        const entries = new Map<string, RuntimeValue>();
-        for (const property of expression.properties) {
-          if (entries.has(property.name.name)) {
-            throw this.#fault(
-              "TSR007",
-              `Duplicate object property '${property.name.name}'.`,
-              property.name.span,
-            );
-          }
-          entries.set(
-            property.name.name,
-            this.#copyValue(
-              this.#evaluate(
-                property.value,
-                environment,
-                contextualSpeaker,
-              ),
-              property.value.span,
-            ),
-          );
-        }
-        return createRuntimeObject(entries);
-      }
-      case "parenthesizedExpression":
-        return this.#evaluate(
-          expression.expression,
-          environment,
-          contextualSpeaker,
-        );
-      case "templateLiteral": {
-        let text = "";
-        for (const part of expression.parts) {
-          if (part.kind === "templateText") text += part.value;
-          else {
-            text += toVisibleText(
-              this.#evaluate(
-                part.expression,
-                environment,
-                contextualSpeaker,
-              ),
-              part.expression.span,
-              this.#random,
-            );
-          }
-        }
-        return text;
-      }
-      case "propertyAccessExpression": {
-        const object = this.#evaluate(
-          expression.object,
-          environment,
-          contextualSpeaker,
-        );
-        return this.#getProperty(object, expression.property.name, expression.span);
-      }
-      case "indexExpression": {
-        const object = this.#evaluate(
-          expression.object,
-          environment,
-          contextualSpeaker,
-        );
-        if (isRuntimeSet(object)) {
-          throw this.#fault("TSR004", "Sets are not indexable.", expression.span);
-        }
-        if (!isRuntimeList(object)) {
-          throw this.#fault(
-            "TSR008",
-            "Only lists support numeric indexing.",
-            expression.span,
-          );
-        }
-        const index = this.#evaluateIndex(expression.index, environment);
-        assertListIndex(object, index, expression.index.span);
-        return object.items[index]!;
-      }
-      case "callExpression":
-        return this.#evaluateCall(expression, environment, contextualSpeaker);
-      case "unaryExpression": {
-        const operand = this.#evaluate(
-          expression.operand,
-          environment,
-          contextualSpeaker,
-        );
-        if (expression.operator === "not") {
-          this.#expectBoolean(operand, expression.operand.span);
-          return !operand;
-        }
-        this.#expectNumber(operand, expression.operand.span);
-        return expression.operator === "+" ? operand : -operand;
-      }
-      case "binaryExpression":
-        return this.#evaluateBinary(
-          expression,
-          environment,
-          contextualSpeaker,
-        );
-    }
-  }
-
-  #evaluateBinary(
-    expression: BinaryExpression,
-    environment: Environment,
-    contextualSpeaker: RuntimeSpeaker | null,
-  ): RuntimeValue {
-    const left = this.#evaluate(
-      expression.left,
-      environment,
-      contextualSpeaker,
+          span: createSourceSpan(call.span.start, call.span.end),
+        }),
+      ),
     );
-    if (expression.operator === "and") {
-      this.#expectBoolean(left, expression.left.span);
-      return left
-        ? this.#booleanExpression(
-            expression.right,
-            environment,
-            contextualSpeaker,
-          )
-        : false;
-    }
-    if (expression.operator === "or") {
-      this.#expectBoolean(left, expression.left.span);
-      return left
-        ? true
-        : this.#booleanExpression(
-            expression.right,
-            environment,
-            contextualSpeaker,
-          );
-    }
-    const right = this.#evaluate(
-      expression.right,
-      environment,
-      contextualSpeaker,
-    );
-
-    if (expression.operator === "==" || expression.operator === "!=") {
-      try {
-        const equal = runtimeEquals(left, right);
-        return expression.operator === "==" ? equal : !equal;
-      } catch (error) {
-        this.#translateEqualityError(error, expression.span);
-      }
-    }
-
-    if (
-      expression.operator === "<" ||
-      expression.operator === "<=" ||
-      expression.operator === ">" ||
-      expression.operator === ">="
-    ) {
-      if (
-        (typeof left !== "number" || typeof right !== "number") &&
-        (typeof left !== "string" || typeof right !== "string")
-      ) {
-        throw this.#fault(
-          "TSR009",
-          "Comparison operands must both be numbers or both be strings.",
-          expression.span,
-        );
-      }
-      switch (expression.operator) {
-        case "<":
-          return left < right;
-        case "<=":
-          return left <= right;
-        case ">":
-          return left > right;
-        case ">=":
-          return left >= right;
-      }
-    }
-
-    this.#expectNumber(left, expression.left.span);
-    this.#expectNumber(right, expression.right.span);
-    switch (expression.operator) {
-      case "+":
-        return left + right;
-      case "-":
-        return left - right;
-      case "*":
-        return left * right;
-      case "/":
-        return left / right;
-      case "%":
-        return left % right;
-      default:
-        throw new Error(`Unhandled binary operator ${expression.operator}.`);
-    }
-  }
-
-  #booleanExpression(
-    expression: Expression,
-    environment: Environment,
-    contextualSpeaker: RuntimeSpeaker | null,
-  ): boolean {
-    const value = this.#evaluate(expression, environment, contextualSpeaker);
-    this.#expectBoolean(value, expression.span);
-    return value;
-  }
-
-  #evaluateCall(
-    expression: CallExpression,
-    environment: Environment,
-    contextualSpeaker: RuntimeSpeaker | null,
-  ): RuntimeValue {
-    const positional: RuntimeValue[] = [];
-    const named: Record<string, RuntimeValue> = {};
-    for (const argument of expression.arguments) {
-      const value = this.#copyValue(
-        this.#evaluate(argument.value, environment, contextualSpeaker),
-        argument.value.span,
-      );
-      if (argument.kind === "positionalArgument") positional.push(value);
-      else {
-        if (Object.hasOwn(named, argument.name.name)) {
-          throw this.#fault(
-            "TSR010",
-            `Duplicate named argument '${argument.name.name}'.`,
-            argument.name.span,
-          );
-        }
-        named[argument.name.name] = value;
-      }
-    }
-
-    if (expression.callee.kind === "identifier") {
-      const builtin = this.#builtins[expression.callee.name];
-      if (builtin === undefined) {
-        throw this.#fault(
-          "TSR011",
-          `Unknown built-in function '${expression.callee.name}'.`,
-          expression.callee.span,
-        );
-      }
-      let result: unknown;
-      try {
-        result = builtin(
-          Object.freeze({
-            positional: Object.freeze(positional),
-            named: Object.freeze(named),
-            span: createSourceSpan(expression.span.start, expression.span.end),
-          }),
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw this.#fault(
-          "TSR012",
-          `Built-in '${expression.callee.name}' failed: ${message}`,
-          expression.span,
-        );
-      }
-      const validationFailure = validateRuntimeValue(result);
-      if (validationFailure === "cyclic") {
-        throw this.#fault(
-          "TSR031",
-          "Cyclic script values are not supported.",
-          expression.span,
-        );
-      }
-      if (validationFailure === "setElement") {
-        throw this.#fault(
-          "TSR032",
-          "Sets may contain only string, boolean, integer, number, or null values.",
-          expression.span,
-        );
-      }
-      if (validationFailure === "invalid") {
-        throw this.#fault(
-          "TSR013",
-          `Built-in '${expression.callee.name}' returned an invalid value.`,
-          expression.span,
-        );
-      }
-      return this.#copyValue(result as RuntimeValue, expression.span);
-    }
-
-    if (expression.callee.kind === "propertyAccessExpression") {
-      const receiver = this.#evaluate(
-        expression.callee.object,
-        environment,
-        contextualSpeaker,
-      );
-      return this.#callMethod(
-        receiver,
-        expression.callee.property.name,
-        positional,
-        named,
-        expression.span,
-      );
-    }
-
-    throw this.#fault(
-      "TSR014",
-      "Only injected built-ins and supported collection methods are callable.",
-      expression.callee.span,
-    );
-  }
-
-  #callMethod(
-    receiver: RuntimeValue,
-    name: string,
-    positional: readonly RuntimeValue[],
-    named: Readonly<Record<string, RuntimeValue>>,
-    span: SourceSpan,
-  ): RuntimeValue {
-    const result = callCollectionMethod(
-      receiver,
-      name,
-      positional,
-      named,
-      span,
-    );
-    if (result.handled) return result.value;
-    throw this.#fault(
-      "TSR016",
-      `Unsupported method '${name}'.`,
-      span,
-    );
-  }
-
-  #getProperty(
-    value: RuntimeValue,
-    name: string,
-    span: SourceSpan,
-  ): RuntimeValue {
-    if (isRuntimeObject(value) || isRuntimeSpeaker(value)) {
-      let property = value.properties.get(name);
-      if (isRuntimeSpeaker(value) && property === undefined) {
-        if (name === "title") property = value.properties.get("shortTitle");
-        else if (name === "shortTitle") property = value.properties.get("title");
-      }
-      if (property === undefined) {
-        throw this.#fault("TSR017", `Unknown property '${name}'.`, span);
-      }
-      return property;
-    }
-    return getCollectionProperty(value, name, span, this.#random);
-  }
-
-  #getSpeaker(
-    name: string,
-    environment: Environment,
-    span: SourceSpan,
-  ): RuntimeSpeaker {
-    const value = environment.get(name);
-    if (!isRuntimeSpeaker(value)) {
-      throw this.#fault("TSR023", `'${name}' is not a declared speaker.`, span);
-    }
-    return value;
-  }
-
-  #evaluateIndex(expression: Expression, environment: Environment): number {
-    const value = this.#evaluate(expression, environment, null);
-    if (typeof value !== "number" || !Number.isInteger(value)) {
-      throw this.#fault(
-        "TSR024",
-        "A list index must be an integer.",
-        expression.span,
-      );
-    }
-    return value;
-  }
-
-  #expectBoolean(value: RuntimeValue, span: SourceSpan): asserts value is boolean {
-    if (typeof value !== "boolean") {
-      throw this.#fault("TSR026", "Expected a boolean value.", span);
-    }
-  }
-
-  #expectNumber(value: RuntimeValue, span: SourceSpan): asserts value is number {
-    if (typeof value !== "number") {
-      throw this.#fault("TSR027", "Expected a numeric value.", span);
-    }
-  }
-
-  #copyValue(value: RuntimeValue, span: SourceSpan): RuntimeValue {
-    try {
-      return cloneRuntimeValue(value);
-    } catch (error) {
-      this.#translateValueError(error, span);
-    }
-  }
-
-  #translateValueError(error: unknown, span: SourceSpan): never {
-    if (error instanceof RuntimeCopyError) {
-      throw this.#fault("TSR031", error.message, span);
-    }
-    if (error instanceof RuntimeSetElementError) {
-      throw this.#fault("TSR032", error.message, span);
-    }
-    throw error;
-  }
-
-  #translateEqualityError(error: unknown, span: SourceSpan): never {
-    if (error instanceof RuntimeEqualityError) {
-      throw this.#fault("TSR029", error.message, span);
-    }
-    throw error;
-  }
-
-  #fault(code: string, message: string, span: SourceSpan): RuntimeFault {
-    return new RuntimeFault(code, message, span);
-  }
 }

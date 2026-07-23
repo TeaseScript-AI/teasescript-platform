@@ -1,0 +1,895 @@
+import type {
+  AssignmentTargetPlan,
+  BinaryExpressionPlan,
+  ExpressionPlan,
+  Instruction,
+  InstructionPlan,
+} from "../instructions.js";
+import { validateInstructionPlan } from "../instructions.js";
+import { createSourceSpan, type SourceSpan } from "../source.js";
+import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
+import type {
+  CompleteEvent,
+  DeveloperWarningEvent,
+  ExitEvent,
+  InterpreterEvent,
+  OutputSpeaker,
+  RuntimeFailureEvent,
+  SayEvent,
+} from "./events.js";
+import { nextXorShift32, type RandomSource } from "./random.js";
+import {
+  addSerializableSetValue,
+  cloneSerializableValue,
+  createSerializableList,
+  createSerializableObject,
+  createSerializableSet,
+  getSerializableProperty,
+  removeSerializableSetValue,
+  serializableSetContains,
+  serializableEquals,
+  SerializableValueError,
+  setSerializableProperty,
+  validateSerializableValue,
+  type SerializableRuntimeList,
+  type SerializableRuntimeObject,
+  type SerializableRuntimeSet,
+  type SerializableRuntimeValue,
+  type SerializableSpeakerReference,
+} from "./serializable-values.js";
+import {
+  cloneRuntimeSnapshot,
+  validateRuntimeSnapshot,
+  type RuntimeBindingSnapshot,
+  type RuntimeSnapshot,
+  type RuntimeSpeakerSnapshot,
+} from "./state.js";
+
+export interface RuntimeCapabilityCall {
+  readonly positional: readonly SerializableRuntimeValue[];
+  readonly named: Readonly<Record<string, SerializableRuntimeValue>>;
+  readonly span: SourceSpan;
+}
+
+export type RuntimeBuiltinFunction = (
+  call: RuntimeCapabilityCall,
+) => SerializableRuntimeValue;
+
+export interface RuntimeCapabilities {
+  readonly builtins?: Readonly<Record<string, RuntimeBuiltinFunction>>;
+  /** Compatibility/testing override. Serializable xorshift32 is used otherwise. */
+  readonly random?: RandomSource;
+}
+
+export interface RuntimeOperationResult {
+  readonly snapshot: RuntimeSnapshot;
+  readonly events: readonly InterpreterEvent[];
+  readonly instructionsExecuted: number;
+}
+
+export interface RuntimeRunOptions {
+  readonly instructionBudget?: number;
+}
+
+export class RuntimeDataError extends Error {
+  public constructor(
+    readonly code: "TSR100" | "TSR101",
+    message: string,
+  ) {
+    super(message);
+    this.name = "RuntimeDataError";
+  }
+
+  public toInfo(): Readonly<{ code: string; message: string }> {
+    return Object.freeze({ code: this.code, message: this.message });
+  }
+}
+
+export function executeInstruction(
+  plan: InstructionPlan,
+  inputSnapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities = {},
+): RuntimeOperationResult {
+  assertExecutableData(plan, inputSnapshot);
+  const snapshot = cloneRuntimeSnapshot(inputSnapshot);
+  if (snapshot.status === "halted" || snapshot.status === "failed") {
+    return result(snapshot, [], 0);
+  }
+  const instruction = plan.instructions[snapshot.nextInstruction];
+  if (instruction === undefined) {
+    snapshot.status = "halted";
+    return result(snapshot, [], 0);
+  }
+
+  snapshot.status = "running";
+  const events: InterpreterEvent[] = [];
+  const evaluator = new Evaluator(snapshot, capabilities);
+  try {
+    executePlannedInstruction(instruction, snapshot, evaluator, events);
+    if (
+      snapshot.status === "running" &&
+      snapshot.nextInstruction === plan.instructions.length
+    ) {
+      snapshot.status = "halted";
+      events.push(createCompleteEvent(snapshot, instruction.span));
+    }
+  } catch (error) {
+    if (!(error instanceof RuntimeFault)) throw error;
+    failSnapshot(snapshot, error.toInfo(), events);
+  } finally {
+    snapshot.contextualSpeaker = null;
+  }
+  return result(snapshot, events, 1);
+}
+
+export function stepToEvent(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities = {},
+  options: RuntimeRunOptions = {},
+): RuntimeOperationResult {
+  const budget = instructionBudget(options.instructionBudget);
+  let current = cloneRuntimeSnapshot(snapshot);
+  const events: InterpreterEvent[] = [];
+  let instructionsExecuted = 0;
+  while (
+    current.status !== "halted" &&
+    current.status !== "failed" &&
+    events.length === 0
+  ) {
+    if (instructionsExecuted >= budget) {
+      const budgetResult = failForBudget(plan, current);
+      events.push(...budgetResult.events);
+      current = budgetResult.snapshot;
+      break;
+    }
+    const operation = executeInstruction(plan, current, capabilities);
+    current = operation.snapshot;
+    instructionsExecuted += operation.instructionsExecuted;
+    events.push(...operation.events);
+  }
+  return result(current, events, instructionsExecuted);
+}
+
+export function run(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities = {},
+  options: RuntimeRunOptions = {},
+): RuntimeOperationResult {
+  const budget = instructionBudget(options.instructionBudget);
+  let current = cloneRuntimeSnapshot(snapshot);
+  const events: InterpreterEvent[] = [];
+  let instructionsExecuted = 0;
+  while (current.status !== "halted" && current.status !== "failed") {
+    if (instructionsExecuted >= budget) {
+      const budgetResult = failForBudget(plan, current);
+      current = budgetResult.snapshot;
+      events.push(...budgetResult.events);
+      break;
+    }
+    const operation = executeInstruction(plan, current, capabilities);
+    current = operation.snapshot;
+    instructionsExecuted += operation.instructionsExecuted;
+    events.push(...operation.events);
+  }
+  return result(current, events, instructionsExecuted);
+}
+
+function executePlannedInstruction(
+  instruction: Instruction,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  switch (instruction.kind) {
+    case "declareSpeaker": {
+      if (findBinding(snapshot, instruction.name) !== undefined) {
+        throw fault("TSR001", `Speaker '${instruction.name}' is already visible in this scope.`, instruction.span);
+      }
+      const speaker: RuntimeSpeakerSnapshot = {
+        id: snapshot.nextSpeakerId,
+        identifier: instruction.name,
+        properties: [],
+      };
+      snapshot.nextSpeakerId += 1;
+      snapshot.speakers.push(speaker);
+      currentFrame(snapshot).bindings.push({
+        name: instruction.name,
+        value: {
+          kind: "speakerReference",
+          speakerId: speaker.id,
+          identifier: instruction.name,
+        },
+      });
+      snapshot.contextualSpeaker = speaker.id;
+      for (const property of instruction.properties) {
+        if (speaker.properties.some((item) => item.name === property.name)) {
+          throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
+        }
+        speaker.properties.push({
+          name: property.name,
+          value: cloneSerializableValue(evaluator.evaluate(property.value)),
+        });
+      }
+      advance(snapshot);
+      return;
+    }
+    case "setDefaultSpeaker": {
+      const speaker = evaluator.speakerByName(instruction.name, instruction.span);
+      snapshot.defaultSpeaker = speaker.id;
+      advance(snapshot);
+      return;
+    }
+    case "enterScope":
+      snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });
+      snapshot.nextScopeId += 1;
+      advance(snapshot);
+      return;
+    case "leaveScope":
+      if (snapshot.frames.length === 1) {
+        throw fault("TSR033", "Cannot leave the root lexical scope.", instruction.span);
+      }
+      snapshot.frames.pop();
+      advance(snapshot);
+      return;
+    case "declareBinding": {
+      if (findBinding(snapshot, instruction.name) !== undefined) {
+        throw fault("TSR001", `Variable '${instruction.name}' is already visible in this scope.`, instruction.span);
+      }
+      currentFrame(snapshot).bindings.push({
+        name: instruction.name,
+        value: cloneSerializableValue(evaluator.evaluate(instruction.value)),
+      });
+      advance(snapshot);
+      return;
+    }
+    case "assign":
+      evaluator.assign(instruction.target, evaluator.evaluate(instruction.value));
+      advance(snapshot);
+      return;
+    case "evaluate":
+      evaluator.evaluate(instruction.expression);
+      advance(snapshot);
+      return;
+    case "jumpIfFalse": {
+      const condition = evaluator.evaluate(instruction.condition);
+      if (typeof condition !== "boolean") {
+        throw fault("TSR026", "Expected a boolean value.", instruction.condition.span);
+      }
+      snapshot.nextInstruction = condition
+        ? snapshot.nextInstruction + 1
+        : instruction.target;
+      return;
+    }
+    case "jump":
+      snapshot.nextInstruction = instruction.target;
+      return;
+    case "say": {
+      const speaker =
+        instruction.speaker !== null
+          ? evaluator.speakerByName(instruction.speaker, instruction.span)
+          : snapshot.defaultSpeaker === null
+            ? null
+            : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
+      snapshot.contextualSpeaker = speaker?.id ?? null;
+      const text = evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span);
+      const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
+      events.push(
+        Object.freeze({
+          kind: "say",
+          sequence: takeSequence(snapshot),
+          speaker: output,
+          text,
+          span: copySpan(instruction.span),
+        } satisfies SayEvent),
+      );
+      advance(snapshot);
+      return;
+    }
+    case "exit":
+      snapshot.defaultSpeaker = null;
+      snapshot.status = "halted";
+      snapshot.nextInstruction += 1;
+      events.push(
+        Object.freeze({
+          kind: "exit",
+          sequence: takeSequence(snapshot),
+          span: copySpan(instruction.span),
+        } satisfies ExitEvent),
+      );
+      return;
+  }
+}
+
+class Evaluator {
+  readonly #builtins: Readonly<Record<string, RuntimeBuiltinFunction>>;
+
+  public constructor(
+    private readonly snapshot: RuntimeSnapshot,
+    private readonly capabilities: RuntimeCapabilities,
+  ) {
+    this.#builtins = capabilities.builtins ?? {};
+  }
+
+  public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
+    switch (expression.kind) {
+      case "literal":
+        return expression.value;
+      case "identifier": {
+        if (expression.name === "speaker" && this.snapshot.contextualSpeaker !== null) {
+          const speaker = this.speakerById(
+            this.snapshot.contextualSpeaker,
+            expression.span,
+          );
+          return {
+            kind: "speakerReference",
+            speakerId: speaker.id,
+            identifier: speaker.identifier,
+          };
+        }
+        const binding = findBinding(this.snapshot, expression.name);
+        if (binding === undefined) {
+          throw fault("TSR006", `Unknown identifier '${expression.name}'.`, expression.span);
+        }
+        return binding.value;
+      }
+      case "list":
+        return createSerializableList(expression.elements.map((item) => this.evaluate(item)));
+      case "set": {
+        const set = createSerializableSet([]);
+        for (const element of expression.elements) {
+          try {
+            addSerializableSetValue(set, this.evaluate(element));
+          } catch (error) {
+            throw this.#translateValueError(error, element.span);
+          }
+        }
+        return set;
+      }
+      case "object": {
+        const names = new Set<string>();
+        for (const property of expression.properties) {
+          if (names.has(property.name)) {
+            throw fault("TSR007", `Duplicate object property '${property.name}'.`, property.span);
+          }
+          names.add(property.name);
+        }
+        return createSerializableObject(
+          expression.properties.map((property) => ({
+            name: property.name,
+            value: this.evaluate(property.value),
+          })),
+        );
+      }
+      case "group":
+        return this.evaluate(expression.expression);
+      case "template": {
+        let text = "";
+        for (const part of expression.parts) {
+          text +=
+            part.kind === "text"
+              ? part.value
+              : this.visibleText(this.evaluate(part.expression), part.expression.span);
+        }
+        return text;
+      }
+      case "property":
+        return this.#getProperty(this.evaluate(expression.object), expression.name, expression.span);
+      case "index": {
+        const object = this.evaluate(expression.object);
+        if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", expression.span);
+        if (!isList(object)) {
+          throw fault("TSR008", "Only lists support numeric indexing.", expression.span);
+        }
+        const index = this.#index(this.evaluate(expression.index), expression.index.span);
+        this.#assertIndex(object, index, expression.index.span);
+        return object.items[index]!;
+      }
+      case "call":
+        return this.#call(expression);
+      case "unary": {
+        const operand = this.evaluate(expression.operand);
+        if (expression.operator === "not") {
+          if (typeof operand !== "boolean") throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
+          return !operand;
+        }
+        const number = this.#number(operand, expression.operand.span);
+        return this.#finite(expression.operator === "+" ? number : -number, expression.span);
+      }
+      case "binary":
+        return this.#binary(expression);
+    }
+  }
+
+  public assign(target: AssignmentTargetPlan, value: SerializableRuntimeValue): void {
+    const copied = cloneSerializableValue(value);
+    if (target.kind === "identifier") {
+      const binding = findBinding(this.snapshot, target.name);
+      if (binding === undefined) {
+        throw fault("TSR002", `Cannot assign to unknown variable '${target.name}'.`, target.span);
+      }
+      if (isSpeakerReference(binding.value)) {
+        throw fault("TSR034", `Cannot replace speaker '${target.name}'.`, target.span);
+      }
+      binding.value = copied;
+      return;
+    }
+    const object = this.evaluate(target.object);
+    if (target.kind === "property") {
+      if (isObject(object)) {
+        setSerializableProperty(object, target.name, copied);
+        return;
+      }
+      if (isSpeakerReference(object)) {
+        setSpeakerProperty(this.speakerById(object.speakerId, target.span), target.name, copied);
+        return;
+      }
+      throw fault("TSR003", "Only objects and speakers have assignable properties.", target.span);
+    }
+    if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
+    if (!isList(object)) throw fault("TSR005", "Only lists have assignable numeric indexes.", target.span);
+    const index = this.#index(this.evaluate(target.index), target.index.span);
+    this.#assertIndex(object, index, target.index.span);
+    object.items[index] = copied;
+  }
+
+  public speakerByName(name: string, span: SourceSpan): RuntimeSpeakerSnapshot {
+    const binding = findBinding(this.snapshot, name);
+    if (binding === undefined || !isSpeakerReference(binding.value)) {
+      throw fault("TSR023", `'${name}' is not a declared speaker.`, span);
+    }
+    return this.speakerById(binding.value.speakerId, span);
+  }
+
+  public speakerById(id: number, span: SourceSpan): RuntimeSpeakerSnapshot {
+    const speaker = this.snapshot.speakers.find((item) => item.id === id);
+    if (speaker === undefined) throw fault("TSR023", `Speaker ID '${id}' is not declared.`, span);
+    return speaker;
+  }
+
+  public outputSpeaker(
+    speaker: RuntimeSpeakerSnapshot,
+    span: SourceSpan,
+    events: InterpreterEvent[],
+  ): OutputSpeaker {
+    const explicit = optionalSpeakerString(speaker, "displayName", span);
+    let displayName: string;
+    let fallback = false;
+    if (explicit !== null) {
+      if (explicit.length === 0) {
+        throw fault("TSR022", `Speaker '${speaker.identifier}' has no resolvable display name.`, span);
+      }
+      displayName = explicit;
+    } else {
+      const derived = [
+        optionalSpeakerString(speaker, "title", span) ??
+          optionalSpeakerString(speaker, "shortTitle", span),
+        optionalSpeakerString(speaker, "firstName", span),
+        optionalSpeakerString(speaker, "lastName", span),
+      ]
+        .filter((part): part is string => part !== null && part.length > 0)
+        .join(" ");
+      displayName = derived.length === 0 ? speaker.identifier : derived;
+      fallback = derived.length === 0;
+    }
+    if (fallback && !this.snapshot.warnedSpeakerIds.includes(speaker.id)) {
+      this.snapshot.warnedSpeakerIds.push(speaker.id);
+      events.push(
+        Object.freeze({
+          kind: "developerWarning",
+          sequence: takeSequence(this.snapshot),
+          severity: "warning",
+          code: "TSW001",
+          message: `Speaker '${speaker.identifier}' uses its identifier as the display name.`,
+          span: copySpan(span),
+        } satisfies DeveloperWarningEvent),
+      );
+    }
+    return Object.freeze({
+      identifier: speaker.identifier,
+      displayName,
+      color: optionalSpeakerString(speaker, "color", span),
+      font: optionalSpeakerString(speaker, "font", span),
+      avatar: optionalSpeakerString(speaker, "avatar", span),
+    });
+  }
+
+  public visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
+    if (isList(value)) return this.visibleText(this.#randomItem(value.items, span), span);
+    if (typeof value === "string") return value;
+    if (typeof value === "number") return String(value);
+    if (typeof value === "boolean") return value ? "true" : "false";
+    if (value === null) return "null";
+    throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
+  }
+
+  #binary(expression: BinaryExpressionPlan): SerializableRuntimeValue {
+    const left = this.evaluate(expression.left);
+    if (expression.operator === "and") {
+      if (typeof left !== "boolean") throw fault("TSR026", "Expected a boolean value.", expression.left.span);
+      if (!left) return false;
+      const right = this.evaluate(expression.right);
+      if (typeof right !== "boolean") throw fault("TSR026", "Expected a boolean value.", expression.right.span);
+      return right;
+    }
+    if (expression.operator === "or") {
+      if (typeof left !== "boolean") throw fault("TSR026", "Expected a boolean value.", expression.left.span);
+      if (left) return true;
+      const right = this.evaluate(expression.right);
+      if (typeof right !== "boolean") throw fault("TSR026", "Expected a boolean value.", expression.right.span);
+      return right;
+    }
+    const right = this.evaluate(expression.right);
+    if (expression.operator === "==" || expression.operator === "!=") {
+      try {
+        const equal = serializableEquals(left, right);
+        return expression.operator === "==" ? equal : !equal;
+      } catch (error) {
+        throw this.#translateValueError(error, expression.span);
+      }
+    }
+    if (["<", "<=", ">", ">="].includes(expression.operator)) {
+      if (
+        (typeof left !== "number" || typeof right !== "number") &&
+        (typeof left !== "string" || typeof right !== "string")
+      ) {
+        throw fault("TSR009", "Comparison operands must both be numbers or both be strings.", expression.span);
+      }
+      if (expression.operator === "<") return left < right;
+      if (expression.operator === "<=") return left <= right;
+      if (expression.operator === ">") return left > right;
+      return left >= right;
+    }
+    const leftNumber = this.#number(left, expression.left.span);
+    const rightNumber = this.#number(right, expression.right.span);
+    switch (expression.operator) {
+      case "+": return this.#finite(leftNumber + rightNumber, expression.span);
+      case "-": return this.#finite(leftNumber - rightNumber, expression.span);
+      case "*": return this.#finite(leftNumber * rightNumber, expression.span);
+      case "/": return this.#finite(leftNumber / rightNumber, expression.span);
+      case "%": return this.#finite(leftNumber % rightNumber, expression.span);
+      default: throw fault("TSR035", "Unsupported binary operation.", expression.span);
+    }
+  }
+
+  #call(expression: Extract<ExpressionPlan, { kind: "call" }>): SerializableRuntimeValue {
+    const positional: SerializableRuntimeValue[] = [];
+    const named: Record<string, SerializableRuntimeValue> = {};
+    for (const argument of expression.arguments) {
+      const value = cloneSerializableValue(this.evaluate(argument.value));
+      if (argument.kind === "positional") positional.push(value);
+      else {
+        if (Object.hasOwn(named, argument.name)) {
+          throw fault("TSR010", `Duplicate named argument '${argument.name}'.`, argument.span);
+        }
+        named[argument.name] = value;
+      }
+    }
+    if (expression.callee.kind === "identifier") {
+      const builtin = this.#builtins[expression.callee.name];
+      if (builtin === undefined) {
+        throw fault("TSR011", `Unknown built-in function '${expression.callee.name}'.`, expression.callee.span);
+      }
+      let returned: SerializableRuntimeValue;
+      try {
+        returned = builtin(Object.freeze({
+          positional: Object.freeze(positional),
+          named: Object.freeze(named),
+          span: copySpan(expression.span),
+        }));
+      } catch (error) {
+        if (error instanceof SerializableValueError) {
+          const code =
+            error.code === "cyclic"
+              ? "TSR031"
+              : error.code === "setElement"
+                ? "TSR032"
+                : "TSR013";
+          throw fault(code, error.message, expression.span);
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        throw fault("TSR012", `Built-in '${expression.callee.name}' failed: ${message}`, expression.span);
+      }
+      const failure = validateSerializableValue(returned);
+      if (failure !== null) {
+        throw fault("TSR013", `Built-in '${expression.callee.name}' returned an invalid value: ${failure}`, expression.span);
+      }
+      return cloneSerializableValue(returned);
+    }
+    if (expression.callee.kind === "property") {
+      const receiver = this.evaluate(expression.callee.object);
+      return this.#callCollection(receiver, expression.callee.name, positional, named, expression.span);
+    }
+    throw fault("TSR014", "Only injected built-ins and supported collection methods are callable.", expression.callee.span);
+  }
+
+  #callCollection(
+    receiver: SerializableRuntimeValue,
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    if (!isList(receiver) && !isSet(receiver)) throw fault("TSR016", `Unsupported method '${name}'.`, span);
+    if (Object.keys(named).length !== 0) throw fault("TSR015", "Collection methods accept positional arguments only.", span);
+    const expect = (count: number): void => {
+      if (positional.length !== count) throw fault("TSR028", `Expected ${count} positional argument(s), received ${positional.length}.`, span);
+    };
+    try {
+      if (isSet(receiver)) {
+        switch (name) {
+          case "add": expect(1); addSerializableSetValue(receiver, positional[0]!); return null;
+          case "remove": expect(1); removeSerializableSetValue(receiver, positional[0]!); return null;
+          case "clear": expect(0); receiver.items.length = 0; return null;
+          case "contains": expect(1); return serializableSetContains(receiver, positional[0]!);
+          case "toList": expect(0); return createSerializableList(receiver.items);
+          default: throw fault("TSR016", `Unsupported method '${name}'.`, span);
+        }
+      }
+      switch (name) {
+        case "add": expect(1); receiver.items.push(cloneSerializableValue(positional[0]!)); return null;
+        case "remove": {
+          expect(1);
+          const index = this.#findValue(receiver.items, positional[0]!, span);
+          if (index >= 0) receiver.items.splice(index, 1);
+          return null;
+        }
+        case "removeFirst": expect(0); receiver.items.shift(); return null;
+        case "removeLast": expect(0); receiver.items.pop(); return null;
+        case "clear": expect(0); receiver.items.length = 0; return null;
+        case "contains": expect(1); return this.#findValue(receiver.items, positional[0]!, span) >= 0;
+        case "toSet": expect(0); return createSerializableSet(receiver.items);
+        default: throw fault("TSR016", `Unsupported method '${name}'.`, span);
+      }
+    } catch (error) {
+      if (error instanceof RuntimeFault) throw error;
+      throw this.#translateValueError(error, span);
+    }
+  }
+
+  #getCollectionProperty(
+    value: SerializableRuntimeList | SerializableRuntimeSet,
+    name: string,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    if (name === "length") return value.items.length;
+    if (name === "first" || name === "last") {
+      if (value.items.length === 0) throw fault("TSR018", `Cannot read '.${name}' from an empty collection.`, span);
+      return value.items[name === "first" ? 0 : value.items.length - 1]!;
+    }
+    if (name === "random") return this.#randomItem(value.items, span);
+    throw fault("TSR017", `Unknown collection property '${name}'.`, span);
+  }
+
+  #getSpeakerProperty(
+    speaker: RuntimeSpeakerSnapshot,
+    name: string,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    let property = speaker.properties.find((item) => item.name === name)?.value;
+    if (property === undefined && name === "title") {
+      property = speaker.properties.find((item) => item.name === "shortTitle")?.value;
+    } else if (property === undefined && name === "shortTitle") {
+      property = speaker.properties.find((item) => item.name === "title")?.value;
+    }
+    if (property === undefined) throw fault("TSR017", `Unknown property '${name}'.`, span);
+    return property;
+  }
+
+  #getObjectProperty(
+    object: SerializableRuntimeObject,
+    name: string,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const value = getSerializableProperty(object, name);
+    if (value === undefined) throw fault("TSR017", `Unknown property '${name}'.`, span);
+    return value;
+  }
+
+  #findRandom(span: SourceSpan): number {
+    const random = this.capabilities.random?.next() ?? nextXorShift32(this.snapshot.rng);
+    if (!Number.isFinite(random) || random < 0 || random >= 1) {
+      throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
+    }
+    return random;
+  }
+
+  #findValue(
+    items: readonly SerializableRuntimeValue[],
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): number {
+    for (let index = 0; index < items.length; index += 1) {
+      try {
+        if (serializableEquals(items[index]!, value)) return index;
+      } catch (error) {
+        throw this.#translateValueError(error, span);
+      }
+    }
+    return -1;
+  }
+
+  #randomItem(
+    items: readonly SerializableRuntimeValue[],
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    if (items.length === 0) throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
+    return items[Math.floor(this.#findRandom(span) * items.length)]!;
+  }
+
+  #getProperty(value: SerializableRuntimeValue, name: string, span: SourceSpan): SerializableRuntimeValue {
+    if (isObject(value)) return this.#getObjectProperty(value, name, span);
+    if (isSpeakerReference(value)) {
+      return this.#getSpeakerProperty(
+        this.speakerById(value.speakerId, span),
+        name,
+        span,
+      );
+    }
+    if (isList(value) || isSet(value)) return this.#getCollectionProperty(value, name, span);
+    throw fault("TSR017", `Value has no property '${name}'.`, span);
+  }
+
+  #index(value: SerializableRuntimeValue, span: SourceSpan): number {
+    if (typeof value !== "number" || !Number.isInteger(value)) throw fault("TSR024", "A list index must be an integer.", span);
+    return value;
+  }
+
+  #assertIndex(list: SerializableRuntimeList, index: number, span: SourceSpan): void {
+    if (index < 0 || index >= list.items.length) throw fault("TSR025", `List index ${index} is outside the valid range.`, span);
+  }
+
+  #number(value: SerializableRuntimeValue, span: SourceSpan): number {
+    if (typeof value !== "number") throw fault("TSR027", "Expected a numeric value.", span);
+    return value;
+  }
+
+  #finite(value: number, span: SourceSpan): number {
+    if (!Number.isFinite(value)) throw fault("TSR036", "Numeric operation produced a non-finite result.", span);
+    return value;
+  }
+
+  #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
+    if (error instanceof SerializableValueError) {
+      const code = error.code === "setElement" ? "TSR032" : error.code === "equality" ? "TSR029" : "TSR031";
+      return fault(code, error.message, span);
+    }
+    throw error;
+  }
+}
+
+function optionalSpeakerString(
+  speaker: RuntimeSpeakerSnapshot,
+  name: string,
+  span: SourceSpan,
+): string | null {
+  const value = speaker.properties.find((property) => property.name === name)?.value;
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") throw fault("TSR030", `Speaker property '${name}' must be a string for output.`, span);
+  return value;
+}
+
+function setSpeakerProperty(
+  speaker: RuntimeSpeakerSnapshot,
+  name: string,
+  value: SerializableRuntimeValue,
+): void {
+  const property = speaker.properties.find((item) => item.name === name);
+  if (property === undefined) speaker.properties.push({ name, value: cloneSerializableValue(value) });
+  else property.value = cloneSerializableValue(value);
+}
+
+function findBinding(snapshot: RuntimeSnapshot, name: string): RuntimeBindingSnapshot | undefined {
+  for (let index = snapshot.frames.length - 1; index >= 0; index -= 1) {
+    const binding = snapshot.frames[index]!.bindings.find((item) => item.name === name);
+    if (binding !== undefined) return binding;
+  }
+  return undefined;
+}
+
+function currentFrame(snapshot: RuntimeSnapshot) {
+  return snapshot.frames.at(-1)!;
+}
+
+function advance(snapshot: RuntimeSnapshot): void {
+  snapshot.nextInstruction += 1;
+}
+
+function takeSequence(snapshot: RuntimeSnapshot): number {
+  const sequence = snapshot.nextEventSequence;
+  snapshot.nextEventSequence += 1;
+  return sequence;
+}
+
+function createCompleteEvent(snapshot: RuntimeSnapshot, span: SourceSpan): CompleteEvent {
+  return Object.freeze({
+    kind: "complete",
+    sequence: takeSequence(snapshot),
+    span: copySpan(span),
+  });
+}
+
+function failSnapshot(
+  snapshot: RuntimeSnapshot,
+  failure: RuntimeErrorInfo,
+  events: InterpreterEvent[],
+): void {
+  snapshot.status = "failed";
+  snapshot.failure = {
+    code: failure.code,
+    message: failure.message,
+    span: copySpan(failure.span),
+  };
+  events.push(
+    Object.freeze({
+      kind: "runtimeFailure",
+      sequence: takeSequence(snapshot),
+      code: failure.code,
+      message: failure.message,
+      span: copySpan(failure.span),
+    } satisfies RuntimeFailureEvent),
+  );
+}
+
+function failForBudget(plan: InstructionPlan, snapshot: RuntimeSnapshot): RuntimeOperationResult {
+  assertExecutableData(plan, snapshot);
+  const copy = cloneRuntimeSnapshot(snapshot);
+  const span = plan.instructions[copy.nextInstruction]?.span ?? plan.sourceSpan;
+  const events: InterpreterEvent[] = [];
+  failSnapshot(copy, { code: "TSR037", message: "Runtime instruction budget exceeded.", span }, events);
+  return result(copy, events, 0);
+}
+
+function assertExecutableData(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {
+  const planValidation = validateInstructionPlan(plan);
+  if (!planValidation.valid) {
+    throw new RuntimeDataError("TSR100", planValidation.errors[0]?.message ?? "Malformed instruction plan.");
+  }
+  const snapshotValidation = validateRuntimeSnapshot(snapshot, plan);
+  if (!snapshotValidation.valid) {
+    throw new RuntimeDataError("TSR101", snapshotValidation.errors[0] ?? "Malformed runtime snapshot.");
+  }
+}
+
+function instructionBudget(value: number | undefined): number {
+  const budget = value ?? 10_000;
+  if (!Number.isInteger(budget) || budget < 1) throw new RangeError("Instruction budget must be a positive integer.");
+  return budget;
+}
+
+function result(
+  snapshot: RuntimeSnapshot,
+  events: readonly InterpreterEvent[],
+  instructionsExecuted: number,
+): RuntimeOperationResult {
+  return Object.freeze({
+    snapshot,
+    events: Object.freeze([...events]),
+    instructionsExecuted,
+  });
+}
+
+function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+  return new RuntimeFault(code, message, span);
+}
+
+function copySpan(span: SourceSpan): SourceSpan {
+  return createSourceSpan(span.start, span.end);
+}
+
+function isList(value: SerializableRuntimeValue): value is SerializableRuntimeList {
+  return typeof value === "object" && value !== null && value.kind === "list";
+}
+
+function isSet(value: SerializableRuntimeValue): value is SerializableRuntimeSet {
+  return typeof value === "object" && value !== null && value.kind === "set";
+}
+
+function isObject(value: SerializableRuntimeValue): value is SerializableRuntimeObject {
+  return typeof value === "object" && value !== null && value.kind === "object";
+}
+
+function isSpeakerReference(value: SerializableRuntimeValue): value is SerializableSpeakerReference {
+  return typeof value === "object" && value !== null && value.kind === "speakerReference";
+}
