@@ -163,9 +163,10 @@ test("rejects list, object, and set values in set literals at element spans", ()
   }
 });
 
-test("rejects composite values through set add and list toSet", () => {
+test("rejects composite values through set add, contains, and list toSet", () => {
   for (const source of [
     "let values = set[]\nvalues.add([1])",
+    "let values = set[1]\nlet found = values.contains([1])",
     "let source = [{ value: 1 }]\nlet values = source.toSet()",
     "let source = [set[1]]\nlet values = source.toSet()",
   ]) {

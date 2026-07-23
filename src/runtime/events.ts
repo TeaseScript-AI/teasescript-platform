@@ -10,6 +10,7 @@ export interface OutputSpeaker {
 
 export interface SayEvent {
   readonly kind: "say";
+  readonly sequence: number;
   readonly speaker: OutputSpeaker | null;
   readonly text: string;
   readonly span: SourceSpan;
@@ -17,7 +18,36 @@ export interface SayEvent {
 
 export interface ExitEvent {
   readonly kind: "exit";
+  readonly sequence: number;
   readonly span: SourceSpan;
 }
 
-export type InterpreterEvent = SayEvent | ExitEvent;
+export interface CompleteEvent {
+  readonly kind: "complete";
+  readonly sequence: number;
+  readonly span: SourceSpan;
+}
+
+export interface DeveloperWarningEvent {
+  readonly kind: "developerWarning";
+  readonly sequence: number;
+  readonly severity: "warning";
+  readonly code: string;
+  readonly message: string;
+  readonly span: SourceSpan;
+}
+
+export interface RuntimeFailureEvent {
+  readonly kind: "runtimeFailure";
+  readonly sequence: number;
+  readonly code: string;
+  readonly message: string;
+  readonly span: SourceSpan;
+}
+
+export type InterpreterEvent =
+  | SayEvent
+  | ExitEvent
+  | CompleteEvent
+  | DeveloperWarningEvent
+  | RuntimeFailureEvent;
