@@ -45,6 +45,8 @@ import {
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeLoopFrameSnapshot,
+  type RuntimeCallFrameSnapshot,
+  type RuntimeTemporarySnapshot,
 } from "./state.js";
 
 export interface RuntimeCapabilityCall {
@@ -107,10 +109,11 @@ export function executeInstruction(
   const events: InterpreterEvent[] = [];
   const evaluator = new Evaluator(snapshot, capabilities);
   try {
-    executePlannedInstruction(instruction, snapshot, evaluator, events);
+    executePlannedInstruction(plan, instruction, snapshot, evaluator, events);
     if (
       snapshot.status === "running" &&
-      snapshot.nextInstruction === plan.instructions.length
+      snapshot.callFrames.length === 0 &&
+      snapshot.nextInstruction === plan.rootEndInstruction
     ) {
       snapshot.status = "halted";
       events.push(createCompleteEvent(snapshot, instruction.span));
@@ -179,6 +182,7 @@ export function run(
 }
 
 function executePlannedInstruction(
+  plan: InstructionPlan,
   instruction: Instruction,
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
@@ -214,6 +218,18 @@ function executePlannedInstruction(
           value: cloneSerializableValue(evaluator.evaluate(property.value)),
         });
       }
+      advance(snapshot);
+      return;
+    }
+    case "setDeclaredSpeakerProperty": {
+      const speaker = evaluator.speakerByName(instruction.speaker, instruction.span);
+      if (speaker.properties.some((property) => property.name === instruction.name)) {
+        throw fault("TSR007", `Duplicate speaker property '${instruction.name}'.`, instruction.span);
+      }
+      speaker.properties.push({
+        name: instruction.name,
+        value: cloneSerializableValue(evaluator.evaluate(instruction.value)),
+      });
       advance(snapshot);
       return;
     }
@@ -273,6 +289,47 @@ function executePlannedInstruction(
     case "loopControl":
       executeLoopControl(instruction, snapshot);
       return;
+    case "storeTemporary": {
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.expectBoolean && typeof value !== "boolean") {
+        throw fault("TSR026", "Expected a boolean value.", instruction.value.span);
+      }
+      setTemporary(snapshot.temporaries, instruction.temporaryId, value);
+      advance(snapshot);
+      return;
+    }
+    case "clearTemporary": {
+      const index = snapshot.temporaries.findIndex(
+        (temporary) => temporary.id === instruction.temporaryId,
+      );
+      if (index >= 0) snapshot.temporaries.splice(index, 1);
+      advance(snapshot);
+      return;
+    }
+    case "callFunction":
+      enterFunction(plan, instruction, snapshot);
+      return;
+    case "bindSuppliedParameter":
+      bindSuppliedParameter(plan, instruction, snapshot);
+      return;
+    case "beginFunctionDefaults":
+      beginFunctionDefaults(plan, instruction.functionId, snapshot, instruction.span);
+      return;
+    case "prepareParameterDefault":
+      prepareParameterDefault(plan, instruction, snapshot);
+      return;
+    case "bindDefaultParameter":
+      bindDefaultParameter(plan, instruction, snapshot, evaluator);
+      return;
+    case "enterFunctionBody":
+      enterFunctionBody(plan, instruction.functionId, snapshot, instruction.span);
+      return;
+    case "returnValue":
+      returnFromFunction(plan, snapshot, evaluator.evaluate(instruction.value), instruction.span);
+      return;
+    case "returnVoid":
+      returnFromFunction(plan, snapshot, null, instruction.span);
+      return;
     case "say": {
       const speaker =
         instruction.speaker !== null
@@ -300,6 +357,8 @@ function executePlannedInstruction(
       snapshot.contextualSpeaker = null;
       snapshot.frames.splice(1);
       snapshot.loopFrames.length = 0;
+      snapshot.callFrames.length = 0;
+      snapshot.temporaries.length = 0;
       snapshot.status = "halted";
       snapshot.nextInstruction += 1;
       events.push(
@@ -311,6 +370,257 @@ function executePlannedInstruction(
       );
       return;
   }
+}
+
+function enterFunction(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "callFunction" }>,
+  snapshot: RuntimeSnapshot,
+): void {
+  const definition = functionDefinition(plan, instruction.functionId, instruction.span);
+  if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
+    throw fault(
+      "TSR047",
+      `Maximum TeaseScript call depth of ${snapshot.maxCallDepth} exceeded.`,
+      instruction.span,
+    );
+  }
+  const supplied = new Map(
+    instruction.arguments.map((argument) => [
+      argument.parameterName,
+      cloneSerializableValue(
+        readTemporary(snapshot.temporaries, argument.temporaryId, argument.span),
+      ),
+    ]),
+  );
+  const frame: RuntimeCallFrameSnapshot = {
+    id: snapshot.nextCallFrameId,
+    functionId: definition.id,
+    functionName: definition.name,
+    callSiteSpan: copySpan(instruction.span),
+    returnInstruction: instruction.returnInstruction,
+    destinationTemporary: instruction.destinationTemporary,
+    callerTemporaries: snapshot.temporaries.map(cloneTemporary),
+    scopeBaseDepth: snapshot.frames.length,
+    loopBaseDepth: snapshot.loopFrames.length,
+    arguments: definition.parameters.map((parameter) => {
+      const value = supplied.get(parameter.name);
+      return value === undefined
+        ? { parameterName: parameter.name, supplied: false as const }
+        : {
+            parameterName: parameter.name,
+            supplied: true as const,
+            value,
+          };
+    }),
+    parameterState: { phase: "supplied", parameterIndex: 0 },
+  };
+  snapshot.nextCallFrameId += 1;
+  snapshot.callFrames.push(frame);
+  snapshot.temporaries.length = 0;
+  snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });
+  snapshot.nextScopeId += 1;
+  snapshot.nextInstruction = definition.entryInstruction;
+}
+
+function bindSuppliedParameter(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "bindSuppliedParameter" }>,
+  snapshot: RuntimeSnapshot,
+): void {
+  const { frame, definition } = activeFunction(plan, snapshot, instruction.span);
+  if (
+    frame.functionId !== instruction.functionId ||
+    frame.parameterState.phase !== "supplied" ||
+    frame.parameterState.parameterIndex !== instruction.parameterIndex
+  ) {
+    throw fault("TSR048", "Supplied-parameter progress is inconsistent.", instruction.span);
+  }
+  const parameter = definition.parameters[instruction.parameterIndex];
+  const argument = frame.arguments[instruction.parameterIndex];
+  if (parameter === undefined || argument === undefined) {
+    throw fault("TSR048", "Function parameter metadata is inconsistent.", instruction.span);
+  }
+  if (argument.supplied) {
+    declareFunctionBinding(snapshot, parameter.name, argument.value, instruction.span);
+  }
+  frame.parameterState.parameterIndex += 1;
+  advance(snapshot);
+}
+
+function beginFunctionDefaults(
+  plan: InstructionPlan,
+  functionId: number,
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+): void {
+  const { frame, definition } = activeFunction(plan, snapshot, span);
+  if (
+    frame.functionId !== functionId ||
+    frame.parameterState.phase !== "supplied" ||
+    frame.parameterState.parameterIndex !== definition.parameters.length
+  ) {
+    throw fault("TSR048", "Parameter binding did not reach the defaults phase.", span);
+  }
+  frame.parameterState = { phase: "defaults", parameterIndex: 0 };
+  advance(snapshot);
+}
+
+function prepareParameterDefault(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "prepareParameterDefault" }>,
+  snapshot: RuntimeSnapshot,
+): void {
+  const { frame, definition } = activeFunction(plan, snapshot, instruction.span);
+  if (
+    frame.functionId !== instruction.functionId ||
+    frame.parameterState.phase !== "defaults" ||
+    frame.parameterState.parameterIndex !== instruction.parameterIndex
+  ) {
+    throw fault("TSR048", "Default-parameter progress is inconsistent.", instruction.span);
+  }
+  const parameter = definition.parameters[instruction.parameterIndex];
+  const argument = frame.arguments[instruction.parameterIndex];
+  if (parameter === undefined || argument === undefined) {
+    throw fault("TSR048", "Function parameter metadata is inconsistent.", instruction.span);
+  }
+  if (argument.supplied) {
+    frame.parameterState.parameterIndex += 1;
+    snapshot.nextInstruction = instruction.target;
+    return;
+  }
+  if (!parameter.hasDefault) {
+    throw fault(
+      "TSR049",
+      `Required parameter '${parameter.name}' was not supplied.`,
+      instruction.span,
+    );
+  }
+  advance(snapshot);
+}
+
+function bindDefaultParameter(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "bindDefaultParameter" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+): void {
+  const { frame, definition } = activeFunction(plan, snapshot, instruction.span);
+  if (
+    frame.functionId !== instruction.functionId ||
+    frame.parameterState.phase !== "defaults" ||
+    frame.parameterState.parameterIndex !== instruction.parameterIndex
+  ) {
+    throw fault("TSR048", "Default-parameter binding is inconsistent.", instruction.span);
+  }
+  const parameter = definition.parameters[instruction.parameterIndex];
+  if (parameter === undefined || !parameter.hasDefault) {
+    throw fault("TSR048", "Default-parameter metadata is inconsistent.", instruction.span);
+  }
+  declareFunctionBinding(
+    snapshot,
+    parameter.name,
+    evaluator.evaluate(instruction.value),
+    instruction.span,
+  );
+  frame.parameterState.parameterIndex += 1;
+  advance(snapshot);
+}
+
+function enterFunctionBody(
+  plan: InstructionPlan,
+  functionId: number,
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+): void {
+  const { frame, definition } = activeFunction(plan, snapshot, span);
+  if (
+    frame.functionId !== functionId ||
+    frame.parameterState.phase !== "defaults" ||
+    frame.parameterState.parameterIndex !== definition.parameters.length
+  ) {
+    throw fault("TSR048", "Function body entry has incomplete parameters.", span);
+  }
+  frame.parameterState = {
+    phase: "body",
+    parameterIndex: definition.parameters.length,
+  };
+  advance(snapshot);
+}
+
+function returnFromFunction(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): void {
+  const { frame } = activeFunction(plan, snapshot, span);
+  const returned = cloneSerializableValue(value);
+  snapshot.frames.splice(frame.scopeBaseDepth);
+  snapshot.loopFrames.splice(frame.loopBaseDepth);
+  snapshot.callFrames.pop();
+  snapshot.temporaries.splice(
+    0,
+    snapshot.temporaries.length,
+    ...frame.callerTemporaries.map(cloneTemporary),
+  );
+  if (
+    snapshot.temporaries.some(
+      (temporary) => temporary.id === frame.destinationTemporary,
+    )
+  ) {
+    throw fault("TSR050", "Function result destination is already occupied.", span);
+  }
+  snapshot.temporaries.push({
+    id: frame.destinationTemporary,
+    value: returned,
+  });
+  snapshot.nextInstruction = frame.returnInstruction;
+}
+
+function activeFunction(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+): {
+  readonly frame: RuntimeCallFrameSnapshot;
+  readonly definition: InstructionPlan["functions"][number];
+} {
+  const frame = snapshot.callFrames.at(-1);
+  if (frame === undefined) {
+    throw fault("TSR051", "Function-only instruction executed without a call frame.", span);
+  }
+  return {
+    frame,
+    definition: functionDefinition(plan, frame.functionId, span),
+  };
+}
+
+function functionDefinition(
+  plan: InstructionPlan,
+  functionId: number,
+  span: SourceSpan,
+): InstructionPlan["functions"][number] {
+  const definition = plan.functions.find((item) => item.id === functionId);
+  if (definition === undefined) {
+    throw fault("TSR052", `Unknown compiled function ID '${functionId}'.`, span);
+  }
+  return definition;
+}
+
+function declareFunctionBinding(
+  snapshot: RuntimeSnapshot,
+  name: string,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): void {
+  if (findBinding(snapshot, name) !== undefined) {
+    throw fault("TSR001", `Parameter '${name}' duplicates a visible binding.`, span);
+  }
+  currentFrame(snapshot).bindings.push({
+    name,
+    value: cloneSerializableValue(value),
+  });
 }
 
 function executeLoopStart(
@@ -333,9 +643,20 @@ function executeLoopStart(
       ) {
         throw fault("TSR043", "repeat requires a non-negative integer count.", instruction.expression.span);
       }
-      frame = { kind: "repeat", loopId: instruction.loopId, scopeDepth, remaining: value };
+      frame = {
+        kind: "repeat",
+        loopId: instruction.loopId,
+        scopeDepth,
+        remaining: value,
+        callFrameId: currentCallFrameId(snapshot),
+      };
     } else if (instruction.loopKind === "while") {
-      frame = { kind: "while", loopId: instruction.loopId, scopeDepth };
+      frame = {
+        kind: "while",
+        loopId: instruction.loopId,
+        scopeDepth,
+        callFrameId: currentCallFrameId(snapshot),
+      };
     } else {
       const source = evaluator.evaluate(instruction.expression);
       if (!isList(source) && !isSet(source) && !isRange(source)) {
@@ -349,6 +670,7 @@ function executeLoopStart(
         variable: instruction.variable,
         source: cloneSerializableValue(source) as Extract<RuntimeLoopFrameSnapshot, { kind: "for" }>["source"],
         position: 0,
+        callFrameId: currentCallFrameId(snapshot),
       };
     }
     snapshot.loopFrames.push(frame);
@@ -408,6 +730,9 @@ function executeLoopControl(
   const frame = snapshot.loopFrames.at(-1);
   if (frame === undefined || frame.loopId !== instruction.loopId) {
     throw fault("TSR042", "Loop control does not match the active innermost loop.", instruction.span);
+  }
+  if (frame.callFrameId !== currentCallFrameId(snapshot)) {
+    throw fault("TSR042", "Loop control cannot cross a function boundary.", instruction.span);
   }
   if (snapshot.frames.length <= frame.scopeDepth) {
     throw fault("TSR042", "Active loop iteration scope is missing.", instruction.span);
@@ -490,6 +815,12 @@ class Evaluator {
         }
         return binding.value;
       }
+      case "temporary":
+        return readTemporary(
+          this.snapshot.temporaries,
+          expression.temporaryId,
+          expression.span,
+        );
       case "list":
         return createSerializableList(expression.elements.map((item) => this.evaluate(item)));
       case "set": {
@@ -996,11 +1327,54 @@ function setSpeakerProperty(
 }
 
 function findBinding(snapshot: RuntimeSnapshot, name: string): RuntimeBindingSnapshot | undefined {
-  for (let index = snapshot.frames.length - 1; index >= 0; index -= 1) {
+  const functionBase = snapshot.callFrames.at(-1)?.scopeBaseDepth;
+  const minimum = functionBase ?? 0;
+  for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
     const binding = snapshot.frames[index]!.bindings.find((item) => item.name === name);
     if (binding !== undefined) return binding;
   }
+  if (functionBase !== undefined) {
+    return snapshot.frames[0]!.bindings.find((item) => item.name === name);
+  }
   return undefined;
+}
+
+function readTemporary(
+  temporaries: readonly RuntimeTemporarySnapshot[],
+  temporaryId: number,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  const temporary = temporaries.find((item) => item.id === temporaryId);
+  if (temporary === undefined) {
+    throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
+  }
+  return temporary.value;
+}
+
+function setTemporary(
+  temporaries: RuntimeTemporarySnapshot[],
+  temporaryId: number,
+  value: SerializableRuntimeValue,
+): void {
+  const existing = temporaries.find((item) => item.id === temporaryId);
+  if (existing === undefined) {
+    temporaries.push({ id: temporaryId, value: cloneSerializableValue(value) });
+  } else {
+    existing.value = cloneSerializableValue(value);
+  }
+}
+
+function cloneTemporary(
+  temporary: RuntimeTemporarySnapshot,
+): RuntimeTemporarySnapshot {
+  return {
+    id: temporary.id,
+    value: cloneSerializableValue(temporary.value),
+  };
+}
+
+function currentCallFrameId(snapshot: RuntimeSnapshot): number | null {
+  return snapshot.callFrames.at(-1)?.id ?? null;
 }
 
 function currentFrame(snapshot: RuntimeSnapshot) {

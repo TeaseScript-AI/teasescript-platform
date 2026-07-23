@@ -210,6 +210,14 @@ export function validateSerializableValue(
   value: unknown,
   path = "$",
 ): string | null {
+  return validateSerializableValueInternal(value, path, new Set<object>());
+}
+
+function validateSerializableValueInternal(
+  value: unknown,
+  path: string,
+  active: Set<object>,
+): string | null {
   if (
     value === null ||
     typeof value === "string" ||
@@ -223,6 +231,9 @@ export function validateSerializableValue(
   if (!isPlainRecord(value) || typeof value.kind !== "string") {
     return `${path} is not a JSON-safe runtime value.`;
   }
+  if (active.has(value)) return `${path} contains a cyclic runtime value.`;
+  active.add(value);
+  try {
   if (value.kind === "speakerReference") {
     return Number.isInteger(value.speakerId) &&
       (value.speakerId as number) >= 0 &&
@@ -242,7 +253,7 @@ export function validateSerializableValue(
   }
   if (value.kind === "list") {
     if (!Array.isArray(value.items)) return `${path}.items must be an array.`;
-    return validateValueArray(value.items, `${path}.items`);
+    return validateValueArray(value.items, `${path}.items`, active);
   }
   if (value.kind === "set") {
     if (!Array.isArray(value.items)) return `${path}.items must be an array.`;
@@ -263,17 +274,28 @@ export function validateSerializableValue(
     for (let index = 0; index < value.properties.length; index += 1) {
       const property = value.properties[index];
       const propertyPath = `${path}.properties[${index}]`;
-      if (!isPlainRecord(property) || typeof property.name !== "string") {
+      if (
+        !isPlainRecord(property) ||
+        typeof property.name !== "string" ||
+        property.name.length === 0
+      ) {
         return `${propertyPath} is malformed.`;
       }
       if (names.has(property.name)) return `${propertyPath}.name is duplicated.`;
       names.add(property.name);
-      const failure = validateSerializableValue(property.value, `${propertyPath}.value`);
+      const failure = validateSerializableValueInternal(
+        property.value,
+        `${propertyPath}.value`,
+        active,
+      );
       if (failure !== null) return failure;
     }
     return null;
   }
   return `${path}.kind is unsupported.`;
+  } finally {
+    active.delete(value);
+  }
 }
 
 function fromHostValueInternal(
@@ -332,9 +354,17 @@ function assertSerializableScalar(
   }
 }
 
-function validateValueArray(values: readonly unknown[], path: string): string | null {
+function validateValueArray(
+  values: readonly unknown[],
+  path: string,
+  active: Set<object>,
+): string | null {
   for (let index = 0; index < values.length; index += 1) {
-    const failure = validateSerializableValue(values[index], `${path}[${index}]`);
+    const failure = validateSerializableValueInternal(
+      values[index],
+      `${path}[${index}]`,
+      active,
+    );
     if (failure !== null) return failure;
   }
   return null;
