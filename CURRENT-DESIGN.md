@@ -40,40 +40,44 @@ identifier and emits one developer warning when that fallback is first used.
 
 ## Current POC milestones
 
-### 1. Parser POC
+### 1. Parser and core-language foundation — complete
 
-Implement only what is necessary to prove source parsing:
+The implemented core slice includes the tokenizer, parser, AST, diagnostics,
+source spans, literals and expressions, variables and assignments, lexical
+`if`/`else` blocks, speakers, `say`, `say as`, `exit`, lists, objects, and the
+accepted ordered scalar set.
 
-- tokenizer/lexer;
-- parser;
-- AST types;
-- source spans and diagnostics;
-- automated parser tests;
-- initial grammar slice for speaker declarations, default-speaker selection, `say`, `say as`, strings, template interpolation, property access, and `exit`.
+### 2. Serializable runtime and standalone playground — current
 
-Parsing must not execute code.
+The current vertical slice adds:
 
-### 2. Speaker execution POC
+- a semantic-validation pass for the implemented syntax;
+- a flat, versioned, JSON-safe instruction plan with source spans;
+- explicit, versioned, JSON-safe deterministic runtime state;
+- low-level instruction stepping and higher-level event-boundary stepping;
+- sequenced typed events and structured runtime failures;
+- a self-contained plan-and-snapshot checkpoint;
+- a versioned serializable deterministic RNG;
+- a standalone browser-first development playground that loads
+  `examples/playground/main.tease`.
 
-Add a minimal event-based interpreter for:
+The runtime executes the compiled instruction plan, not AST nodes. The browser
+transcript remains UI state rather than runtime snapshot state.
 
-- declared speakers;
-- current default speaker;
-- one-message `say as` override;
-- temporary `speaker` context during interpolation;
-- display-name resolution;
-- `exit`;
-- deterministic, testable `say` events.
-
-No browser UI is required. A CLI or test event log is sufficient.
+The playground does not yet implement the future cross-origin iframe host,
+Laravel communication, persistence, accounts, media, input, or timers.
 
 ## Required design discipline
 
 - AST nodes carry source locations.
 - The parser does not perform runtime execution.
 - Runtime output is represented as typed events, not direct HTML.
-- Do not rely on a serializable JavaScript call stack for future pause/resume.
-- Build later runtime actions, handles, events, and execution frames as explicit state.
+- The AST is compile-time data; runtime execution uses a validated serializable
+  instruction plan.
+- Runtime snapshots and checkpoints are explicit versioned JSON-safe data and
+  do not depend on a suspended JavaScript call stack.
+- Build later runtime actions, handles, events, and execution frames as
+  explicit state.
 
 ## Accepted architectural boundaries
 
@@ -83,6 +87,8 @@ No browser UI is required. A CLI or test event log is sufficient.
 - Package code has no unrestricted external network access.
 - Server-persistent events require explicit execution-location and missed-event behavior.
 - Same parser/runtime/state model supports sessions and persistent personalities.
+- ADR 0015 defines the serializable instruction-plan, runtime-state,
+  checkpoint, stepping, event-sequence, and deterministic-RNG boundaries.
 
 ## Major post-POC gaps
 
