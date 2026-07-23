@@ -202,6 +202,41 @@ test("builds left-associated chained property access in interpolation", () => {
   });
 });
 
+test("parses the contextual speaker reference in interpolation", () => {
+  const source =
+    "say as mistressVera `You will obey your ${speaker.title}.`";
+  const result = parse(source);
+  const statement = result.program.statements[0];
+
+  assert.deepEqual(result.diagnostics, []);
+  assert.equal(statement?.kind, "sayStatement");
+  if (
+    statement?.kind !== "sayStatement" ||
+    statement.value.kind !== "templateLiteral"
+  ) {
+    assert.fail("Expected a template say statement.");
+  }
+
+  assert.deepEqual(statement.value.parts[1], {
+    kind: "templateInterpolation",
+    expression: {
+      kind: "propertyAccessExpression",
+      object: {
+        kind: "identifier",
+        name: "speaker",
+        span: sourceSpan(source, 42, 49),
+      },
+      property: {
+        kind: "identifier",
+        name: "title",
+        span: sourceSpan(source, 50, 55),
+      },
+      span: sourceSpan(source, 42, 55),
+    },
+    span: sourceSpan(source, 40, 56),
+  });
+});
+
 test("accepts multiple statements separated by LF or CRLF", () => {
   const source = 'speaker vera\r\nsay "Hi"\nexit\r\n';
   const result = parse(source);

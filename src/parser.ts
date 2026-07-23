@@ -417,7 +417,7 @@ class Parser {
   }
 
   #parseInterpolationExpression(): InterpolationExpression | null {
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!isInterpolationRoot(this.#peek())) {
       this.#reportToken(
         parserDiagnosticCode.unsupportedTemplateExpression,
         "Only identifiers and chained property access are supported in template interpolation.",
@@ -636,6 +636,13 @@ function isPropertyName(token: Token): boolean {
     token.kind === TokenKind.KeywordSay ||
     token.kind === TokenKind.KeywordAs ||
     token.kind === TokenKind.KeywordExit
+  );
+}
+
+function isInterpolationRoot(token: Token): boolean {
+  return (
+    token.kind === TokenKind.Identifier ||
+    token.kind === TokenKind.KeywordSpeaker
   );
 }
 
