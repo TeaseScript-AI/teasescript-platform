@@ -1,0 +1,26 @@
+speaker guide {
+    title: "Guide"
+    firstName: "Vera"
+    color: "#b784ff"
+}
+
+speaker guide
+
+let greetings = ["Welcome", "Hello", "Good evening"]
+let greeting = greetings.random
+let qualities = set["focus", "patience", "focus"]
+let score = 1
+
+say `${greeting}. I am ${speaker.firstName}.`
+say `Your ordered set contains ${qualities.length} qualities.`
+
+score = score + 1
+
+if score == 2 {
+    say `Your deterministic score is ${score}.`
+} else {
+    say "The score took an unexpected path."
+}
+
+say as guide "The example is complete."
+exit

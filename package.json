@@ -10,7 +10,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test dist/tests/*.test.js",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "playground": "npm run build && node dist/playground/server.js"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
