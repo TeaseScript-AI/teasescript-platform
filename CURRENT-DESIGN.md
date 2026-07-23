@@ -24,7 +24,11 @@ Important current syntax includes:
 - double-quoted strings and backtick interpolation;
 - variables, expressions, functions, control flow, lists, storage, timers, media, date/time, scheduling, and account-facing APIs as defined by V30.
 
-The unique `set` collection capability was confirmed after earlier discussions but is absent from V30. Its final V31 syntax remains open. This is unrelated to the rejected use of `set` as an assignment keyword.
+ADR 0013 accepts the unique `set` collection after V30. Set literals use
+`set[...]`, explicit element types use `type set`, sets preserve insertion
+order and use copy semantics, and sets are not indexable. This is unrelated to
+the rejected use of `set` as an assignment keyword; direct assignment remains
+`score = 20`.
 
 ## Current POC milestones
 
@@ -79,7 +83,6 @@ The following are not parser-POC blockers:
 - custom-view API and lifecycle;
 - TypeScript import/linkage syntax from `.tease`;
 - rich module metadata and selection;
-- final `set` collection syntax;
 - execution-frame ownership for timers, buttons, media, and views;
 - media lifecycle controls;
 - typed storage and session recovery;
