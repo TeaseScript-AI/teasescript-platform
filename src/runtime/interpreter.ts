@@ -28,17 +28,24 @@ import {
   isRuntimeSpeaker,
 } from "./value-guards.js";
 import {
+  addSetValue,
   cloneRuntimeValue,
   createRuntimeList,
   createRuntimeObject,
   createRuntimeSet,
   createRuntimeSpeaker,
-  isRuntimeValue,
   runtimeEquals,
+  RuntimeCopyError,
   RuntimeEqualityError,
+  RuntimeSetElementError,
   type RuntimeSpeaker,
   type RuntimeValue,
+  validateRuntimeValue,
 } from "./values.js";
+import {
+  createRuntimeWarning,
+  type RuntimeWarningInfo,
+} from "./warnings.js";
 
 export type { RandomSource } from "./random.js";
 
@@ -59,6 +66,7 @@ export interface InterpreterOptions {
 export interface ExecutionResult {
   readonly events: readonly InterpreterEvent[];
   readonly errors: readonly RuntimeErrorInfo[];
+  readonly warnings: readonly RuntimeWarningInfo[];
   readonly exited: boolean;
 }
 
@@ -72,6 +80,8 @@ export function execute(
 export class Interpreter {
   readonly #events: InterpreterEvent[] = [];
   readonly #errors: RuntimeErrorInfo[] = [];
+  readonly #warnings: RuntimeWarningInfo[] = [];
+  readonly #warnedFallbackSpeakers = new Set<RuntimeSpeaker>();
   readonly #globals = new Environment();
   readonly #builtins: Readonly<Record<string, BuiltinFunction>>;
   readonly #random: RandomSource;
@@ -89,7 +99,8 @@ export class Interpreter {
     this.#builtins = Object.freeze({ ...(options.builtins ?? {}) });
 
     for (const [name, value] of Object.entries(options.globals ?? {})) {
-      if (!isRuntimeValue(value)) {
+      const failure = validateRuntimeValue(value);
+      if (failure !== null) {
         throw new TypeError(`Global ${JSON.stringify(name)} is not a runtime value.`);
       }
       if (!this.#globals.declare(name, cloneRuntimeValue(value))) {
@@ -111,6 +122,7 @@ export class Interpreter {
     return Object.freeze({
       events: Object.freeze([...this.#events]),
       errors: Object.freeze([...this.#errors]),
+      warnings: Object.freeze([...this.#warnings]),
       exited: this.#exited,
     });
   }
@@ -129,7 +141,12 @@ export class Interpreter {
     switch (statement.kind) {
       case "letStatement": {
         const value = this.#evaluate(statement.initializer, environment, null);
-        if (!environment.declare(statement.name.name, cloneRuntimeValue(value))) {
+        if (
+          !environment.declare(
+            statement.name.name,
+            this.#copyValue(value, statement.initializer.span),
+          )
+        ) {
           throw this.#fault(
             "TSR001",
             `Variable '${statement.name.name}' is already visible in this scope.`,
@@ -140,7 +157,7 @@ export class Interpreter {
       }
       case "assignmentStatement": {
         const value = this.#evaluate(statement.value, environment, null);
-        this.#assign(statement.target, value, environment);
+        this.#assign(statement.target, value, environment, statement.value.span);
         return;
       }
       case "expressionStatement":
@@ -167,8 +184,9 @@ export class Interpreter {
         for (const property of statement.properties) {
           speaker.properties.set(
             property.name.name,
-            cloneRuntimeValue(
+            this.#copyValue(
               this.#evaluate(property.value, environment, speaker),
+              property.value.span,
             ),
           );
         }
@@ -192,12 +210,27 @@ export class Interpreter {
               );
         const value = this.#evaluate(statement.value, environment, speaker);
         const text = toVisibleText(value, statement.value.span, this.#random);
+        const resolvedSpeaker =
+          speaker === null
+            ? null
+            : resolveOutputSpeaker(speaker, statement.span);
+        if (
+          speaker !== null &&
+          resolvedSpeaker?.usedIdentifierFallback === true &&
+          !this.#warnedFallbackSpeakers.has(speaker)
+        ) {
+          this.#warnedFallbackSpeakers.add(speaker);
+          this.#warnings.push(
+            createRuntimeWarning(
+              "TSW001",
+              `Speaker '${speaker.identifier}' uses its identifier as the display name.`,
+              statement.span,
+            ),
+          );
+        }
         const event: SayEvent = Object.freeze({
           kind: "say",
-          speaker:
-            speaker === null
-              ? null
-              : resolveOutputSpeaker(speaker, statement.span),
+          speaker: resolvedSpeaker?.speaker ?? null,
           text,
           span: createSourceSpan(statement.span.start, statement.span.end),
         });
@@ -225,8 +258,9 @@ export class Interpreter {
     target: AssignmentTarget,
     value: RuntimeValue,
     environment: Environment,
+    valueSpan: SourceSpan,
   ): void {
-    const copied = cloneRuntimeValue(value);
+    const copied = this.#copyValue(value, valueSpan);
     if (target.kind === "identifier") {
       if (!environment.assign(target.name, copied)) {
         throw this.#fault(
@@ -298,21 +332,24 @@ export class Interpreter {
       case "listLiteral":
         return createRuntimeList(
           expression.elements.map((element) =>
-            cloneRuntimeValue(
+            this.#copyValue(
               this.#evaluate(element, environment, contextualSpeaker),
+              element.span,
             ),
           ),
         );
-      case "setLiteral":
-        try {
-          return createRuntimeSet(
-            expression.elements.map((element) =>
-              this.#evaluate(element, environment, contextualSpeaker),
-            ),
-          );
-        } catch (error) {
-          this.#translateEqualityError(error, expression.span);
+      case "setLiteral": {
+        const set = createRuntimeSet([]);
+        for (const element of expression.elements) {
+          const value = this.#evaluate(element, environment, contextualSpeaker);
+          try {
+            addSetValue(set, value);
+          } catch (error) {
+            this.#translateValueError(error, element.span);
+          }
         }
+        return set;
+      }
       case "objectLiteral": {
         const entries = new Map<string, RuntimeValue>();
         for (const property of expression.properties) {
@@ -325,12 +362,13 @@ export class Interpreter {
           }
           entries.set(
             property.name.name,
-            cloneRuntimeValue(
+            this.#copyValue(
               this.#evaluate(
                 property.value,
                 environment,
                 contextualSpeaker,
               ),
+              property.value.span,
             ),
           );
         }
@@ -521,8 +559,9 @@ export class Interpreter {
     const positional: RuntimeValue[] = [];
     const named: Record<string, RuntimeValue> = {};
     for (const argument of expression.arguments) {
-      const value = cloneRuntimeValue(
+      const value = this.#copyValue(
         this.#evaluate(argument.value, environment, contextualSpeaker),
+        argument.value.span,
       );
       if (argument.kind === "positionalArgument") positional.push(value);
       else {
@@ -563,14 +602,29 @@ export class Interpreter {
           expression.span,
         );
       }
-      if (!isRuntimeValue(result)) {
+      const validationFailure = validateRuntimeValue(result);
+      if (validationFailure === "cyclic") {
+        throw this.#fault(
+          "TSR031",
+          "Cyclic script values are not supported.",
+          expression.span,
+        );
+      }
+      if (validationFailure === "setElement") {
+        throw this.#fault(
+          "TSR032",
+          "Sets may contain only string, boolean, integer, number, or null values.",
+          expression.span,
+        );
+      }
+      if (validationFailure === "invalid") {
         throw this.#fault(
           "TSR013",
           `Built-in '${expression.callee.name}' returned an invalid value.`,
           expression.span,
         );
       }
-      return cloneRuntimeValue(result);
+      return this.#copyValue(result as RuntimeValue, expression.span);
     }
 
     if (expression.callee.kind === "propertyAccessExpression") {
@@ -670,6 +724,24 @@ export class Interpreter {
     if (typeof value !== "number") {
       throw this.#fault("TSR027", "Expected a numeric value.", span);
     }
+  }
+
+  #copyValue(value: RuntimeValue, span: SourceSpan): RuntimeValue {
+    try {
+      return cloneRuntimeValue(value);
+    } catch (error) {
+      this.#translateValueError(error, span);
+    }
+  }
+
+  #translateValueError(error: unknown, span: SourceSpan): never {
+    if (error instanceof RuntimeCopyError) {
+      throw this.#fault("TSR031", error.message, span);
+    }
+    if (error instanceof RuntimeSetElementError) {
+      throw this.#fault("TSR032", error.message, span);
+    }
+    throw error;
   }
 
   #translateEqualityError(error: unknown, span: SourceSpan): never {

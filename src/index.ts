@@ -15,6 +15,7 @@ export {
   type RandomSource,
 } from "./runtime/interpreter.js";
 export type { RuntimeErrorInfo } from "./runtime/errors.js";
+export type { RuntimeWarningInfo } from "./runtime/warnings.js";
 export type {
   ExitEvent,
   InterpreterEvent,

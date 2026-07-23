@@ -1,10 +1,15 @@
 import type { SourceSpan } from "../source.js";
+import { randomItem } from "./collections.js";
 import { RuntimeFault } from "./errors.js";
 import type { OutputSpeaker } from "./events.js";
 import type { RandomSource } from "./random.js";
-import { randomItem } from "./collections.js";
 import { isRuntimeList } from "./value-guards.js";
 import type { RuntimeSpeaker, RuntimeValue } from "./values.js";
+
+export interface ResolvedOutputSpeaker {
+  readonly speaker: OutputSpeaker;
+  readonly usedIdentifierFallback: boolean;
+}
 
 export function toVisibleText(
   value: RuntimeValue,
@@ -28,31 +33,51 @@ export function toVisibleText(
 export function resolveOutputSpeaker(
   speaker: RuntimeSpeaker,
   span: SourceSpan,
-): OutputSpeaker {
+): ResolvedOutputSpeaker {
   const explicit = optionalStringProperty(speaker, "displayName", span);
-  const displayName =
-    explicit ??
-    [
-      optionalStringProperty(speaker, "title", span) ??
-        optionalStringProperty(speaker, "shortTitle", span),
-      optionalStringProperty(speaker, "firstName", span),
-      optionalStringProperty(speaker, "lastName", span),
-    ]
-      .filter((part): part is string => part !== null && part.length > 0)
-      .join(" ");
-  if (displayName.length === 0) {
-    throw new RuntimeFault(
-      "TSR022",
-      `Speaker '${speaker.identifier}' has no resolvable display name.`,
-      span,
-    );
+  if (explicit !== null) {
+    if (explicit.length === 0) {
+      throw new RuntimeFault(
+        "TSR022",
+        `Speaker '${speaker.identifier}' has no resolvable display name.`,
+        span,
+      );
+    }
+    return resolvedSpeaker(speaker, explicit, false, span);
   }
+
+  const derived = [
+    optionalStringProperty(speaker, "title", span) ??
+      optionalStringProperty(speaker, "shortTitle", span),
+    optionalStringProperty(speaker, "firstName", span),
+    optionalStringProperty(speaker, "lastName", span),
+  ]
+    .filter((part): part is string => part !== null && part.length > 0)
+    .join(" ");
+
+  return resolvedSpeaker(
+    speaker,
+    derived.length === 0 ? speaker.identifier : derived,
+    derived.length === 0,
+    span,
+  );
+}
+
+function resolvedSpeaker(
+  runtimeSpeaker: RuntimeSpeaker,
+  displayName: string,
+  usedIdentifierFallback: boolean,
+  span: SourceSpan,
+): ResolvedOutputSpeaker {
   return Object.freeze({
-    identifier: speaker.identifier,
-    displayName,
-    color: optionalStringProperty(speaker, "color", span),
-    font: optionalStringProperty(speaker, "font", span),
-    avatar: optionalStringProperty(speaker, "avatar", span),
+    speaker: Object.freeze({
+      identifier: runtimeSpeaker.identifier,
+      displayName,
+      color: optionalStringProperty(runtimeSpeaker, "color", span),
+      font: optionalStringProperty(runtimeSpeaker, "font", span),
+      avatar: optionalStringProperty(runtimeSpeaker, "avatar", span),
+    }),
+    usedIdentifierFallback,
   });
 }
 

@@ -9,7 +9,9 @@ import {
   createRuntimeSet,
   removeSetValue,
   runtimeEquals,
+  RuntimeCopyError,
   RuntimeEqualityError,
+  RuntimeSetElementError,
   setContains,
   type RuntimeList,
   type RuntimeValue,
@@ -98,7 +100,7 @@ export function callCollectionMethod(
         return { handled: false, value: null };
     }
   } catch (error) {
-    translateEqualityError(error, span);
+    translateCollectionError(error, span);
   }
 }
 
@@ -215,9 +217,15 @@ function findRuntimeValue(
   return -1;
 }
 
-function translateEqualityError(error: unknown, span: SourceSpan): never {
+function translateCollectionError(error: unknown, span: SourceSpan): never {
   if (error instanceof RuntimeEqualityError) {
     throw new RuntimeFault("TSR029", error.message, span);
+  }
+  if (error instanceof RuntimeCopyError) {
+    throw new RuntimeFault("TSR031", error.message, span);
+  }
+  if (error instanceof RuntimeSetElementError) {
+    throw new RuntimeFault("TSR032", error.message, span);
   }
   throw error;
 }

@@ -18,7 +18,7 @@ export interface RuntimeSpeaker {
 
 export interface RuntimeSet {
   readonly kind: "set";
-  readonly items: RuntimeValue[];
+  readonly items: RuntimeScalar[];
 }
 
 export type RuntimeValue =
@@ -28,12 +28,31 @@ export type RuntimeValue =
   | RuntimeSpeaker
   | RuntimeSet;
 
+export type RuntimeValueValidationFailure =
+  | "cyclic"
+  | "invalid"
+  | "setElement";
+
+export class RuntimeCopyError extends Error {
+  public constructor() {
+    super("Cyclic script values are not supported.");
+    this.name = "RuntimeCopyError";
+  }
+}
+
 export class RuntimeEqualityError extends Error {
   public constructor() {
     super(
       "Equality for object, list, and set values is not accepted in this milestone.",
     );
     this.name = "RuntimeEqualityError";
+  }
+}
+
+export class RuntimeSetElementError extends Error {
+  public constructor() {
+    super("Sets may contain only string, boolean, integer, number, or null values.");
+    this.name = "RuntimeSetElementError";
   }
 }
 
@@ -58,12 +77,14 @@ export function createRuntimeSet(items: readonly RuntimeValue[]): RuntimeSet {
 }
 
 export function addSetValue(set: RuntimeSet, value: RuntimeValue): boolean {
+  assertSetElement(value);
   if (setContains(set, value)) return false;
-  set.items.push(cloneRuntimeValue(value));
+  set.items.push(value);
   return true;
 }
 
 export function removeSetValue(set: RuntimeSet, value: RuntimeValue): boolean {
+  assertSetElement(value);
   const index = findValueIndex(set.items, value);
   if (index < 0) return false;
   set.items.splice(index, 1);
@@ -71,6 +92,7 @@ export function removeSetValue(set: RuntimeSet, value: RuntimeValue): boolean {
 }
 
 export function setContains(set: RuntimeSet, value: RuntimeValue): boolean {
+  assertSetElement(value);
   return findValueIndex(set.items, value) >= 0;
 }
 
@@ -96,72 +118,122 @@ export function runtimeEquals(
 }
 
 export function cloneRuntimeValue(value: RuntimeValue): RuntimeValue {
-  if (value === null || typeof value !== "object") return value;
-  switch (value.kind) {
-    case "speaker":
-      return value;
-    case "list":
-      return createRuntimeList(value.items.map(cloneRuntimeValue));
-    case "set":
-      return {
-        kind: "set",
-        items: value.items.map(cloneRuntimeValue),
-      };
-    case "object":
-      return createRuntimeObject(
-        new Map(
-          [...value.properties].map(
-            ([name, item]): [string, RuntimeValue] => [
-              name,
-              cloneRuntimeValue(item),
-            ],
-          ),
-        ),
-      );
-  }
+  return cloneRuntimeValueInternal(value, new Set<object>());
+}
+
+export function validateRuntimeValue(
+  value: unknown,
+): RuntimeValueValidationFailure | null {
+  return validateRuntimeValueInternal(value, new Set<object>());
 }
 
 export function isRuntimeValue(value: unknown): value is RuntimeValue {
-  return isRuntimeValueInternal(value, new Set<object>());
+  return validateRuntimeValue(value) === null;
 }
 
-function isRuntimeValueInternal(
+function cloneRuntimeValueInternal(
+  value: RuntimeValue,
+  active: Set<object>,
+): RuntimeValue {
+  if (value === null || typeof value !== "object") return value;
+  if (value.kind === "speaker") return value;
+  if (active.has(value)) throw new RuntimeCopyError();
+
+  active.add(value);
+  try {
+    switch (value.kind) {
+      case "list":
+        return createRuntimeList(
+          value.items.map((item) => cloneRuntimeValueInternal(item, active)),
+        );
+      case "set":
+        return createRuntimeSet(value.items);
+      case "object":
+        return createRuntimeObject(
+          new Map(
+            [...value.properties].map(
+              ([name, item]): [string, RuntimeValue] => [
+                name,
+                cloneRuntimeValueInternal(item, active),
+              ],
+            ),
+          ),
+        );
+    }
+  } finally {
+    active.delete(value);
+  }
+}
+
+function validateRuntimeValueInternal(
   value: unknown,
   active: Set<object>,
-): value is RuntimeValue {
+): RuntimeValueValidationFailure | null {
   if (
     value === null ||
     typeof value === "string" ||
     typeof value === "boolean"
   ) {
-    return true;
+    return null;
   }
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value !== "object") return false;
-  if (active.has(value)) return false;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? null : "invalid";
+  }
+  if (typeof value !== "object") return "invalid";
+  if (active.has(value)) return "cyclic";
+
   active.add(value);
-  const candidate = value as Partial<RuntimeList>;
-  let valid = false;
-  if (candidate.kind === "list" || candidate.kind === "set") {
-    valid =
-      Array.isArray(candidate.items) &&
-      candidate.items.every((item) => isRuntimeValueInternal(item, active));
-  } else if (candidate.kind === "object" || candidate.kind === "speaker") {
-    const properties = (value as Partial<RuntimeObject>).properties;
-    valid =
-      properties instanceof Map &&
-      [...properties].every(
-        ([name, item]) =>
-          typeof name === "string" && isRuntimeValueInternal(item, active),
-      )
+  try {
+    const candidate = value as Partial<RuntimeList>;
+    if (candidate.kind === "list") {
+      if (!Array.isArray(candidate.items)) return "invalid";
+      return validateValues(candidate.items, active);
+    }
+    if (candidate.kind === "set") {
+      if (!Array.isArray(candidate.items)) return "invalid";
+      for (const item of candidate.items) {
+        if (item !== null && typeof item === "object") return "setElement";
+        const failure = validateRuntimeValueInternal(item, active);
+        if (failure !== null) return failure;
+      }
+      return null;
+    }
+    if (candidate.kind === "object" || candidate.kind === "speaker") {
+      const properties = (value as Partial<RuntimeObject>).properties;
+      if (!(properties instanceof Map)) return "invalid";
+      for (const [name, item] of properties) {
+        if (typeof name !== "string") return "invalid";
+        const failure = validateRuntimeValueInternal(item, active);
+        if (failure !== null) return failure;
+      }
+      return null;
+    }
+    return "invalid";
+  } finally {
+    active.delete(value);
   }
-  active.delete(value);
-  return valid;
+}
+
+function validateValues(
+  values: readonly unknown[],
+  active: Set<object>,
+): RuntimeValueValidationFailure | null {
+  for (const value of values) {
+    const failure = validateRuntimeValueInternal(value, active);
+    if (failure !== null) return failure;
+  }
+  return null;
+}
+
+function assertSetElement(value: RuntimeValue): asserts value is RuntimeScalar {
+  if (value !== null && typeof value === "object") {
+    throw new RuntimeSetElementError();
+  }
 }
 
 function findValueIndex(
-  items: readonly RuntimeValue[],
-  value: RuntimeValue,
+  items: readonly RuntimeScalar[],
+  value: RuntimeScalar,
 ): number {
   for (let index = 0; index < items.length; index += 1) {
     if (runtimeEquals(items[index]!, value)) return index;

@@ -30,6 +30,14 @@ order and use copy semantics, and sets are not indexable. This is unrelated to
 the rejected use of `set` as an assignment keyword; direct assignment remains
 `score = 20`.
 
+ADR 0014 defines the current core runtime value semantics. Variable
+declarations and direct assignments recursively copy ordinary lists, sets, and
+script objects. Cyclic values are rejected with structured runtime errors.
+Sets currently accept only scalar and `null` elements. Empty collection
+`.first`, `.last`, and `.random` access is an error and does not consume RNG
+state. A speaker without an explicit or derived display name uses its
+identifier and emits one developer warning when that fallback is first used.
+
 ## Current POC milestones
 
 ### 1. Parser POC
