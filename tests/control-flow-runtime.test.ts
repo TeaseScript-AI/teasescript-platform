@@ -153,6 +153,10 @@ test("rejects old formats and malformed serialized loop state", () => {
   snapshot.version = 1;
   assertCheckpointRejected(checkpoint, "TSK001");
   snapshot.version = 2;
+  const checkpointPlan = checkpoint.plan as Record<string, unknown>;
+  checkpointPlan.version = 1;
+  assertCheckpointRejected(checkpoint, "TSK001");
+  checkpointPlan.version = 2;
   const loops = snapshot.loopFrames as Array<Record<string, unknown>>;
   loops[0]!.position = 99;
   assertCheckpointRejected(checkpoint, "TSK002");
