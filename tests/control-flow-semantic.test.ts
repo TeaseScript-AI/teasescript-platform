@@ -35,6 +35,14 @@ test("validates loop sources and body identifiers", () => {
   );
 });
 
+test("rejects statically known non-iterable loop sources", () => {
+  for (const source of ["for item in 1 { say item }", 'for item in "text" { say item }']) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null);
+    assert.ok(result.semanticDiagnostics.some((item) => item.code === "TSV012"));
+  }
+});
+
 test("loop variables have lexical scope and conflict with visible names", () => {
   const escaped = compileSource("for item in [1] { say item }\nsay item");
   assert.ok(escaped.semanticDiagnostics.some((item) => item.code === "TSV002"));
@@ -49,6 +57,7 @@ test("rejects statically invalid range operands and repeat counts", () => {
     "for value in 1.5..3 { say value }",
     "repeat -1 { say \"never\" }",
     "repeat 1.5 { say \"never\" }",
+    'repeat "twice" { say "never" }',
   ];
   for (const source of cases) {
     const result = compileSource(source);

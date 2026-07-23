@@ -39,6 +39,7 @@ const semanticCode = {
   chainedRange: "TSV009",
   invalidRangeOperand: "TSV010",
   invalidRepeatCount: "TSV011",
+  invalidLoopSource: "TSV012",
 } as const;
 
 const coreBuiltinNames = Object.freeze([
@@ -183,11 +184,24 @@ class SemanticValidator {
             "A statically known repeat count must be a non-negative integer.",
             statement.count.span,
           );
+        } else if (isDefinitelyNonNumeric(statement.count)) {
+          this.#report(
+            semanticCode.invalidRepeatCount,
+            "A repeat count must be an integer value.",
+            statement.count.span,
+          );
         }
         this.#validateBlock(statement.body, scope, loopDepth + 1);
         return;
       case "forStatement": {
         this.#validateExpression(statement.iterable, scope, null);
+        if (isDefinitelyNonIterable(statement.iterable)) {
+          this.#report(
+            semanticCode.invalidLoopSource,
+            "A for-loop source must be a list, set, or integer range.",
+            statement.iterable.span,
+          );
+        }
         if (
           statement.iterable.kind === "rangeExpression" &&
           (!isKnownInteger(statement.iterable.start) ||
@@ -476,6 +490,20 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "objectLiteral" ||
     expression.kind === "templateLiteral" ||
     expression.kind === "rangeExpression"
+  );
+}
+
+function isDefinitelyNonIterable(expression: Expression): boolean {
+  if (expression.kind === "parenthesizedExpression") {
+    return isDefinitelyNonIterable(expression.expression);
+  }
+  return (
+    expression.kind === "stringLiteral" ||
+    expression.kind === "booleanLiteral" ||
+    expression.kind === "nullLiteral" ||
+    expression.kind === "numberLiteral" ||
+    expression.kind === "objectLiteral" ||
+    expression.kind === "templateLiteral"
   );
 }
 
