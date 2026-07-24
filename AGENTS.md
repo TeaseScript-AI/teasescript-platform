@@ -12,6 +12,7 @@ For every substantive task, read:
 6. relevant ADRs in `docs/decisions/`
 7. `docs/OPEN-DECISIONS.md` when resolving a gap
 8. `docs/planning/POC-TO-ALPHA-BACKLOG.md` when proposing or selecting future POC/pre-alpha work
+9. `docs/DEVELOPMENT-WORKFLOW.md` when creating implementation issues or participating in coordinated work
 
 Do not treat planning documents, wishes, research files, historical audits, or source examples as accepted decisions. A backlog item is not implementation scope unless the current owner/coordinator assignment or phase plan explicitly schedules its ID.
 
@@ -39,6 +40,19 @@ State briefly:
 
 Then work in small verifiable steps.
 
+## Issue sizing and execution recommendation
+
+When creating or substantially refining an implementation issue:
+
+- describe one coherent, reviewable task whenever practical;
+- include evidence or reproduction, scope, exclusions, and acceptance criteria;
+- state `Execution recommendation: Single agent` by default;
+- recommend `Coordinated multi-agent` only with a concrete reason why one agent or independently mergeable issues are insufficient;
+- do not recommend multiple agents merely because the task is difficult, touches several files, or spans multiple layers;
+- first consider splitting broad work into separate single-agent issues.
+
+The owner or designated coordinator confirms the execution model. An issue author's recommendation does not schedule work by itself.
+
 ## Verification
 
 Run all configured formatting, linting, type checking, build, relevant unit/integration tests, playground smoke tests, and diff checks. Report the exact commands and remaining failures or risks. If a check is not configured or could not be run, state that rather than inventing success.
@@ -47,14 +61,19 @@ Run all configured formatting, linting, type checking, build, relevant unit/inte
 
 - Keep `main` stable and usable.
 - Do not make substantive changes directly on `main`.
-- Create one short-lived branch per clear task.
+- Prefer one issue, one owning agent, one short-lived branch, and one pull request to `main`.
+- Use an integration branch and multiple executor branches only when the owner or coordinator explicitly selects coordinated multi-agent work.
 - Keep each branch limited to one clear purpose.
 - Make small logical commits with concise English imperative messages.
-- Push the branch and open one pull request to `main`.
-- State scope, intentionally deferred work, verification, and remaining risks in the pull request.
+- Open the pull request to the branch assigned for the task: normally `main`, or an integration branch for explicitly coordinated work.
+- Do not push to another agent's branch unless ownership has been explicitly handed over or reassigned.
+- State scope, intentionally deferred work, verification, documentation impact, and remaining risks in the pull request.
+- Process review feedback on the same branch and keep the pull request description aligned with the final result.
 - Review the complete diff for accidental files, debug code, secrets, unrelated changes, and stale documentation.
 - Prefer squash merge after checks pass, then delete the branch.
 - Never force-push or rewrite `main`.
+
+Follow `docs/DEVELOPMENT-WORKFLOW.md` for issue sizing, single-agent defaults, coordinator, executor, integration-branch, documentation, and final-verification responsibilities.
 
 ## Backlog governance
 

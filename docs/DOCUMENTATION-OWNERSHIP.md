@@ -2,12 +2,13 @@
 
 ## GitHub repository: canonical and continuously maintained
 
-The repository owns documentation that must change with code, architecture, language semantics, security boundaries, or product decisions:
+The repository owns documentation that must change with code, architecture, language semantics, security boundaries, product decisions, or the stable development process:
 
 - root routing/status files: `README-FIRST.md`, `CURRENT-DESIGN.md`, `PHASE-STATUS.md`, `AGENTS.md`, and `README.md`;
 - accepted syntax specifications;
 - ADRs;
 - concise current topic documents in `docs/`;
+- `docs/DEVELOPMENT-WORKFLOW.md` and other stable repository workflow rules;
 - current open decisions, the selected POC-to-alpha backlog, and deliberately maintained repository planning documents;
 - `WISHES.xml` product intent/history;
 - executable, tested examples under `examples/`.
@@ -50,7 +51,7 @@ Do not add the following merely to make the repository self-contained:
 
 ## Avoiding drift
 
-- GitHub is the source of truth for exact implementation and decision documentation.
+- GitHub is the source of truth for exact implementation, decision, and stable workflow documentation.
 - The shared project context must not claim an exact current commit or test count unless it is a dated handoff note.
 - When a chat lacks GitHub access, provide a current repository ZIP or patch rather than treating the shared research package as current code documentation.
 - Periodic research-archive cleanup may reorganize files, but must preserve source hashes and non-authoritative labels.

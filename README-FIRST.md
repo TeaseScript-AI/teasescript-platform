@@ -46,7 +46,8 @@ This does not mean that the complete V30 language, static type system, timers, i
 
 - `CURRENT-DESIGN.md`: current architecture and implementation boundaries.
 - `PHASE-STATUS.md`: current milestone status and verification evidence.
-- `AGENTS.md`: coding, review, and Git workflow rules.
+- `AGENTS.md`: coding, review, and Git rules for every agent.
+- `docs/DEVELOPMENT-WORKFLOW.md`: coordinator, executor, pull-request, documentation, and final-verification workflow.
 - `docs/README.md`: documentation map.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: which material belongs in GitHub versus the shared project research archive.
 - `docs/specifications/`: accepted consolidated specifications.
