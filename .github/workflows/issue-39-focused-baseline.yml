@@ -1,0 +1,28 @@
+name: Issue 39 focused baseline
+
+on:
+  push:
+    branches: [fix/issue-39-control-flow-regions]
+    paths:
+      - .github/workflows/issue-39-focused-baseline.yml
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Run focused failing-before tests
+        run: node --test dist/tests/instruction-plan-validation.test.js
