@@ -230,6 +230,10 @@ The final verifier reports:
 
 When the gate passes, open one final pull request from the integration branch to `main`. Prefer squash merge, then delete the milestone and executor branches.
 
-## Fallback package flow
+## Fallback work-package flow
 
-Use patch ZIPs and a repository integration runner only when direct GitHub branch and pull-request work is unavailable or a reproducible external patch handoff is specifically required. Fallback packages must remain outside the repository and may not replace pull-request review or final combined verification.
+Use repository branches and pull requests by default. Select the work-package fallback only when an assigned agent cannot create the required GitHub branch, commits, or pull request, or when a reproducible external patch handoff is explicitly required.
+
+The assignment must explicitly select fallback mode. Do not create a package ZIP as part of a normal GitHub-native task.
+
+See `../tools/work-packages/README.md` for package authoring, local integration, result, repair, publication, and cleanup rules. Package files remain outside the repository. A successful local integration must still be published, reviewed, verified by CI, and merged through the normal pull-request workflow.

@@ -29,8 +29,9 @@ These files provide concise current routing and must not duplicate or override a
 
 ## Development workflow
 
-- `DEVELOPMENT-WORKFLOW.md` defines the GitHub-native coordinator, executor, integration-branch, pull-request, documentation, and final-verification process.
+- `DEVELOPMENT-WORKFLOW.md` defines the GitHub-native issue, agent, branch, pull-request, coordinated-work, documentation, and final-verification process.
 - `../AGENTS.md` contains the mandatory task, coding, review, and Git rules for every agent.
+- `../tools/work-packages/README.md` defines the explicit fallback for agents that cannot complete the normal GitHub branch and pull-request flow.
 
 Temporary work breakdowns, executor assignments, package files, and merge tracking remain outside the repository.
 
