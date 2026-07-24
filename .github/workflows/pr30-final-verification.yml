@@ -22,11 +22,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
       - name: Verify PR 30 head
         id: result
         shell: bash
@@ -34,16 +29,15 @@ jobs:
           set -euo pipefail
           git fetch origin main agent/issue-28-runtime-api-docs
           git checkout --detach origin/agent/issue-28-runtime-api-docs
-          export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-          if [ -s "$NVM_DIR/nvm.sh" ]; then
-            . "$NVM_DIR/nvm.sh"
-            nvm use
-          fi
+          export NVM_DIR="$HOME/.nvm"
+          . "$NVM_DIR/nvm.sh"
+          nvm install
+          nvm use
           npm ci
           npm run check > /tmp/pr30-check.log
-          tests="$(awk '$1 == "tests" || $2 == "tests" { value=$NF } END { print value }' /tmp/pr30-check.log)"
-          passed="$(awk '$1 == "pass" || $2 == "pass" { value=$NF } END { print value }' /tmp/pr30-check.log)"
-          failed="$(awk '$1 == "fail" || $2 == "fail" { value=$NF } END { print value }' /tmp/pr30-check.log)"
+          tests="$(grep -E '(^| )tests [0-9]+$' /tmp/pr30-check.log | tail -n 1 | grep -oE '[0-9]+$')"
+          passed="$(grep -E '(^| )pass [0-9]+$' /tmp/pr30-check.log | tail -n 1 | grep -oE '[0-9]+$')"
+          failed="$(grep -E '(^| )fail [0-9]+$' /tmp/pr30-check.log | tail -n 1 | grep -oE '[0-9]+$')"
           test -n "$tests"
           npm run build
           git diff --check origin/main...HEAD
