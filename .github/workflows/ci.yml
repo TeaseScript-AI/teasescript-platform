@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check:
@@ -17,33 +17,60 @@ jobs:
         with:
           ref: fix/issue-39-control-flow-regions
           fetch-depth: 0
-      - name: Apply issue 39 correction
-        run: |
-          python3 tools/issue39-fix.py
-          git diff --check
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Record versions and nvm selection
+        run: |
+          set -o pipefail
+          {
+            if [ -s "$HOME/.nvm/nvm.sh" ]; then
+              . "$HOME/.nvm/nvm.sh"
+              nvm use
+            else
+              echo "nvm shell function unavailable; actions/setup-node used .nvmrc"
+            fi
+            echo ".nvmrc=$(cat .nvmrc)"
+            node --version
+            npm --version
+          } | tee issue-39-versions.log
       - name: Validate work-package tooling
         run: |
           bash -n tools/work-packages/integrate.sh
           jq empty tools/work-packages/PACKAGE.schema.json
           jq empty tools/work-packages/templates/PACKAGE.example.json
       - name: Install dependencies
-        run: npm ci
-      - name: Check source
-        run: npm run check
-      - name: Build
+        run: npm ci 2>&1 | tee issue-39-npm-ci.log
+      - name: Build for focused tests
         run: npm run build
-      - name: Commit and push issue 39 correction
+      - name: Run focused compiled tests
         run: |
-          if git diff --quiet; then
-            exit 0
-          fi
-          git config user.name "OpenAI Agent"
-          git config user.email "agent@openai.com"
-          git add src/instructions.ts
-          git commit -m "Validate specialized targets against execution regions"
-          git push origin HEAD:fix/issue-39-control-flow-regions
+          set -o pipefail
+          node --test dist/tests/instruction-plan-validation.test.js 2>&1 | tee issue-39-focused.log
+      - name: Run full check
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee issue-39-full.log
+      - name: Run final build
+        run: npm run build 2>&1 | tee issue-39-build.log
+      - name: Verify diff and clean worktree
+        run: |
+          set -o pipefail
+          git fetch origin main
+          git diff --check origin/main...HEAD
+          git status --short | tee issue-39-status.log
+          test ! -s issue-39-status.log
+      - name: Upload issue 39 verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-39-final-verification
+          path: |
+            issue-39-versions.log
+            issue-39-npm-ci.log
+            issue-39-focused.log
+            issue-39-full.log
+            issue-39-build.log
+            issue-39-status.log
