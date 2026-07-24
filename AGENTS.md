@@ -12,6 +12,7 @@ For every substantive task, read:
 6. relevant ADRs in `docs/decisions/`
 7. `docs/OPEN-DECISIONS.md` when resolving a gap
 8. `docs/planning/POC-TO-ALPHA-BACKLOG.md` when proposing or selecting future POC/pre-alpha work
+9. `docs/DEVELOPMENT-WORKFLOW.md` when participating in coordinated multi-agent work
 
 Do not treat planning documents, wishes, research files, historical audits, or source examples as accepted decisions. A backlog item is not implementation scope unless the current owner/coordinator assignment or phase plan explicitly schedules its ID.
 
@@ -47,14 +48,18 @@ Run all configured formatting, linting, type checking, build, relevant unit/inte
 
 - Keep `main` stable and usable.
 - Do not make substantive changes directly on `main`.
-- Create one short-lived branch per clear task.
+- Create one short-lived branch per clear task or workstream.
 - Keep each branch limited to one clear purpose.
 - Make small logical commits with concise English imperative messages.
-- Push the branch and open one pull request to `main`.
-- State scope, intentionally deferred work, verification, and remaining risks in the pull request.
+- Open the pull request to the branch assigned by the coordinator: an integration branch for coordinated work, otherwise `main`.
+- Do not push to another agent's branch unless explicitly assigned.
+- State scope, intentionally deferred work, verification, documentation impact, and remaining risks in the pull request.
+- Process review feedback on the same branch and keep the pull request description aligned with the final result.
 - Review the complete diff for accidental files, debug code, secrets, unrelated changes, and stale documentation.
 - Prefer squash merge after checks pass, then delete the branch.
 - Never force-push or rewrite `main`.
+
+Follow `docs/DEVELOPMENT-WORKFLOW.md` for coordinator, executor, integration-branch, documentation, and final-verification responsibilities.
 
 ## Backlog governance
 
