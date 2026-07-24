@@ -1,10 +1,7 @@
 name: Issue 39 focused baseline
 
 on:
-  push:
-    branches: [fix/issue-39-control-flow-regions]
-    paths:
-      - .github/workflows/issue-39-focused-baseline.yml
+  pull_request:
 
 permissions:
   contents: read
