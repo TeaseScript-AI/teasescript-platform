@@ -417,6 +417,22 @@ export interface PlanValidationResult {
   readonly errors: readonly PlanValidationError[];
 }
 
+
+/** Controlled compiler-boundary failure for semantically invalid AST input. */
+export class InstructionCompilationError extends Error {
+  readonly span: SourceSpan;
+
+  public constructor(
+    readonly code: "TSC003",
+    message: string,
+    span: SourceSpan,
+  ) {
+    super(message);
+    this.name = "InstructionCompilationError";
+    this.span = copySpan(span);
+  }
+}
+
 export function compileProgram(program: Program): InstructionPlan {
   const declarations = program.statements.filter(
     (statement): statement is FunctionDeclaration =>
@@ -1306,10 +1322,20 @@ class InstructionCompiler {
         expectBoolean: false,
         span: copySpan(argument.span),
       });
-      const parameterName =
-        argument.kind === "namedArgument"
-          ? argument.name.name
-          : registered.declaration.parameters[index]!.name.name;
+      let parameterName: string;
+      if (argument.kind === "namedArgument") {
+        parameterName = argument.name.name;
+      } else {
+        const parameter = registered.declaration.parameters[index];
+        if (parameter === undefined) {
+          throw new InstructionCompilationError(
+            "TSC003",
+            `Function '${name}' has no parameter for positional argument ${index + 1}.`,
+            argument.span,
+          );
+        }
+        parameterName = parameter.name.name;
+      }
       prepared.push({
         parameterName,
         temporaryId,

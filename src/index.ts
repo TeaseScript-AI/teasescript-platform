@@ -15,6 +15,7 @@ export {
   compileProgram,
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
+  InstructionCompilationError,
   validateInstructionPlan,
   type ArgumentPlan,
   type AssignmentTargetPlan,
@@ -40,6 +41,7 @@ export {
 export {
   execute,
   Interpreter,
+  InterpreterCompilationError,
   type BuiltinCall,
   type BuiltinFunction,
   type ExecutionResult,
