@@ -48,7 +48,7 @@ test("restores a self-contained checkpoint from serialized JSON", () => {
 
 test("uninterrupted and checkpoint-resumed execution are identical", () => {
   const { finalSnapshot } = assertRuntimeResumeEquivalent([
-    "speaker vera { title: "Mistress" }",
+    'speaker vera { title: "Mistress" }',
     "speaker vera",
     'let values = set["first", "second", "third"]',
     "let chosen = values.random",
