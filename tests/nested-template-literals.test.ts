@@ -38,9 +38,11 @@ test("lexes nested templates and interpolations with exact spans", () => {
 
 test("preserves template escapes inside a nested template", () => {
   const result = lex("say `Outer: ${`tick \\` literal \\${name}`}`");
-  const textValues = result.tokens
-    .filter((token) => token.kind === TokenKind.TemplateText)
-    .map((token) => token.value);
+  const textValues = result.tokens.flatMap((token) =>
+    token.kind === TokenKind.TemplateText && "value" in token
+      ? [token.value]
+      : [],
+  );
 
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(textValues, ["Outer: ", "tick ` literal ${name}"]);
