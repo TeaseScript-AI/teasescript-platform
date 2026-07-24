@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test": "git diff --check && git fetch origin main && git diff --check origin/main...HEAD && npm run build && node --test dist/tests/*.test.js",
     "check": "npm run typecheck && npm test",
     "playground": "npm run build && node dist/playground/server.js"
   },
