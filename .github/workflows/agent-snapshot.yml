@@ -1,4 +1,4 @@
-name: Agent Snapshot
+name: Issue 38 Reproduction
 
 on:
   pull_request:
@@ -7,13 +7,32 @@ permissions:
   contents: read
 
 jobs:
-  snapshot:
+  reproduce:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-node@v4
         with:
-          name: issue-38-repository-snapshot
-          path: .
-          include-hidden-files: true
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Run focused failing-before test
+        shell: bash
+        run: |
+          set +e
+          npm run build > issue-38-reproduction.log 2>&1
+          build_status=$?
+          if [ "$build_status" -eq 0 ]; then
+            node --test dist/tests/issue-38-reproduction.test.js >> issue-38-reproduction.log 2>&1
+            test_status=$?
+          else
+            test_status=$build_status
+          fi
+          cat issue-38-reproduction.log
+          exit "$test_status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue-38-failing-before-log
+          path: issue-38-reproduction.log
           retention-days: 1
