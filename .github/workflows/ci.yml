@@ -19,6 +19,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Validate work-package tooling
+        run: |
+          bash -n tools/work-packages/integrate.sh
+          python -m json.tool tools/work-packages/PACKAGE.schema.json > /dev/null
+          python -m json.tool tools/work-packages/templates/PACKAGE.example.json > /dev/null
       - name: Install dependencies
         run: npm ci
       - name: Check source
