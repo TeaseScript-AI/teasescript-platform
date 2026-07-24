@@ -26,6 +26,17 @@ jobs:
           jq empty tools/work-packages/templates/PACKAGE.example.json
       - name: Install dependencies
         run: npm ci
+      - name: Run focused issue 16 test
+        continue-on-error: true
+        run: |
+          npm run build > focused.log 2>&1
+          node --test dist/tests/runtime-engine-hardening.test.js >> focused.log 2>&1
+      - name: Upload focused test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-16-focused-log
+          path: focused.log
       - name: Check source
         run: npm run check
       - name: Build
