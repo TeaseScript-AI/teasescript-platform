@@ -10,7 +10,7 @@ import {
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 
 test("requires explicit own registration for an inherited builtin name", () => {
-  const compiled = compile("valueOf()", ["valueOf"]);
+  const compiled = compile("let output = valueOf()", ["valueOf"]);
   const missing = run(compiled, createFreshRuntimeSnapshot(compiled));
 
   assert.equal(missing.snapshot.failure?.code, "TSR011");
@@ -36,7 +36,7 @@ test("requires explicit own registration for an inherited builtin name", () => {
 });
 
 test("keeps core builtin precedence over injected names", () => {
-  const compiled = compile("random()", []);
+  const compiled = compile("let output = random()", []);
   let injectedCalls = 0;
   let randomCalls = 0;
   const result = run(
