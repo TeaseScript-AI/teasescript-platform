@@ -28,7 +28,7 @@ jobs:
           {
             if [ -s "$HOME/.nvm/nvm.sh" ]; then
               . "$HOME/.nvm/nvm.sh"
-              nvm use
+              nvm use || echo "nvm could not select the setup-node installation; continuing with actions/setup-node"
             else
               echo "nvm shell function unavailable; actions/setup-node used .nvmrc"
             fi
