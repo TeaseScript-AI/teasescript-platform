@@ -1,0 +1,29 @@
+name: Capture Agent 2 failing test
+
+on:
+  push:
+    branches: [fix/issue-9-finite-numeric-literals]
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/issue-9-finite-numeric-literals
+          fetch-depth: 0
+      - name: Capture failing test
+        run: |
+          npm ci
+          npm run check > /tmp/agent2-full.log 2>&1 || true
+          awk 'BEGIN { before = 25; after = 50 } { lines[NR] = $0 } /not ok/ { start = NR - before; if (start < 1) start = 1; stop = NR + after } END { for (i = start; i <= stop && i <= NR; i++) print lines[i] }' /tmp/agent2-full.log > tools/tmp/agent-2-full-suite-output.txt
+          git rm .github/workflows/capture-agent-2-failing-test.yml
+          git add tools/tmp/agent-2-full-suite-output.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Capture failing full-suite test"
+          git push origin HEAD:fix/issue-9-finite-numeric-literals
