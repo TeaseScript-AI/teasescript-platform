@@ -122,10 +122,10 @@ test("checkpoint restore in every loop kind matches uninterrupted events", () =>
     "for value in 1..=3 {\n  if value == 1 { continue }\n  say value\n}",
   ]) {
     const { boundaries } = assertRuntimeResumeEquivalent(source, {
-    scenarioName: `loop checkpoint corpus: ${source.split("\n")[0]}`,
-    seed: 9,
-  });
-  assert.ok(boundaries.some((snapshot) => snapshot.loopFrames.length > 0));
+      scenarioName: `loop checkpoint corpus: ${source.split("\n")[0]}`,
+      seed: 9,
+    });
+    assert.ok(boundaries.some((snapshot) => snapshot.loopFrames.length > 0));
   }
 });
 
