@@ -228,7 +228,7 @@ An authoring environment without a local checkout may construct the patch from e
 
 ### 5.5 Fill `PACKAGE.json`
 
-Start from `templates/PACKAGE.example.json`. The authoring agent fills the manifest; the runner does not generate it.
+Start from `templates/PACKAGE.example.json`. The authoring agent fills the manifest; the runner does not generate it. `PACKAGE.schema.json` is the canonical authoring schema and reference. `integrate.sh` validates the manifest contract directly with `jq`; it does not execute JSON Schema validation.
 
 Required fields include:
 
@@ -342,7 +342,7 @@ bash tools/work-packages/integrate.sh \
 
 The runner validates:
 
-- package schema and allowed manifest fields;
+- manifest structure, required fields, accepted values, paths, and preimages;
 - repository, branch, base policy, and clean live tree;
 - required integration context;
 - allowed paths and base blob preimages;
