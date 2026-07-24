@@ -2,96 +2,14 @@ name: CI
 
 on:
   push:
-    branches:
-      - fix/issue-13-visible-list-text
+    branches: [main]
   pull_request:
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
-  apply-agent-fix:
-    if: github.event_name == 'push'
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Apply visible list text fix
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("src/runtime/engine.ts")
-          source = path.read_text()
-          old = '''  public visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
-              if (isList(value)) return this.visibleText(this.#randomItem(value.items, span), span);
-              if (typeof value === "string") return value;
-              if (typeof value === "number") return String(value);
-              if (typeof value === "boolean") return value ? "true" : "false";
-              if (value === null) return "null";
-              throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
-            }'''.replace("          ", "")
-          new = '''  public visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
-              if (isList(value)) {
-                const selected = this.#randomItem(value.items, span);
-                if (typeof selected === "string") return selected;
-                if (typeof selected === "number" && Number.isFinite(selected)) return String(selected);
-                throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
-              }
-              if (typeof value === "string") return value;
-              if (typeof value === "number") return String(value);
-              if (typeof value === "boolean") return value ? "true" : "false";
-              if (value === null) return "null";
-              throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
-            }'''.replace("          ", "")
-          if source.count(old) != 1:
-              raise SystemExit("Expected exactly one visibleText implementation.")
-          path.write_text(source.replace(old, new))
-          PY
-          cat > .github/workflows/ci.yml <<'EOF'
-          name: CI
-
-          on:
-            push:
-              branches: [main]
-            pull_request:
-
-          permissions:
-            contents: read
-
-          jobs:
-            check:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Check out repository
-                  uses: actions/checkout@v4
-                - name: Set up Node.js
-                  uses: actions/setup-node@v4
-                  with:
-                    node-version-file: .nvmrc
-                    cache: npm
-                - name: Validate work-package tooling
-                  run: |
-                    bash -n tools/work-packages/integrate.sh
-                    jq empty tools/work-packages/PACKAGE.schema.json
-                    jq empty tools/work-packages/templates/PACKAGE.example.json
-                - name: Install dependencies
-                  run: npm ci
-                - name: Check source
-                  run: npm run check
-                - name: Build
-                  run: npm run build
-          EOF
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/runtime/engine.ts .github/workflows/ci.yml
-          git commit -m "Restrict automatic visible list text"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-
   check:
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -101,6 +19,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Validate work-package tooling
+        run: |
+          bash -n tools/work-packages/integrate.sh
+          jq empty tools/work-packages/PACKAGE.schema.json
+          jq empty tools/work-packages/templates/PACKAGE.example.json
       - name: Install dependencies
         run: npm ci
       - name: Check source
