@@ -1,10 +1,73 @@
 # Development workflow
 
-## Default model
+## Guiding principle
 
-Use GitHub-native branches and pull requests for coordinated agent work. A work-package ZIP and local integration runner are fallback mechanisms for agents without repository write access; they are not the default path.
+Use the simplest GitHub workflow that safely completes the task. The default is:
 
-For a coordinated milestone, use:
+```text
+one issue
+    -> one agent
+    -> one short-lived branch
+    -> one pull request to main
+```
+
+Do not introduce a coordinator, integration branch, or multiple executor agents merely because a task is technically difficult, touches several files, or spans more than one layer. Coordination has a cost and must solve a concrete problem.
+
+Use coordinated multi-agent work only when the work cannot reasonably be completed as one coherent agent task, or when several dependent workstreams must be reviewed and landed together.
+
+A work-package ZIP and local integration runner are fallback mechanisms for agents without repository write access; they are not the default path.
+
+## Issue sizing and execution recommendation
+
+An issue should normally describe one coherent, reviewable task that one agent can own from reproduction or design through implementation, tests, documentation impact, and pull request.
+
+The agent creating or substantially refining an issue should include:
+
+- the observed problem, requested outcome, or design goal;
+- evidence, reproduction, or relevant source references;
+- explicit scope and exclusions;
+- acceptance criteria;
+- an execution recommendation:
+  - `Single agent` — the default;
+  - `Coordinated multi-agent` — only with a short concrete rationale.
+
+Before recommending multiple agents, first consider whether the work can be split into independent issues. Prefer separate single-agent issues when each can be implemented, tested, reviewed, and merged safely on its own.
+
+Multiple agents are justified when, for example:
+
+- one accepted goal contains genuinely separate workstreams that can progress independently;
+- the workstreams share a contract or integration gate and must land together;
+- sequencing or overlapping behavior requires an explicit merge order;
+- the task is too broad for one agent but splitting it into independently mergeable issues would create contradictory intermediate states or duplicated work.
+
+Do not recommend multiple agents only because an issue is large, touches several files, or benefits from review. One agent may still own a complex but coherent issue.
+
+The issue author's recommendation is advisory. The owner or designated coordinator confirms the execution model before implementation begins.
+
+## Default single-agent flow
+
+For a normal issue:
+
+1. Confirm the issue is sufficiently scoped and accepted for implementation.
+2. Create one short-lived branch from current `main`.
+3. Implement code, tests, fixtures, examples, and relevant documentation on that branch.
+4. Open a pull request to `main`; a draft pull request may be opened early when visibility or feedback is useful.
+5. Keep the pull request description aligned with the final implementation.
+6. Process review feedback on the same branch and pull request.
+7. Run the required verification and review the complete diff.
+8. Merge after approval and passing checks, then delete the branch.
+
+The pull request is the implementation handoff record. A separate coordinator report, integration branch, or milestone orchestrator is not required.
+
+A single-agent pull request that completes its issue may use:
+
+```text
+Closes #123
+```
+
+## Coordinated multi-agent model
+
+Use this model only after it has been explicitly selected for a complex issue or coordinated milestone:
 
 ```text
 coordinator
@@ -19,20 +82,19 @@ integration branch
     -> final pull request to main
 ```
 
-A small independent task may use one branch and one pull request directly to `main`.
-
-## Roles
+Several unrelated or independently mergeable issues do not need an integration branch merely because they are being worked on at the same time.
 
 ### Coordinator
 
 The coordinator:
 
-- divides the milestone into workstreams and records dependencies;
+- confirms that the multi-agent model is justified;
+- divides the accepted issue or milestone into workstreams and records dependencies;
 - creates or names the integration branch;
 - gives each executor its base, target branch, scope, exclusions, acceptance criteria, and documentation ownership;
 - minimizes overlapping file ownership;
 - reviews executor pull requests and assigns cross-workstream findings;
-- controls merge order;
+- controls merge order and authorizes executor pull-request merges;
 - owns the final update of shared status and routing documents;
 - prepares or reviews the final pull request to `main`.
 
@@ -45,19 +107,22 @@ Each executor starts from the assigned repository state and follows `AGENTS.md`.
 - works only on its assigned workstream;
 - creates its own branch;
 - implements code, tests, fixtures, examples, and specifically assigned documentation;
-- opens a pull request to the assigned target branch;
+- opens a draft pull request to the assigned integration branch when work begins or as soon as a reviewable skeleton exists;
 - records final behavior, verification, documentation impact, deferred work, and remaining risks in the pull request description;
-- processes review feedback on the same branch and pull request.
+- processes review feedback on the same branch and pull request;
+- marks the pull request ready only after its own scope and checks are complete.
 
 The pull request is the executor's handoff record. A separate coordinator report is not required. When a repair changes the result, update the pull request description before merge.
+
+Executors do not merge their own workstream pull requests unless the coordinator explicitly authorizes it.
 
 ### Final verifier
 
 Codex or another assigned verifier checks the combined integration branch after executor work and canonical documentation have been merged. It does not silently redesign or repair a failed workstream. Failures are returned to the responsible executor or coordinator unless an explicit repair assignment is made.
 
-## Branch and pull-request structure
+## Coordinated branch and pull-request structure
 
-For a coordinated milestone, create one integration branch from current `main`, for example:
+Create one integration branch from current `main`, for example:
 
 ```text
 fix/runtime-foundation-hardening
@@ -75,11 +140,24 @@ Executor pull requests target the integration branch, not `main`. GitHub CI runs
 
 Independent workstreams may branch from the same integration commit and proceed in parallel when their file ownership and behavior do not overlap. Dependent work starts from the predecessor's merged integration state. The coordinator must not present dependent work as safely parallel.
 
-Do not push to another executor's branch unless the coordinator explicitly assigns it. A coordinator may directly commit a small, unambiguous review or documentation correction to a pull-request branch when that is faster than a round trip; the change must remain visible in the pull request and may not silently alter feature scope.
+Review feedback normally uses pull-request comments or reviews. Do not push to another agent's branch unless ownership has been explicitly handed over or the work has been reassigned. A handoff must remain visible in the pull request.
 
-## Minimum executor assignment
+Executor pull requests should reference their issue without closing it prematurely:
 
-An executor assignment must identify:
+```text
+Refs #123
+```
+
+The final integration pull request to `main` closes the completed issues:
+
+```text
+Closes #123
+Closes #124
+```
+
+## Minimum coordinated assignment
+
+A coordinated executor assignment must identify:
 
 - repository and assigned base state;
 - source branch name and pull-request target branch;
@@ -93,7 +171,9 @@ Fresh executor sessions must read the repository documents required by `AGENTS.m
 
 ## Documentation ownership
 
-Executors update documentation that is local to their assigned behavior when needed. Shared summary and routing documents are coordinator-owned unless explicitly assigned, especially:
+For a single-agent issue, that agent updates documentation affected by the implemented behavior in the same pull request unless the task explicitly reserves a shared document for someone else.
+
+For coordinated work, executors update documentation local to their assigned behavior. Shared summary and routing documents are coordinator-owned unless explicitly assigned, especially:
 
 ```text
 README-FIRST.md
@@ -104,7 +184,7 @@ README.md
 
 Executor pull requests must state the effect on canonical documentation even when the executor is not assigned to edit those files.
 
-After implementation pull requests are merged, the coordinator prepares the canonical documentation update from:
+After coordinated implementation pull requests are merged, the coordinator prepares the canonical documentation update from:
 
 - the merged code and tests;
 - the final pull-request descriptions;
@@ -113,20 +193,23 @@ After implementation pull requests are merged, the coordinator prepares the cano
 
 The coordinator records actual implemented behavior, not the original proposal. Deferred work remains explicit.
 
-## Review and merge loop
+## Coordinated review and merge loop
 
-1. The executor opens a pull request to the assigned target branch.
+1. Each executor opens a draft pull request to the assigned integration branch.
 2. CI and the coordinator review the workstream in isolation.
 3. Findings are handled by the owning executor on the same pull request, or reassigned explicitly when they cross workstream boundaries.
-4. The coordinator confirms scope, tests, documentation impact, and merge order.
-5. The executor pull request is merged into the integration branch.
-6. Dependent executors receive the new integration state.
+4. The executor marks the pull request ready after completing its scope and checks.
+5. The coordinator confirms scope, tests, documentation impact, and merge order.
+6. The coordinator merges or explicitly authorizes merging the executor pull request into the integration branch.
+7. Dependent executors receive the new integration state.
 
 Do not merge a workstream merely because its files do not conflict. Behavioral contracts, checkpoint formats, public types, and shared tests can create dependencies without textual merge conflicts.
 
-## Final integration gate
+## Verification
 
-After all implementation and coordinator documentation changes are on the integration branch, run from a clean install:
+Every pull request runs its relevant configured checks and reports exact commands and results.
+
+For a coordinated milestone, after all implementation and coordinator documentation changes are on the integration branch, run from a clean install:
 
 ```shell
 nvm use
