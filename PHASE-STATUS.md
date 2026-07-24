@@ -2,8 +2,9 @@
 
 ## Evidence boundary
 
-- Current repository baseline for this status update: `a11abdad46863933e71f8d8307466802d720d3de` on `main`.
-- The seven-item implemented-foundation hardening set tracked by issue #7 is complete at this baseline, including the merged compiler/template work in PR #19 and RNG-state work in PR #20.
+- Current repository baseline for this status update: `786a6480a4de4690797207a0964a92ed387afedf` on `main`.
+- The seven-item implemented-foundation hardening set tracked by issue #7 is complete at this baseline, including the compiler/template work in PR #19, RNG-state work in PR #20, and the direct-AST non-finite-number boundary repair in PR #34.
+- Final post-merge verification at this baseline passed with 273 tests, 0 failures, and a successful TypeScript build.
 - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
 ## Implemented in the current repository code
@@ -14,7 +15,7 @@
 - Literals, expressions, variables, assignments, lexical blocks, speakers, `say`, `say as`, contextual speaker behavior, and `exit`.
 - Lists, objects, insertion-ordered scalar sets, deep ordinary-value copying, and current collection/runtime errors.
 - Recursive nested template literals inside interpolation, including preserved escapes, source spans, structured unterminated-template diagnostics, and existing recovery behavior.
-- `compileSource(...)` rejection of non-finite numeric literals through `TSC001`, while large finite literals remain valid and failed compilation returns no plan.
+- `compileSource(...)` rejection of non-finite numeric literals through exact-span `TSC001`, while large finite literals remain valid and failed compilation returns no plan.
 
 ### Serializable deterministic runtime
 
@@ -39,12 +40,13 @@
 - Complete suspended-caller temporary liveness validation.
 - Strict function prologue/region, checkpoint-progress, and prepared-reference validation.
 - Central V30 protected-name enforcement.
-- Semantic validation before direct `Program` compatibility execution and defensive `TSC003` lowering failure for invalid direct AST input.
+- Shared non-finite-literal AST validation and semantic validation before direct `Program` compatibility execution.
+- Defensive direct lowering with `TSC001` for non-finite numeric literals and `TSC003` for excess positional arguments.
 - Explicit rejection of host `RuntimeSpeaker` values at the compatibility boundary.
 - Own-property-only runtime builtin registration and prototype-free named builtin arguments.
 - Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
 
-The current plan, snapshot, and checkpoint formats are version 3 POC formats. The merged RNG hardening did not change these format versions.
+The current plan, snapshot, and checkpoint formats are version 3 POC formats. The completed hardening did not change these format versions.
 
 ## Verification expected before merge
 
