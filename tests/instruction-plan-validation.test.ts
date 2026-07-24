@@ -136,6 +136,56 @@ test("preserves a compiler-generated owning-function implicit-return target", ()
   assert.equal(validateInstructionPlan(compiled).valid, true);
 });
 
+test("keeps function-call return targets inside the caller region", () => {
+  const compiled = plan(rootBranchWithTwoFunctions());
+  const callSource = [
+    'function first { say "first" }',
+    'function second { say "second" }',
+    "first()",
+    "exit",
+  ].join("\n");
+  const callable = plan(callSource);
+  const callIndex = rootInstructionIndex(callable, "callFunction");
+  const malformed = mutateTarget(
+    callable,
+    callIndex,
+    "returnInstruction",
+    callable.functions[1]!.bodyEntryInstruction,
+  );
+
+  assertRegionError(
+    validateInstructionPlan(malformed),
+    `$.instructions[${callIndex}].returnInstruction`,
+  );
+  assert.equal(validateInstructionPlan(compiled).valid, true);
+});
+
+test("keeps parameter-default targets inside their function region", () => {
+  const compiled = plan([
+    "function first(value = 1) { say value }",
+    "function second { say 2 }",
+    "first()",
+    "exit",
+  ].join("\n"));
+  const first = compiled.functions[0]!;
+  const prepareIndex = functionInstructionIndex(
+    compiled,
+    first.id,
+    "prepareParameterDefault",
+  );
+  const malformed = mutateTarget(
+    compiled,
+    prepareIndex,
+    "target",
+    compiled.functions[1]!.entryInstruction,
+  );
+
+  assertRegionError(
+    validateInstructionPlan(malformed),
+    `$.instructions[${prepareIndex}].target`,
+  );
+});
+
 test("preserves compiler-generated control flow, calls, and returns", () => {
   const sources = [
     rootBranchWithTwoFunctions(),
