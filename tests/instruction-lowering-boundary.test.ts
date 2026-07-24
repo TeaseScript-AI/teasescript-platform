@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProgram } from "../src/instructions.js";
+import {
+  compileProgram,
+  InstructionCompilationError,
+} from "../src/instructions.js";
 import { parse } from "../src/parser.js";
 
 const source = [
@@ -15,18 +18,12 @@ test("function-call lowering reports a controlled missing-parameter error", () =
   const secondArgumentStart = source.lastIndexOf("2");
 
   assert.throws(() => compileProgram(parsed.program), (error: unknown) => {
-    assert.ok(error instanceof Error);
-    assert.equal(error.name, "InstructionCompilationError");
+    assert.ok(error instanceof InstructionCompilationError);
     assert.equal(error instanceof TypeError, false);
-    assert.equal((error as { code?: string }).code, "TSC003");
+    assert.equal(error.code, "TSC003");
     assert.match(error.message, /positional argument 2/u);
-    const span = (error as {
-      span?: { start: { offset: number }; end: { offset: number } };
-    }).span;
     assert.deepEqual(
-      span === undefined
-        ? null
-        : [span.start.offset, span.end.offset],
+      [error.span.start.offset, error.span.end.offset],
       [secondArgumentStart, secondArgumentStart + 1],
     );
     return true;
