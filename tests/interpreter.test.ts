@@ -4,6 +4,7 @@ import test from "node:test";
 import { parse } from "../src/parser.js";
 import {
   execute,
+  InterpreterCompilationError,
   type BuiltinFunction,
   type ExecutionResult,
   type RandomSource,
@@ -34,24 +35,34 @@ test("evaluates variables, assignment, precedence, if, and else", () => {
   assert.deepEqual(sayTexts(result), ["15"]);
 });
 
-test("enforces lexical block scope with a span-bearing error", () => {
+test("rejects out-of-scope identifiers at the semantic boundary", () => {
   const source = [
     "if true {",
     "  let local = 1",
     "}",
     "say `${local}`",
   ].join("\n");
-  const result = run(source);
+  const parsed = parse(source);
+  assert.deepEqual(parsed.diagnostics, []);
+  const start = source.indexOf("local", source.indexOf("say"));
 
-  assert.deepEqual(
-    result.errors.map((error) => [
-      error.code,
-      error.span.start.offset,
-      error.span.end.offset,
-    ]),
-    [["TSR006", source.indexOf("local", source.indexOf("say")), source.length - 2]],
+  assert.throws(
+    () => execute(parsed.program, { random: sequenceRandom([0]) }),
+    (error: unknown) => {
+      assert.ok(error instanceof InterpreterCompilationError);
+      const diagnostic = error.diagnostics.find(
+        (candidate) => candidate.code === "TSV002",
+      );
+      assert.notEqual(diagnostic, undefined);
+      assert.deepEqual(
+        diagnostic === undefined
+          ? null
+          : [diagnostic.span.start.offset, diagnostic.span.end.offset],
+        [start, source.length - 2],
+      );
+      return true;
+    },
   );
-  assert.deepEqual(result.events, []);
 });
 
 test("evaluates positional and named injected built-in calls", () => {
