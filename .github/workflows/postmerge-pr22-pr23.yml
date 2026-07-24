@@ -32,15 +32,27 @@ jobs:
           test "$ACTUAL_MAIN_SHA" = "ed098995238172065c6dcd1ea2b8e9e0d4238675"
           test "$(git rev-parse HEAD)" = "ed098995238172065c6dcd1ea2b8e9e0d4238675"
           test -z "$(git status --short)"
-      - name: Install and use .nvmrc Node
+      - name: Install nvm
         shell: bash
         run: |
           set -eo pipefail
           export NVM_DIR="$RUNNER_TEMP/nvm"
           rm -rf "$NVM_DIR"
           git clone --depth 1 --branch v0.40.3 https://github.com/nvm-sh/nvm.git "$NVM_DIR"
+          test -s "$NVM_DIR/nvm.sh"
+      - name: Install .nvmrc Node
+        shell: bash
+        run: |
+          set -eo pipefail
+          export NVM_DIR="$RUNNER_TEMP/nvm"
           . "$NVM_DIR/nvm.sh"
           nvm install
+      - name: Use .nvmrc Node
+        shell: bash
+        run: |
+          set -eo pipefail
+          export NVM_DIR="$RUNNER_TEMP/nvm"
+          . "$NVM_DIR/nvm.sh"
           nvm use
           echo "$NVM_DIR/versions/node/$(nvm version)/bin" >> "$GITHUB_PATH"
           node --version
