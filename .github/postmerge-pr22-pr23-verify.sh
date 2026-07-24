@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Runs only after the workflow has checked out the pinned current-main commit.
+# Kept in this draft solely as executable verification evidence.
 echo '$ node --input-type=module  # explicit PR22/PR23 functional probes'
 node --input-type=module <<'NODE'
 import assert from "node:assert/strict";
