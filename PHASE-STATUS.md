@@ -2,10 +2,9 @@
 
 ## Evidence boundary
 
-- Last independently recorded merged `main` baseline before the function milestone: `348170dd75598a1265f82e22a1f0e3cd8a639321`.
-- Function hardening code commit immediately before this documentation update: `df51ebe` on `feature/functions-runtime`.
-- User-provided terminal output reported 239 passing tests, zero failures, successful TypeScript build, and a successful push of that commit.
-- Live pull-request, merge, and GitHub Actions status must be checked in GitHub; this file does not substitute for live repository metadata.
+- Current repository baseline for this status update: `1cf3aa4a7ad7302ffdbd434488ce526e76c97ad8` on `main`.
+- PR #5, **Add serializable user-defined functions**, is merged into `main` as `07f1c9fb98ff9b9a72096477d5a13461487ea606`.
+- Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
 ## Implemented in the current repository code
 
@@ -64,4 +63,4 @@ Also inspect the complete diff and verify the playground route/security matrix. 
 - Laravel persistence, accounts, catalog/publishing, moderation, scheduling, and global data;
 - continuous-personality services and LLM/vision integration.
 
-The next milestone must be selected explicitly after the function-runtime PR is resolved.
+The next milestone remains unselected and must be selected explicitly. Open backlog items are not scheduled by this status document.

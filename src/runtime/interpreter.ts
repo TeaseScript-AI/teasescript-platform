@@ -1,5 +1,10 @@
 import type { Program } from "../ast.js";
+import {
+  DiagnosticSeverity,
+  type Diagnostic,
+} from "../diagnostics.js";
 import { compileProgram } from "../instructions.js";
+import { validateSemantics } from "../semantic.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
   run,
@@ -43,6 +48,17 @@ export interface ExecutionResult {
   readonly exited: boolean;
 }
 
+/** Structured semantic failure from the direct AST compatibility boundary. */
+export class InterpreterCompilationError extends Error {
+  readonly diagnostics: readonly Diagnostic[];
+
+  public constructor(diagnostics: readonly Diagnostic[]) {
+    super(diagnostics[0]?.message ?? "Program failed semantic validation.");
+    this.name = "InterpreterCompilationError";
+    this.diagnostics = Object.freeze([...diagnostics]);
+  }
+}
+
 /** Compatibility wrapper: AST -> serializable plan -> explicit runtime state. */
 export function execute(
   program: Program,
@@ -65,6 +81,18 @@ export class Interpreter {
   }
 
   public execute(program: Program): ExecutionResult {
+    const semantic = validateSemantics(program, {
+      globals: Object.keys(this.#options.globals ?? {}),
+      builtins: Object.keys(this.#options.builtins ?? {}),
+    });
+    if (
+      semantic.diagnostics.some(
+        (diagnostic) => diagnostic.severity === DiagnosticSeverity.Error,
+      )
+    ) {
+      throw new InterpreterCompilationError(semantic.diagnostics);
+    }
+
     const plan = compileProgram(program);
     const globals = Object.fromEntries(
       Object.entries(this.#options.globals ?? {}).map(([name, value]) => [
