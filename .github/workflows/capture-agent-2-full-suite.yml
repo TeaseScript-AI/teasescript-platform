@@ -1,0 +1,30 @@
+name: Capture Agent 2 full-suite failure
+
+on:
+  push:
+    branches: [fix/issue-9-finite-numeric-literals]
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/issue-9-finite-numeric-literals
+          fetch-depth: 0
+      - name: Capture full-suite output
+        run: |
+          npm ci
+          npm run check > /tmp/agent2-full.log 2>&1 || true
+          mkdir -p tools/tmp
+          tail -220 /tmp/agent2-full.log > tools/tmp/agent-2-full-suite-output.txt
+          git rm .github/workflows/capture-agent-2-full-suite.yml
+          git add tools/tmp/agent-2-full-suite-output.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Capture full suite output"
+          git push origin HEAD:fix/issue-9-finite-numeric-literals
