@@ -13,6 +13,7 @@ import {
 } from "../src/runtime/checkpoint.js";
 import { run, stepToEvent } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
+import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("executes exclusive and inclusive integer ranges", () => {
   assert.deepEqual(sayTexts(runSource("for value in 1..4 { say value }")), ["1", "2", "3"]);
@@ -120,7 +121,11 @@ test("checkpoint restore in every loop kind matches uninterrupted events", () =>
     "let value = 0\nwhile value < 3 { value = value + 1\nsay value }",
     "for value in 1..=3 {\n  if value == 1 { continue }\n  say value\n}",
   ]) {
-    assertResumeMatches(source);
+    const { boundaries } = assertRuntimeResumeEquivalent(source, {
+    scenarioName: `loop checkpoint corpus: ${source.split("\n")[0]}`,
+    seed: 9,
+  });
+  assert.ok(boundaries.some((snapshot) => snapshot.loopFrames.length > 0));
   }
 });
 
@@ -188,20 +193,6 @@ test("loop variables deep-copy composite list elements", () => {
 
   assert.deepEqual(sayTexts(result), ["1"]);
 });
-
-function assertResumeMatches(source: string): void {
-  const compiled = plan(source);
-  const initial = createFreshRuntimeSnapshot(compiled, { seed: 9 });
-  const uninterrupted = run(compiled, initial);
-  const first = stepToEvent(compiled, initial);
-  assert.ok(first.snapshot.loopFrames.length > 0);
-  const checkpoint = restoreCheckpoint(
-    JSON.parse(JSON.stringify(createCheckpoint(compiled, first.snapshot))) as unknown,
-  );
-  const resumed = run(checkpoint.plan, checkpoint.snapshot);
-  assert.deepEqual([...first.events, ...resumed.events], uninterrupted.events);
-  assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
-}
 
 function runSource(source: string, seed = 1) {
   const compiled = plan(source);

@@ -25,6 +25,7 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("runtime snapshots survive JSON stringify and parse validation", () => {
   const compiled = plan("let values = set[3, 1, 2]\nexit");
@@ -46,8 +47,8 @@ test("restores a self-contained checkpoint from serialized JSON", () => {
 });
 
 test("uninterrupted and checkpoint-resumed execution are identical", () => {
-  const compiled = plan([
-    "speaker vera { title: \"Mistress\" }",
+  const { finalSnapshot } = assertRuntimeResumeEquivalent([
+    "speaker vera { title: "Mistress" }",
     "speaker vera",
     'let values = set["first", "second", "third"]',
     "let chosen = values.random",
@@ -55,24 +56,12 @@ test("uninterrupted and checkpoint-resumed execution are identical", () => {
     'values.add("fourth")',
     'say `Again: ${values.random}`',
     "exit",
-  ].join("\n"));
-  const initial = createFreshRuntimeSnapshot(compiled, { seed: 12345 });
-  const uninterrupted = run(compiled, initial);
+  ].join("\n"), {
+    scenarioName: "general runtime checkpoint equivalence",
+    seed: 12345,
+  });
 
-  let partialSnapshot = initial;
-  const partialEvents = [] as typeof uninterrupted.events[number][];
-  for (let count = 0; count < 5; count += 1) {
-    const operation = executeInstruction(compiled, partialSnapshot);
-    partialSnapshot = operation.snapshot;
-    partialEvents.push(...operation.events);
-  }
-  const restored = restoreCheckpoint(
-    JSON.parse(JSON.stringify(createCheckpoint(compiled, partialSnapshot))) as unknown,
-  );
-  const resumed = run(restored.plan, restored.snapshot);
-
-  assert.deepEqual([...partialEvents, ...resumed.events], uninterrupted.events);
-  assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
+  assert.equal(finalSnapshot.status, "halted");
 });
 
 test("preserves nested deep-copy independence and ordered sets after restore", () => {
