@@ -30,3 +30,7 @@ jobs:
         run: npm run check
       - name: Build
         run: npm run build
+      - name: Check diff whitespace
+        run: |
+          git fetch origin main --depth=1
+          git diff --check origin/main...HEAD
