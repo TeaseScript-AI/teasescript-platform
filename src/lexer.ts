@@ -413,7 +413,7 @@ class Lexer {
         );
         return "closed";
       }
-      if (this.#peek() === "`") {
+      if (this.#peek() === "`" && !this.#canStartNestedTemplate()) {
         this.#report(
           diagnosticCodes.unterminatedInterpolation,
           "Unterminated template interpolation.",
@@ -435,6 +435,39 @@ class Lexer {
       this.#position(),
     );
     return "eof";
+  }
+
+  #canStartNestedTemplate(): boolean {
+    let index = this.#tokens.length - 1;
+    while (this.#tokens[index]?.kind === TokenKind.Newline) index -= 1;
+
+    switch (this.#tokens[index]?.kind) {
+      case TokenKind.InterpolationStart:
+      case TokenKind.LeftParenthesis:
+      case TokenKind.LeftBracket:
+      case TokenKind.LeftBrace:
+      case TokenKind.Comma:
+      case TokenKind.Colon:
+      case TokenKind.Plus:
+      case TokenKind.Minus:
+      case TokenKind.Star:
+      case TokenKind.Slash:
+      case TokenKind.Percent:
+      case TokenKind.EqualEqual:
+      case TokenKind.BangEqual:
+      case TokenKind.Less:
+      case TokenKind.LessEqual:
+      case TokenKind.Greater:
+      case TokenKind.GreaterEqual:
+      case TokenKind.RangeExclusive:
+      case TokenKind.RangeInclusive:
+      case TokenKind.KeywordNot:
+      case TokenKind.KeywordAnd:
+      case TokenKind.KeywordOr:
+        return true;
+      default:
+        return false;
+    }
   }
 
   #scanEscape(context: "string" | "template"): string {
