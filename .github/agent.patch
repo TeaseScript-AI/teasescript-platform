@@ -1,0 +1,111 @@
+diff --git a/.github/workflows/agent-export.yml b/.github/workflows/agent-export.yml
+deleted file mode 100644
+index 23ee603..0000000
+--- a/.github/workflows/agent-export.yml
++++ /dev/null
+@@ -1,27 +0,0 @@
+-name: Agent repository export
+-
+-on:
+-  push:
+-    branches:
+-      - fix/issue-16-own-builtin-registry
+-      - fix/issue-15-safe-named-arguments
+-      - fix/issue-13-visible-list-text
+-
+-permissions:
+-  contents: read
+-
+-jobs:
+-  export:
+-    runs-on: ubuntu-latest
+-    steps:
+-      - name: Check out repository
+-        uses: actions/checkout@v4
+-      - name: Upload repository snapshot
+-        uses: actions/upload-artifact@v4
+-        with:
+-          name: repository-snapshot
+-          path: |
+-            .
+-            !.git
+-            !node_modules
+-          include-hidden-files: true
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 9f03d76..fc1ca8a 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -2,36 +2,14 @@ name: CI
+ 
+ on:
+   push:
+-    branches:
+-      - fix/issue-16-own-builtin-registry
++    branches: [main]
+   pull_request:
+ 
+-permissions: {}
++permissions:
++  contents: read
+ 
+ jobs:
+-  apply-agent-patch:
+-    if: github.event_name == 'push'
+-    permissions:
+-      contents: write
+-    runs-on: ubuntu-latest
+-    steps:
+-      - name: Check out repository
+-        uses: actions/checkout@v4
+-      - name: Apply scoped agent patch
+-        run: |
+-          git apply --check .github/agent.patch
+-          git apply .github/agent.patch
+-          rm .github/agent.patch
+-          git config user.name "github-actions[bot]"
+-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+-          git add -A
+-          git commit -m "Use own builtin registry"
+-          git push origin "HEAD:${GITHUB_REF_NAME}"
+-
+   check:
+-    if: github.event_name == 'pull_request'
+-    permissions:
+-      contents: read
+     runs-on: ubuntu-latest
+     steps:
+       - name: Check out repository
+diff --git a/src/runtime/engine.ts b/src/runtime/engine.ts
+index 9cca117..c13ccc0 100644
+--- a/src/runtime/engine.ts
++++ b/src/runtime/engine.ts
+@@ -810,12 +810,12 @@ class Evaluator {
+     private readonly snapshot: RuntimeSnapshot,
+     private readonly capabilities: RuntimeCapabilities,
+   ) {
+-    this.#builtins = {
+-      ...(capabilities.builtins ?? {}),
+-      random: (call) => this.#randomBuiltin(call),
+-      chance: (call) => this.#chanceBuiltin(call),
+-      randomInteger: (call) => this.#randomIntegerBuiltin(call),
+-    };
++    const builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
++    Object.assign(builtins, capabilities.builtins ?? {});
++    builtins.random = (call) => this.#randomBuiltin(call);
++    builtins.chance = (call) => this.#chanceBuiltin(call);
++    builtins.randomInteger = (call) => this.#randomIntegerBuiltin(call);
++    this.#builtins = Object.freeze(builtins);
+   }
+ 
+   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
+@@ -1320,7 +1320,9 @@ class Evaluator {
+       }
+     }
+     if (expression.callee.kind === "identifier") {
+-      const builtin = this.#builtins[expression.callee.name];
++      const builtin = Object.hasOwn(this.#builtins, expression.callee.name)
++        ? this.#builtins[expression.callee.name]
++        : undefined;
+       if (builtin === undefined) {
+         throw fault("TSR011", `Unknown built-in function '${expression.callee.name}'.`, expression.callee.span);
+       }
