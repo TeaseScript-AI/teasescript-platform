@@ -2,36 +2,14 @@ name: CI
 
 on:
   push:
-    branches:
-      - fix/issue-16-own-builtin-registry
+    branches: [main]
   pull_request:
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
-  apply-agent-patch:
-    if: github.event_name == 'push'
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Apply scoped agent patch
-        run: |
-          git apply --check .github/agent.patch
-          git apply .github/agent.patch
-          rm .github/agent.patch
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Use own builtin registry"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-
   check:
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
