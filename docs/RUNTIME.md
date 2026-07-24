@@ -30,7 +30,7 @@ Plan, snapshot, and checkpoint formats currently use version 3. They are POC for
 `compileSource(source, options)` is the normal source compilation route. It:
 
 1. parses source text into a `Program`;
-2. adds compile-boundary diagnostics for parsed non-finite numeric literals;
+2. runs shared AST-level validation for parsed non-finite numeric literals;
 3. runs semantic validation when parsing and finite-literal checking produced no errors;
 4. includes the core runtime built-ins plus configured global and builtin names in validation;
 5. lowers the program only when no error diagnostics remain.
@@ -39,7 +39,7 @@ The result separates parser and semantic diagnostics and returns `plan: null` wh
 
 `compileSource(...)` rejects numeric literals such as `1e999` and `-1e999` with error diagnostic `TSC001`. It does not return an instruction plan for those inputs. Large finite values such as `1e308` remain valid. The normal compilation route therefore cannot return a plan containing literal `Infinity`, `-Infinity`, or `NaN`, and instruction-plan validation independently rejects any non-finite number in plan data.
 
-This finite-literal check belongs to `compileSource(...)`. The lower-level `parse(...)` result may still expose the raw JavaScript number produced while parsing; callers that use lower-level frontend functions must not treat parsing alone as successful compilation.
+The `TSC001` check is implemented as shared AST-level validation. `compileSource(...)` includes these diagnostics in its parser-diagnostic boundary, while the lower-level `parse(...)` result may still expose the raw JavaScript number produced while parsing. Callers must not treat parsing alone as successful compilation.
 
 ### Template interpolation
 
@@ -51,13 +51,13 @@ Unterminated nested content remains structured: `TSL004` reports an unterminated
 
 `execute(program, options)` and `Interpreter.execute(program)` are compatibility/testing entry points for callers that already hold a `Program`. They are not an alternative runtime representation: they validate the program, lower it to an instruction plan, create explicit runtime state, and execute that plan.
 
-Configured global and builtin names participate in semantic validation. Semantic errors throw `InterpreterCompilationError` with the structured diagnostics instead of reaching runtime or failing through an incidental JavaScript exception. `InterpreterOptions.random` is required so compatibility execution remains deterministic.
+Before lowering, the compatibility route runs the shared non-finite-literal AST validation and semantic validation with configured global and builtin names. Non-finite literals produce exact-span `TSC001` diagnostics. These diagnostics are ordered before ordinary semantic diagnostics, and any error throws `InterpreterCompilationError` before lowering, runtime-state creation, event emission, or RNG consumption. `InterpreterOptions.random` is required so compatibility execution remains deterministic.
 
 The compatibility result exposes `say` and `exit` events in its `events` array, structured runtime failures in `errors`, and developer warnings in `warnings`.
 
 ### Low-level lowering and runtime route
 
-`compileProgram(program)` is a low-level lowering function for a semantically valid AST. It does not replace `validateSemantics()`. Its defensive lowering checks include `InstructionCompilationError` with code `TSC003` when direct invalid input supplies more positional arguments than a function defines.
+`compileProgram(program)` is a low-level lowering function for a semantically valid AST. It does not replace `validateSemantics()`. As a narrow defensive boundary, it reuses the shared AST-level finite-literal validation and throws `InstructionCompilationError` with `TSC001` before returning a plan containing `NaN`, `Infinity`, or `-Infinity`. Its other defensive lowering checks include `InstructionCompilationError` with `TSC003` when direct invalid input supplies more positional arguments than a function defines.
 
 The low-level runtime entry points are:
 
