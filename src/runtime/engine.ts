@@ -111,7 +111,7 @@ export function executeInstruction(
 
   snapshot.status = "running";
   const events: InterpreterEvent[] = [];
-  const evaluator = new Evaluator(snapshot, capabilities);
+  const evaluator = new Evaluator(snapshot, capabilities, events);
   try {
     executePlannedInstruction(plan, instruction, snapshot, evaluator, events);
     if (
@@ -809,6 +809,7 @@ class Evaluator {
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
+    private readonly events: InterpreterEvent[],
   ) {
     const builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
     Object.assign(builtins, capabilities.builtins ?? {});
@@ -1405,6 +1406,12 @@ class Evaluator {
             );
             receiver.items.splice(index, 1);
             refreshPreparedReferenceFallbacks(this.snapshot, rebased);
+          } else {
+            this.#warn(
+              "TSW002",
+              "list.remove(value) found no matching value; the list was left unchanged.",
+              span,
+            );
           }
           return null;
         }
@@ -1448,6 +1455,19 @@ class Evaluator {
       if (error instanceof RuntimeFault) throw error;
       throw this.#translateValueError(error, span);
     }
+  }
+
+  #warn(code: string, message: string, span: SourceSpan): void {
+    this.events.push(
+      Object.freeze({
+        kind: "developerWarning",
+        sequence: takeSequence(this.snapshot),
+        severity: "warning",
+        code,
+        message,
+        span: copySpan(span),
+      } satisfies DeveloperWarningEvent),
+    );
   }
 
   #getCollectionProperty(
