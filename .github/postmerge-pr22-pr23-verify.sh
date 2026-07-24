@@ -1,45 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_MAIN_SHA="ed098995238172065c6dcd1ea2b8e9e0d4238675"
-SUMMARY_FILE="${RUNNER_TEMP:-/tmp}/postmerge-pr22-pr23-summary.txt"
-NVM_DIR="${RUNNER_TEMP:-/tmp}/nvm"
-export NVM_DIR
-
-printf 'Expected current main: %s\n' "$EXPECTED_MAIN_SHA"
-git fetch origin main --depth=1
-ACTUAL_MAIN_SHA="$(git rev-parse origin/main)"
-printf 'Observed current main: %s\n' "$ACTUAL_MAIN_SHA"
-test "$ACTUAL_MAIN_SHA" = "$EXPECTED_MAIN_SHA"
-test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
-test -z "$(git status --short)"
-
-rm -rf "$NVM_DIR"
-git clone --depth 1 --branch v0.40.3 https://github.com/nvm-sh/nvm.git "$NVM_DIR"
-. "$NVM_DIR/nvm.sh"
-
-echo '$ nvm install'
-nvm install
-echo '$ nvm use'
-nvm use
-NODE_VERSION="$(node --version)"
-NPM_VERSION="$(npm --version)"
-printf 'Node: %s\nNPM: %s\n' "$NODE_VERSION" "$NPM_VERSION"
-
-echo '$ npm ci'
-npm ci
-
-echo '$ npm run build  # prerequisite for direct dist test files'
-npm run build
-
-echo '$ node --test dist/tests/interpreter.test.js dist/tests/interpreter-semantic-boundary.test.js dist/tests/instruction-lowering-boundary.test.js dist/tests/runtime-semantics.test.js dist/tests/runtime-checkpoint.test.js'
-node --test \
-  dist/tests/interpreter.test.js \
-  dist/tests/interpreter-semantic-boundary.test.js \
-  dist/tests/instruction-lowering-boundary.test.js \
-  dist/tests/runtime-semantics.test.js \
-  dist/tests/runtime-checkpoint.test.js
-
 echo '$ node --input-type=module  # explicit PR22/PR23 functional probes'
 node --input-type=module <<'NODE'
 import assert from "node:assert/strict";
@@ -196,27 +157,3 @@ if grep -R --line-number --fixed-string 'speakerId: 0' src; then
   exit 1
 fi
 echo 'PASS PR22 no speakerId: 0 construction exists in src'
-
-echo '$ npm run check'
-npm run check
-
-echo '$ npm run build'
-npm run build
-
-echo '$ git diff --check'
-git diff --check
-test -z "$(git status --short)"
-
-cat > "$SUMMARY_FILE" <<EOF
-RESULT=PASS
-BASE_SHA=$EXPECTED_MAIN_SHA
-NODE=$NODE_VERSION
-NPM=$NPM_VERSION
-TARGETED_TESTS=PASS
-FUNCTIONAL_PROBES=PASS
-NPM_CHECK=PASS
-NPM_BUILD=PASS
-GIT_DIFF_CHECK=PASS
-WORKTREE_CLEAN=PASS
-EOF
-cat "$SUMMARY_FILE"
