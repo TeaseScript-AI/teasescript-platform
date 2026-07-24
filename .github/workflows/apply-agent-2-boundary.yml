@@ -1,0 +1,29 @@
+name: Apply Agent 2 boundary compatibility
+
+on:
+  push:
+    branches: [fix/issue-9-finite-numeric-literals]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/issue-9-finite-numeric-literals
+          fetch-depth: 0
+      - name: Apply and commit patch
+        run: |
+          git apply tools/tmp/issue-14-boundary.patch
+          git rm tools/tmp/issue-14-boundary.patch
+          git rm tools/tmp/agent-2-full-suite-output.txt
+          git rm .github/workflows/apply-agent-2-boundary.yml
+          git add src/lexer.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Preserve template interpolation recovery"
+          git push origin HEAD:fix/issue-9-finite-numeric-literals
