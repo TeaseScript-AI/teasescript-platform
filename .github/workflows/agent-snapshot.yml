@@ -1,9 +1,7 @@
 name: Agent Snapshot
 
 on:
-  push:
-    branches:
-      - fix/issue-38-bare-builtin-identifiers
+  pull_request:
 
 permissions:
   contents: read
