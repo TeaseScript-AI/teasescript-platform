@@ -1,3 +1,5 @@
+> **Status note (2026-07-24):** The parser-only framing in this legacy Dutch backlog is historical. The serializable runtime, control flow, and user-function milestone now exist. Use `../../PHASE-STATUS.md` for implementation status; the remaining items below are planning, not accepted implementation decisions.
+
 # TeaseScript — Post-POC ontwikkelbacklog
 
 **Referentie:** TeaseScript Accepted Syntax versie 30  

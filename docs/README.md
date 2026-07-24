@@ -1,16 +1,40 @@
 # Documentation map
 
-## Authoritative
+## Authority
 
-- `specifications/accepted-syntaxes-v30.md`: accepted TeaseScript syntax.
-- accepted ADRs in `decisions/`: architectural decisions within their scope.
-- `../CURRENT-DESIGN.md`: current architecture and POC scope.
+- `../README-FIRST.md`: authority and conflict-routing rules.
+- `specifications/accepted-syntaxes-v30.md`: accepted consolidated syntax baseline.
+- `decisions/`: accepted and proposed ADRs; each file states its status.
+- `../CURRENT-DESIGN.md`: current architecture and implementation boundaries.
+- `../PHASE-STATUS.md`: milestone and verification status.
+- `../WISHES.xml`: product intent and decision history; wishes are not automatic implementation decisions.
 
-## Planning, not accepted syntax
+## Current topic documents
 
-- `planning/V30-TO-V31-GAP-REVIEW.md`
-- `planning/POST-POC-DEVELOPMENT-BACKLOG.md`
+- `PRODUCT.md`
+- `ARCHITECTURE.md`
+- `TEASESCRIPT.md`
+- `RUNTIME.md`
+- `DATA-AND-API.md`
+- `LIBRARIES.md`
+- `SECURITY.md`
+- `CONTINUOUS-PERSONALITIES.md`
+- `CODE-EDITOR.md`
+- `LLM-INTEGRATION.md`
+- `MATH-EXPRESSIONS.md`
+- `CAPABILITY-MATRIX.md`
+- `OPEN-DECISIONS.md`
 
-## Reference only
+These files provide concise current routing and must not duplicate or override accepted syntax or ADRs.
 
-Documents under `reference/` are capability research or historical material. They must not override accepted syntax or ADRs.
+## Planning
+
+`planning/` contains implementation proposals, gap analysis, and backlog. Planning text is non-authoritative until accepted through the appropriate decision process.
+
+## Reference
+
+`reference/` explains where non-authoritative capability research, legacy documents, and source archives are stored. Large third-party source examples and historical package material are intentionally kept outside this repository.
+
+## Documentation ownership
+
+See `DOCUMENTATION-OWNERSHIP.md` for the boundary between canonical repository documentation and the shared project research archive.

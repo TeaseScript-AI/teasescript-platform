@@ -1,3 +1,5 @@
+> **Status note (2026-07-24):** This is a historical working review, not a V31 specification or current implementation-status document. ADR 0013 resolved the set collection, ADR 0015 resolved the serializable runtime architecture, and the current repository already implements the reviewed control-flow and user-function milestones. Use `../../PHASE-STATUS.md` and `../OPEN-DECISIONS.md` for current status and remaining decisions.
+
 # TeaseScript V30 → V31 Gap and Conflict Review
 
 **Status:** Working review document  
@@ -853,7 +855,7 @@ These should be functions/methods, not grammar keywords.
 
 ## 8.3 Control-flow milestone edge behavior (not accepted semantics)
 
-The `feature/control-flow-runtime` implementation needs conservative behavior
+The current control-flow implementation uses conservative behavior
 where V30 does not yet fix an edge case. These choices are implementation notes,
 not additions to accepted language semantics:
 

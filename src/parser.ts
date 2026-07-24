@@ -10,6 +10,8 @@ import type {
   Expression,
   ExpressionStatement,
   ForStatement,
+  FunctionDeclaration,
+  FunctionParameter,
   Identifier,
   IfStatement,
   LetStatement,
@@ -23,6 +25,7 @@ import type {
   ScalarTypeName,
   SayStatement,
   RepeatStatement,
+  ReturnStatement,
   SetLiteral,
   SpeakerDeclaration,
   SpeakerProperty,
@@ -78,6 +81,9 @@ const parserDiagnosticCode = {
   invalidType: "TSP021",
   chainedRange: "TSP022",
   expectedIn: "TSP023",
+  expectedFunctionName: "TSP024",
+  expectedParameter: "TSP025",
+  emptyFunctionParameters: "TSP026",
 } as const;
 
 /** Parses the accepted core-language milestone. */
@@ -155,6 +161,10 @@ class Parser {
         return this.#parseLoopControl("breakStatement");
       case TokenKind.KeywordContinue:
         return this.#parseLoopControl("continueStatement");
+      case TokenKind.KeywordFunction:
+        return this.#parseFunctionDeclaration();
+      case TokenKind.KeywordReturn:
+        return this.#parseReturnStatement();
       default:
         if (isExpressionStart(this.#peek())) {
           return this.#parseAssignmentOrExpressionStatement();
@@ -519,6 +529,139 @@ class Parser {
   ): BreakStatement | ContinueStatement {
     const keyword = this.#advance();
     return Object.freeze({ kind, span: copySpan(keyword.span) });
+  }
+
+  #parseFunctionDeclaration(): FunctionDeclaration | null {
+    const keyword = this.#advance();
+    if (!this.#check(TokenKind.Identifier)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedFunctionName,
+        "Expected a function identifier after 'function'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const name = this.#identifier(this.#advance());
+    const parameters: FunctionParameter[] = [];
+    if (this.#match(TokenKind.LeftParenthesis)) {
+      this.#skipNewlines();
+      if (this.#check(TokenKind.RightParenthesis)) {
+        this.#reportToken(
+          parserDiagnosticCode.emptyFunctionParameters,
+          "Parentheses are omitted when a function has no parameters.",
+          this.#peek(),
+        );
+      }
+      while (
+        !this.#check(TokenKind.RightParenthesis) &&
+        !this.#check(TokenKind.EndOfFile)
+      ) {
+        const parameter = this.#parseFunctionParameter();
+        if (parameter !== null) parameters.push(parameter);
+        this.#skipNewlines();
+        if (!this.#match(TokenKind.Comma)) break;
+        this.#skipNewlines();
+        if (this.#check(TokenKind.RightParenthesis)) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedParameter,
+            "Expected a function parameter after ','.",
+          );
+          break;
+        }
+      }
+      if (!this.#match(TokenKind.RightParenthesis)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedDelimiter,
+          "Expected ')' after the function parameters.",
+        );
+        this.#synchronizeStatement();
+        return null;
+      }
+    }
+
+    let returnTypeAnnotation: TypeAnnotation | null = null;
+    if (this.#match(TokenKind.Colon)) {
+      returnTypeAnnotation = this.#parseTypeAnnotation();
+      if (returnTypeAnnotation === null) {
+        this.#synchronizeStatement();
+        return null;
+      }
+    }
+    this.#skipContinuationNewlines();
+    const body = this.#parseBlock();
+    if (body === null) return null;
+    return Object.freeze({
+      kind: "functionDeclaration",
+      name,
+      parameters: Object.freeze(parameters),
+      returnTypeAnnotation,
+      body,
+      span: spanFrom(keyword.span, body.span),
+    });
+  }
+
+  #parseFunctionParameter(): FunctionParameter | null {
+    if (!this.#check(TokenKind.Identifier)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedParameter,
+        "Expected a function parameter identifier.",
+      );
+      this.#synchronizeParameter();
+      return null;
+    }
+    const name = this.#identifier(this.#advance());
+    let typeAnnotation: TypeAnnotation | null = null;
+    let end = name.span;
+    if (this.#match(TokenKind.Colon)) {
+      typeAnnotation = this.#parseTypeAnnotation();
+      if (typeAnnotation === null) {
+        this.#synchronizeParameter();
+        return null;
+      }
+      end = typeAnnotation.span;
+    }
+    let defaultValue: Expression | null = null;
+    if (this.#match(TokenKind.Equal)) {
+      this.#skipContinuationNewlines();
+      defaultValue = this.#parseRequiredExpression();
+      if (defaultValue === null) {
+        this.#synchronizeParameter();
+        return null;
+      }
+      end = defaultValue.span;
+    }
+    return Object.freeze({
+      kind: "functionParameter",
+      name,
+      typeAnnotation,
+      defaultValue,
+      span: spanFrom(name.span, end),
+    });
+  }
+
+  #parseReturnStatement(): ReturnStatement | null {
+    const keyword = this.#advance();
+    if (
+      this.#check(TokenKind.Newline) ||
+      this.#check(TokenKind.RightBrace) ||
+      this.#check(TokenKind.EndOfFile)
+    ) {
+      return Object.freeze({
+        kind: "returnStatement",
+        value: null,
+        span: copySpan(keyword.span),
+      });
+    }
+    const value = this.#parseRequiredExpression();
+    if (value === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    return Object.freeze({
+      kind: "returnStatement",
+      value,
+      span: spanFrom(keyword.span, value.span),
+    });
   }
 
   #parseBlock(): Block | null {
@@ -1368,6 +1511,16 @@ class Parser {
     }
   }
 
+  #synchronizeParameter(): void {
+    while (
+      !this.#check(TokenKind.Comma) &&
+      !this.#check(TokenKind.RightParenthesis) &&
+      !this.#check(TokenKind.EndOfFile)
+    ) {
+      this.#advance();
+    }
+  }
+
   #synchronizeInterpolation(): void {
     while (
       !this.#check(TokenKind.InterpolationEnd) &&
@@ -1514,6 +1667,8 @@ function isStatementStart(kind: TokenKind): boolean {
     || kind === TokenKind.KeywordWhile
     || kind === TokenKind.KeywordBreak
     || kind === TokenKind.KeywordContinue
+    || kind === TokenKind.KeywordFunction
+    || kind === TokenKind.KeywordReturn
   );
 }
 

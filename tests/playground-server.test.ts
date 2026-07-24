@@ -55,7 +55,7 @@ test("serves required JavaScript and CSS assets", async () => {
 });
 
 test("serves every fixed repository playground example", async () => {
-  for (const name of ["main", "control-flow", "checkpoint-loop"]) {
+  for (const name of ["main", "control-flow", "checkpoint-loop", "functions"]) {
     const response = await get(`/examples/playground/${name}.tease`);
     assert.equal(response.status, 200, name);
     assert.match(response.contentType, /^text\/plain/u);

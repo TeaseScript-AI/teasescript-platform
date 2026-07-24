@@ -4,12 +4,12 @@
  */
 let labels = ["one", "two", "three", "four"]
 
-for label in labels {
-    say `Checkpoint step: ${label}`
+for itemLabel in labels {
+    say `Checkpoint step: ${itemLabel}`
 }
 
-for number in 1..4 {
-    say `Range step: ${number}`
+for step in 1..4 {
+    say `Range step: ${step}`
 }
 
 say `Final deterministic integer: ${randomInteger(10..=20)}`

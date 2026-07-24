@@ -1,4 +1,8 @@
-import type { InstructionPlan } from "../instructions.js";
+import type {
+  ExpressionPlan,
+  Instruction,
+  InstructionPlan,
+} from "../instructions.js";
 import { validateInstructionPlan } from "../instructions.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
@@ -18,7 +22,9 @@ import {
 } from "./serializable-values.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 2;
+export const RUNTIME_SNAPSHOT_VERSION = 3;
+export const DEFAULT_MAX_CALL_DEPTH = 256;
+export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 
 export type RuntimeStatus = "ready" | "running" | "halted" | "failed";
 
@@ -47,6 +53,7 @@ export interface RuntimeFailureSnapshot {
 interface RuntimeLoopFrameBase {
   readonly loopId: number;
   readonly scopeDepth: number;
+  readonly callFrameId: number | null;
 }
 
 export interface RuntimeRepeatLoopFrameSnapshot extends RuntimeLoopFrameBase {
@@ -73,6 +80,41 @@ export type RuntimeLoopFrameSnapshot =
   | RuntimeForLoopFrameSnapshot
   | RuntimeWhileLoopFrameSnapshot;
 
+export interface RuntimeTemporarySnapshot {
+  readonly id: number;
+  value: SerializableRuntimeValue;
+}
+
+export type RuntimeCallArgumentSnapshot =
+  | {
+      readonly parameterName: string;
+      readonly supplied: false;
+    }
+  | {
+      readonly parameterName: string;
+      readonly supplied: true;
+      readonly value: SerializableRuntimeValue;
+    };
+
+export interface RuntimeParameterStateSnapshot {
+  phase: "supplied" | "defaults" | "body";
+  parameterIndex: number;
+}
+
+export interface RuntimeCallFrameSnapshot {
+  readonly id: number;
+  readonly functionId: number;
+  readonly functionName: string;
+  readonly callSiteSpan: SourceSpan;
+  readonly returnInstruction: number;
+  readonly destinationTemporary: number;
+  readonly callerTemporaries: RuntimeTemporarySnapshot[];
+  readonly scopeBaseDepth: number;
+  readonly loopBaseDepth: number;
+  readonly arguments: RuntimeCallArgumentSnapshot[];
+  parameterState: RuntimeParameterStateSnapshot;
+}
+
 export interface RuntimeSnapshot {
   readonly format: typeof RUNTIME_SNAPSHOT_FORMAT;
   readonly version: typeof RUNTIME_SNAPSHOT_VERSION;
@@ -84,9 +126,13 @@ export interface RuntimeSnapshot {
   readonly rng: XorShift32State;
   readonly warnedSpeakerIds: number[];
   readonly loopFrames: RuntimeLoopFrameSnapshot[];
+  readonly temporaries: RuntimeTemporarySnapshot[];
+  readonly callFrames: RuntimeCallFrameSnapshot[];
   nextEventSequence: number;
   nextScopeId: number;
   nextSpeakerId: number;
+  nextCallFrameId: number;
+  readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
 }
@@ -94,6 +140,7 @@ export interface RuntimeSnapshot {
 export interface FreshRuntimeOptions {
   readonly seed?: number;
   readonly globals?: Readonly<Record<string, SerializableRuntimeValue>>;
+  readonly maxCallDepth?: number;
 }
 
 export interface SnapshotValidationResult {
@@ -110,7 +157,18 @@ export function createFreshRuntimeSnapshot(
     throw new TypeError(planValidation.errors[0]?.message ?? "Malformed instruction plan.");
   }
   const bindings: RuntimeBindingSnapshot[] = [];
+  const maxCallDepth = options.maxCallDepth ?? DEFAULT_MAX_CALL_DEPTH;
+  if (
+    !Number.isInteger(maxCallDepth) ||
+    maxCallDepth < 1 ||
+    maxCallDepth > MAX_SUPPORTED_CALL_DEPTH
+  ) {
+    throw new RangeError(
+      `maxCallDepth must be an integer from 1 through ${MAX_SUPPORTED_CALL_DEPTH}.`,
+    );
+  }
   for (const [name, value] of Object.entries(options.globals ?? {})) {
+    if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
     const failure = validateSerializableValue(value, `globals.${name}`);
     if (failure !== null) throw new TypeError(failure);
     if (bindings.some((binding) => binding.name === name)) {
@@ -129,10 +187,14 @@ export function createFreshRuntimeSnapshot(
     rng: createXorShift32State(options.seed ?? DEFAULT_PLAYGROUND_SEED),
     warnedSpeakerIds: [],
     loopFrames: [],
+    temporaries: [],
+    callFrames: [],
     nextEventSequence: 1,
     nextScopeId: 1,
     nextSpeakerId: 1,
-    status: plan.instructions.length === 0 ? "halted" : "ready",
+    nextCallFrameId: 1,
+    maxCallDepth,
+    status: plan.rootEndInstruction === 0 ? "halted" : "ready",
     failure: null,
   };
 }
@@ -169,9 +231,33 @@ export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot
         source: cloneSerializableValue(frame.source) as RuntimeForLoopFrameSnapshot["source"],
       };
     }),
+    temporaries: snapshot.temporaries.map(cloneTemporary),
+    callFrames: snapshot.callFrames.map((frame) => ({
+      id: frame.id,
+      functionId: frame.functionId,
+      functionName: frame.functionName,
+      callSiteSpan: copySpan(frame.callSiteSpan),
+      returnInstruction: frame.returnInstruction,
+      destinationTemporary: frame.destinationTemporary,
+      callerTemporaries: frame.callerTemporaries.map(cloneTemporary),
+      scopeBaseDepth: frame.scopeBaseDepth,
+      loopBaseDepth: frame.loopBaseDepth,
+      arguments: frame.arguments.map((argument) =>
+        argument.supplied
+          ? {
+              parameterName: argument.parameterName,
+              supplied: true,
+              value: cloneSerializableValue(argument.value),
+            }
+          : { parameterName: argument.parameterName, supplied: false },
+      ),
+      parameterState: { ...frame.parameterState },
+    })),
     nextEventSequence: snapshot.nextEventSequence,
     nextScopeId: snapshot.nextScopeId,
     nextSpeakerId: snapshot.nextSpeakerId,
+    nextCallFrameId: snapshot.nextCallFrameId,
+    maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
       snapshot.failure === null
@@ -207,10 +293,33 @@ export function validateRuntimeSnapshot(
   }
   validateFrames(value.frames, errors);
   const speakerIds = validateSpeakers(value.speakers, errors);
+  const preparedReferenceTemporaryIds = collectPreparedReferenceTemporaryIds(plan);
+  validateTemporaries(value.temporaries, plan, "Runtime temporaries", errors);
+  validatePreparedReferenceTemporaries(
+    value.temporaries,
+    value.frames,
+    value.speakers,
+    preparedReferenceTemporaryIds,
+    "Runtime temporaries",
+    errors,
+  );
+  const callFrameIds = validateCallFrames(
+    value.callFrames,
+    value.frames,
+    value.speakers,
+    value.loopFrames,
+    value.nextInstruction,
+    value.maxCallDepth,
+    plan,
+    preparedReferenceTemporaryIds,
+    errors,
+  );
   validateSpeakerReferences(
     value.frames,
     value.speakers,
     value.loopFrames,
+    value.temporaries,
+    value.callFrames,
     speakerIds,
     errors,
   );
@@ -249,6 +358,16 @@ export function validateRuntimeSnapshot(
     value.loopFrames,
     value.frames,
     value.nextInstruction,
+    value.callFrames,
+    callFrameIds,
+    plan,
+    errors,
+  );
+  validateCurrentTemporaryRequirements(
+    value.temporaries,
+    value.loopFrames,
+    value.nextInstruction,
+    value.status,
     plan,
     errors,
   );
@@ -275,10 +394,25 @@ export function validateRuntimeSnapshot(
   ) {
     errors.push("Runtime nextSpeakerId is invalid.");
   }
+  if (
+    !nonNegativeInteger(value.nextCallFrameId) ||
+    value.nextCallFrameId < 1 ||
+    [...callFrameIds].some((id) => id >= (value.nextCallFrameId as number))
+  ) {
+    errors.push("Runtime nextCallFrameId is invalid.");
+  }
+  if (
+    !nonNegativeInteger(value.maxCallDepth) ||
+    value.maxCallDepth < 1 ||
+    value.maxCallDepth > MAX_SUPPORTED_CALL_DEPTH
+  ) {
+    errors.push("Runtime maxCallDepth is outside the supported range.");
+  }
   if (!["ready", "running", "halted", "failed"].includes(String(value.status))) {
     errors.push("Runtime status is invalid.");
   }
   validateFailure(value.failure, value.status, errors);
+  validateStatusConsistency(value, plan, errors);
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }
 
@@ -286,6 +420,8 @@ function validateLoopFrames(
   value: unknown,
   frames: unknown,
   nextInstruction: unknown,
+  callFrames: unknown,
+  callFrameIds: ReadonlySet<number>,
   plan: InstructionPlan | undefined,
   errors: string[],
 ): void {
@@ -300,7 +436,9 @@ function validateLoopFrames(
     kind: "repeat" | "for" | "while";
     variable?: string;
     start: number;
+    continueStart: number;
     target: number;
+    functionId: number | null;
   }>();
   plan?.instructions.forEach((instruction, index) => {
     if (instruction.kind === "loopStart") {
@@ -308,7 +446,14 @@ function validateLoopFrames(
         kind: instruction.loopKind,
         ...(instruction.loopKind === "for" ? { variable: instruction.variable } : {}),
         start: index,
+        continueStart: instruction.continueTarget,
         target: instruction.target,
+        functionId:
+          plan.functions.find(
+            (definition) =>
+              index >= definition.entryInstruction &&
+              index < definition.endInstruction,
+          )?.id ?? null,
       });
     }
   });
@@ -324,6 +469,12 @@ function validateLoopFrames(
       errors.push("Runtime loop frame is malformed.");
       continue;
     }
+    if (
+      frame.callFrameId !== null &&
+      (!nonNegativeInteger(frame.callFrameId) || !callFrameIds.has(frame.callFrameId))
+    ) {
+      errors.push("Runtime loop frame has an unknown call-frame owner.");
+    }
     if (loopIds.has(frame.loopId)) errors.push("Runtime loop IDs must be unique.");
     loopIds.add(frame.loopId);
     if (frame.scopeDepth < previousDepth) {
@@ -331,14 +482,27 @@ function validateLoopFrames(
     }
     previousDepth = frame.scopeDepth;
     const planned = plannedLoops.get(frame.loopId);
+    const owner = Array.isArray(callFrames)
+      ? callFrames.find(
+          (candidate) =>
+            isPlainRecord(candidate) && candidate.id === frame.callFrameId,
+        )
+      : undefined;
+    const currentOwner = Array.isArray(callFrames) && callFrames.length > 0
+      ? (isPlainRecord(callFrames.at(-1)) ? callFrames.at(-1)!.id : undefined)
+      : null;
     if (
       plan !== undefined &&
       (planned === undefined ||
         planned.kind !== frame.kind ||
         (planned.kind === "for" && planned.variable !== frame.variable) ||
-        !nonNegativeInteger(nextInstruction) ||
-        nextInstruction < planned.start ||
-        nextInstruction >= planned.target)
+        (planned.functionId === null
+          ? frame.callFrameId !== null
+          : !isPlainRecord(owner) || owner.functionId !== planned.functionId) ||
+        (frame.callFrameId === currentOwner &&
+          (!nonNegativeInteger(nextInstruction) ||
+            nextInstruction < planned.continueStart ||
+            nextInstruction >= planned.target)))
     ) {
       errors.push("Runtime loop frame does not match the instruction plan.");
     }
@@ -384,6 +548,1068 @@ function iterationLength(source: Record<string, unknown>): number {
   return -1;
 }
 
+function validateTemporaries(
+  value: unknown,
+  plan: InstructionPlan | undefined,
+  label: string,
+  errors: string[],
+): void {
+  if (!Array.isArray(value)) {
+    errors.push(`${label} must be an array.`);
+    return;
+  }
+  const ids = new Set<number>();
+  for (const temporary of value) {
+    if (
+      !isPlainRecord(temporary) ||
+      !nonNegativeInteger(temporary.id) ||
+      temporary.id < 1 ||
+      (plan !== undefined && temporary.id > plan.temporaryCount)
+    ) {
+      errors.push(`${label} contain an invalid temporary ID.`);
+      continue;
+    }
+    if (ids.has(temporary.id)) errors.push(`${label} contain duplicate temporary IDs.`);
+    ids.add(temporary.id);
+    const failure = validateSerializableValue(temporary.value);
+    if (failure !== null) errors.push(failure);
+  }
+}
+
+type PreparedReferencePathStep =
+  | { readonly kind: "property"; readonly name: string }
+  | { readonly kind: "index"; readonly index: number };
+
+const preparedReferencePropertyNames = Object.freeze([
+  "marker",
+  "rootFrameId",
+  "rootName",
+  "path",
+  "capturedRoot",
+  "detached",
+] as const);
+
+function validatePreparedReferenceTemporaries(
+  value: unknown,
+  frames: unknown,
+  speakers: unknown,
+  preparedTemporaryIds: ReadonlySet<number>,
+  label: string,
+  errors: string[],
+): void {
+  if (preparedTemporaryIds.size === 0 || !Array.isArray(value)) return;
+
+  for (const temporary of value) {
+    if (
+      !isPlainRecord(temporary) ||
+      !nonNegativeInteger(temporary.id) ||
+      !preparedTemporaryIds.has(temporary.id)
+    ) {
+      continue;
+    }
+    const failure = validatePreparedReferenceDescriptor(
+      temporary.value,
+      frames,
+      speakers,
+    );
+    if (failure !== null) {
+      errors.push(`${label} contain malformed prepared-reference state: ${failure}`);
+    }
+  }
+}
+
+function collectPreparedReferenceTemporaryIds(
+  plan: InstructionPlan | undefined,
+): ReadonlySet<number> {
+  if (plan === undefined) return new Set<number>();
+  return new Set(
+    plan.instructions
+      .filter(
+        (instruction): instruction is Extract<Instruction, { kind: "prepareReference" }> =>
+          instruction.kind === "prepareReference",
+      )
+      .map((instruction) => instruction.destinationTemporary),
+  );
+}
+
+function validatePreparedReferenceDescriptor(
+  value: unknown,
+  frames: unknown,
+  speakers: unknown,
+): string | null {
+  const properties = serializedObjectPropertyMap(value);
+  if (
+    properties === null ||
+    properties.size !== preparedReferencePropertyNames.length ||
+    preparedReferencePropertyNames.some((name) => !properties.has(name))
+  ) {
+    return "the descriptor must contain exactly the supported fields.";
+  }
+
+  const marker = properties.get("marker");
+  const rootFrameId = properties.get("rootFrameId");
+  const rootName = properties.get("rootName");
+  const pathValue = properties.get("path");
+  const capturedRoot = properties.get("capturedRoot");
+  const detached = properties.get("detached");
+  if (marker !== "preparedReference") {
+    return "the descriptor marker is invalid.";
+  }
+  if (
+    rootFrameId !== null &&
+    (!nonNegativeInteger(rootFrameId))
+  ) {
+    return "the root frame ID must be a non-negative integer or null.";
+  }
+  if (
+    rootName !== null &&
+    (typeof rootName !== "string" || rootName.length === 0)
+  ) {
+    return "the root name must be a non-empty string or null.";
+  }
+  if ((rootFrameId === null) !== (rootName === null)) {
+    return "the root frame ID and root name must both be present or both be null.";
+  }
+  if (typeof detached !== "boolean") {
+    return "the detached flag must be boolean.";
+  }
+  if (rootFrameId === null && detached !== true) {
+    return "a descriptor without a binding root must be detached.";
+  }
+  if (capturedRoot === undefined) {
+    return "the captured root is missing.";
+  }
+
+  const path = parsePreparedReferencePath(pathValue);
+  if (path === null) return "the descriptor path is malformed.";
+  if (!preparedReferencePathResolves(capturedRoot, path, speakers)) {
+    return "the captured root does not satisfy the prepared path.";
+  }
+
+  if (rootFrameId !== null && rootName !== null) {
+    const binding = serializedFrameBinding(frames, rootFrameId, rootName);
+    if (!binding.found) {
+      return "the binding root does not exist in the serialized scope frames.";
+    }
+    if (!detached && !preparedReferencePathResolves(binding.value, path, speakers)) {
+      return "the attached binding root does not satisfy the prepared path.";
+    }
+  }
+
+  return null;
+}
+
+function serializedObjectPropertyMap(
+  value: unknown,
+): ReadonlyMap<string, unknown> | null {
+  if (
+    !isPlainRecord(value) ||
+    value.kind !== "object" ||
+    !Array.isArray(value.properties)
+  ) {
+    return null;
+  }
+  const output = new Map<string, unknown>();
+  for (const property of value.properties) {
+    if (
+      !isPlainRecord(property) ||
+      typeof property.name !== "string" ||
+      property.name.length === 0 ||
+      output.has(property.name)
+    ) {
+      return null;
+    }
+    output.set(property.name, property.value);
+  }
+  return output;
+}
+
+function parsePreparedReferencePath(
+  value: unknown,
+): readonly PreparedReferencePathStep[] | null {
+  if (!isPlainRecord(value) || value.kind !== "list" || !Array.isArray(value.items)) {
+    return null;
+  }
+  const output: PreparedReferencePathStep[] = [];
+  for (const item of value.items) {
+    const properties = serializedObjectPropertyMap(item);
+    if (properties === null) return null;
+    const kind = properties.get("kind");
+    if (
+      kind === "property" &&
+      properties.size === 2 &&
+      properties.has("name")
+    ) {
+      const name = properties.get("name");
+      if (typeof name !== "string" || name.length === 0) return null;
+      output.push({ kind, name });
+      continue;
+    }
+    if (
+      kind === "index" &&
+      properties.size === 2 &&
+      properties.has("index")
+    ) {
+      const index = properties.get("index");
+      if (!nonNegativeInteger(index)) return null;
+      output.push({ kind, index });
+      continue;
+    }
+    return null;
+  }
+  return output;
+}
+
+function serializedFrameBinding(
+  frames: unknown,
+  frameId: number,
+  name: string,
+): { readonly found: boolean; readonly value: unknown } {
+  if (!Array.isArray(frames)) return { found: false, value: null };
+  const frame = frames.find(
+    (candidate) => isPlainRecord(candidate) && candidate.id === frameId,
+  );
+  if (!isPlainRecord(frame) || !Array.isArray(frame.bindings)) {
+    return { found: false, value: null };
+  }
+  const binding = frame.bindings.find(
+    (candidate) =>
+      isPlainRecord(candidate) &&
+      candidate.name === name &&
+      "value" in candidate,
+  );
+  return isPlainRecord(binding)
+    ? { found: true, value: binding.value }
+    : { found: false, value: null };
+}
+
+function preparedReferencePathResolves(
+  root: unknown,
+  path: readonly PreparedReferencePathStep[],
+  speakers: unknown,
+): boolean {
+  let current = root;
+  for (const step of path) {
+    if (step.kind === "index") {
+      if (
+        !isPlainRecord(current) ||
+        !["list", "set"].includes(String(current.kind)) ||
+        !Array.isArray(current.items) ||
+        step.index >= current.items.length
+      ) {
+        return false;
+      }
+      current = current.items[step.index];
+      continue;
+    }
+
+    if (isPlainRecord(current) && current.kind === "object") {
+      const properties = serializedObjectPropertyMap(current);
+      if (properties === null || !properties.has(step.name)) return false;
+      current = properties.get(step.name);
+      continue;
+    }
+    if (
+      isPlainRecord(current) &&
+      ["list", "set"].includes(String(current.kind)) &&
+      Array.isArray(current.items)
+    ) {
+      if (step.name !== "length") return false;
+      current = current.items.length;
+      continue;
+    }
+    if (
+      isPlainRecord(current) &&
+      current.kind === "speakerReference" &&
+      nonNegativeInteger(current.speakerId)
+    ) {
+      const property = serializedSpeakerProperty(
+        speakers,
+        current.speakerId,
+        step.name,
+      );
+      if (!property.found) return false;
+      current = property.value;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+function serializedSpeakerProperty(
+  speakers: unknown,
+  speakerId: number,
+  name: string,
+): { readonly found: boolean; readonly value: unknown } {
+  if (!Array.isArray(speakers)) return { found: false, value: null };
+  const speaker = speakers.find(
+    (candidate) => isPlainRecord(candidate) && candidate.id === speakerId,
+  );
+  if (!isPlainRecord(speaker) || !Array.isArray(speaker.properties)) {
+    return { found: false, value: null };
+  }
+  const names = name === "title"
+    ? ["title", "shortTitle"]
+    : name === "shortTitle"
+      ? ["shortTitle", "title"]
+      : [name];
+  for (const candidateName of names) {
+    const property = speaker.properties.find(
+      (candidate) =>
+        isPlainRecord(candidate) &&
+        candidate.name === candidateName &&
+        "value" in candidate,
+    );
+    if (isPlainRecord(property)) {
+      return { found: true, value: property.value };
+    }
+  }
+  return { found: false, value: null };
+}
+
+function validateCallFrames(
+  value: unknown,
+  frames: unknown,
+  speakers: unknown,
+  loopFrames: unknown,
+  nextInstruction: unknown,
+  maxCallDepth: unknown,
+  plan: InstructionPlan | undefined,
+  preparedReferenceTemporaryIds: ReadonlySet<number>,
+  errors: string[],
+): Set<number> {
+  const ids = new Set<number>();
+  if (!Array.isArray(value)) {
+    errors.push("Runtime callFrames must be an array.");
+    return ids;
+  }
+  if (nonNegativeInteger(maxCallDepth) && value.length > maxCallDepth) {
+    errors.push("Runtime call stack exceeds maxCallDepth.");
+  }
+  const frameCount = Array.isArray(frames) ? frames.length : 0;
+  const loopCount = Array.isArray(loopFrames) ? loopFrames.length : 0;
+  let previousId = 0;
+  let previousScopeBase = 0;
+  let previousLoopBase = 0;
+  value.forEach((frame, frameIndex) => {
+    if (!isPlainRecord(frame)) {
+      errors.push("Runtime call frame is malformed.");
+      return;
+    }
+    if (!nonNegativeInteger(frame.id) || frame.id < 1 || ids.has(frame.id)) {
+      errors.push("Runtime call-frame IDs must be unique positive integers.");
+    } else {
+      if (frame.id <= previousId) errors.push("Runtime call-frame IDs are out of order.");
+      previousId = frame.id;
+      ids.add(frame.id);
+    }
+    const definition = plan?.functions.find((item) => item.id === frame.functionId);
+    let callInstruction: InstructionPlan["instructions"][number] | undefined;
+    if (
+      !nonNegativeInteger(frame.functionId) ||
+      frame.functionId < 1 ||
+      (plan !== undefined && definition === undefined) ||
+      typeof frame.functionName !== "string" ||
+      frame.functionName.length === 0 ||
+      (definition !== undefined && frame.functionName !== definition.name) ||
+      !validSpan(frame.callSiteSpan)
+    ) {
+      errors.push("Runtime call frame refers to a malformed or unknown function.");
+    }
+    if (
+      !nonNegativeInteger(frame.returnInstruction) ||
+      frame.returnInstruction < 1 ||
+      (plan !== undefined && frame.returnInstruction > plan.instructions.length)
+    ) {
+      errors.push("Runtime call frame has an invalid return instruction.");
+    } else if (plan !== undefined) {
+      const call = plan.instructions[frame.returnInstruction - 1];
+      if (
+        call?.kind !== "callFunction" ||
+        call.functionId !== frame.functionId ||
+        call.destinationTemporary !== frame.destinationTemporary ||
+        call.returnInstruction !== frame.returnInstruction
+      ) {
+        errors.push("Runtime call frame return target does not match its call instruction.");
+      } else {
+        callInstruction = call;
+      }
+    }
+    if (
+      !nonNegativeInteger(frame.destinationTemporary) ||
+      frame.destinationTemporary < 1 ||
+      (plan !== undefined && frame.destinationTemporary > plan.temporaryCount)
+    ) {
+      errors.push("Runtime call frame has an invalid result destination.");
+    }
+    validateTemporaries(
+      frame.callerTemporaries,
+      plan,
+      "Runtime caller temporaries",
+      errors,
+    );
+    validatePreparedReferenceTemporaries(
+      frame.callerTemporaries,
+      frames,
+      speakers,
+      preparedReferenceTemporaryIds,
+      "Runtime caller temporaries",
+      errors,
+    );
+    if (
+      nonNegativeInteger(frame.destinationTemporary) &&
+      Array.isArray(frame.callerTemporaries) &&
+      frame.callerTemporaries.some(
+        (temporary) =>
+          isPlainRecord(temporary) &&
+          temporary.id === frame.destinationTemporary,
+      )
+    ) {
+      errors.push("Runtime caller temporaries already contain the result destination.");
+    }
+    if (
+      !nonNegativeInteger(frame.scopeBaseDepth) ||
+      frame.scopeBaseDepth < 1 ||
+      frame.scopeBaseDepth >= frameCount ||
+      frame.scopeBaseDepth <= previousScopeBase
+    ) {
+      errors.push("Runtime call frame has an impossible scope base.");
+    }
+    if (nonNegativeInteger(frame.scopeBaseDepth)) previousScopeBase = frame.scopeBaseDepth;
+    if (
+      !nonNegativeInteger(frame.loopBaseDepth) ||
+      frame.loopBaseDepth > loopCount ||
+      frame.loopBaseDepth < previousLoopBase
+    ) {
+      errors.push("Runtime call frame has an impossible loop base.");
+    }
+    if (nonNegativeInteger(frame.loopBaseDepth)) previousLoopBase = frame.loopBaseDepth;
+    validateCallArguments(frame.arguments, definition, errors);
+    validateCallArgumentConsistency(
+      frame.arguments,
+      frame.callerTemporaries,
+      callInstruction,
+      errors,
+    );
+    validateParameterState(frame.parameterState, definition, errors);
+    validateParameterBindings(
+      frame,
+      frames,
+      definition,
+      errors,
+    );
+
+    if (
+      plan !== undefined &&
+      nonNegativeInteger(frame.returnInstruction) &&
+      nonNegativeInteger(frame.destinationTemporary) &&
+      Array.isArray(frame.callerTemporaries)
+    ) {
+      validateSuspendedContinuationTemporaries(
+        frame.callerTemporaries,
+        frame.destinationTemporary,
+        frame.returnInstruction,
+        Array.isArray(loopFrames) && nonNegativeInteger(frame.loopBaseDepth)
+          ? loopFrames.slice(0, frame.loopBaseDepth)
+          : [],
+        plan,
+        errors,
+      );
+    }
+
+    if (plan !== undefined && nonNegativeInteger(frame.returnInstruction)) {
+      const callIndex = frame.returnInstruction - 1;
+      const callerDefinition = frameIndex === 0
+        ? undefined
+        : plan.functions.find(
+            (item) => item.id === (value[frameIndex - 1] as Record<string, unknown>)?.functionId,
+          );
+      if (
+        (frameIndex === 0 && callIndex >= plan.rootEndInstruction) ||
+        (frameIndex > 0 &&
+          (callerDefinition === undefined ||
+            callIndex < callerDefinition.entryInstruction ||
+            callIndex >= callerDefinition.endInstruction))
+      ) {
+        errors.push("Runtime call frame return instruction is outside its caller.");
+      }
+    }
+
+    if (definition !== undefined) {
+      const child = frameIndex < value.length - 1
+        ? value[frameIndex + 1]
+        : undefined;
+      if (
+        frameIndex === value.length - 1 &&
+        (!nonNegativeInteger(nextInstruction) ||
+          nextInstruction < definition.entryInstruction ||
+          nextInstruction >= definition.endInstruction)
+      ) {
+        errors.push("Runtime next instruction is outside the active function.");
+      } else if (frameIndex === value.length - 1 && nonNegativeInteger(nextInstruction)) {
+        validateExactParameterPosition(
+          frame.parameterState,
+          definition,
+          nextInstruction,
+          plan!,
+          errors,
+        );
+      } else if (isPlainRecord(child) && nonNegativeInteger(child.returnInstruction)) {
+        validateExactParameterPosition(
+          frame.parameterState,
+          definition,
+          child.returnInstruction - 1,
+          plan!,
+          errors,
+        );
+        validateExactParameterPosition(
+          frame.parameterState,
+          definition,
+          child.returnInstruction,
+          plan!,
+          errors,
+        );
+      }
+    }
+  });
+  return ids;
+}
+
+function validateCallArgumentConsistency(
+  argumentsValue: unknown,
+  callerTemporaries: unknown,
+  callInstruction: InstructionPlan["instructions"][number] | undefined,
+  errors: string[],
+): void {
+  if (
+    !Array.isArray(argumentsValue) ||
+    !Array.isArray(callerTemporaries) ||
+    callInstruction?.kind !== "callFunction"
+  ) {
+    return;
+  }
+  for (const argument of argumentsValue) {
+    if (!isPlainRecord(argument) || typeof argument.parameterName !== "string") continue;
+    const prepared = callInstruction.arguments.find(
+      (item) => item.parameterName === argument.parameterName,
+    );
+    if (argument.supplied === true) {
+      const temporary = prepared === undefined
+        ? undefined
+        : callerTemporaries.find(
+            (item) => isPlainRecord(item) && item.id === prepared.temporaryId,
+          );
+      if (
+        !isPlainRecord(temporary) ||
+        JSON.stringify(temporary.value) !== JSON.stringify(argument.value)
+      ) {
+        errors.push("Runtime supplied argument does not match caller temporary state.");
+      }
+    } else if (prepared !== undefined) {
+      errors.push("Runtime missing argument is marked as supplied by the call instruction.");
+    }
+  }
+}
+
+function validateParameterBindings(
+  frame: Record<string, unknown>,
+  frames: unknown,
+  definition: InstructionPlan["functions"][number] | undefined,
+  errors: string[],
+): void {
+  if (
+    definition === undefined ||
+    !Array.isArray(frames) ||
+    !nonNegativeInteger(frame.scopeBaseDepth) ||
+    !Array.isArray(frame.arguments) ||
+    !isPlainRecord(frame.parameterState) ||
+    !nonNegativeInteger(frame.parameterState.parameterIndex)
+  ) {
+    return;
+  }
+  const scope = frames[frame.scopeBaseDepth];
+  if (!isPlainRecord(scope) || !Array.isArray(scope.bindings)) return;
+  const argumentsList = frame.arguments as unknown[];
+  const parameterState = frame.parameterState as Record<string, unknown>;
+  const bindingNames = new Set(
+    scope.bindings
+      .filter(isPlainRecord)
+      .map((binding) => binding.name)
+      .filter((name): name is string => typeof name === "string"),
+  );
+  if (
+    parameterState.phase !== "body" &&
+    [...bindingNames].some(
+      (name) => !definition.parameters.some((parameter) => parameter.name === name),
+    )
+  ) {
+    errors.push("Runtime function prologue contains a non-parameter binding.");
+  }
+  definition.parameters.forEach((parameter, index) => {
+    const argument = argumentsList[index];
+    if (!isPlainRecord(argument) || typeof argument.supplied !== "boolean") return;
+    const phase = parameterState.phase;
+    const progress = parameterState.parameterIndex as number;
+    const shouldBeBound =
+      phase === "body" ||
+      (phase === "supplied" && argument.supplied && index < progress) ||
+      (phase === "defaults" && (argument.supplied || index < progress));
+    if (bindingNames.has(parameter.name) !== shouldBeBound) {
+      errors.push("Runtime parameter bindings do not match prologue progress.");
+    }
+  });
+}
+
+function validateCallArguments(
+  value: unknown,
+  definition: InstructionPlan["functions"][number] | undefined,
+  errors: string[],
+): void {
+  if (!Array.isArray(value)) {
+    errors.push("Runtime call-frame arguments must be an array.");
+    return;
+  }
+  if (definition !== undefined && value.length !== definition.parameters.length) {
+    errors.push("Runtime call-frame arguments do not match function parameters.");
+  }
+  value.forEach((argument, index) => {
+    const parameter = definition?.parameters[index];
+    if (
+      !isPlainRecord(argument) ||
+      typeof argument.parameterName !== "string" ||
+      argument.parameterName.length === 0 ||
+      typeof argument.supplied !== "boolean" ||
+      (parameter !== undefined && argument.parameterName !== parameter.name)
+    ) {
+      errors.push("Runtime call-frame argument state is malformed.");
+      return;
+    }
+    if (argument.supplied) {
+      if (!("value" in argument)) {
+        errors.push("Supplied runtime argument is missing its value.");
+      } else {
+        const failure = validateSerializableValue(argument.value);
+        if (failure !== null) errors.push(failure);
+      }
+    } else if ("value" in argument) {
+      errors.push("Missing runtime argument must not contain a value.");
+    }
+  });
+}
+
+function validateParameterState(
+  value: unknown,
+  definition: InstructionPlan["functions"][number] | undefined,
+  errors: string[],
+): void {
+  if (
+    !isPlainRecord(value) ||
+    !["supplied", "defaults", "body"].includes(String(value.phase)) ||
+    !nonNegativeInteger(value.parameterIndex) ||
+    (definition !== undefined && value.parameterIndex > definition.parameters.length) ||
+    (value.phase === "body" &&
+      definition !== undefined &&
+      value.parameterIndex !== definition.parameters.length)
+  ) {
+    errors.push("Runtime parameter-prologue state is malformed.");
+  }
+}
+
+function validateExactParameterPosition(
+  value: unknown,
+  definition: InstructionPlan["functions"][number],
+  instructionPosition: number,
+  plan: InstructionPlan,
+  errors: string[],
+): void {
+  if (!isPlainRecord(value) || !nonNegativeInteger(value.parameterIndex)) return;
+  const expected = expectedParameterProgress(definition, instructionPosition, plan);
+  if (
+    expected === null ||
+    value.phase !== expected.phase ||
+    value.parameterIndex !== expected.parameterIndex
+  ) {
+    errors.push("Runtime parameter progress does not match its exact instruction position.");
+  }
+}
+
+function expectedParameterProgress(
+  definition: InstructionPlan["functions"][number],
+  instructionPosition: number,
+  plan: InstructionPlan,
+): RuntimeParameterStateSnapshot | null {
+  const parameterCount = definition.parameters.length;
+  if (
+    instructionPosition >= definition.entryInstruction &&
+    instructionPosition < definition.entryInstruction + parameterCount
+  ) {
+    return {
+      phase: "supplied",
+      parameterIndex: instructionPosition - definition.entryInstruction,
+    };
+  }
+  let cursor = definition.entryInstruction + parameterCount;
+  if (instructionPosition === cursor) {
+    return { phase: "supplied", parameterIndex: parameterCount };
+  }
+  cursor += 1;
+  for (let parameterIndex = 0; parameterIndex < parameterCount; parameterIndex += 1) {
+    const prepare = plan.instructions[cursor];
+    if (prepare?.kind !== "prepareParameterDefault") return null;
+    if (instructionPosition === cursor) {
+      return { phase: "defaults", parameterIndex };
+    }
+    const bindIndex = plan.instructions.findIndex(
+      (instruction, index) =>
+        index > cursor &&
+        index < prepare.target &&
+        instruction.kind === "bindDefaultParameter" &&
+        instruction.functionId === definition.id &&
+        instruction.parameterIndex === parameterIndex,
+    );
+    if (instructionPosition > cursor && instructionPosition < prepare.target) {
+      return {
+        phase: "defaults",
+        parameterIndex:
+          bindIndex >= 0 && instructionPosition > bindIndex
+            ? parameterIndex + 1
+            : parameterIndex,
+      };
+    }
+    cursor = prepare.target;
+  }
+  if (instructionPosition === definition.bodyEntryInstruction - 1) {
+    return { phase: "defaults", parameterIndex: parameterCount };
+  }
+  if (
+    instructionPosition >= definition.bodyEntryInstruction &&
+    instructionPosition < definition.endInstruction
+  ) {
+    return { phase: "body", parameterIndex: parameterCount };
+  }
+  return null;
+}
+
+function validateSuspendedContinuationTemporaries(
+  callerTemporaries: unknown[],
+  destinationTemporary: number,
+  returnInstruction: number,
+  callerLoopFrames: unknown,
+  plan: InstructionPlan,
+  errors: string[],
+): void {
+  const present = new Set(
+    callerTemporaries
+      .filter(isPlainRecord)
+      .map((temporary) => temporary.id)
+      .filter((id): id is number => nonNegativeInteger(id)),
+  );
+  present.add(destinationTemporary);
+  const required = requiredContinuationTemporaries(
+    plan,
+    returnInstruction,
+    callerLoopFrames,
+  );
+  if ([...required].some((temporaryId) => !present.has(temporaryId))) {
+    errors.push("Runtime caller temporaries cannot resume the suspended continuation.");
+  }
+}
+
+function requiredContinuationTemporaries(
+  plan: InstructionPlan,
+  startInstruction: number,
+  loopFrames: unknown,
+): ReadonlySet<number> {
+  const count = plan.instructions.length;
+  const liveIn = Array.from({ length: count }, () => new Set<number>());
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let index = count - 1; index >= 0; index -= 1) {
+      const instruction = plan.instructions[index]!;
+      const liveOut = new Set<number>();
+      for (const successor of instructionSuccessors(plan, index)) {
+        for (const temporaryId of liveIn[successor] ?? []) liveOut.add(temporaryId);
+      }
+      for (const temporaryId of instructionKilledTemporaries(instruction)) {
+        liveOut.delete(temporaryId);
+      }
+      for (const temporaryId of requiredInstructionTemporaries(instruction, loopFrames)) {
+        liveOut.add(temporaryId);
+      }
+      if (!sameNumberSet(liveIn[index]!, liveOut)) {
+        liveIn[index] = liveOut;
+        changed = true;
+      }
+    }
+  }
+  return liveIn[startInstruction] ?? new Set<number>();
+}
+
+function instructionSuccessors(
+  plan: InstructionPlan,
+  index: number,
+): readonly number[] {
+  const instruction = plan.instructions[index];
+  if (instruction === undefined) return [];
+  const regionEnd = instructionRegionEnd(plan, index);
+  const next = index + 1 < regionEnd ? index + 1 : null;
+  switch (instruction.kind) {
+    case "jump":
+    case "loopControl":
+      return instruction.target < regionEnd ? [instruction.target] : [];
+    case "jumpIfFalse":
+    case "loopStart": {
+      const successors = [instruction.target];
+      if (next !== null) successors.push(next);
+      return successors.filter((candidate) => candidate >= 0 && candidate < regionEnd);
+    }
+    case "returnValue":
+    case "returnVoid":
+    case "exit":
+      return [];
+    case "callFunction":
+      return instruction.returnInstruction < regionEnd
+        ? [instruction.returnInstruction]
+        : [];
+    default:
+      return next === null ? [] : [next];
+  }
+}
+
+function instructionRegionEnd(plan: InstructionPlan, index: number): number {
+  if (index < plan.rootEndInstruction) return plan.rootEndInstruction;
+  return plan.functions.find(
+    (definition) =>
+      index >= definition.entryInstruction && index < definition.endInstruction,
+  )?.endInstruction ?? plan.instructions.length;
+}
+
+function instructionKilledTemporaries(
+  instruction: Instruction,
+): ReadonlySet<number> {
+  switch (instruction.kind) {
+    case "storeTemporary":
+      return new Set([instruction.temporaryId]);
+    case "prepareReference":
+      return new Set([instruction.destinationTemporary]);
+    case "clearTemporary":
+      return new Set([instruction.temporaryId]);
+    case "callFunction":
+      return new Set([instruction.destinationTemporary]);
+    default:
+      return new Set<number>();
+  }
+}
+
+function sameNumberSet(left: ReadonlySet<number>, right: ReadonlySet<number>): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
+}
+
+function validateStatusConsistency(
+  value: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  const calls = Array.isArray(value.callFrames) ? value.callFrames.length : 0;
+  const loops = Array.isArray(value.loopFrames) ? value.loopFrames.length : 0;
+  const temporaries = Array.isArray(value.temporaries) ? value.temporaries.length : 0;
+  const scopes = Array.isArray(value.frames) ? value.frames.length : 0;
+  if (value.contextualSpeaker !== null) {
+    errors.push("Runtime contextual speaker must be cleared between instructions.");
+  }
+  if (value.status === "ready") {
+    if (
+      value.nextInstruction !== 0 ||
+      calls !== 0 ||
+      loops !== 0 ||
+      temporaries !== 0 ||
+      scopes !== 1 ||
+      value.failure !== null
+    ) {
+      errors.push("Ready runtime state contains execution progress.");
+    }
+  } else if (value.status === "halted") {
+    if (calls !== 0 || loops !== 0 || temporaries !== 0 || scopes !== 1 || value.failure !== null) {
+      errors.push("Halted runtime state retains active execution state.");
+    }
+  } else if (value.status === "running") {
+    if (value.failure !== null) errors.push("Running runtime state contains failure information.");
+    if (
+      plan !== undefined &&
+      calls === 0 &&
+      (!nonNegativeInteger(value.nextInstruction) || value.nextInstruction >= plan.rootEndInstruction)
+    ) {
+      errors.push("Root execution position is outside the root instruction range.");
+    }
+  }
+}
+
+function validateCurrentTemporaryRequirements(
+  temporaries: unknown,
+  loopFrames: unknown,
+  nextInstruction: unknown,
+  status: unknown,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  if (
+    plan === undefined ||
+    status === "halted" ||
+    !Array.isArray(temporaries) ||
+    !nonNegativeInteger(nextInstruction)
+  ) {
+    return;
+  }
+  const instruction = plan.instructions[nextInstruction];
+  if (instruction === undefined) return;
+  const required = requiredInstructionTemporaries(instruction, loopFrames);
+  const present = new Set(
+    temporaries
+      .filter(isPlainRecord)
+      .map((temporary) => temporary.id)
+      .filter((id): id is number => nonNegativeInteger(id)),
+  );
+  if ([...required].some((id) => !present.has(id))) {
+    errors.push("Runtime state is missing a temporary required by the next instruction.");
+  }
+}
+
+function requiredInstructionTemporaries(
+  instruction: Instruction,
+  loopFrames: unknown,
+): ReadonlySet<number> {
+  const output = new Set<number>();
+  const collect = (expression: ExpressionPlan): void => {
+    collectExpressionTemporaries(expression, output);
+  };
+  switch (instruction.kind) {
+    case "declareSpeaker":
+      instruction.properties.forEach((property) => collect(property.value));
+      break;
+    case "setDeclaredSpeakerProperty":
+    case "declareBinding":
+      collect(instruction.value);
+      break;
+    case "prepareReference":
+      collect(instruction.expression);
+      break;
+    case "validateAssignmentTarget":
+      collect(instruction.target);
+      break;
+    case "assign":
+      collect(instruction.value);
+      collect(instruction.target);
+      break;
+    case "validateCallReceiver":
+      collect(instruction.receiver);
+      break;
+    case "evaluate":
+      collect(instruction.expression);
+      break;
+    case "jumpIfFalse":
+      collect(instruction.condition);
+      break;
+    case "loopStart": {
+      const active = Array.isArray(loopFrames)
+        ? loopFrames.at(-1)
+        : undefined;
+      if (
+        instruction.loopKind === "while" ||
+        !isPlainRecord(active) ||
+        active.loopId !== instruction.loopId
+      ) {
+        collect(instruction.expression);
+      }
+      break;
+    }
+    case "storeTemporary":
+    case "bindDefaultParameter":
+    case "returnValue":
+      collect(instruction.value);
+      break;
+    case "callFunction":
+      instruction.arguments.forEach((argument) => output.add(argument.temporaryId));
+      break;
+    case "setDefaultSpeaker":
+    case "enterScope":
+    case "leaveScope":
+    case "jump":
+    case "loopControl":
+    case "clearTemporary":
+    case "bindSuppliedParameter":
+    case "beginFunctionDefaults":
+    case "prepareParameterDefault":
+    case "enterFunctionBody":
+    case "returnVoid":
+    case "exit":
+      break;
+    case "say":
+      collect(instruction.value);
+      break;
+  }
+  return output;
+}
+
+function collectExpressionTemporaries(
+  expression: ExpressionPlan,
+  output: Set<number>,
+): void {
+  switch (expression.kind) {
+    case "temporary":
+    case "preparedReference":
+      output.add(expression.temporaryId);
+      return;
+    case "literal":
+    case "identifier":
+      return;
+    case "list":
+    case "set":
+      expression.elements.forEach((item) => collectExpressionTemporaries(item, output));
+      return;
+    case "object":
+      expression.properties.forEach((property) =>
+        collectExpressionTemporaries(property.value, output)
+      );
+      return;
+    case "group":
+      collectExpressionTemporaries(expression.expression, output);
+      return;
+    case "template":
+      expression.parts.forEach((part) => {
+        if (part.kind === "expression") {
+          collectExpressionTemporaries(part.expression, output);
+        }
+      });
+      return;
+    case "property":
+      collectExpressionTemporaries(expression.object, output);
+      return;
+    case "index":
+      collectExpressionTemporaries(expression.object, output);
+      collectExpressionTemporaries(expression.index, output);
+      return;
+    case "call":
+      collectExpressionTemporaries(expression.callee, output);
+      expression.arguments.forEach((argument) =>
+        collectExpressionTemporaries(argument.value, output)
+      );
+      return;
+    case "unary":
+      collectExpressionTemporaries(expression.operand, output);
+      return;
+    case "binary":
+      collectExpressionTemporaries(expression.left, output);
+      collectExpressionTemporaries(expression.right, output);
+      return;
+    case "range":
+      collectExpressionTemporaries(expression.start, output);
+      collectExpressionTemporaries(expression.end, output);
+      return;
+  }
+}
+
 function validateFrames(value: unknown, errors: string[]): void {
   if (!Array.isArray(value) || value.length === 0) {
     errors.push("Runtime frames must be a non-empty array.");
@@ -399,7 +1625,11 @@ function validateFrames(value: unknown, errors: string[]): void {
     frameIds.add(frame.id);
     const names = new Set<string>();
     for (const binding of frame.bindings) {
-      if (!isPlainRecord(binding) || typeof binding.name !== "string") {
+      if (
+        !isPlainRecord(binding) ||
+        typeof binding.name !== "string" ||
+        binding.name.length === 0
+      ) {
         errors.push("Runtime binding is malformed.");
         continue;
       }
@@ -425,6 +1655,7 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
       !isPlainRecord(speaker) ||
       !nonNegativeInteger(speaker.id) ||
       typeof speaker.identifier !== "string" ||
+      speaker.identifier.length === 0 ||
       !Array.isArray(speaker.properties)
     ) {
       errors.push("Runtime speaker is malformed.");
@@ -434,7 +1665,11 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
     ids.add(speaker.id);
     const names = new Set<string>();
     for (const property of speaker.properties) {
-      if (!isPlainRecord(property) || typeof property.name !== "string") {
+      if (
+        !isPlainRecord(property) ||
+        typeof property.name !== "string" ||
+        property.name.length === 0
+      ) {
         errors.push("Runtime speaker property is malformed.");
         continue;
       }
@@ -467,6 +1702,8 @@ function validateSpeakerReferences(
   frames: unknown,
   speakers: unknown,
   loopFrames: unknown,
+  temporaries: unknown,
+  callFrames: unknown,
   speakerIds: ReadonlySet<number>,
   errors: string[],
 ): void {
@@ -490,6 +1727,28 @@ function validateSpeakerReferences(
   if (Array.isArray(loopFrames)) {
     for (const loop of loopFrames) {
       if (isPlainRecord(loop) && loop.kind === "for") values.push(loop.source);
+    }
+  }
+  if (Array.isArray(temporaries)) {
+    for (const temporary of temporaries) {
+      if (isPlainRecord(temporary)) values.push(temporary.value);
+    }
+  }
+  if (Array.isArray(callFrames)) {
+    for (const frame of callFrames) {
+      if (!isPlainRecord(frame)) continue;
+      if (Array.isArray(frame.callerTemporaries)) {
+        for (const temporary of frame.callerTemporaries) {
+          if (isPlainRecord(temporary)) values.push(temporary.value);
+        }
+      }
+      if (Array.isArray(frame.arguments)) {
+        for (const argument of frame.arguments) {
+          if (isPlainRecord(argument) && argument.supplied === true) {
+            values.push(argument.value);
+          }
+        }
+      }
     }
   }
   const referencedIds = new Set<number>();
@@ -537,6 +1796,15 @@ function validPosition(value: unknown): boolean {
 
 function copySpan(span: SourceSpan): SourceSpan {
   return createSourceSpan(span.start, span.end);
+}
+
+function cloneTemporary(
+  temporary: RuntimeTemporarySnapshot,
+): RuntimeTemporarySnapshot {
+  return {
+    id: temporary.id,
+    value: cloneSerializableValue(temporary.value),
+  };
 }
 
 function nonNegativeInteger(value: unknown): value is number {

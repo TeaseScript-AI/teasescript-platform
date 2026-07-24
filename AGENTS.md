@@ -6,25 +6,27 @@ For every substantive task, read:
 
 1. `README-FIRST.md`
 2. `CURRENT-DESIGN.md`
-3. `docs/specifications/accepted-syntaxes-v30.md` when language syntax or semantics are involved
-4. the task-specific planning/specification document
-5. relevant ADRs in `docs/decisions/`
+3. `PHASE-STATUS.md`
+4. `docs/specifications/accepted-syntaxes-v30.md` when language syntax or semantics are involved
+5. the task-specific current document or planning file
+6. relevant ADRs in `docs/decisions/`
+7. `docs/OPEN-DECISIONS.md` when resolving a gap
 
-Do not treat planning documents as accepted decisions.
+Do not treat planning documents, wishes, research files, historical audits, or source examples as accepted decisions.
 
 ## Working rules
 
-- Use English for code, identifiers, comments, documentation, package metadata, and UI text.
+- Use English for source code, identifiers, comments, documentation, package metadata, editor text, and UI text.
 - Do not silently change architecture, language semantics, security boundaries, or product scope.
-- When documents conflict, identify the exact conflict and follow the authority order in `README-FIRST.md`.
-- `.tease` is not TypeScript. Advanced code belongs in `.ts` libraries.
-- Keep one engine, one state model, and one save format.
+- `.tease` is not TypeScript. Advanced reusable code belongs in `.ts` libraries.
+- Keep one engine, one state model, and one save/checkpoint format.
 - Laravel is the only public backend.
-- Choose the simplest design that meets the current task.
-- Do not add dependencies without documenting the need, alternatives, maintenance impact, and security impact.
-- Validate external data at runtime.
+- Preserve deterministic source evaluation order and explicit JSON-safe pause/resume state.
+- Validate external, checkpoint, host, package, and future integration data at runtime.
+- Choose the simplest design that meets the current milestone.
+- Do not add dependencies without documenting need, alternatives, maintenance impact, and security impact.
 - Do not weaken tests to hide failures.
-- Do not implement deferred capabilities merely because they appear in planning documents.
+- Do not implement deferred capabilities merely because they appear in planning or reference material.
 
 ## Before substantive coding
 
@@ -38,31 +40,21 @@ Then work in small verifiable steps.
 
 ## Verification
 
-Before finishing a task, run all relevant:
-
-- formatting;
-- linting;
-- type checking;
-- unit/integration tests.
-
-Report commands run and any remaining failures or risks.
+Run all configured formatting, linting, type checking, build, relevant unit/integration tests, playground smoke tests, and diff checks. Report the exact commands and remaining failures or risks. If a check is not configured or could not be run, state that rather than inventing success.
 
 ## Git workflow
 
 - Keep `main` stable and usable.
 - Do not make substantive changes directly on `main`.
-- Create one short-lived branch per task. Names may follow patterns such as `poc/parser`, `poc/speaker-runtime`, `docs/syntax-authority`, or `fix/source-spans`.
-- Branch names and repository folders are examples, not fixed architecture. Choose clear names that match the task.
+- Create one short-lived branch per clear task.
 - Keep each branch limited to one clear purpose.
 - Make small logical commits with concise English imperative messages.
-- Push the branch and open a pull request to `main`.
-- In the pull request, state what changed, what is intentionally out of scope, how it was verified, and remaining risks or open decisions.
-- Review the complete diff for accidental files, debug code, secrets, unrelated changes, and missing documentation.
-- Prefer squash merge after all checks pass.
-- Delete the merged branch.
+- Push the branch and open one pull request to `main`.
+- State scope, intentionally deferred work, verification, and remaining risks in the pull request.
+- Review the complete diff for accidental files, debug code, secrets, unrelated changes, and stale documentation.
+- Prefer squash merge after checks pass, then delete the branch.
 - Never force-push or rewrite `main`.
-- Do not merge failing, incomplete, or knowingly broken changes unless Peter explicitly instructs it.
 
-## Initial POC limitation
+## Milestone discipline
 
-For the first parser POC, do not scaffold the full platform. Implement only the smallest maintainable TypeScript structure needed for lexer, parser, AST, diagnostics, tests, and a CLI/test harness. Propose the concrete folder structure in the task plan before creating it.
+Use `PHASE-STATUS.md` and the current task/PR description to identify active work. Do not rely on stale parser-POC or earlier-branch wording. Select the next milestone explicitly; do not expand a focused branch into timers, media, iframe integration, Laravel, modules, or unrelated V30 syntax without revising the plan and recording the decision.

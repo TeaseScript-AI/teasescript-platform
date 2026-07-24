@@ -36,6 +36,8 @@ const keywordKinds: Readonly<Record<string, TokenKind>> = {
   while: TokenKind.KeywordWhile,
   break: TokenKind.KeywordBreak,
   continue: TokenKind.KeywordContinue,
+  function: TokenKind.KeywordFunction,
+  return: TokenKind.KeywordReturn,
 };
 
 const diagnosticCodes = {

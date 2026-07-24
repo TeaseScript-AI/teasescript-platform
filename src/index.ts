@@ -26,6 +26,11 @@ export {
   type PlanValidationError,
   type PlanValidationResult,
   type RangeExpressionPlan,
+  type CompiledFunctionDefinition,
+  type CompiledFunctionParameter,
+  type CallFunctionInstruction,
+  type PreparedCallArgument,
+  type TemporaryExpressionPlan,
 } from "./instructions.js";
 export {
   validateSemantics,
@@ -76,6 +81,8 @@ export {
 } from "./runtime/checkpoint.js";
 export {
   createFreshRuntimeSnapshot,
+  DEFAULT_MAX_CALL_DEPTH,
+  MAX_SUPPORTED_CALL_DEPTH,
   RUNTIME_SNAPSHOT_FORMAT,
   RUNTIME_SNAPSHOT_VERSION,
   validateRuntimeSnapshot,
@@ -84,6 +91,10 @@ export {
   type RuntimeFailureSnapshot,
   type RuntimeScopeFrameSnapshot,
   type RuntimeLoopFrameSnapshot,
+  type RuntimeCallArgumentSnapshot,
+  type RuntimeCallFrameSnapshot,
+  type RuntimeParameterStateSnapshot,
+  type RuntimeTemporarySnapshot,
   type RuntimeRepeatLoopFrameSnapshot,
   type RuntimeForLoopFrameSnapshot,
   type RuntimeWhileLoopFrameSnapshot,
@@ -147,6 +158,8 @@ export type {
   Expression,
   ExpressionStatement,
   ForStatement,
+  FunctionDeclaration,
+  FunctionParameter,
   Identifier,
   IfStatement,
   IndexExpression,
@@ -164,6 +177,7 @@ export type {
   PropertyAccessExpression,
   RangeExpression,
   RepeatStatement,
+  ReturnStatement,
   ScalarTypeName,
   SayStatement,
   SetLiteral,

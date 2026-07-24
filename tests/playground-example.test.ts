@@ -53,5 +53,46 @@ test("checkpoint storage keys are format-versioned and example-specific", () => 
     checkpointStorageKey(name as keyof typeof PLAYGROUND_EXAMPLES)
   );
   assert.equal(new Set(keys).size, keys.length);
-  assert.ok(keys.every((key) => /checkpoint-v2:/u.test(key)));
+  assert.ok(keys.every((key) => /checkpoint-v3:/u.test(key)));
+});
+
+test("the functions example is allowlisted and visibly exercises the milestone", async () => {
+  assert.equal(PLAYGROUND_EXAMPLES.functions.file, "functions.tease");
+  const source = await readFile("examples/playground/functions.tease", "utf8");
+  const compilation = compileSource(source);
+
+  assert.deepEqual(compilation.diagnostics, []);
+  const result = run(
+    compilation.plan!,
+    createFreshRuntimeSnapshot(compilation.plan!),
+  );
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    [
+      "Kneel.",
+      "Hello, pet Alex.",
+      "Hello, puppy Alex.",
+      "Two plus three is 5.",
+      "A nested result is 6.",
+      "Loop result: 5",
+      "Loop result: 5",
+      "Stopped early.",
+      "Countdown 3",
+      "Countdown 2",
+      "Countdown 1",
+      "Done.",
+    ],
+  );
+});
+
+test("playground restore refuses detached source plans and renders source safely", async () => {
+  const browserSource = await readFile("playground/browser.ts", "utf8");
+
+  assert.match(browserSource, /does not match the currently displayed example source/u);
+  assert.match(browserSource, /elements\.source\.textContent = source/u);
+  assert.doesNotMatch(browserSource, /source\.innerHTML/u);
+  assert.match(
+    browserSource,
+    /plan = null;\s+snapshot = null;\s+source = "";\s+eventLog = \[\];/u,
+  );
 });
