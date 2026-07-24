@@ -27,6 +27,13 @@
 
 These files provide concise current routing and must not duplicate or override accepted syntax or ADRs.
 
+## Development workflow
+
+- `DEVELOPMENT-WORKFLOW.md` defines the GitHub-native coordinator, executor, integration-branch, pull-request, documentation, and final-verification process.
+- `../AGENTS.md` contains the mandatory task, coding, review, and Git rules for every agent.
+
+Temporary work breakdowns, executor assignments, package files, and merge tracking remain outside the repository.
+
 ## Planning
 
 - `planning/POC-TO-ALPHA-BACKLOG.md` lists owner-selected work that remains required before a stated POC or pre-alpha gate. An item may remain unscheduled and is not implementation scope until a phase plan or coordinator assignment selects its ID.
