@@ -1,125 +1,32 @@
-name: Apply issue 11 implementation
+name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+  check:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out branch
+      - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-          fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Validate work-package tooling
+        run: |
+          bash -n tools/work-packages/integrate.sh
+          jq empty tools/work-packages/PACKAGE.schema.json
+          jq empty tools/work-packages/templates/PACKAGE.example.json
       - name: Install dependencies
         run: npm ci
-      - name: Apply implementation and restore CI
-        shell: bash
-        run: |
-          python <<'PY'
-          from pathlib import Path
-
-          random_path = Path("src/runtime/random.ts")
-          random_source = random_path.read_text()
-          random_source = random_source.replace(
-              '''  if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
-              throw new RangeError("The xorshift32 seed must be an unsigned 32-bit integer.");
-            }
-          ''',
-              '''  if (
-              !Number.isInteger(seed) ||
-              seed === 0 ||
-              seed < 0 ||
-              seed > 0xffff_ffff
-            ) {
-              throw new RangeError(
-                "The xorshift32 seed must be a non-zero unsigned 32-bit integer.",
-              );
-            }
-          ''',
-          )
-          random_source = random_source.replace(
-              '''    !Number.isInteger(random.state) ||
-              random.state < 0 ||
-          ''',
-              '''    !Number.isInteger(random.state) ||
-              random.state === 0 ||
-              random.state < 0 ||
-          ''',
-          )
-          random_source = random_source.replace(
-              '/** Advances the serializable deterministic RNG and returns a value in [0, 1). */',
-              '// Temporary publication marker; removed by the final connector commit.\n/** Advances the serializable deterministic RNG and returns a value in [0, 1). */',
-          )
-          random_path.write_text(random_source)
-
-          state_path = Path("src/runtime/state.ts")
-          state_source = state_path.read_text().replace(
-              '''    value.rng.algorithm !== XORSHIFT32_ALGORITHM ||
-              !unsigned32(value.rng.state)
-          ''',
-              '''    value.rng.algorithm !== XORSHIFT32_ALGORITHM ||
-              value.rng.state === 0 ||
-              !unsigned32(value.rng.state)
-          ''',
-          )
-          state_path.write_text(state_source)
-
-          Path(".github/workflows/ci.yml").write_text('''name: CI
-
-          on:
-            push:
-              branches: [main]
-            pull_request:
-
-          permissions:
-            contents: read
-
-          jobs:
-            check:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Check out repository
-                  uses: actions/checkout@v4
-                - name: Set up Node.js
-                  uses: actions/setup-node@v4
-                  with:
-                    node-version-file: .nvmrc
-                    cache: npm
-                - name: Validate work-package tooling
-                  run: |
-                    bash -n tools/work-packages/integrate.sh
-                    jq empty tools/work-packages/PACKAGE.schema.json
-                    jq empty tools/work-packages/templates/PACKAGE.example.json
-                - name: Install dependencies
-                  run: npm ci
-                - name: Check source
-                  run: npm run check
-                - name: Build
-                  run: npm run build
-          ''')
-          PY
       - name: Check source
         run: npm run check
       - name: Build
         run: npm run build
-      - name: Check diff
-        run: git diff --check
-      - name: Commit implementation
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/runtime/random.ts src/runtime/state.ts .github/workflows/ci.yml
-          git commit -m "Reject zero xorshift32 state"
-          git push origin HEAD:${{ github.head_ref }}
