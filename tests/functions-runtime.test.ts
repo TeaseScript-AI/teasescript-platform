@@ -210,6 +210,196 @@ test("evaluates observable built-ins in assignment target-before-value order", (
   assert.deepEqual(sayTexts(result), ["9"]);
 });
 
+test("preserves ordinary built-in order before later user calls in composite expressions", () => {
+  const source = [
+    "function userText { return mark(\"userText\") }",
+    "function userNumber { mark(\"userNumber\")\nreturn 2 }",
+    "function indexUser { mark(\"indexUser\")\nreturn 0 }",
+    "let listValue = [mark(\"list\"), userText()]",
+    "let setValue = set[mark(\"set\"), userText()]",
+    "let objectValue = { first: mark(\"object\"), second: userText() }",
+    "let templateValue = `${mark(\"template\")}:${userText()}`",
+    "let binaryValue = markNumber(1, \"binary\") + userNumber()",
+    "let rangeValue = markNumber(1, \"range\")..userNumber()",
+    "let indexedValue = sourceList()[indexUser()]",
+    "receiverList().add(userNumber())",
+  ].join("\n");
+  const compiledResult = compileSource(source, {
+    builtins: ["mark", "markNumber", "sourceList", "receiverList"],
+  });
+  assert.deepEqual(compiledResult.diagnostics, []);
+  const order: string[] = [];
+  const mark: RuntimeBuiltinFunction = (call) => {
+    const label = call.positional[0];
+    if (typeof label !== "string") throw new TypeError("Expected string label.");
+    order.push(label);
+    return label;
+  };
+  const markNumber: RuntimeBuiltinFunction = (call) => {
+    const value = call.positional[0];
+    const label = call.positional[1];
+    if (typeof value !== "number") throw new TypeError("Expected numeric value.");
+    if (typeof label !== "string") throw new TypeError("Expected string label.");
+    order.push(label);
+    return value;
+  };
+  const result = run(
+    compiledResult.plan!,
+    createFreshRuntimeSnapshot(compiledResult.plan!),
+    {
+      builtins: {
+        mark,
+        markNumber,
+        sourceList: () => {
+          order.push("sourceList");
+          return { kind: "list", items: [7] };
+        },
+        receiverList: () => {
+          order.push("receiverList");
+          return { kind: "list", items: [] };
+        },
+      },
+    },
+  );
+
+  assert.equal(result.snapshot.status, "halted");
+  assert.deepEqual(order, [
+    "list", "userText",
+    "set", "userText",
+    "object", "userText",
+    "template", "userText",
+    "binary", "userNumber",
+    "range", "userNumber",
+    "sourceList", "indexUser",
+    "receiverList", "userNumber",
+  ]);
+});
+
+test("snapshots earlier composite values before a later user call mutates their source", () => {
+  const result = runSource([
+    "let items = [1]",
+    "function mutate { items.add(2)\nreturn 0 }",
+    "let combined = [items, mutate()]",
+    "say combined[0].length",
+    "say items.length",
+  ].join("\n"));
+
+  assert.deepEqual(sayTexts(result), ["1", "2"]);
+});
+
+test("keeps a prepared collection receiver attached through argument side effects", () => {
+  const result = runSource([
+    "let items = []",
+    "function argument { items.add(1)\nreturn 2 }",
+    "items.add(argument())",
+    "say `${items[0]}:${items[1]}`",
+  ].join("\n"));
+
+  assert.deepEqual(sayTexts(result), ["1:2"]);
+});
+
+test("fails an invalid prepared receiver before evaluating a user-call argument", () => {
+  const result = runSource([
+    "let order = []",
+    "let scalar = 1",
+    "function argument { order.add(\"argument\")\nreturn 2 }",
+    "scalar.add(argument())",
+  ].join("\n"));
+
+  assert.equal(result.snapshot.status, "failed");
+  assert.deepEqual(
+    (rootValue(result.snapshot, "order") as SerializableRuntimeList).items,
+    [],
+  );
+});
+
+test("fails an earlier ordinary expression before a later user-call side effect", () => {
+  const result = runSource([
+    "let order = []",
+    'function later { order.add("later")\nreturn 1 }',
+    "let values = [randomInteger(1..1), later()]",
+  ].join("\n"));
+
+  assert.equal(result.snapshot.status, "failed");
+  assert.deepEqual(
+    (rootValue(result.snapshot, "order") as SerializableRuntimeList).items,
+    [],
+  );
+});
+
+test("does not retarget prepared assignments after nested path replacement", () => {
+  const result = runSource([
+    "let first = { value: 0 }",
+    "let second = { value: 0 }",
+    "let target = first",
+    "let root = { child: { value: 0 } }",
+    "let items = [{ value: 0 }, { value: 1 }]",
+    "function replaceTarget { target = second\nreturn 5 }",
+    "function replaceChild { root.child = { value: 2 }\nreturn 7 }",
+    "function shiftItems { items.removeFirst()\nreturn 9 }",
+    "target.value = replaceTarget()",
+    "root.child.value = replaceChild()",
+    "items[0].value = shiftItems()",
+    "say first.value",
+    "say second.value",
+    "say root.child.value",
+    "say items[0].value",
+  ].join("\n"));
+
+  assert.deepEqual(sayTexts(result), ["0", "0", "2", "1"]);
+});
+
+test("rebases prepared list descendants when earlier removals shift retained items", () => {
+  const result = runSource([
+    "let firstItems = [{ value: 0 }, { value: 1 }]",
+    "let middleItems = [0, 1, { value: 2 }]",
+    "let lastItems = [{ value: 0 }, { value: 1 }]",
+    "function removeFirstItem { firstItems.removeFirst()\nreturn 9 }",
+    "function removeMiddleItem { middleItems.remove(1)\nreturn 8 }",
+    "function removeLastItem { lastItems.removeLast()\nreturn 7 }",
+    "firstItems[1].value = removeFirstItem()",
+    "middleItems[2].value = removeMiddleItem()",
+    "lastItems[0].value = removeLastItem()",
+    "say `${firstItems[0].value}:${middleItems[1].value}:${lastItems[0].value}`",
+  ].join("\n"));
+
+  assert.deepEqual(sayTexts(result), ["9:8:7"]);
+});
+
+test("rebases prepared list descendants through speaker aliases", () => {
+  const result = runSource([
+    "speaker vera { items: [{ value: 0 }, { value: 1 }] }",
+    "let alias = vera",
+    "function shiftItems { alias.items.removeFirst()\nreturn 9 }",
+    "vera.items[1].value = shiftItems()",
+    "say vera.items[0].value",
+  ].join("\n"));
+
+  assert.deepEqual(sayTexts(result), ["9"]);
+});
+
+test("does not retarget prepared speaker paths through identity aliases", () => {
+  const result = runSource([
+    "speaker vera {",
+    '  title: "Initial"',
+    "  config: { value: 0 }",
+    "  items: [{ value: 0 }, { value: 1 }]",
+    "}",
+    "let alias = vera",
+    'function replaceTitle { alias.title = "Other"\nreturn "Final" }',
+    "function replaceConfig { alias.config = { value: 2 }\nreturn 7 }",
+    "function shiftItems { alias.items.removeFirst()\nreturn 9 }",
+    "vera.title = replaceTitle()",
+    "vera.config.value = replaceConfig()",
+    "vera.items[0].value = shiftItems()",
+    "say vera.title",
+    "say vera.config.value",
+    "say vera.items[0].value",
+  ].join("\n"));
+
+  assert.deepEqual(sayTexts(result), ["Final", "2", "1"]);
+});
+
 test("functions read and assign package-global variables without leaking locals", () => {
   const result = runSource([
     "let total = 1",

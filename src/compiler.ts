@@ -2,6 +2,7 @@ import type { Program } from "./ast.js";
 import { DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileProgram, type InstructionPlan } from "./instructions.js";
 import { parse } from "./parser.js";
+import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import {
   validateSemantics,
   type SemanticValidationOptions,
@@ -17,11 +18,7 @@ export interface CompilationResult {
   readonly plan: InstructionPlan | null;
 }
 
-export const CORE_RUNTIME_BUILTINS = Object.freeze([
-  "random",
-  "chance",
-  "randomInteger",
-] as const);
+export { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 
 /** Parses, validates, and compiles source without executing it. */
 export function compileSource(

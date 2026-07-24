@@ -96,3 +96,55 @@ test("rejects calls to non-callable variables", () => {
 
   assert.ok(result.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV019"));
 });
+
+test("rejects all accepted V30 protected names in declarations", () => {
+  const protectedFunction = compileSource("function wait { return 1 }");
+  assert.equal(protectedFunction.plan, null);
+  assert.ok(
+    protectedFunction.semanticDiagnostics.some(
+      (diagnostic) => diagnostic.code === "TSV001",
+    ),
+  );
+
+  const protectedConversion = compileSource("function toString { return 2 }");
+  assert.equal(protectedConversion.plan, null);
+  assert.ok(protectedConversion.parserDiagnostics.length > 0);
+
+  const protectedParameter = compileSource(
+    "function sample(player) { return player }",
+  );
+  assert.equal(protectedParameter.plan, null);
+  assert.ok(
+    protectedParameter.semanticDiagnostics.some(
+      (diagnostic) => diagnostic.code === "TSV001",
+    ),
+  );
+
+  const protectedLocal = compileSource(
+    "function sample { let getDate = 1\nreturn getDate }",
+  );
+  assert.equal(protectedLocal.plan, null);
+  assert.ok(
+    protectedLocal.semanticDiagnostics.some(
+      (diagnostic) => diagnostic.code === "TSV001",
+    ),
+  );
+
+  const protectedType = compileSource("function string { return 1 }");
+  assert.equal(protectedType.plan, null);
+  assert.ok(
+    protectedType.semanticDiagnostics.some(
+      (diagnostic) => diagnostic.code === "TSV001",
+    ),
+  );
+});
+
+test("does not treat deferred protected engine names as implemented built-ins", () => {
+  const result = compileSource("wait()\ngetDate()\nshowImage()");
+
+  assert.equal(result.plan, null);
+  assert.deepEqual(
+    result.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV018", "TSV018", "TSV018"],
+  );
+});

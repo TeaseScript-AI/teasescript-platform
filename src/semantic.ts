@@ -12,6 +12,10 @@ import {
   type Diagnostic,
 } from "./diagnostics.js";
 import type { SourceSpan } from "./source.js";
+import {
+  CORE_RUNTIME_BUILTINS,
+  TEASESCRIPT_PROTECTED_NAMES,
+} from "./protected-names.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -59,12 +63,6 @@ const semanticCode = {
   functionValue: "TSV028",
 } as const;
 
-const coreBuiltinNames = Object.freeze([
-  "random",
-  "chance",
-  "randomInteger",
-] as const);
-
 export function validateSemantics(
   program: Program,
   options: SemanticValidationOptions = {},
@@ -93,13 +91,18 @@ class SemanticScope {
 class SemanticValidator {
   readonly diagnostics: Diagnostic[] = [];
   readonly #builtins: ReadonlySet<string>;
+  readonly #protectedNames: ReadonlySet<string>;
   readonly #root = new SemanticScope();
   readonly #functions = new Map<string, FunctionDeclaration>();
   #functionDepth = 0;
 
   public constructor(options: SemanticValidationOptions) {
     this.#builtins = new Set([
-      ...coreBuiltinNames,
+      ...CORE_RUNTIME_BUILTINS,
+      ...(options.builtins ?? []),
+    ]);
+    this.#protectedNames = new Set([
+      ...TEASESCRIPT_PROTECTED_NAMES,
       ...(options.builtins ?? []),
     ]);
     for (const name of options.globals ?? []) {
@@ -659,10 +662,10 @@ class SemanticValidator {
     span: SourceSpan,
     scope: SemanticScope,
   ): boolean {
-    if (this.#builtins.has(name)) {
+    if (this.#protectedNames.has(name)) {
       this.#report(
         semanticCode.duplicateDeclaration,
-        `Declaration '${name}' conflicts with a protected built-in.`,
+        `Declaration '${name}' conflicts with a protected TeaseScript name.`,
         span,
       );
       return false;

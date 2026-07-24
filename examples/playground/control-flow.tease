@@ -17,11 +17,11 @@ for value in uniqueValues {
     say value
 }
 
-for number in 1..=5 {
-    if number == 4 {
+for step in 1..=5 {
+    if step == 4 {
         break
     }
-    say number
+    say step
 }
 
 let counter = 0

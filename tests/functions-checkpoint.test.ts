@@ -214,20 +214,167 @@ test("restores between assignment-target and right-hand call evaluation", () => 
   ));
 });
 
-test("rejects missing temporaries in every suspended caller continuation", () => {
-  const source = [
-    "function one { return 1 }",
-    "function two { return 2 }",
-    "function total { return one() + two() }",
-    "say total()",
-  ].join("\n");
-  const compiled = plan(source);
-  const snapshot = executeUntil(compiled, (candidate) =>
-    candidate.callFrames.map((frame) => frame.functionName).join(",") === "total,two"
+test("restores mixed ordinary and user-call evaluation at every instruction boundary", () => {
+  const observations = assertEveryInstructionResume([
+    "let order = []",
+    "let first = { nested: [0] }",
+    "let second = { nested: [0] }",
+    "let target = first",
+    "function mark(value) { order.add(value)\nreturn value }",
+    "function retarget { target = second\nreturn 7 }",
+    'let listValue = [random(), mark("list")]',
+    'let setValue = set[randomInteger(1..=3), mark("set")]',
+    'let objectValue = { first: random(), second: mark("object") }',
+    'let templateValue = `${random()}:${mark("template")}`',
+    "let binaryValue = random() + mark(2)",
+    "let rangeValue = randomInteger(0..=1)..mark(3)",
+    "target.nested[0] = retarget()",
+    "target.nested.add(mark(8))",
+    "say `${first.nested[0]}:${second.nested[0]}:${target.nested.length}:${order.length}`",
+  ].join("\n"));
+
+  assert.ok(observations.some((snapshot) =>
+    snapshot.temporaries.some((temporary) =>
+      serializedObjectProperty(temporary.value, "marker") === "preparedReference"
+    ) || snapshot.callFrames.some((frame) =>
+      frame.callerTemporaries.some((temporary) =>
+        serializedObjectProperty(temporary.value, "marker") === "preparedReference"
+      )
+    )
+  ));
+});
+
+test("restores prepared speaker aliases before and after nested identity mutations", () => {
+  const observations = assertEveryInstructionResume([
+    "speaker vera {",
+    "  config: { value: 0 }",
+    "  items: [{ value: 0 }, { value: 1 }]",
+    "}",
+    "let alias = vera",
+    "function replaceConfig { alias.config = { value: 2 }\nreturn 7 }",
+    "function shiftItems { alias.items.removeFirst()\nreturn 9 }",
+    "vera.config.value = replaceConfig()",
+    "vera.items[0].value = shiftItems()",
+    "say `${vera.config.value}:${vera.items[0].value}`",
+  ].join("\n"));
+
+  assert.ok(observations.some((snapshot) =>
+    [...snapshot.temporaries, ...snapshot.callFrames.flatMap((frame) => frame.callerTemporaries)]
+      .some((temporary) =>
+        serializedObjectProperty(temporary.value, "marker") === "preparedReference" &&
+        serializedObjectProperty(temporary.value, "detached") === true
+      )
+  ));
+});
+
+test("restores retained prepared list items across structural index shifts", () => {
+  const observations = assertEveryInstructionResume([
+    "let direct = [0, 1, { value: 2 }]",
+    "speaker vera { items: [{ value: 0 }, { value: 1 }] }",
+    "let alias = vera",
+    "function removeMiddle { direct.remove(1)\nreturn 8 }",
+    "function shiftAlias { alias.items.removeFirst()\nreturn 9 }",
+    "direct[2].value = removeMiddle()",
+    "vera.items[1].value = shiftAlias()",
+    "say `${direct[1].value}:${vera.items[0].value}`",
+  ].join("\n"));
+
+  assert.ok(observations.some((snapshot) =>
+    [...snapshot.temporaries, ...snapshot.callFrames.flatMap((frame) => frame.callerTemporaries)]
+      .some((temporary) =>
+        serializedObjectProperty(temporary.value, "marker") === "preparedReference" &&
+        serializedObjectProperty(temporary.value, "detached") === false
+      )
+  ));
+});
+
+test("rejects malformed prepared-reference state in active and suspended temporaries", () => {
+  const compiled = plan([
+    "let target = { nested: [0] }",
+    "function replacement { return 7 }",
+    "target.nested[0] = replacement()",
+  ].join("\n"));
+
+  const active = executeUntil(compiled, (candidate) =>
+    candidate.callFrames.length === 0 &&
+    candidate.temporaries.some((temporary) =>
+      serializedObjectProperty(temporary.value, "marker") === "preparedReference"
+    )
   );
-  const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
-  checkpoint.snapshot.callFrames.at(-1)!.callerTemporaries = [];
-  assertCheckpointRejected(checkpoint, "TSK002");
+  const activeCheckpoint = mutableCheckpoint(createCheckpoint(compiled, active));
+  const activeReference = preparedReferenceValue(activeCheckpoint.snapshot.temporaries);
+  removeSerializedObjectProperty(activeReference, "marker");
+  assertCheckpointRejected(activeCheckpoint, "TSK002");
+
+  const suspended = executeUntil(compiled, (candidate) =>
+    candidate.callFrames.at(-1)?.functionName === "replacement" &&
+    candidate.callFrames.at(-1)!.callerTemporaries.some((temporary) =>
+      serializedObjectProperty(temporary.value, "marker") === "preparedReference"
+    )
+  );
+  const base = mutableCheckpoint(createCheckpoint(compiled, suspended));
+  const mutations: Array<(descriptor: any) => void> = [
+    (descriptor) => {
+      descriptor.properties.push({ name: "unexpected", value: null });
+    },
+    (descriptor) => {
+      setSerializedObjectProperty(descriptor, "rootFrameId", -1);
+    },
+    (descriptor) => {
+      setSerializedObjectProperty(descriptor, "rootName", "missing");
+    },
+    (descriptor) => {
+      const path = serializedObjectProperty(descriptor, "path");
+      const firstStep = path.items[0];
+      setSerializedObjectProperty(firstStep, "name", "");
+    },
+    (descriptor) => {
+      setSerializedObjectProperty(descriptor, "rootFrameId", null);
+      setSerializedObjectProperty(descriptor, "rootName", null);
+      setSerializedObjectProperty(descriptor, "detached", false);
+    },
+    (descriptor) => {
+      setSerializedObjectProperty(descriptor, "capturedRoot", null);
+    },
+  ];
+
+  for (const mutate of mutations) {
+    const checkpoint = structuredClone(base);
+    const descriptor = preparedReferenceValue(
+      checkpoint.snapshot.callFrames.at(-1)!.callerTemporaries,
+    );
+    mutate(descriptor);
+    assertCheckpointRejected(checkpoint, "TSK002");
+  }
+});
+
+test("rejects missing temporaries in every suspended caller continuation", () => {
+  const sources = [
+    [
+      "function one { return 1 }",
+      "function two { return 2 }",
+      "function three { return 3 }",
+      "function total { return one() + two() + three() }",
+      "say total()",
+    ],
+    [
+      "function one { return 1 }",
+      "function two { return 2 }",
+      "function three { return 3 }",
+      "function total(value = one() + two() + three()) { return value }",
+      "say total()",
+    ],
+  ];
+
+  for (const source of sources) {
+    const compiled = plan(source.join("\n"));
+    const snapshot = executeUntil(compiled, (candidate) =>
+      candidate.callFrames.map((frame) => frame.functionName).join(",") === "total,two"
+    );
+    const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+    checkpoint.snapshot.callFrames.at(-1)!.callerTemporaries = [];
+    assertCheckpointRejected(checkpoint, "TSK002");
+  }
 });
 
 test("rejects missing suspended results at multiple recursion depths", () => {
@@ -509,6 +656,34 @@ function mutableCheckpoint(checkpoint: ReturnType<typeof createCheckpoint>): any
 
 function mutablePlan(compiled: InstructionPlan): any {
   return JSON.parse(JSON.stringify(compiled));
+}
+
+function preparedReferenceValue(temporaries: any[]): any {
+  const temporary = temporaries.find(
+    (candidate) =>
+      serializedObjectProperty(candidate.value, "marker") === "preparedReference",
+  );
+  assert.ok(temporary !== undefined);
+  return temporary.value;
+}
+
+function serializedObjectProperty(value: any, name: string): any {
+  if (value?.kind !== "object" || !Array.isArray(value.properties)) return undefined;
+  return value.properties.find((property: any) => property.name === name)?.value;
+}
+
+function setSerializedObjectProperty(value: any, name: string, replacement: any): void {
+  assert.equal(value?.kind, "object");
+  const property = value.properties.find((candidate: any) => candidate.name === name);
+  assert.ok(property !== undefined);
+  property.value = replacement;
+}
+
+function removeSerializedObjectProperty(value: any, name: string): void {
+  assert.equal(value?.kind, "object");
+  const index = value.properties.findIndex((candidate: any) => candidate.name === name);
+  assert.ok(index >= 0);
+  value.properties.splice(index, 1);
 }
 
 function assertCheckpointRejected(value: unknown, code: string): void {

@@ -6,7 +6,11 @@ import type {
   InstructionPlan,
 } from "../instructions.js";
 import { validateInstructionPlan } from "../instructions.js";
-import { createSourceSpan, type SourceSpan } from "../source.js";
+import {
+  createSourcePosition,
+  createSourceSpan,
+  type SourceSpan,
+} from "../source.js";
 import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
 import type {
   CompleteEvent,
@@ -263,8 +267,28 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     }
+    case "prepareReference":
+      setTemporary(
+        snapshot.temporaries,
+        instruction.destinationTemporary,
+        evaluator.prepareReference(instruction.expression),
+      );
+      advance(snapshot);
+      return;
+    case "validateAssignmentTarget":
+      evaluator.validateAssignmentTarget(instruction.target);
+      advance(snapshot);
+      return;
     case "assign":
       evaluator.assign(instruction.target, evaluator.evaluate(instruction.value));
+      advance(snapshot);
+      return;
+    case "validateCallReceiver":
+      evaluator.validateCallReceiver(
+        evaluator.evaluate(instruction.receiver),
+        instruction.method,
+        instruction.span,
+      );
       advance(snapshot);
       return;
     case "evaluate":
@@ -822,6 +846,15 @@ class Evaluator {
           expression.temporaryId,
           expression.span,
         );
+      case "preparedReference":
+        return this.#resolvePreparedReference(
+          readTemporary(
+            this.snapshot.temporaries,
+            expression.temporaryId,
+            expression.span,
+          ),
+          expression.span,
+        );
       case "list":
         return createSerializableList(expression.elements.map((item) => this.evaluate(item)));
       case "set": {
@@ -898,18 +931,53 @@ class Evaluator {
   public assign(target: AssignmentTargetPlan, value: SerializableRuntimeValue): void {
     const copied = cloneSerializableValue(value);
     if (target.kind === "identifier") {
-      const binding = findBinding(this.snapshot, target.name);
-      if (binding === undefined) {
+      const location = findBindingLocation(this.snapshot, target.name);
+      if (location === undefined) {
         throw fault("TSR002", `Cannot assign to unknown variable '${target.name}'.`, target.span);
       }
-      if (isSpeakerReference(binding.value)) {
+      if (isSpeakerReference(location.binding.value)) {
         throw fault("TSR034", `Cannot replace speaker '${target.name}'.`, target.span);
       }
-      binding.value = copied;
+      detachPreparedReferencesForMutation(
+        this.snapshot,
+        {
+          rootFrameId: location.frame.id,
+          rootName: target.name,
+          path: [],
+        },
+      );
+      location.binding.value = copied;
       return;
     }
     const object = this.evaluate(target.object);
+    const receiverDescriptor =
+      target.object.kind === "preparedReference"
+        ? readPreparedReference(
+            readTemporary(
+              this.snapshot.temporaries,
+              target.object.temporaryId,
+              target.object.span,
+            ),
+            target.object.span,
+          )
+        : null;
     if (target.kind === "property") {
+      if (receiverDescriptor !== null && !receiverDescriptor.detached) {
+        const mutationStep: PreparedReferenceStep = {
+          kind: "property",
+          name: target.name,
+        };
+        detachPreparedReferencesForMutation(this.snapshot, {
+          rootFrameId: receiverDescriptor.rootFrameId,
+          rootName: receiverDescriptor.rootName,
+          path: [...receiverDescriptor.path, mutationStep],
+          speakerPath: preparedReferenceSpeakerPath(
+            this.snapshot,
+            receiverDescriptor,
+            [mutationStep],
+          ),
+        });
+      }
       if (isObject(object)) {
         setSerializableProperty(object, target.name, copied);
         return;
@@ -924,7 +992,189 @@ class Evaluator {
     if (!isList(object)) throw fault("TSR005", "Only lists have assignable numeric indexes.", target.span);
     const index = this.#index(this.evaluate(target.index), target.index.span);
     this.#assertIndex(object, index, target.index.span);
+    if (receiverDescriptor !== null && !receiverDescriptor.detached) {
+      const mutationStep: PreparedReferenceStep = { kind: "index", index };
+      detachPreparedReferencesForMutation(this.snapshot, {
+        rootFrameId: receiverDescriptor.rootFrameId,
+        rootName: receiverDescriptor.rootName,
+        path: [...receiverDescriptor.path, mutationStep],
+        speakerPath: preparedReferenceSpeakerPath(
+          this.snapshot,
+          receiverDescriptor,
+          [mutationStep],
+        ),
+      });
+    }
     object.items[index] = copied;
+  }
+
+  public prepareReference(expression: ExpressionPlan): SerializableRuntimeObject {
+    const descriptor = this.#buildPreparedReference(expression);
+    return serializePreparedReference(descriptor);
+  }
+
+  public validateAssignmentTarget(target: AssignmentTargetPlan): void {
+    if (target.kind === "identifier") return;
+    const object = this.evaluate(target.object);
+    if (target.kind === "property") {
+      if (!isObject(object) && !isSpeakerReference(object)) {
+        throw fault("TSR003", "Only objects and speakers have assignable properties.", target.span);
+      }
+      return;
+    }
+    if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
+    if (!isList(object)) {
+      throw fault("TSR005", "Only lists have assignable numeric indexes.", target.span);
+    }
+    const index = this.#index(this.evaluate(target.index), target.index.span);
+    this.#assertIndex(object, index, target.index.span);
+  }
+
+  public validateCallReceiver(
+    receiver: SerializableRuntimeValue,
+    method: string,
+    span: SourceSpan,
+  ): void {
+    if (!isList(receiver) && !isSet(receiver)) {
+      throw fault("TSR016", `Unsupported method '${method}'.`, span);
+    }
+    const supported = isSet(receiver)
+      ? new Set(["add", "remove", "clear", "contains", "toList"])
+      : new Set([
+          "add",
+          "remove",
+          "removeFirst",
+          "removeLast",
+          "clear",
+          "contains",
+          "toSet",
+        ]);
+    if (!supported.has(method)) {
+      throw fault("TSR016", `Unsupported method '${method}'.`, span);
+    }
+  }
+
+  #buildPreparedReference(expression: ExpressionPlan): PreparedReferenceDescriptor {
+    if (expression.kind === "group") {
+      return this.#buildPreparedReference(expression.expression);
+    }
+    if (expression.kind === "identifier") {
+      const location = findBindingLocation(this.snapshot, expression.name);
+      if (location === undefined) {
+        throw fault("TSR006", `Unknown identifier '${expression.name}'.`, expression.span);
+      }
+      return {
+        rootFrameId: location.frame.id,
+        rootName: expression.name,
+        path: [],
+        capturedRoot: cloneSerializableValue(location.binding.value),
+        detached: false,
+      };
+    }
+    if (expression.kind === "property") {
+      const descriptor = this.#buildPreparedReference(expression.object);
+      const base = this.#resolveDescriptor(descriptor, expression.object.span);
+      if ((isList(base) || isSet(base)) && ["first", "last", "random"].includes(expression.name)) {
+        if (base.items.length === 0) {
+          throw fault(
+            expression.name === "random" ? "TSR019" : "TSR018",
+            `Cannot read '.${expression.name}' from an empty collection.`,
+            expression.span,
+          );
+        }
+        const index = expression.name === "first"
+          ? 0
+          : expression.name === "last"
+            ? base.items.length - 1
+            : Math.floor(this.#findRandom(expression.span) * base.items.length);
+        descriptor.path.push({ kind: "index", index });
+      } else {
+        descriptor.path.push({ kind: "property", name: expression.name });
+      }
+      this.#resolveDescriptor(descriptor, expression.span);
+      return descriptor;
+    }
+    if (expression.kind === "index") {
+      const descriptor = this.#buildPreparedReference(expression.object);
+      const object = this.#resolveDescriptor(descriptor, expression.object.span);
+      if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", expression.span);
+      if (!isList(object)) {
+        throw fault("TSR008", "Only lists support numeric indexing.", expression.span);
+      }
+      const index = this.#index(this.evaluate(expression.index), expression.index.span);
+      this.#assertIndex(object, index, expression.index.span);
+      descriptor.path.push({ kind: "index", index });
+      return descriptor;
+    }
+    if (expression.kind === "preparedReference") {
+      return readPreparedReference(
+        readTemporary(this.snapshot.temporaries, expression.temporaryId, expression.span),
+        expression.span,
+      );
+    }
+    const value = this.evaluate(expression);
+    return {
+      rootFrameId: null,
+      rootName: null,
+      path: [],
+      capturedRoot: cloneSerializableValue(value),
+      detached: true,
+    };
+  }
+
+  #resolvePreparedReference(
+    serialized: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const descriptor = readPreparedReference(serialized, span);
+    if (descriptor.detached) return this.#resolveDescriptor(descriptor, span);
+    try {
+      return this.#resolveDescriptor(descriptor, span);
+    } catch (error) {
+      if (!(error instanceof RuntimeFault) || !isObject(serialized)) throw error;
+      setSerializableProperty(serialized, "detached", true);
+      return this.#resolveDescriptor({ ...descriptor, detached: true }, span);
+    }
+  }
+
+  #resolveDescriptor(
+    descriptor: PreparedReferenceDescriptor,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    let value: SerializableRuntimeValue;
+    if (
+      !descriptor.detached &&
+      descriptor.rootFrameId !== null &&
+      descriptor.rootName !== null
+    ) {
+      const frame = this.snapshot.frames.find(
+        (candidate) => candidate.id === descriptor.rootFrameId,
+      );
+      const binding = frame?.bindings.find(
+        (candidate) => candidate.name === descriptor.rootName,
+      );
+      if (binding === undefined) {
+        throw fault("TSR053", "Prepared reference root is no longer available.", span);
+      }
+      value = binding.value;
+    } else {
+      value = descriptor.capturedRoot;
+    }
+    for (const step of descriptor.path) {
+      if (step.kind === "property") {
+        value = this.#getProperty(value, step.name, span);
+        continue;
+      }
+      if (isList(value) || isSet(value)) {
+        if (step.index < 0 || step.index >= value.items.length) {
+          throw fault("TSR025", `Collection index ${step.index} is outside the valid range.`, span);
+        }
+        value = value.items[step.index]!;
+        continue;
+      }
+      throw fault("TSR008", "Prepared reference index no longer addresses a collection.", span);
+    }
+    return value;
   }
 
   public speakerByName(name: string, span: SourceSpan): RuntimeSpeakerSnapshot {
@@ -1048,9 +1298,15 @@ class Evaluator {
   }
 
   #call(expression: Extract<ExpressionPlan, { kind: "call" }>): SerializableRuntimeValue {
-    const receiver = expression.callee.kind === "property"
-      ? this.evaluate(expression.callee.object)
+    const propertyCallee = expression.callee.kind === "property"
+      ? expression.callee
       : null;
+    const receiverDescriptor = propertyCallee === null
+      ? null
+      : this.#buildPreparedReference(propertyCallee.object);
+    const receiver = receiverDescriptor === null || propertyCallee === null
+      ? null
+      : this.#resolveDescriptor(receiverDescriptor, propertyCallee.object.span);
     const positional: SerializableRuntimeValue[] = [];
     const named: Record<string, SerializableRuntimeValue> = {};
     for (const argument of expression.arguments) {
@@ -1095,7 +1351,13 @@ class Evaluator {
       return cloneSerializableValue(returned);
     }
     if (expression.callee.kind === "property") {
-      return this.#callCollection(receiver!, expression.callee.name, positional, named, expression.span);
+      return this.#callCollection(
+        receiver!,
+        expression.callee.name,
+        positional,
+        named,
+        expression.span,
+      );
     }
     throw fault("TSR014", "Only injected built-ins and supported collection methods are callable.", expression.callee.span);
   }
@@ -1128,12 +1390,49 @@ class Evaluator {
         case "remove": {
           expect(1);
           const index = this.#findValue(receiver.items, positional[0]!, span);
-          if (index >= 0) receiver.items.splice(index, 1);
+          if (index >= 0) {
+            const rebased = preparePreparedReferencesForListRemoval(
+              this.snapshot,
+              receiver,
+              index,
+            );
+            receiver.items.splice(index, 1);
+            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
+          }
           return null;
         }
-        case "removeFirst": expect(0); receiver.items.shift(); return null;
-        case "removeLast": expect(0); receiver.items.pop(); return null;
-        case "clear": expect(0); receiver.items.length = 0; return null;
+        case "removeFirst":
+          expect(0);
+          if (receiver.items.length > 0) {
+            const rebased = preparePreparedReferencesForListRemoval(
+              this.snapshot,
+              receiver,
+              0,
+            );
+            receiver.items.shift();
+            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
+          }
+          return null;
+        case "removeLast":
+          expect(0);
+          if (receiver.items.length > 0) {
+            const removedIndex = receiver.items.length - 1;
+            const rebased = preparePreparedReferencesForListRemoval(
+              this.snapshot,
+              receiver,
+              removedIndex,
+            );
+            receiver.items.pop();
+            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
+          }
+          return null;
+        case "clear":
+          expect(0);
+          if (receiver.items.length > 0) {
+            freezePreparedReferenceListDescendants(this.snapshot, receiver);
+            receiver.items.length = 0;
+          }
+          return null;
         case "contains": expect(1); return this.#findValue(receiver.items, positional[0]!, span) >= 0;
         case "toSet": expect(0); return createSerializableSet(receiver.items);
         default: throw fault("TSR016", `Unsupported method '${name}'.`, span);
@@ -1330,16 +1629,460 @@ function setSpeakerProperty(
 }
 
 function findBinding(snapshot: RuntimeSnapshot, name: string): RuntimeBindingSnapshot | undefined {
+  return findBindingLocation(snapshot, name)?.binding;
+}
+
+function findBindingLocation(
+  snapshot: RuntimeSnapshot,
+  name: string,
+): {
+  readonly frame: RuntimeSnapshot["frames"][number];
+  readonly binding: RuntimeBindingSnapshot;
+} | undefined {
   const functionBase = snapshot.callFrames.at(-1)?.scopeBaseDepth;
   const minimum = functionBase ?? 0;
   for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
-    const binding = snapshot.frames[index]!.bindings.find((item) => item.name === name);
-    if (binding !== undefined) return binding;
+    const frame = snapshot.frames[index]!;
+    const binding = frame.bindings.find((item) => item.name === name);
+    if (binding !== undefined) return { frame, binding };
   }
   if (functionBase !== undefined) {
-    return snapshot.frames[0]!.bindings.find((item) => item.name === name);
+    const frame = snapshot.frames[0]!;
+    const binding = frame.bindings.find((item) => item.name === name);
+    return binding === undefined ? undefined : { frame, binding };
   }
   return undefined;
+}
+
+type PreparedReferenceStep =
+  | { readonly kind: "property"; readonly name: string }
+  | { readonly kind: "index"; readonly index: number };
+
+interface PreparedReferenceDescriptor {
+  readonly rootFrameId: number | null;
+  readonly rootName: string | null;
+  readonly path: PreparedReferenceStep[];
+  readonly capturedRoot: SerializableRuntimeValue;
+  readonly detached: boolean;
+}
+
+interface PreparedReferenceMutation {
+  readonly rootFrameId: number | null;
+  readonly rootName: string | null;
+  readonly path: readonly PreparedReferenceStep[];
+  readonly speakerPath?: PreparedSpeakerPath | null;
+}
+
+interface PreparedSpeakerPath {
+  readonly speakerId: number;
+  readonly path: readonly PreparedReferenceStep[];
+}
+
+const INTERNAL_REFERENCE_POSITION = createSourcePosition(0, 0, 0);
+const INTERNAL_REFERENCE_SPAN = createSourceSpan(
+  INTERNAL_REFERENCE_POSITION,
+  INTERNAL_REFERENCE_POSITION,
+);
+
+function serializePreparedReference(
+  descriptor: PreparedReferenceDescriptor,
+): SerializableRuntimeObject {
+  return createSerializableObject([
+    { name: "marker", value: "preparedReference" },
+    { name: "rootFrameId", value: descriptor.rootFrameId },
+    { name: "rootName", value: descriptor.rootName },
+    {
+      name: "path",
+      value: serializePreparedReferencePath(descriptor.path),
+    },
+    { name: "capturedRoot", value: descriptor.capturedRoot },
+    { name: "detached", value: descriptor.detached },
+  ]);
+}
+
+function serializePreparedReferencePath(
+  path: readonly PreparedReferenceStep[],
+): SerializableRuntimeList {
+  return createSerializableList(
+    path.map((step) =>
+      step.kind === "property"
+        ? createSerializableObject([
+            { name: "kind", value: "property" },
+            { name: "name", value: step.name },
+          ])
+        : createSerializableObject([
+            { name: "kind", value: "index" },
+            { name: "index", value: step.index },
+          ]),
+    ),
+  );
+}
+
+function readPreparedReference(
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): PreparedReferenceDescriptor {
+  if (!isObject(value)) {
+    throw fault("TSR053", "Prepared reference state is malformed.", span);
+  }
+  const marker = getSerializableProperty(value, "marker");
+  const rootFrameId = getSerializableProperty(value, "rootFrameId");
+  const rootName = getSerializableProperty(value, "rootName");
+  const pathValue = getSerializableProperty(value, "path");
+  const capturedRoot = getSerializableProperty(value, "capturedRoot");
+  const detached = getSerializableProperty(value, "detached");
+  if (
+    marker !== "preparedReference" ||
+    (rootFrameId !== null &&
+      (typeof rootFrameId !== "number" || !Number.isInteger(rootFrameId))) ||
+    (rootName !== null && (typeof rootName !== "string" || rootName.length === 0)) ||
+    (rootFrameId === null) !== (rootName === null) ||
+    pathValue === undefined ||
+    !isList(pathValue) ||
+    capturedRoot === undefined ||
+    typeof detached !== "boolean"
+  ) {
+    throw fault("TSR053", "Prepared reference state is malformed.", span);
+  }
+  const captured = capturedRoot as SerializableRuntimeValue;
+  const path: PreparedReferenceStep[] = [];
+  for (const item of pathValue.items) {
+    if (!isObject(item)) {
+      throw fault("TSR053", "Prepared reference path is malformed.", span);
+    }
+    const kind = getSerializableProperty(item, "kind");
+    if (kind === "property") {
+      const name = getSerializableProperty(item, "name");
+      if (typeof name !== "string" || name.length === 0) {
+        throw fault("TSR053", "Prepared reference property path is malformed.", span);
+      }
+      path.push({ kind, name });
+      continue;
+    }
+    if (kind === "index") {
+      const index = getSerializableProperty(item, "index");
+      if (typeof index !== "number" || !Number.isInteger(index)) {
+        throw fault("TSR053", "Prepared reference index path is malformed.", span);
+      }
+      path.push({ kind, index });
+      continue;
+    }
+    throw fault("TSR053", "Prepared reference path kind is malformed.", span);
+  }
+  return {
+    rootFrameId,
+    rootName,
+    path,
+    capturedRoot: captured,
+    detached,
+  };
+}
+
+function detachPreparedReferencesForMutation(
+  snapshot: RuntimeSnapshot,
+  mutation: PreparedReferenceMutation,
+): void {
+  if (mutation.rootFrameId === null || mutation.rootName === null) return;
+  for (const temporaries of allTemporaryCollections(snapshot)) {
+    for (const temporary of temporaries) {
+      if (!isObject(temporary.value)) continue;
+      let descriptor: PreparedReferenceDescriptor;
+      try {
+        descriptor = readPreparedReference(temporary.value, INTERNAL_REFERENCE_SPAN);
+      } catch {
+        continue;
+      }
+      if (
+        descriptor.detached ||
+        !preparedReferenceMutationMatches(
+          snapshot,
+          descriptor,
+          mutation,
+          false,
+        )
+      ) {
+        continue;
+      }
+      freezePreparedReference(snapshot, temporary.value, descriptor);
+    }
+  }
+}
+
+function preparePreparedReferencesForListRemoval(
+  snapshot: RuntimeSnapshot,
+  receiver: SerializableRuntimeList,
+  removedIndex: number,
+): SerializableRuntimeObject[] {
+  const rebased: SerializableRuntimeObject[] = [];
+  for (const temporaries of allTemporaryCollections(snapshot)) {
+    for (const temporary of temporaries) {
+      if (!isObject(temporary.value)) continue;
+      let descriptor: PreparedReferenceDescriptor;
+      try {
+        descriptor = readPreparedReference(temporary.value, INTERNAL_REFERENCE_SPAN);
+      } catch {
+        continue;
+      }
+      if (descriptor.detached) continue;
+      const pathIndex = preparedReferenceListIndexPosition(
+        snapshot,
+        descriptor,
+        receiver,
+      );
+      if (pathIndex === null) continue;
+      const step = descriptor.path[pathIndex];
+      if (step?.kind !== "index") continue;
+      if (step.index === removedIndex) {
+        freezePreparedReference(snapshot, temporary.value, descriptor);
+        continue;
+      }
+      if (step.index < removedIndex) continue;
+      descriptor.path[pathIndex] = { kind: "index", index: step.index - 1 };
+      setSerializableProperty(
+        temporary.value,
+        "path",
+        serializePreparedReferencePath(descriptor.path),
+      );
+      rebased.push(temporary.value);
+    }
+  }
+  return rebased;
+}
+
+function refreshPreparedReferenceFallbacks(
+  snapshot: RuntimeSnapshot,
+  references: readonly SerializableRuntimeObject[],
+): void {
+  for (const serialized of references) {
+    let descriptor: PreparedReferenceDescriptor;
+    try {
+      descriptor = readPreparedReference(serialized, INTERNAL_REFERENCE_SPAN);
+    } catch {
+      continue;
+    }
+    if (descriptor.detached) continue;
+    const root = preparedReferenceRoot(snapshot, descriptor);
+    if (!root.found) {
+      freezePreparedReference(snapshot, serialized, descriptor);
+      continue;
+    }
+    setSerializableProperty(serialized, "capturedRoot", root.value);
+  }
+}
+
+function freezePreparedReferenceListDescendants(
+  snapshot: RuntimeSnapshot,
+  receiver: SerializableRuntimeList,
+): void {
+  for (const temporaries of allTemporaryCollections(snapshot)) {
+    for (const temporary of temporaries) {
+      if (!isObject(temporary.value)) continue;
+      let descriptor: PreparedReferenceDescriptor;
+      try {
+        descriptor = readPreparedReference(temporary.value, INTERNAL_REFERENCE_SPAN);
+      } catch {
+        continue;
+      }
+      if (
+        descriptor.detached ||
+        preparedReferenceListIndexPosition(snapshot, descriptor, receiver) === null
+      ) {
+        continue;
+      }
+      freezePreparedReference(snapshot, temporary.value, descriptor);
+    }
+  }
+}
+
+function preparedReferenceListIndexPosition(
+  snapshot: RuntimeSnapshot,
+  descriptor: PreparedReferenceDescriptor,
+  receiver: SerializableRuntimeList,
+): number | null {
+  const root = preparedReferenceRoot(snapshot, descriptor);
+  if (!root.found) return null;
+  let current = root.value;
+  for (let index = 0; index < descriptor.path.length; index += 1) {
+    const step = descriptor.path[index]!;
+    if (current === receiver) return step.kind === "index" ? index : null;
+    const next = resolvePreparedReferenceStep(snapshot, current, step);
+    if (!next.found) return null;
+    current = next.value;
+  }
+  return null;
+}
+
+function preparedReferenceMutationMatches(
+  snapshot: RuntimeSnapshot,
+  descriptor: PreparedReferenceDescriptor,
+  mutation: PreparedReferenceMutation,
+  descendantsOnly: boolean,
+): boolean {
+  const rootMatches =
+    descriptor.rootFrameId === mutation.rootFrameId &&
+    descriptor.rootName === mutation.rootName &&
+    (!descendantsOnly || descriptor.path.length > mutation.path.length) &&
+    pathStartsWith(descriptor.path, mutation.path);
+  if (rootMatches) return true;
+
+  if (mutation.speakerPath === null || mutation.speakerPath === undefined) {
+    return false;
+  }
+  const descriptorSpeakerPath = preparedReferenceSpeakerPath(snapshot, descriptor);
+  return descriptorSpeakerPath !== null &&
+    descriptorSpeakerPath.speakerId === mutation.speakerPath.speakerId &&
+    (!descendantsOnly ||
+      descriptorSpeakerPath.path.length > mutation.speakerPath.path.length) &&
+    pathStartsWith(descriptorSpeakerPath.path, mutation.speakerPath.path);
+}
+
+function freezePreparedReference(
+  snapshot: RuntimeSnapshot,
+  serialized: SerializableRuntimeObject,
+  descriptor: PreparedReferenceDescriptor,
+): void {
+  const resolution = resolvePreparedReferenceDescriptor(snapshot, descriptor);
+  if (!resolution.found) {
+    setSerializableProperty(serialized, "detached", true);
+    return;
+  }
+  setSerializableProperty(serialized, "rootFrameId", null);
+  setSerializableProperty(serialized, "rootName", null);
+  setSerializableProperty(serialized, "path", createSerializableList([]));
+  setSerializableProperty(serialized, "capturedRoot", resolution.value);
+  setSerializableProperty(serialized, "detached", true);
+}
+
+function preparedReferenceSpeakerPath(
+  snapshot: RuntimeSnapshot,
+  descriptor: PreparedReferenceDescriptor,
+  extension: readonly PreparedReferenceStep[] = [],
+): PreparedSpeakerPath | null {
+  const root = preparedReferenceRoot(snapshot, descriptor);
+  if (!root.found) return null;
+  let current = root.value;
+  let identity: { speakerId: number; path: PreparedReferenceStep[] } | null = null;
+  for (const step of [...descriptor.path, ...extension]) {
+    if (isSpeakerReference(current)) {
+      identity = { speakerId: current.speakerId, path: [] };
+    }
+    identity?.path.push(step);
+    const next = resolvePreparedReferenceStep(snapshot, current, step);
+    if (!next.found) return null;
+    current = next.value;
+  }
+  if (isSpeakerReference(current)) {
+    identity = { speakerId: current.speakerId, path: [] };
+  }
+  return identity;
+}
+
+function resolvePreparedReferenceDescriptor(
+  snapshot: RuntimeSnapshot,
+  descriptor: PreparedReferenceDescriptor,
+): { readonly found: boolean; readonly value: SerializableRuntimeValue } {
+  const root = preparedReferenceRoot(snapshot, descriptor);
+  if (!root.found) return root;
+  let current = root.value;
+  for (const step of descriptor.path) {
+    const next = resolvePreparedReferenceStep(snapshot, current, step);
+    if (!next.found) return next;
+    current = next.value;
+  }
+  return { found: true, value: current };
+}
+
+function preparedReferenceRoot(
+  snapshot: RuntimeSnapshot,
+  descriptor: PreparedReferenceDescriptor,
+): { readonly found: boolean; readonly value: SerializableRuntimeValue } {
+  if (
+    !descriptor.detached &&
+    descriptor.rootFrameId !== null &&
+    descriptor.rootName !== null
+  ) {
+    const frame = snapshot.frames.find(
+      (candidate) => candidate.id === descriptor.rootFrameId,
+    );
+    const binding = frame?.bindings.find(
+      (candidate) => candidate.name === descriptor.rootName,
+    );
+    return binding === undefined
+      ? { found: false, value: null }
+      : { found: true, value: binding.value };
+  }
+  return { found: true, value: descriptor.capturedRoot };
+}
+
+function resolvePreparedReferenceStep(
+  snapshot: RuntimeSnapshot,
+  value: SerializableRuntimeValue,
+  step: PreparedReferenceStep,
+): { readonly found: boolean; readonly value: SerializableRuntimeValue } {
+  if (step.kind === "index") {
+    if (
+      (!isList(value) && !isSet(value)) ||
+      step.index < 0 ||
+      step.index >= value.items.length
+    ) {
+      return { found: false, value: null };
+    }
+    return { found: true, value: value.items[step.index]! };
+  }
+  if (isObject(value)) {
+    const property = getSerializableProperty(value, step.name);
+    return property === undefined
+      ? { found: false, value: null }
+      : { found: true, value: property };
+  }
+  if (isSpeakerReference(value)) {
+    const speaker = snapshot.speakers.find(
+      (candidate) => candidate.id === value.speakerId,
+    );
+    if (speaker === undefined) return { found: false, value: null };
+    let property = speaker.properties.find(
+      (candidate) => candidate.name === step.name,
+    )?.value;
+    if (property === undefined && step.name === "title") {
+      property = speaker.properties.find(
+        (candidate) => candidate.name === "shortTitle",
+      )?.value;
+    } else if (property === undefined && step.name === "shortTitle") {
+      property = speaker.properties.find(
+        (candidate) => candidate.name === "title",
+      )?.value;
+    }
+    return property === undefined
+      ? { found: false, value: null }
+      : { found: true, value: property };
+  }
+  if ((isList(value) || isSet(value)) && step.name === "length") {
+    return { found: true, value: value.items.length };
+  }
+  return { found: false, value: null };
+}
+
+function pathStartsWith(
+  path: readonly PreparedReferenceStep[],
+  prefix: readonly PreparedReferenceStep[],
+): boolean {
+  if (prefix.length > path.length) return false;
+  return prefix.every((step, index) => {
+    const candidate = path[index];
+    return candidate?.kind === step.kind &&
+      (step.kind === "property"
+        ? candidate.kind === "property" && candidate.name === step.name
+        : candidate.kind === "index" && candidate.index === step.index);
+  });
+}
+
+function allTemporaryCollections(
+  snapshot: RuntimeSnapshot,
+): RuntimeTemporarySnapshot[][] {
+  return [
+    snapshot.temporaries,
+    ...snapshot.callFrames.map((frame) => frame.callerTemporaries),
+  ];
 }
 
 function readTemporary(

@@ -48,7 +48,10 @@ export type Instruction =
   | EnterScopeInstruction
   | LeaveScopeInstruction
   | DeclareBindingInstruction
+  | PrepareReferenceInstruction
+  | ValidateAssignmentTargetInstruction
   | AssignInstruction
+  | ValidateCallReceiverInstruction
   | EvaluateInstruction
   | JumpIfFalseInstruction
   | JumpInstruction
@@ -107,6 +110,23 @@ export interface AssignInstruction extends InstructionBase {
   readonly kind: "assign";
   readonly target: AssignmentTargetPlan;
   readonly value: ExpressionPlan;
+}
+
+export interface ValidateAssignmentTargetInstruction extends InstructionBase {
+  readonly kind: "validateAssignmentTarget";
+  readonly target: AssignmentTargetPlan;
+}
+
+export interface PrepareReferenceInstruction extends InstructionBase {
+  readonly kind: "prepareReference";
+  readonly expression: ExpressionPlan;
+  readonly destinationTemporary: number;
+}
+
+export interface ValidateCallReceiverInstruction extends InstructionBase {
+  readonly kind: "validateCallReceiver";
+  readonly receiver: ExpressionPlan;
+  readonly method: string;
 }
 
 export interface EvaluateInstruction extends InstructionBase {
@@ -258,7 +278,8 @@ export type ExpressionPlan =
   | UnaryExpressionPlan
   | BinaryExpressionPlan
   | RangeExpressionPlan
-  | TemporaryExpressionPlan;
+  | TemporaryExpressionPlan
+  | PreparedReferenceExpressionPlan;
 
 interface ExpressionPlanBase {
   readonly span: SourceSpan;
@@ -276,6 +297,11 @@ export interface IdentifierExpressionPlan extends ExpressionPlanBase {
 
 export interface TemporaryExpressionPlan extends ExpressionPlanBase {
   readonly kind: "temporary";
+  readonly temporaryId: number;
+}
+
+export interface PreparedReferenceExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "preparedReference";
   readonly temporaryId: number;
 }
 
@@ -459,6 +485,7 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
       );
     }
     validateLoopStructure(value.instructions, errors);
+    validatePreparedReferenceStructure(value.instructions, errors);
     validateFunctionDefinitions(
       value.functions,
       value.instructions,
@@ -470,6 +497,71 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
     valid: errors.length === 0,
     errors: Object.freeze(errors),
   });
+}
+
+function validatePreparedReferenceStructure(
+  instructions: readonly unknown[],
+  errors: PlanValidationError[],
+): void {
+  const producers = new Map<number, number>();
+  for (let index = 0; index < instructions.length; index += 1) {
+    const instruction = instructions[index];
+    if (!isRecord(instruction)) continue;
+    if (
+      instruction.kind === "prepareReference" &&
+      Number.isInteger(instruction.destinationTemporary)
+    ) {
+      const temporaryId = instruction.destinationTemporary as number;
+      if (producers.has(temporaryId)) {
+        errors.push(planError(
+          "TSC002",
+          "Prepared-reference temporary is produced more than once.",
+          `$.instructions[${index}].destinationTemporary`,
+        ));
+      }
+      producers.set(temporaryId, index);
+    }
+  }
+  for (let index = 0; index < instructions.length; index += 1) {
+    const referenced = new Set<number>();
+    collectPreparedReferenceIds(instructions[index], referenced);
+    for (const temporaryId of referenced) {
+      const producer = producers.get(temporaryId);
+      if (producer === undefined) {
+        errors.push(planError(
+          "TSC002",
+          "Prepared-reference expression has no matching producer.",
+          `$.instructions[${index}]`,
+        ));
+        continue;
+      }
+      if (producer >= index) {
+        errors.push(planError(
+          "TSC002",
+          "Prepared-reference producer must precede its use.",
+          `$.instructions[${index}]`,
+        ));
+      }
+    }
+  }
+}
+
+function collectPreparedReferenceIds(
+  value: unknown,
+  output: Set<number>,
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectPreparedReferenceIds(item, output);
+    return;
+  }
+  if (!isRecord(value)) return;
+  if (value.kind === "preparedReference" && Number.isInteger(value.temporaryId)) {
+    output.add(value.temporaryId as number);
+    return;
+  }
+  for (const nested of Object.values(value)) {
+    collectPreparedReferenceIds(nested, output);
+  }
 }
 
 function validateLoopStructure(
@@ -630,6 +722,13 @@ class InstructionCompiler {
       case "assignmentStatement":
         {
         const target = this.#lowerAssignmentTarget(statement.target);
+        if (target.plan.kind !== "identifier") {
+          this.instructions.push({
+            kind: "validateAssignmentTarget",
+            target: target.plan,
+            span: copySpan(statement.target.span),
+          });
+        }
         const value = this.#lowerExpression(statement.value);
         this.instructions.push({
           kind: "assign",
@@ -930,7 +1029,7 @@ class InstructionCompiler {
       }
       case "listLiteral":
       case "setLiteral": {
-        const lowered = expression.elements.map((item) => this.#lowerExpression(item));
+        const lowered = this.#lowerOrderedExpressions(expression.elements);
         return {
           plan: {
             kind: expression.kind === "listLiteral" ? "list" : "set",
@@ -941,9 +1040,12 @@ class InstructionCompiler {
         };
       }
       case "objectLiteral": {
-        const lowered = expression.properties.map((property) => ({
+        const values = this.#lowerOrderedExpressions(
+          expression.properties.map((property) => property.value),
+        );
+        const lowered = expression.properties.map((property, index) => ({
           property,
-          lowered: this.#lowerExpression(property.value),
+          lowered: values[index]!,
         }));
         return {
           plan: {
@@ -960,11 +1062,16 @@ class InstructionCompiler {
       }
       case "templateLiteral": {
         const ids: number[] = [];
+        const interpolations = expression.parts
+          .filter((part) => part.kind === "templateInterpolation")
+          .map((part) => part.expression);
+        const loweredInterpolations = this.#lowerOrderedExpressions(interpolations);
+        let interpolationIndex = 0;
         const parts = expression.parts.map((part): TemplatePartPlan => {
           if (part.kind === "templateText") {
             return { kind: "text", value: part.value, span: copySpan(part.span) };
           }
-          const lowered = this.#lowerExpression(part.expression);
+          const lowered = loweredInterpolations[interpolationIndex++]!;
           ids.push(...lowered.temporaryIds);
           return {
             kind: "expression",
@@ -982,7 +1089,10 @@ class InstructionCompiler {
         };
       }
       case "indexExpression": {
-        const object = this.#lowerExpression(expression.object);
+        let object = this.#lowerExpression(expression.object);
+        if (this.#containsUserCall(expression.index)) {
+          object = this.#prepareReferenceExpression(object, expression.object.span);
+        }
         const index = this.#lowerExpression(expression.index);
         return {
           plan: { kind: "index", object: object.plan, index: index.plan, span: copySpan(expression.span) },
@@ -990,10 +1100,39 @@ class InstructionCompiler {
         };
       }
       case "callExpression": {
-        const callee = this.#lowerExpression(expression.callee);
-        const argumentsList = expression.arguments.map((argument) => ({
+        let callee: LoweredExpression;
+        if (expression.callee.kind === "propertyAccessExpression") {
+          let receiver = this.#lowerExpression(expression.callee.object);
+          if (expression.arguments.some((argument) => this.#containsUserCall(argument.value))) {
+            receiver = this.#prepareReferenceExpression(
+              receiver,
+              expression.callee.object.span,
+            );
+            this.instructions.push({
+              kind: "validateCallReceiver",
+              receiver: receiver.plan,
+              method: expression.callee.property.name,
+              span: copySpan(expression.callee.span),
+            });
+          }
+          callee = {
+            plan: {
+              kind: "property",
+              object: receiver.plan,
+              name: expression.callee.property.name,
+              span: copySpan(expression.callee.span),
+            },
+            temporaryIds: receiver.temporaryIds,
+          };
+        } else {
+          callee = this.#lowerExpression(expression.callee);
+        }
+        const loweredArguments = this.#lowerOrderedExpressions(
+          expression.arguments.map((argument) => argument.value),
+        );
+        const argumentsList = expression.arguments.map((argument, index) => ({
           argument,
-          lowered: this.#lowerExpression(argument.value),
+          lowered: loweredArguments[index]!,
         }));
         return {
           plan: {
@@ -1020,19 +1159,23 @@ class InstructionCompiler {
         };
       }
       case "binaryExpression": {
-        const left = this.#lowerExpression(expression.left);
-        const right = this.#lowerExpression(expression.right);
+        const [left, right] = this.#lowerOrderedExpressions([
+          expression.left,
+          expression.right,
+        ]);
         return {
-          plan: { kind: "binary", operator: expression.operator, left: left.plan, right: right.plan, span: copySpan(expression.span) },
-          temporaryIds: [...left.temporaryIds, ...right.temporaryIds],
+          plan: { kind: "binary", operator: expression.operator, left: left!.plan, right: right!.plan, span: copySpan(expression.span) },
+          temporaryIds: [...left!.temporaryIds, ...right!.temporaryIds],
         };
       }
       case "rangeExpression": {
-        const start = this.#lowerExpression(expression.start);
-        const end = this.#lowerExpression(expression.end);
+        const [start, end] = this.#lowerOrderedExpressions([
+          expression.start,
+          expression.end,
+        ]);
         return {
-          plan: { kind: "range", start: start.plan, end: end.plan, inclusive: expression.inclusive, span: copySpan(expression.span) },
-          temporaryIds: [...start.temporaryIds, ...end.temporaryIds],
+          plan: { kind: "range", start: start!.plan, end: end!.plan, inclusive: expression.inclusive, span: copySpan(expression.span) },
+          temporaryIds: [...start!.temporaryIds, ...end!.temporaryIds],
         };
       }
     }
@@ -1080,51 +1223,8 @@ class InstructionCompiler {
   }
 
   #lowerAssignmentObject(expression: Expression): LoweredExpression {
-    if (expression.kind === "identifier") {
-      return { plan: compileExpression(expression), temporaryIds: [] };
-    }
-    if (expression.kind === "parenthesizedExpression") {
-      const nested = this.#lowerAssignmentObject(expression.expression);
-      return {
-        plan: { kind: "group", expression: nested.plan, span: copySpan(expression.span) },
-        temporaryIds: nested.temporaryIds,
-      };
-    }
-    if (expression.kind === "propertyAccessExpression") {
-      const object = this.#lowerAssignmentObject(expression.object);
-      const property: LoweredExpression = {
-        plan: {
-          kind: "property",
-          object: object.plan,
-          name: expression.property.name,
-          span: copySpan(expression.span),
-        },
-        temporaryIds: object.temporaryIds,
-      };
-      return expression.property.name === "random"
-        ? this.#materializeExpression(property, expression.span)
-        : property;
-    }
-    if (expression.kind === "indexExpression") {
-      const object = this.#lowerAssignmentObject(expression.object);
-      const index = this.#materializeExpression(
-        this.#lowerExpression(expression.index),
-        expression.index.span,
-      );
-      return {
-        plan: {
-          kind: "index",
-          object: object.plan,
-          index: index.plan,
-          span: copySpan(expression.span),
-        },
-        temporaryIds: [...object.temporaryIds, ...index.temporaryIds],
-      };
-    }
     const lowered = this.#lowerExpression(expression);
-    return planRequiresEarlyEvaluation(lowered.plan)
-      ? this.#materializeExpression(lowered, expression.span)
-      : lowered;
+    return this.#prepareReferenceExpression(lowered, expression.span);
   }
 
   #materializeExpression(
@@ -1143,6 +1243,48 @@ class InstructionCompiler {
       plan: { kind: "temporary", temporaryId, span: copySpan(span) },
       temporaryIds: [...lowered.temporaryIds, temporaryId],
     };
+  }
+
+  #prepareReferenceExpression(
+    lowered: LoweredExpression,
+    span: SourceSpan,
+  ): LoweredExpression {
+    if (lowered.plan.kind === "preparedReference") return lowered;
+    const temporaryId = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "prepareReference",
+      expression: lowered.plan,
+      destinationTemporary: temporaryId,
+      span: copySpan(span),
+    });
+    return {
+      plan: {
+        kind: "preparedReference",
+        temporaryId,
+        span: copySpan(span),
+      },
+      temporaryIds: [...lowered.temporaryIds, temporaryId],
+    };
+  }
+
+  #lowerOrderedExpressions(
+    expressions: readonly Expression[],
+  ): LoweredExpression[] {
+    const lowered: LoweredExpression[] = [];
+    for (let index = 0; index < expressions.length; index += 1) {
+      const expression = expressions[index]!;
+      let item = this.#lowerExpression(expression);
+      const laterEmitsInstructions = expressions
+        .slice(index + 1)
+        .some((later) => this.#containsUserCall(later));
+      if (laterEmitsInstructions) {
+        item = item.plan.kind === "temporary"
+          ? item
+          : this.#materializeExpression(item, expression.span);
+      }
+      lowered.push(item);
+    }
+    return lowered;
   }
 
   #lowerUserFunctionCall(
@@ -1445,43 +1587,6 @@ function compileArgument(argument: CallArgument): ArgumentPlan {
       };
 }
 
-function planRequiresEarlyEvaluation(expression: ExpressionPlan): boolean {
-  switch (expression.kind) {
-    case "literal":
-    case "identifier":
-    case "temporary":
-      return false;
-    case "list":
-    case "set":
-      return expression.elements.some(planRequiresEarlyEvaluation);
-    case "object":
-      return expression.properties.some((property) =>
-        planRequiresEarlyEvaluation(property.value)
-      );
-    case "group":
-      return planRequiresEarlyEvaluation(expression.expression);
-    case "template":
-      return expression.parts.some(
-        (part) => part.kind === "expression" && planRequiresEarlyEvaluation(part.expression),
-      );
-    case "property":
-      return expression.name === "random" || planRequiresEarlyEvaluation(expression.object);
-    case "index":
-      return planRequiresEarlyEvaluation(expression.object) ||
-        planRequiresEarlyEvaluation(expression.index);
-    case "call":
-      return true;
-    case "unary":
-      return planRequiresEarlyEvaluation(expression.operand);
-    case "binary":
-      return planRequiresEarlyEvaluation(expression.left) ||
-        planRequiresEarlyEvaluation(expression.right);
-    case "range":
-      return planRequiresEarlyEvaluation(expression.start) ||
-        planRequiresEarlyEvaluation(expression.end);
-  }
-}
-
 function validateInstruction(
   value: unknown,
   path: string,
@@ -1517,10 +1622,33 @@ function validateInstruction(
       requireString(value.name, `${path}.name`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       return;
+    case "prepareReference":
+      validateExpression(
+        value.expression,
+        `${path}.expression`,
+        errors,
+        false,
+        temporaryCount,
+      );
+      validateTemporaryId(
+        value.destinationTemporary,
+        `${path}.destinationTemporary`,
+        temporaryCount,
+        errors,
+      );
+      return;
+    case "validateAssignmentTarget":
+      validateExpression(value.target, `${path}.target`, errors, true, temporaryCount);
+      validatePreparedAssignmentTarget(value.target, `${path}.target`, errors);
+      return;
     case "assign":
       validateExpression(value.target, `${path}.target`, errors, true, temporaryCount);
       validatePreparedAssignmentTarget(value.target, `${path}.target`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      return;
+    case "validateCallReceiver":
+      validateExpression(value.receiver, `${path}.receiver`, errors, false, temporaryCount);
+      requireString(value.method, `${path}.method`, errors);
       return;
     case "evaluate":
       validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
@@ -1643,6 +1771,7 @@ function validateExpression(
       requireString(value.name, `${path}.name`, errors);
       return;
     case "temporary":
+    case "preparedReference":
       validateTemporaryId(value.temporaryId, `${path}.temporaryId`, temporaryCount, errors);
       return;
     case "list":
@@ -1703,7 +1832,13 @@ function validatePreparedAssignmentTarget(
   if (!isRecord(value)) return;
   if (value.kind === "identifier") return;
   if (value.kind === "property") {
-    validatePreparedAssignmentObject(value.object, `${path}.object`, errors);
+    if (!isRecord(value.object) || value.object.kind !== "preparedReference") {
+      errors.push(planError(
+        "TSC002",
+        "Assignment receivers must be captured before the right-hand value.",
+        `${path}.object`,
+      ));
+    }
     return;
   }
   if (value.kind === "index") {
@@ -1714,65 +1849,14 @@ function validatePreparedAssignmentTarget(
         `${path}.index`,
       ));
     }
-    validatePreparedAssignmentObject(value.object, `${path}.object`, errors);
-  }
-}
-
-function validatePreparedAssignmentObject(
-  value: unknown,
-  path: string,
-  errors: PlanValidationError[],
-): void {
-  if (!isRecord(value)) return;
-  if (value.kind === "identifier" || value.kind === "temporary") return;
-  if (value.kind === "group") {
-    validatePreparedAssignmentObject(value.expression, `${path}.expression`, errors);
-    return;
-  }
-  if (value.kind === "property") {
-    if (value.name === "random") {
+    if (!isRecord(value.object) || value.object.kind !== "preparedReference") {
       errors.push(planError(
         "TSC002",
-        "Random assignment receivers must be prepared before the right-hand value.",
-        path,
+        "Assignment receivers must be captured before the right-hand value.",
+        `${path}.object`,
       ));
     }
-    validatePreparedAssignmentObject(value.object, `${path}.object`, errors);
-    return;
   }
-  if (value.kind === "index") {
-    if (!isRecord(value.index) || value.index.kind !== "temporary") {
-      errors.push(planError(
-        "TSC002",
-        "Nested assignment indexes must be prepared before the right-hand value.",
-        `${path}.index`,
-      ));
-    }
-    validatePreparedAssignmentObject(value.object, `${path}.object`, errors);
-    return;
-  }
-  if (value.kind === "call" || containsDeferredAssignmentEffect(value)) {
-    errors.push(planError(
-      "TSC002",
-      "Observable assignment receiver expressions must be prepared before the right-hand value.",
-      path,
-    ));
-  }
-}
-
-function containsDeferredAssignmentEffect(value: Record<string, unknown>): boolean {
-  if (value.kind === "call") return true;
-  if (value.kind === "property" && value.name === "random") return true;
-  for (const nested of Object.values(value)) {
-    if (Array.isArray(nested)) {
-      if (nested.some(
-        (item) => isRecord(item) && containsDeferredAssignmentEffect(item),
-      )) return true;
-    } else if (isRecord(nested) && containsDeferredAssignmentEffect(nested)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function validateProperties(
@@ -2101,8 +2185,10 @@ function validateFunctionPrologue(
       if (
         ![
           "storeTemporary",
+          "prepareReference",
           "clearTemporary",
           "callFunction",
+          "validateCallReceiver",
           "jumpIfFalse",
           "jump",
         ].includes(String(nested.kind))
