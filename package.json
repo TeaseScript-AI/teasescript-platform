@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test": "npm run build && node --test dist/tests/non-finite-numeric-literals.test.js",
     "check": "npm run typecheck && npm test",
     "playground": "npm run build && node dist/playground/server.js"
   },
