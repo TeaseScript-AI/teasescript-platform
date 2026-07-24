@@ -149,6 +149,63 @@ test("continues fallback-warning deduplication and event sequences after restore
   assert.deepEqual(remaining.events.map((event) => event.sequence), [3, 4]);
 });
 
+test("preserves list.remove missing-value warnings across event boundaries and restore", () => {
+  const source = [
+    "let values = [1]",
+    "values.remove(2)",
+    "values.remove(2)",
+    'say "After"',
+    "exit",
+  ].join("\n");
+  const compiled = plan(source);
+  const initial = createFreshRuntimeSnapshot(compiled);
+  const uninterrupted = run(compiled, initial);
+  const firstBoundary = stepToEvent(compiled, initial);
+  const call = "values.remove(2)";
+  const firstCallStart = source.indexOf(call);
+
+  assert.equal(firstBoundary.snapshot.status, "running");
+  assert.equal(firstBoundary.snapshot.nextInstruction, 2);
+  assert.deepEqual(rootValue(firstBoundary.snapshot, "values"), {
+    kind: "list",
+    items: [1],
+  });
+  assert.deepEqual(
+    firstBoundary.events.map((event) => [
+      event.kind,
+      event.sequence,
+      event.kind === "developerWarning" ? event.severity : null,
+      event.kind === "developerWarning" ? event.code : null,
+      event.kind === "developerWarning" ? event.message : null,
+      event.kind === "developerWarning" ? event.span.start.offset : null,
+      event.kind === "developerWarning" ? event.span.end.offset : null,
+    ]),
+    [[
+      "developerWarning",
+      1,
+      "warning",
+      "TSW002",
+      "list.remove(value) found no matching value; the list was left unchanged.",
+      firstCallStart,
+      firstCallStart + call.length,
+    ]],
+  );
+
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(compiled, firstBoundary.snapshot)),
+  );
+  const resumed = run(restored.plan, restored.snapshot);
+
+  assert.equal(resumed.events.filter((event) => event.kind === "developerWarning").length, 1);
+  assert.deepEqual(resumed.events.map((event) => event.sequence), [2, 3, 4]);
+  assert.deepEqual([...firstBoundary.events, ...resumed.events], uninterrupted.events);
+  assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
+  assert.deepEqual(rootValue(resumed.snapshot, "values"), {
+    kind: "list",
+    items: [1],
+  });
+});
+
 test("continues deterministic RNG state after restore", () => {
   const compiled = plan([
     'let values = ["a", "b", "c", "d"]',
