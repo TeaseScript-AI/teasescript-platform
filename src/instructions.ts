@@ -514,21 +514,18 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
     }
     validateLoopStructure(value.instructions, errors);
     validatePreparedReferenceStructure(value.instructions, errors);
-    const functionErrorCount = errors.length;
     validateFunctionDefinitions(
       value.functions,
       value.instructions,
       value.rootEndInstruction,
       errors,
     );
-    if (errors.length === functionErrorCount) {
-      validateInstructionControlFlowRegions(
-        value.instructions,
-        value.rootEndInstruction,
-        value.functions,
-        errors,
-      );
-    }
+    validateInstructionControlFlowRegions(
+      value.instructions,
+      value.rootEndInstruction,
+      value.functions,
+      errors,
+    );
   }
   return Object.freeze({
     valid: errors.length === 0,
@@ -2073,36 +2070,36 @@ function validateInstructionControlFlowRegions(
       case "loopControl":
       case "prepareParameterDefault":
         validateInstructionRegionTarget(
-instruction.target,
-`${instructionPath}.target`,
-instructions.length,
-region,
-errors,
+          instruction.target,
+          `${instructionPath}.target`,
+          instructions.length,
+          region,
+          errors,
         );
         return;
       case "loopStart":
         validateInstructionRegionTarget(
-instruction.continueTarget,
-`${instructionPath}.continueTarget`,
-instructions.length,
-region,
-errors,
+          instruction.continueTarget,
+          `${instructionPath}.continueTarget`,
+          instructions.length,
+          region,
+          errors,
         );
         validateInstructionRegionTarget(
-instruction.target,
-`${instructionPath}.target`,
-instructions.length,
-region,
-errors,
+          instruction.target,
+          `${instructionPath}.target`,
+          instructions.length,
+          region,
+          errors,
         );
         return;
       case "callFunction":
         validateInstructionRegionTarget(
-instruction.returnInstruction,
-`${instructionPath}.returnInstruction`,
-instructions.length,
-region,
-errors,
+          instruction.returnInstruction,
+          `${instructionPath}.returnInstruction`,
+          instructions.length,
+          region,
+          errors,
         );
         return;
     }
