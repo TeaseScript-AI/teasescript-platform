@@ -1,0 +1,38 @@
+name: PR30 final verification
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out verification branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Verify PR 30 head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main agent/issue-28-runtime-api-docs
+          git checkout --detach origin/agent/issue-28-runtime-api-docs
+          echo "Node selected from .nvmrc: $(node --version)"
+          npm ci
+          npm run check > /tmp/pr30-check.log
+          tail -n 20 /tmp/pr30-check.log
+          npm run build
+          git diff --check origin/main...HEAD
+          echo "git diff --check origin/main...HEAD: passed"
+          status="$(git status --short)"
+          printf '%s\n' "$status"
+          test -z "$status"
+          echo "git status --short: clean"
