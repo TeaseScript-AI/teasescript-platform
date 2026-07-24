@@ -1,0 +1,79 @@
+name: Fix issue 39 formatting
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/issue-39-control-flow-regions
+          fetch-depth: 0
+      - name: Fix once and push
+        run: |
+          if grep -q '^          instruction.target,$' src/instructions.ts; then
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("src/instructions.ts")
+          text = path.read_text()
+          replacements = {
+              '''        validateInstructionRegionTarget(
+instruction.target,
+`${instructionPath}.target`,
+instructions.length,
+region,
+errors,
+        );''': '''        validateInstructionRegionTarget(
+          instruction.target,
+          `${instructionPath}.target`,
+          instructions.length,
+          region,
+          errors,
+        );''',
+              '''        validateInstructionRegionTarget(
+instruction.continueTarget,
+`${instructionPath}.continueTarget`,
+instructions.length,
+region,
+errors,
+        );''': '''        validateInstructionRegionTarget(
+          instruction.continueTarget,
+          `${instructionPath}.continueTarget`,
+          instructions.length,
+          region,
+          errors,
+        );''',
+              '''        validateInstructionRegionTarget(
+instruction.returnInstruction,
+`${instructionPath}.returnInstruction`,
+instructions.length,
+region,
+errors,
+        );''': '''        validateInstructionRegionTarget(
+          instruction.returnInstruction,
+          `${instructionPath}.returnInstruction`,
+          instructions.length,
+          region,
+          errors,
+        );''',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f"formatting pattern not found: {old!r}")
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+          git diff --check
+          git config user.name "OpenAI Agent"
+          git config user.email "agent@openai.com"
+          git add src/instructions.ts
+          git commit -m "Format instruction region validation"
+          git push origin HEAD:fix/issue-39-control-flow-regions
