@@ -26,14 +26,6 @@ const invalidCalls = [
     code: "TSV020",
   },
   {
-    name: "mixed positional and named arguments",
-    source: [
-      "function pair(left, right) { return left + right }",
-      "pair(1, right: 2)",
-    ].join("\n"),
-    code: "TSV021",
-  },
-  {
     name: "unknown named arguments",
     source: [
       "function identity(value) { return value }",
@@ -63,19 +55,26 @@ for (const invalidCall of invalidCalls) {
   test(`direct AST execution rejects ${invalidCall.name} with diagnostics`, () => {
     const program = parseProgram(invalidCall.source);
 
-    assert.throws(() => execute(program, { random }), (error: unknown) => {
-      assert.ok(error instanceof InterpreterCompilationError);
-      assert.equal(error instanceof TypeError, false);
-      assert.ok(
-        error.diagnostics.some(
-          (diagnostic) => diagnostic.code === invalidCall.code,
-        ),
-        JSON.stringify(error.diagnostics),
-      );
-      return true;
-    });
+    assertCompilationCode(program, invalidCall.code);
   });
 }
+
+test("direct AST execution rejects manually mixed argument shapes", () => {
+  const namedProgram = parseProgram([
+    "function pair(left, right) { return left + right }",
+    "pair(left: 1, right: 2)",
+  ].join("\n"));
+  const positionalProgram = parseProgram([
+    "function pair(left, right) { return left + right }",
+    "pair(1, 2)",
+  ].join("\n"));
+  const program = JSON.parse(JSON.stringify(namedProgram)) as Program;
+  const mixedCall = getMutableCall(program);
+  const positionalCall = getMutableCall(positionalProgram);
+  mixedCall.arguments.unshift(positionalCall.arguments[0]!);
+
+  assertCompilationCode(program, "TSV021");
+});
 
 test("direct AST validation includes configured globals and builtins", () => {
   const player = createRuntimeObject(
@@ -97,6 +96,27 @@ test("direct AST validation includes configured globals and builtins", () => {
   assert.deepEqual(result.errors, []);
   assert.deepEqual(captured, ["puppy"]);
 });
+
+function assertCompilationCode(program: Program, code: string): void {
+  assert.throws(() => execute(program, { random }), (error: unknown) => {
+    assert.ok(error instanceof InterpreterCompilationError);
+    assert.equal(error instanceof TypeError, false);
+    assert.ok(
+      error.diagnostics.some((diagnostic) => diagnostic.code === code),
+      JSON.stringify(error.diagnostics),
+    );
+    return true;
+  });
+}
+
+function getMutableCall(program: Program): {
+  arguments: Array<Program["statements"][number] extends never ? never : unknown>;
+} {
+  const statement = program.statements[1] as unknown as {
+    expression: { arguments: unknown[] };
+  };
+  return statement.expression;
+}
 
 function parseProgram(source: string): Program {
   const parsed = parse(source);
