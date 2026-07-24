@@ -9,20 +9,87 @@ permissions:
 jobs:
   verify-current-main:
     runs-on: ubuntu-latest
+    env:
+      EXPECTED_MAIN_SHA: ed098995238172065c6dcd1ea2b8e9e0d4238675
+      NVM_DIR: ${{ runner.temp }}/nvm
     steps:
       - name: Check out verification branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: Preserve verification runner outside worktree
+      - name: Preserve verification probe outside worktree
         run: cp .github/postmerge-pr22-pr23-verify.sh /tmp/postmerge-pr22-pr23-verify.sh
       - name: Check out pinned current main
         uses: actions/checkout@v4
         with:
           ref: ed098995238172065c6dcd1ea2b8e9e0d4238675
           fetch-depth: 0
-      - name: Run focused post-merge verification
+      - name: Verify current main baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          ACTUAL_MAIN_SHA="$(git rev-parse origin/main)"
+          echo "EXPECTED_MAIN_SHA=$EXPECTED_MAIN_SHA"
+          echo "ACTUAL_MAIN_SHA=$ACTUAL_MAIN_SHA"
+          test "$ACTUAL_MAIN_SHA" = "$EXPECTED_MAIN_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+          test -z "$(git status --short)"
+      - name: Install and use .nvmrc Node
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$NVM_DIR"
+          git clone --depth 1 --branch v0.40.3 https://github.com/nvm-sh/nvm.git "$NVM_DIR"
+          . "$NVM_DIR/nvm.sh"
+          nvm install
+          nvm use
+          NVM_NODE_VERSION="$(nvm version)"
+          echo "$NVM_DIR/versions/node/$NVM_NODE_VERSION/bin" >> "$GITHUB_PATH"
+          echo "NVM_NODE_VERSION=$NVM_NODE_VERSION" >> "$GITHUB_ENV"
+          node --version
+          npm --version
+      - name: Install dependencies
+        run: npm ci
+      - name: Build for targeted tests
+        run: npm run build
+      - name: Run targeted interpreter and boundary tests
+        run: |
+          node --test \
+            dist/tests/interpreter.test.js \
+            dist/tests/interpreter-semantic-boundary.test.js \
+            dist/tests/instruction-lowering-boundary.test.js \
+            dist/tests/runtime-semantics.test.js \
+            dist/tests/runtime-checkpoint.test.js
+      - name: Run explicit PR22 and PR23 probes
         run: bash /tmp/postmerge-pr22-pr23-verify.sh
+      - name: Run complete check
+        run: npm run check
+      - name: Run final build
+        run: npm run build
+      - name: Check diff and clean worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -z "$(git status --short)"
+      - name: Write verification summary
+        if: success()
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/postmerge-pr22-pr23-summary.txt" <<EOF
+          RESULT=PASS
+          BASE_SHA=$EXPECTED_MAIN_SHA
+          NODE=$(node --version)
+          NPM=$(npm --version)
+          TARGETED_TESTS=PASS
+          FUNCTIONAL_PROBES=PASS
+          NPM_CHECK=PASS
+          NPM_BUILD=PASS
+          GIT_DIFF_CHECK=PASS
+          WORKTREE_CLEAN=PASS
+          EOF
+          cat "$RUNNER_TEMP/postmerge-pr22-pr23-summary.txt"
       - name: Upload verification summary
         if: always()
         uses: actions/upload-artifact@v4
