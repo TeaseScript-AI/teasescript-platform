@@ -4,12 +4,15 @@ import test from "node:test";
 import { parse } from "../src/parser.js";
 import {
   execute,
+  InterpreterCompilationError,
   type BuiltinFunction,
   type ExecutionResult,
   type RandomSource,
 } from "../src/runtime/interpreter.js";
+import { SerializableValueError } from "../src/runtime/serializable-values.js";
 import {
   createRuntimeObject,
+  createRuntimeSpeaker,
   type RuntimeValue,
 } from "../src/runtime/values.js";
 
@@ -32,24 +35,34 @@ test("evaluates variables, assignment, precedence, if, and else", () => {
   assert.deepEqual(sayTexts(result), ["15"]);
 });
 
-test("enforces lexical block scope with a span-bearing error", () => {
+test("rejects out-of-scope identifiers at the semantic boundary", () => {
   const source = [
     "if true {",
     "  let local = 1",
     "}",
     "say `${local}`",
   ].join("\n");
-  const result = run(source);
+  const parsed = parse(source);
+  assert.deepEqual(parsed.diagnostics, []);
+  const start = source.indexOf("local", source.indexOf("say"));
 
-  assert.deepEqual(
-    result.errors.map((error) => [
-      error.code,
-      error.span.start.offset,
-      error.span.end.offset,
-    ]),
-    [["TSR006", source.indexOf("local", source.indexOf("say")), source.length - 2]],
+  assert.throws(
+    () => execute(parsed.program, { random: sequenceRandom([0]) }),
+    (error: unknown) => {
+      assert.ok(error instanceof InterpreterCompilationError);
+      const diagnostic = error.diagnostics.find(
+        (candidate) => candidate.code === "TSV002",
+      );
+      assert.notEqual(diagnostic, undefined);
+      assert.deepEqual(
+        diagnostic === undefined
+          ? null
+          : [diagnostic.span.start.offset, diagnostic.span.end.offset],
+        [start, source.length - 2],
+      );
+      return true;
+    },
   );
-  assert.deepEqual(result.events, []);
 });
 
 test("evaluates positional and named injected built-in calls", () => {
@@ -82,6 +95,29 @@ test("validates injected built-in results at runtime", () => {
   assert.deepEqual(
     result.errors.map((error) => error.code),
     ["TSR013"],
+  );
+});
+
+test("rejects host speaker globals at the compatibility boundary", () => {
+  const speaker = createRuntimeSpeaker("hostSpeaker");
+  speaker.properties.set("displayName", "Host Speaker");
+
+  assertHostSpeakerBoundaryError(() =>
+    run("say hostSpeaker", undefined, undefined, { hostSpeaker: speaker }),
+  );
+});
+
+test("rejects host speaker builtin results at the compatibility boundary", () => {
+  const speaker = createRuntimeSpeaker("hostSpeaker");
+  speaker.properties.set("displayName", "Host Speaker");
+
+  const result = run("let value = provideSpeaker()", {
+    provideSpeaker: () => speaker,
+  });
+
+  assert.deepEqual(
+    result.errors.map((error) => [error.code, error.message]),
+    [["TSR013", "Host speaker values are not supported at the runtime boundary."]],
   );
 });
 
@@ -294,6 +330,18 @@ function run(
     random,
     ...(builtins === undefined ? {} : { builtins }),
     ...(globals === undefined ? {} : { globals }),
+  });
+}
+
+function assertHostSpeakerBoundaryError(action: () => unknown): void {
+  assert.throws(action, (error: unknown) => {
+    assert.ok(error instanceof SerializableValueError);
+    assert.equal(error.code, "invalid");
+    assert.equal(
+      error.message,
+      "Host speaker values are not supported at the runtime boundary.",
+    );
+    return true;
   });
 }
 

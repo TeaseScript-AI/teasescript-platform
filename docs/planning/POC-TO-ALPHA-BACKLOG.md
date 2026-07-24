@@ -75,6 +75,7 @@ Define the smallest coherent custom-view contract for package-provided UI inside
 - deterministic lifecycle and reconstruction after save/resume;
 - which view state is canonical runtime state versus reconstructible UI state;
 - the boundary between Standard UI and package UI;
+- DOM and CSS isolation policy, including when optional Shadow DOM is used and how it interacts with package styling, Standard UI, focus, accessibility, previewing, and debugging;
 - focus, keyboard, overlay, navigation, and back behavior inside the player runtime;
 - editor, simulator, debugger, and preview requirements;
 - comparison of a TypeScript-only API, a small TeaseScript invocation API, and a fuller declarative TeaseScript syntax.
@@ -98,6 +99,49 @@ Define the smallest coherent custom-view contract for package-provided UI inside
 #### Completion of the design item
 
 This item may move to **Ready for phase** only after the owner approves a coherent lifecycle/state/security contract and the relevant ADRs and current topic documents are updated. Implementation is a later, explicitly scheduled phase.
+
+### POC-HOST-001 — Define the cross-origin player host contract
+
+- **Track:** Host shell
+- **Target gate:** Before alpha
+- **Planning state:** Design required
+- **Scheduling:** Unscheduled
+
+#### Required outcome
+
+Define the smallest coherent contract between the website host shell and the cross-origin player iframe, including:
+
+- iframe creation, startup, shutdown, and fatal lifecycle;
+- sandbox flags and Content Security Policy;
+- validated communication between parent and player, using typed or otherwise strictly validated messages;
+- capability negotiation;
+- transfer of only selected and validated package, session, and account data;
+- checkpoint transport and acknowledgement or error responses for checkpoint storage;
+- restore and reconnect behavior;
+- resize and fullscreen behavior;
+- browser navigation and back behavior;
+- protocol errors and fatal player errors;
+- clear responsibility boundaries between the Host shell, Player runtime, Standard UI, and package custom UI inside the player.
+
+#### Boundaries
+
+- The Host shell creates and owns the cross-origin player iframe and communicates with the player only through the validated boundary.
+- The Player runtime contains Standard UI and package custom UI. A custom view does not normally communicate directly with the parent website; only functionality that genuinely requires a host capability may pass through the future player-host contract.
+- Do not accept a final `postMessage` schema, protocol version, concrete TypeScript interfaces, capability names, host APIs, reconnect algorithms, sandbox details, or CSP details through this backlog entry.
+- Do not introduce architecture outside the already accepted player/host boundary. The result requires owner approval and the appropriate ADR/current-document updates.
+
+#### Dependencies and references
+
+- [ADR 0012 — Custom-view capability](../decisions/0012-custom-view-capability.md)
+- [ADR 0015 — Serializable runtime architecture](../decisions/0015-serializable-runtime-architecture.md)
+- [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md)
+- [`docs/RUNTIME.md`](../RUNTIME.md)
+- [`docs/SECURITY.md`](../SECURITY.md)
+- [`docs/OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), section **Player and interactions**
+
+#### Completion of the design item
+
+This item may move to **Ready for phase** only after the owner approves a coherent lifecycle, validation, capability, recovery, and responsibility contract and the relevant ADRs and current topic documents are updated. Implementation is a later, explicitly scheduled phase.
 
 ### POC-ENGINE-001 — Establish runtime performance criteria and a benchmark baseline
 

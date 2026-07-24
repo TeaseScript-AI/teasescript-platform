@@ -13,8 +13,15 @@ export interface XorShift32State {
 export function createXorShift32State(
   seed = DEFAULT_PLAYGROUND_SEED,
 ): XorShift32State {
-  if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
-    throw new RangeError("The xorshift32 seed must be an unsigned 32-bit integer.");
+  if (
+    !Number.isInteger(seed) ||
+    seed === 0 ||
+    seed < 0 ||
+    seed > 0xffff_ffff
+  ) {
+    throw new RangeError(
+      "The xorshift32 seed must be a non-zero unsigned 32-bit integer.",
+    );
   }
   return { algorithm: XORSHIFT32_ALGORITHM, state: seed >>> 0 };
 }
@@ -24,6 +31,7 @@ export function nextXorShift32(random: XorShift32State): number {
   if (
     random.algorithm !== XORSHIFT32_ALGORITHM ||
     !Number.isInteger(random.state) ||
+    random.state === 0 ||
     random.state < 0 ||
     random.state > 0xffff_ffff
   ) {

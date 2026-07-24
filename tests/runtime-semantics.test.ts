@@ -4,6 +4,7 @@ import test from "node:test";
 import { parse } from "../src/parser.js";
 import {
   execute,
+  InterpreterCompilationError,
   type BuiltinFunction,
   type ExecutionResult,
   type RandomSource,
@@ -142,7 +143,7 @@ test("turns a cyclic injected script value into a structured runtime error", () 
   );
 });
 
-test("rejects list, object, and set values in set literals at element spans", () => {
+test("rejects list, object, and set values in set literals at the semantic boundary", () => {
   const cases = [
     ["let values = set[[1]]", "[1]"],
     ["let values = set[{ value: 1 }]", "{ value: 1 }"],
@@ -150,15 +151,26 @@ test("rejects list, object, and set values in set literals at element spans", ()
   ] as const;
 
   for (const [source, elementText] of cases) {
-    const result = run(source);
+    const parsed = parse(source);
+    assert.deepEqual(parsed.diagnostics, []);
     const start = source.indexOf(elementText);
-    assert.deepEqual(
-      result.errors.map((error) => [
-        error.code,
-        error.span.start.offset,
-        error.span.end.offset,
-      ]),
-      [["TSR032", start, start + elementText.length]],
+
+    assert.throws(
+      () => execute(parsed.program, { random: { next: () => 0 } }),
+      (error: unknown) => {
+        assert.ok(error instanceof InterpreterCompilationError);
+        const diagnostic = error.diagnostics.find(
+          (candidate) => candidate.code === "TSV006",
+        );
+        assert.notEqual(diagnostic, undefined);
+        assert.deepEqual(
+          diagnostic === undefined
+            ? null
+            : [diagnostic.span.start.offset, diagnostic.span.end.offset],
+          [start, start + elementText.length],
+        );
+        return true;
+      },
     );
   }
 });
