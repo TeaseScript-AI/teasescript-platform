@@ -98,3 +98,145 @@ test("accepts explicitly declared injected built-ins and globals", () => {
   assert.deepEqual(result.diagnostics, []);
   assert.notEqual(result.plan, null);
 });
+
+test("rejects core and injected builtin identifiers in ordinary value positions", () => {
+  const cases = [
+    ["declaration initializer", "let value = BUILTIN"],
+    ["list literal", "let values = [BUILTIN]"],
+    ["object property value", "let value = { callback: BUILTIN }"],
+    ["template interpolation", "say `${BUILTIN}`"],
+    [
+      "function parameter default",
+      "function sample(value = BUILTIN) { return value }",
+    ],
+    ["return expression", "function sample { return BUILTIN }"],
+    ["parenthesized expression", "let value = (BUILTIN)"],
+    ["parenthesized call callee", "let value = (BUILTIN)()"],
+    [
+      "call argument",
+      "function consume(value) { return value }\nlet result = consume(BUILTIN)",
+    ],
+    ["binary expression", "let value = BUILTIN + 1"],
+    ["property receiver", "let value = BUILTIN.length"],
+    ["index receiver", "let value = BUILTIN[0]"],
+  ] as const;
+
+  for (const [label, template] of cases) {
+    for (const builtin of ["random", "customBuiltin"] as const) {
+      const source = template.replace("BUILTIN", builtin);
+      const result = compileSource(source, {
+        ...(builtin === "customBuiltin" ? { builtins: [builtin] } : {}),
+      });
+      const start = source.indexOf(builtin);
+
+      assert.deepEqual(result.parserDiagnostics, [], `${label}: ${source}`);
+      assert.equal(result.plan, null, `${label}: ${source}`);
+      assert.deepEqual(
+        result.semanticDiagnostics.map((diagnostic) => [
+          diagnostic.code,
+          diagnostic.message,
+          diagnostic.span.start.offset,
+          diagnostic.span.end.offset,
+        ]),
+        [[
+          "TSV028",
+          `Builtin '${builtin}' is not a first-class runtime value.`,
+          start,
+          start + builtin.length,
+        ]],
+        `${label}: ${source}`,
+      );
+    }
+  }
+});
+
+test("reports each invalid builtin value once in deterministic source order", () => {
+  const source = "let values = [random, customBuiltin, random]";
+  const result = compileSource(source, { builtins: ["customBuiltin"] });
+  const names = ["random", "customBuiltin", "random"] as const;
+  let offset = 0;
+  const expected = names.map((name) => {
+    const start = source.indexOf(name, offset);
+    offset = start + name.length;
+    return [
+      "TSV028",
+      `Builtin '${name}' is not a first-class runtime value.`,
+      start,
+      start + name.length,
+    ];
+  });
+
+  assert.deepEqual(result.parserDiagnostics, []);
+  assert.equal(result.plan, null);
+  assert.deepEqual(
+    result.semanticDiagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.message,
+      diagnostic.span.start.offset,
+      diagnostic.span.end.offset,
+    ]),
+    expected,
+  );
+});
+
+test("preserves direct builtin calls in every supported nested context", () => {
+  const result = compileSource([
+    "let values = [random(), chance(50), randomInteger(1..=6), customBuiltin()]",
+    "let objectValue = { core: random(), injected: customBuiltin() }",
+    "say `${random()}:${customBuiltin()}`",
+    "function sample(core = random(), injected = customBuiltin()) {",
+    "  return core",
+    "}",
+    "let result = sample()",
+    "values.remove(1)",
+  ].join("\n"), { builtins: ["customBuiltin"] });
+
+  assert.deepEqual(result.diagnostics, []);
+  assert.notEqual(result.plan, null);
+});
+
+test("preserves existing function, unknown-name, callable, and protected-name diagnostics", () => {
+  const functionValue = compileSource([
+    "function sample { return 1 }",
+    "let stored = sample",
+  ].join("\n"));
+  assert.deepEqual(
+    functionValue.semanticDiagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.message,
+    ]),
+    [["TSV028", "Function 'sample' is not a first-class runtime value."]],
+  );
+
+  const unknownVariable = compileSource("let value = missing");
+  assert.deepEqual(
+    unknownVariable.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV002"],
+  );
+
+  const unknownFunction = compileSource("missing()");
+  assert.deepEqual(
+    unknownFunction.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV018"],
+  );
+
+  const nonCallable = compileSource("let value = 1\nvalue()");
+  assert.deepEqual(
+    nonCallable.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV019"],
+  );
+
+  const protectedCore = compileSource("let random = 1");
+  assert.deepEqual(
+    protectedCore.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV001"],
+  );
+
+  const protectedInjected = compileSource("let customBuiltin = 1", {
+    builtins: ["customBuiltin"],
+  });
+  assert.deepEqual(
+    protectedInjected.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV001"],
+  );
+});
