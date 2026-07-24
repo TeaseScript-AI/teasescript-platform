@@ -17,7 +17,9 @@ The source-oriented layer includes:
 - `validateSemantics(...)`;
 - `compileSource(...)`.
 
-`compileSource(...)` is the normal combined route from source text to diagnostics and a compiled instruction plan. It returns no plan when parser or semantic errors remain. A returned plan is validated when a fresh runtime snapshot is created, when runtime execution begins, or when a caller invokes `validateInstructionPlan(...)` explicitly.
+`compileSource(...)` is the normal combined route from source text to diagnostics and a compiled instruction plan. It returns no plan when parser, finite-literal, or semantic errors remain. In particular, non-finite numeric literals are reported as `TSC001`, while large finite literals remain valid. A returned plan is validated when a fresh runtime snapshot is created, when runtime execution begins, or when a caller invokes `validateInstructionPlan(...)` explicitly.
+
+The lower-level `lex(...)` and `parse(...)` functions expose frontend results without promising that the source is compilable. Callers must not substitute parsing alone for the `compileSource(...)` validation boundary.
 
 ### Low-level plan and runtime
 
@@ -26,7 +28,8 @@ The lower-level layer includes:
 - `compileProgram(...)` and `validateInstructionPlan(...)`;
 - `createFreshRuntimeSnapshot(...)` and `validateRuntimeSnapshot(...)`;
 - `executeInstruction(...)`, `stepToEvent(...)`, and `run(...)`;
-- checkpoint creation, serialization, deserialization, and restore functions.
+- checkpoint creation, serialization, deserialization, and restore functions;
+- versioned RNG state creation and advancement helpers.
 
 The normal composition is:
 
@@ -38,7 +41,7 @@ source
     -> executeInstruction, stepToEvent, or run
 ```
 
-Low-level functions remain separately exported for tests, tooling, debugging, and controlled integration. Callers that bypass `compileSource(...)` are responsible for composing the documented semantic, plan, snapshot, and checkpoint validation stages. `compileProgram(...)` performs lowering and limited defensive checks; it is not a substitute for semantic validation.
+Low-level functions remain separately exported for tests, tooling, debugging, and controlled integration. Callers that bypass `compileSource(...)` are responsible for composing the documented semantic, plan, snapshot, and checkpoint validation stages. `compileProgram(...)` performs lowering and limited defensive checks; it is not a substitute for semantic validation. `validateInstructionPlan(...)` rejects non-JSON-safe values, including non-finite numbers.
 
 ### Compatibility host boundary
 
@@ -46,7 +49,9 @@ Low-level functions remain separately exported for tests, tooling, debugging, an
 
 Compatibility globals and builtin results cross a serializable-value adapter. Values are copied and validated before entering runtime state. Host `RuntimeSpeaker` objects are not currently supported across this boundary; declared TeaseScript speakers remain runtime-owned values.
 
-See [`docs/RUNTIME.md`](RUNTIME.md) for current execution behavior, structured errors, capabilities, defaults, and limits.
+Runtime builtins are explicit capabilities. Only own registered properties are callable, core builtins retain precedence, and low-level named arguments use a prototype-free record. These rules prevent inherited JavaScript properties or prototype-mutating names from becoming implicit capabilities.
+
+See [`docs/RUNTIME.md`](RUNTIME.md) for current execution behavior, structured errors, capabilities, compiler/template behavior, RNG invariants, defaults, and limits.
 
 ## Stability and future contracts
 
