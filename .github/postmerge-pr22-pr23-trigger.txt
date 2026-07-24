@@ -1,0 +1,1 @@
+Trigger the corrected draft verification workflow after removing nounset from nvm setup.
