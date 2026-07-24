@@ -32,7 +32,10 @@ test("records failing-before evidence for bare builtin identifiers", () => {
     const compilation = compileSource(item.source, {
       ...(item.builtins === undefined ? {} : { builtins: item.builtins }),
     });
-    assert.deepEqual(compilation.semanticDiagnostics, []);
+    const semanticDiagnostics = compilation.semanticDiagnostics.map(
+      (diagnostic) => diagnostic.code,
+    );
+    assert.deepEqual(semanticDiagnostics, []);
     assert.notEqual(compilation.plan, null);
     const execution = run(
       compilation.plan!,
@@ -43,7 +46,7 @@ test("records failing-before evidence for bare builtin identifiers", () => {
     assert.equal(runtimeFailure, "TSR006");
     evidence.push({
       name: item.name,
-      semanticDiagnostics: compilation.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+      semanticDiagnostics,
       planReturned: compilation.plan !== null,
       runtimeFailure,
     });
