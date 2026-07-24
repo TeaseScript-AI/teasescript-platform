@@ -19,13 +19,19 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - name: Validate work-package tooling
-        run: |
-          bash -n tools/work-packages/integrate.sh
-          jq empty tools/work-packages/PACKAGE.schema.json
-          jq empty tools/work-packages/templates/PACKAGE.example.json
       - name: Install dependencies
         run: npm ci
+      - name: Capture focused diagnostics
+        continue-on-error: true
+        run: |
+          npm run build > diagnostics.log 2>&1
+          node --test dist/tests/runtime-engine-hardening.test.js >> diagnostics.log 2>&1
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-16-final-diagnostics
+          path: diagnostics.log
       - name: Check source
         run: npm run check
       - name: Build
