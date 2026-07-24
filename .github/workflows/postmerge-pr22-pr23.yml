@@ -1,0 +1,31 @@
+name: Post-merge PR22 PR23 verification
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-current-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out verification branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Preserve verification runner outside worktree
+        run: cp .github/postmerge-pr22-pr23-verify.sh /tmp/postmerge-pr22-pr23-verify.sh
+      - name: Check out pinned current main
+        uses: actions/checkout@v4
+        with:
+          ref: ed098995238172065c6dcd1ea2b8e9e0d4238675
+          fetch-depth: 0
+      - name: Run focused post-merge verification
+        run: bash /tmp/postmerge-pr22-pr23-verify.sh
+      - name: Upload verification summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postmerge-pr22-pr23-summary
+          path: ${{ runner.temp }}/postmerge-pr22-pr23-summary.txt
