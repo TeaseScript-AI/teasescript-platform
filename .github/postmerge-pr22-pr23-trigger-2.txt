@@ -1,1 +1,0 @@
-Trigger split nvm diagnostics for the temporary draft verification.
