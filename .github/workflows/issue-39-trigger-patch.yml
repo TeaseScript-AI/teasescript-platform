@@ -1,0 +1,30 @@
+name: Trigger issue 39 patch
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/issue-39-control-flow-regions
+          fetch-depth: 0
+      - name: Apply and push once
+        run: |
+          if grep -q "validateInstructionControlFlowRegions" src/instructions.ts; then
+            exit 0
+          fi
+          sed -n '25,254p' .github/workflows/issue-39-apply-patch.yml | sed 's/^          //' > /tmp/issue-39-apply.sh
+          bash /tmp/issue-39-apply.sh
+          git diff --check
+          git config user.name "OpenAI Agent"
+          git config user.email "agent@openai.com"
+          git add src/instructions.ts tests/instruction-plan-validation.test.ts
+          git commit -m "Reject control flow across execution regions"
+          git push origin HEAD:fix/issue-39-control-flow-regions
