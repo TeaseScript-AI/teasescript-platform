@@ -89,6 +89,7 @@ test("exposes prototype-sensitive named arguments as own immutable keys", () => 
   assert.equal(named.constructor, 2);
   assert.equal(named.prototype, 3);
   assert.equal(Object.isFrozen(named), true);
+  assert.equal(Reflect.defineProperty(named, "extra", { value: 4 }), false);
 });
 
 test("detects duplicate prototype-sensitive named arguments", () => {
