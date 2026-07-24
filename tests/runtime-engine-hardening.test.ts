@@ -6,6 +6,7 @@ import type { InstructionPlan } from "../src/instructions.js";
 import {
   run,
   type RuntimeBuiltinFunction,
+  type RuntimeCapabilityCall,
 } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 
@@ -64,18 +65,86 @@ test("keeps core builtin precedence over injected names", () => {
   assert.equal(randomCalls, 1);
 });
 
+test("exposes prototype-sensitive named arguments as own immutable keys", () => {
+  const names = ["__proto__", "constructor", "prototype"] as const;
+  const compiled = namedBuiltinPlan(names);
+  let captured: RuntimeCapabilityCall["named"] | null = null;
+  const capture: RuntimeBuiltinFunction = (call) => {
+    captured = call.named;
+    return null;
+  };
+  const result = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled),
+    { builtins: { capture } },
+  );
+
+  assert.equal(result.snapshot.status, "halted");
+  assert.equal(result.snapshot.failure, null);
+  assert.notEqual(captured, null);
+  const named = captured!;
+  assert.equal(Object.getPrototypeOf(named), null);
+  assert.deepEqual(Object.keys(named), names);
+  assert.equal(named.__proto__, 1);
+  assert.equal(named.constructor, 2);
+  assert.equal(named.prototype, 3);
+  assert.equal(Object.isFrozen(named), true);
+  assert.equal(Reflect.defineProperty(named, "extra", { value: 4 }), false);
+});
+
+test("detects duplicate prototype-sensitive named arguments", () => {
+  const compiled = namedBuiltinPlan(["__proto__", "__proto__"]);
+  const result = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled),
+    { builtins: { capture: () => null } },
+  );
+
+  assert.equal(result.snapshot.failure?.code, "TSR010");
+  assert.match(
+    result.snapshot.failure?.message ?? "",
+    /Duplicate named argument '__proto__'/u,
+  );
+});
+
 function inheritedBuiltinPlan(name: string): InstructionPlan {
   const compiled = compile("let output = injectedBuiltin()", ["injectedBuiltin"]);
   const plan = JSON.parse(JSON.stringify(compiled)) as InstructionPlan;
+  const call = bindingCall(plan);
+  assert.equal(call.callee.kind, "identifier");
+  if (call.callee.kind !== "identifier") throw new Error("Expected an identifier callee.");
+  (call.callee as { name: string }).name = name;
+  return plan;
+}
+
+function namedBuiltinPlan(names: readonly string[]): InstructionPlan {
+  const argumentsSource = names
+    .map((_, index) => `argument${index}: ${index + 1}`)
+    .join(", ");
+  const compiled = compile(
+    `let output = capture(${argumentsSource})`,
+    ["capture"],
+  );
+  const plan = JSON.parse(JSON.stringify(compiled)) as InstructionPlan;
+  const call = bindingCall(plan);
+  assert.equal(call.arguments.length, names.length);
+  call.arguments.forEach((argument, index) => {
+    assert.equal(argument.kind, "named");
+    if (argument.kind !== "named") throw new Error("Expected a named argument.");
+    (argument as { name: string }).name = names[index]!;
+  });
+  return plan;
+}
+
+function bindingCall(
+  plan: InstructionPlan,
+): Extract<InstructionPlan["instructions"][number], { kind: "declareBinding" }>["value"] & { kind: "call" } {
   const instruction = plan.instructions[0];
   assert.equal(instruction?.kind, "declareBinding");
   if (instruction?.kind !== "declareBinding") throw new Error("Expected a binding declaration.");
   assert.equal(instruction.value.kind, "call");
   if (instruction.value.kind !== "call") throw new Error("Expected a builtin call.");
-  assert.equal(instruction.value.callee.kind, "identifier");
-  if (instruction.value.callee.kind !== "identifier") throw new Error("Expected an identifier callee.");
-  (instruction.value.callee as { name: string }).name = name;
-  return plan;
+  return instruction.value;
 }
 
 function compile(source: string, builtins: readonly string[]): InstructionPlan {
