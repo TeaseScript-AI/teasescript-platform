@@ -10,7 +10,7 @@ import {
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 
 test("requires explicit own registration for an inherited builtin name", () => {
-  const compiled = compile("let output = valueOf()", ["valueOf"]);
+  const compiled = inheritedBuiltinPlan("valueOf");
   const missing = run(compiled, createFreshRuntimeSnapshot(compiled));
 
   assert.equal(missing.snapshot.failure?.code, "TSR011");
@@ -63,6 +63,20 @@ test("keeps core builtin precedence over injected names", () => {
   assert.equal(injectedCalls, 0);
   assert.equal(randomCalls, 1);
 });
+
+function inheritedBuiltinPlan(name: string): InstructionPlan {
+  const compiled = compile("let output = injectedBuiltin()", ["injectedBuiltin"]);
+  const plan = JSON.parse(JSON.stringify(compiled)) as InstructionPlan;
+  const instruction = plan.instructions[0];
+  assert.equal(instruction?.kind, "declareBinding");
+  if (instruction?.kind !== "declareBinding") throw new Error("Expected a binding declaration.");
+  assert.equal(instruction.value.kind, "call");
+  if (instruction.value.kind !== "call") throw new Error("Expected a builtin call.");
+  assert.equal(instruction.value.callee.kind, "identifier");
+  if (instruction.value.callee.kind !== "identifier") throw new Error("Expected an identifier callee.");
+  (instruction.value.callee as { name: string }).name = name;
+  return plan;
+}
 
 function compile(source: string, builtins: readonly string[]): InstructionPlan {
   const result = compileSource(source, { builtins });
