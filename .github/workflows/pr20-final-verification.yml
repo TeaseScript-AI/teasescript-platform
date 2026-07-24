@@ -67,17 +67,23 @@ jobs:
         run: npm ci
 
       - name: Run complete check
-        run: npm run check
+        shell: bash
+        run: |
+          set -eo pipefail
+          npm run check | tee "$RUNNER_TEMP/npm-check.log"
 
       - name: Run build
         run: npm run build
 
       - name: Run focused compiled tests
+        shell: bash
         run: |
+          set -eo pipefail
           node --test \
             dist/tests/runtime-random.test.js \
             dist/tests/runtime-checkpoint.test.js \
-            dist/tests/control-flow-runtime.test.js
+            dist/tests/control-flow-runtime.test.js \
+            | tee "$RUNNER_TEMP/focused-tests.log"
 
       - name: Run functional verification
         run: node /tmp/pr20-final-verification.mjs
@@ -99,6 +105,15 @@ jobs:
       - name: Write verification summary
         shell: bash
         run: |
+          set -euo pipefail
+          FULL_TESTS="$(awk '/^# tests / { value=$3 } END { print value }' "$RUNNER_TEMP/npm-check.log")"
+          FULL_PASS="$(awk '/^# pass / { value=$3 } END { print value }' "$RUNNER_TEMP/npm-check.log")"
+          FULL_FAIL="$(awk '/^# fail / { value=$3 } END { print value }' "$RUNNER_TEMP/npm-check.log")"
+          FOCUSED_TESTS="$(awk '/^# tests / { value=$3 } END { print value }' "$RUNNER_TEMP/focused-tests.log")"
+          FOCUSED_PASS="$(awk '/^# pass / { value=$3 } END { print value }' "$RUNNER_TEMP/focused-tests.log")"
+          FOCUSED_FAIL="$(awk '/^# fail / { value=$3 } END { print value }' "$RUNNER_TEMP/focused-tests.log")"
+          test -n "$FULL_TESTS"
+          test -n "$FOCUSED_TESTS"
           cat > "$RUNNER_TEMP/pr20-final-summary.txt" <<EOF
           RESULT=PASS
           MAIN_SHA=ed098995238172065c6dcd1ea2b8e9e0d4238675
@@ -107,9 +122,14 @@ jobs:
           NPM=$(npm --version)
           NVM_USE=PASS
           NPM_CI=PASS
+          FULL_TESTS=$FULL_TESTS
+          FULL_PASS=$FULL_PASS
+          FULL_FAIL=$FULL_FAIL
           NPM_CHECK=PASS
           NPM_BUILD=PASS
-          FOCUSED_TESTS=PASS
+          FOCUSED_TESTS=$FOCUSED_TESTS
+          FOCUSED_PASS=$FOCUSED_PASS
+          FOCUSED_FAIL=$FOCUSED_FAIL
           FUNCTIONAL_PROBES=PASS
           DIFF_CHECK=PASS
           STATUS_CLEAN=PASS
