@@ -8,8 +8,10 @@ import {
   type ExecutionResult,
   type RandomSource,
 } from "../src/runtime/interpreter.js";
+import { SerializableValueError } from "../src/runtime/serializable-values.js";
 import {
   createRuntimeObject,
+  createRuntimeSpeaker,
   type RuntimeValue,
 } from "../src/runtime/values.js";
 
@@ -82,6 +84,24 @@ test("validates injected built-in results at runtime", () => {
   assert.deepEqual(
     result.errors.map((error) => error.code),
     ["TSR013"],
+  );
+});
+
+test("rejects host speaker globals at the compatibility boundary", () => {
+  const speaker = createRuntimeSpeaker("hostSpeaker");
+  speaker.properties.set("displayName", "Host Speaker");
+
+  assertHostSpeakerBoundaryError(() =>
+    run("say hostSpeaker", undefined, undefined, { hostSpeaker: speaker }),
+  );
+});
+
+test("rejects host speaker builtin results at the compatibility boundary", () => {
+  const speaker = createRuntimeSpeaker("hostSpeaker");
+  speaker.properties.set("displayName", "Host Speaker");
+
+  assertHostSpeakerBoundaryError(() =>
+    run("let value = provideSpeaker()", { provideSpeaker: () => speaker }),
   );
 });
 
@@ -294,6 +314,18 @@ function run(
     random,
     ...(builtins === undefined ? {} : { builtins }),
     ...(globals === undefined ? {} : { globals }),
+  });
+}
+
+function assertHostSpeakerBoundaryError(action: () => unknown): void {
+  assert.throws(action, (error: unknown) => {
+    assert.ok(error instanceof SerializableValueError);
+    assert.equal(error.code, "invalid");
+    assert.equal(
+      error.message,
+      "Host speaker values are not supported at the runtime boundary.",
+    );
+    return true;
   });
 }
 
