@@ -11,15 +11,23 @@ import {
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 
 test("requires explicit own registration for inherited builtin names", () => {
+  for (const name of [
+    "valueOf",
+    "hasOwnProperty",
+    "constructor",
+    "toString",
+  ] as const) {
+    const compiled = compile(`say ${name}()`, [name]);
+    const missing = run(compiled, createFreshRuntimeSnapshot(compiled));
+
+    assert.equal(missing.snapshot.failure?.code, "TSR011");
+    assert.match(
+      missing.snapshot.failure?.message ?? "",
+      new RegExp(`Unknown built-in function '${name}'`, "u"),
+    );
+  }
+
   const compiled = compile("say valueOf()", ["valueOf"]);
-  const missing = run(compiled, createFreshRuntimeSnapshot(compiled));
-
-  assert.equal(missing.snapshot.failure?.code, "TSR011");
-  assert.match(
-    missing.snapshot.failure?.message ?? "",
-    /Unknown built-in function 'valueOf'/u,
-  );
-
   const valueOf: RuntimeBuiltinFunction = () => "registered";
   const injected = run(
     compiled,
