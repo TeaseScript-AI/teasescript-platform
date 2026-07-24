@@ -1,4 +1,5 @@
 import type { Program } from "../ast.js";
+import { findNonFiniteNumericLiteralDiagnostics } from "../ast-validation.js";
 import {
   DiagnosticSeverity,
   type Diagnostic,
@@ -81,16 +82,18 @@ export class Interpreter {
   }
 
   public execute(program: Program): ExecutionResult {
+    const astDiagnostics = findNonFiniteNumericLiteralDiagnostics(program);
     const semantic = validateSemantics(program, {
       globals: Object.keys(this.#options.globals ?? {}),
       builtins: Object.keys(this.#options.builtins ?? {}),
     });
+    const diagnostics = Object.freeze([...astDiagnostics, ...semantic.diagnostics]);
     if (
-      semantic.diagnostics.some(
+      diagnostics.some(
         (diagnostic) => diagnostic.severity === DiagnosticSeverity.Error,
       )
     ) {
-      throw new InterpreterCompilationError(semantic.diagnostics);
+      throw new InterpreterCompilationError(diagnostics);
     }
 
     const plan = compileProgram(program);
