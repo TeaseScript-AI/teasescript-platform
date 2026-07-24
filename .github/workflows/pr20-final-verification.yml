@@ -106,14 +106,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          FULL_TESTS="$(awk '/^# tests / { value=$3 } END { print value }' "$RUNNER_TEMP/npm-check.log")"
-          FULL_PASS="$(awk '/^# pass / { value=$3 } END { print value }' "$RUNNER_TEMP/npm-check.log")"
-          FULL_FAIL="$(awk '/^# fail / { value=$3 } END { print value }' "$RUNNER_TEMP/npm-check.log")"
-          FOCUSED_TESTS="$(awk '/^# tests / { value=$3 } END { print value }' "$RUNNER_TEMP/focused-tests.log")"
-          FOCUSED_PASS="$(awk '/^# pass / { value=$3 } END { print value }' "$RUNNER_TEMP/focused-tests.log")"
-          FOCUSED_FAIL="$(awk '/^# fail / { value=$3 } END { print value }' "$RUNNER_TEMP/focused-tests.log")"
-          test -n "$FULL_TESTS"
-          test -n "$FOCUSED_TESTS"
+          extract_metric() {
+            node --input-type=module - "$1" "$2" <<'NODE'
+          import fs from "node:fs";
+          const [file, metric] = process.argv.slice(2);
+          const text = fs.readFileSync(file, "utf8").replace(/\u001b\[[0-9;]*m/g, "");
+          const pattern = new RegExp(`\\b${metric}\\s+(\\d+)`, "g");
+          const matches = [...text.matchAll(pattern)];
+          if (matches.length === 0) {
+            console.error(`Unable to find ${metric} in ${file}`);
+            console.error(text.slice(-3000));
+            process.exit(1);
+          }
+          console.log(matches.at(-1)[1]);
+          NODE
+          }
+          FULL_TESTS="$(extract_metric "$RUNNER_TEMP/npm-check.log" tests)"
+          FULL_PASS="$(extract_metric "$RUNNER_TEMP/npm-check.log" pass)"
+          FULL_FAIL="$(extract_metric "$RUNNER_TEMP/npm-check.log" fail)"
+          FOCUSED_TESTS="$(extract_metric "$RUNNER_TEMP/focused-tests.log" tests)"
+          FOCUSED_PASS="$(extract_metric "$RUNNER_TEMP/focused-tests.log" pass)"
+          FOCUSED_FAIL="$(extract_metric "$RUNNER_TEMP/focused-tests.log" fail)"
           cat > "$RUNNER_TEMP/pr20-final-summary.txt" <<EOF
           RESULT=PASS
           MAIN_SHA=ed098995238172065c6dcd1ea2b8e9e0d4238675
