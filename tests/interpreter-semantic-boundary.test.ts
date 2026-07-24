@@ -109,9 +109,7 @@ function assertCompilationCode(program: Program, code: string): void {
   });
 }
 
-function getMutableCall(program: Program): {
-  arguments: Array<Program["statements"][number] extends never ? never : unknown>;
-} {
+function getMutableCall(program: Program): { arguments: unknown[] } {
   const statement = program.statements[1] as unknown as {
     expression: { arguments: unknown[] };
   };
