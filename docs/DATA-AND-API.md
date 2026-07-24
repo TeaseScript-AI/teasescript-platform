@@ -17,7 +17,7 @@ The source-oriented layer includes:
 - `validateSemantics(...)`;
 - `compileSource(...)`.
 
-`compileSource(...)` is the normal combined route from source text to diagnostics and a compiled instruction plan. It returns no plan when parser, finite-literal, or semantic errors remain. In particular, non-finite numeric literals are reported as `TSC001`, while large finite literals remain valid. A returned plan is validated when a fresh runtime snapshot is created, when runtime execution begins, or when a caller invokes `validateInstructionPlan(...)` explicitly.
+`compileSource(...)` is the normal combined route from source text to diagnostics and a compiled instruction plan. It returns no plan when parser, finite-literal, or semantic errors remain. In particular, non-finite numeric literals are reported as exact-span `TSC001`, while large finite literals remain valid. A returned plan is validated when a fresh runtime snapshot is created, when runtime execution begins, or when a caller invokes `validateInstructionPlan(...)` explicitly.
 
 The lower-level `lex(...)` and `parse(...)` functions expose frontend results without promising that the source is compilable. Callers must not substitute parsing alone for the `compileSource(...)` validation boundary.
 
@@ -41,11 +41,11 @@ source
     -> executeInstruction, stepToEvent, or run
 ```
 
-Low-level functions remain separately exported for tests, tooling, debugging, and controlled integration. Callers that bypass `compileSource(...)` are responsible for composing the documented semantic, plan, snapshot, and checkpoint validation stages. `compileProgram(...)` performs lowering and limited defensive checks; it is not a substitute for semantic validation. `validateInstructionPlan(...)` rejects non-JSON-safe values, including non-finite numbers.
+Low-level functions remain separately exported for tests, tooling, debugging, and controlled integration. Callers that bypass `compileSource(...)` are responsible for composing the documented semantic, plan, snapshot, and checkpoint validation stages. `compileProgram(...)` performs lowering and limited defensive checks; it is not a substitute for semantic validation. It reuses the shared finite-literal AST validation and throws `InstructionCompilationError` with `TSC001` rather than returning a plan containing `NaN`, `Infinity`, or `-Infinity`. `validateInstructionPlan(...)` independently rejects non-JSON-safe plan data.
 
 ### Compatibility host boundary
 
-`execute(program, options)` and `Interpreter` form the current direct-AST compatibility/testing boundary. They validate the supplied `Program` using configured global and builtin names before lowering. Semantic failure is exposed through `InterpreterCompilationError` rather than an unstructured runtime crash.
+`execute(program, options)` and `Interpreter` form the current direct-AST compatibility/testing boundary. They run shared finite-literal AST validation and semantic validation using configured global and builtin names before lowering. Non-finite literal values and semantic failures are exposed through ordered `InterpreterCompilationError` diagnostics rather than an unstructured runtime crash.
 
 Compatibility globals and builtin results cross a serializable-value adapter. Values are copied and validated before entering runtime state. Host `RuntimeSpeaker` objects are not currently supported across this boundary; declared TeaseScript speakers remain runtime-owned values.
 
