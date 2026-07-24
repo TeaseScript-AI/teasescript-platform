@@ -1,0 +1,56 @@
+name: Fix runtime invariant test migration
+
+on:
+  push:
+    branches: [test/runtime-invariant-harness]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: test/runtime-invariant-harness
+          fetch-depth: 0
+      - name: Correct migrated test text
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          runtime_path = Path("tests/runtime-checkpoint.test.ts")
+          runtime = runtime_path.read_text()
+          broken = '    "speaker vera { title: "Mistress" }",\n'
+          fixed = '    \'speaker vera { title: "Mistress" }\',\n'
+          if broken not in runtime:
+              raise SystemExit("broken runtime checkpoint quote not found")
+          runtime_path.write_text(runtime.replace(broken, fixed, 1))
+
+          control_path = Path("tests/control-flow-runtime.test.ts")
+          control = control_path.read_text()
+          broken_block = '''    const { boundaries } = assertRuntimeResumeEquivalent(source, {
+            scenarioName: `loop checkpoint corpus: ${source.split("\\n")[0]}`,
+            seed: 9,
+          });
+          assert.ok(boundaries.some((snapshot) => snapshot.loopFrames.length > 0));'''
+          fixed_block = '''    const { boundaries } = assertRuntimeResumeEquivalent(source, {
+              scenarioName: `loop checkpoint corpus: ${source.split("\\n")[0]}`,
+              seed: 9,
+            });
+            assert.ok(boundaries.some((snapshot) => snapshot.loopFrames.length > 0));'''
+          if broken_block not in control:
+              raise SystemExit("misindented control-flow block not found")
+          control_path.write_text(control.replace(broken_block, fixed_block, 1))
+          PY
+      - name: Commit correction
+        run: |
+          git rm .github/workflows/fix-runtime-invariant-migration.yml
+          git add tests/runtime-checkpoint.test.ts tests/control-flow-runtime.test.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Fix runtime equivalence test migration"
+          git push origin HEAD:test/runtime-invariant-harness
