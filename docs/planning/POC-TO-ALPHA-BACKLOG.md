@@ -1,0 +1,139 @@
+# POC-to-alpha backlog
+
+**Status:** Canonical selected backlog
+
+**Scope:** Work explicitly selected as required before a stated POC or pre-alpha gate
+
+**Scheduling:** This file does not schedule implementation
+
+## Purpose
+
+This backlog answers a narrower question than `WISHES.xml` or the legacy planning files:
+
+> Which open outcomes has the owner selected as required before a stated development gate?
+
+Inclusion here means the outcome must be addressed before its target gate. It does not mean the item belongs to the current phase, and it does not accept a proposed syntax, API, architecture, or implementation.
+
+The planning flow is:
+
+```text
+WISHES.xml or proposal material
+    -> explicit owner selection
+POC-TO-ALPHA-BACKLOG.md
+    -> explicit coordinator scheduling
+phase plan / work package / issue
+    -> implementation and verification
+PHASE-STATUS.md
+```
+
+## Governance
+
+- Agents may propose entries, but only the owner or designated coordinator may select an item as required, change its target gate, or schedule it for implementation.
+- A backlog item is not implementation scope unless a current phase plan, coordinator assignment, work package, or issue explicitly selects its ID.
+- Ideas that still need product triage remain in `WISHES.xml` or another proposal document.
+- Accepted architecture and language semantics belong in ADRs and specifications, not in this backlog.
+- When an item is implemented and verified, record the result in `PHASE-STATUS.md` and remove it from this open backlog. Git history preserves the completed entry.
+
+## Fields
+
+### Tracks
+
+- **Engine core:** parser, compiler, deterministic runtime, state, checkpoints, language semantics, and core libraries.
+- **Player runtime:** Standard UI, package UI, media, choices, input, timers, and other behavior that runs inside the player environment before or after final iframe embedding.
+- **Host shell:** the website-side owner of the cross-origin player iframe, sandbox, lifecycle, navigation, and host messaging.
+- **Platform backend:** Laravel/PostgreSQL accounts, packages, publishing, persistence, scheduling, moderation, and services.
+- **Authoring tools:** editor, simulator, debugger, validation, previews, and package tooling.
+- **Cross-boundary:** contracts that necessarily span two or more tracks.
+
+### Planning state
+
+- **Design required:** the required outcome is selected, but its contract is not yet ready for implementation planning.
+- **Ready for phase:** the contract is sufficiently decided to schedule in a future phase.
+
+### Scheduling
+
+- **Unscheduled:** required before the target gate but not assigned to a current phase.
+- **Scheduled: `<phase/workstream>`:** explicitly selected by the owner or coordinator for that named phase/workstream.
+
+## Open selected items
+
+### POC-PLAYER-001 — Define the custom-view contract
+
+- **Track:** Player runtime
+- **Target gate:** Before alpha
+- **Planning state:** Design required
+- **Scheduling:** Unscheduled
+
+#### Required outcome
+
+Define the smallest coherent custom-view contract for package-provided UI inside the player runtime, including:
+
+- registration and ownership of package TypeScript views;
+- blocking views that return a serializable result;
+- background views that return a runtime handle;
+- typed input, events, results, update, close, cancel, failure, and cleanup behavior;
+- deterministic lifecycle and reconstruction after save/resume;
+- which view state is canonical runtime state versus reconstructible UI state;
+- the boundary between Standard UI and package UI;
+- focus, keyboard, overlay, navigation, and back behavior inside the player runtime;
+- editor, simulator, debugger, and preview requirements;
+- comparison of a TypeScript-only API, a small TeaseScript invocation API, and a fuller declarative TeaseScript syntax.
+
+#### Boundaries
+
+- This item concerns logical views inside the player runtime. It does not imply browser pop-ups or a nested iframe per view.
+- The cross-origin host-shell protocol is a separate concern. Any custom-view capability that truly requires host support must be proposed and selected as a separate Host shell or Cross-boundary backlog item.
+- Do not accept final TeaseScript syntax or an implementation API through this backlog entry. The result requires owner approval and the appropriate ADR/specification updates.
+
+#### Dependencies and references
+
+- [ADR 0012 — Custom-view capability](../decisions/0012-custom-view-capability.md)
+- [ADR 0015 — Serializable runtime architecture](../decisions/0015-serializable-runtime-architecture.md)
+- [`docs/RUNTIME.md`](../RUNTIME.md)
+- [`docs/LIBRARIES.md`](../LIBRARIES.md)
+- [`docs/SECURITY.md`](../SECURITY.md)
+- [`docs/CODE-EDITOR.md`](../CODE-EDITOR.md)
+- [`docs/OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), section **Player and interactions**
+
+#### Completion of the design item
+
+This item may move to **Ready for phase** only after the owner approves a coherent lifecycle/state/security contract and the relevant ADRs and current topic documents are updated. Implementation is a later, explicitly scheduled phase.
+
+### POC-ENGINE-001 — Establish runtime performance criteria and a benchmark baseline
+
+- **Track:** Engine core
+- **Target gate:** Before alpha
+- **Planning state:** Design required
+- **Scheduling:** Unscheduled
+
+#### Required outcome
+
+Create a measured performance baseline and production optimization plan for the deterministic instruction runtime, including:
+
+- representative small, normal, and stress workloads;
+- execution throughput and latency between externally visible events;
+- runtime-state and checkpoint-size measurements;
+- acceptable limits for loops, recursion, temporaries, scopes, and large values;
+- the cost of current snapshot cloning and defensive validation;
+- run-until-event batching and clone-avoidance options;
+- checkpoint cadence and incremental persistence boundaries;
+- precomputed temporary-liveness metadata;
+- possible copy-on-write optimization for ordinary values while preserving accepted copy semantics.
+
+#### Boundaries
+
+- JSON-safe state at every instruction boundary does not mean serializing or persisting after every instruction.
+- Do not optimize by weakening deterministic source order, checkpoint validation, value-copy behavior, or restore equivalence.
+- Do not select an optimization merely because it appears plausible; measure the current runtime first and document the maintenance and correctness trade-offs.
+
+#### Dependencies and references
+
+- [ADR 0014 — Core runtime value semantics](../decisions/0014-core-runtime-value-semantics.md)
+- [ADR 0015 — Serializable runtime architecture](../decisions/0015-serializable-runtime-architecture.md)
+- [`CURRENT-DESIGN.md`](../../CURRENT-DESIGN.md), section **Runtime execution and performance boundary**
+- [`docs/RUNTIME.md`](../RUNTIME.md)
+- [`docs/OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), section **Runtime hardening and evolution**
+
+#### Completion of the design item
+
+This item may move to **Ready for phase** after benchmark workloads, measurement commands, acceptance thresholds, and a prioritized optimization plan are owner-approved. Individual optimizations must then be scheduled explicitly.

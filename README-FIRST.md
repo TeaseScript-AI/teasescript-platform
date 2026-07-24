@@ -8,9 +8,10 @@ Use project material in this order:
 2. Otherwise use `docs/specifications/accepted-syntaxes-v30.md` for accepted TeaseScript syntax and semantics.
 3. Use `CURRENT-DESIGN.md` and `PHASE-STATUS.md` for current architecture and implementation status.
 4. Use the task-specific current topic document in `docs/`.
-5. Use `docs/planning/` for proposals, gaps, and deferred work; planning text is not an accepted decision by itself.
-6. Use `WISHES.xml` for product intent and decision history; an active wish is not automatically an implementation decision.
-7. Treat capability research, old project packages, audit reports, and source examples as non-authoritative reference material.
+5. Use `docs/planning/POC-TO-ALPHA-BACKLOG.md` for owner-selected work that remains required before its target gate. Inclusion does not schedule the item and does not define architecture or syntax.
+6. Use other files in `docs/planning/` for proposals, gap analysis, and legacy backlog material; planning text is not an accepted decision by itself.
+7. Use `WISHES.xml` for product intent and decision history; an active wish is not automatically an implementation decision or backlog commitment.
+8. Treat capability research, old project packages, audit reports, and source examples as non-authoritative reference material.
 
 When files conflict, identify the exact conflict. Do not silently combine historical syntax, planning proposals, and accepted syntax.
 
@@ -50,5 +51,6 @@ This does not mean that the complete V30 language, static type system, timers, i
 - `docs/DOCUMENTATION-OWNERSHIP.md`: which material belongs in GitHub versus the shared project research archive.
 - `docs/specifications/`: accepted consolidated specifications.
 - `docs/decisions/`: accepted and proposed ADRs.
-- `docs/planning/`: non-authoritative proposals and backlog.
+- `docs/planning/POC-TO-ALPHA-BACKLOG.md`: selected work required before a stated POC/pre-alpha gate, but not automatically scheduled.
+- `docs/planning/`: other non-authoritative proposals, gap analysis, and legacy backlog material.
 - `docs/reference/`: routing notices for research intentionally stored outside this repository.

@@ -1,4 +1,4 @@
-> **Status note (2026-07-24):** The parser-only framing in this legacy Dutch backlog is historical. The serializable runtime, control flow, and user-function milestone now exist. Use `../../PHASE-STATUS.md` for implementation status; the remaining items below are planning, not accepted implementation decisions.
+> **Legacy planning document:** This Dutch file mixes historical parser-POC assumptions, candidate product ideas, open design questions, and already resolved topics. It is retained for later triage and must not be used as current scope. Only items explicitly selected in [`POC-TO-ALPHA-BACKLOG.md`](POC-TO-ALPHA-BACKLOG.md) are required before their stated gate, and even those items are not scheduled until an owner/coordinator phase plan selects their IDs. Use [`../../PHASE-STATUS.md`](../../PHASE-STATUS.md) for implemented status and [`../OPEN-DECISIONS.md`](../OPEN-DECISIONS.md) for unresolved decisions.
 
 # TeaseScript — Post-POC ontwikkelbacklog
 

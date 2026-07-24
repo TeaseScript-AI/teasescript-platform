@@ -8,11 +8,19 @@ The repository owns documentation that must change with code, architecture, lang
 - accepted syntax specifications;
 - ADRs;
 - concise current topic documents in `docs/`;
-- current open decisions and active planning/backlog;
+- current open decisions, the selected POC-to-alpha backlog, and active phase planning;
 - `WISHES.xml` product intent/history;
 - executable, tested examples under `examples/`.
 
 A code or semantic change is incomplete when its canonical documentation becomes false. Update the relevant repository document in the same pull request unless the change is purely internal and does not affect documented behavior or status.
+
+The selected backlog and active phase planning have different lifecycles:
+
+- `docs/planning/POC-TO-ALPHA-BACKLOG.md` records owner-selected obligations that remain open before a target gate;
+- a coordinator assignment, work package, issue, or phase plan records what is currently scheduled;
+- `PHASE-STATUS.md` records implemented and verified results.
+
+Do not keep completed items in the open backlog merely as history; Git already preserves their earlier state.
 
 ## Shared project folder: durable context and non-authoritative research
 
