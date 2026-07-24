@@ -35,7 +35,7 @@ jobs:
       - name: Install and use .nvmrc Node
         shell: bash
         run: |
-          set -euo pipefail
+          set -eo pipefail
           export NVM_DIR="$RUNNER_TEMP/nvm"
           rm -rf "$NVM_DIR"
           git clone --depth 1 --branch v0.40.3 https://github.com/nvm-sh/nvm.git "$NVM_DIR"
