@@ -810,12 +810,12 @@ class Evaluator {
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
   ) {
-    this.#builtins = {
-      ...(capabilities.builtins ?? {}),
-      random: (call) => this.#randomBuiltin(call),
-      chance: (call) => this.#chanceBuiltin(call),
-      randomInteger: (call) => this.#randomIntegerBuiltin(call),
-    };
+    const builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
+    Object.assign(builtins, capabilities.builtins ?? {});
+    builtins.random = (call) => this.#randomBuiltin(call);
+    builtins.chance = (call) => this.#chanceBuiltin(call);
+    builtins.randomInteger = (call) => this.#randomIntegerBuiltin(call);
+    this.#builtins = Object.freeze(builtins);
   }
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
@@ -1308,7 +1308,7 @@ class Evaluator {
       ? null
       : this.#resolveDescriptor(receiverDescriptor, propertyCallee.object.span);
     const positional: SerializableRuntimeValue[] = [];
-    const named: Record<string, SerializableRuntimeValue> = {};
+    const named: Record<string, SerializableRuntimeValue> = Object.create(null);
     for (const argument of expression.arguments) {
       const value = cloneSerializableValue(this.evaluate(argument.value));
       if (argument.kind === "positional") positional.push(value);
@@ -1320,7 +1320,9 @@ class Evaluator {
       }
     }
     if (expression.callee.kind === "identifier") {
-      const builtin = this.#builtins[expression.callee.name];
+      const builtin = Object.hasOwn(this.#builtins, expression.callee.name)
+        ? this.#builtins[expression.callee.name]
+        : undefined;
       if (builtin === undefined) {
         throw fault("TSR011", `Unknown built-in function '${expression.callee.name}'.`, expression.callee.span);
       }
