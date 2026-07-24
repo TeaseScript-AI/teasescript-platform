@@ -28,6 +28,7 @@ test("resume equivalence preserves list warnings and collection state", () => {
     ],
   );
   assert.deepEqual(result.events.map((event) => event.sequence), [1, 2, 3, 4]);
+  assert.equal(result.finalSnapshot.nextEventSequence, 5);
   assert.deepEqual(rootValue(result.finalSnapshot, "values"), {
     kind: "list",
     items: [1],
