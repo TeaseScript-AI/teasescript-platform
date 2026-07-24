@@ -9,9 +9,6 @@ permissions:
 jobs:
   verify-current-main:
     runs-on: ubuntu-latest
-    env:
-      EXPECTED_MAIN_SHA: ed098995238172065c6dcd1ea2b8e9e0d4238675
-      NVM_DIR: ${{ runner.temp }}/nvm
     steps:
       - name: Check out verification branch
         uses: actions/checkout@v4
@@ -30,23 +27,22 @@ jobs:
           set -euo pipefail
           git fetch origin main --depth=1
           ACTUAL_MAIN_SHA="$(git rev-parse origin/main)"
-          echo "EXPECTED_MAIN_SHA=$EXPECTED_MAIN_SHA"
+          echo "EXPECTED_MAIN_SHA=ed098995238172065c6dcd1ea2b8e9e0d4238675"
           echo "ACTUAL_MAIN_SHA=$ACTUAL_MAIN_SHA"
-          test "$ACTUAL_MAIN_SHA" = "$EXPECTED_MAIN_SHA"
-          test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+          test "$ACTUAL_MAIN_SHA" = "ed098995238172065c6dcd1ea2b8e9e0d4238675"
+          test "$(git rev-parse HEAD)" = "ed098995238172065c6dcd1ea2b8e9e0d4238675"
           test -z "$(git status --short)"
       - name: Install and use .nvmrc Node
         shell: bash
         run: |
           set -euo pipefail
+          export NVM_DIR="$RUNNER_TEMP/nvm"
           rm -rf "$NVM_DIR"
           git clone --depth 1 --branch v0.40.3 https://github.com/nvm-sh/nvm.git "$NVM_DIR"
           . "$NVM_DIR/nvm.sh"
           nvm install
           nvm use
-          NVM_NODE_VERSION="$(nvm version)"
-          echo "$NVM_DIR/versions/node/$NVM_NODE_VERSION/bin" >> "$GITHUB_PATH"
-          echo "NVM_NODE_VERSION=$NVM_NODE_VERSION" >> "$GITHUB_ENV"
+          echo "$NVM_DIR/versions/node/$(nvm version)/bin" >> "$GITHUB_PATH"
           node --version
           npm --version
       - name: Install dependencies
@@ -74,12 +70,11 @@ jobs:
           git diff --check
           test -z "$(git status --short)"
       - name: Write verification summary
-        if: success()
         shell: bash
         run: |
           cat > "$RUNNER_TEMP/postmerge-pr22-pr23-summary.txt" <<EOF
           RESULT=PASS
-          BASE_SHA=$EXPECTED_MAIN_SHA
+          BASE_SHA=ed098995238172065c6dcd1ea2b8e9e0d4238675
           NODE=$(node --version)
           NPM=$(npm --version)
           TARGETED_TESTS=PASS
