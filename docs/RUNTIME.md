@@ -34,7 +34,7 @@ Plan, snapshot, and checkpoint formats currently use version 3. They are POC for
 3. includes the core runtime built-ins plus configured global and builtin names in validation;
 4. lowers the program only when no error diagnostics remain.
 
-The result separates parser and semantic diagnostics and returns `plan: null` when compilation fails.
+The result separates parser and semantic diagnostics and returns `plan: null` when compilation fails. A returned plan is checked at the snapshot/runtime boundary or may be checked explicitly with `validateInstructionPlan(...)` before use.
 
 ### Direct AST compatibility route
 
@@ -54,7 +54,7 @@ The low-level runtime entry points are:
 - `stepToEvent(...)` until the next event, halt, or failure;
 - `run(...)` until halt, failure, or instruction-budget exhaustion.
 
-These entry points validate the instruction plan and runtime snapshot before execution. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
+Before an instruction is executed, the runtime validates the instruction plan and runtime snapshot. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
 
 ## Host values and capabilities
 
