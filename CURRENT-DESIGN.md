@@ -18,7 +18,7 @@
 Accepted post-V30 decisions relevant to the current runtime include:
 
 - ADR 0013: insertion-ordered `set[...]` collections and `type set` annotations;
-- ADR 0014: recursive value-copy semantics for ordinary values and speaker-reference identity behavior;
+- ADR 0014: recursive value-copy semantics for ordinary values, scalar-only sets, empty collection errors, and speaker display-name fallback behavior;
 - ADR 0015: versioned JSON-safe instruction plans, explicit runtime state, checkpoints, deterministic stepping/RNG/events, and no suspended JavaScript call stack.
 
 Direct assignment remains `score = 20`; `set score = 20` remains invalid.
@@ -27,7 +27,7 @@ Direct assignment remains `score = 20`; `set score = 20` remains invalid.
 
 ### Parser and core language
 
-The implementation includes lexer/parser/AST/diagnostics, semantic validation, literals, expressions, variables, assignments, speakers, output, collections, and accepted copy/error behavior.
+The implementation includes lexer/parser/AST/diagnostics, semantic validation, literals, expressions, variables, assignments, speakers, output, collections, and accepted copy/error behavior. Template interpolation supports nested template literals and recursive interpolation with exact source spans and structured recovery diagnostics. Shared AST-level validation rejects non-finite numeric literals through the normal `compileSource(...)` boundary and the direct `Program` compatibility boundary before an instruction plan is returned or executed.
 
 ### Serializable runtime and playground
 
@@ -36,7 +36,7 @@ The runtime executes validated instruction plans rather than AST nodes. It provi
 - explicit versioned JSON-safe runtime snapshots and self-contained checkpoints;
 - instruction and event-boundary stepping;
 - typed sequenced events and structured failures;
-- deterministic serializable RNG state;
+- deterministic serializable `xorshift32-v1` state with a non-zero seed/state invariant;
 - instruction budgets;
 - a standalone repository-backed browser playground.
 
@@ -60,6 +60,17 @@ The implementation includes:
 - full suspended-caller temporary liveness validation;
 - strict function prologue/region and checkpoint validation;
 - centralized enforcement of accepted V30 protected names.
+
+### Implemented foundation hardening
+
+The current implementation also:
+
+- validates direct `Program` compatibility execution before lowering, including shared `TSC001` rejection of non-finite numeric literal values;
+- applies a narrow defensive `compileProgram(...)` guard so direct lowering cannot return a plan containing `NaN`, `Infinity`, or `-Infinity`;
+- rejects host `RuntimeSpeaker` values at the current compatibility boundary rather than creating dangling references;
+- requires explicit own-property builtin registration and stores low-level named builtin arguments in a prototype-free record;
+- restricts automatic visible-list text selection to strings and finite numbers after one item is selected;
+- rejects malformed zero `xorshift32-v1` seed, direct state, runtime snapshot state, and restored checkpoint state.
 
 Instruction plans, runtime snapshots, and checkpoints currently use version 3. Complete static typing and the wider V30 runtime/API surface remain out of scope.
 

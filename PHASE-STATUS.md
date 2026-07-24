@@ -2,8 +2,9 @@
 
 ## Evidence boundary
 
-- Current repository baseline for this status update: `1cf3aa4a7ad7302ffdbd434488ce526e76c97ad8` on `main`.
-- PR #5, **Add serializable user-defined functions**, is merged into `main` as `07f1c9fb98ff9b9a72096477d5a13461487ea606`.
+- Current repository baseline for this status update: `786a6480a4de4690797207a0964a92ed387afedf` on `main`.
+- The seven-item implemented-foundation hardening set tracked by issue #7 is complete at this baseline, including the compiler/template work in PR #19, RNG-state work in PR #20, and the direct-AST non-finite-number boundary repair in PR #34.
+- Final post-merge verification at this baseline passed with 273 tests, 0 failures, and a successful TypeScript build.
 - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
 ## Implemented in the current repository code
@@ -13,13 +14,15 @@
 - Lexer, parser, immutable AST, UTF-16 source spans, structured diagnostics, and semantic validation.
 - Literals, expressions, variables, assignments, lexical blocks, speakers, `say`, `say as`, contextual speaker behavior, and `exit`.
 - Lists, objects, insertion-ordered scalar sets, deep ordinary-value copying, and current collection/runtime errors.
+- Recursive nested template literals inside interpolation, including preserved escapes, source spans, structured unterminated-template diagnostics, and existing recovery behavior.
+- `compileSource(...)` rejection of non-finite numeric literals through exact-span `TSC001`, while large finite literals remain valid and failed compilation returns no plan.
 
 ### Serializable deterministic runtime
 
 - Versioned JSON-safe instruction plans and runtime snapshots.
 - Self-contained checkpoints with defensive validation.
 - Typed sequenced runtime events and structured failures.
-- Versioned deterministic RNG state.
+- Versioned deterministic `xorshift32-v1` state with non-zero seed and restored-state validation.
 - One-instruction and event-boundary stepping with instruction budgets.
 - Standalone repository-backed browser playground and constrained development server.
 
@@ -37,8 +40,13 @@
 - Complete suspended-caller temporary liveness validation.
 - Strict function prologue/region, checkpoint-progress, and prepared-reference validation.
 - Central V30 protected-name enforcement.
+- Shared non-finite-literal AST validation and semantic validation before direct `Program` compatibility execution.
+- Defensive direct lowering with `TSC001` for non-finite numeric literals and `TSC003` for excess positional arguments.
+- Explicit rejection of host `RuntimeSpeaker` values at the compatibility boundary.
+- Own-property-only runtime builtin registration and prototype-free named builtin arguments.
+- Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
 
-The current plan, snapshot, and checkpoint formats are version 3 POC formats.
+The current plan, snapshot, and checkpoint formats are version 3 POC formats. The completed hardening did not change these format versions.
 
 ## Verification expected before merge
 
