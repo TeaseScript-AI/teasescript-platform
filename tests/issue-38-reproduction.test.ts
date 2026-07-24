@@ -39,12 +39,13 @@ test("records failing-before evidence for bare builtin identifiers", () => {
       createFreshRuntimeSnapshot(compilation.plan!),
       item.capabilities,
     );
-    assert.equal(execution.snapshot.failure?.code, "TSR006");
+    const runtimeFailure = execution.snapshot.failure?.code ?? null;
+    assert.equal(runtimeFailure, "TSR006");
     evidence.push({
       name: item.name,
       semanticDiagnostics: compilation.semanticDiagnostics.map((diagnostic) => diagnostic.code),
       planReturned: compilation.plan !== null,
-      runtimeFailure: execution.snapshot.failure?.code ?? null,
+      runtimeFailure,
     });
   }
 
