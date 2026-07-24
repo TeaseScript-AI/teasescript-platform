@@ -1,63 +1,57 @@
-# TeaseScript Platform
+# TeaseScript platform
 
-Browser-first platform and deterministic scripting language for interactive teases, persistent personalities, and broader roleplay packages.
+Browser-first platform and deterministic scripting language for interactive teases, BDSM scenes, persistent personalities, and broader roleplay packages.
 
 Start with [`README-FIRST.md`](README-FIRST.md).
 
-On `main`, the TypeScript core contains the parser and core-language foundation.
-The stacked `feature/runtime-playground` branch adds a serializable runtime and
-standalone browser playground. This `feature/control-flow-runtime` branch adds
-accepted comments, ranges, deterministic random built-ins, two-word `else if`,
-`repeat`, list/set/range `for`, `while`, `break`, and `continue`.
+## Current TypeScript POC
 
-The implemented subset compiles to a versioned JSON-safe instruction plan and
-executes with explicit checkpointable runtime state and typed events. Plans,
-snapshots, and checkpoints use version 2 on the control-flow branch and reject
-unsupported older versions. The wider V30 language and full static type
-checking remain out of scope.
+The repository contains the parser/core language, semantic validation, a versioned serializable instruction runtime, explicit loop and call frames, checkpoint save/restore, deterministic control flow and random built-ins, user-defined functions, source-order/checkpoint hardening, and a standalone browser playground.
 
-## Core development
+Instruction plans, runtime snapshots, and checkpoints currently use version 3 and reject unsupported older versions. The wider V30 language and complete static type checking remain out of scope.
 
-Use the Node.js version pinned in `.nvmrc`, then run:
+## Development
+
+Use Node.js 24.18.0 from `.nvmrc`:
 
 ```shell
+nvm use
 npm ci
 npm run check
+npm run build
+git diff --check
 ```
 
 ## Standalone development playground
-
-Install the pinned development dependencies and start the local player:
 
 ```shell
 npm ci
 npm run playground
 ```
 
-The development server builds TypeScript first and listens at
-`http://127.0.0.1:4173/` by default. To make it reachable through an LXC or LAN
-interface deliberately, run:
+The development server builds TypeScript first and listens at `http://127.0.0.1:4173/` by default. To expose it deliberately through an LXC or LAN interface:
 
 ```shell
 HOST=0.0.0.0 PORT=4173 npm run playground
 ```
 
-Binding to `0.0.0.0` exposes this development server to every network that can
-reach the container. The playground is not production-ready and is not a
-public Node backend; Laravel remains the only eventual public backend.
+Binding to `0.0.0.0` exposes this development server to every network that can reach the container. The playground is not production-ready and is not a public Node backend; Laravel remains the only eventual public backend.
 
-The page offers only the repository-backed `main`, `control-flow`, and
-`checkpoint-loop` examples. Selecting another example resets runtime UI state.
-Saved checkpoints are namespaced by example and checkpoint format version.
-Use event-boundary Step and save during `checkpoint-loop` to inspect and restore
-an active serialized loop frame.
+The page offers fixed repository examples for core behavior, control flow, active-loop checkpoints, and functions. Saved checkpoints are namespaced by example and checkpoint format version.
 
-Fresh playground runs use the fixed unsigned seed `0x6d2b79f5`
-(`1831565813`) with the versioned `xorshift32-v1` runtime RNG. This makes the
-repository example reproducible. The generator is not cryptographically secure
-and is not a language-syntax guarantee.
+Fresh playground runs use the fixed unsigned seed `0x6d2b79f5` (`1831565813`) with the versioned `xorshift32-v1` runtime RNG. It is deterministic and serializable, not cryptographically secure and not a permanent syntax guarantee.
 
-The POC has two development-only dependencies, both exactly pinned in the lockfile:
+The POC has two exactly pinned development dependencies:
 
-- `typescript` compiles and statically checks the TypeScript parser core. Plain JavaScript or a separate transpiler would either abandon the accepted TypeScript architecture or add another tool. It requires compiler-version maintenance, but adds no runtime package or production network access.
-- `@types/node` supplies types for the Node.js test harness. Hand-maintained declarations would duplicate the Node API surface. It must track the pinned Node.js version and currently brings the development-only `undici-types` transitive package; none of these packages are part of the parser runtime.
+- `typescript` compiles and statically checks the TypeScript core;
+- `@types/node` supplies types for the Node.js test and development-server harness.
+
+Neither is a runtime package exposed to TeaseScript content.
+
+## Documentation
+
+- [`CURRENT-DESIGN.md`](CURRENT-DESIGN.md)
+- [`PHASE-STATUS.md`](PHASE-STATUS.md)
+- [`docs/README.md`](docs/README.md)
+- [`docs/specifications/accepted-syntaxes-v30.md`](docs/specifications/accepted-syntaxes-v30.md)
+- [`docs/decisions/README.md`](docs/decisions/README.md)

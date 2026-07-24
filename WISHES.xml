@@ -1,0 +1,811 @@
+<?xml version='1.0' encoding='utf-8'?>
+<controlsystems_project name="MilovanaAlternative" schema_version="1.0" last_updated="2026-07-23">
+  <wishlist_policy>
+    <memory_note>Project memory is disabled. This XML file is the persistent wishlist artifact for this conversation.</memory_note>
+    <retention_rule>Never delete a wish. When abandoned or superseded, change its status to retired or superseded and add a dated history note explaining why.</retention_rule>
+    <inference_rule>Add reasonably inferred wishes when they clearly follow from the stated product direction.</inference_rule>
+  </wishlist_policy>
+  <wishes>
+    <wish id="W-001" status="active">
+      <title>Full community platform</title>
+      <description>Build a full Milovana alternative with a forum, script catalogue, script editor, tease engine, user accounts and synchronized progression.</description>
+      <tags>
+        <tag>platform</tag>
+        <tag>forum</tag>
+        <tag>editor</tag>
+        <tag>engine</tag>
+        <tag>accounts</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-002" status="active">
+      <title>Low-cost server architecture</title>
+      <description>Keep central server load and bandwidth low enough for an inexpensive VPS; execute heavy runtime work on client devices where practical.</description>
+      <tags>
+        <tag>infrastructure</tag>
+        <tag>cost</tag>
+        <tag>edge-first</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-003" status="active">
+      <title>Platform-hosted published media with optional private local media</title>
+      <description>Serve published package images, audio and video through platform-managed object storage/CDN so packages do not depend on author-controlled hotlinks. Allow private user-owned high-resolution media to remain local where appropriate.</description>
+      <tags>
+        <tag>media</tag>
+        <tag>video</tag>
+        <tag>local-library</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+        <event date="2026-07-21" type="refined">Refined after choosing platform-hosted published media while retaining optional private local media.</event>
+      </history>
+    </wish>
+    <wish id="W-004" status="active">
+      <title>Private peer-to-peer links</title>
+      <description>Use peer-to-peer connections where they materially reduce server load and improve privacy, particularly for desktop-phone pairing and live sessions.</description>
+      <tags>
+        <tag>webrtc</tag>
+        <tag>privacy</tag>
+        <tag>cross-device</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+        <event date="2026-07-23" type="deferred">WebRTC remains product intent only; implementation requires a concrete browser limitation or peer-to-peer use case and an accepted decision.</event>
+      </history>
+    </wish>
+    <wish id="W-005" status="active">
+      <title>Strong consensual device-control mode</title>
+      <description>Provide an optional installed desktop companion capable of immersive fullscreen or kiosk-like punishment tasks, with visible state, user-enabled integration settings and a reliable emergency exit. Avoid granular per-function permissions.</description>
+      <tags>
+        <tag>desktop</tag>
+        <tag>native-agent</tag>
+        <tag>control</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+        <event date="2026-07-21" type="clarified">Removed unnecessary granular permissions; core engine APIs are standard and only genuine external boundaries require one-time enablement.</event>
+      </history>
+    </wish>
+    <wish id="W-006" status="active">
+      <title>Webcam task validation</title>
+      <description>Use on-device camera analysis to validate movement, posture, repetitions, task completion and before/after visual changes.</description>
+      <tags>
+        <tag>camera</tag>
+        <tag>computer-vision</tag>
+        <tag>validation</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-007" status="active">
+      <title>LLM-enhanced script runtime</title>
+      <description>Allow an LLM to make dialogue more realistic while the deterministic script remains authoritative; support both low-freedom variable filling and bounded higher-freedom scene narration.</description>
+      <tags>
+        <tag>llm</tag>
+        <tag>runtime</tag>
+        <tag>dialogue</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-008" status="active">
+      <title>LLM behaviour and image assessment</title>
+      <description>Allow an LLM or vision model to classify interaction signals such as bratty or submissive behaviour and assess task evidence, with confidence-aware branching.</description>
+      <tags>
+        <tag>llm</tag>
+        <tag>vision</tag>
+        <tag>classification</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-009" status="active">
+      <title>Local LLM providers</title>
+      <description>Support local inference through at least Ollama and llama.cpp, behind a provider-neutral interface.</description>
+      <tags>
+        <tag>llm</tag>
+        <tag>ollama</tag>
+        <tag>llama.cpp</tag>
+        <tag>local</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-010" status="active">
+      <title>Tool-using LLM</title>
+      <description>Expose typed tools to the LLM for rhythm, timers, camera checks, task modules, line writing, corner time, chastity integrations and toy actions; all calls pass through runtime validation.</description>
+      <tags>
+        <tag>llm</tag>
+        <tag>tools</tag>
+        <tag>orchestration</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-011" status="active">
+      <title>Desktop and smartphone specialization</title>
+      <description>Support desktop-only, phone-only and dual-device task variants instead of forcing one interface model onto every device.</description>
+      <tags>
+        <tag>desktop</tag>
+        <tag>mobile</tag>
+        <tag>tasks</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-012" status="active">
+      <title>Cross-device handoff</title>
+      <description>Allow a running tease to move between desktop and smartphone and to combine sensors from one device with rendering or local LLM execution on another.</description>
+      <tags>
+        <tag>cross-device</tag>
+        <tag>handoff</tag>
+        <tag>sensors</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-013" status="active">
+      <title>Smartphone sensor tasks</title>
+      <description>Support camera, accelerometer, orientation, step-count and other available mobile sensor signals for task verification where device support permits.</description>
+      <tags>
+        <tag>mobile</tag>
+        <tag>sensors</tag>
+        <tag>validation</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-014" status="active">
+      <title>Toy integration</title>
+      <description>Integrate existing ecosystems where practical, especially Buttplug/Intiface, xToys-compatible workflows and Chaster APIs.</description>
+      <tags>
+        <tag>toys</tag>
+        <tag>buttplug</tag>
+        <tag>intiface</tag>
+        <tag>xtoys</tag>
+        <tag>chaster</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-015" status="active">
+      <title>Deterministic compatibility engine</title>
+      <description>Run legacy Tease AI-style scripts predictably, with versioned compatibility profiles, reproducible random seeds, resumable state and traceable branching.</description>
+      <tags>
+        <tag>engine</tag>
+        <tag>compatibility</tag>
+        <tag>determinism</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-016" status="active">
+      <title>Safe script publishing model</title>
+      <description>Publish scripts as versioned packages rather than arbitrary executable code; include validation, simulation, dependency metadata and only the external integration requirements that actually cross browser, device, network or OS boundaries.</description>
+      <tags>
+        <tag>editor</tag>
+        <tag>security</tag>
+        <tag>packages</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+        <event date="2026-07-21" type="clarified">Removed unnecessary granular permissions; core engine APIs are standard and only genuine external boundaries require one-time enablement.</event>
+      </history>
+    </wish>
+    <wish id="W-017" status="active">
+      <title>Client-owned private data</title>
+      <description>Prefer local processing for camera, private media, LLM inference and detailed task evidence; synchronize only the minimum account and progression data required.</description>
+      <tags>
+        <tag>privacy</tag>
+        <tag>local-first</tag>
+        <tag>data-minimization</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+      </history>
+    </wish>
+    <wish id="W-018" status="active">
+      <title>Cross-platform desktop client</title>
+      <description>Provide an installed desktop client for Windows and Linux, with macOS support where practical, while sharing as much user-interface and engine code as possible.</description>
+      <tags>
+        <tag>desktop</tag>
+        <tag>windows</tag>
+        <tag>linux</tag>
+        <tag>macos</tag>
+        <tag>cross-platform</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Inferred from the technology-stack and platform-support requirements.</event>
+        <event date="2026-07-23" type="deferred">A full desktop client remains deferred; mobile starts as a responsive PWA and a thin helper is added only for concrete browser limitations.</event>
+      </history>
+    </wish>
+    <wish id="W-019" status="active">
+      <title>Server-independent local operation</title>
+      <description>Allow the tease engine, local scripts, media, local LLM and device integrations to run without a live server connection; the server acts as an optional account, community and synchronization provider.</description>
+      <tags>
+        <tag>offline</tag>
+        <tag>local-first</tag>
+        <tag>sync</tag>
+        <tag>decoupling</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Inferred from the technology-stack and platform-support requirements.</event>
+      </history>
+    </wish>
+    <wish id="W-020" status="active">
+      <title>Mobile web-first delivery</title>
+      <description>Use an installable mobile website/PWA as the first smartphone client, with an optional native wrapper later when background execution, sensors or platform integration require it.</description>
+      <tags>
+        <tag>mobile</tag>
+        <tag>pwa</tag>
+        <tag>android</tag>
+        <tag>ios</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Inferred from the technology-stack and platform-support requirements.</event>
+      </history>
+    </wish>
+    <wish id="W-021" status="active">
+      <title>KISS-first architecture</title>
+      <description>Prefer the simplest architecture that satisfies the current phase. Avoid duplicate frameworks, microservices, premature native clients, WebRTC, distributed infrastructure and extra languages until a concrete requirement justifies them.</description>
+      <tags>
+        <tag>architecture</tag>
+        <tag>kiss</tag>
+        <tag>simplicity</tag>
+        <tag>phased-delivery</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added after the user explicitly required the KISS principle.</event>
+      </history>
+    </wish>
+    <wish id="W-022" status="active">
+      <title>Browser-first with thin headless desktop companion</title>
+      <description>Keep the tease player and primary interface in the normal browser. The installed desktop component should initially be a small headless CLI/native helper without its own full GUI. A browser extension may act as a narrow bridge where required, but the architecture must account for extension-store and browser-distribution constraints.</description>
+      <tags>
+        <tag>browser</tag>
+        <tag>extension</tag>
+        <tag>native-messaging</tag>
+        <tag>headless</tag>
+        <tag>desktop-companion</tag>
+        <tag>kiss</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added after clarifying that a full Electron/Tauri desktop user interface was not the intended baseline.</event>
+      </history>
+    </wish>
+    <wish id="W-023" status="active">
+      <title>Progressive TeaseScript language</title>
+      <description>Create one progressively disclosed TeaseScript language and one deterministic runtime. Beginners use scenes and high-level commands; advanced authors can use typed state, functions, modules, records, collections, events and reusable libraries without needing unrestricted host-language code.</description>
+      <tags>
+        <tag>scripting-language</tag>
+        <tag>dsl</tag>
+        <tag>progressive-disclosure</tag>
+        <tag>advanced-authors</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added after comparing the uploaded SexScript Groovy and Tease AI Java/Spicy script systems.</event>
+        <event date="2026-07-20" type="clarified">Clarified that the goal is one runtime with beginner and advanced authoring levels, not multiple compatibility engines.</event>
+      </history>
+    </wish>
+    <wish id="W-024" status="active">
+      <title>Block syntax without significant whitespace</title>
+      <description>Use explicit block delimiters such as braces rather than making indentation or spaces part of the script meaning.</description>
+      <tags>
+        <tag>syntax</tag>
+        <tag>braces</tag>
+        <tag>usability</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added after comparing the uploaded SexScript Groovy and Tease AI Java/Spicy script systems.</event>
+      </history>
+    </wish>
+    <wish id="W-025" status="active">
+      <title>Legacy compatibility without legacy semantics</title>
+      <description>Support import or a compatibility parser for classic Tease AI scripts while keeping the new language grammar and semantics clean, versioned and unambiguous.</description>
+      <tags>
+        <tag>compatibility</tag>
+        <tag>tease-ai</tag>
+        <tag>migration</tag>
+        <tag>versioning</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added after comparing the uploaded SexScript Groovy and Tease AI Java/Spicy script systems.</event>
+      </history>
+    </wish>
+    <wish id="W-026" status="active">
+      <title>Sandboxed code modules and trusted capability plugins</title>
+      <description>Allow advanced packages to include sandboxed TypeScript-derived libraries for complex algorithms and custom player interfaces. Libraries may use HTML, CSS and DOM inside the isolated player iframe, but receive no parent-site DOM, raw external network, filesystem, process or device objects. Separately enabled host integrations may expose controlled external features.</description>
+      <tags>
+        <tag>plugins</tag>
+        <tag>typescript</tag>
+        <tag>sandbox</tag>
+        <tag>capabilities</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added after comparing the uploaded SexScript Groovy and Tease AI Java/Spicy script systems.</event>
+        <event date="2026-07-20" type="clarified">Separated author-supplied sandboxed computation libraries from separately installed trusted engine plugins.</event>
+        <event date="2026-07-21" type="clarified">Removed unnecessary granular permissions; core engine APIs are standard and only genuine external boundaries require one-time enablement.</event>
+        <event date="2026-07-21" type="corrected">Allowed HTML/CSS/DOM inside the isolated player iframe while retaining the parent-site, network, filesystem, process and device boundaries.</event>
+      </history>
+    </wish>
+    <wish id="W-027" status="active">
+      <title>Reusable author libraries without mandatory programming</title>
+      <description>Support versioned reusable libraries and packages so advanced authors can create Domme3-style helper APIs, while ordinary authors can create complete teases using only built-in high-level commands.</description>
+      <tags>
+        <tag>libraries</tag>
+        <tag>packages</tag>
+        <tag>authoring</tag>
+        <tag>progressive-disclosure</tag>
+        <tag>reuse</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added after reviewing the SexScripts API documentation and the Milovana EOS init-script pattern.</event>
+      </history>
+    </wish>
+    <wish id="W-028" status="active">
+      <title>Randomized module pools and session composition</title>
+      <description>Support Tease AI-style reusable module pools so a main tease can assemble sessions dynamically from tagged or named modules, with weights, requirements, history avoidance, cooldowns and explicit fallback behavior. The composition logic must be visible in the script rather than hidden in hard-coded folder semantics.</description>
+      <tags>
+        <tag>modules</tag>
+        <tag>randomization</tag>
+        <tag>session-builder</tag>
+        <tag>tease-ai</tag>
+        <tag>replayability</tag>
+      </tags>
+      <history>
+        <event date="2026-07-20" type="created">Added after clarifying that randomized reusable file/module selection is a core benefit of classic Tease AI.</event>
+      </history>
+    </wish>
+    <wish id="W-029" status="active">
+      <title>Folder- and tag-based module selection</title>
+      <description>Allow session builders to select random eligible `.tease` modules from a named folder or from the package-wide module index using required and excluded tags. Modules may carry multiple tags, with weights, conditions, cooldowns, recent-history avoidance and explicit fallback behavior.</description>
+      <tags>
+        <tag>modules</tag>
+        <tag>folders</tag>
+        <tag>tags</tag>
+        <tag>randomization</tag>
+        <tag>selection</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added while consolidating the ChatGPT project documentation and new reference examples.</event>
+      </history>
+    </wish>
+    <wish id="W-030" status="active">
+      <title>Continuous personality runtime</title>
+      <description>Support CyberDom/VirMst-style personalities that remain active across a day or longer, with persistent events, schedules, statuses, jobs, deadlines, reminders, notifications, reports, permission requests, calendars and deterministic restart/resume behavior.</description>
+      <tags>
+        <tag>runtime</tag>
+        <tag>scheduler</tag>
+        <tag>continuous</tag>
+        <tag>calendar</tag>
+        <tag>jobs</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added while consolidating the ChatGPT project documentation and new reference examples.</event>
+      </history>
+    </wish>
+    <wish id="W-031" status="active">
+      <title>Integrated browser code editor</title>
+      <description>Provide a browser-based project editor with syntax highlighting, autocomplete, diagnostics, project tree, module/tag navigation, formatter, simulator, debugger, deterministic random tracing and publication validation.</description>
+      <tags>
+        <tag>editor</tag>
+        <tag>authoring</tag>
+        <tag>debugger</tag>
+        <tag>validation</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added while consolidating the ChatGPT project documentation and new reference examples.</event>
+      </history>
+    </wish>
+    <wish id="W-032" status="active">
+      <title>Beginner-friendly expression subsystem</title>
+      <description>Provide readable arithmetic and logical expressions inside TeaseScript without exposing free JavaScript or TypeScript. Evaluate math.js as a restricted expression engine while retaining a separate parser for TeaseScript statements and blocks.</description>
+      <tags>
+        <tag>teasescript</tag>
+        <tag>expressions</tag>
+        <tag>mathjs</tag>
+        <tag>parser</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added while consolidating the ChatGPT project documentation and new reference examples.</event>
+        <event date="2026-07-23" type="clarified">TeaseScript uses its own accepted expression grammar. Math.js remains only a proposed restricted evaluator and is not an accepted dependency.</event>
+      </history>
+    </wish>
+    <wish id="W-033" status="active">
+      <title>Capability parity from reference systems</title>
+      <description>Use Milovana EOS, classic Tease AI, SexScripts/Groovy, Toy, Tease AI Java/Spicy and VirMst/CyberDom as capability references. The new engine should be able to recreate their useful behaviors through TeaseScript, libraries and capabilities without running their original languages or copying their architectures.</description>
+      <tags>
+        <tag>research</tag>
+        <tag>compatibility</tag>
+        <tag>capabilities</tag>
+        <tag>references</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added while consolidating the ChatGPT project documentation and new reference examples.</event>
+      </history>
+    </wish>
+    <wish id="W-034" status="active">
+      <title>Persistent personality instance</title>
+      <description>Represent every long-running personality as a persistent server-side instance with status, timezone, revision, events, assignments, permissions, flags, reports and pending interactions.</description>
+      <tags>
+        <tag>personality</tag>
+        <tag>server-state</tag>
+        <tag>continuous</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+      </history>
+    </wish>
+    <wish id="W-035" status="active">
+      <title>First-class lifecycle and scheduled events</title>
+      <description>Support lifecycle events, explicit execution locations, missed-event policies and server scheduling while browsers are closed.</description>
+      <tags>
+        <tag>events</tag>
+        <tag>scheduler</tag>
+        <tag>lifecycle</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+      </history>
+    </wish>
+    <wish id="W-036" status="active">
+      <title>Standard flags, assignments, permissions and reports</title>
+      <description>Provide standardized runtime and API concepts for expiring flags, long-running assignments, permission requests and multi-question reports.</description>
+      <tags>
+        <tag>flags</tag>
+        <tag>assignments</tag>
+        <tag>permissions</tag>
+        <tag>reports</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+      </history>
+    </wish>
+    <wish id="W-037" status="active">
+      <title>Low-friction TypeScript library publication</title>
+      <description>Use normal TypeScript exports as the public library API and generate manifests and editor metadata automatically. Built-in engine functions, events and planning require no permissions or duplicate registration; only external integrations are enabled at package or user level.</description>
+      <tags>
+        <tag>typescript</tag>
+        <tag>libraries</tag>
+        <tag>developer-experience</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+        <event date="2026-07-21" type="clarified">Removed unnecessary granular permissions; core engine APIs are standard and only genuine external boundaries require one-time enablement.</event>
+      </history>
+    </wish>
+    <wish id="W-038" status="active">
+      <title>Continuous-personality editor simulation</title>
+      <description>Add timelines, calendars, status graphs, offline-time simulation, pending-event inspection and interrupt/resource tracing to the browser editor.</description>
+      <tags>
+        <tag>editor</tag>
+        <tag>simulation</tag>
+        <tag>continuous</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+      </history>
+    </wish>
+    <wish id="W-039" status="active">
+      <title>Controlled interruption and event limits</title>
+      <description>Use explicit procedure priority, interruption rules, resource claims, queue limits, deduplication and recurrence quotas for long-running personalities.</description>
+      <tags>
+        <tag>runtime</tag>
+        <tag>priorities</tag>
+        <tag>resource-limits</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+      </history>
+    </wish>
+    <wish id="W-040" status="active">
+      <title>Named multi-speaker chat messages</title>
+      <description>Use the English `say` command without an implied Mistress argument. Allow authors to declare any practical number of speakers. Each speaker has only a unique identifier, display name, text color and font. Plain messages use quoted strings; backtick strings support `${expression}` interpolation; `say as &lt;speakerIdentifier&gt;` overrides the current default speaker for one message. Do not assume avatars, voices or other speaker properties.</description>
+      <tags>
+        <tag>teasescript</tag>
+        <tag>speakers</tag>
+        <tag>chat</tag>
+        <tag>presentation</tag>
+        <tag>font</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Accepted as the preferred design for say and multi-speaker chat.</event>
+        <event date="2026-07-21" type="corrected">Restricted speaker properties to identifier, display name, color and font; removed unrequested avatar and voice assumptions.</event>
+        <event date="2026-07-21" type="refined">Replaced the intermediate brace-message syntax with ADR 0011 quoted and backtick string literals.</event>
+      </history>
+    </wish>
+    <wish id="W-041" status="active">
+      <title>Cross-origin iframe player</title>
+      <description>Run the complete player, engine and libraries in a sandboxed iframe on a separate player origin. Keep auth cookies host-only and pass only selected validated data through the parent bridge.</description>
+      <tags>
+        <tag>architecture</tag>
+        <tag>iframe</tag>
+        <tag>isolation</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
+      </history>
+    </wish>
+    <wish id="W-042" status="active">
+      <title>Full DOM custom interfaces</title>
+      <description>Allow author libraries to use HTML, CSS and DOM inside the isolated player iframe, with optional Shadow DOM and no parent-site DOM access.</description>
+      <tags>
+        <tag>libraries</tag>
+        <tag>gui</tag>
+        <tag>dom</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
+      </history>
+    </wish>
+    <wish id="W-043" status="active">
+      <title>Standard and publishable author libraries</title>
+      <description>Separate engine primitives, the official Standard Library and author libraries; allow reusable author-library publication.</description>
+      <tags>
+        <tag>libraries</tag>
+        <tag>standard-library</tag>
+        <tag>reuse</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
+      </history>
+    </wish>
+    <wish id="W-044" status="active">
+      <title>Concurrent identified media playback</title>
+      <description>Support blocking/background audio and video, simultaneous resources, durations, indefinite playback and per-resource handles for targeted stop/pause.</description>
+      <tags>
+        <tag>audio</tag>
+        <tag>video</tag>
+        <tag>runtime</tag>
+        <tag>concurrency</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
+      </history>
+    </wish>
+    <wish id="W-045" status="active">
+      <title>English implementation language</title>
+      <description>Use English for source code, identifiers, TeaseScript keywords, APIs, comments, UI text and website content.</description>
+      <tags>
+        <tag>language</tag>
+        <tag>codebase</tag>
+        <tag>website</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
+      </history>
+    </wish>
+    <wish id="W-046" status="active">
+      <title>Tiered TypeScript strictness</title>
+      <description>Use strict mode for engine and Standard Library; allow a friendlier private-author profile with explicit typed exports; require published libraries to compile fully strict.</description>
+      <tags>
+        <tag>typescript</tag>
+        <tag>strict</tag>
+        <tag>libraries</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
+      </history>
+    </wish>
+    <wish id="W-047" status="active">
+      <title>Interpolated and formatted say text</title>
+      <description>Use ordinary quoted strings for non-interpolated say text and backtick template strings for ${expression} interpolation. Both support explicit \n line breaks. Keep the switchable default speaker, Markdown plus limited BBCode, and raw HTML without compatibility guarantees.</description>
+      <tags>
+        <tag>teasescript</tag>
+        <tag>say</tag>
+        <tag>text</tag>
+        <tag>formatting</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
+        <event date="2026-07-21" type="refined">Selected quote strings for plain text and backtick templates for interpolation.</event>
+      </history>
+    </wish>
+    <wish id="W-048" status="superseded">
+      <title>Named custom views</title>
+      <description>Use `set result = show custom view "view-id" with { ... }` for blocking views and `open custom view "view-id" as handle with { ... }`, `update handle with { ... }`, and `close handle` for background views. Transfer serializable data only.</description>
+      <tags>
+        <tag>teasescript</tag>
+        <tag>gui</tag>
+        <tag>custom-view</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
+        <event date="2026-07-21" type="refined">Selected blocking and background custom-view syntax with serializable input and results.</event>
+        <event date="2026-07-23" type="superseded">The custom-view capability remains desired, but the old exact syntax conflicted with accepted direct assignment and is no longer authoritative.</event>
+      </history>
+    </wish>
+    <wish id="W-049" status="superseded">
+      <title>Declared external hosts</title>
+      <description>Require external API, media and widget hosts to be declared in package metadata.</description>
+      <tags>
+        <tag>network</tag>
+        <tag>metadata</tag>
+        <tag>security</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
+        <event date="2026-07-21" type="superseded">Replaced declared author-controlled external hosts with platform-hosted media and managed integrations.</event>
+      </history>
+    </wish>
+    <wish id="W-050" status="active">
+      <title>Platform-hosted media and managed external integrations</title>
+      <description>Do not give package code unrestricted external network access. Upload package images, audio and video to platform storage/CDN, build widgets locally in author libraries, and add third-party APIs later as platform-managed Standard Library integrations.</description>
+      <tags>
+        <tag>network</tag>
+        <tag>media</tag>
+        <tag>cdn</tag>
+        <tag>standard-library</tag>
+        <tag>security</tag>
+      </tags>
+      <history>
+        <event date="2026-07-21" type="created">Accepted after reviewing privacy, dead-link risk and long-term package reliability.</event>
+      </history>
+    </wish>
+    <wish id="W-051" status="active">
+      <title>Ordered unique set collection</title>
+      <description>Support insertion-ordered scalar sets using set[...] and type set, with uniqueness, copy semantics, collection methods and no indexing.</description>
+      <tags>
+        <tag>teasescript</tag>
+        <tag>collection</tag>
+        <tag>set</tag>
+      </tags>
+      <history>
+        <event date="2026-07-23" type="created">Confirmed during the phase-1 core language and runtime design.</event>
+        <event date="2026-07-23" type="accepted-design">ADR 0013 accepted insertion-ordered scalar sets with set[...] literals and type set annotations.</event>
+      </history>
+    </wish>
+    <wish id="W-052" status="active">
+      <title>Deep value-copy semantics</title>
+      <description>Assignments and declarations deep-copy ordinary lists, sets and script objects so mutations do not unexpectedly affect the source value.</description>
+      <tags>
+        <tag>runtime</tag>
+        <tag>state</tag>
+        <tag>copy-semantics</tag>
+      </tags>
+      <history>
+        <event date="2026-07-23" type="created">Confirmed during the phase-1 core language and runtime design.</event>
+        <event date="2026-07-23" type="accepted-design">ADR 0014 accepted recursive value-copy semantics for ordinary script lists, sets, and objects.</event>
+      </history>
+    </wish>
+    <wish id="W-053" status="active">
+      <title>Serializable deterministic execution</title>
+      <description>Compile AST to a versioned JSON-safe instruction plan and execute with explicit JSON-safe runtime snapshots and checkpoints rather than a suspended JavaScript call stack.</description>
+      <tags>
+        <tag>runtime</tag>
+        <tag>determinism</tag>
+        <tag>save-resume</tag>
+        <tag>checkpoint</tag>
+      </tags>
+      <history>
+        <event date="2026-07-23" type="created">Confirmed during the phase-1 core language and runtime design.</event>
+        <event date="2026-07-23" type="partial">The core interpreter is merged on main; serializable instruction plans, runtime snapshots, and checkpoints are the next in-progress milestone and are not yet in the main baseline.</event>
+        <event date="2026-07-23" type="implemented-pending-merge">ADR 0015 is accepted. A versioned serializable instruction plan, runtime snapshot, sequenced events, deterministic RNG state, and self-contained checkpoints are implemented on PR #3 at b9cb50a07e42b31ba79a5a7d26d6c172de33b533; merge and hardening remain.</event>
+        <event date="2026-07-24" type="implemented">The serializable runtime/playground and explicit control-flow frames are present in the recorded merged main baseline 348170dd75598a1265f82e22a1f0e3cd8a639321. Serializable user-function frames and checkpoint/evaluation hardening were committed on feature/functions-runtime in df51ebe.</event>
+      </history>
+    </wish>
+    <wish id="W-054" status="active">
+      <title>Standalone browser playground</title>
+      <description>Provide a development playground that loads a repository main.tease example and exposes diagnostics, instructions, runtime state, events, run, step, reset and checkpoint controls.</description>
+      <tags>
+        <tag>player</tag>
+        <tag>playground</tag>
+        <tag>debugger</tag>
+        <tag>phase-1</tag>
+      </tags>
+      <history>
+        <event date="2026-07-23" type="created">Confirmed during the phase-1 core language and runtime design.</event>
+        <event date="2026-07-23" type="in-progress">The standalone browser playground is being implemented on feature/runtime-playground and is not yet part of the main baseline.</event>
+        <event date="2026-07-23" type="implemented-pending-merge">The standalone repository-backed browser playground and dependency-free development server are implemented on PR #3; the branch reported 127 passing tests and an HTTP smoke test.</event>
+        <event date="2026-07-24" type="implemented">The standalone browser playground is present in the recorded merged main baseline 348170dd75598a1265f82e22a1f0e3cd8a639321 and now includes fixed control-flow, checkpoint-loop, and function examples.</event>
+      </history>
+    </wish>
+    <wish id="W-055" status="active">
+      <title>Custom-view capability with syntax pending</title>
+      <description>Support blocking and background custom views inside the sandboxed player iframe using serializable boundary data; finalize exact TeaseScript syntax later.</description>
+      <tags>
+        <tag>teasescript</tag>
+        <tag>gui</tag>
+        <tag>custom-view</tag>
+      </tags>
+      <history>
+        <event date="2026-07-23" type="created">Confirmed during the phase-1 core language and runtime design.</event>
+        <event date="2026-07-23" type="clarified">The custom-view capability remains accepted while exact author syntax and lifecycle semantics remain open.</event>
+      </history>
+    </wish>
+  </wishes>
+  <technology_stack_proposal status="historical-superseded" date="2026-07-20">
+    <authority>Non-authoritative historical planning snapshot. Use CURRENT-DESIGN.md, current specifications and accepted ADRs.</authority>
+    <component name="server">
+      <technology>PHP 8 + Laravel</technology>
+      <purpose>One server application for accounts, forum, scripts, progress, moderation and API.</purpose>
+    </component>
+    <component name="database">
+      <technology>PostgreSQL</technology>
+      <purpose>Single relational database for all central platform data.</purpose>
+    </component>
+    <component name="web_client">
+      <technology>Server-rendered Blade + small TypeScript modules</technology>
+      <purpose>Responsive web interface and browser tease player without a separate frontend server.</purpose>
+    </component>
+    <component name="mobile">
+      <technology>Responsive PWA</technology>
+      <purpose>Android and iPhone access through the same website; no native app initially.</purpose>
+    </component>
+    <component name="realtime">
+      <technology>HTTPS first; WebSocket only where needed</technology>
+      <purpose>Do not introduce WebRTC until cross-device direct communication is a real requirement.</purpose>
+    </component>
+    <component name="deployment">
+      <technology>Single Linux VPS</technology>
+      <purpose>Run one application and one PostgreSQL database; use Caddy or Nginx and avoid microservices.</purpose>
+    </component>
+    <component name="media">
+      <technology>Platform-managed object storage/CDN + optional private local media</technology>
+      <purpose>Keep published packages reproducible and independent of dead hotlinks while allowing private user-owned media to remain local.</purpose>
+    </component>
+    <phases>
+      <phase number="1">
+        <title>Browser MVP</title>
+        <scope>Accounts, simple forum, script upload, deterministic browser engine, local media import and progress storage.</scope>
+      </phase>
+      <phase number="2">
+        <title>Community platform</title>
+        <scope>Editor, publishing workflow, moderation, synchronization and optional server previews.</scope>
+      </phase>
+      <phase number="3">
+        <title>Desktop companion</title>
+        <scope>Tauri client for local LLM, toys, FFmpeg, local folders and OS-specific tasks.</scope>
+      </phase>
+      <phase number="4">
+        <title>Cross-device features</title>
+        <scope>Phone sensors, device handoff and WebRTC only after the basic platform is stable.</scope>
+      </phase>
+    </phases>
+    <component name="desktop_primary">
+      <technology>Headless native companion</technology>
+      <purpose>A small installed command-line/native host with no mandatory GUI; it provides local files, process launch, Ollama, Intiface and selected OS capabilities.</purpose>
+    </component>
+    <component name="browser_bridge">
+      <technology>Optional WebExtension + Native Messaging</technology>
+      <purpose>A deliberately thin browser-specific relay between the website and native companion. Do not place tease-engine business logic in the extension.</purpose>
+    </component>
+    <component name="desktop_optional_later">
+      <technology>Tauri only when a standalone desktop experience is justified</technology>
+      <purpose>Reuse the web interface in a system webview without adopting Electron; the browser extension is then unnecessary inside the Tauri build.</purpose>
+    </component>
+    <notes>
+      <desktop_architecture_clarification>The browser remains the primary tease environment. The native companion is initially headless. Native Messaging is technically appropriate but must not become the only possible transport until distribution constraints are resolved.</desktop_architecture_clarification>
+      <companion_language_decision>Go is the KISS candidate for the first thin companion; Rust remains the stronger later choice for embedded Buttplug/native integrations or deeper OS control.</companion_language_decision>
+    </notes>
+  </technology_stack_proposal>
+  <script_language_proposal status="historical-superseded" date="2026-07-20">
+    <authority>Non-authoritative historical planning snapshot. Use current TeaseScript/library specifications and accepted ADRs.</authority>
+    <name>TeaseScript</name>
+    <syntax>Narrative-first line syntax with explicit brace-delimited blocks; indentation is cosmetic.</syntax>
+    <execution>Parsed and compiled by the shared TypeScript tease-core into a versioned intermediate representation; executed by a deterministic sandboxed runtime.</execution>
+    <authoring_levels>Level 1 scenes and commands; level 2 state, conditions and reusable procedures; level 3 modules, events, collections and dynamic selection; trusted TypeScript plugins outside normal script packages.</authoring_levels>
+    <compatibility>Classic Tease AI, SexScript Groovy and Tease AI Java scripts are migration sources or compatibility formats, not unrestricted execution formats for newly published scripts.</compatibility>
+    <runtime_model>One engine and scheduler execute a versioned intermediate representation. TeaseScript compiles to that representation; sandboxed code modules may only return data, validated state patches or action plans.</runtime_model>
+    <advanced_code_model>Do not scatter inline eval blocks through pages. Advanced code belongs in named, versioned modules with explicit exports and resource limits.</advanced_code_model>
+    <state_mutation_model>Author code never receives a mutable reference to internal runtime state. The engine validates all state changes for type, ownership and authority before applying them.</state_mutation_model>
+    <milovana_inspiration>Retain EOS's useful combination of declarative pages and an init-code escape hatch, but replace global init/eval strings with first-class modules, typed APIs and controlled state patches.</milovana_inspiration>
+    <entrypoint_model>Each package has one explicit main entry point. Main may call an introduction and then invoke a session builder.</entrypoint_model>
+    <module_model>Modules are first-class named units with metadata such as tags, weight, requirements, cooldown and history keys. A session builder can select and run modules randomly or according to rules. Physical folders are organizational only.</module_model>
+  </script_language_proposal>
+</controlsystems_project>
