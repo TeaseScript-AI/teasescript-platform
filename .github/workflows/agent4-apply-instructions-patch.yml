@@ -26,16 +26,12 @@ jobs:
           path = Path("src/instructions.ts")
           source = path.read_text()
 
-          interface = '''export interface PlanValidationResult {
-            readonly valid: boolean;
-            readonly errors: readonly PlanValidationError[];
-          }
-
-          export function compileProgram'''
-          replacement = '''export interface PlanValidationResult {
-            readonly valid: boolean;
-            readonly errors: readonly PlanValidationError[];
-          }
+          compile_anchor = "\nexport function compileProgram(program: Program): InstructionPlan {"
+          if source.count(compile_anchor) != 1:
+              raise SystemExit(
+                  f"Expected one compileProgram anchor, found {source.count(compile_anchor)}"
+              )
+          error_class = '''
 
           /** Controlled compiler-boundary failure for semantically invalid AST input. */
           export class InstructionCompilationError extends Error {
@@ -51,38 +47,33 @@ jobs:
               this.span = copySpan(span);
             }
           }
+          '''
+          source = source.replace(compile_anchor, error_class + compile_anchor, 1)
 
-          export function compileProgram'''
-
-          parameter = '''      const parameterName =
-                argument.kind === "namedArgument"
-                  ? argument.name.name
-                  : registered.declaration.parameters[index]!.name.name;
-              prepared.push({'''
-          parameter_replacement = '''      let parameterName: string;
-              if (argument.kind === "namedArgument") {
-                parameterName = argument.name.name;
-              } else {
-                const parameter = registered.declaration.parameters[index];
-                if (parameter === undefined) {
-                  throw new InstructionCompilationError(
-                    "TSC003",
-                    `Function '${name}' has no parameter for positional argument ${index + 1}.`,
-                    argument.span,
-                  );
+          start_anchor = "      const parameterName =\n"
+          end_anchor = "      prepared.push({\n"
+          start = source.find(start_anchor)
+          if start < 0:
+              raise SystemExit("Parameter-name lowering anchor not found")
+          end = source.find(end_anchor, start)
+          if end < 0:
+              raise SystemExit("Prepared-argument anchor not found")
+          guard = '''      let parameterName: string;
+                if (argument.kind === "namedArgument") {
+                  parameterName = argument.name.name;
+                } else {
+                  const parameter = registered.declaration.parameters[index];
+                  if (parameter === undefined) {
+                    throw new InstructionCompilationError(
+                      "TSC003",
+                      `Function '${name}' has no parameter for positional argument ${index + 1}.`,
+                      argument.span,
+                    );
+                  }
+                  parameterName = parameter.name.name;
                 }
-                parameterName = parameter.name.name;
-              }
-              prepared.push({'''
-
-          for old, new, label in [
-              (interface, replacement, "error class insertion"),
-              (parameter, parameter_replacement, "parameter guard"),
-          ]:
-              if source.count(old) != 1:
-                  raise SystemExit(f"Expected exactly one {label} target, found {source.count(old)}")
-              source = source.replace(old, new, 1)
-
+          '''
+          source = source[:start] + guard + source[end:]
           path.write_text(source)
           PY
       - name: Remove temporary workflow
