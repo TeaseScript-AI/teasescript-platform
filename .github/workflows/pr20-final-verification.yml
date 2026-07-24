@@ -1,9 +1,7 @@
 name: PR20 final verification
 
 on:
-  push:
-    branches:
-      - verification/pr20-final-bfa2a6d4
+  pull_request:
 
 permissions:
   contents: read
@@ -14,6 +12,8 @@ jobs:
     steps:
       - name: Check out verification branch
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Preserve functional probe
         run: cp .github/pr20-final-verification.mjs /tmp/pr20-final-verification.mjs
