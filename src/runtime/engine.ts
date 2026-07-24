@@ -1308,7 +1308,7 @@ class Evaluator {
       ? null
       : this.#resolveDescriptor(receiverDescriptor, propertyCallee.object.span);
     const positional: SerializableRuntimeValue[] = [];
-    const named: Record<string, SerializableRuntimeValue> = {};
+    const named: Record<string, SerializableRuntimeValue> = Object.create(null);
     for (const argument of expression.arguments) {
       const value = cloneSerializableValue(this.evaluate(argument.value));
       if (argument.kind === "positional") positional.push(value);
