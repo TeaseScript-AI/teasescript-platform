@@ -148,7 +148,7 @@ This item may move to **Ready for phase** only after the owner approves a cohere
 - **Track:** Engine core
 - **Target gate:** Before alpha
 - **Planning state:** Design required
-- **Scheduled:** Unscheduled
+- **Scheduling:** Unscheduled
 
 #### Required outcome
 
