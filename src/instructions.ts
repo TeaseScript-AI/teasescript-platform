@@ -6,6 +6,10 @@ import type {
   Program,
   Statement,
 } from "./ast.js";
+import {
+  AST_VALIDATION_CODES,
+  findNonFiniteNumericLiteralDiagnostics,
+} from "./ast-validation.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
@@ -423,7 +427,7 @@ export class InstructionCompilationError extends Error {
   readonly span: SourceSpan;
 
   public constructor(
-    readonly code: "TSC003",
+    readonly code: "TSC001" | "TSC003",
     message: string,
     span: SourceSpan,
   ) {
@@ -434,6 +438,14 @@ export class InstructionCompilationError extends Error {
 }
 
 export function compileProgram(program: Program): InstructionPlan {
+  const nonFiniteDiagnostic = findNonFiniteNumericLiteralDiagnostics(program)[0];
+  if (nonFiniteDiagnostic !== undefined) {
+    throw new InstructionCompilationError(
+      AST_VALIDATION_CODES.nonFiniteNumericLiteral,
+      nonFiniteDiagnostic.message,
+      nonFiniteDiagnostic.span,
+    );
+  }
   const declarations = program.statements.filter(
     (statement): statement is FunctionDeclaration =>
       statement.kind === "functionDeclaration",
