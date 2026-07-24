@@ -27,7 +27,7 @@ Direct assignment remains `score = 20`; `set score = 20` remains invalid.
 
 ### Parser and core language
 
-The implementation includes lexer/parser/AST/diagnostics, semantic validation, literals, expressions, variables, assignments, speakers, output, collections, and accepted copy/error behavior. Template interpolation supports nested template literals and recursive interpolation with exact source spans and structured recovery diagnostics. The normal `compileSource(...)` boundary rejects non-finite numeric literals before returning an instruction plan.
+The implementation includes lexer/parser/AST/diagnostics, semantic validation, literals, expressions, variables, assignments, speakers, output, collections, and accepted copy/error behavior. Template interpolation supports nested template literals and recursive interpolation with exact source spans and structured recovery diagnostics. Shared AST-level validation rejects non-finite numeric literals through the normal `compileSource(...)` boundary and the direct `Program` compatibility boundary before an instruction plan is returned or executed.
 
 ### Serializable runtime and playground
 
@@ -65,7 +65,8 @@ The implementation includes:
 
 The current implementation also:
 
-- validates direct `Program` compatibility execution before lowering;
+- validates direct `Program` compatibility execution before lowering, including shared `TSC001` rejection of non-finite numeric literal values;
+- applies a narrow defensive `compileProgram(...)` guard so direct lowering cannot return a plan containing `NaN`, `Infinity`, or `-Infinity`;
 - rejects host `RuntimeSpeaker` values at the current compatibility boundary rather than creating dangling references;
 - requires explicit own-property builtin registration and stores low-level named builtin arguments in a prototype-free record;
 - restricts automatic visible-list text selection to strings and finite numbers after one item is selected;
