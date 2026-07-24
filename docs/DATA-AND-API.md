@@ -17,7 +17,7 @@ The source-oriented layer includes:
 - `validateSemantics(...)`;
 - `compileSource(...)`.
 
-`compileSource(...)` is the normal combined route from source text to diagnostics and a validated instruction plan. It returns no plan when parser or semantic errors remain.
+`compileSource(...)` is the normal combined route from source text to diagnostics and a compiled instruction plan. It returns no plan when parser or semantic errors remain. A returned plan is validated when a fresh runtime snapshot is created, when runtime execution begins, or when a caller invokes `validateInstructionPlan(...)` explicitly.
 
 ### Low-level plan and runtime
 
@@ -33,8 +33,8 @@ The normal composition is:
 ```text
 source
     -> compileSource
-    -> validated instruction plan
-    -> fresh or restored runtime snapshot
+    -> compiled instruction plan
+    -> fresh or restored validated runtime snapshot
     -> executeInstruction, stepToEvent, or run
 ```
 
