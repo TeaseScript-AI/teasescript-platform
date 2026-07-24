@@ -1239,7 +1239,12 @@ class Evaluator {
   }
 
   public visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
-    if (isList(value)) return this.visibleText(this.#randomItem(value.items, span), span);
+    if (isList(value)) {
+      const selected = this.#randomItem(value.items, span);
+      if (typeof selected === "string") return selected;
+      if (typeof selected === "number" && Number.isFinite(selected)) return String(selected);
+      throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
+    }
     if (typeof value === "string") return value;
     if (typeof value === "number") return String(value);
     if (typeof value === "boolean") return value ? "true" : "false";
