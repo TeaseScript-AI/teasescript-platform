@@ -26,6 +26,18 @@ jobs:
           jq empty tools/work-packages/templates/PACKAGE.example.json
       - name: Install dependencies
         run: npm ci
+      - name: Capture focused diagnostics
+        continue-on-error: true
+        run: |
+          npm run build > diagnostics.log 2>&1
+          node --test dist/tests/runtime-engine-hardening.test.js >> diagnostics.log 2>&1
+          npm run check >> diagnostics.log 2>&1
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-16-diagnostics
+          path: diagnostics.log
       - name: Check source
         run: npm run check
       - name: Build
