@@ -100,8 +100,13 @@ test("rejects host speaker builtin results at the compatibility boundary", () =>
   const speaker = createRuntimeSpeaker("hostSpeaker");
   speaker.properties.set("displayName", "Host Speaker");
 
-  assertHostSpeakerBoundaryError(() =>
-    run("let value = provideSpeaker()", { provideSpeaker: () => speaker }),
+  const result = run("let value = provideSpeaker()", {
+    provideSpeaker: () => speaker,
+  });
+
+  assert.deepEqual(
+    result.errors.map((error) => [error.code, error.message]),
+    [["TSR013", "Host speaker values are not supported at the runtime boundary."]],
   );
 });
 
