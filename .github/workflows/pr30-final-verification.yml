@@ -9,6 +9,14 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    outputs:
+      node: ${{ steps.result.outputs.node }}
+      tests: ${{ steps.result.outputs.tests }}
+      pass: ${{ steps.result.outputs.pass }}
+      fail: ${{ steps.result.outputs.fail }}
+      build: ${{ steps.result.outputs.build }}
+      diff: ${{ steps.result.outputs.diff }}
+      status: ${{ steps.result.outputs.status }}
     steps:
       - name: Check out verification branch
         uses: actions/checkout@v4
@@ -20,19 +28,47 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - name: Verify PR 30 head
+        id: result
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin main agent/issue-28-runtime-api-docs
           git checkout --detach origin/agent/issue-28-runtime-api-docs
-          echo "Node selected from .nvmrc: $(node --version)"
+          export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+          if [ -s "$NVM_DIR/nvm.sh" ]; then
+            . "$NVM_DIR/nvm.sh"
+            nvm use
+          fi
           npm ci
           npm run check > /tmp/pr30-check.log
-          tail -n 20 /tmp/pr30-check.log
+          tests="$(awk '$1 == "tests" || $2 == "tests" { value=$NF } END { print value }' /tmp/pr30-check.log)"
+          passed="$(awk '$1 == "pass" || $2 == "pass" { value=$NF } END { print value }' /tmp/pr30-check.log)"
+          failed="$(awk '$1 == "fail" || $2 == "fail" { value=$NF } END { print value }' /tmp/pr30-check.log)"
+          test -n "$tests"
           npm run build
           git diff --check origin/main...HEAD
-          echo "git diff --check origin/main...HEAD: passed"
           status="$(git status --short)"
-          printf '%s\n' "$status"
           test -z "$status"
-          echo "git status --short: clean"
+          {
+            echo "node=$(node --version)"
+            echo "tests=$tests"
+            echo "pass=$passed"
+            echo "fail=$failed"
+            echo "build=passed"
+            echo "diff=passed"
+            echo "status=clean"
+          } >> "$GITHUB_OUTPUT"
+
+  report:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report results
+        run: |
+          echo "node=${{ needs.verify.outputs.node }}"
+          echo "tests=${{ needs.verify.outputs.tests }}"
+          echo "pass=${{ needs.verify.outputs.pass }}"
+          echo "fail=${{ needs.verify.outputs.fail }}"
+          echo "build=${{ needs.verify.outputs.build }}"
+          echo "git diff --check origin/main...HEAD=${{ needs.verify.outputs.diff }}"
+          echo "git status --short=${{ needs.verify.outputs.status }}"
