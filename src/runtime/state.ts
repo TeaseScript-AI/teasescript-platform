@@ -342,6 +342,7 @@ export function validateRuntimeSnapshot(
   if (
     !isPlainRecord(value.rng) ||
     value.rng.algorithm !== XORSHIFT32_ALGORITHM ||
+    value.rng.state === 0 ||
     !unsigned32(value.rng.state)
   ) {
     errors.push("Runtime RNG state is malformed or unsupported.");
