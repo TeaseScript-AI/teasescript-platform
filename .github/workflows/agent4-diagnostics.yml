@@ -1,0 +1,39 @@
+name: Agent 4 diagnostics
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.event.pull_request.head.ref == 'fix/issue-12-validate-legacy-execute'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Capture check output
+        run: |
+          set +e
+          npm run check > agent4-check.log 2>&1
+          status=$?
+          cat agent4-check.log
+          printf '%s\n' "$status" > agent4-check.status
+          exit 0
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent4-check-diagnostics
+          path: |
+            agent4-check.log
+            agent4-check.status
