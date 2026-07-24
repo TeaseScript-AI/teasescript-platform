@@ -315,11 +315,10 @@ function fromHostValueInternal(
   try {
     switch (value.kind) {
       case "speaker":
-        return {
-          kind: "speakerReference",
-          speakerId: 0,
-          identifier: value.identifier,
-        };
+        throw new SerializableValueError(
+          "invalid",
+          "Host speaker values are not supported at the runtime boundary.",
+        );
       case "list":
         return {
           kind: "list",
