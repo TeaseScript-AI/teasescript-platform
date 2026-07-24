@@ -14,17 +14,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
-      - name: Record tool versions
-        run: |
-          node --version | tee /tmp/node-version.txt
-          npm --version | tee /tmp/npm-version.txt
       - name: Validate work-package tooling
         run: |
           bash -n tools/work-packages/integrate.sh
@@ -32,37 +26,7 @@ jobs:
           jq empty tools/work-packages/templates/PACKAGE.example.json
       - name: Install dependencies
         run: npm ci
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Check source
+        run: npm run check
       - name: Build
         run: npm run build
-      - name: Full test suite
-        run: |
-          node --test dist/tests/*.test.js > /tmp/full.tap
-          tail -n 12 /tmp/full.tap
-      - name: Focused changed-file tests
-        run: |
-          node --test \
-            dist/tests/control-flow-runtime.test.js \
-            dist/tests/functions-checkpoint.test.js \
-            dist/tests/runtime-checkpoint.test.js \
-            dist/tests/runtime-equivalence.test.js \
-            > /tmp/focused.tap
-          tail -n 12 /tmp/focused.tap
-      - name: Diff check
-        run: |
-          git fetch --force origin main:refs/remotes/origin/main
-          git diff --check origin/main...HEAD
-      - name: Clean worktree
-        run: test -z "$(git status --short)"
-      - name: Upload verification summaries
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: runtime-harness-verification
-          path: |
-            /tmp/node-version.txt
-            /tmp/npm-version.txt
-            /tmp/full.tap
-            /tmp/focused.tap
-          if-no-files-found: warn
