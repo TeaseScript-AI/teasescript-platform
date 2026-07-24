@@ -20,7 +20,7 @@ jobs:
           if grep -q "validateInstructionControlFlowRegions" src/instructions.ts; then
             exit 0
           fi
-          sed -n '25,254p' .github/workflows/issue-39-apply-patch.yml | sed 's/^          //' > /tmp/issue-39-apply.sh
+          sed -n "/python3 - <<'PY'/,/^          PY$/p" .github/workflows/issue-39-apply-patch.yml | sed 's/^          //' > /tmp/issue-39-apply.sh
           bash /tmp/issue-39-apply.sh
           git diff --check
           git config user.name "OpenAI Agent"
