@@ -5,6 +5,7 @@ import type { Program } from "../src/ast.js";
 import { parse } from "../src/parser.js";
 import {
   execute,
+  InterpreterCompilationError,
   type BuiltinFunction,
   type RandomSource,
 } from "../src/runtime/interpreter.js";
@@ -63,15 +64,13 @@ for (const invalidCall of invalidCalls) {
     const program = parseProgram(invalidCall.source);
 
     assert.throws(() => execute(program, { random }), (error: unknown) => {
-      assert.ok(error instanceof Error);
-      assert.equal(error.name, "InterpreterCompilationError");
+      assert.ok(error instanceof InterpreterCompilationError);
       assert.equal(error instanceof TypeError, false);
-      const diagnostics = (error as { diagnostics?: readonly { code: string }[] })
-        .diagnostics;
-      assert.ok(Array.isArray(diagnostics));
       assert.ok(
-        diagnostics.some((diagnostic) => diagnostic.code === invalidCall.code),
-        JSON.stringify(diagnostics),
+        error.diagnostics.some(
+          (diagnostic) => diagnostic.code === invalidCall.code,
+        ),
+        JSON.stringify(error.diagnostics),
       );
       return true;
     });
