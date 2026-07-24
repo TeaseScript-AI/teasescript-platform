@@ -1,0 +1,220 @@
+  ...
+# Subtest: rejects unsupported checkpoint and nested format versions
+ok 213 - rejects unsupported checkpoint and nested format versions
+  ---
+  duration_ms: 0.958854
+  type: 'test'
+  ...
+# Subtest: rejects corrupted checkpoint data through structured errors
+ok 214 - rejects corrupted checkpoint data through structured errors
+  ---
+  duration_ms: 1.041047
+  type: 'test'
+  ...
+# Subtest: rejects colliding or malformed scope-frame identity state
+ok 215 - rejects colliding or malformed scope-frame identity state
+  ---
+  duration_ms: 1.221234
+  type: 'test'
+  ...
+# Subtest: fails structurally when the configurable instruction budget is exhausted
+ok 216 - fails structurally when the configurable instruction budget is exhausted
+  ---
+  duration_ms: 0.625881
+  type: 'test'
+  ...
+# Subtest: deep-copies lists for declarations and direct assignments
+ok 217 - deep-copies lists for declarations and direct assignments
+  ---
+  duration_ms: 28.368073
+  type: 'test'
+  ...
+# Subtest: recursively deep-copies nested lists
+ok 218 - recursively deep-copies nested lists
+  ---
+  duration_ms: 5.233077
+  type: 'test'
+  ...
+# Subtest: recursively deep-copies ordinary objects
+ok 219 - recursively deep-copies ordinary objects
+  ---
+  duration_ms: 2.5402
+  type: 'test'
+  ...
+# Subtest: deep-copies objects containing lists and sets
+ok 220 - deep-copies objects containing lists and sets
+  ---
+  duration_ms: 3.457697
+  type: 'test'
+  ...
+# Subtest: copies sets independently for declaration and assignment
+ok 221 - copies sets independently for declaration and assignment
+  ---
+  duration_ms: 2.454882
+  type: 'test'
+  ...
+# Subtest: turns a cyclic injected script value into a structured runtime error
+ok 222 - turns a cyclic injected script value into a structured runtime error
+  ---
+  duration_ms: 0.753599
+  type: 'test'
+  ...
+# Subtest: rejects list, object, and set values in set literals at element spans
+ok 223 - rejects list, object, and set values in set literals at element spans
+  ---
+  duration_ms: 1.497491
+  type: 'test'
+  ...
+# Subtest: rejects composite values through set add, contains, and list toSet
+ok 224 - rejects composite values through set add, contains, and list toSet
+  ---
+  duration_ms: 2.663622
+  type: 'test'
+  ...
+# Subtest: uses scalar equality for set uniqueness and retains insertion order
+ok 225 - uses scalar equality for set uniqueness and retains insertion order
+  ---
+  duration_ms: 1.586266
+  type: 'test'
+  ...
+# Subtest: errors for first, last, and random on empty lists and sets
+ok 226 - errors for first, last, and random on empty lists and sets
+  ---
+  duration_ms: 3.007124
+  type: 'test'
+  ...
+# Subtest: does not advance RNG state for empty list or set random
+ok 227 - does not advance RNG state for empty list or set random
+  ---
+  duration_ms: 0.772836
+  type: 'test'
+  ...
+# Subtest: uses the speaker identifier fallback and warns only once per speaker
+ok 228 - uses the speaker identifier fallback and warns only once per speaker
+  ---
+  duration_ms: 1.723163
+  type: 'test'
+  ...
+# Subtest: keeps explicit and derived speaker display names warning-free
+ok 229 - keeps explicit and derived speaker display names warning-free
+  ---
+  duration_ms: 0.96243
+  type: 'test'
+  ...
+# Subtest: reports unknown variables and withholds an executable plan
+ok 230 - reports unknown variables and withholds an executable plan
+  ---
+  duration_ms: 7.510196
+  type: 'test'
+  ...
+# Subtest: rejects declarations that duplicate a visible name
+ok 231 - rejects declarations that duplicate a visible name
+  ---
+  duration_ms: 1.241792
+  type: 'test'
+  ...
+# Subtest: reports assignment to unknown variables and invalid binding replacement
+ok 232 - reports assignment to unknown variables and invalid binding replacement
+  ---
+  duration_ms: 1.183644
+  type: 'test'
+  ...
+# Subtest: reports unknown speaker references
+ok 233 - reports unknown speaker references
+  ---
+  duration_ms: 0.940909
+  type: 'test'
+  ...
+# Subtest: accepts nested lexical access and sibling-local reuse
+ok 234 - accepts nested lexical access and sibling-local reuse
+  ---
+  duration_ms: 3.114174
+  type: 'test'
+  ...
+# Subtest: detects definitely invalid set elements without full type checking
+ok 235 - detects definitely invalid set elements without full type checking
+  ---
+  duration_ms: 1.136916
+  type: 'test'
+  ...
+# Subtest: keeps parser and semantic diagnostics distinct
+ok 236 - keeps parser and semantic diagnostics distinct
+  ---
+  duration_ms: 0.886277
+  type: 'test'
+  ...
+# Subtest: accepts explicitly declared injected built-ins and globals
+ok 237 - accepts explicitly declared injected built-ins and globals
+  ---
+  duration_ms: 0.903489
+  type: 'test'
+  ...
+# Subtest: the test harness runs
+ok 238 - the test harness runs
+  ---
+  duration_ms: 1.076514
+  type: 'test'
+  ...
+# Subtest: creates immutable zero-based source positions and half-open spans
+ok 239 - creates immutable zero-based source positions and half-open spans
+  ---
+  duration_ms: 1.42198
+  type: 'test'
+  ...
+# Subtest: allows a zero-length span at a boundary
+ok 240 - allows a zero-length span at a boundary
+  ---
+  duration_ms: 0.211044
+  type: 'test'
+  ...
+# Subtest: combines source spans regardless of their supplied order
+ok 241 - combines source spans regardless of their supplied order
+  ---
+  duration_ms: 0.294381
+  type: 'test'
+  ...
+# Subtest: rejects invalid positions and reversed spans
+ok 242 - rejects invalid positions and reversed spans
+  ---
+  duration_ms: 0.517207
+  type: 'test'
+  ...
+# Subtest: rejects a malformed span supplied to the combining helper
+ok 243 - rejects a malformed span supplied to the combining helper
+  ---
+  duration_ms: 0.216335
+  type: 'test'
+  ...
+# Subtest: creates immutable valued tokens
+ok 244 - creates immutable valued tokens
+  ---
+  duration_ms: 1.949987
+  type: 'test'
+  ...
+# Subtest: creates immutable structural tokens without a value
+ok 245 - creates immutable structural tokens without a value
+  ---
+  duration_ms: 0.366135
+  type: 'test'
+  ...
+# Subtest: defines the preserved and core-milestone keywords and punctuation
+ok 246 - defines the preserved and core-milestone keywords and punctuation
+  ---
+  duration_ms: 1.114284
+  type: 'test'
+  ...
+# Subtest: represents strings, templates, interpolation boundaries, newlines, and EOF
+ok 247 - represents strings, templates, interpolation boundaries, newlines, and EOF
+  ---
+  duration_ms: 0.161552
+  type: 'test'
+  ...
+1..247
+# tests 247
+# suites 0
+# pass 246
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5116.321602
