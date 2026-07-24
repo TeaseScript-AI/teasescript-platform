@@ -1,0 +1,107 @@
+name: PR20 final verification
+
+on:
+  push:
+    branches:
+      - verification/pr20-final-bfa2a6d4
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out verification branch
+        uses: actions/checkout@v4
+
+      - name: Preserve functional probe
+        run: cp .github/pr20-final-verification.mjs /tmp/pr20-final-verification.mjs
+
+      - name: Check out PR20 head
+        uses: actions/checkout@v4
+        with:
+          ref: bfa2a6d4e2c45ac9fb6b5be0d924625d680f5879
+          fetch-depth: 0
+
+      - name: Confirm current main and branch head
+        run: |
+          git fetch origin main --depth=1
+          test "$(git rev-parse origin/main)" = "ed098995238172065c6dcd1ea2b8e9e0d4238675"
+          test "$(git rev-parse HEAD)" = "bfa2a6d4e2c45ac9fb6b5be0d924625d680f5879"
+
+      - name: Provision exact .nvmrc Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install nvm
+        run: |
+          export NVM_DIR="$RUNNER_TEMP/nvm"
+          git clone --depth 1 --branch v0.40.3 https://github.com/nvm-sh/nvm.git "$NVM_DIR"
+
+      - name: Run nvm use
+        run: |
+          export NVM_DIR="$RUNNER_TEMP/nvm"
+          set +u
+          . "$NVM_DIR/nvm.sh"
+          set -u
+          nvm use
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run complete check
+        run: npm run check
+
+      - name: Run build
+        run: npm run build
+
+      - name: Run focused compiled tests
+        run: |
+          node --test \
+            dist/tests/runtime-random.test.js \
+            dist/tests/runtime-checkpoint.test.js \
+            dist/tests/control-flow-runtime.test.js
+
+      - name: Run functional verification
+        run: node /tmp/pr20-final-verification.mjs
+
+      - name: Verify PR scope, diff, and worktree
+        run: |
+          git diff --check origin/main...HEAD
+          actual="$(git diff --name-only origin/main...HEAD | sort)"
+          expected="$(printf '%s\n' \
+            src/runtime/random.ts \
+            src/runtime/state.ts \
+            tests/runtime-random.test.ts | sort)"
+          test "$actual" = "$expected"
+          git status --short
+          test -z "$(git status --short)"
+
+      - name: Write verification summary
+        run: |
+          cat > "$RUNNER_TEMP/pr20-final-summary.txt" <<'EOF'
+          RESULT=PASS
+          MAIN_SHA=ed098995238172065c6dcd1ea2b8e9e0d4238675
+          HEAD_SHA=bfa2a6d4e2c45ac9fb6b5be0d924625d680f5879
+          NODE=v24.18.0
+          NVM_USE=PASS
+          NPM_CI=PASS
+          NPM_CHECK=PASS
+          NPM_BUILD=PASS
+          FOCUSED_TESTS=PASS
+          FUNCTIONAL_PROBES=PASS
+          DIFF_CHECK=PASS
+          STATUS_CLEAN=PASS
+          SCOPE=src/runtime/random.ts,src/runtime/state.ts,tests/runtime-random.test.ts
+          EOF
+
+      - name: Upload verification summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr20-final-summary
+          path: ${{ runner.temp }}/pr20-final-summary.txt
