@@ -11,8 +11,9 @@ For every substantive task, read:
 5. the task-specific current document or planning file
 6. relevant ADRs in `docs/decisions/`
 7. `docs/OPEN-DECISIONS.md` when resolving a gap
+8. `docs/planning/POC-TO-ALPHA-BACKLOG.md` when proposing or selecting future POC/pre-alpha work
 
-Do not treat planning documents, wishes, research files, historical audits, or source examples as accepted decisions.
+Do not treat planning documents, wishes, research files, historical audits, or source examples as accepted decisions. A backlog item is not implementation scope unless the current owner/coordinator assignment or phase plan explicitly schedules its ID.
 
 ## Working rules
 
@@ -55,6 +56,13 @@ Run all configured formatting, linting, type checking, build, relevant unit/inte
 - Prefer squash merge after checks pass, then delete the branch.
 - Never force-push or rewrite `main`.
 
+## Backlog governance
+
+- Agents may propose backlog entries, but only the owner or designated coordinator may select an item as required, change its target gate, or schedule it for implementation.
+- `docs/planning/POC-TO-ALPHA-BACKLOG.md` contains open obligations selected for a future gate. It is not the current phase plan.
+- Ideas that have not been selected as required remain in `WISHES.xml` or another proposal document.
+- When a backlog item is implemented and verified, record the result in `PHASE-STATUS.md` and remove the item from the open backlog in the same documentation update. Git history preserves the completed entry.
+
 ## Milestone discipline
 
-Use `PHASE-STATUS.md` and the current task/PR description to identify active work. Do not rely on stale parser-POC or earlier-branch wording. Select the next milestone explicitly; do not expand a focused branch into timers, media, iframe integration, Laravel, modules, or unrelated V30 syntax without revising the plan and recording the decision.
+Use `PHASE-STATUS.md` and the current task/PR description to identify active work. Do not rely on stale parser-POC or earlier-branch wording. Select backlog IDs explicitly when a phase is planned; do not expand a focused branch into timers, media, iframe integration, Laravel, modules, or unrelated V30 syntax without revising the plan and recording the decision.

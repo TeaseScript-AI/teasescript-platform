@@ -29,7 +29,9 @@ These files provide concise current routing and must not duplicate or override a
 
 ## Planning
 
-`planning/` contains implementation proposals, gap analysis, and backlog. Planning text is non-authoritative until accepted through the appropriate decision process.
+- `planning/POC-TO-ALPHA-BACKLOG.md` lists owner-selected work that remains required before a stated POC or pre-alpha gate. An item may remain unscheduled and is not implementation scope until a phase plan or coordinator assignment selects its ID.
+- `planning/POST-POC-DEVELOPMENT-BACKLOG.md` is a legacy mixed backlog retained for later triage. Its entries are not automatically required.
+- Other files in `planning/` contain proposals and gap analysis. They do not define accepted architecture, syntax, or current implementation scope.
 
 ## Reference
 
