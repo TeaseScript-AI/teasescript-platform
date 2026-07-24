@@ -25,7 +25,9 @@ jobs:
           fetch-depth: 0
 
       - name: Confirm current main and branch head
+        shell: bash
         run: |
+          set -euo pipefail
           git fetch origin main --depth=1
           test "$(git rev-parse origin/main)" = "ed098995238172065c6dcd1ea2b8e9e0d4238675"
           test "$(git rev-parse HEAD)" = "bfa2a6d4e2c45ac9fb6b5be0d924625d680f5879"
@@ -37,17 +39,27 @@ jobs:
           cache: npm
 
       - name: Install nvm
+        shell: bash
         run: |
+          set -eo pipefail
           export NVM_DIR="$RUNNER_TEMP/nvm"
+          rm -rf "$NVM_DIR"
           git clone --depth 1 --branch v0.40.3 https://github.com/nvm-sh/nvm.git "$NVM_DIR"
+          test -s "$NVM_DIR/nvm.sh"
 
       - name: Run nvm use
+        shell: bash
         run: |
+          set -eo pipefail
           export NVM_DIR="$RUNNER_TEMP/nvm"
-          set +u
+          SETUP_NODE_VERSION="$(node --version)"
+          SETUP_NODE_ROOT="$(dirname "$(dirname "$(command -v node)")")"
+          mkdir -p "$NVM_DIR/versions/node"
+          ln -s "$SETUP_NODE_ROOT" "$NVM_DIR/versions/node/$SETUP_NODE_VERSION"
           . "$NVM_DIR/nvm.sh"
-          set -u
           nvm use
+          test "$(node --version)" = "$SETUP_NODE_VERSION"
+          echo "$NVM_DIR/versions/node/$SETUP_NODE_VERSION/bin" >> "$GITHUB_PATH"
           node --version
           npm --version
 
@@ -71,7 +83,9 @@ jobs:
         run: node /tmp/pr20-final-verification.mjs
 
       - name: Verify PR scope, diff, and worktree
+        shell: bash
         run: |
+          set -euo pipefail
           git diff --check origin/main...HEAD
           actual="$(git diff --name-only origin/main...HEAD | sort)"
           expected="$(printf '%s\n' \
@@ -83,12 +97,14 @@ jobs:
           test -z "$(git status --short)"
 
       - name: Write verification summary
+        shell: bash
         run: |
-          cat > "$RUNNER_TEMP/pr20-final-summary.txt" <<'EOF'
+          cat > "$RUNNER_TEMP/pr20-final-summary.txt" <<EOF
           RESULT=PASS
           MAIN_SHA=ed098995238172065c6dcd1ea2b8e9e0d4238675
           HEAD_SHA=bfa2a6d4e2c45ac9fb6b5be0d924625d680f5879
-          NODE=v24.18.0
+          NODE=$(node --version)
+          NPM=$(npm --version)
           NVM_USE=PASS
           NPM_CI=PASS
           NPM_CHECK=PASS
@@ -99,6 +115,7 @@ jobs:
           STATUS_CLEAN=PASS
           SCOPE=src/runtime/random.ts,src/runtime/state.ts,tests/runtime-random.test.ts
           EOF
+          cat "$RUNNER_TEMP/pr20-final-summary.txt"
 
       - name: Upload verification summary
         uses: actions/upload-artifact@v4
