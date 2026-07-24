@@ -26,7 +26,6 @@ export function createXorShift32State(
   return { algorithm: XORSHIFT32_ALGORITHM, state: seed >>> 0 };
 }
 
-// Temporary publication marker; removed by the final connector commit.
 /** Advances the serializable deterministic RNG and returns a value in [0, 1). */
 export function nextXorShift32(random: XorShift32State): number {
   if (
