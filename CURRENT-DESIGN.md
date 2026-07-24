@@ -18,7 +18,7 @@
 Accepted post-V30 decisions relevant to the current runtime include:
 
 - ADR 0013: insertion-ordered `set[...]` collections and `type set` annotations;
-- ADR 0014: recursive value-copy semantics for ordinary values and speaker-reference identity behavior;
+- ADR 0014: recursive value-copy semantics for ordinary values, scalar-only sets, empty collection errors, and speaker display-name fallback behavior;
 - ADR 0015: versioned JSON-safe instruction plans, explicit runtime state, checkpoints, deterministic stepping/RNG/events, and no suspended JavaScript call stack.
 
 Direct assignment remains `score = 20`; `set score = 20` remains invalid.
