@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --version && npm --version && npm run build && node --test dist/tests/*.test.js > /tmp/full.tap && tail -n 12 /tmp/full.tap && node --test dist/tests/control-flow-runtime.test.js dist/tests/functions-checkpoint.test.js dist/tests/runtime-checkpoint.test.js dist/tests/runtime-equivalence.test.js > /tmp/focused.tap && tail -n 12 /tmp/focused.tap && git fetch origin main:refs/remotes/origin/main && git diff --check origin/main...HEAD && echo \"diff-check: clean\" && test -z \"$(git status --short)\" && echo \"worktree-status: clean\"",
+    "test": "npm run build && node --test dist/tests/*.test.js",
     "check": "npm run typecheck && npm test",
     "playground": "npm run build && node dist/playground/server.js"
   },
