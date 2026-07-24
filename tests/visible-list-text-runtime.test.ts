@@ -11,6 +11,7 @@ import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 
 test("selects an eligible visible list value exactly once", () => {
   const direct = runSource('say ["left", 2]', 0.75);
+  assert.equal(direct.result.snapshot.failure, null);
   assert.equal(direct.randomCalls, 1);
   assert.deepEqual(sayTexts(direct.result), ["2"]);
 
@@ -18,6 +19,7 @@ test("selects an eligible visible list value exactly once", () => {
     'let values = ["left", 2]',
     'say `Value: ${values}`',
   ].join("\n"), 0);
+  assert.equal(template.result.snapshot.failure, null);
   assert.equal(template.randomCalls, 1);
   assert.deepEqual(sayTexts(template.result), ["Value: left"]);
 });
@@ -36,7 +38,9 @@ test("rejects ineligible automatically selected list values with one RNG call", 
   for (const source of cases) {
     const execution = runSource(source, 0);
     assert.equal(execution.randomCalls, 1, source);
+    assert.equal(execution.result.snapshot.status, "failed", source);
     assert.equal(execution.result.snapshot.failure?.code, "TSR021", source);
+    assert.deepEqual(sayTexts(execution.result), [], source);
   }
 });
 
@@ -47,6 +51,7 @@ test("preserves direct scalar visible-text conversion", () => {
     "say 3.5",
   ].join("\n"), 0);
 
+  assert.equal(execution.result.snapshot.failure, null);
   assert.equal(execution.randomCalls, 0);
   assert.deepEqual(sayTexts(execution.result), ["true", "null", "3.5"]);
 });
