@@ -1,0 +1,556 @@
++    value: failure === null ? capture.value as SerializableRuntimeValue : null,
++    failure,
++  });
+ }
+ 
+ function validateSerializableValueInternal(
+@@ -479,14 +630,12 @@ function validateSerializableValueInternal(
+     }
+     if (value.kind === "set") {
+       if (!Array.isArray(value.items)) return `${path}.items must be an array.`;
+-      const seen: SerializableRuntimeScalar[] = [];
++      const seen = new Set<SerializableRuntimeScalar>();
+       for (let index = 0; index < value.items.length; index += 1) {
+         const item = value.items[index];
+         if (!isScalar(item)) return `${path}.items[${index}] is not a scalar.`;
+-        if (seen.some((seenItem) => seenItem === item)) {
+-          return `${path}.items contains a duplicate scalar.`;
+-        }
+-        seen.push(item);
++        if (seen.has(item)) return `${path}.items contains a duplicate scalar.`;
++        seen.add(item);
+       }
+       return null;
+     }
+@@ -520,50 +669,6 @@ function validateSerializableValueInternal(
+   }
+ }
+ 
+-function fromHostValueInternal(
+-  value: RuntimeValue,
+-  active: Set<object>,
+-): SerializableRuntimeValue {
+-  if (value === null || typeof value !== "object") {
+-    if (typeof value === "number" && !Number.isFinite(value)) {
+-      throw new SerializableValueError("invalid", "Runtime numbers must be finite.");
+-    }
+-    return value;
+-  }
+-  if (active.has(value)) {
+-    throw new SerializableValueError("cyclic", "Cyclic script values are not supported.");
+-  }
+-  active.add(value);
+-  try {
+-    switch (value.kind) {
+-      case "speaker":
+-        throw new SerializableValueError(
+-          "invalid",
+-          "Host speaker values are not supported at the runtime boundary.",
+-        );
+-      case "list":
+-        return {
+-          kind: "list",
+-          items: value.items.map((item) => fromHostValueInternal(item, active)),
+-        };
+-      case "set":
+-        return createSerializableSet(
+-          value.items.map((item) => fromHostValueInternal(item, active)),
+-        );
+-      case "object":
+-        return {
+-          kind: "object",
+-          properties: [...value.properties].map(([name, item]) => ({
+-            name,
+-            value: fromHostValueInternal(item, active),
+-          })),
+-        };
+-    }
+-  } finally {
+-    active.delete(value);
+-  }
+-}
+-
+ function assertSerializableScalar(
+   value: SerializableRuntimeValue,
+ ): asserts value is SerializableRuntimeScalar {
+@@ -591,6 +696,34 @@ function validateValueArray(
+   return null;
+ }
+ 
++function serializableCaptureError(
++  failure: ExternalDataFailure,
++): SerializableValueError {
++  const message = serializableExternalDataFailureMessage(failure);
++  return new SerializableValueError(
++    failure.kind === "cycle" ? "cyclic" : "invalid",
++    message,
++  );
++}
++
++function serializableExternalDataFailureMessage(
++  failure: ExternalDataFailure,
++): string {
++  switch (failure.kind) {
++    case "depth":
++      return EXTERNAL_DATA_DEPTH_MESSAGE;
++    case "work":
++      return EXTERNAL_DATA_WORK_MESSAGE;
++    case "nonFiniteNumber":
++      return `${failure.path} must be a finite number.`;
++    case "cycle":
++      return `${failure.path} contains a cyclic runtime value.`;
++    case "nonJsonSafeValue":
++    case "nonPlainObject":
++      return `${failure.path} is not a JSON-safe runtime value.`;
++  }
++}
++
+ function isScalar(value: unknown): value is SerializableRuntimeScalar {
+   return (
+     value === null ||
+diff --git a/src/runtime/state.ts b/src/runtime/state.ts
+index cb7705b..a3aee5f 100644
+--- a/src/runtime/state.ts
++++ b/src/runtime/state.ts
+@@ -3,11 +3,11 @@ import type {
+   Instruction,
+   InstructionPlan,
+ } from "../instructions.js";
+-import { validateInstructionPlan } from "../instructions.js";
++import { captureInstructionPlan } from "../instructions.js";
+ import {
+   EXTERNAL_DATA_DEPTH_MESSAGE,
+   EXTERNAL_DATA_WORK_MESSAGE,
+-  findExternalDataFailure,
++  captureExternalData,
+   type ExternalDataFailureKind,
+ } from "../external-data-limits.js";
+ import { createSourceSpan, type SourceSpan } from "../source.js";
+@@ -158,21 +158,34 @@ export function createFreshRuntimeSnapshot(
+   plan: InstructionPlan,
+   options: FreshRuntimeOptions = {},
+ ): RuntimeSnapshot {
+-  const planValidation = validateInstructionPlan(plan);
+-  if (!planValidation.valid) {
+-    throw new TypeError(planValidation.errors[0]?.message ?? "Malformed instruction plan.");
++  const capturedPlan = captureInstructionPlan(plan);
++  if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
++    throw new TypeError(
++      capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
++    );
+   }
+-  const bindings: RuntimeBindingSnapshot[] = [];
+-  const globals = options.globals ?? {};
+-  const globalsFailure = findExternalDataFailure(globals, "$.globals");
+-  if (globalsFailure !== null) {
++  const optionsCapture = captureExternalData(options);
++  if (!optionsCapture.ok) {
+     throw new TypeError(runtimeInputDataFailureMessage(
+-      globalsFailure.kind,
+-      globalsFailure.path,
++      optionsCapture.failure.kind,
++      optionsCapture.failure.path,
+     ));
+   }
+-  const maxCallDepth = options.maxCallDepth ?? DEFAULT_MAX_CALL_DEPTH;
++  if (!isPlainRecord(optionsCapture.value)) {
++    throw new TypeError("Fresh runtime options must be an object.");
++  }
++  const capturedOptions = optionsCapture.value;
++  const globals = capturedOptions.globals ?? {};
++  if (!isPlainRecord(globals)) {
++    throw new TypeError("Fresh runtime globals must be an object.");
++  }
++  const bindings: RuntimeBindingSnapshot[] = [];
++  const maxCallDepthValue = capturedOptions.maxCallDepth;
++  const maxCallDepth = maxCallDepthValue === undefined
++    ? DEFAULT_MAX_CALL_DEPTH
++    : maxCallDepthValue;
+   if (
++    typeof maxCallDepth !== "number" ||
+     !Number.isInteger(maxCallDepth) ||
+     maxCallDepth < 1 ||
+     maxCallDepth > MAX_SUPPORTED_CALL_DEPTH
+@@ -188,7 +201,10 @@ export function createFreshRuntimeSnapshot(
+     if (bindings.some((binding) => binding.name === name)) {
+       throw new TypeError(`Duplicate global '${name}'.`);
+     }
+-    bindings.push({ name, value: cloneSerializableValue(value) });
++    bindings.push({
++      name,
++      value: cloneSerializableValue(value as SerializableRuntimeValue),
++    });
+   }
+   return {
+     format: RUNTIME_SNAPSHOT_FORMAT,
+@@ -198,7 +214,13 @@ export function createFreshRuntimeSnapshot(
+     speakers: [],
+     defaultSpeaker: null,
+     contextualSpeaker: null,
+-    rng: createXorShift32State(options.seed ?? DEFAULT_PLAYGROUND_SEED),
++    rng: createXorShift32State(
++      typeof capturedOptions.seed === "number"
++        ? capturedOptions.seed
++        : capturedOptions.seed === undefined
++          ? DEFAULT_PLAYGROUND_SEED
++          : Number.NaN,
++    ),
+     warnedSpeakerIds: [],
+     loopFrames: [],
+     temporaries: [],
+@@ -208,16 +230,25 @@ export function createFreshRuntimeSnapshot(
+     nextSpeakerId: 1,
+     nextCallFrameId: 1,
+     maxCallDepth,
+-    status: plan.rootEndInstruction === 0 ? "halted" : "ready",
++    status: capturedPlan.plan.rootEndInstruction === 0 ? "halted" : "ready",
+     failure: null,
+   };
+ }
+ 
++export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
++  const captured = captureRuntimeSnapshot(snapshot);
++  if (!captured.validation.valid || captured.snapshot === null) {
++    throw new TypeError(
++      captured.validation.errors[0] ?? "Malformed runtime snapshot.",
++    );
++  }
++  return cloneCapturedRuntimeSnapshot(captured.snapshot);
++}
++
+ /**
+- * Clone already-validated runtime state. External entry points validate the shared
+- * depth/work bounds before reaching this recursive value-copying path.
++ * Clone already-captured and validated runtime state.
+  */
+-export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
++export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+   return {
+     format: RUNTIME_SNAPSHOT_FORMAT,
+     version: RUNTIME_SNAPSHOT_VERSION,
+@@ -288,29 +319,69 @@ export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot
+   };
+ }
+ 
+-export function validateRuntimeSnapshot(
++export interface CapturedRuntimeSnapshotResult {
++  readonly validation: SnapshotValidationResult;
++  readonly snapshot: RuntimeSnapshot | null;
++}
++
++export function captureRuntimeSnapshot(
+   value: unknown,
+   plan?: InstructionPlan,
+-): SnapshotValidationResult {
+-  const errors: string[] = [];
+-  const dataFailure = findExternalDataFailure(value);
+-  if (dataFailure !== null) {
++): CapturedRuntimeSnapshotResult {
++  const snapshotCapture = captureExternalData(value);
++  if (!snapshotCapture.ok) {
+     return Object.freeze({
+-      valid: false,
+-      errors: Object.freeze([snapshotExternalDataFailureMessage(dataFailure.kind)]),
++      validation: Object.freeze({
++        valid: false,
++        errors: Object.freeze([
++          snapshotExternalDataFailureMessage(snapshotCapture.failure.kind),
++        ]),
++      }),
++      snapshot: null,
+     });
+   }
++
++  let capturedPlan: InstructionPlan | undefined;
+   if (plan !== undefined) {
+-    const planDataFailure = findExternalDataFailure(plan);
+-    if (planDataFailure !== null) {
++    const planCapture = captureExternalData(plan);
++    if (!planCapture.ok) {
+       return Object.freeze({
+-        valid: false,
+-        errors: Object.freeze([
+-          snapshotExternalDataFailureMessage(planDataFailure.kind),
+-        ]),
++        validation: Object.freeze({
++          valid: false,
++          errors: Object.freeze([
++            snapshotExternalDataFailureMessage(planCapture.failure.kind),
++          ]),
++        }),
++        snapshot: null,
+       });
+     }
++    capturedPlan = planCapture.value as InstructionPlan;
+   }
++
++  const validation = validateCapturedRuntimeSnapshot(
++    snapshotCapture.value,
++    capturedPlan,
++  );
++  return Object.freeze({
++    validation,
++    snapshot: validation.valid
++      ? snapshotCapture.value as RuntimeSnapshot
++      : null,
++  });
++}
++
++export function validateRuntimeSnapshot(
++  value: unknown,
++  plan?: InstructionPlan,
++): SnapshotValidationResult {
++  return captureRuntimeSnapshot(value, plan).validation;
++}
++
++export function validateCapturedRuntimeSnapshot(
++  value: unknown,
++  plan?: InstructionPlan,
++): SnapshotValidationResult {
++  const errors: string[] = [];
+   if (!isPlainRecord(value)) {
+     return Object.freeze({ valid: false, errors: Object.freeze(["Runtime snapshot must be an object."]) });
+   }
+diff --git a/src/runtime/values.ts b/src/runtime/values.ts
+index a16d2a5..144f3dc 100644
+--- a/src/runtime/values.ts
++++ b/src/runtime/values.ts
+@@ -71,9 +71,15 @@ export function createRuntimeSpeaker(identifier: string): RuntimeSpeaker {
+ }
+ 
+ export function createRuntimeSet(items: readonly RuntimeValue[]): RuntimeSet {
+-  const set: RuntimeSet = { kind: "set", items: [] };
+-  for (const value of items) addSetValue(set, value);
+-  return set;
++  const seen = new Set<RuntimeScalar>();
++  const captured: RuntimeScalar[] = [];
++  for (const value of items) {
++    assertSetElement(value);
++    if (seen.has(value)) continue;
++    seen.add(value);
++    captured.push(value);
++  }
++  return { kind: "set", items: captured };
+ }
+ 
+ export function addSetValue(set: RuntimeSet, value: RuntimeValue): boolean {
+diff --git a/tests/serializable-set-linear.test.ts b/tests/serializable-set-linear.test.ts
+new file mode 100644
+index 0000000..180ae24
+--- /dev/null
++++ b/tests/serializable-set-linear.test.ts
+@@ -0,0 +1,149 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++import {
++  EXTERNAL_DATA_WORK_MESSAGE,
++  MAX_EXTERNAL_RUNTIME_DATA_WORK,
++  createSerializableSet,
++  type SerializableRuntimeScalar,
++  type SerializableRuntimeSet,
++} from "../src/index.js";
++import {
++  addSerializableSetValue,
++  fromHostRuntimeValue,
++  toHostRuntimeValue,
++  validateSerializableValue,
++} from "../src/runtime/serializable-values.js";
++import { createRuntimeSet } from "../src/runtime/values.js";
++
++function countArraySomeCalls(operation: () => void): number {
++  const original = Array.prototype.some;
++  let calls = 0;
++  Array.prototype.some = function countedSome<T>(
++    this: T[],
++    predicate: (value: T, index: number, array: T[]) => unknown,
++    thisArg?: unknown,
++  ): boolean {
++    return original.call(this, (value: T, index: number, array: T[]) => {
++      calls += 1;
++      return predicate.call(thisArg, value, index, array);
++    });
++  } as typeof Array.prototype.some;
++  try {
++    operation();
++  } finally {
++    Array.prototype.some = original;
++  }
++  return calls;
++}
++
++test("serializable-set validation and construction avoid repeated linear scans", () => {
++  const items = Array.from({ length: 4096 }, (_, index) => index);
++
++  const validationSomeCalls = countArraySomeCalls(() => {
++    assert.equal(validateSerializableValue({ kind: "set", items }), null);
++  });
++  const constructionSomeCalls = countArraySomeCalls(() => {
++    assert.equal(createSerializableSet(items).items.length, items.length);
++  });
++
++  assert.equal(validationSomeCalls, 0);
++  assert.equal(constructionSomeCalls, 0);
++});
++
++test("serializable-set validation accepts the largest unique set within the work limit", () => {
++  const acceptedSize = MAX_EXTERNAL_RUNTIME_DATA_WORK - 3;
++  const accepted = Array.from({ length: acceptedSize }, (_, index) => index);
++
++  assert.equal(
++    validateSerializableValue({ kind: "set", items: accepted }),
++    null,
++  );
++  assert.equal(createSerializableSet(accepted).items.length, acceptedSize);
++
++  const rejected = [...accepted, acceptedSize];
++  assert.equal(
++    validateSerializableValue({ kind: "set", items: rejected }),
++    EXTERNAL_DATA_WORK_MESSAGE,
++  );
++});
++
++test("serializable-set validation rejects early and late duplicates consistently", () => {
++  assert.equal(
++    validateSerializableValue({ kind: "set", items: [1, 1, 2, 3] }),
++    "$.items contains a duplicate scalar.",
++  );
++  assert.equal(
++    validateSerializableValue({
++      kind: "set",
++      items: [...Array.from({ length: 4096 }, (_, index) => index), 0],
++    }),
++    "$.items contains a duplicate scalar.",
++  );
++});
++
++test("serializable-set construction preserves scalar equality and insertion order", () => {
++  const values: SerializableRuntimeScalar[] = [
++    1,
++    "1",
++    true,
++    false,
++    null,
++    0,
++    -0,
++    1,
++    "1",
++    true,
++  ];
++
++  assert.deepEqual(createSerializableSet(values).items, [
++    1,
++    "1",
++    true,
++    false,
++    null,
++    0,
++  ]);
++});
++
++test("serializable set mutation uses native membership without changing array order", () => {
++  const set: SerializableRuntimeSet = { kind: "set", items: [1, 2] };
++  const membership = new Set<SerializableRuntimeScalar>(set.items);
++  const someCalls = countArraySomeCalls(() => {
++    assert.equal(addSerializableSetValue(set, 2, membership), false);
++    assert.equal(addSerializableSetValue(set, 3, membership), true);
++  });
++
++  assert.equal(someCalls, 0);
++  assert.deepEqual(set.items, [1, 2, 3]);
++});
++
++test("host and runtime set conversion paths rebuild sets without array scans", () => {
++  const values = Array.from({ length: 4096 }, (_, index) => index);
++
++  const hostToSerializableSomeCalls = countArraySomeCalls(() => {
++    const converted = fromHostRuntimeValue({ kind: "set", items: values });
++    assert.equal(
++      typeof converted === "object" && converted !== null && converted.kind === "set"
++        ? converted.items.length
++        : -1,
++      values.length,
++    );
++  });
++  const serializableToHostSomeCalls = countArraySomeCalls(() => {
++    const converted = toHostRuntimeValue({ kind: "set", items: values });
++    assert.equal(
++      typeof converted === "object" && converted !== null && converted.kind === "set"
++        ? converted.items.length
++        : -1,
++      values.length,
++    );
++  });
++  const runtimeConstructionSomeCalls = countArraySomeCalls(() => {
++    assert.equal(createRuntimeSet(values).items.length, values.length);
++  });
++
++  assert.equal(hostToSerializableSomeCalls, 0);
++  assert.equal(serializableToHostSomeCalls, 0);
++  assert.equal(runtimeConstructionSomeCalls, 0);
++});
+diff --git a/tests/stable-external-data.test.ts b/tests/stable-external-data.test.ts
+new file mode 100644
+index 0000000..71164c8
+--- /dev/null
++++ b/tests/stable-external-data.test.ts
+@@ -0,0 +1,408 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++import {
++  CheckpointError,
++  RuntimeDataError,
++  cloneSerializableValue,
++  compileSource,
++  createCheckpoint,
++  createFreshRuntimeSnapshot,
++  createSerializableList,
++  execute,
++  restoreCheckpoint,
++  run,
++  validateInstructionPlan,
++  validateRuntimeSnapshot,
++  type InstructionPlan,
++  type RuntimeCheckpoint,
++  type RuntimeSnapshot,
++  type SerializableRuntimeList,
++  type SerializableRuntimeValue,
++} from "../src/index.js";
++import {
++  SerializableValueError,
++  fromHostRuntimeValue,
++  toHostRuntimeValue,
++  validateSerializableValue,
++} from "../src/runtime/serializable-values.js";
++import type { RuntimeValue } from "../src/runtime/values.js";
++
++function plan(
++  source = "exit",
++  builtins: readonly string[] = [],
++): InstructionPlan {
++  const compiled = compileSource(source, { builtins });
++  assert.deepEqual(compiled.diagnostics, []);
++  assert.notEqual(compiled.plan, null);
++  return compiled.plan!;
++}
++
++function deepList(depth: number): SerializableRuntimeValue {
++  let value: SerializableRuntimeValue = 0;
++  for (let index = 0; index < depth; index += 1) {
++    value = { kind: "list", items: [value] };
++  }
++  return value;
++}
++
++interface ProxyCounts {
++  ownKeys: number;
++  descriptors: number;
++  gets: number;
++  prototypes: number;
++}
++
++function stableProxy<T extends object>(
++  target: T,
++  counts: ProxyCounts,
++  changingGet: (key: PropertyKey) => unknown,
