@@ -108,7 +108,12 @@ test("rejects all accepted V30 protected names in declarations", () => {
 
   const protectedConversion = compileSource("function toString { return 2 }");
   assert.equal(protectedConversion.plan, null);
-  assert.ok(protectedConversion.parserDiagnostics.length > 0);
+  assert.deepEqual(protectedConversion.parserDiagnostics, []);
+  assert.ok(
+    protectedConversion.semanticDiagnostics.some(
+      (diagnostic) => diagnostic.code === "TSV001",
+    ),
+  );
 
   const protectedParameter = compileSource(
     "function sample(player) { return player }",

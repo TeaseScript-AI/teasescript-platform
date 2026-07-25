@@ -176,18 +176,28 @@ test("does not duplicate lexer diagnostics for an unterminated interpolation", (
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
-test("does not add a parser cascade for an empty unterminated interpolation", () => {
+test("treats a backtick after an interpolation start as a nested template", () => {
   const source = "say `Hello ${`\nexit";
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
     [
+      "TSL004",
+      "Unterminated template string.",
+      [13, 0, 13, 19, 1, 4],
+    ],
+    [
       "TSL005",
       "Unterminated template interpolation.",
-      [11, 0, 11, 13, 0, 13],
+      [11, 0, 11, 19, 1, 4],
+    ],
+    [
+      "TSP009",
+      "Expected a supported expression inside the template interpolation.",
+      [19, 1, 4, 19, 1, 4],
     ],
   ]);
-  assert.deepEqual(statementKinds(result), ["exitStatement"]);
+  assert.deepEqual(statementKinds(result), []);
 });
 
 test("rejects a non-slice statement and recovers at the next CRLF line", () => {
