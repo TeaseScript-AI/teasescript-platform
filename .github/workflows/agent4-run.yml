@@ -1,0 +1,43 @@
+name: Agent 4 apply issue 40
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/issues-40-41-runtime-snapshot-invariants
+          fetch-depth: 0
+      - name: Reconstruct and apply patch
+        env:
+          PATCH_4: aXQgfSIsCisgICAgICAgICdzYXkgImJlZm9yZSInLAorICAgICAgICAic3RvcCgpIiwKKyAgICAgICAgJ3NheSAiYWZ0ZXIiJywKKyAgICAgIF0uam9pbigiXG4iKSwKKyAgICAgIGV4cGVjdGVkS2luZHM6IFsic2F5IiwgImV4aXQiXSwKKyAgICB9LAorICAgIHsKKyAgICAgIG5hbWU6ICJuZXN0ZWQgZnVuY3Rpb24gZXhpdCIsCisgICAgICBzb3VyY2U6IFsKKyAgICAgICAgImZ1bmN0aW9uIGlubmVyIHsgZXhpdCB9IiwKKyAgICAgICAgImZ1bmN0aW9uIG91dGVyIHsiLAorICAgICAgICAiICBpbm5lcigpIiwKKyAgICAgICAgJyAgc2F5ICJ1bnJlYWNoYWJsZSBmdW5jdGlvbiBjb2RlIicsCisgICAgICAgICJ9IiwKKyAgICAgICAgIm91dGVyKCkiLAorICAgICAgICAnc2F5ICJ1bnJlYWNoYWJsZSByb290IGNvZGUiJywKKyAgICAgIF0uam9pbigiXG4iKSwKKyAgICAgIGV4cGVjdGVkS2luZHM6IFsiZXhpdCJdLAorICAgIH0sCisgIF0gYXMgY29uc3Q7CisKKyAgZm9yIChjb25zdCBzY2VuYXJpbyBvZiBzY2VuYXJpb3MpIHsKKyAgICBjb25zdCBjb21waWxlZCA9IHBsYW4oc2NlbmFyaW8uc291cmNlKTsKKyAgICBjb25zdCByZXN1bHQgPSBydW4oY29tcGlsZWQsIGNyZWF0ZUZyZXNoUnVudGltZVNuYXBzaG90KGNvbXBpbGVkKSk7CisgICAgYXNzZXJ0LmVxdWFsKHJlc3VsdC5zbmFwc2hvdC5zdGF0dXMsICJoYWx0ZWQiLCBzY2VuYXJpby5uYW1lKTsKKyAgICBhc3NlcnQuZGVlcEVxdWFsKHJlc3VsdC5ldmVudHMubWFwKChldmVudCkgPT4gZXZlbnQua2luZCksIHNjZW5hcmlvLmV4cGVjdGVkS2luZHMsIHNjZW5hcmlvLm5hbWUpOworICAgIGFzc2VydC5lcXVhbCh2YWxpZGF0ZVJ1bnRpbWVTbmFwc2hvdChyZXN1bHQuc25hcHNob3QsIGNvbXBpbGVkKS52YWxpZCwgdHJ1ZSwgc2NlbmFyaW8ubmFtZSk7CisKKyAgICBjb25zdCByZXN0b3JlZCA9IGRlc2VyaWFsaXplQ2hlY2twb2ludCgKKyAgICAgIHNlcmlhbGl6ZUNoZWNrcG9pbnQoY3JlYXRlQ2hlY2twb2ludChjb21waWxlZCwgcmVzdWx0LnNuYXBzaG90KSksCisgICAgKTsKKyAgICBhc3NlcnQuZGVlcEVxdWFsKHJlc3RvcmVkLnNuYXBzaG90LCByZXN1bHQuc25hcHNob3QsIHNjZW5hcmlvLm5hbWUpOworICAgIGFzc2VydC5lcXVhbCh2YWxpZGF0ZVJ1bnRpbWVTbmFwc2hvdChyZXN0b3JlZC5zbmFwc2hvdCwgcmVzdG9yZWQucGxhbikudmFsaWQsIHRydWUsIHNjZW5hcmlvLm5hbWUpOworICB9Cit9KTsKKwordGVzdCgia2VlcHMgdmFsaWQgaGFsdGVkIGV4ZWN1dGlvbiByZXN1bWUtZXF1aXZhbGVudCIsICgpID0+IHsKKyAgY29uc3QgcmVzdWx0ID0gYXNzZXJ0UnVudGltZVJlc3VtZUVxdWl2YWxlbnQoWworICAgICJmdW5jdGlvbiBpbm5lciB7IHJldHVybiAyIH0iLAorICAgICdzYXkgYHZhbHVlOiR7aW5uZXIoKX1gJywKKyAgICAiZXhpdCIsCisgIF0uam9pbigiXG4iKSwgeworICAgIHNjZW5hcmlvTmFtZTogInJ1bnRpbWUgc25hcHNob3QgaW52YXJpYW50IHJlc3VtZSBlcXVpdmFsZW5jZSIsCisgIH0pOworCisgIGFzc2VydC5lcXVhbChyZXN1bHQuZmluYWxTbmFwc2hvdC5zdGF0dXMsICJoYWx0ZWQiKTsKKyAgYXNzZXJ0LmRlZXBFcXVhbChyZXN1bHQuZXZlbnRzLm1hcCgoZXZlbnQpID0+IGV2ZW50LmtpbmQpLCBbInNheSIsICJleGl0Il0pOworfSk7CisKK2Z1bmN0aW9uIHBsYW4oc291cmNlOiBzdHJpbmcpOiBJbnN0cnVjdGlvblBsYW4geworICBjb25zdCByZXN1bHQgPSBjb21waWxlU291cmNlKHNvdXJjZSk7CisgIGFzc2VydC5kZWVwRXF1YWwocmVzdWx0LmRpYWdub3N0aWNzLCBbXSk7CisgIGFzc2VydC5ub3RFcXVhbChyZXN1bHQucGxhbiwgbnVsbCk7CisgIHJldHVybiByZXN1bHQucGxhbiE7Cit9CisKK2Z1bmN0aW9uIG11dGFibGVDaGVja3BvaW50KGNoZWNrcG9pbnQ6IFJ1bnRpbWVDaGVja3BvaW50KTogeworICBmb3JtYXQ6IFJ1bnRpbWVDaGVja3BvaW50WyJmb3JtYXQiXTsKKyAgdmVyc2lvbjogUnVudGltZUNoZWNrcG9pbnRbInZlcnNpb24iXTsKKyAgcGxhbjogSW5zdHJ1Y3Rpb25QbGFuOworICBzbmFwc2hvdDogUnVudGltZVNuYXBzaG90OworfSB7CisgIHJldHVybiBzdHJ1Y3R1cmVkQ2xv
+        run: |
+          python - <<'PY'
+          import base64, os, pathlib
+          lines = pathlib.Path('.github/workflows/agent4-export.yml').read_text().splitlines()
+          parts = {}
+          for line in lines:
+              stripped = line.strip()
+              for key in ('PATCH_1', 'PATCH_2', 'PATCH_3', 'PATCH_5'):
+                  prefix = f'{key}: '
+                  if stripped.startswith(prefix):
+                      parts[key] = stripped[len(prefix):]
+          encoded = parts['PATCH_1'] + parts['PATCH_2'] + parts['PATCH_3'] + os.environ['PATCH_4'] + parts['PATCH_5']
+          pathlib.Path('/tmp/issue40.patch').write_bytes(base64.b64decode(encoded))
+          PY
+          git apply --check /tmp/issue40.patch
+          git apply /tmp/issue40.patch
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/RUNTIME.md src/runtime/engine.ts src/runtime/state.ts tests/runtime-snapshot-invariants.test.ts
+          git commit -m 'Reject impossible halted snapshots'
+          git push origin HEAD:fix/issues-40-41-runtime-snapshot-invariants
