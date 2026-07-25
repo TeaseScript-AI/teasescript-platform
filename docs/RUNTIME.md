@@ -65,7 +65,7 @@ The low-level runtime entry points are:
 - `stepToEvent(...)` until the next event, halt, or failure;
 - `run(...)` until halt, failure, or instruction-budget exhaustion.
 
-Before an instruction is executed, the runtime validates the instruction plan and runtime snapshot. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
+Each low-level runtime entry validates the instruction plan and runtime snapshot before executing or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
 
 ## Host values and capabilities
 
@@ -108,6 +108,10 @@ Current POC defaults and validation limits are:
 A configured instruction budget must be a positive integer. Exhaustion fails deterministically with structured runtime error `TSR037` instead of hanging. Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
 
 Externally supplied instruction plans, runtime snapshots, checkpoints, and serializable runtime values pass through an iterative depth-and-work preflight before detailed recursive validation, cloning, freezing, state construction, event emission, or RNG consumption. Depth is counted from the external root at zero, and the work limit applies to each bounded preflight traversal. Exceeding either implementation limit is malformed external runtime data. Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`, and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
+
+A halted snapshot is accepted only at the root completion boundary, including an empty root, or immediately after an `exit` instruction. Halted snapshots must also retain no active call frames, loop frames, temporaries, nested scopes, contextual speaker, or failure state. These checks establish that the serialized state is a possible current runtime state; they do not authenticate its execution history.
+
+Persisted runtime counters, identities, instruction positions, collection-iteration positions, depths, temporary IDs, warning-deduplication IDs, speaker references, and source-span positions must be JavaScript safe integers in their existing non-negative or positive ranges. Ordinary finite script numbers retain their existing semantics. The allocator counters `nextEventSequence`, `nextScopeId`, `nextSpeakerId`, and `nextCallFrameId` may hold `Number.MAX_SAFE_INTEGER` as stored state, but an operation that would increment such a value is rejected with `RuntimeDataError` `TSR101` before an event sequence or runtime identity is reused.
 
 ## Deterministic RNG invariant
 
