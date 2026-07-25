@@ -168,35 +168,43 @@ Do not select `fast-check` or another dependency through documentation alone.
 
 ## Interactive runtime state-machine testing
 
-Future choices, input, waits, timers, and pending actions require deterministic state-machine testing. Representative transitions include:
+ADR 0016 defines the shared pending-action runtime contract. Every implemented choice, input, wait, timer, button, media completion, or future typed player action requires deterministic state-machine testing against that contract.
+
+Representative transitions include:
 
 ```text
 running
 -> waiting
 -> checkpoint
 -> restore
--> response
+-> time observation or typed response
 -> running
 -> event
 -> halted
 ```
 
-Required cases include:
+Shared required cases include:
 
 - normal completion;
 - checkpoint and restore while pending;
-- cancellation;
+- JSON round-trip and deterministic resume equivalence;
+- persisted `currentSessionTimeMs` surviving restore;
+- a lower time observation not decreasing the persisted coordinate;
+- atomic session-time update and due-action settlement;
+- invalid session-time values;
+- cancellation and timeout according to the action kind;
 - invalid, duplicate, or late response;
-- unknown handle;
-- timeout;
-- restore around timeout processing;
-- duplicate host message;
-- wrong response type;
-- event and handle IDs not being reused after restore.
+- duplicate delivery returning the same bounded `lastSettlement`;
+- active foreground/background lookup before settled, stale, or unknown classification;
+- an older active background action remaining valid after a newer action settles;
+- stale and unknown IDs;
+- wrong action kind or response type;
+- event and action IDs not being reused after restore;
+- malformed action, settlement, status, time, or deadline state.
 
-Timers must use an injected fake clock or equivalent deterministic time source. Tests must never wait for real seconds.
+Timed actions must use an injected fake clock or equivalent deterministic time source. Tests must never wait for real seconds.
 
-These requirements do not define the pending-action API. That contract remains separate design and runtime work.
+ADR 0016 defines the shared contract; action-specific tests remain required for each later API and UI behavior.
 
 ## Browser E2E gate
 

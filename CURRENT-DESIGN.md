@@ -19,7 +19,8 @@ Accepted post-V30 decisions relevant to the current runtime include:
 
 - ADR 0013: insertion-ordered `set[...]` collections and `type set` annotations;
 - ADR 0014: recursive value-copy semantics for ordinary values, scalar-only sets, empty collection errors, and speaker display-name fallback behavior;
-- ADR 0015: versioned JSON-safe instruction plans, explicit runtime state, checkpoints, deterministic stepping/RNG/events, and no suspended JavaScript call stack.
+- ADR 0015: versioned JSON-safe instruction plans, explicit runtime state, checkpoints, deterministic stepping/RNG/events, and no suspended JavaScript call stack;
+- ADR 0016: resumable pending actions with persisted session time, foreground/background separation, monotonic action IDs, bounded settlement replay, active-first completion lookup, injected time observations, and blocking `wait` as the first implementation slice.
 
 Direct assignment remains `score = 20`; `set score = 20` remains invalid.
 
@@ -74,6 +75,24 @@ The current implementation also:
 
 Instruction plans, runtime snapshots, and checkpoints currently use version 3. Complete static typing and the wider V30 runtime/API surface remain out of scope.
 
+## Accepted pending-action direction
+
+ADR 0016 accepts:
+
+- runtime status `waiting`;
+- exactly one foreground blocking action;
+- a separate background-action collection;
+- persisted finite non-negative `currentSessionTimeMs` so nondecreasing time survives checkpoint and restore;
+- monotonic persisted action identities;
+- one bounded `lastSettlement` record for deterministic immediate retry;
+- active foreground/background lookup before `alreadySettled`, `staleAction`, or `unknownAction` classification;
+- absolute deadlines on the persisted injected session coordinate;
+- typed completion operations and `actionRequested`/`actionCompleted` events;
+- blocking `wait` as the first source-to-runtime implementation slice;
+- version-4 internal plan, snapshot, and checkpoint schemas when the new fields are implemented.
+
+The first slice does not implement camera/media lifecycle, chat pacing, the production host protocol, or Laravel scheduling. Selected camera, media-persistence, time-integrity, and chat-pacing directions are recorded as explicit follow-up design work in [`docs/planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](docs/planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
+
 ## Runtime execution and performance boundary
 
 Runtime state must be serializable at every instruction boundary, but normal execution does not need to stringify, clone for persistence, or send state to Laravel after every instruction. A production runner may execute many instructions in validated in-memory state until an event, wait, input, timer, explicit save point, page lifecycle boundary, or configured checkpoint interval.
@@ -85,15 +104,16 @@ POC implementation choices such as full snapshot cloning may later be optimized,
 - AST nodes carry source locations and remain compile-time data.
 - The parser does not perform runtime execution.
 - Runtime output is represented as typed events, not direct HTML.
-- Runtime actions, handles, scopes, loop frames, call frames, temporaries, and pending work that survive pause/resume must be explicit and JSON-safe.
+- Runtime actions, handles, scopes, loop frames, call frames, temporaries, pending work, session time, and settlement state that survive pause/resume must be explicit and JSON-safe.
 - Do not use suspended JavaScript functions, generators, closures, or implicit module-global mutable state as resumable execution state.
 
 ## Major remaining groups
 
 - units, date, time, datetime, and duration values;
-- choices, input, waits, timers, and resumable pending actions;
+- implementation of the accepted pending-action contract, then action-kind-specific choices, input, waits, timers, buttons, and media completion;
 - cross-origin iframe host protocol and validated messaging;
-- media lifecycle, resource ownership, and custom views;
+- camera/media lifecycle, resource ownership, persistence, recovery, and custom views;
+- chat-output pacing and time-integrity policy;
 - TypeScript library linkage and richer module selection;
 - package/plan identity and migration policy;
 - Laravel persistence, accounts, global data, scheduling, and continuous personalities;
