@@ -25,12 +25,14 @@ jobs:
       - name: Capture failing baseline
         shell: bash
         run: |
+          set +e
           {
             node --version
             npm --version
             node --test dist/tests/lexer-boundaries.test.js
           } > lexer-baseline.txt 2>&1
           status=$?
+          set -e
           printf '\nexit_code=%s\n' "$status" >> lexer-baseline.txt
           test "$status" -ne 0
       - name: Upload baseline evidence
