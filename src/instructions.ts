@@ -520,6 +520,12 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
       value.rootEndInstruction,
       errors,
     );
+    validateInstructionControlFlowRegions(
+      value.instructions,
+      value.rootEndInstruction,
+      value.functions,
+      errors,
+    );
   }
   return Object.freeze({
     valid: errors.length === 0,
@@ -1994,6 +2000,133 @@ function collectFunctionIds(value: unknown): ReadonlySet<number> {
       .map((item) => item.id)
       .filter((id): id is number => Number.isInteger(id) && (id as number) > 0),
   );
+}
+
+type InstructionExecutionRegion =
+  | {
+      readonly kind: "root";
+      readonly startInstruction: 0;
+      readonly endInstruction: number;
+    }
+  | {
+      readonly kind: "function";
+      readonly functionId: number;
+      readonly startInstruction: number;
+      readonly endInstruction: number;
+    };
+
+function validateInstructionControlFlowRegions(
+  instructions: readonly unknown[],
+  rootEndInstruction: unknown,
+  functions: unknown,
+  errors: PlanValidationError[],
+): void {
+  if (!nonNegativeInteger(rootEndInstruction) || !Array.isArray(functions)) return;
+
+  const regions: Array<InstructionExecutionRegion | undefined> = new Array(
+    instructions.length,
+  );
+  const rootRegion: InstructionExecutionRegion = {
+    kind: "root",
+    startInstruction: 0,
+    endInstruction: rootEndInstruction,
+  };
+  for (let index = 0; index < rootEndInstruction; index += 1) {
+    regions[index] = rootRegion;
+  }
+
+  for (const definition of functions) {
+    if (
+      !isRecord(definition) ||
+      !nonNegativeInteger(definition.id) ||
+      !nonNegativeInteger(definition.entryInstruction) ||
+      !nonNegativeInteger(definition.endInstruction)
+    ) {
+      return;
+    }
+    const functionRegion: InstructionExecutionRegion = {
+      kind: "function",
+      functionId: definition.id,
+      startInstruction: definition.entryInstruction,
+      endInstruction: definition.endInstruction,
+    };
+    for (
+      let index = definition.entryInstruction;
+      index < definition.endInstruction;
+      index += 1
+    ) {
+      regions[index] = functionRegion;
+    }
+  }
+
+  instructions.forEach((instruction, instructionIndex) => {
+    if (!isRecord(instruction)) return;
+    const region = regions[instructionIndex];
+    if (region === undefined) return;
+    const instructionPath = `$.instructions[${instructionIndex}]`;
+    switch (instruction.kind) {
+      case "jump":
+      case "jumpIfFalse":
+      case "loopControl":
+      case "prepareParameterDefault":
+        validateInstructionRegionTarget(
+          instruction.target,
+          `${instructionPath}.target`,
+          instructions.length,
+          region,
+          errors,
+        );
+        return;
+      case "loopStart":
+        validateInstructionRegionTarget(
+          instruction.continueTarget,
+          `${instructionPath}.continueTarget`,
+          instructions.length,
+          region,
+          errors,
+        );
+        validateInstructionRegionTarget(
+          instruction.target,
+          `${instructionPath}.target`,
+          instructions.length,
+          region,
+          errors,
+        );
+        return;
+      case "callFunction":
+        validateInstructionRegionTarget(
+          instruction.returnInstruction,
+          `${instructionPath}.returnInstruction`,
+          instructions.length,
+          region,
+          errors,
+        );
+        return;
+    }
+  });
+}
+
+function validateInstructionRegionTarget(
+  value: unknown,
+  path: string,
+  instructionCount: number,
+  region: InstructionExecutionRegion,
+  errors: PlanValidationError[],
+): void {
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > instructionCount) {
+    return;
+  }
+  const target = value as number;
+  const remainsInRegion = region.kind === "root"
+    ? target >= region.startInstruction && target <= region.endInstruction
+    : target >= region.startInstruction && target < region.endInstruction;
+  if (!remainsInRegion) {
+    errors.push(planError(
+      "TSC002",
+      "Control-flow target leaves the instruction's execution region.",
+      path,
+    ));
+  }
 }
 
 function validateFunctionDefinitions(
