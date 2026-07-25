@@ -289,7 +289,7 @@ This pacing model is a post-V30 change and needs its own accepted syntax/runtime
 
 ## Suggested follow-up sequence
 
-1. Accept and implement ADR 0016 slice 1: blocking `wait`.
+1. Implement accepted ADR 0016 slice 1: blocking `wait`.
 2. Implement chat-channel pacing as the second foreground use of timed pending state.
 3. Implement one-shot non-persistent background timer.
 4. Complete the accepted timer family.
