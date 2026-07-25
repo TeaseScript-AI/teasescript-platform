@@ -12,6 +12,18 @@ Accepted ADRs and V30 override older descriptive documents. Sets, deep value cop
 - Complete static type checking and composite equality.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
 
+### Compatibility API lifecycle
+
+The current TypeScript surface exposes both the instruction-plan runtime and a compatibility route through `Interpreter`, `execute(program, ...)`, and the host-oriented `RuntimeValue` model.
+
+Decide whether that compatibility surface should:
+
+- remain a supported alpha API;
+- remain a temporary testing, migration, or importer adapter without broader feature growth; or
+- be deprecated after remaining callers and tests migrate to the instruction-plan runtime.
+
+This decision must define the intended support period, migration expectations, public-export impact, and whether the host-value and serializable-value models remain separate. It should be resolved before a broad refactor that consolidates or removes compatibility-layer types and modules. Until then, the current exports remain implemented POC behavior rather than a permanent alpha commitment.
+
 The exact version-3 schemas are current POC implementation details, not a promise of permanent wire-format compatibility.
 
 ## Remaining language and library work
