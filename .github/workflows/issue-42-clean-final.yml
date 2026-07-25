@@ -21,7 +21,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/issue-42-clean-final.yml
-          git commit --amend --no-edit --allow-empty
+          git commit -m "Remove temporary issue 42 verification workflow"
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
