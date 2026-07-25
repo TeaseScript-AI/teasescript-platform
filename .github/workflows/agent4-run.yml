@@ -1,15 +1,14 @@
-name: Agent 4 merge current main
+name: Agent 4 verification
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  merge-main:
-    if: github.actor != 'github-actions[bot]'
+  verify:
     runs-on: ubuntu-latest
     steps:
       - name: Check out branch
@@ -17,10 +16,34 @@ jobs:
         with:
           ref: fix/issues-40-41-runtime-snapshot-invariants
           fetch-depth: 0
-      - name: Merge current main normally
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Run exact verification
         run: |
+          set -o pipefail
+          mkdir -p /tmp/agent4-verification
+          {
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            echo "nvmrc=$(cat .nvmrc)"
+          } | tee /tmp/agent4-verification/versions.txt
+          npm ci 2>&1 | tee /tmp/agent4-verification/npm-ci.txt
+          npm run check 2>&1 | tee /tmp/agent4-verification/full-check.txt
+          npm run build 2>&1 | tee /tmp/agent4-verification/build.txt
+          node --test dist/tests/runtime-snapshot-invariants.test.js 2>&1 | tee /tmp/agent4-verification/focused-test.txt
           git fetch origin main
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git merge --no-edit origin/main
-          git push origin HEAD:fix/issues-40-41-runtime-snapshot-invariants
+          git diff --check origin/main...HEAD 2>&1 | tee /tmp/agent4-verification/diff-check.txt
+          git status --short | tee /tmp/agent4-verification/status.txt
+          test ! -s /tmp/agent4-verification/status.txt
+          git rev-parse origin/main > /tmp/agent4-verification/main-sha.txt
+          git rev-parse HEAD > /tmp/agent4-verification/head-sha.txt
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent4-verification
+          path: /tmp/agent4-verification
+          if-no-files-found: error
+          retention-days: 1
