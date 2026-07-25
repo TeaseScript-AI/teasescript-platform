@@ -1,0 +1,58 @@
+name: Apply issue 55 and 58 implementation
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'fix/issue-55-stable-external-data-capture'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/issue-55-stable-external-data-capture
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Apply implementation patch
+        run: |
+          cat .github/issue-55-58-patch2/chunk-* > /tmp/issue-55-58.patch
+          git apply --index /tmp/issue-55-58.patch
+          rm -rf \
+            .github/issue-55-58-patch \
+            .github/issue-55-58-patch-text \
+            .github/issue-55-58-patch2
+          rm -f \
+            .github/workflows/issue-55-failing-before.yml \
+            .github/workflows/issue-58-failing-before.yml \
+            .github/workflows/issue-55-export.yml \
+            .github/workflows/issue-55-58-apply.yml
+          git add -A
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify implementation
+        run: |
+          node --version
+          npm --version
+          npm run check
+          npm run build
+          node --test \
+            dist/tests/stable-external-data.test.js \
+            dist/tests/serializable-set-linear.test.js \
+            dist/tests/external-runtime-data-limits.test.js \
+            dist/tests/runtime-snapshot-invariants.test.js \
+            dist/tests/runtime-equivalence.test.js
+          git diff --cached --check
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Stabilize external runtime data handling"
+          git push origin HEAD:fix/issue-55-stable-external-data-capture
