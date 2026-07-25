@@ -1,15 +1,14 @@
-name: Agent 4 merge and verify latest main
+name: Agent 4 final verification
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  merge-and-verify:
-    if: github.actor != 'github-actions[bot]'
+  verify:
     runs-on: ubuntu-latest
     steps:
       - name: Check out branch
@@ -22,14 +21,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - name: Merge latest main and verify
+      - name: Run exact verification
         run: |
           set -o pipefail
           mkdir -p /tmp/agent4-final-verification
-          git fetch origin main
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git merge --no-edit origin/main
           {
             echo "node=$(node --version)"
             echo "npm=$(npm --version)"
@@ -39,13 +34,14 @@ jobs:
           npm run check 2>&1 | tee /tmp/agent4-final-verification/full-check.txt
           npm run build 2>&1 | tee /tmp/agent4-final-verification/build.txt
           node --test dist/tests/runtime-snapshot-invariants.test.js 2>&1 | tee /tmp/agent4-final-verification/focused-test.txt
+          git fetch origin main
           git diff --check origin/main...HEAD 2>&1 | tee /tmp/agent4-final-verification/diff-check.txt
           git status --short | tee /tmp/agent4-final-verification/status.txt
           test ! -s /tmp/agent4-final-verification/status.txt
           git rev-parse origin/main > /tmp/agent4-final-verification/main-sha.txt
-          git rev-parse HEAD > /tmp/agent4-final-verification/verified-head-sha.txt
-          git push origin HEAD:fix/issues-40-41-runtime-snapshot-invariants
+          git rev-parse HEAD > /tmp/agent4-final-verification/head-sha.txt
       - name: Upload verification evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: agent4-final-verification
