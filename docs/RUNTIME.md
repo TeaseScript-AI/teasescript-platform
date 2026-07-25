@@ -4,6 +4,8 @@
 
 ADR 0015 requires the AST to remain compile-time data and the runtime to execute a validated, versioned, JSON-safe instruction plan using explicit versioned state. Checkpoints, event sequence numbers, RNG state, scopes, speakers, loop frames, call frames, temporaries, prepared references, and structured failure information must be serializable without a suspended JavaScript call stack.
 
+ADR 0016 proposes the resumable pending-action contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities. It remains proposed until its design pull request is accepted.
+
 ## Current runtime
 
 The implementation includes:
@@ -22,6 +24,36 @@ The implementation includes:
 - standalone playground and constrained development server.
 
 Plan, snapshot, and checkpoint formats currently use version 3. They are POC formats rather than permanent public wire-format guarantees.
+
+The current implementation does not yet contain `waiting`, foreground/background action fields, action IDs, clock observations, or action completion operations.
+
+## Proposed resumable pending-action model
+
+ADR 0016 proposes:
+
+```text
+status:
+    ready | running | waiting | halted | failed
+
+foregroundAction:
+    PendingAction | null
+
+backgroundActions:
+    PendingAction[]
+
+nextActionId:
+    positive safe integer
+```
+
+A valid `waiting` snapshot contains exactly one foreground action. Non-waiting states contain none. The first implementation slice includes the background collection in the version-4 schema but requires it to remain empty.
+
+A blocking instruction evaluates its arguments, stores a complete JSON-safe action and continuation, advances to `waiting`, emits `actionRequested`, and stops. A validated completion stores any result, clears the action, returns to `running`, emits `actionCompleted`, and leaves continuation execution to the next runtime entry call.
+
+Timed actions store an absolute deadline on a host-supplied nondecreasing time line. The runtime does not read browser or operating-system clocks directly. The player schedules wake-ups and submits validated time observations; tests use a fake clock and never sleep in real time.
+
+The first source-to-runtime slice is blocking `wait`. See ADR 0016 for the state machine, idempotency, time semantics, validation invariants, test matrix, alternatives, and implementation sequence.
+
+Camera stream ownership, media persistence, and chat-output pacing are adjacent follow-up designs rather than part of the first wait implementation. Their selected direction and open questions are recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
 
 ## Compiler and execution entry points
 
@@ -67,6 +99,8 @@ The low-level runtime entry points are:
 
 Each low-level runtime entry validates the instruction plan and runtime snapshot before executing or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
 
+When ADR 0016 is implemented, these entry points must also stop cleanly at `waiting`. Separate validated operations will submit time observations and typed action completions; ordinary execution entry points may not bypass the pending action.
+
 ## Host values and capabilities
 
 Host and builtin capabilities are explicitly injected and are not serialized into runtime state.
@@ -85,9 +119,13 @@ The low-level `RuntimeCapabilities.random` hook is a compatibility/testing overr
 
 The override's own state is external to the runtime snapshot. A checkpoint is therefore not self-contained with respect to an arbitrary injected random source. Canonical checkpoint-equivalence guarantees use the serialized runtime RNG; tests that use the override must explicitly recreate an equivalent deterministic external source.
 
+Future player capabilities must return typed, bounded, JSON-safe outcomes correlated to one action ID. Raw DOM exceptions, browser handles, streams, callbacks, and mutable host objects do not enter the snapshot.
+
 ## Visible text boundary
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, and `null` according to the current implemented subset. When the value is a list, the runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects, sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively select or stringify them.
+
+A proposed later chat-pacing design delays only a subsequent `say` event, not unrelated instructions. It uses the final visible text at 17 visible characters per second unless `say(..., wait: ...)` supplies an explicit next-message gate. This is not implemented or accepted by ADR 0016 itself; see the follow-up planning document.
 
 ## Runtime defaults and limits
 
@@ -109,12 +147,13 @@ A configured instruction budget must be a positive integer. Exhaustion fails det
 
 Externally supplied instruction plans, runtime snapshots, checkpoints, globals, and serializable runtime values are captured into one bounded stable plain-data graph before detailed validation, cloning, freezing, state construction, execution, event emission, or RNG consumption. Enumerable accessors are rejected without invocation, proxy behavior is not retained, and later phases consume only the captured graph. Depth is counted from the external root at zero, and the work limit applies to each bounded capture. Exceeding either implementation limit or failing stable capture is malformed external runtime data. Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`, and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
 
-
 Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality, duplicate handling, and version-3 formats are unchanged.
 
 A halted snapshot is accepted only at the root completion boundary, including an empty root, or immediately after an `exit` instruction. Halted snapshots must also retain no active call frames, loop frames, temporaries, nested scopes, contextual speaker, or failure state. These checks establish that the serialized state is a possible current runtime state; they do not authenticate its execution history.
 
 Persisted runtime counters, identities, instruction positions, collection-iteration positions, depths, temporary IDs, warning-deduplication IDs, speaker references, and source-span positions must be JavaScript safe integers in their existing non-negative or positive ranges. Ordinary finite script numbers retain their existing semantics. The allocator counters `nextEventSequence`, `nextScopeId`, `nextSpeakerId`, and `nextCallFrameId` may hold `Number.MAX_SAFE_INTEGER` as stored state, but an operation that would increment such a value is rejected with `RuntimeDataError` `TSR101` before an event sequence or runtime identity is reused.
+
+The proposed `nextActionId` follows the same no-reuse and pre-increment failure rule.
 
 ## Deterministic RNG invariant
 
@@ -134,15 +173,36 @@ Runtime state must be serializable at every instruction boundary, but normal exe
 
 A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore validates the checkpoint, instruction plan, snapshot, format versions, references, function/call progress, RNG state, and other structural invariants before execution resumes.
 
+Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action and event identities. Restore does not read time or silently complete a deadline. The player submits an explicit observation after restore, after which due actions may settle deterministically.
+
+## Format evolution
+
+Version 3 remains the current implemented format.
+
+When pending actions are implemented, the incompatible waiting status, foreground/background action fields, and action counter require:
+
+```text
+instruction plan version: 4
+runtime snapshot version: 4
+checkpoint version: 4
+```
+
+These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field in the first version-4 design.
+
 ## API stability boundary
 
 The exported TypeScript compiler, compatibility wrapper, low-level runtime, snapshot, checkpoint, and RNG functions are current POC surfaces used by the repository and tests. Their presence in `src/index.ts` does not by itself establish a permanent third-party API or wire-format compatibility promise. Long-term package API stability and migration policy remain open.
 
 ## Remaining runtime work
 
+- accept or revise ADR 0016;
+- implement blocking `wait` as the first pending-action slice;
+- add one-shot non-persistent background timers before the full timer family;
+- define action-kind-specific input, choice, button, media, timeout, and cancellation contracts;
 - stable package/plan identity and migration policy;
-- pending-action state for input, waits, timers, and choices;
 - iframe host commands and response correlation;
-- media ownership, cleanup, and recovery;
-- server checkpoint persistence, conflict resolution, and scheduling;
+- camera stream ownership, media ownership, cleanup, persistence, and recovery;
+- chat-output pacing and checkpoint behavior;
+- time-integrity diagnostics and future server-authoritative scheduling;
+- server checkpoint persistence and conflict resolution;
 - performance profiling and safe optimization of snapshot cloning/liveness metadata.
