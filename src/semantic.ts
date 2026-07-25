@@ -431,16 +431,21 @@ class SemanticValidator {
       case "identifier":
         if (expression.name === "speaker" && contextualSpeaker !== null) return;
         const binding = scope.resolve(expression.name);
-        if (
-          binding === undefined &&
-          !this.#builtins.has(expression.name)
-        ) {
-          this.#report(
-            semanticCode.unknownVariable,
-            `Unknown variable '${expression.name}'.`,
-            expression.span,
-          );
-        } else if (binding?.kind === "function") {
+        if (binding === undefined) {
+          if (this.#builtins.has(expression.name)) {
+            this.#report(
+              semanticCode.functionValue,
+              `Builtin '${expression.name}' is not a first-class runtime value.`,
+              expression.span,
+            );
+          } else {
+            this.#report(
+              semanticCode.unknownVariable,
+              `Unknown variable '${expression.name}'.`,
+              expression.span,
+            );
+          }
+        } else if (binding.kind === "function") {
           this.#report(
             semanticCode.functionValue,
             `Function '${expression.name}' is not a first-class runtime value.`,
