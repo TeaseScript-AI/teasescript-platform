@@ -1,4 +1,4 @@
-name: Agent 4 apply issue 41
+name: Agent 4 merge current main
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  merge-main:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -17,94 +17,10 @@ jobs:
         with:
           ref: fix/issues-40-41-runtime-snapshot-invariants
           fetch-depth: 0
-      - name: Apply safe-integer invariants
+      - name: Merge current main normally
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          state = Path('src/runtime/state.ts')
-          text = state.read_text()
-          text = text.replace('nonNegativeInteger', 'nonNegativeSafeInteger')
-          text = text.replace(
-              'Number.isInteger(source.start) &&\n    Number.isInteger(source.end)',
-              'Number.isSafeInteger(source.start) &&\n    Number.isSafeInteger(source.end)',
-          )
-          text = text.replace(
-              'return Number.isInteger(value) && (value as number) >= 0;',
-              'return Number.isSafeInteger(value) && (value as number) >= 0;',
-          )
-          text = text.replace(
-              'return Math.max(0, size);',
-              'return Number.isSafeInteger(size) ? Math.max(0, size) : -1;',
-              1,
-          )
-          text = text.replace(
-              'Runtime nextEventSequence must be a positive integer.',
-              'Runtime nextEventSequence must be a positive safe integer.',
-          )
-          text = text.replace(
-              'Runtime nextScopeId must be a positive unused ID.',
-              'Runtime nextScopeId must be a positive unused safe integer ID.',
-          )
-          text = text.replace(
-              'Runtime nextSpeakerId is invalid.',
-              'Runtime nextSpeakerId must be a positive unused safe integer ID.',
-          )
-          text = text.replace(
-              'Runtime nextCallFrameId is invalid.',
-              'Runtime nextCallFrameId must be a positive unused safe integer ID.',
-          )
-          state.write_text(text)
-
-          serializable = Path('src/runtime/serializable-values.ts')
-          text = serializable.read_text().replace(
-              'return Number.isInteger(value.speakerId) &&',
-              'return Number.isSafeInteger(value.speakerId) &&',
-          )
-          serializable.write_text(text)
-
-          engine = Path('src/runtime/engine.ts')
-          text = engine.read_text()
-          replacements = [
-              (
-                  '      const speaker: RuntimeSpeakerSnapshot = {\n        id: snapshot.nextSpeakerId,',
-                  '      assertCounterCanAdvance(snapshot.nextSpeakerId, "nextSpeakerId");\n      const speaker: RuntimeSpeakerSnapshot = {\n        id: snapshot.nextSpeakerId,',
-              ),
-              (
-                  '    case "enterScope":\n      snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });',
-                  '    case "enterScope":\n      assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");\n      snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });',
-              ),
-              (
-                  '  const supplied = new Map(',
-                  '  assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");\n  assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");\n  const supplied = new Map(',
-              ),
-              (
-                  '): void {\n  snapshot.frames.push({ id: snapshot.nextScopeId, bindings });\n  snapshot.nextScopeId += 1;\n}\n\nfunction iterationLength(',
-                  '): void {\n  assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");\n  snapshot.frames.push({ id: snapshot.nextScopeId, bindings });\n  snapshot.nextScopeId += 1;\n}\n\nfunction iterationLength(',
-              ),
-              (
-                  'function takeSequence(snapshot: RuntimeSnapshot): number {\n  const sequence = snapshot.nextEventSequence;',
-                  'function assertCounterCanAdvance(value: number, field: string): void {\n  if (value >= Number.MAX_SAFE_INTEGER) {\n    throw new RuntimeDataError(\n      "TSR101",\n      `Runtime ${field} cannot be advanced safely.`,\n    );\n  }\n}\n\nfunction takeSequence(snapshot: RuntimeSnapshot): number {\n  assertCounterCanAdvance(snapshot.nextEventSequence, "nextEventSequence");\n  const sequence = snapshot.nextEventSequence;',
-              ),
-          ]
-          for old, new in replacements:
-              if old not in text:
-                  raise SystemExit(f'missing engine replacement: {old[:60]}')
-              text = text.replace(old, new, 1)
-          engine.write_text(text)
-
-          runtime = Path('docs/RUNTIME.md')
-          text = runtime.read_text()
-          anchor = 'A halted snapshot is accepted only at the root completion boundary, including an empty root, or immediately after an `exit` instruction. Halted snapshots must also retain no active call frames, loop frames, temporaries, nested scopes, contextual speaker, or failure state. These checks establish that the serialized state is a possible current runtime state; they do not authenticate its execution history.\n'
-          paragraph = '\nPersisted runtime counters, identities, instruction positions, collection-iteration positions, depths, temporary IDs, warning-deduplication IDs, speaker references, and source-span positions must be JavaScript safe integers in their existing non-negative or positive ranges. Ordinary finite script numbers retain their existing semantics. The allocator counters `nextEventSequence`, `nextScopeId`, `nextSpeakerId`, and `nextCallFrameId` may hold `Number.MAX_SAFE_INTEGER` as stored state, but an operation that would increment such a value is rejected with `RuntimeDataError` `TSR101` before an event sequence or runtime identity is reused.\n'
-          if anchor not in text:
-              raise SystemExit('missing runtime documentation anchor')
-          text = text.replace(anchor, anchor + paragraph, 1)
-          runtime.write_text(text)
-          PY
-          git diff --check
+          git fetch origin main
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add docs/RUNTIME.md src/runtime/engine.ts src/runtime/serializable-values.ts src/runtime/state.ts
-          git commit -m 'Enforce safe runtime counters'
+          git merge --no-edit origin/main
           git push origin HEAD:fix/issues-40-41-runtime-snapshot-invariants
