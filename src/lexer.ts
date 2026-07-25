@@ -15,30 +15,30 @@ export interface LexResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
-const keywordKinds: Readonly<Record<string, TokenKind>> = {
-  speaker: TokenKind.KeywordSpeaker,
-  say: TokenKind.KeywordSay,
-  as: TokenKind.KeywordAs,
-  exit: TokenKind.KeywordExit,
-  let: TokenKind.KeywordLet,
-  if: TokenKind.KeywordIf,
-  else: TokenKind.KeywordElse,
-  true: TokenKind.KeywordTrue,
-  false: TokenKind.KeywordFalse,
-  null: TokenKind.KeywordNull,
-  not: TokenKind.KeywordNot,
-  and: TokenKind.KeywordAnd,
-  or: TokenKind.KeywordOr,
-  set: TokenKind.KeywordSet,
-  repeat: TokenKind.KeywordRepeat,
-  for: TokenKind.KeywordFor,
-  in: TokenKind.KeywordIn,
-  while: TokenKind.KeywordWhile,
-  break: TokenKind.KeywordBreak,
-  continue: TokenKind.KeywordContinue,
-  function: TokenKind.KeywordFunction,
-  return: TokenKind.KeywordReturn,
-};
+const keywordKinds: ReadonlyMap<string, TokenKind> = new Map([
+  ["speaker", TokenKind.KeywordSpeaker],
+  ["say", TokenKind.KeywordSay],
+  ["as", TokenKind.KeywordAs],
+  ["exit", TokenKind.KeywordExit],
+  ["let", TokenKind.KeywordLet],
+  ["if", TokenKind.KeywordIf],
+  ["else", TokenKind.KeywordElse],
+  ["true", TokenKind.KeywordTrue],
+  ["false", TokenKind.KeywordFalse],
+  ["null", TokenKind.KeywordNull],
+  ["not", TokenKind.KeywordNot],
+  ["and", TokenKind.KeywordAnd],
+  ["or", TokenKind.KeywordOr],
+  ["set", TokenKind.KeywordSet],
+  ["repeat", TokenKind.KeywordRepeat],
+  ["for", TokenKind.KeywordFor],
+  ["in", TokenKind.KeywordIn],
+  ["while", TokenKind.KeywordWhile],
+  ["break", TokenKind.KeywordBreak],
+  ["continue", TokenKind.KeywordContinue],
+  ["function", TokenKind.KeywordFunction],
+  ["return", TokenKind.KeywordReturn],
+]);
 
 const diagnosticCodes = {
   invalidCharacter: "TSL001",
@@ -156,7 +156,7 @@ class Lexer {
     while (isIdentifierPart(this.#peek())) this.#advanceCodeUnit();
 
     const lexeme = this.source.slice(startOffset, this.#offset);
-    const kind = keywordKinds[lexeme];
+    const kind = keywordKinds.get(lexeme);
     if (kind === undefined) {
       this.#emitValuedToken(
         TokenKind.Identifier,
@@ -442,13 +442,6 @@ class Lexer {
     while (this.#tokens[index]?.kind === TokenKind.Newline) index -= 1;
 
     const previousKind = this.#tokens[index]?.kind;
-    if (
-      previousKind === TokenKind.InterpolationStart &&
-      this.#isTemplateBoundaryAtLineEnd()
-    ) {
-      return false;
-    }
-
     switch (previousKind) {
       case TokenKind.InterpolationStart:
       case TokenKind.LeftParenthesis:
@@ -476,17 +469,6 @@ class Lexer {
       default:
         return false;
     }
-  }
-
-  #isTemplateBoundaryAtLineEnd(): boolean {
-    let distance = 1;
-    while (isHorizontalWhitespace(this.#peek(distance))) distance += 1;
-    const character = this.#peek(distance);
-    return (
-      character === "\n" ||
-      character === "\0" ||
-      (character === "\r" && this.#peek(distance + 1) === "\n")
-    );
   }
 
   #scanEscape(context: "string" | "template"): string {

@@ -45,7 +45,7 @@ The `TSC001` check is implemented as shared AST-level validation. `compileSource
 
 Template interpolation uses normal TeaseScript expression parsing and supports recursively nested template literals and nested interpolation expressions. The lexer preserves exact source spans and keeps escaped backticks and escaped `${` as literal template text.
 
-Unterminated nested content remains structured: `TSL004` reports an unterminated template and `TSL005` reports an unterminated interpolation. The established recovery boundary is preserved when a backtick immediately follows an interpolation start and only horizontal whitespace remains before a physical line end or end of source.
+Unterminated nested content remains structured: `TSL004` reports an unterminated template and `TSL005` reports an unterminated interpolation. A backtick starts a nested template whenever the current interpolation position can begin an expression, including when horizontal whitespace or a physical line ending follows the nested opening backtick. A backtick in a position where an expression cannot start remains the outer-template recovery boundary.
 
 ### Direct AST compatibility route
 
