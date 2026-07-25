@@ -1,0 +1,67 @@
+name: Final issue 55 and 58 verification
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.head_ref == 'fix/issue-55-stable-external-data-capture'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/issue-55-stable-external-data-capture
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Prepare final head
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor origin/main HEAD; then
+            git merge --no-edit origin/main
+          fi
+          git rm .github/workflows/issue-55-58-final-verification.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Remove final verification workflow"
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify final head
+        run: |
+          {
+            echo "starting_main=09a3b143beb12b7c9ecf02e5c7f03a0116123ee3"
+            echo "final_main=$(git rev-parse origin/main)"
+            echo "final_head=$(git rev-parse HEAD)"
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            npm run check
+            npm run build
+            node --test \
+              dist/tests/stable-external-data.test.js \
+              dist/tests/serializable-set-linear.test.js \
+              dist/tests/external-runtime-data-limits.test.js \
+              dist/tests/instruction-plan-validation.test.js \
+              dist/tests/runtime-checkpoint.test.js \
+              dist/tests/runtime-snapshot-invariants.test.js \
+              dist/tests/functions-checkpoint.test.js \
+              dist/tests/runtime-equivalence.test.js
+            git diff --check origin/main...HEAD
+            echo "status_begin"
+            git status --short
+            echo "status_end"
+            git diff --stat origin/main...HEAD
+          } 2>&1 | tee /tmp/issue-55-58-final-verification.log
+      - name: Upload final evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-55-58-final-verification
+          path: /tmp/issue-55-58-final-verification.log
+      - name: Push final head
+        run: git push origin HEAD:fix/issue-55-stable-external-data-capture
