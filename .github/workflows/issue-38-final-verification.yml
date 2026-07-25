@@ -25,6 +25,7 @@ jobs:
           {
             export NVM_DIR="$HOME/.nvm"
             . "$NVM_DIR/nvm.sh"
+            nvm install "$(cat .nvmrc)"
             nvm use
             node --version
             npm --version
