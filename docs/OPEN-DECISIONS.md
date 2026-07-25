@@ -2,6 +2,8 @@
 
 Accepted ADRs and V30 override older descriptive documents. Sets, deep value copying, empty collection behavior, speaker fallback, serializable runtime architecture, serializable loop/call frames, source-order evaluation, prepared references, and the current user-function model are not unimplemented design questions.
 
+ADR 0016 is proposed in the issue-#54 design pull request. Until that ADR is accepted, its pending-action contract remains a proposal rather than current architecture.
+
 ## Runtime hardening and evolution
 
 - Package/source identity for browser checkpoints and production plan references.
@@ -11,6 +13,7 @@ Accepted ADRs and V30 override older descriptive documents. Sets, deep value cop
 - Host/global representation for future opaque engine references beyond speakers.
 - Complete static type checking and composite equality.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
+- Implementation and migration details for the proposed version-4 pending-action fields after ADR 0016 is accepted.
 
 ### Compatibility API lifecycle
 
@@ -33,15 +36,24 @@ The exact version-3 schemas are current POC implementation details, not a promis
 - Standard Library string methods and detailed API signatures.
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
 - Static treatment of contextual `speaker` access when control-flow analysis can prove that no explicit or default speaker is available: compile-time error, warning, or retained runtime failure. Ordinary narrator output such as `say "Hello"` is a separate valid case and does not require a default speaker.
+- Exact post-V30 chat-pacing semantics, including `say(..., wait: ...)`, visible-character counting, checkpoint state, and transcript-channel behavior.
 - Remaining accepted V30 constructs and APIs outside the current parser/runtime subset.
 
 ## Player and interactions
 
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and CSP.
-- Input, choices, waits, timers, pending-action resume behavior, and cancellation.
+- Action-kind-specific choices, input, buttons, media completion, cancellation, timeout, and recovery policies after the shared pending-action contract is accepted.
+- Background-handler interruption, repetition, persistence, ordering, and cleanup beyond the first one-shot timer slice.
+- Camera capability declarations, long-lived stream ownership, device switching, quality negotiation, restore, privacy indicators, and optional simultaneous cameras.
+- Exact `askImage(...)` preview/countdown/retake behavior and direct nullable `takePhoto(...)` capture behavior.
+- Motion detection, sampling, camera resource limits, and scene ownership.
 - Media layering, concurrent ownership, cleanup, recovery, and resource handles.
+- Persistent media collections, stable identity, author labels, timestamps, newest/previous retrieval, privacy, retention, encryption, export, and quotas.
 - Exact custom-view author syntax and lifecycle; capability is accepted, syntax remains open.
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
+- Time-integrity logging thresholds and whether a future typed anomaly hook becomes script-visible.
+
+See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md) for the selected direction and explicitly deferred design questions discussed with ADR 0016.
 
 ## Platform and personalities
 
