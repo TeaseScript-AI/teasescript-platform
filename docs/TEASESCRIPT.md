@@ -9,6 +9,19 @@ Accepted post-V30 additions:
 - ADR 0013 defines `set[...]`, `type set`, insertion order, uniqueness, methods/properties, and non-indexability.
 - ADR 0014 defines recursive value-copy behavior, scalar-only sets, empty collection errors, and speaker display-name fallback.
 - ADR 0015 defines the serializable instruction-plan/runtime/checkpoint architecture used to execute the implemented syntax.
+- ADR 0016 defines the shared resumable pending-action architecture, including foreground/background separation and the blocking-wait foundation.
+
+Accepted V30 already defines the background-timer source forms:
+
+```tease
+let timerId = startTimer 30 {
+    timeExpired()
+}
+
+stopTimer(timerId)
+```
+
+Proposed ADR 0017 does not replace this syntax. It proposes the exact first-slice runtime, handle, handler, checkpoint, ordering, stop, and cleanup behavior for the one-shot non-repeating form. It remains non-authoritative until explicit owner approval changes its status from `Proposed` to `Accepted`.
 
 Rejected forms remain rejected, including `set score = 20`, `procedure`, and `call` for ordinary function calls. Historical research may still contain those forms and is non-authoritative.
 
@@ -27,7 +40,7 @@ The current function subset includes:
 - lexical function scope with package-global access;
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
-Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented. Typed signatures may be parsed for diagnostics while unsupported execution/type semantics remain rejected.
+Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented. Typed signatures may be parsed for diagnostics while unsupported execution/type semantics remain rejected. Accepted V30 timer syntax is not implemented by this documentation-only proposal.
 
 ## Protected names
 
