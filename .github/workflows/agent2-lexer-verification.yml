@@ -1,0 +1,42 @@
+name: Agent 2 lexer verification
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --silent
+      - name: Capture focused verification
+        shell: bash
+        run: |
+          set +e
+          {
+            node --version
+            npm --version
+            npm run typecheck
+            npm run build
+            node --test dist/tests/lexer-boundaries.test.js
+          } > lexer-verification.txt 2>&1
+          status=$?
+          set -e
+          printf '\nexit_code=%s\n' "$status" >> lexer-verification.txt
+          exit 0
+      - name: Upload focused verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: lexer-verification-output
+          path: lexer-verification.txt
