@@ -1,0 +1,113 @@
+name: Issue 65 implementation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  implement-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issue-65-sparse-array-work-bound
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Synchronize current main
+        shell: bash
+        run: |
+          git fetch origin main
+          echo "8f7510db5d97a88b1718c230c0b03c0d7cde720f" > /tmp/starting-main.txt
+          git rev-parse origin/main | tee /tmp/final-main.txt
+          if [[ "$(git rev-parse HEAD~0)" != "$(git rev-parse origin/main)" ]] && ! git merge-base --is-ancestor origin/main HEAD; then
+            git config user.name "Codex Agent"
+            git config user.email "codex-agent@users.noreply.github.com"
+            git merge --no-edit origin/main
+          fi
+      - name: Apply focused product patch
+        shell: bash
+        run: |
+          base64 --decode .issue65/patch.b64 > /tmp/issue65.patch
+          git apply --check /tmp/issue65.patch
+          git apply /tmp/issue65.patch
+          git diff --check
+      - name: Record environment
+        shell: bash
+        run: |
+          mkdir -p /tmp/issue65-verification
+          node --version | tee /tmp/issue65-verification/node-version.txt
+          npm --version | tee /tmp/issue65-verification/npm-version.txt
+      - name: Install dependencies
+        run: npm ci
+      - name: Run complete check
+        shell: bash
+        run: |
+          rm -rf dist
+          npm run check 2>&1 | tee /tmp/issue65-verification/check.txt
+      - name: Build separately
+        shell: bash
+        run: npm run build 2>&1 | tee /tmp/issue65-verification/build.txt
+      - name: Run focused compiled tests
+        shell: bash
+        run: |
+          tests=(
+            external-runtime-data-limits
+            stable-external-data
+            serializable-set-linear
+            instruction-plan-validation
+            instruction-plan-range-validation
+            instruction-plan
+            runtime-snapshot-invariants
+            runtime-checkpoint
+            runtime-engine-hardening
+            runtime-equivalence
+          )
+          compiled=()
+          for test_name in "${tests[@]}"; do
+            if [[ -f "dist/tests/${test_name}.test.js" ]]; then
+              compiled+=("dist/tests/${test_name}.test.js")
+            fi
+          done
+          printf '%s\n' "${compiled[@]}" | tee /tmp/issue65-verification/focused-files.txt
+          node --test "${compiled[@]}" 2>&1 | tee /tmp/issue65-verification/focused.txt
+      - name: Verify intended uncommitted diff
+        shell: bash
+        run: |
+          git diff --check
+          git diff --stat | tee /tmp/issue65-verification/product-diff-stat.txt
+          git status --short | tee /tmp/issue65-verification/status-before-commit.txt
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "src/external-data-limits.ts tests/external-runtime-data-limits.test.ts "
+      - name: Commit product change and remove temporary files
+        shell: bash
+        run: |
+          git config user.name "Codex Agent"
+          git config user.email "codex-agent@users.noreply.github.com"
+          git add src/external-data-limits.ts tests/external-runtime-data-limits.test.ts
+          git commit -m "Bound sparse-array external-data validation"
+          git rm -r .issue65 .github/workflows/issue65-baseline-repro.yml .github/workflows/issue65-implement.yml
+          git commit -m "Remove temporary issue 65 files"
+      - name: Verify final branch
+        shell: bash
+        run: |
+          git fetch origin main
+          git diff --check origin/main...HEAD
+          git diff --stat origin/main...HEAD | tee /tmp/issue65-verification/final-diff-stat.txt
+          git diff --name-only origin/main...HEAD | tee /tmp/issue65-verification/final-files.txt
+          git status --short | tee /tmp/issue65-verification/final-status.txt
+          git rev-parse origin/main | tee /tmp/issue65-verification/final-main.txt
+          git rev-parse HEAD | tee /tmp/issue65-verification/final-head.txt
+          test "$(git diff --name-only origin/main...HEAD | sort | tr '\n' ' ')" = "src/external-data-limits.ts tests/external-runtime-data-limits.test.ts "
+          test -z "$(git status --short)"
+      - name: Push final branch
+        run: git push origin HEAD:fix/issue-65-sparse-array-work-bound
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue65-verification
+          path: /tmp/issue65-verification
