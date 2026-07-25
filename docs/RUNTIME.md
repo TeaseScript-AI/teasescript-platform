@@ -25,7 +25,7 @@ The implementation includes:
 
 Plan, snapshot, and checkpoint formats currently use version 3. They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation does not yet contain `waiting`, foreground/background action fields, action IDs, clock observations, or action completion operations.
+The current implementation does not yet contain `waiting`, foreground/background action fields, action IDs, settlements, clock observations, or action completion operations.
 
 ## Proposed resumable pending-action model
 
@@ -43,13 +43,18 @@ backgroundActions:
 
 nextActionId:
     positive safe integer
+
+lastSettlement:
+    ActionSettlement | null
 ```
 
 A valid `waiting` snapshot contains exactly one foreground action. Non-waiting states contain none. The first implementation slice includes the background collection in the version-4 schema but requires it to remain empty.
 
-A blocking instruction evaluates its arguments, stores a complete JSON-safe action and continuation, advances to `waiting`, emits `actionRequested`, and stops. A validated completion stores any result, clears the action, returns to `running`, emits `actionCompleted`, and leaves continuation execution to the next runtime entry call.
+A blocking instruction evaluates its arguments, stores a complete JSON-safe action and continuation, advances to `waiting`, emits `actionRequested`, and stops. A validated completion stores its result and bounded `lastSettlement`, clears the action, returns to `running`, emits `actionCompleted`, and leaves continuation execution to the next runtime entry call.
 
-Timed actions store an absolute deadline on a host-supplied nondecreasing time line. The runtime does not read browser or operating-system clocks directly. The player schedules wake-ups and submits validated time observations; tests use a fake clock and never sleep in real time.
+A duplicate delivery matching `lastSettlement` returns the same canonical recorded settlement without another write, event, RNG advance, handler, or continuation. A newer settlement replaces the previous record, so older completion deliveries become stale without creating unbounded history.
+
+Timed actions store an absolute deadline on a host-supplied nondecreasing session coordinate. The runtime does not read browser or operating-system clocks directly. The player maps monotonic elapsed deltas onto that coordinate, schedules wake-ups, and submits validated observations; tests use a fake clock and never sleep in real time.
 
 The first source-to-runtime slice is blocking `wait`. See ADR 0016 for the state machine, idempotency, time semantics, validation invariants, test matrix, alternatives, and implementation sequence.
 
@@ -153,7 +158,7 @@ A halted snapshot is accepted only at the root completion boundary, including an
 
 Persisted runtime counters, identities, instruction positions, collection-iteration positions, depths, temporary IDs, warning-deduplication IDs, speaker references, and source-span positions must be JavaScript safe integers in their existing non-negative or positive ranges. Ordinary finite script numbers retain their existing semantics. The allocator counters `nextEventSequence`, `nextScopeId`, `nextSpeakerId`, and `nextCallFrameId` may hold `Number.MAX_SAFE_INTEGER` as stored state, but an operation that would increment such a value is rejected with `RuntimeDataError` `TSR101` before an event sequence or runtime identity is reused.
 
-The proposed `nextActionId` follows the same no-reuse and pre-increment failure rule.
+The proposed `nextActionId` follows the same no-reuse and pre-increment failure rule. The proposed `lastSettlement` is bounded to one record and remains subject to ordinary external-data limits.
 
 ## Deterministic RNG invariant
 
@@ -173,13 +178,13 @@ Runtime state must be serializable at every instruction boundary, but normal exe
 
 A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore validates the checkpoint, instruction plan, snapshot, format versions, references, function/call progress, RNG state, and other structural invariants before execution resumes.
 
-Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action and event identities. Restore does not read time or silently complete a deadline. The player submits an explicit observation after restore, after which due actions may settle deterministically.
+Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, settlement, and event identities. Restore does not read time or silently complete a deadline. The player submits an explicit observation after restore, after which due actions may settle deterministically.
 
 ## Format evolution
 
 Version 3 remains the current implemented format.
 
-When pending actions are implemented, the incompatible waiting status, foreground/background action fields, and action counter require:
+When pending actions are implemented, the incompatible waiting status, foreground/background action fields, action counter, and settlement record require:
 
 ```text
 instruction plan version: 4
