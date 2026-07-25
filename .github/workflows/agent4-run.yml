@@ -1,4 +1,4 @@
-name: Agent 4 apply issue 40
+name: Agent 4 apply issue 41
 
 on:
   pull_request:
@@ -17,27 +17,94 @@ jobs:
         with:
           ref: fix/issues-40-41-runtime-snapshot-invariants
           fetch-depth: 0
-      - name: Reconstruct and apply patch
-        env:
-          PATCH_4: aXQgfSIsCisgICAgICAgICdzYXkgImJlZm9yZSInLAorICAgICAgICAic3RvcCgpIiwKKyAgICAgICAgJ3NheSAiYWZ0ZXIiJywKKyAgICAgIF0uam9pbigiXG4iKSwKKyAgICAgIGV4cGVjdGVkS2luZHM6IFsic2F5IiwgImV4aXQiXSwKKyAgICB9LAorICAgIHsKKyAgICAgIG5hbWU6ICJuZXN0ZWQgZnVuY3Rpb24gZXhpdCIsCisgICAgICBzb3VyY2U6IFsKKyAgICAgICAgImZ1bmN0aW9uIGlubmVyIHsgZXhpdCB9IiwKKyAgICAgICAgImZ1bmN0aW9uIG91dGVyIHsiLAorICAgICAgICAiICBpbm5lcigpIiwKKyAgICAgICAgJyAgc2F5ICJ1bnJlYWNoYWJsZSBmdW5jdGlvbiBjb2RlIicsCisgICAgICAgICJ9IiwKKyAgICAgICAgIm91dGVyKCkiLAorICAgICAgICAnc2F5ICJ1bnJlYWNoYWJsZSByb290IGNvZGUiJywKKyAgICAgIF0uam9pbigiXG4iKSwKKyAgICAgIGV4cGVjdGVkS2luZHM6IFsiZXhpdCJdLAorICAgIH0sCisgIF0gYXMgY29uc3Q7CisKKyAgZm9yIChjb25zdCBzY2VuYXJpbyBvZiBzY2VuYXJpb3MpIHsKKyAgICBjb25zdCBjb21waWxlZCA9IHBsYW4oc2NlbmFyaW8uc291cmNlKTsKKyAgICBjb25zdCByZXN1bHQgPSBydW4oY29tcGlsZWQsIGNyZWF0ZUZyZXNoUnVudGltZVNuYXBzaG90KGNvbXBpbGVkKSk7CisgICAgYXNzZXJ0LmVxdWFsKHJlc3VsdC5zbmFwc2hvdC5zdGF0dXMsICJoYWx0ZWQiLCBzY2VuYXJpby5uYW1lKTsKKyAgICBhc3NlcnQuZGVlcEVxdWFsKHJlc3VsdC5ldmVudHMubWFwKChldmVudCkgPT4gZXZlbnQua2luZCksIHNjZW5hcmlvLmV4cGVjdGVkS2luZHMsIHNjZW5hcmlvLm5hbWUpOworICAgIGFzc2VydC5lcXVhbCh2YWxpZGF0ZVJ1bnRpbWVTbmFwc2hvdChyZXN1bHQuc25hcHNob3QsIGNvbXBpbGVkKS52YWxpZCwgdHJ1ZSwgc2NlbmFyaW8ubmFtZSk7CisKKyAgICBjb25zdCByZXN0b3JlZCA9IGRlc2VyaWFsaXplQ2hlY2twb2ludCgKKyAgICAgIHNlcmlhbGl6ZUNoZWNrcG9pbnQoY3JlYXRlQ2hlY2twb2ludChjb21waWxlZCwgcmVzdWx0LnNuYXBzaG90KSksCisgICAgKTsKKyAgICBhc3NlcnQuZGVlcEVxdWFsKHJlc3RvcmVkLnNuYXBzaG90LCByZXN1bHQuc25hcHNob3QsIHNjZW5hcmlvLm5hbWUpOworICAgIGFzc2VydC5lcXVhbCh2YWxpZGF0ZVJ1bnRpbWVTbmFwc2hvdChyZXN0b3JlZC5zbmFwc2hvdCwgcmVzdG9yZWQucGxhbikudmFsaWQsIHRydWUsIHNjZW5hcmlvLm5hbWUpOworICB9Cit9KTsKKwordGVzdCgia2VlcHMgdmFsaWQgaGFsdGVkIGV4ZWN1dGlvbiByZXN1bWUtZXF1aXZhbGVudCIsICgpID0+IHsKKyAgY29uc3QgcmVzdWx0ID0gYXNzZXJ0UnVudGltZVJlc3VtZUVxdWl2YWxlbnQoWworICAgICJmdW5jdGlvbiBpbm5lciB7IHJldHVybiAyIH0iLAorICAgICdzYXkgYHZhbHVlOiR7aW5uZXIoKX1gJywKKyAgICAiZXhpdCIsCisgIF0uam9pbigiXG4iKSwgeworICAgIHNjZW5hcmlvTmFtZTogInJ1bnRpbWUgc25hcHNob3QgaW52YXJpYW50IHJlc3VtZSBlcXVpdmFsZW5jZSIsCisgIH0pOworCisgIGFzc2VydC5lcXVhbChyZXN1bHQuZmluYWxTbmFwc2hvdC5zdGF0dXMsICJoYWx0ZWQiKTsKKyAgYXNzZXJ0LmRlZXBFcXVhbChyZXN1bHQuZXZlbnRzLm1hcCgoZXZlbnQpID0+IGV2ZW50LmtpbmQpLCBbInNheSIsICJleGl0Il0pOworfSk7CisKK2Z1bmN0aW9uIHBsYW4oc291cmNlOiBzdHJpbmcpOiBJbnN0cnVjdGlvblBsYW4geworICBjb25zdCByZXN1bHQgPSBjb21waWxlU291cmNlKHNvdXJjZSk7CisgIGFzc2VydC5kZWVwRXF1YWwocmVzdWx0LmRpYWdub3N0aWNzLCBbXSk7CisgIGFzc2VydC5ub3RFcXVhbChyZXN1bHQucGxhbiwgbnVsbCk7CisgIHJldHVybiByZXN1bHQucGxhbiE7Cit9CisKK2Z1bmN0aW9uIG11dGFibGVDaGVja3BvaW50KGNoZWNrcG9pbnQ6IFJ1bnRpbWVDaGVja3BvaW50KTogeworICBmb3JtYXQ6IFJ1bnRpbWVDaGVja3BvaW50WyJmb3JtYXQiXTsKKyAgdmVyc2lvbjogUnVudGltZUNoZWNrcG9pbnRbInZlcnNpb24iXTsKKyAgcGxhbjogSW5zdHJ1Y3Rpb25QbGFuOworICBzbmFwc2hvdDogUnVudGltZVNuYXBzaG90OworfSB7CisgIHJldHVybiBzdHJ1Y3R1cmVkQ2xv
+      - name: Apply safe-integer invariants
         run: |
           python - <<'PY'
-          import base64, os, pathlib
-          lines = pathlib.Path('.github/workflows/agent4-export.yml').read_text().splitlines()
-          parts = {}
-          for line in lines:
-              stripped = line.strip()
-              for key in ('PATCH_1', 'PATCH_2', 'PATCH_3', 'PATCH_5'):
-                  prefix = f'{key}: '
-                  if stripped.startswith(prefix):
-                      parts[key] = stripped[len(prefix):]
-          encoded = parts['PATCH_1'] + parts['PATCH_2'] + parts['PATCH_3'] + os.environ['PATCH_4'] + parts['PATCH_5']
-          pathlib.Path('/tmp/issue40.patch').write_bytes(base64.b64decode(encoded))
+          from pathlib import Path
+
+          state = Path('src/runtime/state.ts')
+          text = state.read_text()
+          text = text.replace('nonNegativeInteger', 'nonNegativeSafeInteger')
+          text = text.replace(
+              'Number.isInteger(source.start) &&\n    Number.isInteger(source.end)',
+              'Number.isSafeInteger(source.start) &&\n    Number.isSafeInteger(source.end)',
+          )
+          text = text.replace(
+              'return Number.isInteger(value) && (value as number) >= 0;',
+              'return Number.isSafeInteger(value) && (value as number) >= 0;',
+          )
+          text = text.replace(
+              'return Math.max(0, size);',
+              'return Number.isSafeInteger(size) ? Math.max(0, size) : -1;',
+              1,
+          )
+          text = text.replace(
+              'Runtime nextEventSequence must be a positive integer.',
+              'Runtime nextEventSequence must be a positive safe integer.',
+          )
+          text = text.replace(
+              'Runtime nextScopeId must be a positive unused ID.',
+              'Runtime nextScopeId must be a positive unused safe integer ID.',
+          )
+          text = text.replace(
+              'Runtime nextSpeakerId is invalid.',
+              'Runtime nextSpeakerId must be a positive unused safe integer ID.',
+          )
+          text = text.replace(
+              'Runtime nextCallFrameId is invalid.',
+              'Runtime nextCallFrameId must be a positive unused safe integer ID.',
+          )
+          state.write_text(text)
+
+          serializable = Path('src/runtime/serializable-values.ts')
+          text = serializable.read_text().replace(
+              'return Number.isInteger(value.speakerId) &&',
+              'return Number.isSafeInteger(value.speakerId) &&',
+          )
+          serializable.write_text(text)
+
+          engine = Path('src/runtime/engine.ts')
+          text = engine.read_text()
+          replacements = [
+              (
+                  '      const speaker: RuntimeSpeakerSnapshot = {\n        id: snapshot.nextSpeakerId,',
+                  '      assertCounterCanAdvance(snapshot.nextSpeakerId, "nextSpeakerId");\n      const speaker: RuntimeSpeakerSnapshot = {\n        id: snapshot.nextSpeakerId,',
+              ),
+              (
+                  '    case "enterScope":\n      snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });',
+                  '    case "enterScope":\n      assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");\n      snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });',
+              ),
+              (
+                  '  const supplied = new Map(',
+                  '  assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");\n  assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");\n  const supplied = new Map(',
+              ),
+              (
+                  '): void {\n  snapshot.frames.push({ id: snapshot.nextScopeId, bindings });\n  snapshot.nextScopeId += 1;\n}\n\nfunction iterationLength(',
+                  '): void {\n  assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");\n  snapshot.frames.push({ id: snapshot.nextScopeId, bindings });\n  snapshot.nextScopeId += 1;\n}\n\nfunction iterationLength(',
+              ),
+              (
+                  'function takeSequence(snapshot: RuntimeSnapshot): number {\n  const sequence = snapshot.nextEventSequence;',
+                  'function assertCounterCanAdvance(value: number, field: string): void {\n  if (value >= Number.MAX_SAFE_INTEGER) {\n    throw new RuntimeDataError(\n      "TSR101",\n      `Runtime ${field} cannot be advanced safely.`,\n    );\n  }\n}\n\nfunction takeSequence(snapshot: RuntimeSnapshot): number {\n  assertCounterCanAdvance(snapshot.nextEventSequence, "nextEventSequence");\n  const sequence = snapshot.nextEventSequence;',
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'missing engine replacement: {old[:60]}')
+              text = text.replace(old, new, 1)
+          engine.write_text(text)
+
+          runtime = Path('docs/RUNTIME.md')
+          text = runtime.read_text()
+          anchor = 'A halted snapshot is accepted only at the root completion boundary, including an empty root, or immediately after an `exit` instruction. Halted snapshots must also retain no active call frames, loop frames, temporaries, nested scopes, contextual speaker, or failure state. These checks establish that the serialized state is a possible current runtime state; they do not authenticate its execution history.\n'
+          paragraph = '\nPersisted runtime counters, identities, instruction positions, collection-iteration positions, depths, temporary IDs, warning-deduplication IDs, speaker references, and source-span positions must be JavaScript safe integers in their existing non-negative or positive ranges. Ordinary finite script numbers retain their existing semantics. The allocator counters `nextEventSequence`, `nextScopeId`, `nextSpeakerId`, and `nextCallFrameId` may hold `Number.MAX_SAFE_INTEGER` as stored state, but an operation that would increment such a value is rejected with `RuntimeDataError` `TSR101` before an event sequence or runtime identity is reused.\n'
+          if anchor not in text:
+              raise SystemExit('missing runtime documentation anchor')
+          text = text.replace(anchor, anchor + paragraph, 1)
+          runtime.write_text(text)
           PY
-          git apply --check /tmp/issue40.patch
-          git apply /tmp/issue40.patch
+          git diff --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add docs/RUNTIME.md src/runtime/engine.ts src/runtime/state.ts tests/runtime-snapshot-invariants.test.ts
-          git commit -m 'Reject impossible halted snapshots'
+          git add docs/RUNTIME.md src/runtime/engine.ts src/runtime/serializable-values.ts src/runtime/state.ts
+          git commit -m 'Enforce safe runtime counters'
           git push origin HEAD:fix/issues-40-41-runtime-snapshot-invariants
