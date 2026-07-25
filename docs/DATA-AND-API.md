@@ -53,8 +53,38 @@ Runtime builtins are explicit capabilities. Only own registered properties are c
 
 See [`docs/RUNTIME.md`](RUNTIME.md) for current execution behavior, structured errors, capabilities, compiler/template behavior, RNG invariants, defaults, and limits.
 
+## Proposed pending-action boundary
+
+ADR 0016 proposes one canonical runtime-owned contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities.
+
+The runtime owns:
+
+- foreground and background action state;
+- action and event identities;
+- expected response types;
+- deadlines and continuation positions;
+- state transitions and idempotency;
+- snapshot, checkpoint, and completion validation.
+
+The player/controller owns:
+
+- Standard UI rendering and reconstruction;
+- browser capability invocation;
+- clock observation and wake-up scheduling;
+- translating browser results and exceptions into typed plain-data outcomes;
+- checkpoint transport and save acknowledgement;
+- browser-resource cleanup requested by canonical runtime transitions.
+
+The future host/player protocol must expose typed operations equivalent to observing time and completing, cancelling, or reporting a capability outcome for one action ID. The host must not mutate arbitrary snapshot fields or directly advance a continuation.
+
+The exact cross-origin envelope, field names, capability-negotiation schema, reconnect protocol, and save acknowledgement remain open. They are not silently accepted by ADR 0016.
+
+Camera and file APIs continue to return engine-managed references rather than browser objects. Package-defined camera roles, player device aliases, long-lived stream ownership, and persistent media collections remain separate follow-up designs recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
+
 ## Stability and future contracts
 
 The current TypeScript exports and version-3 plan, snapshot, and checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
 
-Exact account, toy, history, global-data, checkpoint storage, host-message, and integration payloads remain open and must be defined as typed contracts before implementation. This document does not accept those payloads or resolve their long-term versioning and migration policy.
+If ADR 0016 is accepted and implemented, the new waiting status, foreground/background action fields, and action counter require version-4 plan, snapshot, and checkpoint schemas. Version 4 is an internal POC format revision, not a product release number.
+
+Exact account, toy, history, global-data, checkpoint storage, host-message, media-persistence, time-integrity, and integration payloads remain open and must be defined as typed contracts before implementation. This document does not accept those payloads or resolve their long-term versioning and migration policy.
