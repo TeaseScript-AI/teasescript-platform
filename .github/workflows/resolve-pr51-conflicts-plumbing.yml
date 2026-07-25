@@ -1,78 +1,46 @@
-name: Resolve PR 51 conflicts plumbing
+name: Agent 4 final conflict verification
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  resolve:
+  verify:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out branch
+        uses: actions/checkout@v4
         with:
           ref: fix/issues-40-41-runtime-snapshot-invariants
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
-      - name: Merge and resolve
+      - name: Run exact verification
         run: |
-          set -euo pipefail
-          git fetch origin main
-          branch_parent="$(git rev-parse HEAD)"
-          main_parent="$(git rev-parse origin/main)"
-          git merge --no-commit --no-ff origin/main || test "$?" -eq 1
-          git checkout origin/main -- docs/RUNTIME.md src/runtime/serializable-values.ts
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          runtime = Path('docs/RUNTIME.md')
-          text = runtime.read_text()
-          old = 'Before an instruction is executed, the runtime validates the instruction plan and runtime snapshot. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.'
-          new = 'Each low-level runtime entry validates the instruction plan and runtime snapshot before executing or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.'
-          assert old in text
-          text = text.replace(old, new, 1)
-          anchor = 'Externally supplied instruction plans, runtime snapshots, checkpoints, and serializable runtime values pass through an iterative depth-and-work preflight before detailed recursive validation, cloning, freezing, state construction, event emission, or RNG consumption. Depth is counted from the external root at zero, and the work limit applies to each bounded preflight traversal. Exceeding either implementation limit is malformed external runtime data. Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`, and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.\n'
-          assert anchor in text
-          extra = '\nA halted snapshot is accepted only at the root completion boundary, including an empty root, or immediately after an `exit` instruction. Halted snapshots must also retain no active call frames, loop frames, temporaries, nested scopes, contextual speaker, or failure state. These checks establish that the serialized state is a possible current runtime state; they do not authenticate its execution history.\n\nPersisted runtime counters, identities, instruction positions, collection-iteration positions, depths, temporary IDs, warning-deduplication IDs, speaker references, and source-span positions must be JavaScript safe integers in their existing non-negative or positive ranges. Ordinary finite script numbers retain their existing semantics. The allocator counters `nextEventSequence`, `nextScopeId`, `nextSpeakerId`, and `nextCallFrameId` may hold `Number.MAX_SAFE_INTEGER` as stored state, but an operation that would increment such a value is rejected with `RuntimeDataError` `TSR101` before an event sequence or runtime identity is reused.\n'
-          runtime.write_text(text.replace(anchor, anchor + extra, 1))
-
-          serializable = Path('src/runtime/serializable-values.ts')
-          text = serializable.read_text()
-          assert 'return Number.isInteger(value.speakerId) &&' in text
-          serializable.write_text(text.replace('return Number.isInteger(value.speakerId) &&', 'return Number.isSafeInteger(value.speakerId) &&', 1))
-
-          engine = Path('src/runtime/engine.ts')
-          text = engine.read_text()
-          pattern = re.compile(r'(export function (?:stepToEvent|run)\([\s\S]*?\): RuntimeOperationResult \{\n)(?:  assertExecutableData\(plan, snapshot\);\n)?  const budget = instructionBudget\(options\.instructionBudget\);\n(?:  assertExecutableData\(plan, snapshot\);\n)?')
-          text, count = pattern.subn(lambda m: m.group(1) + '  assertExecutableData(plan, snapshot);\n  const budget = instructionBudget(options.instructionBudget);\n', text)
-          assert count == 2
-          engine.write_text(text)
-          PY
-          git add -A
-          test -z "$(git ls-files -u)"
-          tree="$(git write-tree)"
-          export GIT_AUTHOR_NAME='github-actions[bot]'
-          export GIT_AUTHOR_EMAIL='41898282+github-actions[bot]@users.noreply.github.com'
-          export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
-          export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
-          commit="$(printf '%s\n' 'Merge current main and resolve runtime invariant conflicts' | git commit-tree "$tree" -p "$branch_parent" -p "$main_parent")"
-          git reset --hard "$commit"
-      - name: Verify
-        run: |
-          node --version
-          npm --version
-          npm ci
-          npm run check
-          npm run build
-          node --test dist/tests/runtime-snapshot-invariants.test.js
-          git diff --check origin/main...HEAD
+          set -o pipefail
+          mkdir -p /tmp/agent4-evidence
+          node --version | tee /tmp/agent4-evidence/node-version.txt
+          npm --version | tee /tmp/agent4-evidence/npm-version.txt
+          cat .nvmrc | tee /tmp/agent4-evidence/nvmrc.txt
+          npm ci 2>&1 | tee /tmp/agent4-evidence/npm-ci.txt
+          npm run check 2>&1 | tee /tmp/agent4-evidence/full-check.txt
+          npm run build 2>&1 | tee /tmp/agent4-evidence/build.txt
+          node --test dist/tests/runtime-snapshot-invariants.test.js 2>&1 | tee /tmp/agent4-evidence/focused.txt
+          git diff --check origin/main...HEAD 2>&1 | tee /tmp/agent4-evidence/diff-check.txt
+          git status --short | tee /tmp/agent4-evidence/status.txt
           test -z "$(git status --short)"
-      - name: Push
-        run: git push origin HEAD:fix/issues-40-41-runtime-snapshot-invariants
+          git rev-parse origin/main | tee /tmp/agent4-evidence/main-sha.txt
+          git rev-parse HEAD | tee /tmp/agent4-evidence/head-sha.txt
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent4-post-conflict-verification
+          path: /tmp/agent4-evidence
+          retention-days: 1
