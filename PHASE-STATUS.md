@@ -2,11 +2,12 @@
 
 ## Evidence boundary
 
-- Current repository baseline for this status update: `7802c344fb9ee77dfff645e182bc362ddb416be1` on `main`.
+- Current repository baseline for this status update: `b67e5f947e628ad4d3784fadf3a8a9c5003055aa` on `main`.
 - The seven-item implemented-foundation hardening set tracked by issue #7 is complete at this baseline, including the compiler/template work in PR #19, RNG-state work in PR #20, and the direct-AST non-finite-number boundary repair in PR #34.
 - PR #37 added sequenced `TSW002` developer warnings when `list.remove(value)` finds no matching value while preserving the unchanged list.
 - PR #48 completed the owner-selected reusable runtime resume-equivalence outcome tracked as `POC-ENGINE-002`, with a shared test-only helper and bounded corpus that checks every completed instruction boundary through a real JSON checkpoint round trip.
-- Final post-merge verification for PR #48 at this baseline passed with 280 tests, 0 failures, and a successful TypeScript build.
+- PR #46 rejects ordinary instruction-plan control-flow targets that cross between root and function execution regions before execution or checkpoint restore.
+- Final post-merge verification reported for PR #46 at this baseline passed with 294 tests, 0 failures, and a successful TypeScript build.
 - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
 ## Implemented in the current repository code
@@ -34,6 +35,7 @@
 
 - Comments, ranges, deterministic random built-ins, `else if`, `repeat`, list/set/range `for`, `while`, `break`, and `continue`.
 - Explicit serializable loop frames and restore inside active loops.
+- Instruction-plan validation rejects ordinary jumps, loop edges, parameter-default targets, and call return targets that leave their owning root or function execution region.
 
 ### User-defined functions and hardening
 
