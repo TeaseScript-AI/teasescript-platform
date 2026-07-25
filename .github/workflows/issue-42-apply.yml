@@ -108,6 +108,8 @@ jobs:
           npm run build
       - name: Commit and push implementation
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Bound validation of external runtime data"
           test -z "$(git status --short)"
