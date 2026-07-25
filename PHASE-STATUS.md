@@ -58,8 +58,11 @@ The current plan, snapshot, and checkpoint formats are version 3 POC formats. Th
 
 ## Verification expected before merge
 
+The exact Node.js version declared in `.nvmrc` is required. Activate that version with any suitable mechanism. When NVM is available, `nvm use` is one optional activation method; missing NVM, or NVM not seeing a version activated by `actions/setup-node`, a container, or another version manager, is not itself a verification failure. Confirm the effective environment before installing dependencies:
+
 ```shell
-nvm use
+node --version
+npm --version
 npm ci
 npm run check
 npm run build
