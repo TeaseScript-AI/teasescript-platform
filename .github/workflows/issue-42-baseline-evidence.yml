@@ -1,10 +1,7 @@
 name: Issue 42 baseline evidence
 
 on:
-  push:
-    branches: [fix/issue-42-bounded-runtime-validation]
-    paths:
-      - .github/workflows/issue-42-baseline-evidence.yml
+  pull_request:
 
 permissions:
   contents: read
