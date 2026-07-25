@@ -1,0 +1,51 @@
+name: Agent 2 final lexer verification
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Verify and capture output
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            echo "node_version=$(node --version)"
+            echo "npm_version=$(npm --version)"
+            npm ci
+            npm run check
+            npm run build
+            node --test \
+              dist/tests/functions-semantic.test.js \
+              dist/tests/lexer-boundaries.test.js \
+              dist/tests/parser-diagnostics.test.js
+            git diff --check origin/main...HEAD
+            echo "changed_files_begin"
+            git diff --stat origin/main...HEAD
+            git diff --name-only origin/main...HEAD
+            echo "changed_files_end"
+            echo "worktree_status_begin"
+            git status --short
+            echo "worktree_status_end"
+          } 2>&1 | tee /tmp/agent2-final-verification.txt
+      - name: Upload verification output
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent2-final-lexer-verification
+          path: /tmp/agent2-final-verification.txt
