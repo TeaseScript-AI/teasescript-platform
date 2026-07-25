@@ -504,11 +504,18 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
   if (!Array.isArray(value.instructions)) {
     errors.push(planError("TSC002", "Instructions must be an array.", "$.instructions"));
   } else {
-    if (
-      !nonNegativeInteger(value.rootEndInstruction) ||
-      value.rootEndInstruction > value.instructions.length
-    ) {
-      errors.push(planError("TSC002", "Root execution boundary is invalid.", "$.rootEndInstruction"));
+    const rootEndInstruction = validInstructionBoundary(
+      value.rootEndInstruction,
+      value.instructions.length,
+    )
+      ? value.rootEndInstruction
+      : null;
+    if (rootEndInstruction === null) {
+      errors.push(planError(
+        "TSC002",
+        "Root execution boundary is invalid.",
+        "$.rootEndInstruction",
+      ));
     }
     const functionIds = collectFunctionIds(value.functions);
     for (let index = 0; index < value.instructions.length; index += 1) {
@@ -524,16 +531,16 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
     }
     validateLoopStructure(value.instructions, errors);
     validatePreparedReferenceStructure(value.instructions, errors);
-    validateFunctionDefinitions(
+    const validatedFunctions = validateFunctionDefinitions(
       value.functions,
       value.instructions,
-      value.rootEndInstruction,
+      rootEndInstruction,
       errors,
     );
     validateInstructionControlFlowRegions(
       value.instructions,
-      value.rootEndInstruction,
-      value.functions,
+      rootEndInstruction,
+      validatedFunctions,
       errors,
     );
   }
@@ -2025,13 +2032,23 @@ type InstructionExecutionRegion =
       readonly endInstruction: number;
     };
 
+interface ValidatedFunctionRange {
+  readonly definition: Record<string, unknown>;
+  readonly path: string;
+  readonly id: number;
+  readonly entryInstruction: number;
+  readonly bodyEntryInstruction: number;
+  readonly implicitReturnInstruction: number;
+  readonly endInstruction: number;
+}
+
 function validateInstructionControlFlowRegions(
   instructions: readonly unknown[],
-  rootEndInstruction: unknown,
-  functions: unknown,
+  rootEndInstruction: number | null,
+  functions: readonly ValidatedFunctionRange[],
   errors: PlanValidationError[],
 ): void {
-  if (!nonNegativeInteger(rootEndInstruction) || !Array.isArray(functions)) return;
+  if (rootEndInstruction === null) return;
 
   const regions: Array<InstructionExecutionRegion | undefined> = new Array(
     instructions.length,
@@ -2041,19 +2058,15 @@ function validateInstructionControlFlowRegions(
     startInstruction: 0,
     endInstruction: rootEndInstruction,
   };
-  for (let index = 0; index < rootEndInstruction; index += 1) {
+  for (
+    let index = 0;
+    index < rootEndInstruction && index < instructions.length;
+    index += 1
+  ) {
     regions[index] = rootRegion;
   }
 
   for (const definition of functions) {
-    if (
-      !isRecord(definition) ||
-      !nonNegativeInteger(definition.id) ||
-      !nonNegativeInteger(definition.entryInstruction) ||
-      !nonNegativeInteger(definition.endInstruction)
-    ) {
-      return;
-    }
     const functionRegion: InstructionExecutionRegion = {
       kind: "function",
       functionId: definition.id,
@@ -2062,7 +2075,7 @@ function validateInstructionControlFlowRegions(
     };
     for (
       let index = definition.entryInstruction;
-      index < definition.endInstruction;
+      index < definition.endInstruction && index < instructions.length;
       index += 1
     ) {
       regions[index] = functionRegion;
@@ -2123,10 +2136,8 @@ function validateInstructionRegionTarget(
   region: InstructionExecutionRegion,
   errors: PlanValidationError[],
 ): void {
-  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > instructionCount) {
-    return;
-  }
-  const target = value as number;
+  if (!validInstructionBoundary(value, instructionCount)) return;
+  const target = value;
   const remainsInRegion = region.kind === "root"
     ? target >= region.startInstruction && target <= region.endInstruction
     : target >= region.startInstruction && target < region.endInstruction;
@@ -2142,19 +2153,18 @@ function validateInstructionRegionTarget(
 function validateFunctionDefinitions(
   value: unknown,
   instructions: readonly unknown[],
-  rootEndInstruction: unknown,
+  rootEndInstruction: number | null,
   errors: PlanValidationError[],
-): void {
+): readonly ValidatedFunctionRange[] {
   if (!Array.isArray(value)) {
     errors.push(planError("TSC002", "Function definitions must be an array.", "$.functions"));
-    return;
+    return [];
   }
   const ids = new Set<number>();
   const names = new Set<string>();
   const definitions = new Map<number, Record<string, unknown>>();
-  let expectedEntry = nonNegativeInteger(rootEndInstruction)
-    ? rootEndInstruction
-    : -1;
+  const validatedRanges: ValidatedFunctionRange[] = [];
+  let expectedEntry = rootEndInstruction;
   value.forEach((definition, definitionIndex) => {
     const path = `$.functions[${definitionIndex}]`;
     if (!isRecord(definition)) {
@@ -2170,10 +2180,13 @@ function validateFunctionDefinitions(
         errors.push(planError("TSC002", "Function IDs must be unique.", `${path}.id`));
       }
       if (definition.id !== definitionIndex + 1) {
-        errors.push(planError("TSC002", "Function IDs must follow deterministic source order.", `${path}.id`));
+        errors.push(planError(
+          "TSC002",
+          "Function IDs must follow deterministic source order.",
+          `${path}.id`,
+        ));
       }
       ids.add(definition.id);
-      definitions.set(definition.id, definition);
     }
     if (typeof definition.name === "string") {
       if (names.has(definition.name)) {
@@ -2188,8 +2201,12 @@ function validateFunctionDefinitions(
       definition.implicitReturnInstruction,
       definition.endInstruction,
     ];
-    if (points.some((point) => !nonNegativeInteger(point))) {
-      errors.push(planError("TSC002", "Function instruction boundaries must be non-negative integers.", path));
+    if (points.some((point) => !nonNegativeSafeInteger(point))) {
+      errors.push(planError(
+        "TSC002",
+        "Function instruction boundaries must be non-negative integers.",
+        path,
+      ));
       return;
     }
     const [entry, bodyEntry, implicitReturn, end] = points as [
@@ -2199,34 +2216,65 @@ function validateFunctionDefinitions(
       number,
     ];
     if (
+      expectedEntry === null ||
       entry !== expectedEntry ||
       entry >= bodyEntry ||
       bodyEntry > implicitReturn ||
-      implicitReturn + 1 !== end ||
+      implicitReturn !== end - 1 ||
       end > instructions.length
     ) {
-      errors.push(planError("TSC002", "Function instruction range is overlapping or impossible.", path));
+      errors.push(planError(
+        "TSC002",
+        "Function instruction range is overlapping or impossible.",
+        path,
+      ));
+      return;
     }
+    const functionId = definition.id;
+    if (!Number.isSafeInteger(functionId) || (functionId as number) < 1) return;
+
+    const validatedRange: ValidatedFunctionRange = {
+      definition,
+      path,
+      id: functionId as number,
+      entryInstruction: entry,
+      bodyEntryInstruction: bodyEntry,
+      implicitReturnInstruction: implicitReturn,
+      endInstruction: end,
+    };
+    validatedRanges.push(validatedRange);
+    definitions.set(functionId as number, definition);
+
     const bodyEntryMarker = instructions[bodyEntry - 1];
     if (!isRecord(bodyEntryMarker) || bodyEntryMarker.kind !== "enterFunctionBody") {
-      errors.push(planError("TSC002", "Function body entry point is invalid.", `${path}.bodyEntryInstruction`));
+      errors.push(planError(
+        "TSC002",
+        "Function body entry point is invalid.",
+        `${path}.bodyEntryInstruction`,
+      ));
     }
     const implicitReturnInstruction = instructions[implicitReturn];
     if (!isRecord(implicitReturnInstruction) || implicitReturnInstruction.kind !== "returnVoid") {
-      errors.push(planError("TSC002", "Function implicit-return boundary is invalid.", `${path}.implicitReturnInstruction`));
+      errors.push(planError(
+        "TSC002",
+        "Function implicit-return boundary is invalid.",
+        `${path}.implicitReturnInstruction`,
+      ));
     }
-    validateFunctionPrologue(definition, instructions, path, errors);
+    validateFunctionPrologue(validatedRange, instructions, errors);
     expectedEntry = end;
   });
-  if (expectedEntry !== instructions.length) {
-    errors.push(planError("TSC002", "Function ranges do not cover the non-root instruction region.", "$.functions"));
+  if (expectedEntry !== null && expectedEntry !== instructions.length) {
+    errors.push(planError(
+      "TSC002",
+      "Function ranges do not cover the non-root instruction region.",
+      "$.functions",
+    ));
   }
 
   instructions.forEach((instruction, index) => {
     if (!isRecord(instruction)) return;
-    const owner = [...definitions.values()].find((definition) =>
-      typeof definition.entryInstruction === "number" &&
-      typeof definition.endInstruction === "number" &&
+    const owner = validatedRanges.find((definition) =>
       index >= definition.entryInstruction &&
       index < definition.endInstruction
     );
@@ -2240,7 +2288,11 @@ function validateFunctionDefinitions(
       "returnVoid",
     ].includes(String(instruction.kind));
     if (functionOnly && owner === undefined) {
-      errors.push(planError("TSC002", "Function-only instruction appears in root execution.", `$.instructions[${index}]`));
+      errors.push(planError(
+        "TSC002",
+        "Function-only instruction appears in root execution.",
+        `$.instructions[${index}]`,
+      ));
     }
     if (
       owner !== undefined &&
@@ -2248,11 +2300,19 @@ function validateFunctionDefinitions(
       "functionId" in instruction &&
       instruction.functionId !== owner.id
     ) {
-      errors.push(planError("TSC002", "Function prologue instruction has the wrong function ID.", `$.instructions[${index}].functionId`));
+      errors.push(planError(
+        "TSC002",
+        "Function prologue instruction has the wrong function ID.",
+        `$.instructions[${index}].functionId`,
+      ));
     }
     if (instruction.kind === "callFunction" && typeof instruction.functionId === "number") {
       const target = definitions.get(instruction.functionId);
-      if (target !== undefined && Array.isArray(target.parameters) && Array.isArray(instruction.arguments)) {
+      if (
+        target !== undefined &&
+        Array.isArray(target.parameters) &&
+        Array.isArray(instruction.arguments)
+      ) {
         const parameterNames = new Set(
           target.parameters
             .filter(isRecord)
@@ -2263,10 +2323,18 @@ function validateFunctionDefinitions(
         instruction.arguments.forEach((argument, argumentIndex) => {
           if (!isRecord(argument) || typeof argument.parameterName !== "string") return;
           if (!parameterNames.has(argument.parameterName)) {
-            errors.push(planError("TSC002", "Call refers to an unknown function parameter.", `$.instructions[${index}].arguments[${argumentIndex}].parameterName`));
+            errors.push(planError(
+              "TSC002",
+              "Call refers to an unknown function parameter.",
+              `$.instructions[${index}].arguments[${argumentIndex}].parameterName`,
+            ));
           }
           if (supplied.has(argument.parameterName)) {
-            errors.push(planError("TSC002", "Call supplies a function parameter more than once.", `$.instructions[${index}].arguments[${argumentIndex}].parameterName`));
+            errors.push(planError(
+              "TSC002",
+              "Call supplies a function parameter more than once.",
+              `$.instructions[${index}].arguments[${argumentIndex}].parameterName`,
+            ));
           }
           supplied.add(argument.parameterName);
         });
@@ -2287,32 +2355,31 @@ function validateFunctionDefinitions(
       }
     }
   });
+  return validatedRanges;
 }
 
 function validateFunctionPrologue(
-  definition: Record<string, unknown>,
+  range: ValidatedFunctionRange,
   instructions: readonly unknown[],
-  path: string,
   errors: PlanValidationError[],
 ): void {
-  if (
-    !Array.isArray(definition.parameters) ||
-    !nonNegativeInteger(definition.entryInstruction) ||
-    !nonNegativeInteger(definition.bodyEntryInstruction) ||
-    !nonNegativeInteger(definition.id)
-  ) {
-    return;
-  }
-  let cursor = definition.entryInstruction;
+  const { definition, path } = range;
+  if (!Array.isArray(definition.parameters)) return;
+
+  let cursor = range.entryInstruction;
   for (let index = 0; index < definition.parameters.length; index += 1) {
     const instruction = instructions[cursor];
     if (
       !isRecord(instruction) ||
       instruction.kind !== "bindSuppliedParameter" ||
-      instruction.functionId !== definition.id ||
+      instruction.functionId !== range.id ||
       instruction.parameterIndex !== index
     ) {
-      errors.push(planError("TSC002", "Function supplied-parameter prologue is malformed.", `${path}.entryInstruction`));
+      errors.push(planError(
+        "TSC002",
+        "Function supplied-parameter prologue is malformed.",
+        `${path}.entryInstruction`,
+      ));
       return;
     }
     cursor += 1;
@@ -2321,9 +2388,13 @@ function validateFunctionPrologue(
   if (
     !isRecord(beginDefaults) ||
     beginDefaults.kind !== "beginFunctionDefaults" ||
-    beginDefaults.functionId !== definition.id
+    beginDefaults.functionId !== range.id
   ) {
-    errors.push(planError("TSC002", "Function default-parameter prologue is missing.", `${path}.entryInstruction`));
+    errors.push(planError(
+      "TSC002",
+      "Function default-parameter prologue is missing.",
+      `${path}.entryInstruction`,
+    ));
     return;
   }
   cursor += 1;
@@ -2334,24 +2405,32 @@ function validateFunctionPrologue(
       !isRecord(parameter) ||
       !isRecord(prepare) ||
       prepare.kind !== "prepareParameterDefault" ||
-      prepare.functionId !== definition.id ||
+      prepare.functionId !== range.id ||
       prepare.parameterIndex !== index ||
-      !nonNegativeInteger(prepare.target) ||
+      !validInstructionBoundary(prepare.target, instructions.length) ||
       prepare.target <= cursor ||
-      prepare.target >= definition.bodyEntryInstruction
+      prepare.target >= range.bodyEntryInstruction
     ) {
-      errors.push(planError("TSC002", "Function parameter-default sequence is malformed.", `${path}.parameters[${index}]`));
+      errors.push(planError(
+        "TSC002",
+        "Function parameter-default sequence is malformed.",
+        `${path}.parameters[${index}]`,
+      ));
       return;
     }
     const regionStart = cursor + 1;
     const regionEnd = prepare.target;
     const defaultBindings: Record<string, unknown>[] = [];
-    for (let instructionIndex = regionStart; instructionIndex < regionEnd; instructionIndex += 1) {
+    for (
+      let instructionIndex = regionStart;
+      instructionIndex < regionEnd && instructionIndex < instructions.length;
+      instructionIndex += 1
+    ) {
       const nested = instructions[instructionIndex];
       if (!isRecord(nested)) continue;
       if (nested.kind === "bindDefaultParameter") {
         if (
-          nested.functionId !== definition.id ||
+          nested.functionId !== range.id ||
           nested.parameterIndex !== index
         ) {
           errors.push(planError(
@@ -2382,7 +2461,7 @@ function validateFunctionPrologue(
       }
       if (
         (nested.kind === "jump" || nested.kind === "jumpIfFalse") &&
-        (!nonNegativeInteger(nested.target) ||
+        (!validInstructionBoundary(nested.target, instructions.length) ||
           nested.target <= instructionIndex ||
           nested.target > regionEnd)
       ) {
@@ -2397,13 +2476,17 @@ function validateFunctionPrologue(
       (parameter.hasDefault === true && defaultBindings.length !== 1) ||
       (parameter.hasDefault === false && regionEnd !== regionStart)
     ) {
-      errors.push(planError("TSC002", "Function parameter default does not match its metadata.", `${path}.parameters[${index}]`));
+      errors.push(planError(
+        "TSC002",
+        "Function parameter default does not match its metadata.",
+        `${path}.parameters[${index}]`,
+      ));
     }
     if (parameter.hasDefault === true && defaultBindings.length === 1) {
       const bindingIndex = instructions.indexOf(defaultBindings[0]);
       for (
         let instructionIndex = regionStart;
-        instructionIndex < regionEnd;
+        instructionIndex < regionEnd && instructionIndex < instructions.length;
         instructionIndex += 1
       ) {
         const nested = instructions[instructionIndex];
@@ -2417,7 +2500,7 @@ function validateFunctionPrologue(
         }
         if (
           (nested.kind === "jump" || nested.kind === "jumpIfFalse") &&
-          nonNegativeInteger(nested.target) &&
+          validInstructionBoundary(nested.target, instructions.length) &&
           nested.target > bindingIndex
         ) {
           errors.push(planError(
@@ -2434,10 +2517,14 @@ function validateFunctionPrologue(
   if (
     !isRecord(bodyMarker) ||
     bodyMarker.kind !== "enterFunctionBody" ||
-    bodyMarker.functionId !== definition.id ||
-    cursor + 1 !== definition.bodyEntryInstruction
+    bodyMarker.functionId !== range.id ||
+    cursor + 1 !== range.bodyEntryInstruction
   ) {
-    errors.push(planError("TSC002", "Function body-entry prologue marker is malformed.", `${path}.bodyEntryInstruction`));
+    errors.push(planError(
+      "TSC002",
+      "Function body-entry prologue marker is malformed.",
+      `${path}.bodyEntryInstruction`,
+    ));
   }
   const prologueOnly = new Set([
     "bindSuppliedParameter",
@@ -2447,8 +2534,8 @@ function validateFunctionPrologue(
     "enterFunctionBody",
   ]);
   for (
-    let instructionIndex = definition.bodyEntryInstruction;
-    instructionIndex < (definition.endInstruction as number);
+    let instructionIndex = range.bodyEntryInstruction;
+    instructionIndex < range.endInstruction && instructionIndex < instructions.length;
     instructionIndex += 1
   ) {
     const instruction = instructions[instructionIndex];
@@ -2588,7 +2675,7 @@ function validateJumpTarget(
   instructionCount: number,
   errors: PlanValidationError[],
 ): void {
-  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > instructionCount) {
+  if (!validInstructionBoundary(value, instructionCount)) {
     errors.push(planError("TSC002", "Jump target is outside the instruction plan.", path));
   }
 }
@@ -2626,6 +2713,21 @@ function isScalar(value: unknown): boolean {
     typeof value === "boolean" ||
     (typeof value === "number" && Number.isFinite(value))
   );
+}
+
+function validInstructionBoundary(
+  value: unknown,
+  instructionCount: number,
+): value is number {
+  return (
+    Number.isSafeInteger(value) &&
+    (value as number) >= 0 &&
+    (value as number) <= instructionCount
+  );
+}
+
+function nonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 function nonNegativeInteger(value: unknown): value is number {
