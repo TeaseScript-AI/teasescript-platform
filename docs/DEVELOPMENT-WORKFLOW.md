@@ -225,10 +225,11 @@ Do not merge a workstream merely because its files do not conflict. Behavioral c
 
 Every pull request runs its relevant configured checks and reports exact commands and results.
 
-For a coordinated milestone, after all implementation and coordinator documentation changes are on the integration branch, run from a clean install:
+For a coordinated milestone, after all implementation and coordinator documentation changes are on the integration branch, run from a clean install with the exact Node.js version declared in `.nvmrc`. Activate that version with any suitable mechanism. When NVM is available, `nvm use` is one optional activation method; missing NVM, or NVM not seeing a version activated by `actions/setup-node`, a container, or another version manager, is not itself a verification failure. Confirm the effective environment before installing dependencies:
 
 ```shell
-nvm use
+node --version
+npm --version
 npm ci
 npm run check
 npm run build
