@@ -21,9 +21,12 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - name: Record environment
+        shell: bash
         run: |
-          node --version | tee node-version.txt
-          npm --version | tee npm-version.txt
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence"
+          node --version | tee "$RUNNER_TEMP/evidence/node-version.txt"
+          npm --version | tee "$RUNNER_TEMP/evidence/npm-version.txt"
       - name: Install dependencies
         run: npm ci
       - name: Verify canonical clean build and tests
@@ -31,8 +34,8 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf dist
-          npm run check 2>&1 | tee check.log
-          test "$(grep -c '^> tsc$' check.log)" -eq 1
+          npm run check 2>&1 | tee "$RUNNER_TEMP/evidence/check.log"
+          test "$(grep -c '^> tsc$' "$RUNNER_TEMP/evidence/check.log")" -eq 1
           test -f dist/src/index.js
           test -f dist/playground/browser.js
           test -f dist/playground/server.js
@@ -42,47 +45,42 @@ jobs:
           test ! -e dist/src/runtime/collections.js
           test ! -e dist/src/runtime/display.js
           test ! -e dist/src/runtime/value-guards.js
-          find dist -type f | sort > dist-tree.txt
+          find dist -type f | sort > "$RUNNER_TEMP/evidence/dist-tree.txt"
       - name: Verify retained focused commands
         shell: bash
         run: |
           set -euo pipefail
-          npm run build 2>&1 | tee build.log
-          npm run typecheck 2>&1 | tee typecheck.log
+          npm run build 2>&1 | tee "$RUNNER_TEMP/evidence/build.log"
+          npm run typecheck 2>&1 | tee "$RUNNER_TEMP/evidence/typecheck.log"
       - name: Verify import graph and symbols
         shell: bash
         run: |
           set -euo pipefail
           command -v rg
-          if rg 'runtime/(environment|collections|display|value-guards)' . \
-            --glob '!node_modules/**' --glob '!dist/**' --glob '!.git/**' \
-            | tee module-search.txt; then
+          search_roots=(
+            src tests playground docs tools examples
+            README.md README-FIRST.md CURRENT-DESIGN.md PHASE-STATUS.md AGENTS.md
+            package.json tsconfig.json .github/workflows/ci.yml
+          )
+          if rg 'runtime/(environment|collections|display|value-guards)' "${search_roots[@]}" \
+            | tee "$RUNNER_TEMP/evidence/module-search.txt"; then
             exit 1
           else
             status=$?
             test "$status" -eq 1
-            : > module-search.txt
+            : > "$RUNNER_TEMP/evidence/module-search.txt"
           fi
           rg 'Environment|callCollectionMethod|getCollectionProperty|randomItem|assertListIndex|toVisibleText|resolveOutputSpeaker|isRuntime(List|Set|Object|Speaker)' \
-            src tests playground | tee symbol-search.txt || test "$?" -eq 1
+            src tests playground | tee "$RUNNER_TEMP/evidence/symbol-search.txt" || test "$?" -eq 1
       - name: Verify diff and worktree
         shell: bash
         run: |
           set -euo pipefail
           git diff --check origin/main...HEAD
-          git status --short | tee git-status.txt
-          test ! -s git-status.txt
+          git status --short | tee "$RUNNER_TEMP/evidence/git-status.txt"
+          test ! -s "$RUNNER_TEMP/evidence/git-status.txt"
       - name: Upload verification evidence
         uses: actions/upload-artifact@v4
         with:
           name: agent4-repository-hygiene-verification
-          path: |
-            node-version.txt
-            npm-version.txt
-            check.log
-            build.log
-            typecheck.log
-            dist-tree.txt
-            module-search.txt
-            symbol-search.txt
-            git-status.txt
+          path: ${{ runner.temp }}/evidence
