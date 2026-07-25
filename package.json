@@ -9,8 +9,9 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/tests/*.test.js",
-    "check": "npm run typecheck && npm test",
+    "test:compiled": "node --test dist/tests/*.test.js",
+    "test": "npm run build && npm run test:compiled",
+    "check": "npm test",
     "playground": "npm run build && node dist/playground/server.js"
   },
   "devDependencies": {
