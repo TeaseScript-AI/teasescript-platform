@@ -4,6 +4,8 @@ Accepted ADRs and V30 override older descriptive documents. Sets, deep value cop
 
 ADR 0016 is accepted. It defines persisted nondecreasing session time, foreground/background pending actions, monotonic action IDs, bounded settlement replay, active-first completion lookup, injected time observations, and blocking `wait` as the first implementation slice.
 
+ADR 0017 is Proposed. It defines an owner-reviewable post-V30 syntax and runtime contract for deterministic transcript pacing, but it does not authorize implementation until the owner explicitly accepts or revises it.
+
 ## Runtime hardening and evolution
 
 - Package/source identity for browser checkpoints and production plan references.
@@ -36,7 +38,7 @@ The exact version-3 schemas are current POC implementation details, not a promis
 - Standard Library string methods and detailed API signatures.
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
 - Static treatment of contextual `speaker` access when control-flow analysis can prove that no explicit or default speaker is available: compile-time error, warning, or retained runtime failure. Ordinary narrator output such as `say "Hello"` is a separate valid case and does not require a default speaker.
-- Exact post-V30 chat-pacing semantics, including `say(..., wait: ...)`, visible-character counting, checkpoint state, and transcript-channel behavior.
+- Owner acceptance or revision of proposed ADR 0017, specifically its call-style `say` API, named `as:` option, Unicode code-point measurement, ordinary presentation-delay action events, and transfer-of-deadline-ownership state model.
 - Remaining accepted V30 constructs and APIs outside the current parser/runtime subset.
 
 ## Player and interactions
@@ -53,7 +55,7 @@ The exact version-3 schemas are current POC implementation details, not a promis
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
 - Time-integrity logging thresholds and whether a future typed anomaly hook becomes script-visible.
 
-See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md) for the selected direction and explicitly deferred design questions discussed with ADR 0016.
+See [`decisions/0017-deterministic-chat-output-pacing.md`](decisions/0017-deterministic-chat-output-pacing.md) for the proposed pacing contract and [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md) for the remaining camera, media, time-integrity, and planning context.
 
 ## Platform and personalities
 
@@ -64,5 +66,6 @@ See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CA
 
 ## Proposals, not decisions
 
+- ADR 0017 deterministic chat-output pacing until owner acceptance.
 - Restricted math.js-backed numeric/unit evaluation.
 - WebRTC, Redis, Electron, native apps, Kubernetes, and microservices without a concrete documented need.
