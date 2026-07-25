@@ -1,0 +1,137 @@
+name: Issue 55 failing-before evidence
+
+on:
+  push:
+    branches: [fix/issue-55-stable-external-data-capture]
+    paths:
+      - .github/workflows/issue-55-failing-before.yml
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact starting main
+        uses: actions/checkout@v4
+        with:
+          ref: 09a3b143beb12b7c9ecf02e5c7f03a0116123ee3
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+      - name: Run public-boundary probes
+        run: |
+          cat > /tmp/issue-55-probe.mjs <<'EOF'
+          import {
+            compileSource,
+            createFreshRuntimeSnapshot,
+          } from "${{ github.workspace }}/dist/src/index.js";
+
+          function deeplyNestedSerializableList(depth) {
+            let value = 0;
+            for (let index = 0; index < depth; index += 1) {
+              value = { kind: "list", items: [value] };
+            }
+            return value;
+          }
+
+          function record(name, operation, counters) {
+            try {
+              const result = operation();
+              console.log(`${name}=returned`);
+              if (result?.frames?.[0]?.bindings?.[0]) {
+                console.log(`${name}.stored=${JSON.stringify(result.frames[0].bindings[0].value)}`);
+              }
+            } catch (error) {
+              console.log(`${name}=${error?.constructor?.name}: ${error?.message}`);
+            }
+            for (const [key, value] of Object.entries(counters)) {
+              console.log(`${name}.${key}=${value()}`);
+            }
+          }
+
+          const plan = compileSource("exit").plan;
+          console.log(`node=${process.version}`);
+          console.log("main=09a3b143beb12b7c9ecf02e5c7f03a0116123ee3");
+
+          let simpleReads = 0;
+          const simpleGlobals = {};
+          Object.defineProperty(simpleGlobals, "payload", {
+            enumerable: true,
+            get() {
+              simpleReads += 1;
+              return simpleReads === 1 ? 0 : 1;
+            },
+          });
+          record(
+            "changing-global-getter",
+            () => createFreshRuntimeSnapshot(plan, { globals: simpleGlobals }),
+            { reads: () => simpleReads },
+          );
+
+          let itemReads = 0;
+          const unstableList = { kind: "list" };
+          Object.defineProperty(unstableList, "items", {
+            enumerable: true,
+            get() {
+              itemReads += 1;
+              return itemReads <= 2
+                ? [0]
+                : [deeplyNestedSerializableList(20_000)];
+            },
+          });
+          record(
+            "nested-getter-stack-overflow",
+            () => createFreshRuntimeSnapshot(plan, { globals: { payload: unstableList } }),
+            { itemReads: () => itemReads },
+          );
+
+          let ownKeysCount = 0;
+          let descriptorCount = 0;
+          let getCount = 0;
+          let prototypeCount = 0;
+          const proxyList = new Proxy({ kind: "list", items: [0] }, {
+            ownKeys(target) {
+              ownKeysCount += 1;
+              return Reflect.ownKeys(target);
+            },
+            getOwnPropertyDescriptor(target, key) {
+              descriptorCount += 1;
+              return Reflect.getOwnPropertyDescriptor(target, key);
+            },
+            getPrototypeOf(target) {
+              prototypeCount += 1;
+              return Reflect.getPrototypeOf(target);
+            },
+            get(target, key, receiver) {
+              getCount += 1;
+              if (key === "items" && getCount > 4) {
+                return [deeplyNestedSerializableList(20_000)];
+              }
+              return Reflect.get(target, key, receiver);
+            },
+          });
+          record(
+            "changing-proxy",
+            () => createFreshRuntimeSnapshot(plan, { globals: { payload: proxyList } }),
+            {
+              ownKeys: () => ownKeysCount,
+              descriptors: () => descriptorCount,
+              gets: () => getCount,
+              prototypes: () => prototypeCount,
+            },
+          );
+          EOF
+          node /tmp/issue-55-probe.mjs | tee issue-55-failing-before.log
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-55-failing-before
+          path: issue-55-failing-before.log
