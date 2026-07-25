@@ -442,13 +442,6 @@ class Lexer {
     while (this.#tokens[index]?.kind === TokenKind.Newline) index -= 1;
 
     const previousKind = this.#tokens[index]?.kind;
-    if (
-      previousKind === TokenKind.InterpolationStart &&
-      this.#isTemplateBoundaryAtLineEnd()
-    ) {
-      return false;
-    }
-
     switch (previousKind) {
       case TokenKind.InterpolationStart:
       case TokenKind.LeftParenthesis:
@@ -476,17 +469,6 @@ class Lexer {
       default:
         return false;
     }
-  }
-
-  #isTemplateBoundaryAtLineEnd(): boolean {
-    let distance = 1;
-    while (isHorizontalWhitespace(this.#peek(distance))) distance += 1;
-    const character = this.#peek(distance);
-    return (
-      character === "\n" ||
-      character === "\0" ||
-      (character === "\r" && this.#peek(distance + 1) === "\n")
-    );
   }
 
   #scanEscape(context: "string" | "template"): string {
