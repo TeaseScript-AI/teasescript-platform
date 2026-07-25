@@ -3,6 +3,12 @@ export {
   DiagnosticSeverity,
   type Diagnostic,
 } from "./diagnostics.js";
+export {
+  EXTERNAL_DATA_DEPTH_MESSAGE,
+  EXTERNAL_DATA_WORK_MESSAGE,
+  MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
+  MAX_EXTERNAL_RUNTIME_DATA_WORK,
+} from "./external-data-limits.js";
 export { lex, type LexResult } from "./lexer.js";
 export { parse, type ParseResult } from "./parser.js";
 export {

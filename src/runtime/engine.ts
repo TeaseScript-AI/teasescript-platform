@@ -138,6 +138,7 @@ export function stepToEvent(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
+  assertExecutableData(plan, snapshot);
   let current = cloneRuntimeSnapshot(snapshot);
   const events: InterpreterEvent[] = [];
   let instructionsExecuted = 0;
@@ -167,6 +168,7 @@ export function run(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
+  assertExecutableData(plan, snapshot);
   let current = cloneRuntimeSnapshot(snapshot);
   const events: InterpreterEvent[] = [];
   let instructionsExecuted = 0;

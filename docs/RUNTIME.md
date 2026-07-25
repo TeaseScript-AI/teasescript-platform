@@ -96,12 +96,16 @@ Current POC defaults and validation limits are:
 - checkpoint format version: `3`;
 - default maximum call depth: `256`;
 - accepted maximum call depth range: `1` through `4096`;
+- maximum external runtime-data nesting depth: `128` (`MAX_EXTERNAL_RUNTIME_DATA_DEPTH`);
+- maximum external runtime-data validation work: `100,000` visited values (`MAX_EXTERNAL_RUNTIME_DATA_WORK`);
 - default `run(...)` and `stepToEvent(...)` instruction budget: `10,000`;
 - compatibility `execute(program, options)` instruction budget: `100,000`;
 - default playground RNG algorithm: `xorshift32-v1`;
 - default playground seed: `0x6d2b79f5`.
 
 A configured instruction budget must be a positive integer. Exhaustion fails deterministically with structured runtime error `TSR037` instead of hanging. Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
+
+Externally supplied instruction plans, runtime snapshots, checkpoints, and serializable runtime values pass through an iterative depth-and-work preflight before detailed recursive validation, cloning, freezing, state construction, event emission, or RNG consumption. Exceeding either implementation limit is malformed external runtime data. Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`, and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
 
 ## Deterministic RNG invariant
 

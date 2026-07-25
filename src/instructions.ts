@@ -10,6 +10,12 @@ import {
   AST_VALIDATION_CODES,
   findNonFiniteNumericLiteralDiagnostics,
 } from "./ast-validation.js";
+import {
+  EXTERNAL_DATA_DEPTH_MESSAGE,
+  EXTERNAL_DATA_WORK_MESSAGE,
+  findExternalDataFailure,
+  type ExternalDataFailureKind,
+} from "./external-data-limits.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
@@ -471,9 +477,13 @@ export function compileProgram(program: Program): InstructionPlan {
 
 export function validateInstructionPlan(value: unknown): PlanValidationResult {
   const errors: PlanValidationError[] = [];
-  const jsonFailure = findJsonSafetyFailure(value, "$", new Set<object>());
-  if (jsonFailure !== null) {
-    return invalidPlan("TSC002", jsonFailure.message, jsonFailure.path);
+  const dataFailure = findExternalDataFailure(value);
+  if (dataFailure !== null) {
+    return invalidPlan(
+      "TSC002",
+      planExternalDataFailureMessage(dataFailure.kind),
+      dataFailure.path,
+    );
   }
   if (!isRecord(value)) {
     return invalidPlan("TSC002", "Instruction plan must be an object.", "$.");
@@ -2626,45 +2636,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function findJsonSafetyFailure(
-  value: unknown,
-  path: string,
-  active: Set<object>,
-): { readonly message: string; readonly path: string } | null {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean"
-  ) {
-    return null;
+function planExternalDataFailureMessage(
+  kind: ExternalDataFailureKind,
+): string {
+  switch (kind) {
+    case "depth":
+      return EXTERNAL_DATA_DEPTH_MESSAGE;
+    case "work":
+      return EXTERNAL_DATA_WORK_MESSAGE;
+    case "nonFiniteNumber":
+      return "Plan contains a non-finite number.";
+    case "nonJsonSafeValue":
+      return "Plan contains a non-JSON-safe value.";
+    case "cycle":
+      return "Plan contains a cycle.";
+    case "nonPlainObject":
+      return "Plan contains a non-plain object.";
   }
-  if (typeof value === "number") {
-    return Number.isFinite(value)
-      ? null
-      : { message: "Plan contains a non-finite number.", path };
-  }
-  if (typeof value !== "object") {
-    return { message: "Plan contains a non-JSON-safe value.", path };
-  }
-  if (active.has(value)) return { message: "Plan contains a cycle.", path };
-  const prototype = Object.getPrototypeOf(value);
-  if (
-    !Array.isArray(value) &&
-    prototype !== Object.prototype &&
-    prototype !== null
-  ) {
-    return { message: "Plan contains a non-plain object.", path };
-  }
-  active.add(value);
-  try {
-    for (const [key, nested] of Object.entries(value)) {
-      const failure = findJsonSafetyFailure(nested, `${path}.${key}`, active);
-      if (failure !== null) return failure;
-    }
-  } finally {
-    active.delete(value);
-  }
-  return null;
 }
 
 function planError(

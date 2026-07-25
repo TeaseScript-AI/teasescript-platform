@@ -74,6 +74,7 @@ export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {
 }
 
 function clonePlan(plan: InstructionPlan): InstructionPlan {
+  // Callers validate the plan first; the shared depth/work limits bound this recursive freeze.
   return deepFreeze(JSON.parse(JSON.stringify(plan)) as InstructionPlan);
 }
 
