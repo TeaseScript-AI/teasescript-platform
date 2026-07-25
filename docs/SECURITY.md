@@ -9,13 +9,16 @@
 - Future external APIs use platform-managed typed integrations.
 - LLM output is untrusted input and may not directly rewrite canonical state or bypass deterministic rules.
 
-## Proposed pending-action boundary
+## Accepted pending-action boundary
 
-ADR 0016 proposes these additional requirements:
+ADR 0016 adds these requirements:
 
-- Canonical pending-action state, IDs, deadlines, continuation positions, and expected result types remain runtime-owned.
-- The player may report a typed time observation or typed capability result, but may not mutate arbitrary snapshot fields or directly select a continuation.
-- Every completion is correlated to one persisted action ID and is validated before any state mutation, result storage, event emission, RNG use, or continuation.
+- Canonical `currentSessionTimeMs`, pending-action state, IDs, deadlines, continuation positions, expected result types, and `lastSettlement` remain runtime-owned.
+- The player may report a typed time observation or typed capability result, but may not mutate arbitrary snapshot fields, directly replace `currentSessionTimeMs`, or select a continuation.
+- A time observation is validated and applied atomically: persist `max(currentSessionTimeMs, suppliedNow)` before settling actions due at that effective value.
+- Every completion is correlated to one persisted action ID and is validated before any state mutation, result storage, event emission, RNG use, handler, or continuation.
+- Completion lookup searches active foreground and background actions before matching `lastSettlement`, classifying an issued inactive ID as stale, or classifying an unissued ID as unknown.
+- An older active background action may not be rejected merely because a newer action has already settled.
 - Duplicate, unknown, stale, early, late, wrong-kind, and wrong-type requests produce structured outcomes and may not settle an action twice.
 - Raw browser exceptions, DOM objects, `MediaStream` objects, file handles, callbacks, and other non-JSON values may not enter runtime state.
 - Browser capability failures are translated into bounded typed plain data before crossing the runtime boundary.
