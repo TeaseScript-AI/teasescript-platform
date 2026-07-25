@@ -1,0 +1,88 @@
+name: Agent 4 repository hygiene verification
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Record environment
+        run: |
+          node --version | tee node-version.txt
+          npm --version | tee npm-version.txt
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify canonical clean build and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          npm run check 2>&1 | tee check.log
+          test "$(grep -c '^> tsc$' check.log)" -eq 1
+          test -f dist/src/index.js
+          test -f dist/playground/browser.js
+          test -f dist/playground/server.js
+          test -f dist/tests/interpreter.test.js
+          test -f dist/tests/runtime-checkpoint.test.js
+          test ! -e dist/src/runtime/environment.js
+          test ! -e dist/src/runtime/collections.js
+          test ! -e dist/src/runtime/display.js
+          test ! -e dist/src/runtime/value-guards.js
+          find dist -type f | sort > dist-tree.txt
+      - name: Verify retained focused commands
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee build.log
+          npm run typecheck 2>&1 | tee typecheck.log
+      - name: Verify import graph and symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v rg
+          if rg 'runtime/(environment|collections|display|value-guards)' . \
+            --glob '!node_modules/**' --glob '!dist/**' --glob '!.git/**' \
+            | tee module-search.txt; then
+            exit 1
+          else
+            status=$?
+            test "$status" -eq 1
+            : > module-search.txt
+          fi
+          rg 'Environment|callCollectionMethod|getCollectionProperty|randomItem|assertListIndex|toVisibleText|resolveOutputSpeaker|isRuntime(List|Set|Object|Speaker)' \
+            src tests playground | tee symbol-search.txt || test "$?" -eq 1
+      - name: Verify diff and worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/main...HEAD
+          git status --short | tee git-status.txt
+          test ! -s git-status.txt
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent4-repository-hygiene-verification
+          path: |
+            node-version.txt
+            npm-version.txt
+            check.log
+            build.log
+            typecheck.log
+            dist-tree.txt
+            module-search.txt
+            symbol-search.txt
+            git-status.txt
