@@ -4,7 +4,7 @@
 
 ADR 0015 requires the AST to remain compile-time data and the runtime to execute a validated, versioned, JSON-safe instruction plan using explicit versioned state. Checkpoints, event sequence numbers, RNG state, scopes, speakers, loop frames, call frames, temporaries, prepared references, and structured failure information must be serializable without a suspended JavaScript call stack.
 
-ADR 0016 proposes the resumable pending-action contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities. It remains proposed until its design pull request is accepted.
+ADR 0016 accepts the resumable pending-action contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities.
 
 ## Current runtime
 
@@ -25,15 +25,18 @@ The implementation includes:
 
 Plan, snapshot, and checkpoint formats currently use version 3. They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation does not yet contain `waiting`, foreground/background action fields, action IDs, settlements, clock observations, or action completion operations.
+The current implementation does not yet contain `waiting`, persisted session time, foreground/background action fields, action IDs, settlements, clock observations, or action completion operations.
 
-## Proposed resumable pending-action model
+## Accepted resumable pending-action model
 
-ADR 0016 proposes:
+ADR 0016 accepts this conceptual version-4 snapshot state:
 
 ```text
 status:
     ready | running | waiting | halted | failed
+
+currentSessionTimeMs:
+    finite non-negative number
 
 foregroundAction:
     PendingAction | null
@@ -50,13 +53,27 @@ lastSettlement:
 
 A valid `waiting` snapshot contains exactly one foreground action. Non-waiting states contain none. The first implementation slice includes the background collection in the version-4 schema but requires it to remain empty.
 
-A blocking instruction evaluates its arguments, stores a complete JSON-safe action and continuation, advances to `waiting`, emits `actionRequested`, and stops. A validated completion stores its result and bounded `lastSettlement`, clears the action, returns to `running`, emits `actionCompleted`, and leaves continuation execution to the next runtime entry call.
+`currentSessionTimeMs` is canonical runtime state. It preserves the nondecreasing session coordinate across checkpoint and restore. A fresh version-4 snapshot receives a validated initial coordinate; deterministic tests may use `0`.
 
-A duplicate delivery matching `lastSettlement` returns the same canonical recorded settlement without another write, event, RNG advance, handler, or continuation. A newer settlement replaces the previous record, so older completion deliveries become stale without creating unbounded history.
+A blocking instruction evaluates its arguments, stores a complete JSON-safe action and continuation, advances to `waiting`, emits `actionRequested`, and stops. A validated completion stores its result and bounded `lastSettlement`, removes the matching action, emits `actionCompleted`, and leaves continuation or handler execution to the next runtime entry call.
 
-Timed actions store an absolute deadline on a host-supplied nondecreasing session coordinate. The runtime does not read browser or operating-system clocks directly. The player maps monotonic elapsed deltas onto that coordinate, schedules wake-ups, and submits validated observations; tests use a fake clock and never sleep in real time.
+A duplicate delivery matching `lastSettlement` returns the same canonical recorded settlement without another write, event, RNG advance, handler, or continuation. A newer settlement replaces the previous record.
 
-The first source-to-runtime slice is blocking `wait`. See ADR 0016 for the state machine, idempotency, time semantics, validation invariants, test matrix, alternatives, and implementation sequence.
+Completion lookup always searches the active foreground action and all active background actions first. Only when no active action matches does the runtime compare `lastSettlement`, classify a lower previously issued ID as `staleAction`, or classify an unissued ID as `unknownAction`. This prevents an older long-running background action from being misclassified after a newer action settles.
+
+Timed actions store an absolute deadline derived from `currentSessionTimeMs`. The runtime does not read browser or operating-system clocks directly. The player maps monotonic elapsed deltas onto the session coordinate, schedules wake-ups, and submits validated observations; tests use a fake clock and never sleep in real time.
+
+A time observation updates the snapshot atomically:
+
+```text
+effectiveNow = max(snapshot.currentSessionTimeMs, suppliedNow)
+snapshot.currentSessionTimeMs = effectiveNow
+settle actions due at effectiveNow
+```
+
+No checkpoint may contain due-action processing performed against a newer observation while retaining the older session-time value.
+
+The first source-to-runtime slice is blocking `wait`. See ADR 0016 for the state machine, identity lookup, idempotency, time semantics, validation invariants, test matrix, alternatives, and implementation sequence.
 
 Camera stream ownership, media persistence, and chat-output pacing are adjacent follow-up designs rather than part of the first wait implementation. Their selected direction and open questions are recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
 
@@ -104,7 +121,7 @@ The low-level runtime entry points are:
 
 Each low-level runtime entry validates the instruction plan and runtime snapshot before executing or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
 
-When ADR 0016 is implemented, these entry points must also stop cleanly at `waiting`. Separate validated operations will submit time observations and typed action completions; ordinary execution entry points may not bypass the pending action.
+When ADR 0016 is implemented, these entry points must also stop cleanly at `waiting`. Separate validated operations submit time observations and typed action completions; ordinary execution entry points may not bypass the pending action.
 
 ## Host values and capabilities
 
@@ -130,7 +147,7 @@ Future player capabilities must return typed, bounded, JSON-safe outcomes correl
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, and `null` according to the current implemented subset. When the value is a list, the runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects, sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively select or stringify them.
 
-A proposed later chat-pacing design delays only a subsequent `say` event, not unrelated instructions. It uses the final visible text at 17 visible characters per second unless `say(..., wait: ...)` supplies an explicit next-message gate. This is not implemented or accepted by ADR 0016 itself; see the follow-up planning document.
+A proposed later chat-pacing design delays only a subsequent `say` event, not unrelated instructions. It uses the final visible text at 17 visible characters per second unless `say(..., wait: ...)` supplies an explicit next-message gate. This is not accepted by ADR 0016 itself; see the follow-up planning document.
 
 ## Runtime defaults and limits
 
@@ -158,7 +175,7 @@ A halted snapshot is accepted only at the root completion boundary, including an
 
 Persisted runtime counters, identities, instruction positions, collection-iteration positions, depths, temporary IDs, warning-deduplication IDs, speaker references, and source-span positions must be JavaScript safe integers in their existing non-negative or positive ranges. Ordinary finite script numbers retain their existing semantics. The allocator counters `nextEventSequence`, `nextScopeId`, `nextSpeakerId`, and `nextCallFrameId` may hold `Number.MAX_SAFE_INTEGER` as stored state, but an operation that would increment such a value is rejected with `RuntimeDataError` `TSR101` before an event sequence or runtime identity is reused.
 
-The proposed `nextActionId` follows the same no-reuse and pre-increment failure rule. The proposed `lastSettlement` is bounded to one record and remains subject to ordinary external-data limits.
+The accepted `nextActionId` follows the same no-reuse and pre-increment failure rule. `lastSettlement` is bounded to one record. `currentSessionTimeMs` is finite, non-negative, persisted, and subject to the accepted numeric magnitude and external-data limits.
 
 ## Deterministic RNG invariant
 
@@ -178,13 +195,13 @@ Runtime state must be serializable at every instruction boundary, but normal exe
 
 A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore validates the checkpoint, instruction plan, snapshot, format versions, references, function/call progress, RNG state, and other structural invariants before execution resumes.
 
-Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, settlement, and event identities. Restore does not read time or silently complete a deadline. The player submits an explicit observation after restore, after which due actions may settle deterministically.
+Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. The player submits an explicit observation after restore; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
 
 ## Format evolution
 
 Version 3 remains the current implemented format.
 
-When pending actions are implemented, the incompatible waiting status, foreground/background action fields, action counter, and settlement record require:
+When pending actions are implemented, the incompatible waiting status, persisted session-time coordinate, foreground/background action fields, action counter, and settlement record require:
 
 ```text
 instruction plan version: 4
@@ -200,8 +217,7 @@ The exported TypeScript compiler, compatibility wrapper, low-level runtime, snap
 
 ## Remaining runtime work
 
-- accept or revise ADR 0016;
-- implement blocking `wait` as the first pending-action slice;
+- implement blocking `wait` as the first accepted pending-action slice;
 - add one-shot non-persistent background timers before the full timer family;
 - define action-kind-specific input, choice, button, media, timeout, and cancellation contracts;
 - stable package/plan identity and migration policy;
