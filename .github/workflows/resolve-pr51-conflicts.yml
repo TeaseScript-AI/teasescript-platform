@@ -72,13 +72,16 @@ jobs:
           assert count == 2, f'expected two runtime entry points, found {count}'
           path.write_text(text)
           PY
-      - name: Commit resolved merge
+      - name: Stage resolved merge
         run: |
-          git add docs/RUNTIME.md src/runtime/serializable-values.ts src/runtime/engine.ts
-          unresolved="$(git diff --name-only --diff-filter=U)"
-          test -z "$unresolved" || { printf 'Unresolved conflicts:\n%s\n' "$unresolved"; exit 1; }
           git add -A
-          git commit -m 'Merge current main and resolve runtime invariant conflicts'
+          git status --short
+      - name: Verify no unresolved index entries
+        run: |
+          git ls-files -u
+          test -z "$(git ls-files -u)"
+      - name: Commit resolved merge
+        run: git commit -m 'Merge current main and resolve runtime invariant conflicts'
       - name: Install dependencies
         run: npm ci
       - name: Run full check
