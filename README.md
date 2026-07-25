@@ -12,10 +12,11 @@ Instruction plans, runtime snapshots, and checkpoints currently use version 3 an
 
 ## Development
 
-Use Node.js 24.18.0 from `.nvmrc`:
+The exact Node.js version declared in `.nvmrc` is required, currently 24.18.0. Activate it with any suitable mechanism. When NVM is available, `nvm use` is one optional method; missing NVM, or NVM not seeing a version activated by `actions/setup-node`, a container, or another version manager, is not itself a failure. Confirm the effective environment before installing dependencies:
 
 ```shell
-nvm use
+node --version
+npm --version
 npm ci
 npm run check
 npm run build
