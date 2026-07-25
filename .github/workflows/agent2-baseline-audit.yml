@@ -1,0 +1,138 @@
+name: Agent 2 lexer baseline audit
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact starting baseline
+        uses: actions/checkout@v4
+        with:
+          ref: 9c5736e8ddaf48f9c265329c913c4d2efa427bcc
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Build baseline
+        run: |
+          npm ci --silent
+          npm run build --silent
+      - name: Capture exact baseline classifications
+        run: |
+          node --input-type=module <<'NODE' > /tmp/agent2-baseline-audit.json
+          import { compileSource, lex, TokenKind } from "./dist/src/index.js";
+
+          const tokenKinds = new Set(Object.values(TokenKind));
+          const names = [
+            "valueOf",
+            "constructor",
+            "toString",
+            "hasOwnProperty",
+            "prototype",
+            "__proto__",
+            "isPrototypeOf",
+            "propertyIsEnumerable",
+            "toLocaleString",
+          ];
+
+          function kindRecord(kind) {
+            return {
+              type: typeof kind,
+              string: String(kind),
+              validTokenKind: tokenKinds.has(kind),
+            };
+          }
+
+          const identifiers = names.map((name) => {
+            const source = `let ${name} = 1\nsay ${name}`;
+            const lexed = lex(source);
+            const token = lexed.tokens[1];
+            let compilation;
+            try {
+              const result = compileSource(source);
+              compilation = {
+                threw: false,
+                diagnostics: result.diagnostics.map((diagnostic) => ({
+                  code: diagnostic.code,
+                  span: [diagnostic.span.start.offset, diagnostic.span.end.offset],
+                })),
+                hasPlan: result.plan !== null,
+              };
+            } catch (error) {
+              compilation = {
+                threw: true,
+                name: error instanceof Error ? error.name : typeof error,
+                message: error instanceof Error ? error.message : String(error),
+              };
+            }
+            return {
+              name,
+              source,
+              token: token === undefined ? null : {
+                kind: kindRecord(token.kind),
+                lexeme: token.lexeme,
+                value: "value" in token ? token.value : null,
+                span: [
+                  token.span.start.offset,
+                  token.span.start.line,
+                  token.span.start.column,
+                  token.span.end.offset,
+                  token.span.end.line,
+                  token.span.end.column,
+                ],
+              },
+              lexerDiagnostics: lexed.diagnostics.map((diagnostic) => ({
+                code: diagnostic.code,
+                span: [diagnostic.span.start.offset, diagnostic.span.end.offset],
+              })),
+              compilation,
+            };
+          });
+
+          const nestedSources = {
+            LF: ["say `Outer: ${`", "  Inner", "`}`"].join("\n"),
+            CRLF: ["say `Outer: ${`", "  Inner", "`}`"].join("\r\n"),
+            whitespaceLF: ["say `Outer: ${` \t", "  Inner", "`}`"].join("\n"),
+            whitespaceCRLF: ["say `Outer: ${`\t ", "  Inner", "`}`"].join("\r\n"),
+            emptyFirstLine: ["say `Outer: ${`", "", "  Inner", "`}`"].join("\n"),
+          };
+          const nestedTemplates = Object.fromEntries(
+            Object.entries(nestedSources).map(([name, source]) => {
+              const lexed = lex(source);
+              const compiled = compileSource(source);
+              return [name, {
+                diagnostics: lexed.diagnostics.map((diagnostic) => ({
+                  code: diagnostic.code,
+                  span: [
+                    diagnostic.span.start.offset,
+                    diagnostic.span.start.line,
+                    diagnostic.span.start.column,
+                    diagnostic.span.end.offset,
+                    diagnostic.span.end.line,
+                    diagnostic.span.end.column,
+                  ],
+                })),
+                tokenKinds: lexed.tokens.map((token) => kindRecord(token.kind)),
+                hasPlan: compiled.plan !== null,
+              }];
+            }),
+          );
+
+          console.log(JSON.stringify({
+            node: process.version,
+            identifiers,
+            nestedTemplates,
+          }, null, 2));
+          NODE
+      - name: Upload baseline audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent2-lexer-baseline-audit
+          path: /tmp/agent2-baseline-audit.json
