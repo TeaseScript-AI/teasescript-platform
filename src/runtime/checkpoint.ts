@@ -1,12 +1,20 @@
 import {
-  validateInstructionPlan,
+  captureInstructionPlan,
+  validateCapturedInstructionPlan,
   type InstructionPlan,
 } from "../instructions.js";
 import {
-  cloneRuntimeSnapshot,
+  EXTERNAL_DATA_DEPTH_MESSAGE,
+  EXTERNAL_DATA_WORK_MESSAGE,
+  captureExternalData,
+  type ExternalDataFailureKind,
+} from "../external-data-limits.js";
+import {
+  captureRuntimeSnapshot,
+  cloneCapturedRuntimeSnapshot,
   RUNTIME_SNAPSHOT_FORMAT,
   RUNTIME_SNAPSHOT_VERSION,
-  validateRuntimeSnapshot,
+  validateCapturedRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "./state.js";
 
@@ -37,13 +45,13 @@ export function createCheckpoint(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
 ): RuntimeCheckpoint {
-  assertPlan(plan, "$.plan");
-  assertSnapshot(snapshot, plan, "$.snapshot");
+  const capturedPlan = capturePlan(plan, "$.plan");
+  const capturedSnapshot = captureSnapshot(snapshot, capturedPlan, "$.snapshot");
   return Object.freeze({
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
-    plan: clonePlan(plan),
-    snapshot: cloneRuntimeSnapshot(snapshot),
+    plan: clonePlan(capturedPlan),
+    snapshot: cloneCapturedRuntimeSnapshot(capturedSnapshot),
   });
 }
 
@@ -53,28 +61,38 @@ export function serializeCheckpoint(checkpoint: RuntimeCheckpoint): string {
 }
 
 export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {
-  if (!isPlainRecord(value)) {
+  const capture = captureExternalData(value);
+  if (!capture.ok) {
+    throw checkpointError(
+      "TSK002",
+      checkpointExternalDataFailureMessage(capture.failure.kind),
+      capture.failure.path.startsWith("$.snapshot")
+        ? "$.snapshot"
+        : capture.failure.path,
+    );
+  }
+  const stable = capture.value;
+  if (!isPlainRecord(stable)) {
     throw checkpointError("TSK002", "Checkpoint must be a JSON object.", "$.");
   }
-  if (value.format !== CHECKPOINT_FORMAT) {
+  if (stable.format !== CHECKPOINT_FORMAT) {
     throw checkpointError("TSK001", "Unsupported checkpoint format.", "$.format");
   }
-  if (value.version !== CHECKPOINT_VERSION) {
+  if (stable.version !== CHECKPOINT_VERSION) {
     throw checkpointError("TSK001", "Unsupported checkpoint version.", "$.version");
   }
-  assertPlan(value.plan, "$.plan");
-  const plan = value.plan as InstructionPlan;
-  assertSnapshot(value.snapshot, plan, "$.snapshot");
+
+  const plan = assertCapturedPlan(stable.plan, "$.plan");
+  const snapshot = assertCapturedSnapshot(stable.snapshot, plan, "$.snapshot");
   return Object.freeze({
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
-    plan: clonePlan(value.plan as InstructionPlan),
-    snapshot: cloneRuntimeSnapshot(value.snapshot as RuntimeSnapshot),
+    plan: clonePlan(plan),
+    snapshot: cloneCapturedRuntimeSnapshot(snapshot),
   });
 }
 
 function clonePlan(plan: InstructionPlan): InstructionPlan {
-  // Callers validate the plan first; the shared depth/work limits bound this recursive freeze.
   return deepFreeze(JSON.parse(JSON.stringify(plan)) as InstructionPlan);
 }
 
@@ -89,8 +107,35 @@ export function deserializeCheckpoint(json: string): RuntimeCheckpoint {
   return restoreCheckpoint(parsed);
 }
 
-function assertPlan(value: unknown, path: string): asserts value is InstructionPlan {
-  const validation = validateInstructionPlan(value);
+function capturePlan(value: unknown, path: string): InstructionPlan {
+  const captured = captureInstructionPlan(value);
+  if (!captured.validation.valid || captured.plan === null) {
+    const first = captured.validation.errors[0];
+    throw checkpointError(
+      first?.code === "TSC001" ? "TSK001" : "TSK002",
+      first?.message ?? "Instruction plan is malformed.",
+      `${path}${first?.path.slice(1) ?? ""}`,
+    );
+  }
+  return captured.plan;
+}
+
+function captureSnapshot(
+  value: unknown,
+  plan: InstructionPlan,
+  path: string,
+): RuntimeSnapshot {
+  const captured = captureRuntimeSnapshot(value, plan);
+  if (!captured.validation.valid || captured.snapshot === null) {
+    const message = captured.validation.errors[0] ?? "Runtime snapshot is malformed.";
+    const unsupported = message.includes("Unsupported runtime-snapshot");
+    throw checkpointError(unsupported ? "TSK001" : "TSK002", message, path);
+  }
+  return captured.snapshot;
+}
+
+function assertCapturedPlan(value: unknown, path: string): InstructionPlan {
+  const validation = validateCapturedInstructionPlan(value);
   if (!validation.valid) {
     const first = validation.errors[0];
     throw checkpointError(
@@ -99,14 +144,15 @@ function assertPlan(value: unknown, path: string): asserts value is InstructionP
       `${path}${first?.path.slice(1) ?? ""}`,
     );
   }
+  return value as InstructionPlan;
 }
 
-function assertSnapshot(
+function assertCapturedSnapshot(
   value: unknown,
   plan: InstructionPlan,
   path: string,
-): asserts value is RuntimeSnapshot {
-  const validation = validateRuntimeSnapshot(value, plan);
+): RuntimeSnapshot {
+  const validation = validateCapturedRuntimeSnapshot(value, plan);
   if (!validation.valid) {
     const message = validation.errors[0] ?? "Runtime snapshot is malformed.";
     const unsupported =
@@ -115,6 +161,26 @@ function assertSnapshot(
         (value.format !== RUNTIME_SNAPSHOT_FORMAT ||
           value.version !== RUNTIME_SNAPSHOT_VERSION));
     throw checkpointError(unsupported ? "TSK001" : "TSK002", message, path);
+  }
+  return value as RuntimeSnapshot;
+}
+
+function checkpointExternalDataFailureMessage(
+  kind: ExternalDataFailureKind,
+): string {
+  switch (kind) {
+    case "depth":
+      return EXTERNAL_DATA_DEPTH_MESSAGE;
+    case "work":
+      return EXTERNAL_DATA_WORK_MESSAGE;
+    case "nonFiniteNumber":
+      return "Checkpoint contains a non-finite number.";
+    case "nonJsonSafeValue":
+      return "Checkpoint contains a non-JSON-safe value.";
+    case "cycle":
+      return "Checkpoint contains a cycle.";
+    case "nonPlainObject":
+      return "Checkpoint contains a non-plain object.";
   }
 }
 

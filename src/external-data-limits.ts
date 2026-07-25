@@ -19,9 +19,24 @@ export interface ExternalDataFailure {
   readonly path: string;
 }
 
+export type ExternalDataCaptureResult =
+  | {
+      readonly ok: true;
+      readonly value: unknown;
+    }
+  | {
+      readonly ok: false;
+      readonly failure: ExternalDataFailure;
+    };
+
 interface PathNode {
   readonly parent: PathNode | null;
   readonly segment: string;
+}
+
+interface AssignmentTarget {
+  readonly container: unknown[] | Record<string, unknown>;
+  readonly key: string;
 }
 
 type WorkItem =
@@ -30,28 +45,39 @@ type WorkItem =
       readonly value: unknown;
       readonly depth: number;
       readonly path: PathNode | null;
+      readonly target: AssignmentTarget | null;
     }
   | {
       readonly kind: "iterate";
       readonly value: object;
+      readonly captured: unknown[] | Record<string, unknown>;
       readonly depth: number;
       readonly path: PathNode | null;
-      readonly keys: Iterator<string>;
+      readonly keys: readonly (string | symbol)[];
+      readonly index: number;
+      readonly array: boolean;
     }
   | {
       readonly kind: "leave";
       readonly value: object;
     };
 
-export function findExternalDataFailure(
+/**
+ * Captures an externally supplied JSON-like graph into stable plain data while
+ * enforcing the shared depth/work limits. Enumerable accessors are rejected
+ * without invocation. Proxy traps are observed only during this capture; the
+ * returned graph retains no proxy, accessor, or prototype behavior.
+ */
+export function captureExternalData(
   value: unknown,
   rootPath = "$",
-): ExternalDataFailure | null {
+): ExternalDataCaptureResult {
   const active = new Set<object>();
   const work: WorkItem[] = [
-    { kind: "visit", value, depth: 0, path: null },
+    { kind: "visit", value, depth: 0, path: null, target: null },
   ];
   let visited = 0;
+  let capturedRoot: unknown;
 
   while (work.length > 0) {
     const item = work.pop()!;
@@ -59,40 +85,73 @@ export function findExternalDataFailure(
       active.delete(item.value);
       continue;
     }
+
     if (item.kind === "iterate") {
-      let next: IteratorResult<string>;
+      if (item.index >= item.keys.length) continue;
+      work.push({ ...item, index: item.index + 1 });
+
+      const key = item.keys[item.index]!;
+      let descriptor: PropertyDescriptor | undefined;
       try {
-        next = item.keys.next();
+        descriptor = Reflect.getOwnPropertyDescriptor(item.value, key);
       } catch {
-        return failure("nonJsonSafeValue", item.path, rootPath);
+        return captureFailure("nonJsonSafeValue", item.path, rootPath);
       }
-      if (next.done) continue;
-      work.push(item);
-      const key = next.value;
-      let nested: unknown;
-      try {
-        nested = (item.value as Record<string, unknown>)[key];
-      } catch {
-        return failure("nonJsonSafeValue", item.path, rootPath);
+      if (descriptor === undefined) {
+        return captureFailure("nonJsonSafeValue", item.path, rootPath);
       }
+
+      if (item.array && key === "length") {
+        if (
+          !("value" in descriptor) ||
+          typeof descriptor.value !== "number" ||
+          !Number.isSafeInteger(descriptor.value) ||
+          descriptor.value < 0
+        ) {
+          return captureFailure("nonJsonSafeValue", item.path, rootPath);
+        }
+        try {
+          Reflect.defineProperty(item.captured, "length", {
+            value: descriptor.value,
+            writable: true,
+            enumerable: false,
+            configurable: false,
+          });
+        } catch {
+          return captureFailure("nonJsonSafeValue", item.path, rootPath);
+        }
+        continue;
+      }
+
+      if (!descriptor.enumerable) continue;
+      if (typeof key === "symbol") {
+        return captureFailure("nonJsonSafeValue", item.path, rootPath);
+      }
+
+      const nestedPath: PathNode = {
+        parent: item.path,
+        segment: pathSegment(item.array, key),
+      };
+      if (!("value" in descriptor)) {
+        return captureFailure("nonJsonSafeValue", nestedPath, rootPath);
+      }
+
       work.push({
         kind: "visit",
-        value: nested,
+        value: descriptor.value,
         depth: item.depth + 1,
-        path: {
-          parent: item.path,
-          segment: pathSegment(item.value, key),
-        },
+        path: nestedPath,
+        target: { container: item.captured, key },
       });
       continue;
     }
 
     visited += 1;
     if (visited > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
-      return failure("work", item.path, rootPath);
+      return captureFailure("work", item.path, rootPath);
     }
     if (item.depth > MAX_EXTERNAL_RUNTIME_DATA_DEPTH) {
-      return failure("depth", item.path, rootPath);
+      return captureFailure("depth", item.path, rootPath);
     }
 
     const current = item.value;
@@ -101,64 +160,118 @@ export function findExternalDataFailure(
       typeof current === "string" ||
       typeof current === "boolean"
     ) {
+      assignCaptured(item.target, current, (captured) => {
+        capturedRoot = captured;
+      });
       continue;
     }
     if (typeof current === "number") {
       if (!Number.isFinite(current)) {
-        return failure("nonFiniteNumber", item.path, rootPath);
+        return captureFailure("nonFiniteNumber", item.path, rootPath);
       }
+      assignCaptured(item.target, current, (captured) => {
+        capturedRoot = captured;
+      });
       continue;
     }
     if (typeof current !== "object") {
-      return failure("nonJsonSafeValue", item.path, rootPath);
+      return captureFailure("nonJsonSafeValue", item.path, rootPath);
     }
     if (active.has(current)) {
-      return failure("cycle", item.path, rootPath);
+      return captureFailure("cycle", item.path, rootPath);
     }
-    let prototype: object | null;
+
+    let array: boolean;
     try {
-      prototype = Object.getPrototypeOf(current);
+      array = Array.isArray(current);
     } catch {
-      return failure("nonJsonSafeValue", item.path, rootPath);
+      return captureFailure("nonJsonSafeValue", item.path, rootPath);
     }
-    if (
-      !Array.isArray(current) &&
-      prototype !== Object.prototype &&
-      prototype !== null
-    ) {
-      return failure("nonPlainObject", item.path, rootPath);
+
+    let prototype: object | null = null;
+    if (!array) {
+      try {
+        prototype = Reflect.getPrototypeOf(current);
+      } catch {
+        return captureFailure("nonJsonSafeValue", item.path, rootPath);
+      }
+      if (prototype !== Object.prototype && prototype !== null) {
+        return captureFailure("nonPlainObject", item.path, rootPath);
+      }
     }
+
+    let keys: readonly (string | symbol)[];
+    try {
+      keys = Reflect.ownKeys(current);
+    } catch {
+      return captureFailure("nonJsonSafeValue", item.path, rootPath);
+    }
+    if (keys.length > MAX_EXTERNAL_RUNTIME_DATA_WORK + 1) {
+      return captureFailure("work", item.path, rootPath);
+    }
+
+    const captured = array
+      ? []
+      : (Object.create(prototype) as Record<string, unknown>);
+    assignCaptured(item.target, captured, (root) => {
+      capturedRoot = root;
+    });
 
     active.add(current);
     work.push({ kind: "leave", value: current });
     work.push({
       kind: "iterate",
       value: current,
+      captured,
       depth: item.depth,
       path: item.path,
-      keys: enumerableOwnKeys(current),
+      keys,
+      index: 0,
+      array,
     });
   }
 
-  return null;
+  return Object.freeze({ ok: true, value: capturedRoot });
 }
 
-function* enumerableOwnKeys(value: object): Generator<string> {
-  for (const key in value) {
-    if (Object.prototype.hasOwnProperty.call(value, key)) yield key;
+export function findExternalDataFailure(
+  value: unknown,
+  rootPath = "$",
+): ExternalDataFailure | null {
+  const capture = captureExternalData(value, rootPath);
+  return capture.ok ? null : capture.failure;
+}
+
+function assignCaptured(
+  target: AssignmentTarget | null,
+  value: unknown,
+  setRoot: (value: unknown) => void,
+): void {
+  if (target === null) {
+    setRoot(value);
+    return;
   }
+  Reflect.defineProperty(target.container, target.key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
 }
 
-function failure(
+function captureFailure(
   kind: ExternalDataFailureKind,
   path: PathNode | null,
   rootPath: string,
-): ExternalDataFailure {
-  return Object.freeze({ kind, path: formatPath(path, rootPath) });
+): ExternalDataCaptureResult {
+  return Object.freeze({
+    ok: false,
+    failure: Object.freeze({ kind, path: formatPath(path, rootPath) }),
+  });
 }
 
-function pathSegment(parent: object, key: string): string {
-  if (Array.isArray(parent) && /^(0|[1-9]\d*)$/.test(key)) {
+function pathSegment(parentIsArray: boolean, key: string): string {
+  if (parentIsArray && /^(0|[1-9]\d*)$/.test(key)) {
     return `[${key}]`;
   }
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)
