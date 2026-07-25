@@ -4,6 +4,8 @@ Accepted ADRs and V30 override older descriptive documents. Sets, deep value cop
 
 ADR 0016 is accepted. It defines persisted nondecreasing session time, foreground/background pending actions, monotonic action IDs, bounded settlement replay, active-first completion lookup, injected time observations, and blocking `wait` as the first implementation slice.
 
+ADR 0017 is proposed for issue #68. Until owner approval, its one-shot background timer execution contract is not accepted architecture or implementation scope.
+
 ## Runtime hardening and evolution
 
 - Package/source identity for browser checkpoints and production plan references.
@@ -14,6 +16,7 @@ ADR 0016 is accepted. It defines persisted nondecreasing session time, foregroun
 - Complete static type checking and composite equality.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
 - Concrete implementation and migration details for version-4 pending-action fields, operations, and validators.
+- Schema-version impact of timer handles, queued timer handlers, and active timer-handler frames after issue #66 establishes the implemented foundation.
 
 ### Compatibility API lifecycle
 
@@ -43,7 +46,8 @@ The exact version-3 schemas are current POC implementation details, not a promis
 
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and CSP.
 - Action-kind-specific choices, input, buttons, media completion, cancellation, timeout, and recovery policies on the accepted shared pending-action contract.
-- Background-handler interruption, repetition, persistence, ordering, and cleanup beyond the first one-shot timer slice.
+- Owner approval or revision of proposed ADR 0017 choices: canonical assigned `startTimer`, zero-duration observation boundary, opaque timer handle, all-due settlement, one-handler-per-entry scheduling, queued-handler priority, foreground-slot yielding, stop idempotency, and no public handler lifecycle events.
+- Background-handler repetition, persistence, range duration, fairness, cancellation after settlement, and timer-family cleanup beyond the proposed first one-shot slice.
 - Camera capability declarations, long-lived stream ownership, device switching, quality negotiation, restore, privacy indicators, and optional simultaneous cameras.
 - Exact `askImage(...)` preview/countdown/retake behavior and direct nullable `takePhoto(...)` capture behavior.
 - Motion detection, sampling, camera resource limits, and scene ownership.
@@ -52,6 +56,8 @@ The exact version-3 schemas are current POC implementation details, not a promis
 - Exact custom-view author syntax and lifecycle; capability is accepted, syntax remains open.
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
 - Time-integrity logging thresholds and whether a future typed anomaly hook becomes script-visible.
+
+See [`decisions/0017-one-shot-background-timer-execution-contract.md`](decisions/0017-one-shot-background-timer-execution-contract.md) for the proposed first-slice choices and explicit timer-family deferrals.
 
 See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md) for the selected direction and explicitly deferred design questions discussed with ADR 0016.
 
@@ -64,5 +70,6 @@ See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CA
 
 ## Proposals, not decisions
 
+- ADR 0017 one-shot background timer execution contract.
 - Restricted math.js-backed numeric/unit evaluation.
 - WebRTC, Redis, Electron, native apps, Kubernetes, and microservices without a concrete documented need.
