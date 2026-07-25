@@ -74,6 +74,7 @@ jobs:
           PY
       - name: Commit resolved merge
         run: |
+          git add docs/RUNTIME.md src/runtime/serializable-values.ts src/runtime/engine.ts
           unresolved="$(git diff --name-only --diff-filter=U)"
           test -z "$unresolved" || { printf 'Unresolved conflicts:\n%s\n' "$unresolved"; exit 1; }
           git add -A
