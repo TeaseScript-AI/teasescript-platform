@@ -6,6 +6,8 @@ ADR 0015 requires the AST to remain compile-time data and the runtime to execute
 
 ADR 0016 accepts the resumable pending-action contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities.
 
+ADR 0017 proposes the first populated `backgroundActions` contract for one-shot background timers. It remains non-authoritative while its status is `Proposed`.
+
 ## Current runtime
 
 The implementation includes:
@@ -25,7 +27,7 @@ The implementation includes:
 
 Plan, snapshot, and checkpoint formats currently use version 3. They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation does not yet contain `waiting`, persisted session time, foreground/background action fields, action IDs, settlements, clock observations, or action completion operations.
+The current implementation does not yet contain `waiting`, persisted session time, foreground/background action fields, action IDs, settlements, clock observations, action completion operations, timer handles, or queued timer handlers.
 
 ## Accepted resumable pending-action model
 
@@ -76,6 +78,66 @@ No checkpoint may contain due-action processing performed against a newer observ
 The first source-to-runtime slice is blocking `wait`. See ADR 0016 for the state machine, identity lookup, idempotency, time semantics, validation invariants, test matrix, alternatives, and implementation sequence.
 
 Camera stream ownership, media persistence, and chat-output pacing are adjacent follow-up designs rather than part of the first wait implementation. Their selected direction and open questions are recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
+
+## Proposed one-shot background timer model
+
+ADR 0017 proposes the first populated background-action slice using the accepted V30 forms:
+
+```tease
+let timerId = startTimer 30 {
+    timeExpired()
+}
+
+stopTimer(timerId)
+```
+
+The first slice is one-shot, non-repeating, session-scoped, and hidden. It excludes ranges, `repeat: true`, `persist: true`, visible timers, mystery timers, browser wake-up implementation, Laravel schedules, and continuous-personality jobs.
+
+### Proposed identities and state
+
+A timer receives both:
+
+- the internal ADR 0016 action ID used for host/runtime correlation and settlement;
+- an opaque author-visible timer handle used only by timer APIs.
+
+The identities are distinct. The conceptual timer state adds a persisted timer-handle allocator, active timer actions in `backgroundActions`, a due-handler queue, and at most one active timer-handler frame. Timer actions and handlers retain explicit owner-flow, compiled handler, lexical-scope, deadline, ordering, and instruction-position references. No callback, promise, browser timer, generator, or suspended JavaScript stack is serialized.
+
+The proposal intentionally does not select or change an implemented format number. A later implementation must follow issue #66 and explicitly document whether its additional state requires a schema-version transition beyond the then-current implemented format.
+
+### Proposed settlement and scheduling
+
+`observeTime(...)` persists the effective time, collects every due timed foreground and background action, and settles all of them in global order:
+
+```text
+earliest deadline
+-> creation sequence
+-> action ID
+```
+
+For each elapsed background timer it removes the active action, stores the bounded settlement, emits `actionCompleted`, and appends one explicit handler invocation. The observation returns without executing handlers.
+
+Later runtime entries use this priority:
+
+```text
+active timer handler
+-> first queued timer handler
+-> pending foreground wait
+-> normal main path
+```
+
+Only one queued handler starts in one runtime entry. Normal handler completion returns at an inspectable scheduler boundary; another handler or the main path begins only on a later entry. A timer handler may run while the main path remains foreground-waiting.
+
+A handler may create background actions. It may create a foreground action when the global foreground slot is free. When that slot is occupied, the foreground-creating instruction yields before argument evaluation and resumes from the same untouched instruction after the slot becomes available.
+
+### Proposed stop and lifetime
+
+Stopping an active timer settles it as `stopped`, emits the normal `actionCompleted`, and queues no handler. Stopping an already fired, queued, executing, completed, or previously stopped timer is an idempotent no-op. Once elapsed settlement queued the handler, `stopTimer(...)` does not cancel that handler.
+
+“Non-persistent” does not mean lost during checkpoint or reload. Active timers, queued handlers, and active handler frames survive ordinary session checkpoint/restore. They are cleaned up on accepted V30 non-persistent flow transfers (`goto`, script-file `end`, `run`, script-file `call`, and `exit`) and on fatal abort. Ordinary user-defined function calls are not script-file `call` and do not remove timers.
+
+Handler failure fails the complete runtime and clears remaining timer work. `goto` from a handler abandons the interrupted path using normal flow cleanup. No dedicated public handler-start or handler-completed events are proposed for the first slice; the accepted action events and explicit scheduler state provide the observable ordering.
+
+See proposed ADR 0017 for the complete source scope, transitions, checkpoint model, validation invariants, alternatives, deterministic test matrix, deferred timer-family behavior, and owner-review choices.
 
 ## Compiler and execution entry points
 
@@ -177,6 +239,8 @@ Persisted runtime counters, identities, instruction positions, collection-iterat
 
 The accepted `nextActionId` follows the same no-reuse and pre-increment failure rule. `lastSettlement` is bounded to one record. `currentSessionTimeMs` is finite, non-negative, persisted, and subject to the accepted numeric magnitude and external-data limits.
 
+Proposed ADR 0017 adds a distinct timer-handle allocator and bounded timer action/queue/frame state only after owner acceptance and later implementation. It does not change the currently implemented limits or format constants.
+
 ## Deterministic RNG invariant
 
 The `xorshift32-v1` seed and serialized state must be non-zero unsigned 32-bit integers:
@@ -197,6 +261,8 @@ A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore val
 
 Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. The player submits an explicit observation after restore; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
 
+Under proposed ADR 0017, ordinary session checkpoints would also preserve active one-shot timers, due-but-not-started handler invocations, and an active handler's exact instruction/scope state. “Non-persistent” would describe flow/session lifetime rather than checkpoint durability.
+
 ## Format evolution
 
 Version 3 remains the current implemented format.
@@ -211,14 +277,18 @@ checkpoint version: 4
 
 These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field in the first version-4 design.
 
+Proposed ADR 0017 does not assume that later timer queue/handle/frame fields can be added silently to that implemented schema. The timer implementation must inspect the format produced by issue #66 and document any required later version transition.
+
 ## API stability boundary
 
 The exported TypeScript compiler, compatibility wrapper, low-level runtime, snapshot, checkpoint, and RNG functions are current POC surfaces used by the repository and tests. Their presence in `src/index.ts` does not by itself establish a permanent third-party API or wire-format compatibility promise. Long-term package API stability and migration policy remain open.
 
 ## Remaining runtime work
 
-- implement blocking `wait` as the first accepted pending-action slice;
-- add one-shot non-persistent background timers before the full timer family;
+- implement blocking `wait` as the first accepted pending-action slice under issue #66;
+- obtain owner approval or revision of proposed ADR 0017;
+- implement one-shot non-persistent background timers only after #66, accepted ADR 0017, and required external-data hardening;
+- complete later repeating, persistent, visible, mystery, and randomized-range timer-family behavior separately;
 - define action-kind-specific input, choice, button, media, timeout, and cancellation contracts;
 - stable package/plan identity and migration policy;
 - iframe host commands and response correlation;
