@@ -1,10 +1,7 @@
 name: Issue 55 failing-before evidence
 
 on:
-  push:
-    branches: [fix/issue-55-stable-external-data-capture]
-    paths:
-      - .github/workflows/issue-55-failing-before.yml
+  pull_request:
 
 permissions:
   contents: read
