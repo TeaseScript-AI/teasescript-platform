@@ -1,0 +1,46 @@
+name: Issue 38 Verification Summary
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Run verification and write concise summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version > issue-38-summary.log
+          npm --version >> issue-38-summary.log
+          npm ci
+          npm run check > full-check.log 2>&1
+          npm run build > build.log 2>&1
+          node --test dist/tests/semantic-validation.test.js > focused.log 2>&1
+          git fetch origin main
+          git diff --check origin/main...HEAD
+          test -z "$(git status --short)"
+          printf '\nFULL CHECK\n' >> issue-38-summary.log
+          tail -n 20 full-check.log >> issue-38-summary.log
+          printf '\nFOCUSED TEST\n' >> issue-38-summary.log
+          tail -n 20 focused.log >> issue-38-summary.log
+          printf '\nBUILD\n' >> issue-38-summary.log
+          tail -n 10 build.log >> issue-38-summary.log
+          printf '\nCLEAN STATUS\n' >> issue-38-summary.log
+          git status --short >> issue-38-summary.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue-38-verification-summary
+          path: issue-38-summary.log
+          retention-days: 1
