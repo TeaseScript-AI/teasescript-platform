@@ -13,6 +13,16 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Package checkout snapshot
+        run: tar -czf /tmp/lexer-checkout-snapshot.tar.gz --exclude=node_modules --exclude=dist --exclude=lexer-baseline.txt .
+      - name: Upload checkout snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: lexer-checkout-snapshot
+          path: /tmp/lexer-checkout-snapshot.tar.gz
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
