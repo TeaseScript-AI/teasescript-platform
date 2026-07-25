@@ -18,9 +18,10 @@ import {
   createFreshRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("restores every instruction boundary during defaults and nested calls", () => {
-  const observations = assertEveryInstructionResume([
+  const { boundaries: observations } = assertRuntimeResumeEquivalent([
     "let count = 0",
     "function next(value) { count = count + 1\nreturn `${value}:${count}` }",
     'function describe(name, title = next(name)) { say `inside:${title}`\nreturn title }',
@@ -41,7 +42,7 @@ test("restores every instruction boundary during defaults and nested calls", () 
 });
 
 test("restores inside function loops, after continue, and before early return", () => {
-  const observations = assertEveryInstructionResume([
+  const { boundaries: observations } = assertRuntimeResumeEquivalent([
     "function find(limit) {",
     "  for value in 1..=limit {",
     "    if value == 1 { continue }",
@@ -63,7 +64,7 @@ test("restores inside function loops, after continue, and before early return", 
 });
 
 test("restores direct and mutual recursion at every instruction boundary", () => {
-  const direct = assertEveryInstructionResume([
+  const { boundaries: direct } = assertRuntimeResumeEquivalent([
     "function factorial(value) {",
     "  if value <= 1 { return 1 }",
     "  return value * factorial(value - 1)",
@@ -72,7 +73,7 @@ test("restores direct and mutual recursion at every instruction boundary", () =>
   ].join("\n"));
   assert.ok(direct.some((snapshot) => snapshot.callFrames.length >= 4));
 
-  const mutual = assertEveryInstructionResume([
+  const { boundaries: mutual } = assertRuntimeResumeEquivalent([
     "function even(value) { if value == 0 { return true }\nreturn odd(value - 1) }",
     "function odd(value) { if value == 0 { return false }\nreturn even(value - 1) }",
     "say even(5)",
@@ -84,7 +85,7 @@ test("restores direct and mutual recursion at every instruction boundary", () =>
 });
 
 test("restores between nested calls and around say events without duplicates", () => {
-  const observations = assertEveryInstructionResume([
+  const { boundaries: observations } = assertRuntimeResumeEquivalent([
     "function first { say \"first\"\nreturn 1 }",
     "function second { say \"second\"\nreturn 2 }",
     "say first() + second()",
@@ -98,7 +99,7 @@ test("restores between nested calls and around say events without duplicates", (
 });
 
 test("restores exact RNG state through nested calls", () => {
-  const observations = assertEveryInstructionResume([
+  const { boundaries: observations } = assertRuntimeResumeEquivalent([
     "function roll { return randomInteger(1..=6) }",
     "function pair { return roll() + roll() }",
     "say pair()",
@@ -197,7 +198,7 @@ test("rejects a missing temporary required by the next instruction", () => {
 });
 
 test("restores between assignment-target and right-hand call evaluation", () => {
-  const observations = assertEveryInstructionResume([
+  const { boundaries: observations } = assertRuntimeResumeEquivalent([
     "let order = []",
     "let items = [0]",
     'function indexFunction { order.add("index")\nreturn 0 }',
@@ -215,7 +216,7 @@ test("restores between assignment-target and right-hand call evaluation", () => 
 });
 
 test("restores mixed ordinary and user-call evaluation at every instruction boundary", () => {
-  const observations = assertEveryInstructionResume([
+  const { boundaries: observations } = assertRuntimeResumeEquivalent([
     "let order = []",
     "let first = { nested: [0] }",
     "let second = { nested: [0] }",
@@ -245,7 +246,7 @@ test("restores mixed ordinary and user-call evaluation at every instruction boun
 });
 
 test("restores prepared speaker aliases before and after nested identity mutations", () => {
-  const observations = assertEveryInstructionResume([
+  const { boundaries: observations } = assertRuntimeResumeEquivalent([
     "speaker vera {",
     "  config: { value: 0 }",
     "  items: [{ value: 0 }, { value: 1 }]",
@@ -268,7 +269,7 @@ test("restores prepared speaker aliases before and after nested identity mutatio
 });
 
 test("restores retained prepared list items across structural index shifts", () => {
-  const observations = assertEveryInstructionResume([
+  const { boundaries: observations } = assertRuntimeResumeEquivalent([
     "let direct = [0, 1, { value: 2 }]",
     "speaker vera { items: [{ value: 0 }, { value: 1 }] }",
     "let alias = vera",
@@ -586,32 +587,6 @@ test("cyclic builtin results become source-associated runtime failures", () => {
   assert.equal(result.snapshot.failure?.code, "TSR013");
   assert.ok(result.snapshot.failure?.span.start.offset !== undefined);
 });
-
-function assertEveryInstructionResume(source: string): RuntimeSnapshot[] {
-  const compiled = plan(source);
-  const initial = createFreshRuntimeSnapshot(compiled, { seed: 0x1234_5678 });
-  const uninterrupted = run(compiled, initial);
-  const observed: RuntimeSnapshot[] = [];
-  let partial = initial;
-  const events = [] as typeof uninterrupted.events[number][];
-  let guard = 0;
-  while (partial.status !== "halted" && partial.status !== "failed") {
-    const operation = executeInstruction(compiled, partial);
-    partial = operation.snapshot;
-    events.push(...operation.events);
-    const restored = restoreCheckpoint(
-      JSON.parse(JSON.stringify(createCheckpoint(compiled, partial))) as unknown,
-    );
-    assert.deepEqual(restored.snapshot, partial);
-    const resumed = run(restored.plan, restored.snapshot);
-    assert.deepEqual([...events, ...resumed.events], uninterrupted.events);
-    assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
-    observed.push(partial);
-    guard += 1;
-    assert.ok(guard < 2_000, "instruction-boundary checkpoint test did not terminate");
-  }
-  return observed;
-}
 
 function recursiveSnapshot(depth: number): {
   readonly plan: InstructionPlan;
