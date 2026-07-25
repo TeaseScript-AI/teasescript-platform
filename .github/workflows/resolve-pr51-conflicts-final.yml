@@ -1,0 +1,72 @@
+name: Resolve PR 51 conflicts final
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issues-40-41-runtime-snapshot-invariants
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Merge and resolve
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge --no-commit --no-ff origin/main || test "$?" -eq 1
+          git checkout origin/main -- docs/RUNTIME.md src/runtime/serializable-values.ts
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          runtime = Path('docs/RUNTIME.md')
+          text = runtime.read_text()
+          old = 'Before an instruction is executed, the runtime validates the instruction plan and runtime snapshot. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.'
+          new = 'Each low-level runtime entry validates the instruction plan and runtime snapshot before executing or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.'
+          assert old in text
+          text = text.replace(old, new, 1)
+          anchor = 'Externally supplied instruction plans, runtime snapshots, checkpoints, and serializable runtime values pass through an iterative depth-and-work preflight before detailed recursive validation, cloning, freezing, state construction, event emission, or RNG consumption. Depth is counted from the external root at zero, and the work limit applies to each bounded preflight traversal. Exceeding either implementation limit is malformed external runtime data. Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`, and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.\n'
+          assert anchor in text
+          extra = '\nA halted snapshot is accepted only at the root completion boundary, including an empty root, or immediately after an `exit` instruction. Halted snapshots must also retain no active call frames, loop frames, temporaries, nested scopes, contextual speaker, or failure state. These checks establish that the serialized state is a possible current runtime state; they do not authenticate its execution history.\n\nPersisted runtime counters, identities, instruction positions, collection-iteration positions, depths, temporary IDs, warning-deduplication IDs, speaker references, and source-span positions must be JavaScript safe integers in their existing non-negative or positive ranges. Ordinary finite script numbers retain their existing semantics. The allocator counters `nextEventSequence`, `nextScopeId`, `nextSpeakerId`, and `nextCallFrameId` may hold `Number.MAX_SAFE_INTEGER` as stored state, but an operation that would increment such a value is rejected with `RuntimeDataError` `TSR101` before an event sequence or runtime identity is reused.\n'
+          runtime.write_text(text.replace(anchor, anchor + extra, 1))
+
+          serializable = Path('src/runtime/serializable-values.ts')
+          text = serializable.read_text()
+          assert 'return Number.isInteger(value.speakerId) &&' in text
+          serializable.write_text(text.replace('return Number.isInteger(value.speakerId) &&', 'return Number.isSafeInteger(value.speakerId) &&', 1))
+
+          engine = Path('src/runtime/engine.ts')
+          text = engine.read_text()
+          pattern = re.compile(r'(export function (?:stepToEvent|run)\([\s\S]*?\): RuntimeOperationResult \{\n)(?:  assertExecutableData\(plan, snapshot\);\n)?  const budget = instructionBudget\(options\.instructionBudget\);\n(?:  assertExecutableData\(plan, snapshot\);\n)?')
+          text, count = pattern.subn(lambda m: m.group(1) + '  assertExecutableData(plan, snapshot);\n  const budget = instructionBudget(options.instructionBudget);\n', text)
+          assert count == 2
+          engine.write_text(text)
+          PY
+          git add -A
+          test -z "$(git ls-files -u)"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -c commit.gpgsign=false commit --no-verify -m 'Merge current main and resolve runtime invariant conflicts'
+      - name: Verify
+        run: |
+          node --version
+          npm --version
+          npm ci
+          npm run check
+          npm run build
+          node --test dist/tests/runtime-snapshot-invariants.test.js
+          git diff --check origin/main...HEAD
+          test -z "$(git status --short)"
+      - name: Push
+        run: git push origin HEAD:fix/issues-40-41-runtime-snapshot-invariants
