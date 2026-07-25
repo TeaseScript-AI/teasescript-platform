@@ -193,6 +193,22 @@ After coordinated implementation pull requests are merged, the coordinator prepa
 
 The coordinator records actual implemented behavior, not the original proposal. Deferred work remains explicit.
 
+## Test expectations by change type
+
+[`TESTING.md`](TESTING.md) defines the detailed repository testing strategy. The minimum verification for a pull request depends on the behavior it changes:
+
+| Change type | Minimum expected verification |
+| --- | --- |
+| Confirmed defect | Focused regression test and failing-before evidence for the reported root cause |
+| Stateful runtime change | Functional tests plus runtime resume-equivalence |
+| External plan, snapshot, or checkpoint boundary | Valid cases and adversarial malformed-data tests through the documented public boundary |
+| RNG-dependent behavior | Fixed-seed deterministic comparison |
+| Time-dependent behavior | Fake clock or equivalent deterministic source; no real waiting |
+| Security boundary | Structured rejection, bounded work, and no uncontrolled host exception at the documented boundary |
+| Browser host/player behavior | Real browser E2E after the concrete cross-origin boundary exists |
+
+These are relevance-based requirements. A pull request is not required to run or add every test category when the changed behavior does not reach that layer.
+
 ## Coordinated review and merge loop
 
 1. Each executor opens a draft pull request to the assigned integration branch.
@@ -209,10 +225,11 @@ Do not merge a workstream merely because its files do not conflict. Behavioral c
 
 Every pull request runs its relevant configured checks and reports exact commands and results.
 
-For a coordinated milestone, after all implementation and coordinator documentation changes are on the integration branch, run from a clean install:
+For a coordinated milestone, after all implementation and coordinator documentation changes are on the integration branch, run from a clean install with the exact Node.js version declared in `.nvmrc`. Activate that version with any suitable mechanism. When NVM is available, `nvm use` is one optional activation method; missing NVM, or NVM not seeing a version activated by `actions/setup-node`, a container, or another version manager, is not itself a verification failure. Confirm the effective environment before installing dependencies:
 
 ```shell
-nvm use
+node --version
+npm --version
 npm ci
 npm run check
 npm run build

@@ -52,6 +52,6 @@ This does not mean that the complete V30 language, static type system, timers, i
 - `docs/DOCUMENTATION-OWNERSHIP.md`: which material belongs in GitHub versus the shared project research archive.
 - `docs/specifications/`: accepted consolidated specifications.
 - `docs/decisions/`: accepted and proposed ADRs.
-- `docs/planning/POC-TO-ALPHA-BACKLOG.md`: selected work required before a stated POC/pre-alpha gate, but not automatically scheduled.
+- `docs/planning/POC-TO-ALPHA-BACKLOG.md`: selected work required before a stated POC, pre-alpha, or alpha gate, but not automatically scheduled.
 - `docs/planning/`: other non-authoritative proposals, gap analysis, and legacy backlog material.
 - `docs/reference/`: routing notices for research intentionally stored outside this repository.

@@ -2,7 +2,7 @@
 
 **Status:** Canonical selected backlog
 
-**Scope:** Work explicitly selected as required before a stated POC or pre-alpha gate
+**Scope:** Work explicitly selected as required before a stated POC, pre-alpha, or alpha gate
 
 **Scheduling:** This file does not schedule implementation
 
@@ -157,7 +157,10 @@ Create a measured performance baseline and production optimization plan for the 
 - representative small, normal, and stress workloads;
 - execution throughput and latency between externally visible events;
 - runtime-state and checkpoint-size measurements;
-- acceptable limits for loops, recursion, temporaries, scopes, and large values;
+- long-running runtime-managed identity growth, including repeated scoped speaker creation and equivalent identity-producing workloads;
+- clone, validation, and serialization costs as runtime-managed identities accumulate;
+- a reachability and lifetime analysis before proposing reclamation or garbage-collection behavior;
+- acceptable limits for loops, recursion, temporaries, scopes, identities, and large values;
 - the cost of current snapshot cloning and defensive validation;
 - run-until-event batching and clone-avoidance options;
 - checkpoint cadence and incremental persistence boundaries;
@@ -167,8 +170,9 @@ Create a measured performance baseline and production optimization plan for the 
 #### Boundaries
 
 - JSON-safe state at every instruction boundary does not mean serializing or persisting after every instruction.
-- Do not optimize by weakening deterministic source order, checkpoint validation, value-copy behavior, or restore equivalence.
-- Do not select an optimization merely because it appears plausible; measure the current runtime first and document the maintenance and correctness trade-offs.
+- Do not optimize by weakening deterministic source order, checkpoint validation, value-copy behavior, restore equivalence, or runtime identity correctness.
+- Do not assume that a scoped speaker can be deleted at scope exit; references may remain reachable from runtime values or state.
+- Do not select reclamation, garbage collection, or another optimization merely because it appears plausible. Measure the current runtime first and document the lifetime, maintenance, and correctness trade-offs.
 
 #### Dependencies and references
 
@@ -176,8 +180,167 @@ Create a measured performance baseline and production optimization plan for the 
 - [ADR 0015 — Serializable runtime architecture](../decisions/0015-serializable-runtime-architecture.md)
 - [`CURRENT-DESIGN.md`](../../CURRENT-DESIGN.md), section **Runtime execution and performance boundary**
 - [`docs/RUNTIME.md`](../RUNTIME.md)
+- [`docs/TESTING.md`](../TESTING.md), section **Coverage and performance boundaries**
 - [`docs/OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), section **Runtime hardening and evolution**
 
 #### Completion of the design item
 
 This item may move to **Ready for phase** after benchmark workloads, measurement commands, acceptance thresholds, and a prioritized optimization plan are owner-approved. Individual optimizations must then be scheduled explicitly.
+
+### POC-ENGINE-003 — Add adversarial runtime-data mutation testing
+
+- **Track:** Engine core
+- **Target gate:** Before pre-alpha
+- **Planning state:** Ready for phase
+- **Scheduling:** Unscheduled
+
+#### Required outcome
+
+Create reusable deterministic mutation coverage for documented external plan, runtime-snapshot, and checkpoint boundaries, including:
+
+- reusable one-field mutation utilities;
+- valid baseline plans, snapshots, and checkpoints;
+- controlled missing, wrong-type, invalid-reference, identity, RNG, sequence, version, cyclic, and excessive-nesting mutations;
+- verification of the documented structured validation, deserialization, or restore result;
+- explicit depth, size, and total-work bounds;
+- no uncontrolled native stack overflow, hang, silent repair, or partial execution at the documented boundary.
+
+#### Boundaries
+
+- Do not decide through this item that every unknown extra field must be rejected.
+- Do not change plan, snapshot, or checkpoint formats unless a separate accepted decision requires it.
+- The structured-result requirement applies to documented external-data boundaries and does not redefine intentional argument errors from unrelated low-level helpers.
+
+#### Dependencies and references
+
+- [ADR 0015 — Serializable runtime architecture](../decisions/0015-serializable-runtime-architecture.md)
+- [`docs/RUNTIME.md`](../RUNTIME.md), sections **Low-level lowering and runtime route** and **Checkpoint boundary**
+- [`docs/TESTING.md`](../TESTING.md), section **External-data and mutation testing**
+- [`docs/SECURITY.md`](../SECURITY.md)
+
+### POC-ENGINE-004 — Establish a source-to-runtime conformance corpus
+
+- **Track:** Engine core
+- **Target gate:** Before pre-alpha
+- **Planning state:** Ready for phase
+- **Scheduling:** Unscheduled
+
+#### Required outcome
+
+Create a small stable corpus of real `.tease` source cases organized by behavior, with support for:
+
+- expected diagnostic codes and source spans;
+- expected public runtime events;
+- expected final status;
+- selected final values;
+- an optional full resume-equivalence requirement;
+- stable case naming and organization.
+
+#### Boundaries
+
+- Prefer public behavior assertions.
+- Do not use complete instruction-plan snapshots as broad golden files.
+- Assert internal instruction structure only when it is itself an accepted contract or a focused lowering test requires it.
+
+#### Dependencies and references
+
+- [`docs/TESTING.md`](../TESTING.md), section **Source-to-runtime conformance corpus**
+- [`docs/TEASESCRIPT.md`](../TEASESCRIPT.md)
+- [`docs/RUNTIME.md`](../RUNTIME.md)
+
+### POC-ENGINE-005 — Add deterministic fuzz and property testing
+
+- **Track:** Engine core
+- **Target gate:** Before alpha
+- **Planning state:** Ready for phase
+- **Scheduling:** Unscheduled
+
+#### Required outcome
+
+Add fixed-seed, bounded, reproducible generation and property coverage for source and external runtime data, including:
+
+- short token and syntax sequences;
+- malformed and unusual source input;
+- malformed plans and checkpoints;
+- bounded deeply nested valid source structures;
+- equivalent bounded direct-AST structures that bypass parsing;
+- termination, JSON-safety, determinism, and structured-boundary properties;
+- failing source, seed, generated input, and first failing boundary in assertion output;
+- explicit depth, input-size, and total-work limits.
+
+#### Boundaries
+
+- This item does not document deeply nested valid source or direct AST input as a confirmed current defect; a bug issue requires a repository reproduction.
+- A valid generated input may succeed or reach a documented bounded rejection, but must not fail through an incidental native stack overflow.
+- Do not select `fast-check` or another dependency until implementation demonstrates the need and documents alternatives, maintenance impact, and security impact.
+
+#### Dependencies and references
+
+- [`docs/TESTING.md`](../TESTING.md), section **Deterministic fuzz and property testing**
+- [`docs/SECURITY.md`](../SECURITY.md)
+
+### POC-PLAYER-002 — Test resumable pending-action state machines
+
+- **Track:** Player runtime
+- **Target gate:** Before alpha
+- **Planning state:** Design required
+- **Scheduling:** Unscheduled
+
+#### Required outcome
+
+Add deterministic state-transition coverage for choices, input, waits, timers, and pending actions, including:
+
+- normal completion;
+- checkpoint and restore while pending;
+- cancellation;
+- invalid, duplicate, late, timed-out, and wrong-type responses;
+- unknown handles;
+- restore around timeout processing;
+- duplicate host messages;
+- event and handle IDs not being reused after restore;
+- a fake clock or equivalent deterministic time source with no real waiting.
+
+#### Boundaries
+
+- This item does not define the pending-action API, handle format, timeout semantics, or host-message schema.
+- Implementation requires an accepted pending-action runtime contract first.
+
+#### Dependencies and references
+
+- [ADR 0015 — Serializable runtime architecture](../decisions/0015-serializable-runtime-architecture.md)
+- [`docs/RUNTIME.md`](../RUNTIME.md), section **Remaining runtime work**
+- [`docs/OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), section **Player and interactions**
+- [`docs/TESTING.md`](../TESTING.md), section **Interactive runtime state-machine testing**
+
+### POC-HOST-002 — Add cross-origin player browser E2E coverage
+
+- **Track:** Cross-boundary
+- **Target gate:** Before alpha
+- **Planning state:** Design required
+- **Scheduling:** Unscheduled
+
+#### Required outcome
+
+Add real-browser coverage for the implemented cross-origin host/player boundary, including:
+
+- iframe sandboxing and Content Security Policy;
+- typed or otherwise strictly validated messaging;
+- startup, reload, reconnect, shutdown, and fatal failure;
+- checkpoint save and restore;
+- Standard UI and package custom UI;
+- focus, keyboard, fullscreen, and navigation behavior;
+- hostile and malformed host/player messages.
+
+#### Boundaries
+
+- Do not select a browser framework until a concrete host shell and cross-origin player exist.
+- Do not define the host/player protocol, sandbox flags, CSP, or UI lifecycle through this testing item.
+
+#### Dependencies and references
+
+- `POC-HOST-001`;
+- an implemented host shell and cross-origin player;
+- an explicitly selected browser-test framework;
+- [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md)
+- [`docs/SECURITY.md`](../SECURITY.md)
+- [`docs/TESTING.md`](../TESTING.md), section **Browser E2E gate**
