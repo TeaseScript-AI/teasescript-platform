@@ -1,13 +1,13 @@
-name: Apply issue 42 implementation
+name: Debug issue 42 implementation patch
 
 on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
+  debug:
     if: github.head_ref == 'fix/issue-42-bounded-runtime-validation'
     runs-on: ubuntu-latest
     steps:
@@ -16,39 +16,19 @@ jobs:
         with:
           ref: fix/issue-42-bounded-runtime-validation
           fetch-depth: 0
-      - name: Apply implementation patch
+      - name: Check implementation patch
+        id: patch
+        continue-on-error: true
         run: |
           base64 --decode tools/issue42.patch.gz.b64 > /tmp/issue42.patch.gz
           gunzip -c /tmp/issue42.patch.gz > /tmp/issue42.patch
-          git apply --check /tmp/issue42.patch
-          git apply /tmp/issue42.patch
-          rm .github/workflows/issue-42-apply.yml
-          rm .github/workflows/issue-42-baseline-evidence.yml
-          rm tools/issue42.patch.gz.b64
-          git diff --check
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+          git apply --verbose --check /tmp/issue42.patch > issue-42-apply.log 2>&1
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Verify versions
-        run: |
-          node --version
-          npm --version
-      - name: Install dependencies
-        run: npm ci
-      - name: Run focused tests
-        run: |
-          npm run build
-          node --test dist/tests/external-runtime-data-limits.test.js
-      - name: Run full verification
-        run: |
-          npm run check
-          npm run build
-      - name: Commit and push implementation
-        run: |
-          git add -A
-          git commit -m "Bound validation of external runtime data"
-          git status --short
-          test -z "$(git status --short)"
-          git push origin HEAD:fix/issue-42-bounded-runtime-validation
+          name: issue-42-apply-diagnostics
+          path: issue-42-apply.log
+      - name: Preserve failure
+        if: steps.patch.outcome == 'failure'
+        run: exit 1
