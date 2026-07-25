@@ -96,10 +96,28 @@ The exact cross-origin envelope, field names, capability-negotiation schema, rec
 
 Camera and file APIs continue to return engine-managed references rather than browser objects. Package-defined camera roles, player device aliases, long-lived stream ownership, and persistent media collections remain separate follow-up designs recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
 
+## Proposed one-shot timer boundary
+
+ADR 0017 proposes a timer-specific author/runtime identity boundary without changing the accepted action-ID model:
+
+- `startTimer` returns an opaque engine-managed timer handle;
+- the timer handle is JSON-safe and distinct from the internal action ID;
+- script code uses the handle only with timer APIs such as `stopTimer(...)`;
+- the runtime persists the timer-handle allocator, active timer payloads, queued handler invocations, and at most one active timer-handler frame;
+- `observeTime(...)` settles all due timer actions and queues handlers but executes no script code;
+- later runtime entries execute queued handlers one at a time before the normal main path;
+- active, queued, and executing timer state remains runtime-owned and checkpointed;
+- the player does not receive or execute handler callbacks and may not reorder queued handlers;
+- successful active stop is a runtime settlement, while repeated or late stop is an idempotent no-op.
+
+The exact TypeScript type names, low-level scheduler result name, and later schema-version transition remain implementation details. They must preserve proposed ADR 0017 if it is accepted and may not be inferred as accepted while the ADR remains `Proposed`.
+
 ## Stability and future contracts
 
 The current TypeScript exports and version-3 plan, snapshot, and checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
 
 Implementation of ADR 0016 requires version-4 plan, snapshot, and checkpoint schemas for the waiting status, persisted session-time coordinate, foreground/background action fields, action counter, and bounded settlement record. Version 4 is an internal POC format revision, not a product release number.
+
+Proposed ADR 0017 does not change implemented format constants. Its later implementation must start after issue #66 and explicitly decide the required version transition for timer handles and handler state.
 
 Exact account, toy, history, global-data, checkpoint storage, host-message, media-persistence, time-integrity, and integration payloads remain open and must be defined as typed contracts before implementation. This document does not resolve their long-term versioning and migration policy.
