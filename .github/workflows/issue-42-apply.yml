@@ -1,13 +1,13 @@
-name: Debug issue 42 implementation patch
+name: Apply issue 42 implementation
 
 on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  debug:
+  apply:
     if: github.head_ref == 'fix/issue-42-bounded-runtime-validation'
     runs-on: ubuntu-latest
     steps:
@@ -16,19 +16,99 @@ jobs:
         with:
           ref: fix/issue-42-bounded-runtime-validation
           fetch-depth: 0
-      - name: Check implementation patch
-        id: patch
-        continue-on-error: true
+      - name: Apply implementation
         run: |
           base64 --decode tools/issue42.patch.gz.b64 > /tmp/issue42.patch.gz
           gunzip -c /tmp/issue42.patch.gz > /tmp/issue42.patch
-          git apply --verbose --check /tmp/issue42.patch > issue-42-apply.log 2>&1
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
+          rm tests/external-runtime-data-limits.test.ts
+          git apply --exclude=src/instructions.ts /tmp/issue42.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("src/instructions.ts")
+          text = path.read_text()
+          import_marker = '''import {
+            AST_VALIDATION_CODES,
+            findNonFiniteNumericLiteralDiagnostics,
+          } from "./ast-validation.js";
+          '''
+          import_addition = import_marker + '''import {
+            EXTERNAL_DATA_DEPTH_MESSAGE,
+            EXTERNAL_DATA_WORK_MESSAGE,
+            findExternalDataFailure,
+            type ExternalDataFailureKind,
+          } from "./external-data-limits.js";
+          '''
+          if text.count(import_marker) != 1:
+              raise SystemExit("instructions import marker not found")
+          text = text.replace(import_marker, import_addition, 1)
+          old_entry = '''  const errors: PlanValidationError[] = [];
+            const jsonFailure = findJsonSafetyFailure(value, "$", new Set<object>());
+            if (jsonFailure !== null) {
+              return invalidPlan("TSC002", jsonFailure.message, jsonFailure.path);
+            }'''
+          new_entry = '''  const errors: PlanValidationError[] = [];
+            const dataFailure = findExternalDataFailure(value);
+            if (dataFailure !== null) {
+              return invalidPlan(
+                "TSC002",
+                planExternalDataFailureMessage(dataFailure.kind),
+                dataFailure.path,
+              );
+            }'''
+          if text.count(old_entry) != 1:
+              raise SystemExit("instructions validation entry marker not found")
+          text = text.replace(old_entry, new_entry, 1)
+          start = text.index("function findJsonSafetyFailure(")
+          end = text.index("function planError(", start)
+          replacement = '''function planExternalDataFailureMessage(
+            kind: ExternalDataFailureKind,
+          ): string {
+            switch (kind) {
+              case "depth":
+                return EXTERNAL_DATA_DEPTH_MESSAGE;
+              case "work":
+                return EXTERNAL_DATA_WORK_MESSAGE;
+              case "nonFiniteNumber":
+                return "Plan contains a non-finite number.";
+              case "nonJsonSafeValue":
+                return "Plan contains a non-JSON-safe value.";
+              case "cycle":
+                return "Plan contains a cycle.";
+              case "nonPlainObject":
+                return "Plan contains a non-plain object.";
+            }
+          }
+
+          '''
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text)
+          PY
+          rm .github/workflows/issue-42-apply.yml
+          rm .github/workflows/issue-42-baseline-evidence.yml
+          rm tools/issue42.patch.gz.b64
+          git diff --check
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          name: issue-42-apply-diagnostics
-          path: issue-42-apply.log
-      - name: Preserve failure
-        if: steps.patch.outcome == 'failure'
-        run: exit 1
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Verify versions
+        run: |
+          node --version
+          npm --version
+      - name: Install dependencies
+        run: npm ci
+      - name: Run focused tests
+        run: |
+          npm run build
+          node --test dist/tests/external-runtime-data-limits.test.js
+      - name: Run full verification
+        run: |
+          npm run check
+          npm run build
+      - name: Commit and push implementation
+        run: |
+          git add -A
+          git commit -m "Bound validation of external runtime data"
+          test -z "$(git status --short)"
+          git push origin HEAD:fix/issue-42-bounded-runtime-validation
