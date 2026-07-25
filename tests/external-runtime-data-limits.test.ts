@@ -26,6 +26,7 @@ import {
   type RuntimeSnapshot,
   type SerializableRuntimeValue,
 } from "../src/index.js";
+import { captureExternalData } from "../src/external-data-limits.js";
 import {
   SerializableValueError,
   fromHostRuntimeValue,
@@ -339,6 +340,154 @@ test("host/runtime conversion is bounded before recursive conversion", () => {
     (error: unknown) =>
       error instanceof SerializableValueError &&
       error.message === EXTERNAL_DATA_DEPTH_MESSAGE,
+  );
+});
+
+test("external capture bounds sparse array length before detailed validation", () => {
+  const accepted: unknown[] = [];
+  accepted.length = MAX_EXTERNAL_RUNTIME_DATA_WORK;
+  const acceptedCapture = captureExternalData(accepted, "$.items");
+  assert.equal(acceptedCapture.ok, true);
+  if (acceptedCapture.ok) {
+    assert.ok(Array.isArray(acceptedCapture.value));
+    assert.equal(
+      (acceptedCapture.value as unknown[]).length,
+      MAX_EXTERNAL_RUNTIME_DATA_WORK,
+    );
+  }
+
+  const rejected: unknown[] = [];
+  rejected.length = MAX_EXTERNAL_RUNTIME_DATA_WORK + 1;
+  assert.deepEqual(captureExternalData(rejected, "$.items"), {
+    ok: false,
+    failure: {
+      kind: "work",
+      path: "$.items",
+    },
+  });
+});
+
+test("serializable cloning maps huge sparse arrays to the work-limit error", () => {
+  const items: SerializableRuntimeValue[] = [];
+  items.length = 0xffff_ffff;
+
+  assert.throws(
+    () => cloneSerializableValue({ kind: "list", items }),
+    (error: unknown) =>
+      error instanceof SerializableValueError &&
+      error.code === "invalid" &&
+      error.message === EXTERNAL_DATA_WORK_MESSAGE,
+  );
+});
+
+test("serializable cloning preserves dense and small sparse boundary behavior", () => {
+  const acceptedCount = MAX_EXTERNAL_RUNTIME_DATA_WORK - 3;
+  const accepted = new Array<SerializableRuntimeValue>(acceptedCount).fill(null);
+  const cloned = cloneSerializableValue({ kind: "list", items: accepted });
+  assert.equal(typeof cloned === "object" && cloned?.kind === "list", true);
+  if (typeof cloned === "object" && cloned?.kind === "list") {
+    assert.equal(cloned.items.length, acceptedCount);
+  }
+
+  const aboveCaptureBudget = new Array<SerializableRuntimeValue>(
+    acceptedCount + 1,
+  ).fill(null);
+  assert.throws(
+    () => cloneSerializableValue({ kind: "list", items: aboveCaptureBudget }),
+    (error: unknown) =>
+      error instanceof SerializableValueError &&
+      error.code === "invalid" &&
+      error.message === EXTERNAL_DATA_WORK_MESSAGE,
+  );
+
+  assert.deepEqual(
+    cloneSerializableValue({ kind: "list", items: ["a", null, 3] }),
+    { kind: "list", items: ["a", null, 3] },
+  );
+
+  const smallSparse: SerializableRuntimeValue[] = [];
+  smallSparse.length = 2;
+  smallSparse[1] = "present";
+  assert.throws(
+    () => cloneSerializableValue({ kind: "list", items: smallSparse }),
+    (error: unknown) =>
+      error instanceof SerializableValueError &&
+      error.code === "invalid" &&
+      error.message === "$.items[0] is not a JSON-safe runtime value.",
+  );
+});
+
+test("plan validation rejects sparse instruction length before execution", () => {
+  const validPlan = compiledPlan("say random()\nexit");
+  const malformedPlan = JSON.parse(JSON.stringify(validPlan)) as InstructionPlan;
+  (malformedPlan.instructions as unknown[]).length = 0xffff_ffff;
+
+  assert.deepEqual(validateInstructionPlan(malformedPlan), {
+    valid: false,
+    errors: [{
+      code: "TSC002",
+      message: EXTERNAL_DATA_WORK_MESSAGE,
+      path: "$.instructions",
+    }],
+  });
+
+  for (const operation of [executeInstruction, stepToEvent, run]) {
+    const snapshot = createFreshRuntimeSnapshot(validPlan);
+    const before = JSON.parse(JSON.stringify(snapshot)) as RuntimeSnapshot;
+    let randomCalls = 0;
+    assert.throws(
+      () => operation(malformedPlan, snapshot, {
+        random: { next: () => { randomCalls += 1; return 0.5; } },
+      }),
+      (error: unknown) =>
+        error instanceof RuntimeDataError &&
+        error.code === "TSR100" &&
+        error.message === EXTERNAL_DATA_WORK_MESSAGE,
+    );
+    assert.equal(randomCalls, 0);
+    assert.deepEqual(snapshot, before);
+  }
+});
+
+test("snapshot and checkpoint paths preserve sparse-array work errors", () => {
+  const plan = compiledPlan("say random()\nexit");
+  const malformedSnapshot = mutableSnapshot(plan);
+  (malformedSnapshot.frames as unknown[]).length = 0xffff_ffff;
+
+  assert.deepEqual(validateRuntimeSnapshot(malformedSnapshot, plan), {
+    valid: false,
+    errors: [EXTERNAL_DATA_WORK_MESSAGE],
+  });
+
+  for (const operation of [executeInstruction, stepToEvent, run]) {
+    const snapshot = mutableSnapshot(plan);
+    (snapshot.frames as unknown[]).length = 0xffff_ffff;
+    const rngState = snapshot.rng.state;
+    const eventSequence = snapshot.nextEventSequence;
+    let randomCalls = 0;
+    assert.throws(
+      () => operation(plan, snapshot, {
+        random: { next: () => { randomCalls += 1; return 0.5; } },
+      }),
+      (error: unknown) =>
+        error instanceof RuntimeDataError &&
+        error.code === "TSR101" &&
+        error.message === EXTERNAL_DATA_WORK_MESSAGE,
+    );
+    assert.equal(randomCalls, 0);
+    assert.equal(snapshot.rng.state, rngState);
+    assert.equal(snapshot.nextEventSequence, eventSequence);
+  }
+
+  const malformedCheckpoint = checkpoint(
+    plan,
+    createFreshRuntimeSnapshot(plan),
+  );
+  (malformedCheckpoint.snapshot.frames as unknown[]).length = 0xffff_ffff;
+  assertCheckpointError(
+    () => restoreCheckpoint(malformedCheckpoint),
+    EXTERNAL_DATA_WORK_MESSAGE,
+    "$.snapshot",
   );
 });
 

@@ -110,6 +110,9 @@ export function captureExternalData(
         ) {
           return captureFailure("nonJsonSafeValue", item.path, rootPath);
         }
+        if (descriptor.value > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
+          return captureFailure("work", item.path, rootPath);
+        }
         try {
           Reflect.defineProperty(item.captured, "length", {
             value: descriptor.value,
