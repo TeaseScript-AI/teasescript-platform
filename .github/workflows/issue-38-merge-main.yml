@@ -1,0 +1,36 @@
+name: Issue 38 Merge Main
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  merge-main:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Merge updated main and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          npm ci
+          npm run check
+          npm run build
+          node --test dist/tests/semantic-validation.test.js
+          git diff --check origin/main...HEAD
+          test -z "$(git status --short)"
+          git push origin HEAD:${{ github.head_ref }}
