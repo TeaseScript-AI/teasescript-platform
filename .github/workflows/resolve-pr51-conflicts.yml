@@ -1,8 +1,8 @@
 name: Resolve PR 51 conflicts
 
 on:
-  push:
-    branches: [fix/issues-40-41-runtime-snapshot-invariants]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
@@ -89,7 +89,6 @@ jobs:
             exit 1
           fi
 
-          git add docs/RUNTIME.md src/runtime/engine.ts src/runtime/serializable-values.ts src/runtime/state.ts tests/runtime-snapshot-invariants.test.ts
           git add -A
           git commit -m 'Merge current main and resolve runtime invariant conflicts'
 
