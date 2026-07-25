@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  diagnose:
+  implement-and-verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,29 +24,66 @@ jobs:
         shell: bash
         run: |
           cat .issue57/part* | base64 --decode > /tmp/issue57.patch
+          base64 --decode .issue57/fix > /tmp/issue57-fix.patch
           git apply --check /tmp/issue57.patch
           git apply /tmp/issue57.patch
+          git apply --check /tmp/issue57-fix.patch
+          git apply /tmp/issue57-fix.patch
+          git diff --check
       - name: Record environment
         shell: bash
         run: |
           mkdir -p /tmp/issue57-verification
-          node --version > /tmp/issue57-verification/node-version.txt
-          npm --version > /tmp/issue57-verification/npm-version.txt
+          node --version | tee /tmp/issue57-verification/node-version.txt
+          npm --version | tee /tmp/issue57-verification/npm-version.txt
       - name: Install dependencies
         run: npm ci
-      - name: Capture complete check
-        id: check
-        continue-on-error: true
+      - name: Run complete check
+        shell: bash
+        run: npm run check 2>&1 | tee /tmp/issue57-verification/check.txt
+      - name: Build separately
+        shell: bash
+        run: npm run build 2>&1 | tee /tmp/issue57-verification/build.txt
+      - name: Run focused compiled tests
         shell: bash
         run: |
-          set -o pipefail
-          npm run check 2>&1 | tee /tmp/issue57-verification/check.txt
-      - name: Upload diagnostic output
-        if: always()
+          tests=(
+            instruction-plan-range-validation
+            instruction-plan-validation
+            functions-instruction-plan
+            runtime-validation
+            runtime-checkpoint
+            runtime-semantics
+            runtime-engine-hardening
+            external-runtime-data-limits
+            runtime-snapshot-invariants
+            runtime-equivalence
+          )
+          compiled=()
+          for test_name in "${tests[@]}"; do
+            if [[ -f "dist/tests/${test_name}.test.js" ]]; then
+              compiled+=("dist/tests/${test_name}.test.js")
+            fi
+          done
+          printf '%s\n' "${compiled[@]}" | tee /tmp/issue57-verification/focused-files.txt
+          node --test "${compiled[@]}" 2>&1 | tee /tmp/issue57-verification/focused.txt
+      - name: Verify final patch
+        shell: bash
+        run: |
+          git diff --check
+          git status --short | tee /tmp/issue57-verification/status-before-commit.txt
+      - name: Upload verification
         uses: actions/upload-artifact@v4
         with:
-          name: issue57-check-diagnostic
+          name: issue57-verification
           path: /tmp/issue57-verification
-      - name: Preserve failure status
-        if: steps.check.outcome != 'success'
-        run: exit 1
+      - name: Commit product change and remove temporary files
+        shell: bash
+        run: |
+          git config user.name "Codex Agent"
+          git config user.email "codex-agent@users.noreply.github.com"
+          git add src/instructions.ts tests/instruction-plan-range-validation.test.ts
+          git commit -m "Bound instruction-plan range validation"
+          git rm -r .issue57 .github/workflows/issue57-implement.yml .github/workflows/issue57-pr.yml
+          git commit -m "Remove temporary issue 57 files"
+          git push origin HEAD:fix/issue-57-bounded-function-range-validation
