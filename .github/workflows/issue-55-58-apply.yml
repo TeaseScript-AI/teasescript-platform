@@ -24,11 +24,14 @@ jobs:
       - name: Apply implementation patch
         run: |
           cat .github/issue-55-58-patch2/chunk-* > /tmp/issue-55-58.patch
+          sed -i 's/"\$\." );/"\$\.");/g' /tmp/issue-55-58.patch
+          git apply --check --verbose /tmp/issue-55-58.patch
           git apply --index /tmp/issue-55-58.patch
           rm -rf \
             .github/issue-55-58-patch \
             .github/issue-55-58-patch-text \
-            .github/issue-55-58-patch2
+            .github/issue-55-58-patch2 \
+            .github/issue-55-58-patch-hex
           rm -f \
             .github/workflows/issue-55-failing-before.yml \
             .github/workflows/issue-58-failing-before.yml \
