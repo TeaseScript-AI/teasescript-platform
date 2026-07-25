@@ -127,10 +127,11 @@ The current runner targets a Linux environment and requires:
 - `unzip` for ZIP extraction;
 - the repository's configured runtime tools.
 
-For this repository, prepare the environment with:
+For this repository, use the exact Node.js version declared in `.nvmrc`. Activate that version with any suitable mechanism. When NVM is available, `nvm use` is one optional activation method; missing NVM, or NVM not seeing a version activated by `actions/setup-node`, a container, or another version manager, is not itself a failure. Confirm the effective environment before installing dependencies:
 
 ```bash
-nvm use
+node --version
+npm --version
 npm ci
 ```
 
