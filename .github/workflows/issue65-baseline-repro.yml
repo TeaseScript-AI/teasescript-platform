@@ -26,24 +26,45 @@ jobs:
           npm ci
           rm -rf dist
           npm run build
-      - name: Reproduce sparse-array hang safely
-        id: reproduce
-        continue-on-error: true
+      - name: Reproduce sparse serializable-value mapping
         shell: bash
         run: |
-          cat > /tmp/issue65-repro.mjs <<'EOF'
+          cat > /tmp/issue65-value-repro.mjs <<'EOF'
           import { pathToFileURL } from "node:url";
           const moduleUrl = pathToFileURL(`${process.cwd()}/dist/src/index.js`).href;
           const { cloneSerializableValue } = await import(moduleUrl);
           const items = [];
           items.length = 0xffff_ffff;
-          console.log("before cloneSerializableValue");
-          cloneSerializableValue({ kind: "list", items });
-          console.log("after cloneSerializableValue");
+          try {
+            cloneSerializableValue({ kind: "list", items });
+            console.log(JSON.stringify({ returned: true }));
+          } catch (error) {
+            console.log(JSON.stringify({
+              name: error?.name,
+              code: error?.code,
+              message: error?.message,
+            }));
+          }
+          EOF
+          node /tmp/issue65-value-repro.mjs | tee /tmp/value-repro.txt
+      - name: Reproduce sparse plan hang safely
+        id: reproduce
+        shell: bash
+        run: |
+          cat > /tmp/issue65-plan-repro.mjs <<'EOF'
+          import { pathToFileURL } from "node:url";
+          const moduleUrl = pathToFileURL(`${process.cwd()}/dist/src/index.js`).href;
+          const { compileSource, validateInstructionPlan } = await import(moduleUrl);
+          const original = compileSource("exit").plan;
+          const malformed = JSON.parse(JSON.stringify(original));
+          malformed.instructions.length = 0xffff_ffff;
+          console.log("before validateInstructionPlan");
+          validateInstructionPlan(malformed);
+          console.log("after validateInstructionPlan");
           EOF
           set +e
           start_ns=$(date +%s%N)
-          timeout --signal=KILL 2s node /tmp/issue65-repro.mjs > /tmp/repro-stdout.txt 2> /tmp/repro-stderr.txt
+          timeout --signal=KILL 2s node /tmp/issue65-plan-repro.mjs > /tmp/plan-stdout.txt 2> /tmp/plan-stderr.txt
           status=$?
           end_ns=$(date +%s%N)
           set -e
@@ -55,15 +76,15 @@ jobs:
             echo "elapsed_ms=$elapsed_ms"
             echo "exit_status=$status"
             echo "stdout:"
-            cat /tmp/repro-stdout.txt
+            cat /tmp/plan-stdout.txt
             echo "stderr:"
-            cat /tmp/repro-stderr.txt
+            cat /tmp/plan-stderr.txt
+            echo "serializable_value_result:"
+            cat /tmp/value-repro.txt
           } | tee /tmp/issue65-baseline-evidence.txt
-          if [[ "$status" != "137" && "$status" != "124" ]]; then
-            exit 1
-          fi
-          grep -Fx "before cloneSerializableValue" /tmp/repro-stdout.txt
-          ! grep -Fx "after cloneSerializableValue" /tmp/repro-stdout.txt
+          [[ "$status" == "137" || "$status" == "124" ]]
+          grep -Fx "before validateInstructionPlan" /tmp/plan-stdout.txt
+          ! grep -Fx "after validateInstructionPlan" /tmp/plan-stdout.txt
       - name: Capture source checkout
         if: always()
         run: |
@@ -74,11 +95,9 @@ jobs:
           name: issue65-baseline
           path: |
             /tmp/issue65-baseline-evidence.txt
-            /tmp/repro-stdout.txt
-            /tmp/repro-stderr.txt
+            /tmp/value-repro.txt
+            /tmp/plan-stdout.txt
+            /tmp/plan-stderr.txt
             /tmp/node-version.txt
             /tmp/npm-version.txt
             /tmp/issue65-checkout.tar.gz
-      - name: Preserve reproduction status
-        if: always()
-        run: test '${{ steps.reproduce.outcome }}' = success
