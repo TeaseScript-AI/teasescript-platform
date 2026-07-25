@@ -232,7 +232,6 @@ node --version
 npm --version
 npm ci
 npm run check
-npm run build
 git diff --check
 ```
 

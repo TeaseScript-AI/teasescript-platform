@@ -21,14 +21,6 @@
   },
   "checks": [
     {
-      "id": "build",
-      "argv": [
-        "npm",
-        "run",
-        "build"
-      ]
-    },
-    {
       "id": "full-check",
       "argv": [
         "npm",
