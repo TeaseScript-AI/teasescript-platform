@@ -2,12 +2,13 @@
 
 ## Evidence boundary
 
-- Current repository baseline for this status update: `b67e5f947e628ad4d3784fadf3a8a9c5003055aa` on `main`.
+- Current repository baseline for this status update: `9c5736e8ddaf48f9c265329c913c4d2efa427bcc` on `main`.
 - The seven-item implemented-foundation hardening set tracked by issue #7 is complete at this baseline, including the compiler/template work in PR #19, RNG-state work in PR #20, and the direct-AST non-finite-number boundary repair in PR #34.
 - PR #37 added sequenced `TSW002` developer warnings when `list.remove(value)` finds no matching value while preserving the unchanged list.
 - PR #48 completed the owner-selected reusable runtime resume-equivalence outcome tracked as `POC-ENGINE-002`, with a shared test-only helper and bounded corpus that checks every completed instruction boundary through a real JSON checkpoint round trip.
 - PR #46 rejects ordinary instruction-plan control-flow targets that cross between root and function execution regions before execution or checkpoint restore.
-- Final post-merge verification reported for PR #46 at this baseline passed with 294 tests, 0 failures, and a successful TypeScript build.
+- PR #45 rejects core and configured injected builtin identifiers when they are used as ordinary runtime values while preserving direct builtin calls.
+- Final post-merge verification reported for PR #45 at this baseline passed with 301 tests, 0 failures, and a successful TypeScript build.
 - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
 ## Implemented in the current repository code
@@ -20,6 +21,7 @@
 - Recursive nested template literals inside interpolation, including preserved escapes, source spans, structured unterminated-template diagnostics, and existing recovery behavior.
 - `compileSource(...)` rejection of non-finite numeric literals through exact-span `TSC001`, while large finite literals remain valid and failed compilation returns no plan.
 - Unsuccessful `list.remove(value)` calls leave the list unchanged and emit one sequenced `TSW002` developer warning per call.
+- Core and configured injected builtin identifiers are rejected as non-first-class runtime values while direct builtin calls remain valid.
 
 ### Serializable deterministic runtime
 
