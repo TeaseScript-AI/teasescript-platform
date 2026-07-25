@@ -9,8 +9,39 @@ Accepted post-V30 additions:
 - ADR 0013 defines `set[...]`, `type set`, insertion order, uniqueness, methods/properties, and non-indexability.
 - ADR 0014 defines recursive value-copy behavior, scalar-only sets, empty collection errors, and speaker display-name fallback.
 - ADR 0015 defines the serializable instruction-plan/runtime/checkpoint architecture used to execute the implemented syntax.
+- ADR 0016 defines the shared resumable pending-action contract and selects blocking `wait` as its first implementation slice.
 
 Rejected forms remain rejected, including `set score = 20`, `procedure`, and `call` for ordinary function calls. Historical research may still contain those forms and is non-authoritative.
+
+## Proposed post-V30 chat-pacing syntax
+
+ADR 0017 is Proposed and requires explicit owner approval before implementation. It preserves accepted command-style forms such as:
+
+```tease
+say "Kneel."
+say as mistressVera "Kneel."
+```
+
+It proposes call-style forms such as:
+
+```tease
+say("Kneel.")
+
+say(
+    text: "Kneel.",
+    wait: 5 s
+)
+
+say(
+    as: mistressVera,
+    text: "Kneel.",
+    wait: 5 s
+)
+```
+
+Only `text` is available positionally. Named calls use required `text` plus optional `as` and `wait`; positional and named arguments may not be mixed. `wait` controls only the gate established for the next transcript `say`, and `wait: 0` establishes no next-message delay.
+
+This proposal is not accepted syntax and is not implemented. The exact proposed syntax, validation, transcript-channel, visible-text, pending-action, event, checkpoint, and test contract is in [`decisions/0017-deterministic-chat-output-pacing.md`](decisions/0017-deterministic-chat-output-pacing.md).
 
 ## Currently implemented language subset
 
