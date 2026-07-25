@@ -27,6 +27,8 @@ jobs:
           rm -rf dist
           npm run build
       - name: Reproduce sparse-array hang safely
+        id: reproduce
+        continue-on-error: true
         shell: bash
         run: |
           cat > /tmp/issue65-repro.mjs <<'EOF'
@@ -47,7 +49,7 @@ jobs:
           set -e
           elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
           {
-            echo "baseline=$(git rev-parse HEAD^)"
+            echo "baseline=$(git merge-base HEAD origin/main)"
             echo "branch_head=$(git rev-parse HEAD)"
             echo "timeout_seconds=2"
             echo "elapsed_ms=$elapsed_ms"
@@ -57,13 +59,17 @@ jobs:
             echo "stderr:"
             cat /tmp/repro-stderr.txt
           } | tee /tmp/issue65-baseline-evidence.txt
-          test "$status" -eq 137 -o "$status" -eq 124
+          if [[ "$status" != "137" && "$status" != "124" ]]; then
+            exit 1
+          fi
           grep -Fx "before cloneSerializableValue" /tmp/repro-stdout.txt
           ! grep -Fx "after cloneSerializableValue" /tmp/repro-stdout.txt
       - name: Capture source checkout
+        if: always()
         run: |
           tar --exclude=.git --exclude=node_modules --exclude=dist -czf /tmp/issue65-checkout.tar.gz .
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: issue65-baseline
           path: |
@@ -73,3 +79,6 @@ jobs:
             /tmp/node-version.txt
             /tmp/npm-version.txt
             /tmp/issue65-checkout.tar.gz
+      - name: Preserve reproduction status
+        if: always()
+        run: test '${{ steps.reproduce.outcome }}' = success
