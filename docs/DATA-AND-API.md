@@ -53,31 +53,46 @@ Runtime builtins are explicit capabilities. Only own registered properties are c
 
 See [`docs/RUNTIME.md`](RUNTIME.md) for current execution behavior, structured errors, capabilities, compiler/template behavior, RNG invariants, defaults, and limits.
 
-## Proposed pending-action boundary
+## Accepted pending-action boundary
 
-ADR 0016 proposes one canonical runtime-owned contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities.
+ADR 0016 defines one canonical runtime-owned contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities.
 
 The runtime owns:
 
+- persisted `currentSessionTimeMs` and nondecreasing time updates;
 - foreground and background action state;
 - action and event identities;
 - expected response types;
 - deadlines and continuation positions;
+- bounded `lastSettlement` state;
+- active-first action lookup and stale/unknown classification;
 - state transitions and idempotency;
-- snapshot, checkpoint, and completion validation.
+- snapshot, checkpoint, time-observation, and completion validation.
 
 The player/controller owns:
 
 - Standard UI rendering and reconstruction;
 - browser capability invocation;
-- clock observation and wake-up scheduling;
+- observing browser/server clocks and mapping them onto the runtime session coordinate;
+- browser wake-up scheduling;
 - translating browser results and exceptions into typed plain-data outcomes;
 - checkpoint transport and save acknowledgement;
 - browser-resource cleanup requested by canonical runtime transitions.
 
-The future host/player protocol must expose typed operations equivalent to observing time and completing, cancelling, or reporting a capability outcome for one action ID. The host must not mutate arbitrary snapshot fields or directly advance a continuation.
+The future host/player protocol must expose typed operations equivalent to observing time and completing, cancelling, or reporting a capability outcome for one action ID. The host supplies observations but may not directly mutate `currentSessionTimeMs`, arbitrary snapshot fields, or continuation state.
 
-The exact cross-origin envelope, field names, capability-negotiation schema, reconnect protocol, and save acknowledgement remain open. They are not silently accepted by ADR 0016.
+Time observation is one atomic runtime transition: validate the supplied coordinate, persist `max(currentSessionTimeMs, suppliedNow)`, then settle due actions against that stored value.
+
+Completion correlation uses the accepted order:
+
+```text
+active foreground/background action
+-> matching lastSettlement
+-> issued inactive stale action
+-> unknown unissued action
+```
+
+The exact cross-origin envelope, field names, capability-negotiation schema, reconnect protocol, and save acknowledgement remain open. They are not defined by ADR 0016.
 
 Camera and file APIs continue to return engine-managed references rather than browser objects. Package-defined camera roles, player device aliases, long-lived stream ownership, and persistent media collections remain separate follow-up designs recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
 
@@ -85,6 +100,6 @@ Camera and file APIs continue to return engine-managed references rather than br
 
 The current TypeScript exports and version-3 plan, snapshot, and checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
 
-If ADR 0016 is accepted and implemented, the new waiting status, foreground/background action fields, and action counter require version-4 plan, snapshot, and checkpoint schemas. Version 4 is an internal POC format revision, not a product release number.
+Implementation of ADR 0016 requires version-4 plan, snapshot, and checkpoint schemas for the waiting status, persisted session-time coordinate, foreground/background action fields, action counter, and bounded settlement record. Version 4 is an internal POC format revision, not a product release number.
 
-Exact account, toy, history, global-data, checkpoint storage, host-message, media-persistence, time-integrity, and integration payloads remain open and must be defined as typed contracts before implementation. This document does not accept those payloads or resolve their long-term versioning and migration policy.
+Exact account, toy, history, global-data, checkpoint storage, host-message, media-persistence, time-integrity, and integration payloads remain open and must be defined as typed contracts before implementation. This document does not resolve their long-term versioning and migration policy.
