@@ -105,7 +105,7 @@ Current POC defaults and validation limits are:
 
 A configured instruction budget must be a positive integer. Exhaustion fails deterministically with structured runtime error `TSR037` instead of hanging. Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
 
-Externally supplied instruction plans, runtime snapshots, checkpoints, and serializable runtime values pass through an iterative depth-and-work preflight before detailed recursive validation, cloning, freezing, state construction, event emission, or RNG consumption. Exceeding either implementation limit is malformed external runtime data. Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`, and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
+Externally supplied instruction plans, runtime snapshots, checkpoints, and serializable runtime values pass through an iterative depth-and-work preflight before detailed recursive validation, cloning, freezing, state construction, event emission, or RNG consumption. Depth is counted from the external root at zero, and the work limit applies to each bounded preflight traversal. Exceeding either implementation limit is malformed external runtime data. Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`, and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
 
 ## Deterministic RNG invariant
 
