@@ -4,6 +4,12 @@ import type {
   InstructionPlan,
 } from "../instructions.js";
 import { validateInstructionPlan } from "../instructions.js";
+import {
+  EXTERNAL_DATA_DEPTH_MESSAGE,
+  EXTERNAL_DATA_WORK_MESSAGE,
+  findExternalDataFailure,
+  type ExternalDataFailureKind,
+} from "../external-data-limits.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
   createXorShift32State,
@@ -157,6 +163,14 @@ export function createFreshRuntimeSnapshot(
     throw new TypeError(planValidation.errors[0]?.message ?? "Malformed instruction plan.");
   }
   const bindings: RuntimeBindingSnapshot[] = [];
+  const globals = options.globals ?? {};
+  const globalsFailure = findExternalDataFailure(globals, "$.globals");
+  if (globalsFailure !== null) {
+    throw new TypeError(runtimeInputDataFailureMessage(
+      globalsFailure.kind,
+      globalsFailure.path,
+    ));
+  }
   const maxCallDepth = options.maxCallDepth ?? DEFAULT_MAX_CALL_DEPTH;
   if (
     !Number.isInteger(maxCallDepth) ||
@@ -167,7 +181,7 @@ export function createFreshRuntimeSnapshot(
       `maxCallDepth must be an integer from 1 through ${MAX_SUPPORTED_CALL_DEPTH}.`,
     );
   }
-  for (const [name, value] of Object.entries(options.globals ?? {})) {
+  for (const [name, value] of Object.entries(globals)) {
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
     const failure = validateSerializableValue(value, `globals.${name}`);
     if (failure !== null) throw new TypeError(failure);
@@ -199,6 +213,10 @@ export function createFreshRuntimeSnapshot(
   };
 }
 
+/**
+ * Clone already-validated runtime state. External entry points validate the shared
+ * depth/work bounds before reaching this recursive value-copying path.
+ */
 export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
   return {
     format: RUNTIME_SNAPSHOT_FORMAT,
@@ -275,9 +293,23 @@ export function validateRuntimeSnapshot(
   plan?: InstructionPlan,
 ): SnapshotValidationResult {
   const errors: string[] = [];
-  const jsonFailure = findJsonSafetyFailure(value, new Set<object>());
-  if (jsonFailure !== null) {
-    return Object.freeze({ valid: false, errors: Object.freeze([jsonFailure]) });
+  const dataFailure = findExternalDataFailure(value);
+  if (dataFailure !== null) {
+    return Object.freeze({
+      valid: false,
+      errors: Object.freeze([snapshotExternalDataFailureMessage(dataFailure.kind)]),
+    });
+  }
+  if (plan !== undefined) {
+    const planDataFailure = findExternalDataFailure(plan);
+    if (planDataFailure !== null) {
+      return Object.freeze({
+        valid: false,
+        errors: Object.freeze([
+          snapshotExternalDataFailureMessage(planDataFailure.kind),
+        ]),
+      });
+    }
   }
   if (!isPlainRecord(value)) {
     return Object.freeze({ valid: false, errors: Object.freeze(["Runtime snapshot must be an object."]) });
@@ -1834,31 +1866,40 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-function findJsonSafetyFailure(value: unknown, active: Set<object>): string | null {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean"
-  ) {
-    return null;
+function runtimeInputDataFailureMessage(
+  kind: ExternalDataFailureKind,
+  path: string,
+): string {
+  switch (kind) {
+    case "depth":
+      return EXTERNAL_DATA_DEPTH_MESSAGE;
+    case "work":
+      return EXTERNAL_DATA_WORK_MESSAGE;
+    case "nonFiniteNumber":
+      return `${path} must be a finite number.`;
+    case "nonJsonSafeValue":
+    case "nonPlainObject":
+      return `${path} is not a JSON-safe runtime value.`;
+    case "cycle":
+      return `${path} contains a cyclic runtime value.`;
   }
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? null : "Runtime snapshot contains a non-finite number.";
+}
+
+function snapshotExternalDataFailureMessage(
+  kind: ExternalDataFailureKind,
+): string {
+  switch (kind) {
+    case "depth":
+      return EXTERNAL_DATA_DEPTH_MESSAGE;
+    case "work":
+      return EXTERNAL_DATA_WORK_MESSAGE;
+    case "nonFiniteNumber":
+      return "Runtime snapshot contains a non-finite number.";
+    case "nonJsonSafeValue":
+      return "Runtime snapshot contains a non-JSON-safe value.";
+    case "cycle":
+      return "Runtime snapshot contains a cycle.";
+    case "nonPlainObject":
+      return "Runtime snapshot contains a non-plain object.";
   }
-  if (typeof value !== "object") return "Runtime snapshot contains a non-JSON-safe value.";
-  if (active.has(value)) return "Runtime snapshot contains a cycle.";
-  const prototype = Object.getPrototypeOf(value);
-  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
-    return "Runtime snapshot contains a non-plain object.";
-  }
-  active.add(value);
-  try {
-    for (const nested of Object.values(value)) {
-      const failure = findJsonSafetyFailure(nested, active);
-      if (failure !== null) return failure;
-    }
-  } finally {
-    active.delete(value);
-  }
-  return null;
 }
