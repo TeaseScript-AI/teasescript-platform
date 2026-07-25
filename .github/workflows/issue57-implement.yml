@@ -1,0 +1,962 @@
+name: Issue 57 implementation
+
+on:
+  push:
+    branches:
+      - fix/issue-57-bounded-function-range-validation
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issue-57-bounded-function-range-validation
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Apply bounded range validation repair
+        shell: bash
+        run: |
+          cat > /tmp/patch_issue57.py <<'PY'
+          from pathlib import Path
+
+          path = Path("src/instructions.ts")
+          source = path.read_text()
+
+          def replace_between(start_marker: str, end_marker: str, replacement: str) -> None:
+              global source
+              start = source.index(start_marker)
+              end = source.index(end_marker, start)
+              source = source[:start] + replacement + "\n\n" + source[end:]
+
+          replace_between(
+              "export function validateInstructionPlan(value: unknown): PlanValidationResult {",
+              "function validatePreparedReferenceStructure(",
+              '''export function validateInstructionPlan(value: unknown): PlanValidationResult {
+            const errors: PlanValidationError[] = [];
+            const dataFailure = findExternalDataFailure(value);
+            if (dataFailure !== null) {
+              return invalidPlan(
+                "TSC002",
+                planExternalDataFailureMessage(dataFailure.kind),
+                dataFailure.path,
+              );
+            }
+            if (!isRecord(value)) {
+              return invalidPlan("TSC002", "Instruction plan must be an object.", "$.");
+            }
+            if (value.format !== INSTRUCTION_PLAN_FORMAT) {
+              errors.push(planError("TSC001", "Unsupported instruction-plan format.", "$.format"));
+            }
+            if (value.version !== INSTRUCTION_PLAN_VERSION) {
+              errors.push(planError("TSC001", "Unsupported instruction-plan version.", "$.version"));
+            }
+            validateSpan(value.sourceSpan, "$.sourceSpan", errors);
+            const temporaryCount = nonNegativeInteger(value.temporaryCount)
+              ? value.temporaryCount
+              : -1;
+            if (temporaryCount < 0) {
+              errors.push(planError("TSC002", "temporaryCount must be a non-negative integer.", "$.temporaryCount"));
+            }
+            if (!Array.isArray(value.instructions)) {
+              errors.push(planError("TSC002", "Instructions must be an array.", "$.instructions"));
+            } else {
+              const rootEndInstruction = validInstructionBoundary(
+                value.rootEndInstruction,
+                value.instructions.length,
+              )
+                ? value.rootEndInstruction
+                : null;
+              if (rootEndInstruction === null) {
+                errors.push(planError("TSC002", "Root execution boundary is invalid.", "$.rootEndInstruction"));
+              }
+              const functionIds = collectFunctionIds(value.functions);
+              for (let index = 0; index < value.instructions.length; index += 1) {
+                validateInstruction(
+                  value.instructions[index],
+                  `$.instructions[${index}]`,
+                  value.instructions.length,
+                  index,
+                  temporaryCount,
+                  functionIds,
+                  errors,
+                );
+              }
+              validateLoopStructure(value.instructions, errors);
+              validatePreparedReferenceStructure(value.instructions, errors);
+              const validatedFunctions = validateFunctionDefinitions(
+                value.functions,
+                value.instructions,
+                rootEndInstruction,
+                errors,
+              );
+              validateInstructionControlFlowRegions(
+                value.instructions,
+                rootEndInstruction,
+                validatedFunctions,
+                errors,
+              );
+            }
+            return Object.freeze({
+              valid: errors.length === 0,
+              errors: Object.freeze(errors),
+            });
+          }''',
+          )
+
+          replace_between(
+              "type InstructionExecutionRegion =",
+              "function validateInstructionRegionTarget(",
+              '''type InstructionExecutionRegion =
+            | {
+                readonly kind: "root";
+                readonly startInstruction: 0;
+                readonly endInstruction: number;
+              }
+            | {
+                readonly kind: "function";
+                readonly functionId: number;
+                readonly startInstruction: number;
+                readonly endInstruction: number;
+              };
+
+          interface ValidatedFunctionRange {
+            readonly definition: Record<string, unknown>;
+            readonly path: string;
+            readonly id: number;
+            readonly entryInstruction: number;
+            readonly bodyEntryInstruction: number;
+            readonly implicitReturnInstruction: number;
+            readonly endInstruction: number;
+          }
+
+          function validateInstructionControlFlowRegions(
+            instructions: readonly unknown[],
+            rootEndInstruction: number | null,
+            functions: readonly ValidatedFunctionRange[],
+            errors: PlanValidationError[],
+          ): void {
+            if (rootEndInstruction === null) return;
+
+            const regions: Array<InstructionExecutionRegion | undefined> = new Array(
+              instructions.length,
+            );
+            const rootRegion: InstructionExecutionRegion = {
+              kind: "root",
+              startInstruction: 0,
+              endInstruction: rootEndInstruction,
+            };
+            for (
+              let index = 0;
+              index < rootEndInstruction && index < instructions.length;
+              index += 1
+            ) {
+              regions[index] = rootRegion;
+            }
+
+            for (const definition of functions) {
+              const functionRegion: InstructionExecutionRegion = {
+                kind: "function",
+                functionId: definition.id,
+                startInstruction: definition.entryInstruction,
+                endInstruction: definition.endInstruction,
+              };
+              for (
+                let index = definition.entryInstruction;
+                index < definition.endInstruction && index < instructions.length;
+                index += 1
+              ) {
+                regions[index] = functionRegion;
+              }
+            }
+
+            instructions.forEach((instruction, instructionIndex) => {
+              if (!isRecord(instruction)) return;
+              const region = regions[instructionIndex];
+              if (region === undefined) return;
+              const instructionPath = `$.instructions[${instructionIndex}]`;
+              switch (instruction.kind) {
+                case "jump":
+                case "jumpIfFalse":
+                case "loopControl":
+                case "prepareParameterDefault":
+                  validateInstructionRegionTarget(
+                    instruction.target,
+                    `${instructionPath}.target`,
+                    instructions.length,
+                    region,
+                    errors,
+                  );
+                  return;
+                case "loopStart":
+                  validateInstructionRegionTarget(
+                    instruction.continueTarget,
+                    `${instructionPath}.continueTarget`,
+                    instructions.length,
+                    region,
+                    errors,
+                  );
+                  validateInstructionRegionTarget(
+                    instruction.target,
+                    `${instructionPath}.target`,
+                    instructions.length,
+                    region,
+                    errors,
+                  );
+                  return;
+                case "callFunction":
+                  validateInstructionRegionTarget(
+                    instruction.returnInstruction,
+                    `${instructionPath}.returnInstruction`,
+                    instructions.length,
+                    region,
+                    errors,
+                  );
+                  return;
+              }
+            });
+          }''',
+          )
+
+          source = source.replace(
+              '''  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > instructionCount) {
+              return;
+            }
+            const target = value as number;''',
+              '''  if (!validInstructionBoundary(value, instructionCount)) return;
+            const target = value;''',
+              1,
+          )
+
+          replace_between(
+              "function validateFunctionDefinitions(",
+              "function validateFunctionPrologue(",
+              '''function validateFunctionDefinitions(
+            value: unknown,
+            instructions: readonly unknown[],
+            rootEndInstruction: number | null,
+            errors: PlanValidationError[],
+          ): readonly ValidatedFunctionRange[] {
+            if (!Array.isArray(value)) {
+              errors.push(planError("TSC002", "Function definitions must be an array.", "$.functions"));
+              return [];
+            }
+            const ids = new Set<number>();
+            const names = new Set<string>();
+            const definitions = new Map<number, Record<string, unknown>>();
+            const validatedRanges: ValidatedFunctionRange[] = [];
+            let expectedEntry = rootEndInstruction;
+            value.forEach((definition, definitionIndex) => {
+              const path = `$.functions[${definitionIndex}]`;
+              if (!isRecord(definition)) {
+                errors.push(planError("TSC002", "Function definition must be an object.", path));
+                return;
+              }
+              requirePositiveInteger(definition.id, `${path}.id`, errors);
+              requireString(definition.name, `${path}.name`, errors);
+              validateSpan(definition.declarationSpan, `${path}.declarationSpan`, errors);
+              validateSpan(definition.bodySpan, `${path}.bodySpan`, errors);
+              if (typeof definition.id === "number") {
+                if (ids.has(definition.id)) {
+                  errors.push(planError("TSC002", "Function IDs must be unique.", `${path}.id`));
+                }
+                if (definition.id !== definitionIndex + 1) {
+                  errors.push(planError("TSC002", "Function IDs must follow deterministic source order.", `${path}.id`));
+                }
+                ids.add(definition.id);
+              }
+              if (typeof definition.name === "string") {
+                if (names.has(definition.name)) {
+                  errors.push(planError("TSC002", "Function names must be unique.", `${path}.name`));
+                }
+                names.add(definition.name);
+              }
+              validateFunctionParameters(definition.parameters, `${path}.parameters`, errors);
+              const points = [
+                definition.entryInstruction,
+                definition.bodyEntryInstruction,
+                definition.implicitReturnInstruction,
+                definition.endInstruction,
+              ];
+              if (points.some((point) => !nonNegativeSafeInteger(point))) {
+                errors.push(planError(
+                  "TSC002",
+                  "Function instruction boundaries must be non-negative integers.",
+                  path,
+                ));
+                return;
+              }
+              const [entry, bodyEntry, implicitReturn, end] = points as [
+                number,
+                number,
+                number,
+                number,
+              ];
+              if (
+                expectedEntry === null ||
+                entry !== expectedEntry ||
+                entry >= bodyEntry ||
+                bodyEntry > implicitReturn ||
+                implicitReturn !== end - 1 ||
+                end > instructions.length
+              ) {
+                errors.push(planError(
+                  "TSC002",
+                  "Function instruction range is overlapping or impossible.",
+                  path,
+                ));
+                return;
+              }
+              if (!Number.isInteger(definition.id) || definition.id < 1) return;
+
+              const validatedRange: ValidatedFunctionRange = {
+                definition,
+                path,
+                id: definition.id,
+                entryInstruction: entry,
+                bodyEntryInstruction: bodyEntry,
+                implicitReturnInstruction: implicitReturn,
+                endInstruction: end,
+              };
+              validatedRanges.push(validatedRange);
+              definitions.set(definition.id, definition);
+
+              const bodyEntryMarker = instructions[bodyEntry - 1];
+              if (!isRecord(bodyEntryMarker) || bodyEntryMarker.kind !== "enterFunctionBody") {
+                errors.push(planError(
+                  "TSC002",
+                  "Function body entry point is invalid.",
+                  `${path}.bodyEntryInstruction`,
+                ));
+              }
+              const implicitReturnInstruction = instructions[implicitReturn];
+              if (!isRecord(implicitReturnInstruction) || implicitReturnInstruction.kind !== "returnVoid") {
+                errors.push(planError(
+                  "TSC002",
+                  "Function implicit-return boundary is invalid.",
+                  `${path}.implicitReturnInstruction`,
+                ));
+              }
+              validateFunctionPrologue(validatedRange, instructions, errors);
+              expectedEntry = end;
+            });
+            if (expectedEntry !== null && expectedEntry !== instructions.length) {
+              errors.push(planError(
+                "TSC002",
+                "Function ranges do not cover the non-root instruction region.",
+                "$.functions",
+              ));
+            }
+
+            instructions.forEach((instruction, index) => {
+              if (!isRecord(instruction)) return;
+              const owner = validatedRanges.find(
+                (definition) =>
+                  index >= definition.entryInstruction &&
+                  index < definition.endInstruction,
+              );
+              const functionOnly = [
+                "bindSuppliedParameter",
+                "beginFunctionDefaults",
+                "prepareParameterDefault",
+                "bindDefaultParameter",
+                "enterFunctionBody",
+                "returnValue",
+                "returnVoid",
+              ].includes(String(instruction.kind));
+              if (functionOnly && owner === undefined) {
+                errors.push(planError(
+                  "TSC002",
+                  "Function-only instruction appears in root execution.",
+                  `$.instructions[${index}]`,
+                ));
+              }
+              if (
+                owner !== undefined &&
+                instruction.kind !== "callFunction" &&
+                "functionId" in instruction &&
+                instruction.functionId !== owner.id
+              ) {
+                errors.push(planError(
+                  "TSC002",
+                  "Function prologue instruction has the wrong function ID.",
+                  `$.instructions[${index}].functionId`,
+                ));
+              }
+              if (instruction.kind === "callFunction" && typeof instruction.functionId === "number") {
+                const target = definitions.get(instruction.functionId);
+                if (
+                  target !== undefined &&
+                  Array.isArray(target.parameters) &&
+                  Array.isArray(instruction.arguments)
+                ) {
+                  const parameterNames = new Set(
+                    target.parameters
+                      .filter(isRecord)
+                      .map((parameter) => parameter.name)
+                      .filter((name): name is string => typeof name === "string"),
+                  );
+                  const supplied = new Set<string>();
+                  instruction.arguments.forEach((argument, argumentIndex) => {
+                    if (!isRecord(argument) || typeof argument.parameterName !== "string") return;
+                    if (!parameterNames.has(argument.parameterName)) {
+                      errors.push(planError(
+                        "TSC002",
+                        "Call refers to an unknown function parameter.",
+                        `$.instructions[${index}].arguments[${argumentIndex}].parameterName`,
+                      ));
+                    }
+                    if (supplied.has(argument.parameterName)) {
+                      errors.push(planError(
+                        "TSC002",
+                        "Call supplies a function parameter more than once.",
+                        `$.instructions[${index}].arguments[${argumentIndex}].parameterName`,
+                      ));
+                    }
+                    supplied.add(argument.parameterName);
+                  });
+                  target.parameters.forEach((parameter, parameterIndex) => {
+                    if (
+                      isRecord(parameter) &&
+                      parameter.hasDefault === false &&
+                      typeof parameter.name === "string" &&
+                      !supplied.has(parameter.name)
+                    ) {
+                      errors.push(planError(
+                        "TSC002",
+                        "Call omits a required function parameter.",
+                        `$.instructions[${index}].arguments[${parameterIndex}]`,
+                      ));
+                    }
+                  });
+                }
+              }
+            });
+            return validatedRanges;
+          }''',
+          )
+
+          replace_between(
+              "function validateFunctionPrologue(",
+              "function validateFunctionParameters(",
+              '''function validateFunctionPrologue(
+            range: ValidatedFunctionRange,
+            instructions: readonly unknown[],
+            errors: PlanValidationError[],
+          ): void {
+            const { definition, path } = range;
+            if (!Array.isArray(definition.parameters)) return;
+
+            let cursor = range.entryInstruction;
+            for (let index = 0; index < definition.parameters.length; index += 1) {
+              const instruction = instructions[cursor];
+              if (
+                !isRecord(instruction) ||
+                instruction.kind !== "bindSuppliedParameter" ||
+                instruction.functionId !== range.id ||
+                instruction.parameterIndex !== index
+              ) {
+                errors.push(planError(
+                  "TSC002",
+                  "Function supplied-parameter prologue is malformed.",
+                  `${path}.entryInstruction`,
+                ));
+                return;
+              }
+              cursor += 1;
+            }
+            const beginDefaults = instructions[cursor];
+            if (
+              !isRecord(beginDefaults) ||
+              beginDefaults.kind !== "beginFunctionDefaults" ||
+              beginDefaults.functionId !== range.id
+            ) {
+              errors.push(planError(
+                "TSC002",
+                "Function default-parameter prologue is missing.",
+                `${path}.entryInstruction`,
+              ));
+              return;
+            }
+            cursor += 1;
+            for (let index = 0; index < definition.parameters.length; index += 1) {
+              const parameter = definition.parameters[index];
+              const prepare = instructions[cursor];
+              if (
+                !isRecord(parameter) ||
+                !isRecord(prepare) ||
+                prepare.kind !== "prepareParameterDefault" ||
+                prepare.functionId !== range.id ||
+                prepare.parameterIndex !== index ||
+                !validInstructionBoundary(prepare.target, instructions.length) ||
+                prepare.target <= cursor ||
+                prepare.target >= range.bodyEntryInstruction
+              ) {
+                errors.push(planError(
+                  "TSC002",
+                  "Function parameter-default sequence is malformed.",
+                  `${path}.parameters[${index}]`,
+                ));
+                return;
+              }
+              const regionStart = cursor + 1;
+              const regionEnd = prepare.target;
+              const defaultBindings: Record<string, unknown>[] = [];
+              for (
+                let instructionIndex = regionStart;
+                instructionIndex < regionEnd && instructionIndex < instructions.length;
+                instructionIndex += 1
+              ) {
+                const nested = instructions[instructionIndex];
+                if (!isRecord(nested)) continue;
+                if (nested.kind === "bindDefaultParameter") {
+                  if (
+                    nested.functionId !== range.id ||
+                    nested.parameterIndex !== index
+                  ) {
+                    errors.push(planError(
+                      "TSC002",
+                      "Default binding does not match its parameter segment.",
+                      `$.instructions[${instructionIndex}]`,
+                    ));
+                  }
+                  defaultBindings.push(nested);
+                  continue;
+                }
+                if (
+                  ![
+                    "storeTemporary",
+                    "prepareReference",
+                    "clearTemporary",
+                    "callFunction",
+                    "validateCallReceiver",
+                    "jumpIfFalse",
+                    "jump",
+                  ].includes(String(nested.kind))
+                ) {
+                  errors.push(planError(
+                    "TSC002",
+                    "Function default-expression region contains an invalid instruction.",
+                    `$.instructions[${instructionIndex}]`,
+                  ));
+                }
+                if (
+                  (nested.kind === "jump" || nested.kind === "jumpIfFalse") &&
+                  (!validInstructionBoundary(nested.target, instructions.length) ||
+                    nested.target <= instructionIndex ||
+                    nested.target > regionEnd)
+                ) {
+                  errors.push(planError(
+                    "TSC002",
+                    "Default-expression jump escapes its parameter segment.",
+                    `$.instructions[${instructionIndex}].target`,
+                  ));
+                }
+              }
+              if (
+                (parameter.hasDefault === true && defaultBindings.length !== 1) ||
+                (parameter.hasDefault === false && regionEnd !== regionStart)
+              ) {
+                errors.push(planError(
+                  "TSC002",
+                  "Function parameter default does not match its metadata.",
+                  `${path}.parameters[${index}]`,
+                ));
+              }
+              if (parameter.hasDefault === true && defaultBindings.length === 1) {
+                const bindingIndex = instructions.indexOf(defaultBindings[0]);
+                for (
+                  let instructionIndex = regionStart;
+                  instructionIndex < regionEnd && instructionIndex < instructions.length;
+                  instructionIndex += 1
+                ) {
+                  const nested = instructions[instructionIndex];
+                  if (!isRecord(nested)) continue;
+                  if (instructionIndex > bindingIndex && nested.kind !== "clearTemporary") {
+                    errors.push(planError(
+                      "TSC002",
+                      "Only temporary cleanup may follow a default binding.",
+                      `$.instructions[${instructionIndex}]`,
+                    ));
+                  }
+                  if (
+                    (nested.kind === "jump" || nested.kind === "jumpIfFalse") &&
+                    validInstructionBoundary(nested.target, instructions.length) &&
+                    nested.target > bindingIndex
+                  ) {
+                    errors.push(planError(
+                      "TSC002",
+                      "Default-expression control flow may not bypass its binding.",
+                      `$.instructions[${instructionIndex}].target`,
+                    ));
+                  }
+                }
+              }
+              cursor = prepare.target;
+            }
+            const bodyMarker = instructions[cursor];
+            if (
+              !isRecord(bodyMarker) ||
+              bodyMarker.kind !== "enterFunctionBody" ||
+              bodyMarker.functionId !== range.id ||
+              cursor + 1 !== range.bodyEntryInstruction
+            ) {
+              errors.push(planError(
+                "TSC002",
+                "Function body-entry prologue marker is malformed.",
+                `${path}.bodyEntryInstruction`,
+              ));
+            }
+            const prologueOnly = new Set([
+              "bindSuppliedParameter",
+              "beginFunctionDefaults",
+              "prepareParameterDefault",
+              "bindDefaultParameter",
+              "enterFunctionBody",
+            ]);
+            for (
+              let instructionIndex = range.bodyEntryInstruction;
+              instructionIndex < range.endInstruction &&
+              instructionIndex < instructions.length;
+              instructionIndex += 1
+            ) {
+              const instruction = instructions[instructionIndex];
+              if (isRecord(instruction) && prologueOnly.has(String(instruction.kind))) {
+                errors.push(planError(
+                  "TSC002",
+                  "Function prologue instruction appears inside the function body.",
+                  `$.instructions[${instructionIndex}]`,
+                ));
+              }
+            }
+          }''',
+          )
+
+          source = source.replace(
+              '''  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > instructionCount) {
+              errors.push(planError("TSC002", "Jump target is outside the instruction plan.", path));
+            }''',
+              '''  if (!validInstructionBoundary(value, instructionCount)) {
+              errors.push(planError("TSC002", "Jump target is outside the instruction plan.", path));
+            }''',
+              1,
+          )
+
+          source = source.replace(
+              '''function nonNegativeInteger(value: unknown): value is number {
+            return Number.isInteger(value) && (value as number) >= 0;
+          }
+          ''',
+              '''function validInstructionBoundary(
+            value: unknown,
+            instructionCount: number,
+          ): value is number {
+            return (
+              Number.isSafeInteger(value) &&
+              (value as number) >= 0 &&
+              (value as number) <= instructionCount
+            );
+          }
+
+          function nonNegativeSafeInteger(value: unknown): value is number {
+            return Number.isSafeInteger(value) && (value as number) >= 0;
+          }
+
+          function nonNegativeInteger(value: unknown): value is number {
+            return Number.isInteger(value) && (value as number) >= 0;
+          }
+          ''',
+              1,
+          )
+
+          path.write_text(source)
+          PY
+          python /tmp/patch_issue57.py
+          cat > tests/instruction-plan-range-validation.test.ts <<'TS'
+          import assert from "node:assert/strict";
+          import test from "node:test";
+
+          import {
+            CheckpointError,
+            RuntimeDataError,
+            compileSource,
+            createCheckpoint,
+            createFreshRuntimeSnapshot,
+            deserializeCheckpoint,
+            executeInstruction,
+            restoreCheckpoint,
+            run,
+            stepToEvent,
+            validateInstructionPlan,
+            type InstructionPlan,
+            type RuntimeCheckpoint,
+            type RuntimeSnapshot,
+          } from "../src/index.js";
+
+          const RANGE_ERROR = "Function instruction range is overlapping or impossible.";
+          const ROOT_ERROR = "Root execution boundary is invalid.";
+
+          test("rejects function boundaries outside the instruction array without dependent traversal", () => {
+            const original = functionPlan();
+            const mutations = [
+              ["endInstruction", original.instructions.length + 1],
+              ["endInstruction", Number.MAX_SAFE_INTEGER],
+              ["entryInstruction", Number.MAX_SAFE_INTEGER],
+              ["bodyEntryInstruction", Number.MAX_SAFE_INTEGER],
+              ["implicitReturnInstruction", Number.MAX_SAFE_INTEGER],
+            ] as const;
+
+            for (const [field, value] of mutations) {
+              const malformed = mutablePlan(original);
+              malformed.functions[0]![field] = value;
+              const result = validateInstructionPlan(malformed as unknown as InstructionPlan);
+              assert.equal(result.valid, false, field);
+              assert.ok(
+                result.errors.some(
+                  (error) =>
+                    error.code === "TSC002" &&
+                    error.path === "$.functions[0]" &&
+                    error.message === RANGE_ERROR,
+                ),
+                field,
+              );
+              assert.equal(
+                result.errors.some((error) => error.message.includes("prologue")),
+                false,
+                `${field} must not reach prologue validation`,
+              );
+            }
+          });
+
+          test("rejects an extreme root boundary without building a metadata-sized region", () => {
+            const malformed = mutablePlan(functionPlan());
+            malformed.rootEndInstruction = Number.MAX_SAFE_INTEGER;
+
+            const result = validateInstructionPlan(malformed as unknown as InstructionPlan);
+
+            assert.equal(result.valid, false);
+            assert.deepEqual(result.errors[0], {
+              code: "TSC002",
+              message: ROOT_ERROR,
+              path: "$.rootEndInstruction",
+            });
+          });
+
+          test("rejects unsafe and negative function boundaries before range-dependent validation", () => {
+            for (const value of [Number.MAX_SAFE_INTEGER + 1, -1, 1.5]) {
+              const malformed = mutablePlan(functionPlan());
+              malformed.functions[0]!.endInstruction = value;
+              const result = validateInstructionPlan(malformed as unknown as InstructionPlan);
+              assert.ok(result.errors.some((error) =>
+                error.path === "$.functions[0]" &&
+                error.message === "Function instruction boundaries must be non-negative integers."
+              ));
+              assert.equal(result.errors.some((error) => error.message.includes("prologue")), false);
+            }
+          });
+
+          test("rejects impossible ordering, gaps, overlaps, and pre-root entries", () => {
+            const cases: Array<(plan: MutablePlan) => void> = [
+              (plan) => {
+                plan.functions[0]!.entryInstruction = plan.functions[0]!.bodyEntryInstruction;
+              },
+              (plan) => {
+                plan.functions[0]!.bodyEntryInstruction =
+                  plan.functions[0]!.implicitReturnInstruction + 1;
+              },
+              (plan) => {
+                plan.functions[0]!.endInstruction =
+                  plan.functions[0]!.implicitReturnInstruction + 2;
+              },
+              (plan) => {
+                plan.functions[0]!.entryInstruction = plan.rootEndInstruction - 1;
+              },
+              (plan) => {
+                plan.functions[1]!.entryInstruction += 1;
+              },
+              (plan) => {
+                plan.functions[1]!.entryInstruction = plan.functions[0]!.entryInstruction;
+              },
+            ];
+
+            for (const mutate of cases) {
+              const malformed = mutablePlan(twoFunctionPlan());
+              mutate(malformed);
+              const result = validateInstructionPlan(malformed as unknown as InstructionPlan);
+              assert.equal(result.valid, false);
+              assert.ok(result.errors.some((error) => error.message === RANGE_ERROR));
+            }
+          });
+
+          test("continues independent validation after an unsafe function range", () => {
+            const malformed = mutablePlan(twoFunctionPlan());
+            malformed.functions[0]!.endInstruction = Number.MAX_SAFE_INTEGER;
+            malformed.functions[1]!.id = malformed.functions[0]!.id;
+
+            const result = validateInstructionPlan(malformed as unknown as InstructionPlan);
+
+            assert.equal(result.valid, false);
+            assert.ok(result.errors.some((error) =>
+              error.path === "$.functions[0]" && error.message === RANGE_ERROR
+            ));
+            assert.ok(result.errors.some((error) =>
+              error.path === "$.functions[1].id" && error.message === "Function IDs must be unique."
+            ));
+          });
+
+          test("all public execution and checkpoint routes reject an extreme function range before side effects", () => {
+            const original = functionPlan('say random()\nexit');
+            const malformed = mutablePlan(original);
+            malformed.functions[0]!.endInstruction = Number.MAX_SAFE_INTEGER;
+            const invalid = malformed as unknown as InstructionPlan;
+            const snapshot = createFreshRuntimeSnapshot(original);
+            const before = structuredClone(snapshot);
+            let randomCalls = 0;
+            const capabilities = {
+              random: {
+                next(): number {
+                  randomCalls += 1;
+                  return 0.5;
+                },
+              },
+            };
+
+            assert.throws(
+              () => createFreshRuntimeSnapshot(invalid),
+              (error: unknown) => error instanceof TypeError && error.message === RANGE_ERROR,
+            );
+            for (const operation of [executeInstruction, stepToEvent, run]) {
+              assert.throws(
+                () => operation(invalid, snapshot, capabilities),
+                (error: unknown) =>
+                  error instanceof RuntimeDataError &&
+                  error.code === "TSR100" &&
+                  error.message === RANGE_ERROR,
+              );
+              assert.deepEqual(snapshot, before);
+            }
+            assert.equal(randomCalls, 0);
+
+            assert.throws(
+              () => createCheckpoint(invalid, snapshot),
+              (error: unknown) =>
+                error instanceof CheckpointError &&
+                error.info.code === "TSK002" &&
+                error.info.message === RANGE_ERROR,
+            );
+
+            const checkpoint = JSON.parse(
+              JSON.stringify(createCheckpoint(original, snapshot)),
+            ) as MutableCheckpoint;
+            checkpoint.plan = malformed;
+            for (const restore of [
+              () => restoreCheckpoint(checkpoint),
+              () => deserializeCheckpoint(JSON.stringify(checkpoint)),
+            ]) {
+              assert.throws(
+                restore,
+                (error: unknown) =>
+                  error instanceof CheckpointError &&
+                  error.info.code === "TSK002" &&
+                  error.info.message === RANGE_ERROR,
+              );
+            }
+          });
+
+          test("preserves compiler-generated plans across representative root and function layouts", () => {
+            const sources = [
+              "",
+              "exit",
+              "function empty { }\nexit",
+              "function required(value) { return value }\nrequired(1)\nexit",
+              "function defaults(value = 1) { return value }\ndefaults()\nexit",
+              "function implicit { say 1 }\nimplicit()\nexit",
+              "function recursive(value) { if value > 0 { return recursive(value - 1) } return 0 }\nrecursive(2)\nexit",
+              "function first { return second() }\nfunction second { return 2 }\nfirst()\nexit",
+            ];
+
+            for (const source of sources) {
+              const result = compileSource(source);
+              assert.deepEqual(result.diagnostics, [], source);
+              assert.notEqual(result.plan, null, source);
+              assert.equal(validateInstructionPlan(result.plan).valid, true, source);
+            }
+          });
+
+          type MutableFunction = {
+            id: number;
+            entryInstruction: number;
+            bodyEntryInstruction: number;
+            implicitReturnInstruction: number;
+            endInstruction: number;
+          };
+
+          type MutablePlan = Omit<InstructionPlan, "functions"> & {
+            rootEndInstruction: number;
+            functions: MutableFunction[];
+          };
+
+          type MutableCheckpoint = Omit<RuntimeCheckpoint, "plan" | "snapshot"> & {
+            plan: MutablePlan;
+            snapshot: RuntimeSnapshot;
+          };
+
+          function functionPlan(root = "exit"): InstructionPlan {
+            return compiledPlan(`function sample(value = 1) { return value }\n${root}`);
+          }
+
+          function twoFunctionPlan(): InstructionPlan {
+            return compiledPlan([
+              "function first(value = 1) { return value }",
+              "function second { return 2 }",
+              "first()",
+              "exit",
+            ].join("\n"));
+          }
+
+          function compiledPlan(source: string): InstructionPlan {
+            const result = compileSource(source);
+            assert.deepEqual(result.diagnostics, []);
+            assert.notEqual(result.plan, null);
+            return result.plan!;
+          }
+
+          function mutablePlan(plan: InstructionPlan): MutablePlan {
+            return JSON.parse(JSON.stringify(plan)) as MutablePlan;
+          }
+          TS
+      - name: Install dependencies
+        run: npm ci
+      - name: Check source and complete suite
+        run: npm run check
+      - name: Build separately
+        run: npm run build
+      - name: Run focused compiled tests
+        run: |
+          node --test \
+            dist/tests/instruction-plan-range-validation.test.js \
+            dist/tests/instruction-plan-validation.test.js \
+            dist/tests/functions-instruction-plan.test.js \
+            dist/tests/runtime-checkpoint.test.js \
+            dist/tests/runtime-engine-hardening.test.js \
+            dist/tests/external-runtime-data-limits.test.js \
+            dist/tests/runtime-snapshot-invariants.test.js \
+            dist/tests/runtime-equivalence.test.js
+      - name: Verify diff
+        run: git diff --check
+      - name: Commit repair and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "Codex Agent"
+          git config user.email "codex-agent@users.noreply.github.com"
+          git add src/instructions.ts tests/instruction-plan-range-validation.test.ts
+          git commit -m "Bound instruction-plan range validation"
+          git rm .github/workflows/issue57-implement.yml
+          git commit -m "Remove temporary issue 57 workflow"
+          git push origin HEAD:fix/issue-57-bounded-function-range-validation
