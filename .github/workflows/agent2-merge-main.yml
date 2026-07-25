@@ -1,0 +1,29 @@
+name: Merge updated main for Agent 2
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  merge:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Merge updated main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-ff origin/main -m "Merge updated main for lexer boundary verification"
+          rm .github/workflows/agent2-merge-main.yml
+          git add -u .github/workflows/agent2-merge-main.yml
+          git commit -m "Remove temporary main merge workflow"
+          git push origin HEAD:refs/heads/${{ github.head_ref }}
