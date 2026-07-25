@@ -65,7 +65,7 @@ The low-level runtime entry points are:
 - `stepToEvent(...)` until the next event, halt, or failure;
 - `run(...)` until halt, failure, or instruction-budget exhaustion.
 
-Before an instruction is executed, the runtime validates the instruction plan and runtime snapshot. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
+Each low-level runtime entry validates the instruction plan and runtime snapshot before executing or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
 
 ## Host values and capabilities
 
@@ -102,6 +102,8 @@ Current POC defaults and validation limits are:
 - default playground seed: `0x6d2b79f5`.
 
 A configured instruction budget must be a positive integer. Exhaustion fails deterministically with structured runtime error `TSR037` instead of hanging. Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
+
+A halted snapshot is accepted only at the root completion boundary, including an empty root, or immediately after an `exit` instruction. Halted snapshots must also retain no active call frames, loop frames, temporaries, nested scopes, contextual speaker, or failure state. These checks establish that the serialized state is a possible current runtime state; they do not authenticate its execution history.
 
 ## Deterministic RNG invariant
 

@@ -1435,6 +1435,9 @@ function validateStatusConsistency(
     if (calls !== 0 || loops !== 0 || temporaries !== 0 || scopes !== 1 || value.failure !== null) {
       errors.push("Halted runtime state retains active execution state.");
     }
+    if (plan !== undefined && !isLegalHaltPosition(value.nextInstruction, plan)) {
+      errors.push("Halted runtime state is not at a legal halt position.");
+    }
   } else if (value.status === "running") {
     if (value.failure !== null) errors.push("Running runtime state contains failure information.");
     if (
@@ -1445,6 +1448,15 @@ function validateStatusConsistency(
       errors.push("Root execution position is outside the root instruction range.");
     }
   }
+}
+
+function isLegalHaltPosition(
+  nextInstruction: unknown,
+  plan: InstructionPlan,
+): boolean {
+  if (!nonNegativeInteger(nextInstruction)) return false;
+  if (nextInstruction === plan.rootEndInstruction) return true;
+  return nextInstruction > 0 && plan.instructions[nextInstruction - 1]?.kind === "exit";
 }
 
 function validateCurrentTemporaryRequirements(
