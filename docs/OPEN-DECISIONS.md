@@ -20,6 +20,7 @@ The exact version-3 schemas are current POC implementation details, not a promis
 - Exact unit/date/time/datetime/duration implementation.
 - Standard Library string methods and detailed API signatures.
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
+- Static treatment of contextual `speaker` access when control-flow analysis can prove that no explicit or default speaker is available: compile-time error, warning, or retained runtime failure. Ordinary narrator output such as `say "Hello"` is a separate valid case and does not require a default speaker.
 - Remaining accepted V30 constructs and APIs outside the current parser/runtime subset.
 
 ## Player and interactions
