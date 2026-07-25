@@ -3,7 +3,8 @@ import {
   EXTERNAL_DATA_WORK_MESSAGE,
   MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
   MAX_EXTERNAL_RUNTIME_DATA_WORK,
-  findExternalDataFailure,
+  captureExternalData,
+  type ExternalDataFailure,
 } from "../external-data-limits.js";
 import type { RuntimeValue } from "./values.js";
 import {
@@ -87,25 +88,40 @@ export function createSerializableObject(
 export function createSerializableSet(
   items: readonly SerializableRuntimeValue[],
 ): SerializableRuntimeSet {
-  if (items.length + 1 > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
-    throw new SerializableValueError("invalid", EXTERNAL_DATA_WORK_MESSAGE);
+  const capture = captureExternalData(items, "$.items");
+  if (!capture.ok) throw serializableCaptureError(capture.failure);
+  if (!Array.isArray(capture.value)) {
+    throw new SerializableValueError("invalid", "Serializable set items must be an array.");
   }
-  const set: SerializableRuntimeSet = { kind: "set", items: [] };
-  for (const item of items) addSerializableSetValue(set, item);
-  return set;
+
+  const seen = new Set<SerializableRuntimeScalar>();
+  const capturedItems: SerializableRuntimeScalar[] = [];
+  for (let index = 0; index < capture.value.length; index += 1) {
+    const item = capture.value[index];
+    if (!isScalar(item)) {
+      throw new SerializableValueError(
+        "setElement",
+        "Sets may contain only string, boolean, integer, number, or null values.",
+      );
+    }
+    if (seen.has(item)) continue;
+    seen.add(item);
+    capturedItems.push(item);
+  }
+  return { kind: "set", items: capturedItems };
 }
 
 export function cloneSerializableValue(
   value: SerializableRuntimeValue,
 ): SerializableRuntimeValue {
-  const failure = validateSerializableValue(value);
-  if (failure !== null) {
+  const captured = captureAndValidateSerializableValue(value);
+  if (captured.failure !== null) {
     throw new SerializableValueError(
-      failure.includes("cyclic runtime value") ? "cyclic" : "invalid",
-      failure,
+      captured.failure.includes("cyclic runtime value") ? "cyclic" : "invalid",
+      captured.failure,
     );
   }
-  return cloneSerializableValueValidated(value);
+  return cloneSerializableValueValidated(captured.value!);
 }
 
 function cloneSerializableValueValidated(
@@ -160,9 +176,12 @@ export function setSerializableProperty(
 export function addSerializableSetValue(
   set: SerializableRuntimeSet,
   value: SerializableRuntimeValue,
+  membership?: Set<SerializableRuntimeScalar>,
 ): boolean {
   assertSerializableScalar(value);
-  if (set.items.some((item) => item === value)) return false;
+  const seen = membership ?? new Set(set.items);
+  if (seen.has(value)) return false;
+  seen.add(value);
   set.items.push(value);
   return true;
 }
@@ -183,7 +202,7 @@ export function serializableSetContains(
   value: SerializableRuntimeValue,
 ): boolean {
   assertSerializableScalar(value);
-  return set.items.some((item) => item === value);
+  return new Set(set.items).has(value);
 }
 
 export function serializableEquals(
@@ -203,20 +222,24 @@ export function serializableEquals(
 }
 
 export function fromHostRuntimeValue(value: RuntimeValue): SerializableRuntimeValue {
-  const failure = findHostRuntimeValueFailure(value);
-  if (failure !== null) throw failure;
-  return fromHostValueInternal(value, new Set<object>());
+  return captureHostRuntimeValue(
+    value,
+    0,
+    new Set<object>(),
+    { visited: 0 },
+    "$",
+  );
 }
 
 export function toHostRuntimeValue(value: SerializableRuntimeValue): RuntimeValue {
-  const failure = validateSerializableValue(value);
-  if (failure !== null) {
+  const captured = captureAndValidateSerializableValue(value);
+  if (captured.failure !== null) {
     throw new SerializableValueError(
-      failure.includes("cyclic runtime value") ? "cyclic" : "invalid",
-      failure,
+      captured.failure.includes("cyclic runtime value") ? "cyclic" : "invalid",
+      captured.failure,
     );
   }
-  return toHostRuntimeValueValidated(value);
+  return toHostRuntimeValueValidated(captured.value!);
 }
 
 function toHostRuntimeValueValidated(
@@ -247,192 +270,320 @@ function toHostRuntimeValueValidated(
   }
 }
 
-type HostRuntimeWorkItem =
-  | {
-      readonly kind: "visit";
-      readonly value: unknown;
-      readonly depth: number;
-    }
-  | {
-      readonly kind: "array";
-      readonly value: object;
-      readonly items: readonly unknown[];
-      readonly index: number;
-      readonly depth: number;
-    }
-  | {
-      readonly kind: "map";
-      readonly value: object;
-      readonly entries: Iterator<[string, RuntimeValue]>;
-      readonly depth: number;
-    }
-  | {
-      readonly kind: "leave";
-      readonly value: object;
-    };
+interface HostCaptureBudget {
+  visited: number;
+}
 
-function findHostRuntimeValueFailure(
-  value: RuntimeValue,
-): SerializableValueError | null {
-  const active = new Set<object>();
-  const work: HostRuntimeWorkItem[] = [
-    { kind: "visit", value, depth: 0 },
-  ];
-  let visited = 0;
+function captureHostRuntimeValue(
+  value: unknown,
+  depth: number,
+  active: Set<object>,
+  budget: HostCaptureBudget,
+  path: string,
+): SerializableRuntimeValue {
+  budget.visited += 1;
+  if (budget.visited > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
+    throw new SerializableValueError("invalid", EXTERNAL_DATA_WORK_MESSAGE);
+  }
+  if (depth > MAX_EXTERNAL_RUNTIME_DATA_DEPTH) {
+    throw new SerializableValueError("invalid", EXTERNAL_DATA_DEPTH_MESSAGE);
+  }
 
-  while (work.length > 0) {
-    const item = work.pop()!;
-    if (item.kind === "leave") {
-      active.delete(item.value);
-      continue;
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new SerializableValueError("invalid", "Runtime numbers must be finite.");
     }
-    if (item.kind === "array") {
-      if (item.index >= item.items.length) continue;
-      work.push({ ...item, index: item.index + 1 });
-      work.push({
-        kind: "visit",
-        value: item.items[item.index],
-        depth: item.depth + 1,
-      });
-      continue;
-    }
-    if (item.kind === "map") {
-      const next = item.entries.next();
-      if (next.done) continue;
-      work.push(item);
-      const [name, nested] = next.value;
-      if (typeof name !== "string") {
-        return new SerializableValueError(
-          "invalid",
-          "Host runtime object properties must have string names.",
-        );
-      }
-      work.push({ kind: "visit", value: nested, depth: item.depth + 1 });
-      continue;
-    }
+    return value;
+  }
+  if (typeof value !== "object") {
+    throw new SerializableValueError("invalid", "Runtime value is malformed.");
+  }
+  if (active.has(value)) {
+    throw new SerializableValueError(
+      "cyclic",
+      "Cyclic script values are not supported.",
+    );
+  }
 
-    visited += 1;
-    if (visited > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
-      return new SerializableValueError("invalid", EXTERNAL_DATA_WORK_MESSAGE);
-    }
-    if (item.depth > MAX_EXTERNAL_RUNTIME_DATA_DEPTH) {
-      return new SerializableValueError("invalid", EXTERNAL_DATA_DEPTH_MESSAGE);
-    }
-    const current = item.value;
-    if (
-      current === null ||
-      typeof current === "string" ||
-      typeof current === "boolean"
-    ) {
-      continue;
-    }
-    if (typeof current === "number") {
-      if (!Number.isFinite(current)) {
-        return new SerializableValueError(
-          "invalid",
-          "Runtime numbers must be finite.",
-        );
-      }
-      continue;
-    }
-    if (typeof current !== "object") {
-      return new SerializableValueError("invalid", "Runtime value is malformed.");
-    }
-    if (active.has(current)) {
-      return new SerializableValueError(
-        "cyclic",
-        "Cyclic script values are not supported.",
+  const properties = captureHostDataProperties(value, path);
+  const kind = properties.get("kind");
+  active.add(value);
+  try {
+    if (kind === "speaker") {
+      throw new SerializableValueError(
+        "invalid",
+        "Host speaker values are not supported at the runtime boundary.",
       );
     }
-    const candidate = current as {
-      readonly kind?: unknown;
-      readonly properties?: unknown;
-      readonly items?: unknown;
-    };
-    if (candidate.kind === "speaker") {
-      continue;
+    if (kind === "list") {
+      assertOnlyHostProperties(properties, ["kind", "items"]);
+      const items = captureHostArrayItems(properties.get("items"), `${path}.items`);
+      return {
+        kind: "list",
+        items: items.map((item, index) =>
+          captureHostRuntimeValue(
+            item,
+            depth + 1,
+            active,
+            budget,
+            `${path}.items[${index}]`,
+          ),
+        ),
+      };
     }
-    if (candidate.kind === "list") {
-      if (!Array.isArray(candidate.items)) {
-        return new SerializableValueError("invalid", "Runtime list is malformed.");
+    if (kind === "set") {
+      assertOnlyHostProperties(properties, ["kind", "items"]);
+      const items = captureHostArrayItems(properties.get("items"), `${path}.items`);
+      if (budget.visited + items.length > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
+        throw new SerializableValueError("invalid", EXTERNAL_DATA_WORK_MESSAGE);
       }
-      active.add(current);
-      work.push({ kind: "leave", value: current });
-      work.push({
-        kind: "array",
-        value: current,
-        items: candidate.items,
-        index: 0,
-        depth: item.depth,
-      });
-      continue;
-    }
-    if (candidate.kind === "set") {
-      if (!Array.isArray(candidate.items)) {
-        return new SerializableValueError("invalid", "Runtime set is malformed.");
-      }
-      if (visited + candidate.items.length > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
-        return new SerializableValueError("invalid", EXTERNAL_DATA_WORK_MESSAGE);
-      }
-      for (const nested of candidate.items) {
-        if (nested !== null && typeof nested === "object") {
-          return new SerializableValueError(
+      const seen = new Set<SerializableRuntimeScalar>();
+      const capturedItems: SerializableRuntimeScalar[] = [];
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index];
+        if (item !== null && typeof item === "object") {
+          throw new SerializableValueError(
             "setElement",
             "Sets may contain only string, boolean, integer, number, or null values.",
           );
         }
+        const captured = captureHostRuntimeValue(
+          item,
+          depth + 1,
+          active,
+          budget,
+          `${path}.items[${index}]`,
+        );
+        if (!isScalar(captured)) {
+          throw new SerializableValueError(
+            "setElement",
+            "Sets may contain only string, boolean, integer, number, or null values.",
+          );
+        }
+        if (seen.has(captured)) continue;
+        seen.add(captured);
+        capturedItems.push(captured);
       }
-      active.add(current);
-      work.push({ kind: "leave", value: current });
-      work.push({
-        kind: "array",
-        value: current,
-        items: candidate.items,
-        index: 0,
-        depth: item.depth,
-      });
-      continue;
+      return { kind: "set", items: capturedItems };
     }
-    if (candidate.kind === "object") {
-      if (!(candidate.properties instanceof Map)) {
-        return new SerializableValueError("invalid", "Runtime object is malformed.");
+    if (kind === "object") {
+      assertOnlyHostProperties(properties, ["kind", "properties"]);
+      const source = properties.get("properties");
+      let iterator: IterableIterator<[unknown, unknown]>;
+      try {
+        iterator = Map.prototype.entries.call(source) as IterableIterator<[
+          unknown,
+          unknown,
+        ]>;
+      } catch {
+        throw new SerializableValueError("invalid", "Runtime object is malformed.");
       }
-      active.add(current);
-      work.push({ kind: "leave", value: current });
-      work.push({
-        kind: "map",
-        value: current,
-        entries: candidate.properties.entries(),
-        depth: item.depth,
-      });
-      continue;
+      const capturedProperties: SerializableRuntimeProperty[] = [];
+      while (true) {
+        let next: IteratorResult<[unknown, unknown]>;
+        try {
+          next = iterator.next();
+        } catch {
+          throw new SerializableValueError("invalid", "Runtime object is malformed.");
+        }
+        if (next.done) break;
+        const [name, nested] = next.value;
+        if (typeof name !== "string") {
+          throw new SerializableValueError(
+            "invalid",
+            "Host runtime object properties must have string names.",
+          );
+        }
+        capturedProperties.push({
+          name,
+          value: captureHostRuntimeValue(
+            nested,
+            depth + 1,
+            active,
+            budget,
+            `${path}.properties[${capturedProperties.length}].value`,
+          ),
+        });
+      }
+      return { kind: "object", properties: capturedProperties };
     }
-    return new SerializableValueError("invalid", "Runtime value is malformed.");
+    throw new SerializableValueError("invalid", "Runtime value is malformed.");
+  } finally {
+    active.delete(value);
   }
-  return null;
+}
+
+function captureHostDataProperties(
+  value: object,
+  path: string,
+): Map<string, unknown> {
+  let prototype: object | null;
+  let keys: readonly (string | symbol)[];
+  try {
+    prototype = Reflect.getPrototypeOf(value);
+    keys = Reflect.ownKeys(value);
+  } catch {
+    throw new SerializableValueError(
+      "invalid",
+      `${path} is not stable host runtime data.`,
+    );
+  }
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new SerializableValueError("invalid", "Runtime value is malformed.");
+  }
+
+  const properties = new Map<string, unknown>();
+  for (const key of keys) {
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+    } catch {
+      throw new SerializableValueError(
+        "invalid",
+        `${path} is not stable host runtime data.`,
+      );
+    }
+    if (descriptor === undefined) {
+      throw new SerializableValueError(
+        "invalid",
+        `${path} is not stable host runtime data.`,
+      );
+    }
+    if (!descriptor.enumerable) continue;
+    if (typeof key === "symbol" || !("value" in descriptor)) {
+      throw new SerializableValueError(
+        "invalid",
+        `${path} is not stable host runtime data.`,
+      );
+    }
+    properties.set(key, descriptor.value);
+  }
+  return properties;
+}
+
+function captureHostArrayItems(value: unknown, path: string): unknown[] {
+  let array: boolean;
+  let keys: readonly (string | symbol)[];
+  try {
+    array = Array.isArray(value);
+    if (!array) throw new Error("not array");
+    keys = Reflect.ownKeys(value as object);
+  } catch {
+    throw new SerializableValueError("invalid", `${path} must be an array.`);
+  }
+
+  let length: number | null = null;
+  const descriptors = new Map<string, PropertyDescriptor>();
+  for (const key of keys) {
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Reflect.getOwnPropertyDescriptor(value as object, key);
+    } catch {
+      throw new SerializableValueError(
+        "invalid",
+        `${path} is not stable host runtime data.`,
+      );
+    }
+    if (descriptor === undefined) {
+      throw new SerializableValueError(
+        "invalid",
+        `${path} is not stable host runtime data.`,
+      );
+    }
+    if (key === "length") {
+      if (
+        !("value" in descriptor) ||
+        typeof descriptor.value !== "number" ||
+        !Number.isSafeInteger(descriptor.value) ||
+        descriptor.value < 0
+      ) {
+        throw new SerializableValueError("invalid", `${path} must be an array.`);
+      }
+      length = descriptor.value;
+      continue;
+    }
+    if (!descriptor.enumerable) continue;
+    if (
+      typeof key === "symbol" ||
+      !/^(0|[1-9]\d*)$/.test(key) ||
+      !("value" in descriptor)
+    ) {
+      throw new SerializableValueError(
+        "invalid",
+        `${path} is not stable host runtime data.`,
+      );
+    }
+    descriptors.set(key, descriptor);
+  }
+  if (length === null || length > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
+    throw new SerializableValueError(
+      "invalid",
+      length === null ? `${path} must be an array.` : EXTERNAL_DATA_WORK_MESSAGE,
+    );
+  }
+
+  const items = new Array<unknown>(length);
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors.get(String(index));
+    if (descriptor === undefined || !("value" in descriptor)) {
+      throw new SerializableValueError("invalid", `${path} is malformed.`);
+    }
+    items[index] = descriptor.value;
+  }
+  return items;
+}
+
+function assertOnlyHostProperties(
+  properties: ReadonlyMap<string, unknown>,
+  allowed: readonly string[],
+): void {
+  const accepted = new Set(allowed);
+  for (const name of properties.keys()) {
+    if (!accepted.has(name)) {
+      throw new SerializableValueError("invalid", "Runtime value is malformed.");
+    }
+  }
 }
 
 export function validateSerializableValue(
   value: unknown,
   path = "$",
 ): string | null {
-  const dataFailure = findExternalDataFailure(value, path);
-  if (dataFailure !== null) {
-    switch (dataFailure.kind) {
-      case "depth":
-        return EXTERNAL_DATA_DEPTH_MESSAGE;
-      case "work":
-        return EXTERNAL_DATA_WORK_MESSAGE;
-      case "nonFiniteNumber":
-        return `${dataFailure.path} must be a finite number.`;
-      case "cycle":
-        return `${dataFailure.path} contains a cyclic runtime value.`;
-      case "nonJsonSafeValue":
-      case "nonPlainObject":
-        return `${dataFailure.path} is not a JSON-safe runtime value.`;
-    }
+  return captureAndValidateSerializableValue(value, path).failure;
+}
+
+interface CapturedSerializableValueResult {
+  readonly value: SerializableRuntimeValue | null;
+  readonly failure: string | null;
+}
+
+function captureAndValidateSerializableValue(
+  value: unknown,
+  path = "$",
+): CapturedSerializableValueResult {
+  const capture = captureExternalData(value, path);
+  if (!capture.ok) {
+    return Object.freeze({
+      value: null,
+      failure: serializableExternalDataFailureMessage(capture.failure),
+    });
   }
-  return validateSerializableValueInternal(value, path, new Set<object>());
+  const failure = validateSerializableValueInternal(
+    capture.value,
+    path,
+    new Set<object>(),
+  );
+  return Object.freeze({
+    value: failure === null ? capture.value as SerializableRuntimeValue : null,
+    failure,
+  });
 }
 
 function validateSerializableValueInternal(
@@ -479,14 +630,12 @@ function validateSerializableValueInternal(
     }
     if (value.kind === "set") {
       if (!Array.isArray(value.items)) return `${path}.items must be an array.`;
-      const seen: SerializableRuntimeScalar[] = [];
+      const seen = new Set<SerializableRuntimeScalar>();
       for (let index = 0; index < value.items.length; index += 1) {
         const item = value.items[index];
         if (!isScalar(item)) return `${path}.items[${index}] is not a scalar.`;
-        if (seen.some((seenItem) => seenItem === item)) {
-          return `${path}.items contains a duplicate scalar.`;
-        }
-        seen.push(item);
+        if (seen.has(item)) return `${path}.items contains a duplicate scalar.`;
+        seen.add(item);
       }
       return null;
     }
@@ -520,50 +669,6 @@ function validateSerializableValueInternal(
   }
 }
 
-function fromHostValueInternal(
-  value: RuntimeValue,
-  active: Set<object>,
-): SerializableRuntimeValue {
-  if (value === null || typeof value !== "object") {
-    if (typeof value === "number" && !Number.isFinite(value)) {
-      throw new SerializableValueError("invalid", "Runtime numbers must be finite.");
-    }
-    return value;
-  }
-  if (active.has(value)) {
-    throw new SerializableValueError("cyclic", "Cyclic script values are not supported.");
-  }
-  active.add(value);
-  try {
-    switch (value.kind) {
-      case "speaker":
-        throw new SerializableValueError(
-          "invalid",
-          "Host speaker values are not supported at the runtime boundary.",
-        );
-      case "list":
-        return {
-          kind: "list",
-          items: value.items.map((item) => fromHostValueInternal(item, active)),
-        };
-      case "set":
-        return createSerializableSet(
-          value.items.map((item) => fromHostValueInternal(item, active)),
-        );
-      case "object":
-        return {
-          kind: "object",
-          properties: [...value.properties].map(([name, item]) => ({
-            name,
-            value: fromHostValueInternal(item, active),
-          })),
-        };
-    }
-  } finally {
-    active.delete(value);
-  }
-}
-
 function assertSerializableScalar(
   value: SerializableRuntimeValue,
 ): asserts value is SerializableRuntimeScalar {
@@ -589,6 +694,34 @@ function validateValueArray(
     if (failure !== null) return failure;
   }
   return null;
+}
+
+function serializableCaptureError(
+  failure: ExternalDataFailure,
+): SerializableValueError {
+  const message = serializableExternalDataFailureMessage(failure);
+  return new SerializableValueError(
+    failure.kind === "cycle" ? "cyclic" : "invalid",
+    message,
+  );
+}
+
+function serializableExternalDataFailureMessage(
+  failure: ExternalDataFailure,
+): string {
+  switch (failure.kind) {
+    case "depth":
+      return EXTERNAL_DATA_DEPTH_MESSAGE;
+    case "work":
+      return EXTERNAL_DATA_WORK_MESSAGE;
+    case "nonFiniteNumber":
+      return `${failure.path} must be a finite number.`;
+    case "cycle":
+      return `${failure.path} contains a cyclic runtime value.`;
+    case "nonJsonSafeValue":
+    case "nonPlainObject":
+      return `${failure.path} is not a JSON-safe runtime value.`;
+  }
 }
 
 function isScalar(value: unknown): value is SerializableRuntimeScalar {

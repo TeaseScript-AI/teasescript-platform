@@ -3,11 +3,11 @@ import type {
   Instruction,
   InstructionPlan,
 } from "../instructions.js";
-import { validateInstructionPlan } from "../instructions.js";
+import { captureInstructionPlan } from "../instructions.js";
 import {
   EXTERNAL_DATA_DEPTH_MESSAGE,
   EXTERNAL_DATA_WORK_MESSAGE,
-  findExternalDataFailure,
+  captureExternalData,
   type ExternalDataFailureKind,
 } from "../external-data-limits.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
@@ -158,21 +158,34 @@ export function createFreshRuntimeSnapshot(
   plan: InstructionPlan,
   options: FreshRuntimeOptions = {},
 ): RuntimeSnapshot {
-  const planValidation = validateInstructionPlan(plan);
-  if (!planValidation.valid) {
-    throw new TypeError(planValidation.errors[0]?.message ?? "Malformed instruction plan.");
+  const capturedPlan = captureInstructionPlan(plan);
+  if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
+    throw new TypeError(
+      capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
+    );
   }
-  const bindings: RuntimeBindingSnapshot[] = [];
-  const globals = options.globals ?? {};
-  const globalsFailure = findExternalDataFailure(globals, "$.globals");
-  if (globalsFailure !== null) {
+  const optionsCapture = captureExternalData(options);
+  if (!optionsCapture.ok) {
     throw new TypeError(runtimeInputDataFailureMessage(
-      globalsFailure.kind,
-      globalsFailure.path,
+      optionsCapture.failure.kind,
+      optionsCapture.failure.path,
     ));
   }
-  const maxCallDepth = options.maxCallDepth ?? DEFAULT_MAX_CALL_DEPTH;
+  if (!isPlainRecord(optionsCapture.value)) {
+    throw new TypeError("Fresh runtime options must be an object.");
+  }
+  const capturedOptions = optionsCapture.value;
+  const globals = capturedOptions.globals ?? {};
+  if (!isPlainRecord(globals)) {
+    throw new TypeError("Fresh runtime globals must be an object.");
+  }
+  const bindings: RuntimeBindingSnapshot[] = [];
+  const maxCallDepthValue = capturedOptions.maxCallDepth;
+  const maxCallDepth = maxCallDepthValue === undefined
+    ? DEFAULT_MAX_CALL_DEPTH
+    : maxCallDepthValue;
   if (
+    typeof maxCallDepth !== "number" ||
     !Number.isInteger(maxCallDepth) ||
     maxCallDepth < 1 ||
     maxCallDepth > MAX_SUPPORTED_CALL_DEPTH
@@ -188,7 +201,10 @@ export function createFreshRuntimeSnapshot(
     if (bindings.some((binding) => binding.name === name)) {
       throw new TypeError(`Duplicate global '${name}'.`);
     }
-    bindings.push({ name, value: cloneSerializableValue(value) });
+    bindings.push({
+      name,
+      value: cloneSerializableValue(value as SerializableRuntimeValue),
+    });
   }
   return {
     format: RUNTIME_SNAPSHOT_FORMAT,
@@ -198,7 +214,13 @@ export function createFreshRuntimeSnapshot(
     speakers: [],
     defaultSpeaker: null,
     contextualSpeaker: null,
-    rng: createXorShift32State(options.seed ?? DEFAULT_PLAYGROUND_SEED),
+    rng: createXorShift32State(
+      typeof capturedOptions.seed === "number"
+        ? capturedOptions.seed
+        : capturedOptions.seed === undefined
+          ? DEFAULT_PLAYGROUND_SEED
+          : Number.NaN,
+    ),
     warnedSpeakerIds: [],
     loopFrames: [],
     temporaries: [],
@@ -208,16 +230,25 @@ export function createFreshRuntimeSnapshot(
     nextSpeakerId: 1,
     nextCallFrameId: 1,
     maxCallDepth,
-    status: plan.rootEndInstruction === 0 ? "halted" : "ready",
+    status: capturedPlan.plan.rootEndInstruction === 0 ? "halted" : "ready",
     failure: null,
   };
 }
 
-/**
- * Clone already-validated runtime state. External entry points validate the shared
- * depth/work bounds before reaching this recursive value-copying path.
- */
 export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  const captured = captureRuntimeSnapshot(snapshot);
+  if (!captured.validation.valid || captured.snapshot === null) {
+    throw new TypeError(
+      captured.validation.errors[0] ?? "Malformed runtime snapshot.",
+    );
+  }
+  return cloneCapturedRuntimeSnapshot(captured.snapshot);
+}
+
+/**
+ * Clone already-captured and validated runtime state.
+ */
+export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
   return {
     format: RUNTIME_SNAPSHOT_FORMAT,
     version: RUNTIME_SNAPSHOT_VERSION,
@@ -288,29 +319,69 @@ export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot
   };
 }
 
+export interface CapturedRuntimeSnapshotResult {
+  readonly validation: SnapshotValidationResult;
+  readonly snapshot: RuntimeSnapshot | null;
+}
+
+export function captureRuntimeSnapshot(
+  value: unknown,
+  plan?: InstructionPlan,
+): CapturedRuntimeSnapshotResult {
+  const snapshotCapture = captureExternalData(value);
+  if (!snapshotCapture.ok) {
+    return Object.freeze({
+      validation: Object.freeze({
+        valid: false,
+        errors: Object.freeze([
+          snapshotExternalDataFailureMessage(snapshotCapture.failure.kind),
+        ]),
+      }),
+      snapshot: null,
+    });
+  }
+
+  let capturedPlan: InstructionPlan | undefined;
+  if (plan !== undefined) {
+    const planCapture = captureExternalData(plan);
+    if (!planCapture.ok) {
+      return Object.freeze({
+        validation: Object.freeze({
+          valid: false,
+          errors: Object.freeze([
+            snapshotExternalDataFailureMessage(planCapture.failure.kind),
+          ]),
+        }),
+        snapshot: null,
+      });
+    }
+    capturedPlan = planCapture.value as InstructionPlan;
+  }
+
+  const validation = validateCapturedRuntimeSnapshot(
+    snapshotCapture.value,
+    capturedPlan,
+  );
+  return Object.freeze({
+    validation,
+    snapshot: validation.valid
+      ? snapshotCapture.value as RuntimeSnapshot
+      : null,
+  });
+}
+
 export function validateRuntimeSnapshot(
   value: unknown,
   plan?: InstructionPlan,
 ): SnapshotValidationResult {
+  return captureRuntimeSnapshot(value, plan).validation;
+}
+
+export function validateCapturedRuntimeSnapshot(
+  value: unknown,
+  plan?: InstructionPlan,
+): SnapshotValidationResult {
   const errors: string[] = [];
-  const dataFailure = findExternalDataFailure(value);
-  if (dataFailure !== null) {
-    return Object.freeze({
-      valid: false,
-      errors: Object.freeze([snapshotExternalDataFailureMessage(dataFailure.kind)]),
-    });
-  }
-  if (plan !== undefined) {
-    const planDataFailure = findExternalDataFailure(plan);
-    if (planDataFailure !== null) {
-      return Object.freeze({
-        valid: false,
-        errors: Object.freeze([
-          snapshotExternalDataFailureMessage(planDataFailure.kind),
-        ]),
-      });
-    }
-  }
   if (!isPlainRecord(value)) {
     return Object.freeze({ valid: false, errors: Object.freeze(["Runtime snapshot must be an object."]) });
   }

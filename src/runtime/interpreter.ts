@@ -75,17 +75,35 @@ export class Interpreter {
     if (options === null || typeof options !== "object") {
       throw new TypeError("Interpreter options are required.");
     }
-    if (typeof options.random?.next !== "function") {
+    const entries = new Map(captureOwnDataEntries(options, "Interpreter options"));
+    const random = entries.get("random");
+    if (
+      random === null ||
+      typeof random !== "object" ||
+      typeof (random as RandomSource).next !== "function"
+    ) {
       throw new TypeError("A deterministic random source is required.");
     }
-    this.#options = options;
+    const globals = entries.get("globals");
+    const builtins = entries.get("builtins");
+    this.#options = Object.freeze({
+      random: random as RandomSource,
+      ...(globals === undefined
+        ? {}
+        : { globals: globals as Readonly<Record<string, RuntimeValue>> }),
+      ...(builtins === undefined
+        ? {}
+        : { builtins: builtins as Readonly<Record<string, BuiltinFunction>> }),
+    });
   }
 
   public execute(program: Program): ExecutionResult {
+    const globals = captureCompatibilityGlobals(this.#options.globals ?? {});
+    const builtins = captureCompatibilityBuiltins(this.#options.builtins ?? {});
     const astDiagnostics = findNonFiniteNumericLiteralDiagnostics(program);
     const semantic = validateSemantics(program, {
-      globals: Object.keys(this.#options.globals ?? {}),
-      builtins: Object.keys(this.#options.builtins ?? {}),
+      globals: Object.keys(globals),
+      builtins: Object.keys(builtins),
     });
     const diagnostics = Object.freeze([...astDiagnostics, ...semantic.diagnostics]);
     if (
@@ -97,18 +115,6 @@ export class Interpreter {
     }
 
     const plan = compileProgram(program);
-    const globals = Object.fromEntries(
-      Object.entries(this.#options.globals ?? {}).map(([name, value]) => [
-        name,
-        fromHostRuntimeValue(value),
-      ]),
-    );
-    const builtins = Object.fromEntries(
-      Object.entries(this.#options.builtins ?? {}).map(([name, builtin]) => [
-        name,
-        adaptBuiltin(builtin),
-      ]),
-    );
     const initial = createFreshRuntimeSnapshot(plan, { globals });
     const execution = run(
       plan,
@@ -143,6 +149,71 @@ export class Interpreter {
       exited: compatibilityEvents.some((event) => event.kind === "exit"),
     });
   }
+}
+
+function captureCompatibilityGlobals(
+  globals: Readonly<Record<string, RuntimeValue>>,
+): Record<string, ReturnType<typeof fromHostRuntimeValue>> {
+  const captured: Record<string, ReturnType<typeof fromHostRuntimeValue>> =
+    Object.create(null) as Record<
+      string,
+      ReturnType<typeof fromHostRuntimeValue>
+    >;
+  for (const [name, value] of captureOwnDataEntries(globals, "Interpreter globals")) {
+    captured[name] = fromHostRuntimeValue(value as RuntimeValue);
+  }
+  return captured;
+}
+
+function captureCompatibilityBuiltins(
+  builtins: Readonly<Record<string, BuiltinFunction>>,
+): Record<string, RuntimeBuiltinFunction> {
+  const captured: Record<string, RuntimeBuiltinFunction> = Object.create(null) as Record<
+    string,
+    RuntimeBuiltinFunction
+  >;
+  for (const [name, value] of captureOwnDataEntries(builtins, "Interpreter builtins")) {
+    if (typeof value !== "function") {
+      throw new TypeError(`Interpreter builtin '${name}' must be a function.`);
+    }
+    captured[name] = adaptBuiltin(value as BuiltinFunction);
+  }
+  return captured;
+}
+
+function captureOwnDataEntries(
+  value: object,
+  label: string,
+): readonly (readonly [string, unknown])[] {
+  let prototype: object | null;
+  let keys: readonly (string | symbol)[];
+  try {
+    prototype = Reflect.getPrototypeOf(value);
+    keys = Reflect.ownKeys(value);
+  } catch {
+    throw new TypeError(`${label} must be stable plain data.`);
+  }
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`${label} must be a plain object.`);
+  }
+  const entries: Array<readonly [string, unknown]> = [];
+  for (const key of keys) {
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+    } catch {
+      throw new TypeError(`${label} must be stable plain data.`);
+    }
+    if (descriptor === undefined) {
+      throw new TypeError(`${label} must be stable plain data.`);
+    }
+    if (!descriptor.enumerable) continue;
+    if (typeof key === "symbol" || !("value" in descriptor)) {
+      throw new TypeError(`${label} must be stable plain data.`);
+    }
+    entries.push(Object.freeze([key, descriptor.value] as const));
+  }
+  return Object.freeze(entries);
 }
 
 function adaptBuiltin(builtin: BuiltinFunction): RuntimeBuiltinFunction {

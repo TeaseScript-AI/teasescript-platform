@@ -71,9 +71,15 @@ export function createRuntimeSpeaker(identifier: string): RuntimeSpeaker {
 }
 
 export function createRuntimeSet(items: readonly RuntimeValue[]): RuntimeSet {
-  const set: RuntimeSet = { kind: "set", items: [] };
-  for (const value of items) addSetValue(set, value);
-  return set;
+  const seen = new Set<RuntimeScalar>();
+  const captured: RuntimeScalar[] = [];
+  for (const value of items) {
+    assertSetElement(value);
+    if (seen.has(value)) continue;
+    seen.add(value);
+    captured.push(value);
+  }
+  return { kind: "set", items: captured };
 }
 
 export function addSetValue(set: RuntimeSet, value: RuntimeValue): boolean {

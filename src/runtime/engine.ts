@@ -5,7 +5,7 @@ import type {
   Instruction,
   InstructionPlan,
 } from "../instructions.js";
-import { validateInstructionPlan } from "../instructions.js";
+import { captureInstructionPlan } from "../instructions.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -34,17 +34,17 @@ import {
   serializableEquals,
   SerializableValueError,
   setSerializableProperty,
-  validateSerializableValue,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
+  type SerializableRuntimeScalar,
   type SerializableRuntimeValue,
   type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import {
-  cloneRuntimeSnapshot,
-  validateRuntimeSnapshot,
+  captureRuntimeSnapshot,
+  cloneCapturedRuntimeSnapshot,
   type RuntimeBindingSnapshot,
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
@@ -98,8 +98,20 @@ export function executeInstruction(
   inputSnapshot: RuntimeSnapshot,
   capabilities: RuntimeCapabilities = {},
 ): RuntimeOperationResult {
-  assertExecutableData(plan, inputSnapshot);
-  const snapshot = cloneRuntimeSnapshot(inputSnapshot);
+  const captured = captureExecutableData(plan, inputSnapshot);
+  return executeCapturedInstruction(
+    captured.plan,
+    captured.snapshot,
+    capabilities,
+  );
+}
+
+function executeCapturedInstruction(
+  plan: InstructionPlan,
+  inputSnapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities,
+): RuntimeOperationResult {
+  const snapshot = cloneCapturedRuntimeSnapshot(inputSnapshot);
   if (snapshot.status === "halted" || snapshot.status === "failed") {
     return result(snapshot, [], 0);
   }
@@ -137,9 +149,9 @@ export function stepToEvent(
   capabilities: RuntimeCapabilities = {},
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
-  assertExecutableData(plan, snapshot);
+  const captured = captureExecutableData(plan, snapshot);
   const budget = instructionBudget(options.instructionBudget);
-  let current = cloneRuntimeSnapshot(snapshot);
+  let current = cloneCapturedRuntimeSnapshot(captured.snapshot);
   const events: InterpreterEvent[] = [];
   let instructionsExecuted = 0;
   while (
@@ -148,12 +160,16 @@ export function stepToEvent(
     events.length === 0
   ) {
     if (instructionsExecuted >= budget) {
-      const budgetResult = failForBudget(plan, current);
+      const budgetResult = failForBudget(captured.plan, current);
       events.push(...budgetResult.events);
       current = budgetResult.snapshot;
       break;
     }
-    const operation = executeInstruction(plan, current, capabilities);
+    const operation = executeCapturedInstruction(
+      captured.plan,
+      current,
+      capabilities,
+    );
     current = operation.snapshot;
     instructionsExecuted += operation.instructionsExecuted;
     events.push(...operation.events);
@@ -167,19 +183,23 @@ export function run(
   capabilities: RuntimeCapabilities = {},
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
-  assertExecutableData(plan, snapshot);
+  const captured = captureExecutableData(plan, snapshot);
   const budget = instructionBudget(options.instructionBudget);
-  let current = cloneRuntimeSnapshot(snapshot);
+  let current = cloneCapturedRuntimeSnapshot(captured.snapshot);
   const events: InterpreterEvent[] = [];
   let instructionsExecuted = 0;
   while (current.status !== "halted" && current.status !== "failed") {
     if (instructionsExecuted >= budget) {
-      const budgetResult = failForBudget(plan, current);
+      const budgetResult = failForBudget(captured.plan, current);
       current = budgetResult.snapshot;
       events.push(...budgetResult.events);
       break;
     }
-    const operation = executeInstruction(plan, current, capabilities);
+    const operation = executeCapturedInstruction(
+      captured.plan,
+      current,
+      capabilities,
+    );
     current = operation.snapshot;
     instructionsExecuted += operation.instructionsExecuted;
     events.push(...operation.events);
@@ -867,9 +887,14 @@ class Evaluator {
         return createSerializableList(expression.elements.map((item) => this.evaluate(item)));
       case "set": {
         const set = createSerializableSet([]);
+        const membership = new Set<SerializableRuntimeScalar>();
         for (const element of expression.elements) {
           try {
-            addSerializableSetValue(set, this.evaluate(element));
+            addSerializableSetValue(
+              set,
+              this.evaluate(element),
+              membership,
+            );
           } catch (error) {
             throw this.#translateValueError(error, element.span);
           }
@@ -1359,11 +1384,18 @@ class Evaluator {
         const message = error instanceof Error ? error.message : String(error);
         throw fault("TSR012", `Built-in '${expression.callee.name}' failed: ${message}`, expression.span);
       }
-      const failure = validateSerializableValue(returned);
-      if (failure !== null) {
-        throw fault("TSR013", `Built-in '${expression.callee.name}' returned an invalid value: ${failure}`, expression.span);
+      try {
+        return cloneSerializableValue(returned);
+      } catch (error) {
+        if (error instanceof SerializableValueError) {
+          throw fault(
+            "TSR013",
+            `Built-in '${expression.callee.name}' returned an invalid value: ${error.message}`,
+            expression.span,
+          );
+        }
+        throw error;
       }
-      return cloneSerializableValue(returned);
     }
     if (expression.callee.kind === "property") {
       return this.#callCollection(
@@ -2212,23 +2244,40 @@ function failSnapshot(
 }
 
 function failForBudget(plan: InstructionPlan, snapshot: RuntimeSnapshot): RuntimeOperationResult {
-  assertExecutableData(plan, snapshot);
-  const copy = cloneRuntimeSnapshot(snapshot);
+  const copy = cloneCapturedRuntimeSnapshot(snapshot);
   const span = plan.instructions[copy.nextInstruction]?.span ?? plan.sourceSpan;
   const events: InterpreterEvent[] = [];
   failSnapshot(copy, { code: "TSR037", message: "Runtime instruction budget exceeded.", span }, events);
   return result(copy, events, 0);
 }
 
-function assertExecutableData(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {
-  const planValidation = validateInstructionPlan(plan);
-  if (!planValidation.valid) {
-    throw new RuntimeDataError("TSR100", planValidation.errors[0]?.message ?? "Malformed instruction plan.");
+interface CapturedExecutableData {
+  readonly plan: InstructionPlan;
+  readonly snapshot: RuntimeSnapshot;
+}
+
+function captureExecutableData(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+): CapturedExecutableData {
+  const capturedPlan = captureInstructionPlan(plan);
+  if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
+    throw new RuntimeDataError(
+      "TSR100",
+      capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
+    );
   }
-  const snapshotValidation = validateRuntimeSnapshot(snapshot, plan);
-  if (!snapshotValidation.valid) {
-    throw new RuntimeDataError("TSR101", snapshotValidation.errors[0] ?? "Malformed runtime snapshot.");
+  const capturedSnapshot = captureRuntimeSnapshot(snapshot, capturedPlan.plan);
+  if (!capturedSnapshot.validation.valid || capturedSnapshot.snapshot === null) {
+    throw new RuntimeDataError(
+      "TSR101",
+      capturedSnapshot.validation.errors[0] ?? "Malformed runtime snapshot.",
+    );
   }
+  return Object.freeze({
+    plan: capturedPlan.plan,
+    snapshot: capturedSnapshot.snapshot,
+  });
 }
 
 function instructionBudget(value: number | undefined): number {

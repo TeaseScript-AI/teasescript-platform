@@ -13,7 +13,7 @@ import {
 import {
   EXTERNAL_DATA_DEPTH_MESSAGE,
   EXTERNAL_DATA_WORK_MESSAGE,
-  findExternalDataFailure,
+  captureExternalData,
   type ExternalDataFailureKind,
 } from "./external-data-limits.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
@@ -475,16 +475,40 @@ export function compileProgram(program: Program): InstructionPlan {
   });
 }
 
-export function validateInstructionPlan(value: unknown): PlanValidationResult {
-  const errors: PlanValidationError[] = [];
-  const dataFailure = findExternalDataFailure(value);
-  if (dataFailure !== null) {
-    return invalidPlan(
-      "TSC002",
-      planExternalDataFailureMessage(dataFailure.kind),
-      dataFailure.path,
-    );
+export interface CapturedInstructionPlanResult {
+  readonly validation: PlanValidationResult;
+  readonly plan: InstructionPlan | null;
+}
+
+export function captureInstructionPlan(
+  value: unknown,
+): CapturedInstructionPlanResult {
+  const capture = captureExternalData(value);
+  if (!capture.ok) {
+    return Object.freeze({
+      validation: invalidPlan(
+        "TSC002",
+        planExternalDataFailureMessage(capture.failure.kind),
+        capture.failure.path,
+      ),
+      plan: null,
+    });
   }
+  const validation = validateCapturedInstructionPlan(capture.value);
+  return Object.freeze({
+    validation,
+    plan: validation.valid ? capture.value as InstructionPlan : null,
+  });
+}
+
+export function validateInstructionPlan(value: unknown): PlanValidationResult {
+  return captureInstructionPlan(value).validation;
+}
+
+export function validateCapturedInstructionPlan(
+  value: unknown,
+): PlanValidationResult {
+  const errors: PlanValidationError[] = [];
   if (!isRecord(value)) {
     return invalidPlan("TSC002", "Instruction plan must be an object.", "$.");
   }
