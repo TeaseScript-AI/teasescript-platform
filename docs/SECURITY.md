@@ -26,6 +26,24 @@ ADR 0016 adds these requirements:
 - Time-integrity anomalies are diagnostics, not automatic proof of cheating, until a later policy defines thresholds and script visibility.
 - Restored Standard UI is reconstructed from validated canonical action payloads rather than replaying untrusted host state.
 
+## Proposed one-shot timer boundary
+
+If accepted, ADR 0017 additionally requires:
+
+- opaque timer handles are runtime-managed tagged references and cannot be forged from script numbers or strings;
+- internal action IDs and author-visible timer handles use distinct validated identity namespaces;
+- timer actions, queued handler invocations, active handler frames, captured scopes, handler definitions, owner flows, deadlines, ordering metadata, and handle counters are all bounded JSON-safe state;
+- one timer handle or source action may not appear in multiple active, queued, or executing lifecycle positions;
+- queued handlers are validated in deterministic deadline/creation/action order and the player may not reorder them;
+- `observeTime(...)` may settle and queue due timers but may not execute handler source code inside the host-facing observation operation;
+- no browser callback, timer callback, promise, generator, closure, DOM object, or suspended JavaScript stack represents a timer handler;
+- a handler waiting for the foreground slot retains an unconsumed instruction and may not preserve partially evaluated arguments;
+- active, queued, and executing timer state is subject to the same bounded stable-capture rules, including sparse-array work limits required by issue #65;
+- cleanup on control transfer, runtime failure, `exit`, and fatal abort cannot leave executable orphan handlers or reusable identities;
+- the later implementation must explicitly document its format-version impact after issue #66 rather than silently extending an implemented schema.
+
+These requirements remain proposed until ADR 0017 receives explicit owner approval.
+
 Camera permission, long-lived stream ownership, device switching, captured-media retention, encryption, persistent collections, and player-visible privacy indicators require a separate accepted camera/media design. Selected direction and open questions are recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
 
 Exact iframe sandbox flags, CSP, message schemas, capability negotiation, signing, moderation workflows, camera/media privacy policy, and time-integrity policy remain to be specified.
