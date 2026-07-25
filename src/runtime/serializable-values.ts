@@ -235,7 +235,7 @@ function validateSerializableValueInternal(
   active.add(value);
   try {
   if (value.kind === "speakerReference") {
-    return Number.isInteger(value.speakerId) &&
+    return Number.isSafeInteger(value.speakerId) &&
       (value.speakerId as number) >= 0 &&
       typeof value.identifier === "string" &&
       value.identifier.length > 0

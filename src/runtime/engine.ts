@@ -199,6 +199,7 @@ function executePlannedInstruction(
       if (findBinding(snapshot, instruction.name) !== undefined) {
         throw fault("TSR001", `Speaker '${instruction.name}' is already visible in this scope.`, instruction.span);
       }
+      assertCounterCanAdvance(snapshot.nextSpeakerId, "nextSpeakerId");
       const speaker: RuntimeSpeakerSnapshot = {
         id: snapshot.nextSpeakerId,
         identifier: instruction.name,
@@ -247,6 +248,7 @@ function executePlannedInstruction(
       return;
     }
     case "enterScope":
+      assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
       snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });
       snapshot.nextScopeId += 1;
       advance(snapshot);
@@ -412,6 +414,8 @@ function enterFunction(
       instruction.span,
     );
   }
+  assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");
+  assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
   const supplied = new Map(
     instruction.arguments.map((argument) => [
       argument.parameterName,
@@ -773,6 +777,7 @@ function pushIterationScope(
   snapshot: RuntimeSnapshot,
   bindings: RuntimeBindingSnapshot[],
 ): void {
+  assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
   snapshot.frames.push({ id: snapshot.nextScopeId, bindings });
   snapshot.nextScopeId += 1;
 }
@@ -2160,7 +2165,17 @@ function advance(snapshot: RuntimeSnapshot): void {
   snapshot.nextInstruction += 1;
 }
 
+function assertCounterCanAdvance(value: number, field: string): void {
+  if (value >= Number.MAX_SAFE_INTEGER) {
+    throw new RuntimeDataError(
+      "TSR101",
+      `Runtime ${field} cannot be advanced safely.`,
+    );
+  }
+}
+
 function takeSequence(snapshot: RuntimeSnapshot): number {
+  assertCounterCanAdvance(snapshot.nextEventSequence, "nextEventSequence");
   const sequence = snapshot.nextEventSequence;
   snapshot.nextEventSequence += 1;
   return sequence;

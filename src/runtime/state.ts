@@ -286,7 +286,7 @@ export function validateRuntimeSnapshot(
   if (value.version !== RUNTIME_SNAPSHOT_VERSION) errors.push("Unsupported runtime-snapshot version.");
   const instructionLimit = plan?.instructions.length;
   if (
-    !nonNegativeInteger(value.nextInstruction) ||
+    !nonNegativeSafeInteger(value.nextInstruction) ||
     (instructionLimit !== undefined && value.nextInstruction > instructionLimit)
   ) {
     errors.push("Runtime nextInstruction is outside the plan.");
@@ -323,7 +323,7 @@ export function validateRuntimeSnapshot(
     speakerIds,
     errors,
   );
-  if (value.defaultSpeaker !== null && !nonNegativeInteger(value.defaultSpeaker)) {
+  if (value.defaultSpeaker !== null && !nonNegativeSafeInteger(value.defaultSpeaker)) {
     errors.push("Runtime defaultSpeaker must be a speaker ID or null.");
   } else if (
     typeof value.defaultSpeaker === "number" &&
@@ -331,7 +331,7 @@ export function validateRuntimeSnapshot(
   ) {
     errors.push("Runtime defaultSpeaker refers to an unknown speaker.");
   }
-  if (value.contextualSpeaker !== null && !nonNegativeInteger(value.contextualSpeaker)) {
+  if (value.contextualSpeaker !== null && !nonNegativeSafeInteger(value.contextualSpeaker)) {
     errors.push("Runtime contextualSpeaker must be a speaker ID or null.");
   } else if (
     typeof value.contextualSpeaker === "number" &&
@@ -349,7 +349,7 @@ export function validateRuntimeSnapshot(
   }
   if (
     !Array.isArray(value.warnedSpeakerIds) ||
-    value.warnedSpeakerIds.some((item) => !nonNegativeInteger(item)) ||
+    value.warnedSpeakerIds.some((item) => !nonNegativeSafeInteger(item)) ||
     new Set(value.warnedSpeakerIds).size !== value.warnedSpeakerIds.length ||
     value.warnedSpeakerIds.some((item) => !speakerIds.has(item))
   ) {
@@ -372,38 +372,38 @@ export function validateRuntimeSnapshot(
     plan,
     errors,
   );
-  if (!nonNegativeInteger(value.nextEventSequence) || value.nextEventSequence < 1) {
-    errors.push("Runtime nextEventSequence must be a positive integer.");
+  if (!nonNegativeSafeInteger(value.nextEventSequence) || value.nextEventSequence < 1) {
+    errors.push("Runtime nextEventSequence must be a positive safe integer.");
   }
   const frameIds = Array.isArray(value.frames)
     ? value.frames
         .filter(isPlainRecord)
         .map((frame) => frame.id)
-        .filter(nonNegativeInteger)
+        .filter(nonNegativeSafeInteger)
     : [];
   if (
-    !nonNegativeInteger(value.nextScopeId) ||
+    !nonNegativeSafeInteger(value.nextScopeId) ||
     value.nextScopeId < 1 ||
     frameIds.some((id) => id >= (value.nextScopeId as number))
   ) {
-    errors.push("Runtime nextScopeId must be a positive unused ID.");
+    errors.push("Runtime nextScopeId must be a positive unused safe integer ID.");
   }
   if (
-    !nonNegativeInteger(value.nextSpeakerId) ||
+    !nonNegativeSafeInteger(value.nextSpeakerId) ||
     value.nextSpeakerId < 1 ||
     [...speakerIds].some((id) => id >= (value.nextSpeakerId as number))
   ) {
-    errors.push("Runtime nextSpeakerId is invalid.");
+    errors.push("Runtime nextSpeakerId must be a positive unused safe integer ID.");
   }
   if (
-    !nonNegativeInteger(value.nextCallFrameId) ||
+    !nonNegativeSafeInteger(value.nextCallFrameId) ||
     value.nextCallFrameId < 1 ||
     [...callFrameIds].some((id) => id >= (value.nextCallFrameId as number))
   ) {
-    errors.push("Runtime nextCallFrameId is invalid.");
+    errors.push("Runtime nextCallFrameId must be a positive unused safe integer ID.");
   }
   if (
-    !nonNegativeInteger(value.maxCallDepth) ||
+    !nonNegativeSafeInteger(value.maxCallDepth) ||
     value.maxCallDepth < 1 ||
     value.maxCallDepth > MAX_SUPPORTED_CALL_DEPTH
   ) {
@@ -461,9 +461,9 @@ function validateLoopFrames(
   for (const frame of value) {
     if (
       !isPlainRecord(frame) ||
-      !nonNegativeInteger(frame.loopId) ||
+      !nonNegativeSafeInteger(frame.loopId) ||
       frame.loopId < 1 ||
-      !nonNegativeInteger(frame.scopeDepth) ||
+      !nonNegativeSafeInteger(frame.scopeDepth) ||
       frame.scopeDepth < 1 ||
       frame.scopeDepth > frameCount
     ) {
@@ -472,7 +472,7 @@ function validateLoopFrames(
     }
     if (
       frame.callFrameId !== null &&
-      (!nonNegativeInteger(frame.callFrameId) || !callFrameIds.has(frame.callFrameId))
+      (!nonNegativeSafeInteger(frame.callFrameId) || !callFrameIds.has(frame.callFrameId))
     ) {
       errors.push("Runtime loop frame has an unknown call-frame owner.");
     }
@@ -501,14 +501,14 @@ function validateLoopFrames(
           ? frame.callFrameId !== null
           : !isPlainRecord(owner) || owner.functionId !== planned.functionId) ||
         (frame.callFrameId === currentOwner &&
-          (!nonNegativeInteger(nextInstruction) ||
+          (!nonNegativeSafeInteger(nextInstruction) ||
             nextInstruction < planned.continueStart ||
             nextInstruction >= planned.target)))
     ) {
       errors.push("Runtime loop frame does not match the instruction plan.");
     }
     if (frame.kind === "repeat") {
-      if (!nonNegativeInteger(frame.remaining)) {
+      if (!nonNegativeSafeInteger(frame.remaining)) {
         errors.push("Runtime repeat-loop state is malformed.");
       }
     } else if (frame.kind === "while") {
@@ -521,7 +521,7 @@ function validateLoopFrames(
         failure !== null ||
         !isPlainRecord(frame.source) ||
         !["list", "set", "range"].includes(String(frame.source.kind)) ||
-        !nonNegativeInteger(frame.position) ||
+        !nonNegativeSafeInteger(frame.position) ||
         frame.position > iterationLength(frame.source)
       ) {
         errors.push("Runtime for-loop iterator state is malformed.");
@@ -538,13 +538,13 @@ function iterationLength(source: Record<string, unknown>): number {
   }
   if (
     source.kind === "range" &&
-    Number.isInteger(source.start) &&
-    Number.isInteger(source.end) &&
+    Number.isSafeInteger(source.start) &&
+    Number.isSafeInteger(source.end) &&
     typeof source.inclusive === "boolean"
   ) {
     const size = (source.end as number) - (source.start as number) +
       (source.inclusive ? 1 : 0);
-    return Math.max(0, size);
+    return Number.isSafeInteger(size) ? Math.max(0, size) : -1;
   }
   return -1;
 }
@@ -563,7 +563,7 @@ function validateTemporaries(
   for (const temporary of value) {
     if (
       !isPlainRecord(temporary) ||
-      !nonNegativeInteger(temporary.id) ||
+      !nonNegativeSafeInteger(temporary.id) ||
       temporary.id < 1 ||
       (plan !== undefined && temporary.id > plan.temporaryCount)
     ) {
@@ -603,7 +603,7 @@ function validatePreparedReferenceTemporaries(
   for (const temporary of value) {
     if (
       !isPlainRecord(temporary) ||
-      !nonNegativeInteger(temporary.id) ||
+      !nonNegativeSafeInteger(temporary.id) ||
       !preparedTemporaryIds.has(temporary.id)
     ) {
       continue;
@@ -658,7 +658,7 @@ function validatePreparedReferenceDescriptor(
   }
   if (
     rootFrameId !== null &&
-    (!nonNegativeInteger(rootFrameId))
+    (!nonNegativeSafeInteger(rootFrameId))
   ) {
     return "the root frame ID must be a non-negative integer or null.";
   }
@@ -752,7 +752,7 @@ function parsePreparedReferencePath(
       properties.has("index")
     ) {
       const index = properties.get("index");
-      if (!nonNegativeInteger(index)) return null;
+      if (!nonNegativeSafeInteger(index)) return null;
       output.push({ kind, index });
       continue;
     }
@@ -822,7 +822,7 @@ function preparedReferencePathResolves(
     if (
       isPlainRecord(current) &&
       current.kind === "speakerReference" &&
-      nonNegativeInteger(current.speakerId)
+      nonNegativeSafeInteger(current.speakerId)
     ) {
       const property = serializedSpeakerProperty(
         speakers,
@@ -885,7 +885,7 @@ function validateCallFrames(
     errors.push("Runtime callFrames must be an array.");
     return ids;
   }
-  if (nonNegativeInteger(maxCallDepth) && value.length > maxCallDepth) {
+  if (nonNegativeSafeInteger(maxCallDepth) && value.length > maxCallDepth) {
     errors.push("Runtime call stack exceeds maxCallDepth.");
   }
   const frameCount = Array.isArray(frames) ? frames.length : 0;
@@ -898,7 +898,7 @@ function validateCallFrames(
       errors.push("Runtime call frame is malformed.");
       return;
     }
-    if (!nonNegativeInteger(frame.id) || frame.id < 1 || ids.has(frame.id)) {
+    if (!nonNegativeSafeInteger(frame.id) || frame.id < 1 || ids.has(frame.id)) {
       errors.push("Runtime call-frame IDs must be unique positive integers.");
     } else {
       if (frame.id <= previousId) errors.push("Runtime call-frame IDs are out of order.");
@@ -908,7 +908,7 @@ function validateCallFrames(
     const definition = plan?.functions.find((item) => item.id === frame.functionId);
     let callInstruction: InstructionPlan["instructions"][number] | undefined;
     if (
-      !nonNegativeInteger(frame.functionId) ||
+      !nonNegativeSafeInteger(frame.functionId) ||
       frame.functionId < 1 ||
       (plan !== undefined && definition === undefined) ||
       typeof frame.functionName !== "string" ||
@@ -919,7 +919,7 @@ function validateCallFrames(
       errors.push("Runtime call frame refers to a malformed or unknown function.");
     }
     if (
-      !nonNegativeInteger(frame.returnInstruction) ||
+      !nonNegativeSafeInteger(frame.returnInstruction) ||
       frame.returnInstruction < 1 ||
       (plan !== undefined && frame.returnInstruction > plan.instructions.length)
     ) {
@@ -938,7 +938,7 @@ function validateCallFrames(
       }
     }
     if (
-      !nonNegativeInteger(frame.destinationTemporary) ||
+      !nonNegativeSafeInteger(frame.destinationTemporary) ||
       frame.destinationTemporary < 1 ||
       (plan !== undefined && frame.destinationTemporary > plan.temporaryCount)
     ) {
@@ -959,7 +959,7 @@ function validateCallFrames(
       errors,
     );
     if (
-      nonNegativeInteger(frame.destinationTemporary) &&
+      nonNegativeSafeInteger(frame.destinationTemporary) &&
       Array.isArray(frame.callerTemporaries) &&
       frame.callerTemporaries.some(
         (temporary) =>
@@ -970,22 +970,22 @@ function validateCallFrames(
       errors.push("Runtime caller temporaries already contain the result destination.");
     }
     if (
-      !nonNegativeInteger(frame.scopeBaseDepth) ||
+      !nonNegativeSafeInteger(frame.scopeBaseDepth) ||
       frame.scopeBaseDepth < 1 ||
       frame.scopeBaseDepth >= frameCount ||
       frame.scopeBaseDepth <= previousScopeBase
     ) {
       errors.push("Runtime call frame has an impossible scope base.");
     }
-    if (nonNegativeInteger(frame.scopeBaseDepth)) previousScopeBase = frame.scopeBaseDepth;
+    if (nonNegativeSafeInteger(frame.scopeBaseDepth)) previousScopeBase = frame.scopeBaseDepth;
     if (
-      !nonNegativeInteger(frame.loopBaseDepth) ||
+      !nonNegativeSafeInteger(frame.loopBaseDepth) ||
       frame.loopBaseDepth > loopCount ||
       frame.loopBaseDepth < previousLoopBase
     ) {
       errors.push("Runtime call frame has an impossible loop base.");
     }
-    if (nonNegativeInteger(frame.loopBaseDepth)) previousLoopBase = frame.loopBaseDepth;
+    if (nonNegativeSafeInteger(frame.loopBaseDepth)) previousLoopBase = frame.loopBaseDepth;
     validateCallArguments(frame.arguments, definition, errors);
     validateCallArgumentConsistency(
       frame.arguments,
@@ -1003,15 +1003,15 @@ function validateCallFrames(
 
     if (
       plan !== undefined &&
-      nonNegativeInteger(frame.returnInstruction) &&
-      nonNegativeInteger(frame.destinationTemporary) &&
+      nonNegativeSafeInteger(frame.returnInstruction) &&
+      nonNegativeSafeInteger(frame.destinationTemporary) &&
       Array.isArray(frame.callerTemporaries)
     ) {
       validateSuspendedContinuationTemporaries(
         frame.callerTemporaries,
         frame.destinationTemporary,
         frame.returnInstruction,
-        Array.isArray(loopFrames) && nonNegativeInteger(frame.loopBaseDepth)
+        Array.isArray(loopFrames) && nonNegativeSafeInteger(frame.loopBaseDepth)
           ? loopFrames.slice(0, frame.loopBaseDepth)
           : [],
         plan,
@@ -1019,7 +1019,7 @@ function validateCallFrames(
       );
     }
 
-    if (plan !== undefined && nonNegativeInteger(frame.returnInstruction)) {
+    if (plan !== undefined && nonNegativeSafeInteger(frame.returnInstruction)) {
       const callIndex = frame.returnInstruction - 1;
       const callerDefinition = frameIndex === 0
         ? undefined
@@ -1043,12 +1043,12 @@ function validateCallFrames(
         : undefined;
       if (
         frameIndex === value.length - 1 &&
-        (!nonNegativeInteger(nextInstruction) ||
+        (!nonNegativeSafeInteger(nextInstruction) ||
           nextInstruction < definition.entryInstruction ||
           nextInstruction >= definition.endInstruction)
       ) {
         errors.push("Runtime next instruction is outside the active function.");
-      } else if (frameIndex === value.length - 1 && nonNegativeInteger(nextInstruction)) {
+      } else if (frameIndex === value.length - 1 && nonNegativeSafeInteger(nextInstruction)) {
         validateExactParameterPosition(
           frame.parameterState,
           definition,
@@ -1056,7 +1056,7 @@ function validateCallFrames(
           plan!,
           errors,
         );
-      } else if (isPlainRecord(child) && nonNegativeInteger(child.returnInstruction)) {
+      } else if (isPlainRecord(child) && nonNegativeSafeInteger(child.returnInstruction)) {
         validateExactParameterPosition(
           frame.parameterState,
           definition,
@@ -1122,10 +1122,10 @@ function validateParameterBindings(
   if (
     definition === undefined ||
     !Array.isArray(frames) ||
-    !nonNegativeInteger(frame.scopeBaseDepth) ||
+    !nonNegativeSafeInteger(frame.scopeBaseDepth) ||
     !Array.isArray(frame.arguments) ||
     !isPlainRecord(frame.parameterState) ||
-    !nonNegativeInteger(frame.parameterState.parameterIndex)
+    !nonNegativeSafeInteger(frame.parameterState.parameterIndex)
   ) {
     return;
   }
@@ -1207,7 +1207,7 @@ function validateParameterState(
   if (
     !isPlainRecord(value) ||
     !["supplied", "defaults", "body"].includes(String(value.phase)) ||
-    !nonNegativeInteger(value.parameterIndex) ||
+    !nonNegativeSafeInteger(value.parameterIndex) ||
     (definition !== undefined && value.parameterIndex > definition.parameters.length) ||
     (value.phase === "body" &&
       definition !== undefined &&
@@ -1224,7 +1224,7 @@ function validateExactParameterPosition(
   plan: InstructionPlan,
   errors: string[],
 ): void {
-  if (!isPlainRecord(value) || !nonNegativeInteger(value.parameterIndex)) return;
+  if (!isPlainRecord(value) || !nonNegativeSafeInteger(value.parameterIndex)) return;
   const expected = expectedParameterProgress(definition, instructionPosition, plan);
   if (
     expected === null ||
@@ -1304,7 +1304,7 @@ function validateSuspendedContinuationTemporaries(
     callerTemporaries
       .filter(isPlainRecord)
       .map((temporary) => temporary.id)
-      .filter((id): id is number => nonNegativeInteger(id)),
+      .filter((id): id is number => nonNegativeSafeInteger(id)),
   );
   present.add(destinationTemporary);
   const required = requiredContinuationTemporaries(
@@ -1443,7 +1443,7 @@ function validateStatusConsistency(
     if (
       plan !== undefined &&
       calls === 0 &&
-      (!nonNegativeInteger(value.nextInstruction) || value.nextInstruction >= plan.rootEndInstruction)
+      (!nonNegativeSafeInteger(value.nextInstruction) || value.nextInstruction >= plan.rootEndInstruction)
     ) {
       errors.push("Root execution position is outside the root instruction range.");
     }
@@ -1454,7 +1454,7 @@ function isLegalHaltPosition(
   nextInstruction: unknown,
   plan: InstructionPlan,
 ): boolean {
-  if (!nonNegativeInteger(nextInstruction)) return false;
+  if (!nonNegativeSafeInteger(nextInstruction)) return false;
   if (nextInstruction === plan.rootEndInstruction) return true;
   return nextInstruction > 0 && plan.instructions[nextInstruction - 1]?.kind === "exit";
 }
@@ -1471,7 +1471,7 @@ function validateCurrentTemporaryRequirements(
     plan === undefined ||
     status === "halted" ||
     !Array.isArray(temporaries) ||
-    !nonNegativeInteger(nextInstruction)
+    !nonNegativeSafeInteger(nextInstruction)
   ) {
     return;
   }
@@ -1482,7 +1482,7 @@ function validateCurrentTemporaryRequirements(
     temporaries
       .filter(isPlainRecord)
       .map((temporary) => temporary.id)
-      .filter((id): id is number => nonNegativeInteger(id)),
+      .filter((id): id is number => nonNegativeSafeInteger(id)),
   );
   if ([...required].some((id) => !present.has(id))) {
     errors.push("Runtime state is missing a temporary required by the next instruction.");
@@ -1630,7 +1630,7 @@ function validateFrames(value: unknown, errors: string[]): void {
   }
   const frameIds = new Set<number>();
   for (const frame of value) {
-    if (!isPlainRecord(frame) || !nonNegativeInteger(frame.id) || !Array.isArray(frame.bindings)) {
+    if (!isPlainRecord(frame) || !nonNegativeSafeInteger(frame.id) || !Array.isArray(frame.bindings)) {
       errors.push("Runtime scope frame is malformed.");
       continue;
     }
@@ -1666,7 +1666,7 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
   for (const speaker of value) {
     if (
       !isPlainRecord(speaker) ||
-      !nonNegativeInteger(speaker.id) ||
+      !nonNegativeSafeInteger(speaker.id) ||
       typeof speaker.identifier !== "string" ||
       speaker.identifier.length === 0 ||
       !Array.isArray(speaker.properties)
@@ -1776,7 +1776,7 @@ function validateSpeakerReferences(
 
 function collectSpeakerReferenceIds(value: unknown, output: Set<number>): void {
   if (!isPlainRecord(value)) return;
-  if (value.kind === "speakerReference" && nonNegativeInteger(value.speakerId)) {
+  if (value.kind === "speakerReference" && nonNegativeSafeInteger(value.speakerId)) {
     output.add(value.speakerId);
     return;
   }
@@ -1801,9 +1801,9 @@ function validSpan(value: unknown): value is SourceSpan {
 function validPosition(value: unknown): boolean {
   return (
     isPlainRecord(value) &&
-    nonNegativeInteger(value.offset) &&
-    nonNegativeInteger(value.line) &&
-    nonNegativeInteger(value.column)
+    nonNegativeSafeInteger(value.offset) &&
+    nonNegativeSafeInteger(value.line) &&
+    nonNegativeSafeInteger(value.column)
   );
 }
 
@@ -1820,12 +1820,12 @@ function cloneTemporary(
   };
 }
 
-function nonNegativeInteger(value: unknown): value is number {
-  return Number.isInteger(value) && (value as number) >= 0;
+function nonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 function unsigned32(value: unknown): value is number {
-  return nonNegativeInteger(value) && value <= 0xffff_ffff;
+  return nonNegativeSafeInteger(value) && value <= 0xffff_ffff;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
