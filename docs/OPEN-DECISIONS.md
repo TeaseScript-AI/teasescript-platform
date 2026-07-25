@@ -1,8 +1,8 @@
 # Current open decisions
 
-Accepted ADRs and V30 override older descriptive documents. Sets, deep value copying, empty collection behavior, speaker fallback, serializable runtime architecture, serializable loop/call frames, source-order evaluation, prepared references, and the current user-function model are not unimplemented design questions.
+Accepted ADRs and V30 override older descriptive documents. Sets, deep value copying, empty collection behavior, speaker fallback, serializable runtime architecture, serializable loop/call frames, source-order evaluation, prepared references, the current user-function model, and the shared resumable pending-action contract are not unimplemented design questions.
 
-ADR 0016 is proposed in the issue-#54 design pull request. Until that ADR is accepted, its pending-action contract remains a proposal rather than current architecture.
+ADR 0016 is accepted. It defines persisted nondecreasing session time, foreground/background pending actions, monotonic action IDs, bounded settlement replay, active-first completion lookup, injected time observations, and blocking `wait` as the first implementation slice.
 
 ## Runtime hardening and evolution
 
@@ -13,7 +13,7 @@ ADR 0016 is proposed in the issue-#54 design pull request. Until that ADR is acc
 - Host/global representation for future opaque engine references beyond speakers.
 - Complete static type checking and composite equality.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
-- Implementation and migration details for the proposed version-4 pending-action fields after ADR 0016 is accepted.
+- Concrete implementation and migration details for version-4 pending-action fields, operations, and validators.
 
 ### Compatibility API lifecycle
 
@@ -42,7 +42,7 @@ The exact version-3 schemas are current POC implementation details, not a promis
 ## Player and interactions
 
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and CSP.
-- Action-kind-specific choices, input, buttons, media completion, cancellation, timeout, and recovery policies after the shared pending-action contract is accepted.
+- Action-kind-specific choices, input, buttons, media completion, cancellation, timeout, and recovery policies on the accepted shared pending-action contract.
 - Background-handler interruption, repetition, persistence, ordering, and cleanup beyond the first one-shot timer slice.
 - Camera capability declarations, long-lived stream ownership, device switching, quality negotiation, restore, privacy indicators, and optional simultaneous cameras.
 - Exact `askImage(...)` preview/countdown/retake behavior and direct nullable `takePhoto(...)` capture behavior.
