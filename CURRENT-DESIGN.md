@@ -21,6 +21,8 @@ Accepted post-V30 decisions relevant to the current runtime include:
 - ADR 0014: recursive value-copy semantics for ordinary values, scalar-only sets, empty collection errors, and speaker display-name fallback behavior;
 - ADR 0015: versioned JSON-safe instruction plans, explicit runtime state, checkpoints, deterministic stepping/RNG/events, and no suspended JavaScript call stack.
 
+ADR 0016, resumable pending-action runtime contract, is currently proposed. It is not authoritative until accepted.
+
 Direct assignment remains `score = 20`; `set score = 20` remains invalid.
 
 ## Implemented POC milestones
@@ -74,6 +76,22 @@ The current implementation also:
 
 Instruction plans, runtime snapshots, and checkpoints currently use version 3. Complete static typing and the wider V30 runtime/API surface remain out of scope.
 
+## Proposed pending-action direction
+
+ADR 0016 proposes:
+
+- runtime status `waiting`;
+- exactly one foreground blocking action;
+- a separate background-action collection;
+- monotonic persisted action identities;
+- absolute deadlines on an injected time line;
+- typed, idempotent completion operations;
+- `actionRequested` and `actionCompleted` events;
+- blocking `wait` as the first source-to-runtime implementation slice;
+- version-4 internal plan, snapshot, and checkpoint schemas when the new fields are implemented.
+
+The first slice does not implement camera/media lifecycle, chat pacing, the production host protocol, or Laravel scheduling. Selected camera, media-persistence, time-integrity, and chat-pacing directions are recorded as explicit follow-up design work in [`docs/planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](docs/planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
+
 ## Runtime execution and performance boundary
 
 Runtime state must be serializable at every instruction boundary, but normal execution does not need to stringify, clone for persistence, or send state to Laravel after every instruction. A production runner may execute many instructions in validated in-memory state until an event, wait, input, timer, explicit save point, page lifecycle boundary, or configured checkpoint interval.
@@ -91,9 +109,10 @@ POC implementation choices such as full snapshot cloning may later be optimized,
 ## Major remaining groups
 
 - units, date, time, datetime, and duration values;
-- choices, input, waits, timers, and resumable pending actions;
+- acceptance and implementation of resumable pending actions, then action-kind-specific choices, input, waits, timers, buttons, and media completion;
 - cross-origin iframe host protocol and validated messaging;
-- media lifecycle, resource ownership, and custom views;
+- camera/media lifecycle, resource ownership, persistence, recovery, and custom views;
+- chat-output pacing and time-integrity policy;
 - TypeScript library linkage and richer module selection;
 - package/plan identity and migration policy;
 - Laravel persistence, accounts, global data, scheduling, and continuous personalities;
