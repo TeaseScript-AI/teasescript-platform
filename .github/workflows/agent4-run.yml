@@ -1,0 +1,54 @@
+name: Agent 4 merge and verify latest main
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  merge-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/issues-40-41-runtime-snapshot-invariants
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Merge latest main and verify
+        run: |
+          set -o pipefail
+          mkdir -p /tmp/agent4-final-verification
+          git fetch origin main
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git merge --no-edit origin/main
+          {
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            echo "nvmrc=$(cat .nvmrc)"
+          } | tee /tmp/agent4-final-verification/versions.txt
+          npm ci 2>&1 | tee /tmp/agent4-final-verification/npm-ci.txt
+          npm run check 2>&1 | tee /tmp/agent4-final-verification/full-check.txt
+          npm run build 2>&1 | tee /tmp/agent4-final-verification/build.txt
+          node --test dist/tests/runtime-snapshot-invariants.test.js 2>&1 | tee /tmp/agent4-final-verification/focused-test.txt
+          git diff --check origin/main...HEAD 2>&1 | tee /tmp/agent4-final-verification/diff-check.txt
+          git status --short | tee /tmp/agent4-final-verification/status.txt
+          test ! -s /tmp/agent4-final-verification/status.txt
+          git rev-parse origin/main > /tmp/agent4-final-verification/main-sha.txt
+          git rev-parse HEAD > /tmp/agent4-final-verification/verified-head-sha.txt
+          git push origin HEAD:fix/issues-40-41-runtime-snapshot-invariants
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent4-final-verification
+          path: /tmp/agent4-final-verification
+          if-no-files-found: error
+          retention-days: 1
