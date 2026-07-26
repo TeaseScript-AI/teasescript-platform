@@ -4,7 +4,7 @@ import { MAX_WORKSPACE_SOURCE_BYTES, compileWorkspaceSource, executeWorkspaceSna
 
 const DRAFT_KEY = "teasescript-playground-draft-v1";
 const elements = {
-  source: requiredTextarea("source-code"), sourceLines: requiredElement("source-lines"), diagnostics: requiredElement("diagnostics"), transcript: requiredElement("transcript"), instructionPosition: requiredElement("instruction-position"), runtimeStatus: requiredElement("runtime-status"), eventLog: requiredElement("event-log"), instructionPlan: requiredElement("instruction-plan"), runtimeState: requiredElement("runtime-state"), actionStatus: requiredElement("action-status"), loadedExampleName: requiredElement("loaded-example-name"), sourceRevision: requiredElement("source-revision"), exampleSelect: requiredSelect("example-select"), compile: requiredButton("compile"), run: requiredButton("run"), step: requiredButton("step"), reset: requiredButton("reset"), saveCheckpoint: requiredButton("save-checkpoint"), restoreCheckpoint: requiredButton("restore-checkpoint"), clearCheckpoint: requiredButton("clear-checkpoint"), reloadExample: requiredButton("reload-example"), importSource: requiredButton("import-source"), exportSource: requiredButton("export-source"), refreshWorkspace: requiredButton("refresh-workspace"), sourceFile: requiredFile("source-file"),
+  source: requiredTextarea("source-code"), sourceLines: requiredElement("source-lines"), sourcePanel: requiredElement("source-panel"), playerPanel: requiredElement("player-panel"), diagnostics: requiredElement("diagnostics"), transcript: requiredElement("transcript"), instructionPosition: requiredElement("instruction-position"), runtimeStatus: requiredElement("runtime-status"), eventLog: requiredElement("event-log"), instructionPlan: requiredElement("instruction-plan"), runtimeState: requiredElement("runtime-state"), actionStatus: requiredElement("action-status"), loadedExampleName: requiredElement("loaded-example-name"), sourceRevision: requiredElement("source-revision"), exampleSelect: requiredSelect("example-select"), compile: requiredButton("compile"), run: requiredButton("run"), step: requiredButton("step"), reset: requiredButton("reset"), saveCheckpoint: requiredButton("save-checkpoint"), restoreCheckpoint: requiredButton("restore-checkpoint"), clearCheckpoint: requiredButton("clear-checkpoint"), reloadExample: requiredButton("reload-example"), importSource: requiredButton("import-source"), exportSource: requiredButton("export-source"), refreshWorkspace: requiredButton("refresh-workspace"), sourceFile: requiredFile("source-file"),
 };
 
 let sourceRevision = 0;
@@ -31,6 +31,7 @@ elements.refreshWorkspace.addEventListener("click", () => void refreshAutomation
 elements.exampleSelect.addEventListener("change", () => { if (isPlaygroundExampleName(elements.exampleSelect.value)) { currentExample = elements.exampleSelect.value; void reloadExample(); } });
 elements.source.addEventListener("input", sourceEdited);
 elements.source.addEventListener("scroll", () => { elements.sourceLines.scrollTop = elements.source.scrollTop; });
+new ResizeObserver(() => { elements.playerPanel.style.height = `${elements.sourcePanel.offsetHeight}px`; }).observe(elements.sourcePanel);
 void loadInitialSource();
 
 async function loadInitialSource(): Promise<void> {
