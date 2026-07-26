@@ -56,6 +56,7 @@ type WorkItem =
       readonly keys: readonly (string | symbol)[];
       readonly index: number;
       readonly array: boolean;
+      readonly arrayLength: number | null;
     }
   | {
       readonly kind: "leave";
@@ -87,10 +88,17 @@ export function captureExternalData(
     }
 
     if (item.kind === "iterate") {
-      if (item.index >= item.keys.length) continue;
+      if (item.index >= item.keys.length) {
+        if (item.array && item.captured.length !== item.arrayLength) {
+          return captureFailure("nonJsonSafeValue", item.path, rootPath);
+        }
+        continue;
+      }
       work.push({ ...item, index: item.index + 1 });
 
       const key = item.keys[item.index]!;
+      if (item.array && key === "length") continue;
+
       let descriptor: PropertyDescriptor | undefined;
       try {
         descriptor = Reflect.getOwnPropertyDescriptor(item.value, key);
@@ -101,29 +109,15 @@ export function captureExternalData(
         return captureFailure("nonJsonSafeValue", item.path, rootPath);
       }
 
-      if (item.array && key === "length") {
-        if (
-          !("value" in descriptor) ||
-          typeof descriptor.value !== "number" ||
-          !Number.isSafeInteger(descriptor.value) ||
-          descriptor.value < 0
-        ) {
+      if (item.array && typeof key === "string") {
+        const arrayIndex = canonicalArrayIndex(key);
+        if (arrayIndex === null) {
+          if (numericLookingArrayKey(key)) {
+            return captureFailure("nonJsonSafeValue", item.path, rootPath);
+          }
+        } else if (arrayIndex >= item.arrayLength!) {
           return captureFailure("nonJsonSafeValue", item.path, rootPath);
         }
-        if (descriptor.value > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
-          return captureFailure("work", item.path, rootPath);
-        }
-        try {
-          Reflect.defineProperty(item.captured, "length", {
-            value: descriptor.value,
-            writable: true,
-            enumerable: false,
-            configurable: false,
-          });
-        } catch {
-          return captureFailure("nonJsonSafeValue", item.path, rootPath);
-        }
-        continue;
       }
 
       if (!descriptor.enumerable) continue;
@@ -203,6 +197,29 @@ export function captureExternalData(
       }
     }
 
+    let arrayLength: number | null = null;
+    if (array) {
+      let lengthDescriptor: PropertyDescriptor | undefined;
+      try {
+        lengthDescriptor = Reflect.getOwnPropertyDescriptor(current, "length");
+      } catch {
+        return captureFailure("nonJsonSafeValue", item.path, rootPath);
+      }
+      if (
+        lengthDescriptor === undefined ||
+        !("value" in lengthDescriptor) ||
+        typeof lengthDescriptor.value !== "number" ||
+        !Number.isSafeInteger(lengthDescriptor.value) ||
+        lengthDescriptor.value < 0
+      ) {
+        return captureFailure("nonJsonSafeValue", item.path, rootPath);
+      }
+      if (lengthDescriptor.value > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
+        return captureFailure("work", item.path, rootPath);
+      }
+      arrayLength = lengthDescriptor.value;
+    }
+
     let keys: readonly (string | symbol)[];
     try {
       keys = Reflect.ownKeys(current);
@@ -214,7 +231,7 @@ export function captureExternalData(
     }
 
     const captured = array
-      ? []
+      ? new Array(arrayLength!)
       : (Object.create(prototype) as Record<string, unknown>);
     assignCaptured(item.target, captured, (root) => {
       capturedRoot = root;
@@ -231,6 +248,7 @@ export function captureExternalData(
       keys,
       index: 0,
       array,
+      arrayLength,
     });
   }
 
@@ -280,6 +298,16 @@ function pathSegment(parentIsArray: boolean, key: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)
     ? `.${key}`
     : `[${JSON.stringify(key)}]`;
+}
+
+function canonicalArrayIndex(key: string): number | null {
+  if (!/^(0|[1-9]\d*)$/.test(key)) return null;
+  const index = Number(key);
+  return Number.isSafeInteger(index) && index < 0xffff_ffff ? index : null;
+}
+
+function numericLookingArrayKey(key: string): boolean {
+  return /^[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(key);
 }
 
 function formatPath(path: PathNode | null, rootPath: string): string {
