@@ -1,7 +1,7 @@
 # Player camera, media, and chat-pacing follow-ups
 
 **Status:** Camera/media direction retained; chat-pacing direction superseded for redesign  
-**Related design:** ADR 0016 and proposed ADR 0017  
+**Related design:** Accepted ADR 0016 and accepted ADR 0017  
 **Implementation status:** Not implemented
 
 This file keeps camera, captured-media, time-integrity, and text-output follow-up work in one findable place. The earlier automatic 17-characters-per-second chat-pacing direction is superseded by the owner-selected engine-core/Standard-Library redesign and must not be treated as current implementation guidance. This planning file does not schedule work and does not replace an accepted ADR or canonical API specification.
@@ -48,7 +48,7 @@ A future `countdown` option may override the default. `countdown: 0` means captu
 
 Cancelling, rejecting, or failing one attempt keeps the same mandatory input action pending and shows recovery choices. `invalidMessage` and `invalidLlmInstruction` remain available for ordinary author-controlled feedback.
 
-The final public `askImage` composition is now subject to proposed ADR 0017: the player workflow may remain one typed capability interaction while an author-facing wrapper and any associated text output live in the Standard Library. The exact split requires a later input/camera decision.
+The final public `askImage` composition is subject to accepted ADR 0017: the player workflow may remain one typed capability interaction while an author-facing wrapper and any associated text output live in the Standard Library. The exact split requires a later input/camera decision.
 
 ### `takePhoto(...)`
 
@@ -64,7 +64,7 @@ Keep the name `takePhoto`, not `takeImage`, unless a later API decision explicit
 
 The direct capture is intended for surprise snapshots, periodic checks, motion-related scenes, and other script-controlled camera use.
 
-Do not add `requestImage(...)` merely as a duplicate public convenience name. The generic typed-interaction primitive proposed by ADR 0017 is an internal architecture concept, not automatically a new TeaseScript API.
+Do not add `requestImage(...)` merely as a duplicate public convenience name. The generic typed-interaction primitive defined as an architectural boundary by ADR 0017 is not automatically a new TeaseScript API.
 
 ## Multiple cameras
 
@@ -239,13 +239,13 @@ Long-running sentences, assignments, or personality deadlines that must resist l
 
 The earlier recommendation that every `say` establish an automatic next-message deadline at exactly 17 visible characters per second is no longer the owner-selected direction. Closed draft PR #71 documents that historical proposal but must not be merged or used as an implementation contract.
 
-The owner instead selected an architecture-first redesign:
+Accepted ADR 0017 establishes the architecture-first boundary:
 
 - the engine should expose a minimal typed text-output primitive;
 - `say` should be considered an author-facing Standard Library composition where practical;
 - all visible chat messages may share one output target while retaining stable speaker identity;
 - output and later input results must retain enough provenance to support transcript history and selectively separated future LLM contexts;
-- exact pacing modes and their interaction with choices, input, waits, and later `say` calls require a new design after proposed ADR 0017 is reviewed.
+- exact pacing modes and their interaction with choices, input, waits, and later `say` calls require separate detailed design.
 
 ### Candidate output boundary
 
@@ -269,10 +269,10 @@ Candidate Standard Library behavior includes:
 - default chat target selection;
 - current or explicit speaker selection;
 - author-friendly `say` calls and accepted syntax adapters;
-- future smart, manual, timed, autoplay, or instant pacing policies;
+- future smart, timed, autoplay, or instant pacing policies;
 - transcript-oriented defaults and optional custom output targets.
 
-No pacing mode is accepted by this planning update. In particular, it does not restore the automatic 17-characters-per-second proposal.
+No detailed pacing API is accepted by this planning update. In particular, it does not restore the automatic 17-characters-per-second proposal.
 
 ## Timed-work redesign
 
@@ -289,10 +289,10 @@ The accepted V30 syntax remains authoritative until a later accepted ADR explici
 
 ## Suggested follow-up sequence
 
-1. Review and accept or revise proposed ADR 0017: engine primitives and Standard Library boundary.
+1. Use accepted ADR 0017 as the engine-primitives and Standard Library boundary.
 2. Preserve ADR 0016 as the deterministic pending-action and time foundation; implement its blocking-delay slice with the internal placement documented explicitly.
 3. Define Standard Library linkage, generated declarations, editor metadata, versioning, and package-library reuse.
-4. Select a small tested Standard Library POC slice, potentially including `say`, `wait`, or one timer wrapper.
+4. Select a small tested Standard Library POC slice, potentially including `say`, acknowledgement, `askText`, `askNumber`, and `choose`.
 5. Redesign chat output, speaker/participant provenance, and pacing on the accepted layer boundary.
 6. Redesign background timed work and the public timer lifecycle API on the same boundary.
 7. Design package camera capability declarations and long-lived stream ownership.
@@ -303,7 +303,6 @@ The accepted V30 syntax remains authoritative until a later accepted ADR explici
 
 ## Explicitly deferred decisions
 
-- owner acceptance or revision of proposed ADR 0017;
 - exact core capability names and public TypeScript interfaces;
 - Standard Library linkage, packaging, metadata, and compatibility policy;
 - final `say` API, official syntax lowering, pacing modes, and skip behavior;
