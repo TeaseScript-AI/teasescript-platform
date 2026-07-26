@@ -8,6 +8,10 @@
 - Normal TypeScript named exports are the accepted public-library direction; tooling may generate signatures and editor metadata.
 - Package libraries execute inside the player sandbox and have no unrestricted external network access.
 
+The current POC includes an internal exact-identity catalog and generated, JSON-safe metadata for named exported function declarations, type aliases, and interfaces. It is synchronous infrastructure only: it has no `.tease` import syntax, package manifest, range or `latest` resolution, runtime/checkpoint persistence, execution linkage, or permanent metadata wire format. The catalog uses opaque exact tokens and intentionally makes no final package-versioning decision.
+
+Public library definitions and metadata are separate from internal privileged platform adapters. Registering a public library accepts inert TypeScript source and metadata only; it does not expose DOM, cookie, network, browser-handle, runtime, or host capabilities.
+
 The exact `.tease` import/linkage syntax, generated metadata format, versioning rules, and complete Standard Library API remain open. Historical examples using the rejected procedure concept, explicit ordinary-function invocation keywords, or procedure-based scheduling are not authoritative.
 
 ## Accepted dependency model
