@@ -17,6 +17,7 @@ Proposed ADR 0017 defines an owner-reviewable engine-primitive/Standard-Library/
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
 - Concrete implementation and migration details for version-4 pending-action fields, operations, and validators.
 - Exact minimal primitive families for text output, typed interactions, foreground delays, and background timed work after ADR 0017 review.
+- Exact serializable lowering or engine-managed continuation representation for resumable library workflows.
 
 ### Compatibility API lifecycle
 
@@ -36,16 +37,17 @@ The exact version-3 schemas are current POC implementation details, not a promis
 
 - Owner approval or revision of proposed ADR 0017.
 - TypeScript-library and Standard Library import/linkage syntax from `.tease`.
-- Standard Library packaging, compatibility, capability access, and version-selection rules.
+- Standard Library packaging, exact identity/version binding, compatibility, migration, and version-selection rules.
+- Public Standard Library versus privileged platform-adapter module and capability boundaries.
 - Generated declaration/editor-metadata format for autocomplete, signatures, hover documentation, navigation, and diagnostics.
-- Package-library dependency declarations, transitive resolution, cycle handling, and version conflicts.
+- Whether package libraries may depend on other package libraries; if accepted later, define transitive resolution, cycles, lock data, moderation, capability interaction, and version conflicts.
 - Exact unit/date/time/datetime/duration implementation.
 - Standard Library string methods and detailed API signatures.
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
 - Static treatment of contextual `speaker` access when control-flow analysis can prove that no explicit or default speaker is available: compile-time error, warning, or retained runtime failure. Ordinary narrator output such as `say "Hello"` is a separate valid case and does not require a default speaker.
 - Final `say` composition and pacing semantics after the core/Standard-Library boundary is accepted.
 - Final timer author API and lifecycle semantics, including pause, resume, stop, restart-after-stop, repetition, persistence, and visible presentation.
-- Whether accepted command/block syntax lowers directly to core instructions, to Standard Library exports, or to compiler-owned compositions.
+- Whether accepted command/block syntax lowers directly to core instructions, to public Standard Library exports, or to compiler-owned compositions.
 - Remaining accepted V30 constructs and APIs outside the current parser/runtime subset.
 
 ## Player and interactions
@@ -65,7 +67,7 @@ The exact version-3 schemas are current POC implementation details, not a promis
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
 - Time-integrity logging thresholds and whether a future typed anomaly hook becomes script-visible.
 
-See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md) for earlier selected directions and deferred questions discussed with ADR 0016. Closed draft PRs #69 and #71 are historical proposals and are not current decisions.
+See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md) for earlier selected directions and deferred questions discussed with ADR 0016. Closed draft PRs #69 and #71 and closed issues #67 and #68 are historical proposals and are not current decisions.
 
 ## Platform and personalities
 
