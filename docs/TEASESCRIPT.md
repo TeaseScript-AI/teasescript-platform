@@ -13,6 +13,23 @@ Accepted post-V30 additions:
 
 Rejected forms remain rejected, including `set score = 20`, `procedure`, and `call` for ordinary function calls. Historical research may still contain those forms and is non-authoritative.
 
+## Language design intent
+
+TeaseScript should make the common authoring path readable and require as little boilerplate as practical. A script author who is not a professional developer should be able to use compact official syntax and deterministic platform defaults without first understanding the engine, imports, pending-action state, or UI implementation details.
+
+The same language must still permit advanced authors to opt into explicit parameters, ordinary function calls, TypeScript libraries, custom UI, and lower-level capabilities where supported. Advanced control should extend the simple path rather than making every basic script spell out the advanced machinery.
+
+When syntax is designed or reviewed, prefer:
+
+- compact, readable forms for common actions;
+- deterministic and documented defaults that handle the ordinary case;
+- explicit overrides for authors who need different behavior;
+- minimal mandatory imports and configuration;
+- no hidden nondeterminism or uncheckpointed execution state;
+- special syntax only where it materially improves ordinary authoring and remains unambiguous.
+
+Keeping compact syntax does not require its implementation to remain hard-coded as a separate engine system. The compiler may lower an easy source form through the Standard Library or into small engine primitives while preserving source spans, diagnostics, determinism, and resume behavior.
+
 ## Proposed syntax-to-library boundary
 
 Proposed ADR 0017 separates source syntax from internal implementation placement.
