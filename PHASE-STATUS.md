@@ -56,7 +56,7 @@
 
 The current plan, snapshot, and checkpoint formats are version 4 POC formats. The implemented ADR 0016 first slice supports compiler-owned blocking `wait` delays, persisted session time, explicit foreground pending action state, action events, checkpoint/restore, and explicit time settlement; background actions remain intentionally empty.
 
-The implemented ADR 0017 infrastructure slice provides an exact-identity in-memory library catalog and deterministic static metadata for the documented narrow TypeScript export subset. These internal POC identities and metadata shapes are not final package manifests, import syntax, library bindings, or checkpoint data; privileged adapter internals remain outside the root public export surface.
+The implemented ADR 0017 infrastructure slice provides a tooling-only exact-identity in-memory library catalog and deterministic static metadata for the documented narrow TypeScript export subset. Its external boundaries use stable capture and a bounded source-text limit before parsing. These internal POC identities and metadata shapes are not final package manifests, import syntax, library bindings, or checkpoint data; neither the tooling surface nor privileged adapter internals are exported from the runtime root entry point.
 
 ## Verification expected before merge
 

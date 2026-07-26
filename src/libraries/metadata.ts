@@ -3,6 +3,9 @@ import ts from "typescript";
 import { captureExternalData } from "../external-data-limits.js";
 import type { ExactLibraryIdentity, PublicLibraryDefinition } from "./catalog.js";
 
+/** Bounds TypeScript parser work at the public tooling-data boundary. */
+export const MAX_LIBRARY_SOURCE_LENGTH = 100_000;
+
 export interface PublicParameterMetadata {
   readonly name: string;
   readonly optional: boolean;
@@ -41,9 +44,10 @@ export class LibraryMetadataError extends Error {
 export function createPublicLibraryMetadata(
   definition: PublicLibraryDefinition,
 ): PublicLibraryMetadata {
+  const normalizedDefinition = captureLibraryDefinition(definition);
   const sourceFile = ts.createSourceFile(
     "library.ts",
-    definition.source,
+    normalizedDefinition.source,
     ts.ScriptTarget.ES2023,
     true,
     ts.ScriptKind.TS,
@@ -56,6 +60,7 @@ export function createPublicLibraryMetadata(
   for (const statement of sourceFile.statements) {
     if (!hasExportModifier(statement)) continue;
     if (ts.isFunctionDeclaration(statement) && statement.name !== undefined) {
+      assertSupportedFunction(statement);
       exports.push(freezeExport({
         name: statement.name.text,
         kind: "function",
@@ -66,6 +71,12 @@ export function createPublicLibraryMetadata(
       continue;
     }
     if ((ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement))) {
+      if (!hasOnlyExportModifier(statement) || statement.typeParameters !== undefined) {
+        throw new LibraryMetadataError(
+          "unsupportedExport",
+          "Default and generic type exports are not supported in this POC.",
+        );
+      }
       exports.push(freezeExport({
         name: statement.name.text,
         kind: "type",
@@ -89,9 +100,53 @@ export function createPublicLibraryMetadata(
   }
   exports.sort((left, right) => compareText(left.name, right.name));
   return Object.freeze({
-    identity: Object.freeze({ token: definition.identity.token }),
+    identity: Object.freeze({ token: normalizedDefinition.identity.token }),
     exports: Object.freeze(exports),
   });
+}
+
+function captureLibraryDefinition(value: unknown): PublicLibraryDefinition {
+  const captured = captureExternalData(value, "$library");
+  if (!captured.ok) {
+    throw new LibraryMetadataError(
+      "invalidMetadata",
+      `Library definition is not supported at ${captured.failure.path}.`,
+    );
+  }
+  const definition = captured.value;
+  if (!isPlainRecord(definition) || Object.keys(definition).length !== 2 ||
+    !("identity" in definition) || !("source" in definition) ||
+    !isIdentity(definition.identity) || typeof definition.source !== "string") {
+    throw new LibraryMetadataError("invalidMetadata", "Library definition has an invalid shape.");
+  }
+  if (definition.source.length > MAX_LIBRARY_SOURCE_LENGTH) {
+    throw new LibraryMetadataError(
+      "invalidSource",
+      `Library TypeScript source exceeds the ${MAX_LIBRARY_SOURCE_LENGTH}-character limit.`,
+    );
+  }
+  return Object.freeze({
+    identity: Object.freeze({ token: definition.identity.token }),
+    source: definition.source,
+  });
+}
+
+function assertSupportedFunction(statement: ts.FunctionDeclaration): void {
+  if (!hasOnlyExportModifier(statement) || statement.typeParameters !== undefined) {
+    throw new LibraryMetadataError(
+      "unsupportedExport",
+      "Default and generic function exports are not supported in this POC.",
+    );
+  }
+  for (const parameter of statement.parameters) {
+    if (parameter.dotDotDotToken !== undefined ||
+      (ts.isIdentifier(parameter.name) && parameter.name.text === "this")) {
+      throw new LibraryMetadataError(
+        "unsupportedExport",
+        "Rest and this parameters are not supported in public function metadata.",
+      );
+    }
+  }
 }
 
 /** Validates externally supplied POC metadata and returns a frozen JSON-safe copy. */
@@ -142,6 +197,11 @@ function hasExportModifier(statement: ts.Statement): boolean {
   return (ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined)?.some((modifier) =>
     modifier.kind === ts.SyntaxKind.ExportKeyword
   ) ?? false;
+}
+
+function hasOnlyExportModifier(statement: ts.Statement): boolean {
+  const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
+  return modifiers !== undefined && modifiers.length === 1 && modifiers[0]?.kind === ts.SyntaxKind.ExportKeyword;
 }
 
 function normalizeExport(value: unknown): PublicExportMetadata {

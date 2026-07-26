@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
 
 import * as root from "../src/index.js";
@@ -7,11 +9,26 @@ import { LibraryCatalog, LibraryCatalogError } from "../src/libraries/public.js"
 import { privilegedPlatformAdapterMarker } from "../src/libraries/internal/privileged-platform-adapters.js";
 
 test("public library surface does not export privileged adapter values", () => {
-  assert.equal(typeof root.LibraryCatalog, "function");
-  assert.equal(typeof root.createExactLibraryIdentity, "function");
+  assert.equal("LibraryCatalog" in root, false);
+  assert.equal("createPublicLibraryMetadata" in root, false);
   assert.equal("privilegedPlatformAdapterMarker" in publicLibraries, false);
   assert.equal("privilegedPlatformAdapterMarker" in root, false);
   assert.equal(privilegedPlatformAdapterMarker.internalOnly, true);
+});
+
+test("runtime root module graph has no TypeScript tooling dependency", () => {
+  const visited = new Set<string>();
+  const visit = (file: string): void => {
+    if (visited.has(file)) return;
+    visited.add(file);
+    const source = readFileSync(file, "utf8");
+    assert.equal(/from\s+["']typescript["']/.test(source), false, `${file} imports TypeScript tooling.`);
+    for (const match of source.matchAll(/from\s+["'](\.[^"']+)["']/g)) {
+      const target = resolve(dirname(file), match[1]!.replace(/\.js$/, ".ts"));
+      visit(target);
+    }
+  };
+  visit(resolve(process.cwd(), "src/index.ts"));
 });
 
 test("public registration accepts inert definitions only and grants no platform capability", () => {

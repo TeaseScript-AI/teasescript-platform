@@ -61,7 +61,14 @@ export class LibraryCatalog {
   }
 
   public resolve(identity: unknown): PublicLibraryMetadata {
-    const token = normalizeIdentity(identity);
+    const captured = captureExternalData(identity, "$identity");
+    if (!captured.ok) {
+      throw new LibraryCatalogError(
+        "invalidDefinition",
+        `Library identity is not supported at ${captured.failure.path}.`,
+      );
+    }
+    const token = normalizeIdentity(captured.value);
     const entry = this.#entries.get(token);
     if (entry === undefined) {
       throw new LibraryCatalogError(

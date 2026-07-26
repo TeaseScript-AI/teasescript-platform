@@ -5,6 +5,7 @@ import {
   LibraryCatalog,
   LibraryCatalogError,
   LibraryMetadataError,
+  MAX_LIBRARY_SOURCE_LENGTH,
   createExactLibraryIdentity,
   createPublicLibraryMetadata,
   validatePublicLibraryMetadata,
@@ -41,6 +42,19 @@ test("catalog rejects missing and duplicate identities deterministically", () =>
   assert.throws(() => catalog.resolve({ token: "missing@1" }), isCatalogError("missingIdentity"));
   catalog.register(definition());
   assert.throws(() => catalog.register(definition()), isCatalogError("duplicateIdentity"));
+});
+
+test("catalog identity lookup rejects accessors and throwing proxy traps as structured input failures", () => {
+  const catalog = new LibraryCatalog();
+  catalog.register(definition());
+  const accessor = {};
+  Object.defineProperty(accessor, "token", { enumerable: true, get: () => "org.example.fixture@exact-1" });
+  const throwingProxy = new Proxy({}, {
+    getPrototypeOf: () => { throw new Error("host trap"); },
+  });
+
+  assert.throws(() => catalog.resolve(accessor), isCatalogError("invalidDefinition"));
+  assert.throws(() => catalog.resolve(throwingProxy), isCatalogError("invalidDefinition"));
 });
 
 test("catalog results do not depend on registration order", () => {
@@ -92,6 +106,37 @@ test("unsupported exports and duplicate public names fail clearly", () => {
       source: "export function repeated() {}\nexport interface repeated {}",
     }),
     isMetadataError("duplicateExport"),
+  );
+  for (const source of [
+    "export default function named() {}",
+    "export async function asynchronous() {}",
+    "export declare function declared(): void",
+    "export function generic<T>(value: T): T { return value }",
+    "export interface Generic<T> { value: T }",
+    "export type Alias<T> = T",
+    "export function rest(...values: string[]): void {}",
+    "export function receiver(this: { value: string }, value: string): string { return value }",
+  ]) {
+    assert.throws(
+      () => createPublicLibraryMetadata({ identity, source }),
+      isMetadataError("unsupportedExport"),
+    );
+  }
+});
+
+test("metadata generation captures external definitions and bounds TypeScript source", () => {
+  const identity = createExactLibraryIdentity("fixture@1");
+  const accessor = { identity } as Record<string, unknown>;
+  Object.defineProperty(accessor, "source", { enumerable: true, get: () => "export function value() {}" });
+  const throwingProxy = new Proxy({}, {
+    getPrototypeOf: () => { throw new Error("host trap"); },
+  });
+
+  assert.throws(() => createPublicLibraryMetadata(accessor as never), isMetadataError("invalidMetadata"));
+  assert.throws(() => createPublicLibraryMetadata(throwingProxy as never), isMetadataError("invalidMetadata"));
+  assert.throws(
+    () => createPublicLibraryMetadata({ identity, source: "x".repeat(MAX_LIBRARY_SOURCE_LENGTH + 1) }),
+    isMetadataError("invalidSource"),
   );
 });
 
