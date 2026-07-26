@@ -202,6 +202,14 @@ class SemanticValidator {
         this.#validateExpression(statement.value, scope, contextualSpeaker);
         return;
       }
+      case "waitStatement": {
+        this.#validateExpression(statement.duration, scope, null);
+        const known = knownNumber(statement.duration);
+        if (known !== undefined && known < 0) {
+          this.#report(semanticCode.invalidRepeatCount, "Wait duration must not be negative.", statement.duration.span);
+        }
+        return;
+      }
       case "assignmentStatement":
         this.#validateAssignmentTarget(statement.target, scope);
         this.#validateExpression(statement.value, scope, null);

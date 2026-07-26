@@ -24,6 +24,7 @@ import type {
   PropertyAccessExpression,
   ScalarTypeName,
   SayStatement,
+  WaitStatement,
   RepeatStatement,
   ReturnStatement,
   SetLiteral,
@@ -140,6 +141,13 @@ class Parser {
   }
 
   #parseStatement(): Statement | null {
+    if (
+      this.#check(TokenKind.Identifier) &&
+      this.#peek().lexeme === "wait" &&
+      !(this.#peek(1).kind === TokenKind.LeftParenthesis && this.#peek(2).kind === TokenKind.RightParenthesis)
+    ) {
+      return this.#parseWaitStatement();
+    }
     switch (this.#peek().kind) {
       case TokenKind.KeywordSpeaker:
         return this.#parseSpeakerStatement();
@@ -335,6 +343,26 @@ class Parser {
       kind: "exitStatement",
       span: copySpan(keyword.span),
     });
+  }
+
+  #parseWaitStatement(): WaitStatement | null {
+    const keyword = this.#advance();
+    const duration = this.#parseExpression();
+    if (duration === null) {
+      this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected a duration after 'wait'.");
+      this.#synchronizeStatement();
+      return null;
+    }
+    let unit: WaitStatement["unit"] = null;
+    if (this.#check(TokenKind.Identifier)) {
+      const token = this.#advance();
+      if (token.lexeme === "ms" || token.lexeme === "s" || token.lexeme === "min" || token.lexeme === "h") {
+        unit = token.lexeme;
+      } else {
+        this.#reportToken(parserDiagnosticCode.expectedStatementEnd, "Expected wait unit 'ms', 's', 'min', or 'h'.", token);
+      }
+    }
+    return Object.freeze({ kind: "waitStatement", duration, unit, span: spanFrom(keyword.span, duration.span) });
   }
 
   #parseLetStatement(): LetStatement | null {

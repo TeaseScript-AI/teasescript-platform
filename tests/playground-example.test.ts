@@ -53,7 +53,7 @@ test("checkpoint storage keys are format-versioned and example-specific", () => 
     checkpointStorageKey(name as keyof typeof PLAYGROUND_EXAMPLES)
   );
   assert.equal(new Set(keys).size, keys.length);
-  assert.ok(keys.every((key) => /checkpoint-v3:/u.test(key)));
+  assert.ok(keys.every((key) => /checkpoint-v4:/u.test(key)));
 });
 
 test("the functions example is allowlisted and visibly exercises the milestone", async () => {

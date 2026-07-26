@@ -12,6 +12,7 @@ export const TokenKind = {
 
   KeywordSpeaker: "keywordSpeaker",
   KeywordSay: "keywordSay",
+  KeywordWait: "keywordWait",
   KeywordAs: "keywordAs",
   KeywordExit: "keywordExit",
   KeywordLet: "keywordLet",
