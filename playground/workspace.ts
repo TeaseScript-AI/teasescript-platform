@@ -58,7 +58,7 @@ export function executeWorkspaceSnapshot(plan: InstructionPlan, snapshot: Runtim
 
 export function assertWorkspaceSource(source: unknown): asserts source is string {
   if (typeof source !== "string") throw new TypeError("Workspace source must be UTF-8 text.");
-  if (Buffer.byteLength(source, "utf8") > MAX_WORKSPACE_SOURCE_BYTES) {
+  if (new TextEncoder().encode(source).byteLength > MAX_WORKSPACE_SOURCE_BYTES) {
     throw new RangeError(`Workspace source must not exceed ${MAX_WORKSPACE_SOURCE_BYTES} UTF-8 bytes.`);
   }
 }
