@@ -10,6 +10,7 @@ Accepted post-V30 additions:
 - ADR 0014 defines recursive value-copy behavior, scalar-only sets, empty collection errors, and speaker display-name fallback.
 - ADR 0015 defines the serializable instruction-plan/runtime/checkpoint architecture used to execute the implemented syntax.
 - ADR 0016 defines the shared resumable pending-action contract and selects blocking `wait` as its first implementation slice.
+- ADR 0017 defines the accepted boundary between official syntax, the public Standard Library, package libraries, privileged platform adapters, and deterministic engine primitives.
 
 Rejected forms remain rejected, including `set score = 20`, `procedure`, and `call` for ordinary function calls. Historical research may still contain those forms and is non-authoritative.
 
@@ -30,9 +31,9 @@ When syntax is designed or reviewed, prefer:
 
 Keeping compact syntax does not require its implementation to remain hard-coded as a separate engine system. The compiler may lower an easy source form through the Standard Library or into small engine primitives while preserving source spans, diagnostics, determinism, and resume behavior.
 
-## Proposed syntax-to-library boundary
+## Accepted syntax-to-library boundary
 
-Proposed ADR 0017 separates source syntax from internal implementation placement.
+ADR 0017 separates source syntax from internal implementation placement.
 
 An official TeaseScript construct may lower to:
 
@@ -40,7 +41,7 @@ An official TeaseScript construct may lower to:
 - a platform Standard Library function;
 - or a fixed compiler-owned composition of both.
 
-Ordinary Standard Library and package-library exports use normal function-call syntax. Generated signatures and metadata should provide autocomplete, parameter hints, hover documentation, navigation, and type-aware diagnostics without requiring a new grammar production.
+Ordinary Standard Library and package-library exports use normal function-call syntax. Generated signatures and metadata provide the intended path for autocomplete, parameter hints, hover documentation, navigation, and type-aware diagnostics without requiring a new grammar production.
 
 Libraries may not add keywords, command syntax, block syntax, token forms, or parser hooks. New special syntax remains an explicit TeaseScript/compiler decision. Official syntax may call into a library internally, but a library export does not automatically become syntax.
 
@@ -48,13 +49,13 @@ Examples of the distinction:
 
 ```tease
 say "Hello"              // official accepted command syntax
-say(text: "Hello")       // possible ordinary library/API call; not accepted by this proposal alone
+say(text: "Hello")       // possible ordinary library/API call; not accepted by ADR 0017 alone
 customGreeting("Hello")  // ordinary package-library call
 ```
 
 A formatter formats ordinary calls according to the existing call grammar. It does not invent command syntax for a library function.
 
-The proposed boundary does not itself change accepted V30 forms such as `say "..."`, `wait 2`, `timer 10`, or `startTimer ...`. Timer names, chat pacing, and whether particular accepted forms later lower through the Standard Library require separate accepted decisions.
+The accepted boundary does not itself change accepted V30 forms such as `say "..."`, `wait 2`, `timer 10`, or `startTimer ...`. Timer names, chat pacing, and whether particular accepted forms later lower through the Standard Library require separate accepted decisions.
 
 ## Currently implemented language subset
 
@@ -73,7 +74,7 @@ The current function subset includes:
 
 Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented. Typed signatures may be parsed for diagnostics while unsupported execution/type semantics remain rejected.
 
-The current implemented `say` and `say as` paths remain unchanged by proposed ADR 0017. A later migration may lower those forms through a tested Standard Library path while preserving source spans, diagnostics, visible output, speaker identity, deterministic RNG use, and checkpoint behavior.
+The current implemented `say` and `say as` paths remain unchanged by ADR 0017. A later migration may lower those forms through a tested Standard Library path while preserving source spans, diagnostics, visible output, speaker identity, deterministic RNG use, and checkpoint behavior.
 
 ## Protected names
 
