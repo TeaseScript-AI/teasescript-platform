@@ -17,6 +17,7 @@ import {
   type ExternalDataFailureKind,
 } from "./external-data-limits.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
+import { recordValidationTestWork } from "./runtime/validation-testing.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
 export const INSTRUCTION_PLAN_VERSION = 4;
@@ -562,7 +563,7 @@ export function validateCapturedInstructionPlan(
     }
     validateLoopStructure(value.instructions, errors);
     validatePreparedReferenceStructure(value.instructions, errors);
-    const validatedFunctions = validateFunctionDefinitions(
+    const validationIndex = validateFunctionDefinitions(
       value.functions,
       value.instructions,
       rootEndInstruction,
@@ -570,8 +571,7 @@ export function validateCapturedInstructionPlan(
     );
     validateInstructionControlFlowRegions(
       value.instructions,
-      rootEndInstruction,
-      validatedFunctions,
+      validationIndex,
       errors,
     );
   }
@@ -2085,49 +2085,55 @@ interface ValidatedFunctionRange {
   readonly endInstruction: number;
 }
 
-function validateInstructionControlFlowRegions(
+/**
+ * Per-validation ownership data. It is deliberately local to one validation
+ * operation: externally supplied plans must not populate a process-wide cache.
+ */
+interface PlanValidationIndex {
+  readonly owners: readonly (InstructionExecutionRegion | undefined)[];
+  readonly functionsById: ReadonlyMap<number, ValidatedFunctionRange>;
+}
+
+function createPlanValidationIndex(
   instructions: readonly unknown[],
   rootEndInstruction: number | null,
   functions: readonly ValidatedFunctionRange[],
-  errors: PlanValidationError[],
-): void {
-  if (rootEndInstruction === null) return;
-
-  const regions: Array<InstructionExecutionRegion | undefined> = new Array(
-    instructions.length,
-  );
-  const rootRegion: InstructionExecutionRegion = {
+): PlanValidationIndex | null {
+  recordValidationTestWork("planOwnerIndexBuilds");
+  if (rootEndInstruction === null) return null;
+  const owners: Array<InstructionExecutionRegion | undefined> = new Array(instructions.length);
+  const root: InstructionExecutionRegion = {
     kind: "root",
     startInstruction: 0,
     endInstruction: rootEndInstruction,
   };
-  for (
-    let index = 0;
-    index < rootEndInstruction && index < instructions.length;
-    index += 1
-  ) {
-    regions[index] = rootRegion;
-  }
-
+  for (let index = 0; index < rootEndInstruction; index += 1) owners[index] = root;
+  const functionsById = new Map<number, ValidatedFunctionRange>();
   for (const definition of functions) {
-    const functionRegion: InstructionExecutionRegion = {
+    const region: InstructionExecutionRegion = {
       kind: "function",
       functionId: definition.id,
       startInstruction: definition.entryInstruction,
       endInstruction: definition.endInstruction,
     };
-    for (
-      let index = definition.entryInstruction;
-      index < definition.endInstruction && index < instructions.length;
-      index += 1
-    ) {
-      regions[index] = functionRegion;
+    functionsById.set(definition.id, definition);
+    for (let index = definition.entryInstruction; index < definition.endInstruction; index += 1) {
+      owners[index] = region;
     }
   }
+  return { owners, functionsById };
+}
+
+function validateInstructionControlFlowRegions(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex | null,
+  errors: PlanValidationError[],
+): void {
+  if (index === null) return;
 
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
-    const region = regions[instructionIndex];
+    const region = index.owners[instructionIndex];
     if (region === undefined) return;
     const instructionPath = `$.instructions[${instructionIndex}]`;
     switch (instruction.kind) {
@@ -2198,14 +2204,13 @@ function validateFunctionDefinitions(
   instructions: readonly unknown[],
   rootEndInstruction: number | null,
   errors: PlanValidationError[],
-): readonly ValidatedFunctionRange[] {
+): PlanValidationIndex | null {
   if (!Array.isArray(value)) {
     errors.push(planError("TSC002", "Function definitions must be an array.", "$.functions"));
-    return [];
+    return createPlanValidationIndex(instructions, rootEndInstruction, []);
   }
   const ids = new Set<number>();
   const names = new Set<string>();
-  const definitions = new Map<number, Record<string, unknown>>();
   const validatedRanges: ValidatedFunctionRange[] = [];
   let expectedEntry = rootEndInstruction;
   value.forEach((definition, definitionIndex) => {
@@ -2286,7 +2291,6 @@ function validateFunctionDefinitions(
       endInstruction: end,
     };
     validatedRanges.push(validatedRange);
-    definitions.set(functionId as number, definition);
 
     const bodyEntryMarker = instructions[bodyEntry - 1];
     if (!isRecord(bodyEntryMarker) || bodyEntryMarker.kind !== "enterFunctionBody") {
@@ -2315,12 +2319,13 @@ function validateFunctionDefinitions(
     ));
   }
 
-  instructions.forEach((instruction, index) => {
+  const index = createPlanValidationIndex(instructions, rootEndInstruction, validatedRanges);
+  instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
-    const owner = validatedRanges.find((definition) =>
-      index >= definition.entryInstruction &&
-      index < definition.endInstruction
-    );
+    const ownerRegion = index?.owners[instructionIndex];
+    const owner = ownerRegion?.kind === "function"
+      ? index?.functionsById.get(ownerRegion.functionId)
+      : undefined;
     const functionOnly = [
       "bindSuppliedParameter",
       "beginFunctionDefaults",
@@ -2334,7 +2339,7 @@ function validateFunctionDefinitions(
       errors.push(planError(
         "TSC002",
         "Function-only instruction appears in root execution.",
-        `$.instructions[${index}]`,
+        `$.instructions[${instructionIndex}]`,
       ));
     }
     if (
@@ -2346,11 +2351,11 @@ function validateFunctionDefinitions(
       errors.push(planError(
         "TSC002",
         "Function prologue instruction has the wrong function ID.",
-        `$.instructions[${index}].functionId`,
+        `$.instructions[${instructionIndex}].functionId`,
       ));
     }
     if (instruction.kind === "callFunction" && typeof instruction.functionId === "number") {
-      const target = definitions.get(instruction.functionId);
+      const target = index?.functionsById.get(instruction.functionId)?.definition;
       if (
         target !== undefined &&
         Array.isArray(target.parameters) &&
@@ -2369,14 +2374,14 @@ function validateFunctionDefinitions(
             errors.push(planError(
               "TSC002",
               "Call refers to an unknown function parameter.",
-              `$.instructions[${index}].arguments[${argumentIndex}].parameterName`,
+              `$.instructions[${instructionIndex}].arguments[${argumentIndex}].parameterName`,
             ));
           }
           if (supplied.has(argument.parameterName)) {
             errors.push(planError(
               "TSC002",
               "Call supplies a function parameter more than once.",
-              `$.instructions[${index}].arguments[${argumentIndex}].parameterName`,
+              `$.instructions[${instructionIndex}].arguments[${argumentIndex}].parameterName`,
             ));
           }
           supplied.add(argument.parameterName);
@@ -2391,14 +2396,14 @@ function validateFunctionDefinitions(
             errors.push(planError(
               "TSC002",
               "Call omits a required function parameter.",
-              `$.instructions[${index}].arguments[${parameterIndex}]`,
+              `$.instructions[${instructionIndex}].arguments[${parameterIndex}]`,
             ));
           }
         });
       }
     }
   });
-  return validatedRanges;
+  return index;
 }
 
 function validateFunctionPrologue(

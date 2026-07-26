@@ -12,13 +12,19 @@ import {
 import {
   executeInstruction,
   run,
+  RuntimeDataError,
   type RuntimeBuiltinFunction,
 } from "../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
 import {
   createFreshRuntimeSnapshot,
+  validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import {
+  withDetailedValidationWorkLimitForTesting,
+  withValidationTestStatistics,
+} from "../src/runtime/validation-testing.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("restores every instruction boundary during defaults and nested calls", () => {
@@ -108,6 +114,102 @@ test("restores exact RNG state through nested calls", () => {
   ].join("\n"));
 
   assert.ok(new Set(observations.map((snapshot) => snapshot.rng.state)).size > 1);
+});
+
+test("builds snapshot indexes once and reuses liveness for same-signature call frames", () => {
+  const { plan: compiled, snapshot } = recursiveSnapshot(4);
+  const statistics = withValidationTestStatistics((finish) => {
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+    return finish();
+  }).counts;
+
+  assert.equal(statistics.snapshotAnalysisBuilds, 1);
+  assert.equal(statistics.defaultBindingIndexBuilds, 1);
+  assert.equal(statistics.parameterNameIndexBuilds, 1);
+  assert.equal(statistics.preparedArgumentMapBuilds, snapshot.callFrames.length);
+  assert.equal(statistics.livenessComputations, 1);
+  assert.equal(statistics.livenessTableAllocations, 1);
+  assert.equal(statistics.livenessCacheInsertions, 1);
+  assert.equal(statistics.livenessCacheHits, snapshot.callFrames.length - 1);
+});
+
+test("indexes prepared arguments and caller temporaries once per suspended frame", () => {
+  const compiled = plan([
+    "function recurse(value, first, second, third, fourth, fifth) {",
+    "  if value == 0 { return first }",
+    "  return recurse(value - 1, first, second, third, fourth, fifth)",
+    "}",
+    "say recurse(3, 1, 2, 3, 4, 5)",
+  ].join("\n"));
+  const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === 3);
+  const statistics = withValidationTestStatistics((finish) => {
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+    return finish();
+  }).counts;
+
+  assert.equal(statistics.preparedArgumentMapBuilds, 3);
+  assert.equal(statistics.temporaryMapBuilds, 9);
+  assert.equal(statistics.structuralValueComparisons, 18);
+
+  const missing = structuredClone(snapshot) as any;
+  missing.callFrames[0].callerTemporaries = [];
+  assert.equal(validateRuntimeSnapshot(missing, compiled).valid, false);
+  const mismatched = structuredClone(snapshot) as any;
+  mismatched.callFrames[0].callerTemporaries[0].value = 99;
+  assert.equal(validateRuntimeSnapshot(mismatched, compiled).valid, false);
+});
+
+test("structurally compares captured scalar and composite argument values", () => {
+  const expressions = [
+    "42",
+    "1..=3",
+    '[1, "two", [3]]',
+    'set["first", "second"]',
+    '{ outer: { items: [1, 2] } }',
+  ];
+  for (const expression of expressions) {
+    const compiled = plan(`function identity(value) { return value }\nsay identity(${expression})`);
+    const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === 1);
+    const statistics = withValidationTestStatistics((finish) => {
+      assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, expression);
+      return finish();
+    }).counts;
+    assert.ok((statistics.structuralValueComparisons ?? 0) >= 1, expression);
+  }
+
+  const compiled = plan("function identity(value) { return value }\nsay identity({ outer: { items: [1, 2] } })");
+  const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === 1);
+  const mismatched = structuredClone(snapshot) as any;
+  mismatched.callFrames[0].arguments[0].value.properties[0].value.properties[0].value.items[1] = 99;
+  assert.equal(validateRuntimeSnapshot(mismatched, compiled).valid, false);
+});
+
+test("detailed validation exhausts before later liveness allocation at every public boundary", () => {
+  const { plan: compiled, snapshot } = recursiveSnapshot(3);
+  const checkpoint = createCheckpoint(compiled, snapshot);
+  const snapshotBefore = JSON.stringify(snapshot);
+  const statistics = withDetailedValidationWorkLimitForTesting(0, () =>
+    withValidationTestStatistics((finish) => {
+      const direct = validateRuntimeSnapshot(snapshot, compiled);
+      assert.equal(direct.valid, false);
+      assert.ok(direct.errors.includes("Runtime snapshot exceeds the detailed validation work limit."));
+      assert.throws(
+        () => run(compiled, snapshot),
+        (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+      );
+      assert.throws(
+        () => restoreCheckpoint(checkpoint),
+        (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002",
+      );
+      return finish();
+    }).counts,
+  );
+
+  assert.equal(JSON.stringify(snapshot), snapshotBefore);
+  assert.equal(statistics.livenessTableAllocations, undefined);
+  assert.equal(statistics.livenessComputations, undefined);
+  assert.equal(statistics.livenessCacheInsertions, undefined);
+  assert.equal(statistics.budgetExhaustions, 9);
 });
 
 test("checkpoint creation defensively isolates the supplied plan", () => {

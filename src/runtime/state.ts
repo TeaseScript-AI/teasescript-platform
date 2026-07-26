@@ -26,12 +26,17 @@ import {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
+import {
+  detailedValidationWorkLimitForTesting,
+  recordValidationTestWork,
+} from "./validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
 export const RUNTIME_SNAPSHOT_VERSION = 5;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
+const MAX_DETAILED_VALIDATION_WORK = 1_000_000;
 
 export type RuntimeStatus = "ready" | "running" | "waiting" | "halted" | "failed";
 
@@ -436,6 +441,7 @@ export function validateCapturedRuntimeSnapshot(
   }
   if (value.format !== RUNTIME_SNAPSHOT_FORMAT) errors.push("Unsupported runtime-snapshot format.");
   if (value.version !== RUNTIME_SNAPSHOT_VERSION) errors.push("Unsupported runtime-snapshot version.");
+  const analysis = plan === undefined ? undefined : createSnapshotValidationAnalysis(plan);
   const instructionLimit = plan?.instructions.length;
   if (
     !nonNegativeSafeInteger(value.nextInstruction) ||
@@ -463,6 +469,7 @@ export function validateCapturedRuntimeSnapshot(
     value.nextInstruction,
     value.maxCallDepth,
     plan,
+    analysis,
     preparedReferenceTemporaryIds,
     errors,
   );
@@ -514,6 +521,7 @@ export function validateCapturedRuntimeSnapshot(
     value.callFrames,
     callFrameIds,
     plan,
+    analysis,
     errors,
   );
   validateCurrentTemporaryRequirements(
@@ -578,6 +586,7 @@ function validateLoopFrames(
   callFrames: unknown,
   callFrameIds: ReadonlySet<number>,
   plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
   if (!Array.isArray(value)) {
@@ -595,6 +604,14 @@ function validateLoopFrames(
     target: number;
     functionId: number | null;
   }>();
+  const callFramesById = new Map<number, Record<string, unknown>>();
+  if (Array.isArray(callFrames)) {
+    for (const frame of callFrames) {
+      if (isPlainRecord(frame) && nonNegativeSafeInteger(frame.id)) {
+        callFramesById.set(frame.id, frame);
+      }
+    }
+  }
   plan?.instructions.forEach((instruction, index) => {
     if (instruction.kind === "loopStart") {
       plannedLoops.set(instruction.loopId, {
@@ -603,12 +620,7 @@ function validateLoopFrames(
         start: index,
         continueStart: instruction.continueTarget,
         target: instruction.target,
-        functionId:
-          plan.functions.find(
-            (definition) =>
-              index >= definition.entryInstruction &&
-              index < definition.endInstruction,
-          )?.id ?? null,
+        functionId: analysis?.functionIdsByInstruction[index] ?? null,
       });
     }
   });
@@ -637,11 +649,8 @@ function validateLoopFrames(
     }
     previousDepth = frame.scopeDepth;
     const planned = plannedLoops.get(frame.loopId);
-    const owner = Array.isArray(callFrames)
-      ? callFrames.find(
-          (candidate) =>
-            isPlainRecord(candidate) && candidate.id === frame.callFrameId,
-        )
+    const owner = nonNegativeSafeInteger(frame.callFrameId)
+      ? callFramesById.get(frame.callFrameId)
       : undefined;
     const currentOwner = Array.isArray(callFrames) && callFrames.length > 0
       ? (isPlainRecord(callFrames.at(-1)) ? callFrames.at(-1)!.id : undefined)
@@ -1031,6 +1040,7 @@ function validateCallFrames(
   nextInstruction: unknown,
   maxCallDepth: unknown,
   plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
   preparedReferenceTemporaryIds: ReadonlySet<number>,
   errors: string[],
 ): Set<number> {
@@ -1059,7 +1069,9 @@ function validateCallFrames(
       previousId = frame.id;
       ids.add(frame.id);
     }
-    const definition = plan?.functions.find((item) => item.id === frame.functionId);
+    const definition = nonNegativeSafeInteger(frame.functionId)
+      ? analysis?.functionsById.get(frame.functionId)
+      : undefined;
     let callInstruction: InstructionPlan["instructions"][number] | undefined;
     if (
       !nonNegativeSafeInteger(frame.functionId) ||
@@ -1115,11 +1127,7 @@ function validateCallFrames(
     if (
       nonNegativeSafeInteger(frame.destinationTemporary) &&
       Array.isArray(frame.callerTemporaries) &&
-      frame.callerTemporaries.some(
-        (temporary) =>
-          isPlainRecord(temporary) &&
-          temporary.id === frame.destinationTemporary,
-      )
+      createTemporaryMap(frame.callerTemporaries).has(frame.destinationTemporary)
     ) {
       errors.push("Runtime caller temporaries already contain the result destination.");
     }
@@ -1152,6 +1160,7 @@ function validateCallFrames(
       frame,
       frames,
       definition,
+      analysis,
       errors,
     );
 
@@ -1168,18 +1177,17 @@ function validateCallFrames(
         Array.isArray(loopFrames) && nonNegativeSafeInteger(frame.loopBaseDepth)
           ? loopFrames.slice(0, frame.loopBaseDepth)
           : [],
-        plan,
+        analysis!,
         errors,
       );
     }
 
     if (plan !== undefined && nonNegativeSafeInteger(frame.returnInstruction)) {
       const callIndex = frame.returnInstruction - 1;
-      const callerDefinition = frameIndex === 0
-        ? undefined
-        : plan.functions.find(
-            (item) => item.id === (value[frameIndex - 1] as Record<string, unknown>)?.functionId,
-          );
+      const caller = frameIndex === 0 ? undefined : value[frameIndex - 1];
+      const callerDefinition = isPlainRecord(caller) && nonNegativeSafeInteger(caller.functionId)
+        ? analysis?.functionsById.get(caller.functionId)
+        : undefined;
       if (
         (frameIndex === 0 && callIndex >= plan.rootEndInstruction) ||
         (frameIndex > 0 &&
@@ -1207,7 +1215,7 @@ function validateCallFrames(
           frame.parameterState,
           definition,
           nextInstruction,
-          plan!,
+          analysis!,
           errors,
         );
       } else if (isPlainRecord(child) && nonNegativeSafeInteger(child.returnInstruction)) {
@@ -1215,14 +1223,14 @@ function validateCallFrames(
           frame.parameterState,
           definition,
           child.returnInstruction - 1,
-          plan!,
+          analysis!,
           errors,
         );
         validateExactParameterPosition(
           frame.parameterState,
           definition,
           child.returnInstruction,
-          plan!,
+          analysis!,
           errors,
         );
       }
@@ -1244,20 +1252,22 @@ function validateCallArgumentConsistency(
   ) {
     return;
   }
+  const preparedByParameter = new Map(
+    callInstruction.arguments.map((argument) => [argument.parameterName, argument]),
+  );
+  recordValidationTestWork("preparedArgumentMapBuilds");
+  const callerTemporariesById = createTemporaryMap(callerTemporaries);
   for (const argument of argumentsValue) {
     if (!isPlainRecord(argument) || typeof argument.parameterName !== "string") continue;
-    const prepared = callInstruction.arguments.find(
-      (item) => item.parameterName === argument.parameterName,
-    );
+    const prepared = preparedByParameter.get(argument.parameterName);
     if (argument.supplied === true) {
       const temporary = prepared === undefined
         ? undefined
-        : callerTemporaries.find(
-            (item) => isPlainRecord(item) && item.id === prepared.temporaryId,
-          );
+        : callerTemporariesById.get(prepared.temporaryId);
       if (
         !isPlainRecord(temporary) ||
-        JSON.stringify(temporary.value) !== JSON.stringify(argument.value)
+        !("value" in temporary) ||
+        !sameValidatedSerializableValue(temporary.value, argument.value)
       ) {
         errors.push("Runtime supplied argument does not match caller temporary state.");
       }
@@ -1267,10 +1277,52 @@ function validateCallArgumentConsistency(
   }
 }
 
+function createTemporaryMap(temporaries: readonly unknown[]): ReadonlyMap<number, Record<string, unknown>> {
+  recordValidationTestWork("temporaryMapBuilds");
+  const result = new Map<number, Record<string, unknown>>();
+  for (const temporary of temporaries) {
+    if (isPlainRecord(temporary) && nonNegativeSafeInteger(temporary.id)) {
+      result.set(temporary.id, temporary);
+    }
+  }
+  return result;
+}
+
+/** Structural equality for values that have already passed serializable-value validation. */
+function sameValidatedSerializableValue(left: unknown, right: unknown): boolean {
+  recordValidationTestWork("structuralValueComparisons");
+  if (left === right) return true;
+  if (!isPlainRecord(left) || !isPlainRecord(right) || left.kind !== right.kind) return false;
+  switch (left.kind) {
+    case "speakerReference":
+      return left.speakerId === right.speakerId && left.identifier === right.identifier;
+    case "range":
+      return left.start === right.start && left.end === right.end && left.inclusive === right.inclusive;
+    case "list":
+    case "set":
+      { const rightItems = Array.isArray(right.items) ? right.items : null;
+        return Array.isArray(left.items) && rightItems !== null &&
+          left.items.length === rightItems.length &&
+          left.items.every((item, index) => sameValidatedSerializableValue(item, rightItems[index])); }
+    case "object":
+      { const rightProperties = Array.isArray(right.properties) ? right.properties : null;
+        return Array.isArray(left.properties) && rightProperties !== null &&
+        left.properties.length === rightProperties.length &&
+        left.properties.every((property, index) =>
+          isPlainRecord(property) && isPlainRecord(rightProperties[index]) &&
+          property.name === rightProperties[index].name &&
+          sameValidatedSerializableValue(property.value, rightProperties[index].value)
+        ); }
+    default:
+      return false;
+  }
+}
+
 function validateParameterBindings(
   frame: Record<string, unknown>,
   frames: unknown,
   definition: InstructionPlan["functions"][number] | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
   if (
@@ -1295,9 +1347,7 @@ function validateParameterBindings(
   );
   if (
     parameterState.phase !== "body" &&
-    [...bindingNames].some(
-      (name) => !definition.parameters.some((parameter) => parameter.name === name),
-    )
+    [...bindingNames].some((name) => !analysis?.parameterNames.get(definition.id)?.has(name))
   ) {
     errors.push("Runtime function prologue contains a non-parameter binding.");
   }
@@ -1375,11 +1425,11 @@ function validateExactParameterPosition(
   value: unknown,
   definition: InstructionPlan["functions"][number],
   instructionPosition: number,
-  plan: InstructionPlan,
+  analysis: SnapshotValidationAnalysis,
   errors: string[],
 ): void {
   if (!isPlainRecord(value) || !nonNegativeSafeInteger(value.parameterIndex)) return;
-  const expected = expectedParameterProgress(definition, instructionPosition, plan);
+  const expected = expectedParameterProgress(definition, instructionPosition, analysis);
   if (
     expected === null ||
     value.phase !== expected.phase ||
@@ -1392,7 +1442,7 @@ function validateExactParameterPosition(
 function expectedParameterProgress(
   definition: InstructionPlan["functions"][number],
   instructionPosition: number,
-  plan: InstructionPlan,
+  analysis: SnapshotValidationAnalysis,
 ): RuntimeParameterStateSnapshot | null {
   const parameterCount = definition.parameters.length;
   if (
@@ -1410,19 +1460,14 @@ function expectedParameterProgress(
   }
   cursor += 1;
   for (let parameterIndex = 0; parameterIndex < parameterCount; parameterIndex += 1) {
-    const prepare = plan.instructions[cursor];
+    const prepare = analysis.plan.instructions[cursor];
     if (prepare?.kind !== "prepareParameterDefault") return null;
     if (instructionPosition === cursor) {
       return { phase: "defaults", parameterIndex };
     }
-    const bindIndex = plan.instructions.findIndex(
-      (instruction, index) =>
-        index > cursor &&
-        index < prepare.target &&
-        instruction.kind === "bindDefaultParameter" &&
-        instruction.functionId === definition.id &&
-        instruction.parameterIndex === parameterIndex,
-    );
+    const bindIndex = analysis.defaultBindingPositions.get(
+      `${definition.id}:${parameterIndex}`,
+    ) ?? -1;
     if (instructionPosition > cursor && instructionPosition < prepare.target) {
       return {
         phase: "defaults",
@@ -1446,46 +1491,131 @@ function expectedParameterProgress(
   return null;
 }
 
+interface SnapshotValidationAnalysis {
+  readonly plan: InstructionPlan;
+  readonly functionsById: ReadonlyMap<number, InstructionPlan["functions"][number]>;
+  readonly regionEnds: readonly number[];
+  readonly functionIdsByInstruction: readonly (number | null)[];
+  readonly continuationLiveness: Map<string, readonly ReadonlySet<number>[]>;
+  readonly defaultBindingPositions: ReadonlyMap<string, number>;
+  readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
+  remainingDetailedWork: number;
+  detailedWorkExceeded: boolean;
+}
+
+function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
+  recordValidationTestWork("snapshotAnalysisBuilds");
+  const functionsById = new Map<number, InstructionPlan["functions"][number]>();
+  const regionEnds = new Array<number>(plan.instructions.length).fill(plan.rootEndInstruction);
+  const functionIdsByInstruction = new Array<number | null>(plan.instructions.length).fill(null);
+  for (const definition of plan.functions) {
+    functionsById.set(definition.id, definition);
+    for (let index = definition.entryInstruction; index < definition.endInstruction; index += 1) {
+      regionEnds[index] = definition.endInstruction;
+      functionIdsByInstruction[index] = definition.id;
+    }
+  }
+  const defaultBindingPositions = new Map<string, number>();
+  recordValidationTestWork("defaultBindingIndexBuilds");
+  for (let index = 0; index < plan.instructions.length; index += 1) {
+    const instruction = plan.instructions[index];
+    if (instruction?.kind === "bindDefaultParameter") {
+      defaultBindingPositions.set(`${instruction.functionId}:${instruction.parameterIndex}`, index);
+    }
+  }
+  const parameterNames = new Map(
+    plan.functions.map((definition) => [
+      definition.id,
+      new Set(definition.parameters.map((parameter) => parameter.name)),
+    ]),
+  );
+  recordValidationTestWork("parameterNameIndexBuilds");
+  return {
+    plan,
+    functionsById,
+    regionEnds,
+    functionIdsByInstruction,
+    continuationLiveness: new Map(),
+    defaultBindingPositions,
+    parameterNames,
+    remainingDetailedWork:
+      detailedValidationWorkLimitForTesting() ?? MAX_DETAILED_VALIDATION_WORK,
+    detailedWorkExceeded: false,
+  };
+}
+
 function validateSuspendedContinuationTemporaries(
   callerTemporaries: unknown[],
   destinationTemporary: number,
   returnInstruction: number,
   callerLoopFrames: unknown,
-  plan: InstructionPlan,
+  analysis: SnapshotValidationAnalysis,
   errors: string[],
 ): void {
-  const present = new Set(
-    callerTemporaries
-      .filter(isPlainRecord)
-      .map((temporary) => temporary.id)
-      .filter((id): id is number => nonNegativeSafeInteger(id)),
-  );
+  const present = new Set(createTemporaryMap(callerTemporaries).keys());
   present.add(destinationTemporary);
   const required = requiredContinuationTemporaries(
-    plan,
+    analysis,
     returnInstruction,
     callerLoopFrames,
   );
+  if (analysis.detailedWorkExceeded) {
+    errors.push("Runtime snapshot exceeds the detailed validation work limit.");
+    return;
+  }
   if ([...required].some((temporaryId) => !present.has(temporaryId))) {
     errors.push("Runtime caller temporaries cannot resume the suspended continuation.");
   }
 }
 
 function requiredContinuationTemporaries(
-  plan: InstructionPlan,
+  analysis: SnapshotValidationAnalysis,
   startInstruction: number,
   loopFrames: unknown,
 ): ReadonlySet<number> {
+  const activeLoop = Array.isArray(loopFrames) ? loopFrames.at(-1) : undefined;
+  const loopSignature = isPlainRecord(activeLoop) && nonNegativeSafeInteger(activeLoop.loopId)
+    ? `loop:${activeLoop.loopId}`
+    : "none";
+  let liveIn = analysis.continuationLiveness.get(loopSignature);
+  if (liveIn === undefined) {
+    // Charge the full table allocation before allocating or caching it.
+    if (!consumeDetailedValidationWork(analysis, analysis.plan.instructions.length)) {
+      recordValidationTestWork("budgetExhaustions");
+      return new Set<number>();
+    }
+    recordValidationTestWork("livenessComputations");
+    recordValidationTestWork("livenessTableAllocations");
+    liveIn = computeContinuationLiveness(analysis, loopFrames);
+    if (!analysis.detailedWorkExceeded) {
+      analysis.continuationLiveness.set(loopSignature, liveIn);
+      recordValidationTestWork("livenessCacheInsertions");
+    }
+  } else {
+    recordValidationTestWork("livenessCacheHits");
+  }
+  return liveIn[startInstruction] ?? new Set<number>();
+}
+
+function computeContinuationLiveness(
+  analysis: SnapshotValidationAnalysis,
+  loopFrames: unknown,
+): readonly ReadonlySet<number>[] {
+  const plan = analysis.plan;
   const count = plan.instructions.length;
   const liveIn = Array.from({ length: count }, () => new Set<number>());
   let changed = true;
   while (changed) {
     changed = false;
     for (let index = count - 1; index >= 0; index -= 1) {
+      if (!consumeDetailedValidationWork(analysis)) return liveIn;
       const instruction = plan.instructions[index]!;
       const liveOut = new Set<number>();
-      for (const successor of instructionSuccessors(plan, index)) {
-        for (const temporaryId of liveIn[successor] ?? []) liveOut.add(temporaryId);
+      for (const successor of instructionSuccessors(analysis, index)) {
+        for (const temporaryId of liveIn[successor] ?? []) {
+          if (!consumeDetailedValidationWork(analysis)) return liveIn;
+          liveOut.add(temporaryId);
+        }
       }
       for (const temporaryId of instructionKilledTemporaries(instruction)) {
         liveOut.delete(temporaryId);
@@ -1499,16 +1629,27 @@ function requiredContinuationTemporaries(
       }
     }
   }
-  return liveIn[startInstruction] ?? new Set<number>();
+  return liveIn;
+}
+
+function consumeDetailedValidationWork(analysis: SnapshotValidationAnalysis, amount = 1): boolean {
+  recordValidationTestWork("detailedWorkConsumed", amount);
+  if (analysis.remainingDetailedWork < amount) {
+    analysis.detailedWorkExceeded = true;
+    return false;
+  }
+  analysis.remainingDetailedWork -= amount;
+  return true;
 }
 
 function instructionSuccessors(
-  plan: InstructionPlan,
+  analysis: SnapshotValidationAnalysis,
   index: number,
 ): readonly number[] {
+  const { plan } = analysis;
   const instruction = plan.instructions[index];
   if (instruction === undefined) return [];
-  const regionEnd = instructionRegionEnd(plan, index);
+  const regionEnd = analysis.regionEnds[index] ?? plan.instructions.length;
   const next = index + 1 < regionEnd ? index + 1 : null;
   switch (instruction.kind) {
     case "jump":
@@ -1531,14 +1672,6 @@ function instructionSuccessors(
     default:
       return next === null ? [] : [next];
   }
-}
-
-function instructionRegionEnd(plan: InstructionPlan, index: number): number {
-  if (index < plan.rootEndInstruction) return plan.rootEndInstruction;
-  return plan.functions.find(
-    (definition) =>
-      index >= definition.entryInstruction && index < definition.endInstruction,
-  )?.endInstruction ?? plan.instructions.length;
 }
 
 function instructionKilledTemporaries(
