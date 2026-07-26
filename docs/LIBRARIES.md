@@ -10,9 +10,9 @@
 
 The exact `.tease` import/linkage syntax, generated metadata format, versioning rules, and complete Standard Library API remain open. Historical examples using the rejected procedure concept, explicit ordinary-function invocation keywords, or procedure-based scheduling are not authoritative.
 
-## Proposed dependency model
+## Accepted dependency model
 
-Proposed ADR 0017 adds this dependency direction:
+ADR 0017 defines this dependency direction:
 
 ```text
 TeaseScript scripts
@@ -30,7 +30,7 @@ Package-library-to-package-library dependencies are not accepted by ADR 0017. Ex
 
 The Standard Library is platform-owned TypeScript distributed and versioned with the compatible engine/player. It may compose typed engine capabilities but may not bypass runtime validation, checkpointing, the player sandbox, or security boundaries.
 
-## Candidate responsibility split
+## Accepted responsibility split
 
 ### Engine primitives
 
