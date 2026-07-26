@@ -2,7 +2,11 @@
 
 The future browser editor should use parser diagnostics and source spans for syntax highlighting, errors, navigation, autocomplete, simulation, stepping, deterministic replay, state inspection, and breakpoint-like debugging.
 
-The standalone fixed-example playground is implemented as a development proof. It exposes source, diagnostics, instruction plan, runtime state, events, stepping, reset, and checkpoint save/restore for the implemented examples. It is not yet a full source editor, Monaco integration, cross-origin production player, or package authoring environment.
+The standalone playground is a local technical workspace, not the production editor. It uses an accessible native textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and validated checkpoint save/restore. It deliberately has no Monaco integration, package authoring, library-aware completion, or cross-origin production-player UI.
+
+The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are separate from version-4 runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the draft and never overwrites repository examples. A local `.tease` file may be imported or exported without repository or server writes.
+
+Every edit increments a source revision and invalidates the plan, snapshot, transcript, events, counters, and checkpoint controls. Run, step, checkpoint save, and checkpoint restore require a successfully compiled runtime at the current revision. Reset recompiles the textarea contents; no plan migration occurs. Restore accepts only a validated self-contained checkpoint whose plan exactly matches the current runtime, so source text is never checkpoint identity.
 
 A production editor should build on the versioned parser/runtime interfaces after the host/player boundary is specified. Debugger history may snapshot selected boundaries; it should not imply that production execution persists every internal instruction.
 

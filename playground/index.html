@@ -23,6 +23,7 @@
       <section class="controls" aria-label="Runtime controls">
         <label for="example-select">Example</label>
         <select id="example-select"></select>
+        <button id="compile" type="button">Compile</button>
         <button id="run" type="button">Run</button>
         <button id="step" type="button">Step</button>
         <button id="reset" type="button">Reset</button>
@@ -31,18 +32,31 @@
         <button id="restore-checkpoint" type="button">Restore checkpoint</button>
         <button id="clear-checkpoint" type="button">Clear saved checkpoint</button>
         <button id="reload-example" type="button">Reload example</button>
+        <button id="import-source" type="button">Import .tease</button>
+        <button id="export-source" type="button">Export .tease</button>
+        <button id="refresh-workspace" type="button">Refresh automation workspace</button>
+        <input id="source-file" type="file" accept=".tease,text/plain" hidden>
         <span id="action-status" class="action-status" role="status"></span>
       </section>
 
       <div class="primary-grid">
-        <section class="panel source-panel">
+        <section id="source-panel" class="panel source-panel">
           <h2>Source: <span id="loaded-example-name">loading</span></h2>
-          <pre id="source-code" tabindex="0">Loading example…</pre>
+          <p id="source-revision" class="source-revision" aria-live="polite"></p>
+          <label class="sr-only" for="source-code">TeaseScript source</label>
+          <div class="source-editor">
+            <pre id="source-lines" aria-hidden="true">1</pre>
+            <textarea id="source-code" spellcheck="false" aria-describedby="source-revision">Loading example…</textarea>
+          </div>
         </section>
 
-        <section class="panel player-panel">
+        <section id="player-panel" class="panel player-panel">
           <h2>Player transcript</h2>
           <ol id="transcript" class="transcript" aria-live="polite"></ol>
+          <section class="future-timer-slot" aria-label="Reserved future timer area">
+            <div class="future-timer-circle" aria-label="Future timer placeholder">--:--</div>
+            <p>Reserved for future timer UI</p>
+          </section>
         </section>
       </div>
 

@@ -48,14 +48,14 @@ test("serves required JavaScript and CSS assets", async () => {
 
   assert.equal(javascript.status, 200);
   assert.match(javascript.contentType, /^text\/javascript/u);
-  assert.match(javascript.body, /compileSource/u);
+  assert.match(javascript.body, /compileWorkspaceSource/u);
   assert.equal(css.status, 200);
   assert.match(css.contentType, /^text\/css/u);
   assert.match(css.body, /runtime-summary/u);
 });
 
 test("serves every fixed repository playground example", async () => {
-  for (const name of ["main", "control-flow", "checkpoint-loop", "functions"]) {
+  for (const name of ["basic", "main", "control-flow", "checkpoint-loop", "functions"]) {
     const response = await get(`/examples/playground/${name}.tease`);
     assert.equal(response.status, 200, name);
     assert.match(response.contentType, /^text\/plain/u);
@@ -108,6 +108,42 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
   assert.match(response.body, /unsafe request path/u);
 });
 
+test("workspace automation stores revisions and returns compile and run results", async () => {
+  const uploaded = await api("PUT", "/api/workspace/source", 'say "automation"', "text/plain; charset=utf-8");
+  assert.equal(uploaded.status, 200);
+  const workspace = JSON.parse(uploaded.body) as { source: string; sourceRevision: number; stale: boolean };
+  assert.equal(workspace.source, 'say "automation"');
+  assert.equal(workspace.stale, true);
+  const compiled = await api("POST", "/api/workspace/compile");
+  assert.equal(compiled.status, 200);
+  assert.equal((JSON.parse(compiled.body) as { result: { status: string } }).result.status, "ready");
+  const run = await api("POST", "/api/workspace/run");
+  const runBody = JSON.parse(run.body) as { result: { status: string; events: { kind: string }[] } };
+  assert.equal(run.status, 200);
+  assert.equal(runBody.result.status, "halted");
+  assert.deepEqual(runBody.result.events.map((event) => event.kind), ["say", "complete"]);
+  const result = await api("GET", "/api/workspace/result");
+  assert.equal(result.status, 200);
+  assert.equal((JSON.parse(result.body) as { stale: boolean }).stale, false);
+});
+
+test("workspace automation rejects unsafe methods, bodies, content, and bounds", async () => {
+  assert.equal((await api("DELETE", "/api/workspace")).status, 405);
+  assert.equal((await api("PUT", "/api/workspace/source", "x")).status, 415);
+  assert.equal((await api("PUT", "/api/workspace/source", "x", "application/json")).status, 415);
+  assert.equal((await api("POST", "/api/workspace/run", "{}", "application/json")).status, 400);
+  assert.equal((await api("POST", "/api/workspace/run", "{}", undefined, port, true)).status, 400);
+  assert.equal((await api("PUT", "/api/workspace/source", "x".repeat(70 * 1024), "text/plain; charset=utf-8")).status, 413);
+});
+
+test("workspace automation rejects clients outside the permitted loopback address", async (context) => {
+  const isolatedServer = createPlaygroundServer();
+  const isolatedPort = await listenAt(isolatedServer, "0.0.0.0");
+  context.after(async () => close(isolatedServer));
+  const response = await api("GET", "/api/workspace", undefined, undefined, isolatedPort, false, "127.0.0.2");
+  assert.equal(response.status, 403);
+});
+
 interface HttpResult {
   readonly status: number;
   readonly contentType: string;
@@ -115,13 +151,22 @@ interface HttpResult {
 }
 
 function get(path: string, requestPort = port): Promise<HttpResult> {
+  return api("GET", path, undefined, undefined, requestPort);
+}
+
+function api(method: string, path: string, body?: string, contentType?: string, requestPort = port, omitContentLength = false, localAddress?: string): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
     const outgoing = request(
       {
         host: "127.0.0.1",
         port: requestPort,
-        method: "GET",
+        method,
         path,
+        localAddress,
+        headers: body === undefined ? undefined : {
+          ...(contentType === undefined ? {} : { "Content-Type": contentType }),
+          ...(omitContentLength ? {} : { "Content-Length": Buffer.byteLength(body) }),
+        },
       },
       (incoming) => {
         incoming.setEncoding("utf8");
@@ -139,7 +184,19 @@ function get(path: string, requestPort = port): Promise<HttpResult> {
       },
     );
     outgoing.on("error", reject);
-    outgoing.end();
+    outgoing.end(body);
+  });
+}
+
+function listenAt(target: typeof server, host: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    target.once("error", reject);
+    target.listen(0, host, () => {
+      target.off("error", reject);
+      const address = target.address();
+      if (address === null || typeof address === "string") { reject(new Error("Expected an IP server address.")); return; }
+      resolve(address.port);
+    });
   });
 }
 

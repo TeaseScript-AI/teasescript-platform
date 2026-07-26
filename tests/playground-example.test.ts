@@ -85,14 +85,11 @@ test("the functions example is allowlisted and visibly exercises the milestone",
   );
 });
 
-test("playground restore refuses detached source plans and renders source safely", async () => {
+test("playground restore gates stale source runtimes and renders source safely", async () => {
   const browserSource = await readFile("playground/browser.ts", "utf8");
 
-  assert.match(browserSource, /does not match the currently displayed example source/u);
-  assert.match(browserSource, /elements\.source\.textContent = source/u);
+  assert.match(browserSource, /self-contained plan is incompatible with the current source runtime/u);
+  assert.match(browserSource, /elements\.source\.value = value/u);
   assert.doesNotMatch(browserSource, /source\.innerHTML/u);
-  assert.match(
-    browserSource,
-    /plan = null;\s+snapshot = null;\s+source = "";\s+eventLog = \[\];/u,
-  );
+  assert.match(browserSource, /plan = null; snapshot = null; compiledRevision = null; eventLog = \[\];/u);
 });

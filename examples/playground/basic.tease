@@ -1,0 +1,10 @@
+speaker guide {
+  title: "Guide"
+  firstName: "Vera"
+}
+
+speaker guide
+
+say "Welkom in TeaseScript."
+say `Ik ben ${speaker.firstName}.`
+exit

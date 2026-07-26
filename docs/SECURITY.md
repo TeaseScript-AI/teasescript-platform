@@ -1,5 +1,11 @@
 # Security boundaries
 
+## Playground development automation
+
+The constrained playground server has an ephemeral loopback-only development workspace API: `PUT /api/workspace/source`, `GET /api/workspace`, `POST /api/workspace/compile`, `POST /api/workspace/run`, and `GET /api/workspace/result`. It emits no CORS headers, has no filesystem-write route, and preserves the static allowlist. Automation is rejected for non-loopback clients even if the static development listener is configured beyond loopback.
+
+Source requires UTF-8 `text/plain; charset=utf-8` and is limited to 65,536 bytes; request bodies are limited to 66,560 bytes before buffering. This bounds parser/compiler work and accidental tool uploads. Unsupported methods/content types, malformed UTF-8, unsafe paths, and oversized data receive structured errors without stack traces. This is neither a public API nor a production backend.
+
 - Run the complete player and package code in a sandboxed cross-origin iframe, preferably on a separate player origin.
 - Keep main-site cookies host-only and unavailable to the player.
 - Validate every parent/player message, checkpoint, package manifest, server response, and future integration result.

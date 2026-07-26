@@ -1,9 +1,12 @@
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLAYGROUND_EXAMPLES } from "./examples.js";
+import { MAX_WORKSPACE_SOURCE_BYTES, compileWorkspaceSource, executeWorkspaceSource, type WorkspaceResult } from "./workspace.js";
+
+export const MAX_WORKSPACE_REQUEST_BYTES = MAX_WORKSPACE_SOURCE_BYTES + 1024;
 
 export interface PlaygroundServerOptions {
   readonly projectRoot?: string;
@@ -21,15 +24,11 @@ export function createPlaygroundServer(
   const playgroundRoot = resolve(projectRoot, "playground");
   const distRoot = resolve(projectRoot, "dist");
   const examplesRoot = resolve(projectRoot, "examples");
+  const workspace: AutomationWorkspace = { source: "", sourceRevision: 0, lastCompileResult: null, lastRunResult: null, resultRevision: null };
 
   return createServer((request, response) => {
-    void serveRequest(
-      request.method ?? "GET",
-      request.url ?? "/",
-      { projectRoot, playgroundRoot, distRoot, examplesRoot },
-      response,
-    ).catch(() => {
-      if (!response.headersSent) sendText(response, 500, "Server error.\n", false);
+    void serveRequest(request, { projectRoot, playgroundRoot, distRoot, examplesRoot }, workspace, response).catch(() => {
+      if (!response.headersSent) sendJson(response, 500, { error: { code: "internalError", message: "Server error." } });
       else response.destroy();
     });
   });
@@ -64,12 +63,27 @@ interface StaticRoots {
   readonly examplesRoot: string;
 }
 
+interface AutomationWorkspace {
+  source: string;
+  sourceRevision: number;
+  lastCompileResult: WorkspaceResult | null;
+  lastRunResult: WorkspaceResult | null;
+  resultRevision: number | null;
+}
+
 async function serveRequest(
-  method: string,
-  requestUrl: string,
+  request: IncomingMessage,
   roots: StaticRoots,
-  response: import("node:http").ServerResponse,
+  workspace: AutomationWorkspace,
+  response: ServerResponse,
 ): Promise<void> {
+  const method = request.method ?? "GET";
+  const requestUrl = request.url ?? "/";
+  const rawPath = requestUrl.split("?", 1)[0] ?? "/";
+  if (rawPath.startsWith("/api/workspace")) {
+    await serveWorkspaceApi(request, rawPath, workspace, response);
+    return;
+  }
   if (method !== "GET" && method !== "HEAD") {
     sendText(response, 405, "Method not allowed.\n", method === "HEAD");
     return;
@@ -130,6 +144,95 @@ async function serveRequest(
       method === "HEAD",
     );
   }
+}
+
+async function serveWorkspaceApi(request: IncomingMessage, pathname: string, workspace: AutomationWorkspace, response: ServerResponse): Promise<void> {
+  if (!isLoopback(request.socket.remoteAddress)) {
+    sendJson(response, 403, { error: { code: "loopbackOnly", message: "Workspace automation is available only to loopback clients." } });
+    return;
+  }
+  const method = request.method ?? "GET";
+  if (pathname === "/api/workspace" && method === "GET") {
+    sendJson(response, 200, workspaceView(workspace));
+    return;
+  }
+  if (pathname === "/api/workspace/result" && method === "GET") {
+    const result = workspace.lastRunResult ?? workspace.lastCompileResult;
+    sendJson(response, 200, { sourceRevision: workspace.sourceRevision, resultRevision: workspace.resultRevision, stale: workspace.resultRevision !== workspace.sourceRevision, result });
+    return;
+  }
+  if (pathname === "/api/workspace/source" && method === "PUT") {
+    if (!isUtf8Text(request.headers["content-type"])) {
+      sendJson(response, 415, { error: { code: "unsupportedContentType", message: "Source uploads require Content-Type: text/plain; charset=utf-8." } });
+      return;
+    }
+    const body = await readBoundedUtf8(request);
+    if (!body.ok) { sendJson(response, body.status, { error: body.error }); return; }
+    if (Buffer.byteLength(body.text, "utf8") > MAX_WORKSPACE_SOURCE_BYTES) {
+      sendJson(response, 413, { error: { code: "sourceTooLarge", message: `Source exceeds ${MAX_WORKSPACE_SOURCE_BYTES} UTF-8 bytes.` } }); return;
+    }
+    workspace.source = body.text;
+    workspace.sourceRevision += 1;
+    workspace.lastCompileResult = null;
+    workspace.lastRunResult = null;
+    workspace.resultRevision = null;
+    sendJson(response, 200, workspaceView(workspace));
+    return;
+  }
+  if ((pathname === "/api/workspace/compile" || pathname === "/api/workspace/run") && method === "POST") {
+    const body = await readBoundedBody(request);
+    if (!body.ok) { sendJson(response, body.status, { error: body.error }); return; }
+    if (body.bytes.length !== 0) {
+      sendJson(response, 400, { error: { code: "unexpectedBody", message: "This operation does not accept a request body." } }); return;
+    }
+    const result = pathname.endsWith("/compile") ? compileWorkspaceSource(workspace.source) : executeWorkspaceSource(workspace.source);
+    workspace.lastCompileResult = pathname.endsWith("/compile") ? result : workspace.lastCompileResult;
+    workspace.lastRunResult = pathname.endsWith("/run") ? result : workspace.lastRunResult;
+    workspace.resultRevision = workspace.sourceRevision;
+    sendJson(response, 200, { sourceRevision: workspace.sourceRevision, resultRevision: workspace.resultRevision, stale: false, result });
+    return;
+  }
+  sendJson(response, 405, { error: { code: "methodNotAllowed", message: "Unsupported workspace route or method." } });
+}
+
+function workspaceView(workspace: AutomationWorkspace): object {
+  return { source: workspace.source, sourceRevision: workspace.sourceRevision, resultRevision: workspace.resultRevision, stale: workspace.resultRevision !== workspace.sourceRevision, result: workspace.lastRunResult ?? workspace.lastCompileResult };
+}
+
+function isLoopback(address: string | undefined): boolean {
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+function isUtf8Text(value: string | string[] | undefined): boolean {
+  if (typeof value !== "string") return false;
+  return /^text\/plain(?:\s*;\s*charset=utf-8)?\s*$/iu.test(value);
+}
+
+async function readBoundedUtf8(request: IncomingMessage): Promise<{ readonly ok: true; readonly text: string } | { readonly ok: false; readonly status: number; readonly error: { readonly code: string; readonly message: string } }> {
+  const body = await readBoundedBody(request);
+  if (!body.ok) return body;
+  try {
+    return { ok: true, text: new TextDecoder("utf-8", { fatal: true }).decode(body.bytes) };
+  } catch {
+    return { ok: false, status: 400, error: { code: "malformedUtf8", message: "Source must be valid UTF-8 text." } };
+  }
+}
+
+async function readBoundedBody(request: IncomingMessage): Promise<{ readonly ok: true; readonly bytes: Buffer } | { readonly ok: false; readonly status: number; readonly error: { readonly code: string; readonly message: string } }> {
+  const length = request.headers["content-length"];
+  if (length !== undefined && (!/^\d+$/u.test(length) || Number(length) > MAX_WORKSPACE_REQUEST_BYTES)) {
+    request.resume();
+    return { ok: false, status: 413, error: { code: "requestTooLarge", message: `Request exceeds ${MAX_WORKSPACE_REQUEST_BYTES} bytes.` } };
+  }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_WORKSPACE_REQUEST_BYTES) return { ok: false, status: 413, error: { code: "requestTooLarge", message: `Request exceeds ${MAX_WORKSPACE_REQUEST_BYTES} bytes.` } };
+    chunks.push(buffer);
+  }
+  return { ok: true, bytes: Buffer.concat(chunks) };
 }
 
 interface StaticTarget {
@@ -198,6 +301,15 @@ function sendText(
   response.setHeader("Content-Type", "text/plain; charset=utf-8");
   response.setHeader("Content-Length", Buffer.byteLength(body));
   response.end(headOnly ? undefined : body);
+}
+
+function sendJson(response: ServerResponse, status: number, body: unknown): void {
+  const text = JSON.stringify(body);
+  response.statusCode = status;
+  response.setHeader("Content-Type", "application/json; charset=utf-8");
+  response.setHeader("Content-Length", Buffer.byteLength(text));
+  response.setHeader("Cache-Control", "no-store");
+  response.end(text);
 }
 
 function environmentPort(value: string | undefined): number | undefined {
