@@ -68,7 +68,7 @@ lastSettlement:
     ActionSettlement | null
 ```
 
-A valid `waiting` snapshot contains exactly one foreground action. Non-waiting states contain none. The first implementation slice includes the background collection in the version-4 schema but requires it to remain empty.
+A valid `waiting` snapshot contains exactly one foreground delay action. Its creation time is no later than the persisted session coordinate and its deadline is strictly later; a due action is settled only by an explicit time observation and is never silently repaired during restore. Non-waiting states contain none. The first implementation slice includes the background collection in the version-4 schema but requires it to remain empty.
 
 `currentSessionTimeMs` is canonical runtime state. It preserves the nondecreasing session coordinate across checkpoint and restore. A fresh version-4 snapshot receives a validated initial coordinate; deterministic tests may use `0`.
 
@@ -172,9 +172,9 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
 
 Current POC defaults and validation limits are:
 
-- instruction-plan format version: `3`;
-- runtime-snapshot format version: `3`;
-- checkpoint format version: `3`;
+- instruction-plan format version: `4`;
+- runtime-snapshot format version: `4`;
+- checkpoint format version: `4`;
 - default maximum call depth: `256`;
 - accepted maximum call depth range: `1` through `4096`;
 - maximum external runtime-data nesting depth: `128` (`MAX_EXTERNAL_RUNTIME_DATA_DEPTH`);
@@ -218,9 +218,7 @@ Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preser
 
 ## Format evolution
 
-Version 3 remains the current implemented format.
-
-When pending actions are implemented, the incompatible waiting status, persisted session-time coordinate, foreground/background action fields, action counter, and settlement record require:
+Version 4 is the current implemented format. The incompatible waiting status, persisted session-time coordinate, foreground/background action fields, action counter, and settlement record require:
 
 ```text
 instruction plan version: 4
@@ -236,7 +234,7 @@ The exported TypeScript compiler, compatibility wrapper, low-level runtime, snap
 
 ## Remaining runtime work
 
-- implement blocking `wait` as the first accepted pending-action slice while documenting whether its source form lowers directly to the foreground-delay primitive or through a later Standard Library adapter;
+- maintain the implemented blocking `wait` slice while deferring Standard Library linkage and all other pending-action kinds;
 - under accepted ADR 0017, define the minimum background timed-work primitive and pause/resume/stop lifecycle before selecting the public timer API;
 - define action-kind-specific input, choice, button, media, timeout, and cancellation contracts while avoiding unnecessary independent state machines;
 - define typed text-output targets and stable speaker/participant provenance before final chat-pacing and LLM-context work;

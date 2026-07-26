@@ -268,7 +268,7 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
     if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: { ...current.lastSettlement } });
     return pendingResult(current, [], actionId < current.nextActionId ? { kind: "staleAction", actionId } : { kind: "unknownAction", actionId });
   }
-  if (value.actionKind !== "delay") return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: "delay", receivedActionKind: typeof value.actionKind === "string" ? value.actionKind : String(value.actionKind) });
+  if (value.actionKind !== "delay") return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: "delay", receivedActionKind: typeof value.actionKind === "string" ? value.actionKind : "<invalid>" });
   if (!isPlainRecord(value.payload) || value.payload.kind !== "time" || !validSessionTime(value.payload.currentSessionTimeMs)) return pendingResult(current, [], { kind: "invalidPayload", message: "Delay completion payload must contain a valid time observation." });
   const effectiveNow = Math.max(current.currentSessionTimeMs, value.payload.currentSessionTimeMs);
   if (effectiveNow < active.deadlineMs) return pendingResult(current, [], { kind: "notDue", actionId, currentSessionTimeMs: current.currentSessionTimeMs, deadlineMs: active.deadlineMs });
@@ -478,8 +478,11 @@ function executePlannedInstruction(
       const durationMs = value * multiplier;
       const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
       if (!Number.isFinite(durationMs) || !validSessionTime(deadlineMs)) throw fault("TSR050", "Wait duration is outside the supported session-time range.", instruction.duration.span);
+      if (value > 0 && (durationMs <= 0 || deadlineMs <= snapshot.currentSessionTimeMs)) {
+        throw fault("TSR050", "Wait duration cannot produce a representable future deadline.", instruction.duration.span);
+      }
       if (durationMs === 0) { advance(snapshot); return; }
-      if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER - 1) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
       const sequence = takeSequence(snapshot);
       const action = Object.freeze({ kind: "delay" as const, actionId: snapshot.nextActionId, owningInstruction: snapshot.nextInstruction, continuationInstruction: snapshot.nextInstruction + 1, ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null, scopeDepth: snapshot.frames.length, loopDepth: snapshot.loopFrames.length, createdAtMs: snapshot.currentSessionTimeMs, deadlineMs, expectedCompletion: "time" as const, requestEventSequence: sequence });
       snapshot.nextActionId += 1;

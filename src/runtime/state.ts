@@ -1600,7 +1600,7 @@ function validateStatusConsistency(
     if (
       plan !== undefined &&
       calls === 0 &&
-      (!nonNegativeSafeInteger(value.nextInstruction) || value.nextInstruction >= plan.rootEndInstruction)
+      (!nonNegativeSafeInteger(value.nextInstruction) || value.nextInstruction > plan.rootEndInstruction)
     ) {
       errors.push("Root execution position is outside the root instruction range.");
     }
@@ -1622,14 +1622,74 @@ function validatePendingActionState(value: Record<string, unknown>, plan: Instru
   const action = value.foregroundAction;
   if (action !== null) {
     const callIds = Array.isArray(value.callFrames) ? new Set(value.callFrames.filter(isPlainRecord).map((frame) => frame.id)) : new Set<unknown>();
-    if (!isPlainRecord(action) || action.kind !== "delay" || !positiveSafeInteger(action.actionId) || !validSessionTime(action.createdAtMs) || !validSessionTime(action.deadlineMs) || action.deadlineMs < action.createdAtMs || action.expectedCompletion !== "time" || !positiveSafeInteger(action.requestEventSequence) || !nonNegativeSafeInteger(action.owningInstruction) || !nonNegativeSafeInteger(action.continuationInstruction) || !nonNegativeSafeInteger(action.scopeDepth) || !nonNegativeSafeInteger(action.loopDepth) || (action.ownerCallFrameId !== null && !positiveSafeInteger(action.ownerCallFrameId)) || (action.ownerCallFrameId !== null && !callIds.has(action.ownerCallFrameId)) || action.scopeDepth !== (Array.isArray(value.frames) ? value.frames.length : -1) || action.loopDepth !== (Array.isArray(value.loopFrames) ? value.loopFrames.length : -1) || (typeof value.nextEventSequence === "number" && action.requestEventSequence >= value.nextEventSequence) || (plan !== undefined && (action.owningInstruction >= plan.instructions.length || action.continuationInstruction > plan.instructions.length || plan.instructions[action.owningInstruction]?.kind !== "wait" || action.continuationInstruction !== action.owningInstruction + 1)) || action.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0)) {
+    const currentSessionTimeMs = value.currentSessionTimeMs;
+    const actionTimesAreValid =
+      isPlainRecord(action) &&
+      validSessionTime(action.createdAtMs) &&
+      validSessionTime(action.deadlineMs) &&
+      validSessionTime(currentSessionTimeMs) &&
+      action.createdAtMs <= currentSessionTimeMs &&
+      action.deadlineMs > currentSessionTimeMs;
+    if (!isPlainRecord(action) || action.kind !== "delay" || !positiveSafeInteger(action.actionId) || !actionTimesAreValid || action.expectedCompletion !== "time" || !positiveSafeInteger(action.requestEventSequence) || !nonNegativeSafeInteger(action.owningInstruction) || !nonNegativeSafeInteger(action.continuationInstruction) || !nonNegativeSafeInteger(action.scopeDepth) || !nonNegativeSafeInteger(action.loopDepth) || (action.ownerCallFrameId !== null && !positiveSafeInteger(action.ownerCallFrameId)) || (action.ownerCallFrameId !== null && !callIds.has(action.ownerCallFrameId)) || action.scopeDepth !== (Array.isArray(value.frames) ? value.frames.length : -1) || action.loopDepth !== (Array.isArray(value.loopFrames) ? value.loopFrames.length : -1) || (typeof value.nextEventSequence === "number" && action.requestEventSequence >= value.nextEventSequence) || (plan !== undefined && !validForegroundActionOwnership(action, value, plan)) || action.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0)) {
       errors.push("Runtime foreground action is malformed.");
     }
   }
   const settlement = value.lastSettlement;
-  if (settlement !== null && (!isPlainRecord(settlement) || settlement.actionKind !== "delay" || settlement.settlementKind !== "completed" || !positiveSafeInteger(settlement.actionId) || !validSessionTime(settlement.deadlineMs) || !validSessionTime(settlement.completedAtMs) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.completionEventSequence))) {
+  if (settlement !== null && (!isPlainRecord(settlement) || settlement.actionKind !== "delay" || settlement.settlementKind !== "completed" || !positiveSafeInteger(settlement.actionId) || !validSettlementChronology(settlement, value) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.completionEventSequence || settlement.completionEventSequence >= (typeof value.nextEventSequence === "number" ? value.nextEventSequence : 0) || settlement.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0) || (isPlainRecord(action) && action.actionId === settlement.actionId))) {
     errors.push("Runtime lastSettlement is malformed.");
   }
+}
+
+function validSettlementChronology(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  const currentSessionTimeMs = snapshot.currentSessionTimeMs;
+  return (
+    validSessionTime(settlement.deadlineMs) &&
+    validSessionTime(settlement.completedAtMs) &&
+    validSessionTime(currentSessionTimeMs) &&
+    settlement.completedAtMs >= settlement.deadlineMs &&
+    settlement.completedAtMs <= currentSessionTimeMs
+  );
+}
+
+function validForegroundActionOwnership(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan,
+): boolean {
+  const owningInstruction = action.owningInstruction;
+  const continuationInstruction = action.continuationInstruction;
+  if (
+    !nonNegativeSafeInteger(owningInstruction) ||
+    !nonNegativeSafeInteger(continuationInstruction) ||
+    snapshot.nextInstruction !== owningInstruction ||
+    owningInstruction >= plan.instructions.length ||
+    continuationInstruction !== owningInstruction + 1 ||
+    plan.instructions[owningInstruction]?.kind !== "wait"
+  ) return false;
+
+  const definition = plan.functions.find(
+    (candidate) =>
+      owningInstruction >= candidate.entryInstruction &&
+      owningInstruction < candidate.endInstruction,
+  );
+  const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
+  const activeFrame = callFrames.at(-1);
+  if (definition === undefined) {
+    return (
+      continuationInstruction <= plan.rootEndInstruction &&
+      action.ownerCallFrameId === null &&
+      callFrames.length === 0
+    );
+  }
+  if (continuationInstruction >= definition.endInstruction) return false;
+  return (
+    isPlainRecord(activeFrame) &&
+    activeFrame.id === action.ownerCallFrameId &&
+    activeFrame.functionId === definition.id
+  );
 }
 
 function isLegalHaltPosition(
@@ -1742,6 +1802,9 @@ function requiredInstructionTemporaries(
       break;
     case "say":
       collect(instruction.value);
+      break;
+    case "wait":
+      collect(instruction.duration);
       break;
   }
   return output;
