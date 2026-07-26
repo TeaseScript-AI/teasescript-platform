@@ -9,8 +9,35 @@ Accepted post-V30 additions:
 - ADR 0013 defines `set[...]`, `type set`, insertion order, uniqueness, methods/properties, and non-indexability.
 - ADR 0014 defines recursive value-copy behavior, scalar-only sets, empty collection errors, and speaker display-name fallback.
 - ADR 0015 defines the serializable instruction-plan/runtime/checkpoint architecture used to execute the implemented syntax.
+- ADR 0016 defines the shared resumable pending-action contract and selects blocking `wait` as its first implementation slice.
 
 Rejected forms remain rejected, including `set score = 20`, `procedure`, and `call` for ordinary function calls. Historical research may still contain those forms and is non-authoritative.
+
+## Proposed syntax-to-library boundary
+
+Proposed ADR 0017 separates source syntax from internal implementation placement.
+
+An official TeaseScript construct may lower to:
+
+- a core engine primitive;
+- a platform Standard Library function;
+- or a fixed compiler-owned composition of both.
+
+Ordinary Standard Library and package-library exports use normal function-call syntax. Generated signatures and metadata should provide autocomplete, parameter hints, hover documentation, navigation, and type-aware diagnostics without requiring a new grammar production.
+
+Libraries may not add keywords, command syntax, block syntax, token forms, or parser hooks. New special syntax remains an explicit TeaseScript/compiler decision. Official syntax may call into a library internally, but a library export does not automatically become syntax.
+
+Examples of the distinction:
+
+```tease
+say "Hello"              // official accepted command syntax
+say(text: "Hello")       // possible ordinary library/API call; not accepted by this proposal alone
+customGreeting("Hello")  // ordinary package-library call
+```
+
+A formatter formats ordinary calls according to the existing call grammar. It does not invent command syntax for a library function.
+
+The proposed boundary does not itself change accepted V30 forms such as `say "..."`, `wait 2`, `timer 10`, or `startTimer ...`. Timer names, chat pacing, and whether particular accepted forms later lower through the Standard Library require separate accepted decisions.
 
 ## Currently implemented language subset
 
@@ -20,7 +47,7 @@ The current function subset includes:
 
 - top-level function declarations;
 - required and trailing-default parameters;
-- positional or named calls;
+- positional and named calls;
 - earlier-parameter references in defaults, while later-parameter references are rejected;
 - value, bare, and implicit `return`;
 - forward calls, nested calls, direct recursion, and mutual recursion;
@@ -29,8 +56,12 @@ The current function subset includes:
 
 Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented. Typed signatures may be parsed for diagnostics while unsupported execution/type semantics remain rejected.
 
+The current implemented `say` and `say as` paths remain unchanged by proposed ADR 0017. A later migration may lower those forms through a tested Standard Library path while preserving source spans, diagnostics, visible output, speaker identity, deterministic RNG use, and checkpoint behavior.
+
 ## Protected names
 
 Grammar keywords, type names, engine names, and implemented core built-ins are centrally protected from user declarations even when a protected future engine API is not yet callable. Protection does not make a deferred API implemented.
+
+A Standard Library export does not automatically become a protected grammar keyword. Name reservation, import qualification, conflicts, shadowing, and compatibility policy require the later library-linkage decision.
 
 The V30-to-V31 gap review is not a V31 syntax document. A future `accepted-syntaxes-v31.md` should be created only by consolidating V30 with decisions that have actually been accepted.
