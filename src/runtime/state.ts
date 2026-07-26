@@ -1600,7 +1600,7 @@ function validateStatusConsistency(
     if (
       plan !== undefined &&
       calls === 0 &&
-      (!nonNegativeSafeInteger(value.nextInstruction) || value.nextInstruction >= plan.rootEndInstruction)
+      (!nonNegativeSafeInteger(value.nextInstruction) || value.nextInstruction > plan.rootEndInstruction)
     ) {
       errors.push("Root execution position is outside the root instruction range.");
     }
@@ -1670,8 +1670,6 @@ function validForegroundActionOwnership(
     plan.instructions[owningInstruction]?.kind !== "wait"
   ) return false;
 
-  const regionEnd = instructionRegionEnd(plan, owningInstruction);
-  if (continuationInstruction >= regionEnd) return false;
   const definition = plan.functions.find(
     (candidate) =>
       owningInstruction >= candidate.entryInstruction &&
@@ -1680,8 +1678,13 @@ function validForegroundActionOwnership(
   const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
   const activeFrame = callFrames.at(-1);
   if (definition === undefined) {
-    return action.ownerCallFrameId === null && callFrames.length === 0;
+    return (
+      continuationInstruction <= plan.rootEndInstruction &&
+      action.ownerCallFrameId === null &&
+      callFrames.length === 0
+    );
   }
+  if (continuationInstruction >= definition.endInstruction) return false;
   return (
     isPlainRecord(activeFrame) &&
     activeFrame.id === action.ownerCallFrameId &&

@@ -478,7 +478,7 @@ function executePlannedInstruction(
       const durationMs = value * multiplier;
       const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
       if (!Number.isFinite(durationMs) || !validSessionTime(deadlineMs)) throw fault("TSR050", "Wait duration is outside the supported session-time range.", instruction.duration.span);
-      if (value > 0 && (durationMs <= 0 || deadlineMs <= snapshot.currentSessionTimeMs || deadlineMs - snapshot.currentSessionTimeMs !== durationMs)) {
+      if (value > 0 && (durationMs <= 0 || deadlineMs <= snapshot.currentSessionTimeMs)) {
         throw fault("TSR050", "Wait duration cannot produce a representable future deadline.", instruction.duration.span);
       }
       if (durationMs === 0) { advance(snapshot); return; }

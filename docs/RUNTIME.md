@@ -172,9 +172,9 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
 
 Current POC defaults and validation limits are:
 
-- instruction-plan format version: `3`;
-- runtime-snapshot format version: `3`;
-- checkpoint format version: `3`;
+- instruction-plan format version: `4`;
+- runtime-snapshot format version: `4`;
+- checkpoint format version: `4`;
 - default maximum call depth: `256`;
 - accepted maximum call depth range: `1` through `4096`;
 - maximum external runtime-data nesting depth: `128` (`MAX_EXTERNAL_RUNTIME_DATA_DEPTH`);

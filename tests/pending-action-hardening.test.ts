@@ -53,6 +53,38 @@ test("#78 rejects due foreground delays through direct and checkpoint boundaries
   assert.throws(() => restoreCheckpoint(jsonRoundTrip), checkpointError);
 });
 
+test("terminal root waits validate, round-trip, settle, and resume at the root completion boundary", () => {
+  const compiled = plan("wait 1 ms");
+  const uninterruptedWaiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.equal(uninterruptedWaiting.snapshot.status, "waiting");
+  assert.equal(
+    uninterruptedWaiting.snapshot.foregroundAction!.continuationInstruction,
+    compiled.rootEndInstruction,
+  );
+  assert.equal(validateRuntimeSnapshot(uninterruptedWaiting.snapshot, compiled).valid, true);
+
+  const checkpointJson = serializeCheckpoint(createCheckpoint(compiled, uninterruptedWaiting.snapshot));
+  const restored = deserializeCheckpoint(checkpointJson);
+  assert.equal(restored.snapshot.status, "waiting");
+  assert.deepEqual(restored.snapshot, uninterruptedWaiting.snapshot);
+
+  const uninterruptedSettled = observeTime(compiled, uninterruptedWaiting.snapshot, 1);
+  const uninterruptedFinal = run(compiled, uninterruptedSettled.snapshot);
+  const restoredSettled = observeTime(restored.plan, restored.snapshot, 1);
+  const restoredFinal = run(restored.plan, restoredSettled.snapshot);
+  assert.equal(uninterruptedFinal.snapshot.status, "halted");
+  assert.equal(restoredFinal.snapshot.status, "halted");
+  assert.deepEqual(
+    [...uninterruptedWaiting.events, ...uninterruptedSettled.events, ...uninterruptedFinal.events],
+    [...uninterruptedWaiting.events, ...restoredSettled.events, ...restoredFinal.events],
+  );
+  assert.deepEqual(restoredFinal.snapshot, uninterruptedFinal.snapshot);
+  assert.deepEqual(
+    uninterruptedFinal.events.map((event) => event.kind),
+    [],
+  );
+});
+
 test("#79 validates every settlement relationship and preserves valid replay", () => {
   const compiled = plan("wait 1 ms\nwait 10 ms\nexit");
   const firstWaiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
@@ -105,7 +137,7 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
     "wait 0.5 ms",
     "wait 0.0005 s",
     "wait 0.000008333333333333334 min",
-    "wait 0.0000001388888888888889 h",
+    "wait 0.0000001 h",
   ]) {
     const compiled = plan(`${source}\nexit`);
     const start = MAX_RUNTIME_SESSION_TIME_MS - 3;
@@ -114,6 +146,15 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
     assert.equal(result.snapshot.nextActionId, 1, source);
     assert.ok(!result.events.some((event) => event.kind === "actionRequested"), source);
   }
+
+  const sequential = plan("wait 0.1 ms\nwait 0.2 ms\nexit");
+  const first = run(sequential, createFreshRuntimeSnapshot(sequential));
+  assert.equal(first.snapshot.foregroundAction!.deadlineMs, 0.1);
+  const afterFirst = observeTime(sequential, first.snapshot, 0.1);
+  const second = run(sequential, afterFirst.snapshot);
+  assert.equal(second.snapshot.status, "waiting");
+  assert.equal(second.snapshot.foregroundAction!.createdAtMs, 0.1);
+  assert.ok(second.snapshot.foregroundAction!.deadlineMs > 0.1);
 
   const largestFractional = plan("wait 0.5 ms\nexit");
   const start = 2 ** 52 - 0.5;
