@@ -10,6 +10,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test:compiled": "node --test dist/tests/*.test.js",
+    "check:libraries": "npm run build && node --test dist/tests/library-catalog-metadata.test.js dist/tests/library-export-boundary.test.js dist/tests/library-validation-pipeline.test.js",
     "test": "npm run build && npm run test:compiled",
     "check": "npm test",
     "playground": "npm run build && node dist/playground/server.js"
