@@ -164,6 +164,19 @@ export {
   type SourceSpan,
 } from "./source.js";
 export { createToken, TokenKind, type Token } from "./token.js";
+export {
+  LibraryCatalog,
+  LibraryCatalogError,
+  createExactLibraryIdentity,
+  createPublicLibraryMetadata,
+  validatePublicLibraryMetadata,
+  LibraryMetadataError,
+  type ExactLibraryIdentity,
+  type PublicLibraryDefinition,
+  type PublicExportMetadata,
+  type PublicLibraryMetadata,
+  type PublicParameterMetadata,
+} from "./libraries/public.js";
 export type {
   AssignmentStatement,
   AssignmentTarget,

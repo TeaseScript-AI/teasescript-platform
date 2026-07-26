@@ -56,6 +56,8 @@
 
 The current plan, snapshot, and checkpoint formats are version 4 POC formats. The implemented ADR 0016 first slice supports compiler-owned blocking `wait` delays, persisted session time, explicit foreground pending action state, action events, checkpoint/restore, and explicit time settlement; background actions remain intentionally empty.
 
+The implemented ADR 0017 infrastructure slice provides an exact-identity in-memory library catalog and deterministic static metadata for the documented narrow TypeScript export subset. These internal POC identities and metadata shapes are not final package manifests, import syntax, library bindings, or checkpoint data; privileged adapter internals remain outside the root public export surface.
+
 ## Verification expected before merge
 
 The exact Node.js version declared in `.nvmrc` is required. Activate that version with any suitable mechanism. When NVM is available, `nvm use` is one optional activation method; missing NVM, or NVM not seeing a version activated by `actions/setup-node`, a container, or another version manager, is not itself a verification failure. Confirm the effective environment before installing dependencies:

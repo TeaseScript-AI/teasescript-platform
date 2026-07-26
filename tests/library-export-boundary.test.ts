@@ -7,6 +7,8 @@ import { LibraryCatalog, LibraryCatalogError } from "../src/libraries/public.js"
 import { privilegedPlatformAdapterMarker } from "../src/libraries/internal/privileged-platform-adapters.js";
 
 test("public library surface does not export privileged adapter values", () => {
+  assert.equal(typeof root.LibraryCatalog, "function");
+  assert.equal(typeof root.createExactLibraryIdentity, "function");
   assert.equal("privilegedPlatformAdapterMarker" in publicLibraries, false);
   assert.equal("privilegedPlatformAdapterMarker" in root, false);
   assert.equal(privilegedPlatformAdapterMarker.internalOnly, true);
