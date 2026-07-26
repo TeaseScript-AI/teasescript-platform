@@ -11,6 +11,7 @@ test("browser playground exposes the bounded editable workspace controls", async
   for (const id of ["source-code", "source-lines", "source-panel", "player-panel", "compile", "run", "step", "reset", "reload-example", "import-source", "export-source", "refresh-workspace"]) assert.match(html, new RegExp(`id="${id}"`, "u"));
   assert.match(html, /<textarea id="source-code"/u);
   assert.match(html, /Reserved for future timer UI/u);
+  assert.match(html, /future-timer-circle/u);
   assert.match(browser, /teasescript-playground-draft-v1/u);
   assert.match(browser, /compiledRevision === sourceRevision/u);
   assert.match(browser, /sourceEdited/u);

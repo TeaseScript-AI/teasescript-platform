@@ -168,6 +168,20 @@ textarea {
   border-radius: .5rem;
   color: var(--muted);
   background: rgba(14, 11, 20, .45);
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+}
+.future-timer-circle {
+  display: grid;
+  width: 3.75rem;
+  height: 3.75rem;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent-strong);
+  font: .78rem/1 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 .future-timer-slot p { margin: 0; font-size: .85rem; }
 
