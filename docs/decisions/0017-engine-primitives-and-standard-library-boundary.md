@@ -1,6 +1,6 @@
 # ADR 0017 — Engine primitives and Standard Library boundary
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -14,9 +14,9 @@ Recent design work for chat pacing and background timers showed that defining ev
 - editor support must work for library functions without allowing arbitrary libraries to mutate the language grammar;
 - future LLM context selection needs stable speaker and conversation-participant provenance without placing personality or prompt logic in the deterministic engine.
 
-This ADR proposes the architectural boundary first. It does not finalize the replacement timer syntax, chat-pacing policy, input API, participant schema, Standard Library linkage syntax, or implementation schedule.
+This ADR defines the architectural boundary first. It does not finalize the replacement timer syntax, chat-pacing policy, input API, participant schema, Standard Library linkage syntax, or implementation schedule.
 
-ADR 0015 remains authoritative for explicit JSON-safe execution state. ADR 0016 remains authoritative for the shared pending-action model, deterministic time observation, action identity, settlement, checkpoint, and restore semantics. If accepted, this ADR changes where higher-level behavior should be composed; it does not silently replace accepted source syntax or pending-action semantics.
+ADR 0015 remains authoritative for explicit JSON-safe execution state. ADR 0016 remains authoritative for the shared pending-action model, deterministic time observation, action identity, settlement, checkpoint, and restore semantics. This ADR changes where higher-level behavior should be composed; it does not silently replace accepted source syntax or pending-action semantics.
 
 ## Decision summary
 
@@ -31,10 +31,8 @@ ADR 0015 remains authoritative for explicit JSON-safe execution state. ADR 0016 
 9. Require library behavior crossing a pending-action or checkpoint boundary to be lowered into explicit serializable engine instructions or represented by an engine-managed serializable continuation. Ordinary TypeScript calls may not remain invisibly suspended.
 10. Separate public Standard Library exports from privileged platform adapters. Public imports must not transitively expose internal host capabilities.
 11. Require deterministic Standard Library identity/version binding whenever behavior is not fully lowered into the instruction plan. Restore may not silently use an implicit latest implementation.
-12. Preserve currently implemented behavior until the required library-linkage and metadata pipeline exists. This documentation proposal does not move or delete current `say` code.
+12. Preserve currently implemented behavior until the required library-linkage and metadata pipeline exists. This documentation decision does not move or delete current `say` code.
 13. Require later implementation work to test both the engine primitives and the Standard Library behavior built on them. Deferring a Standard Library slice from the current POC does not exempt it from tests when implemented.
-
-Every item remains proposed until explicit owner approval changes this ADR to `Accepted`.
 
 ## Layer model
 
@@ -235,7 +233,7 @@ remain parser-recognized syntax unless a later accepted language decision change
 
 ## Compatibility and POC migration
 
-This proposal is documentation-only and requires no immediate source rewrite.
+This decision is documentation-only and requires no immediate source rewrite.
 
 The current repository already implements `say` and speaker-aware output in the core execution path. That behavior remains current POC functionality until a tested Standard Library linkage path can replace or wrap it without observable regressions.
 
@@ -265,23 +263,6 @@ The first Standard Library POC slice may deliberately include only a small set o
 - resumable library helpers need explicit lowering or serializable continuations rather than ordinary suspended TypeScript calls;
 - plan/checkpoint compatibility must bind to lowered behavior or an exact compatible Standard Library identity/version;
 - some existing accepted V30 APIs may later need explicit superseding decisions about their public names or placement.
-
-## Explicit owner decisions required
-
-Owner approval or revision is required for:
-
-1. the engine-core/public-Standard-Library/package-library dependency direction;
-2. package libraries being allowed to import and reuse public Standard Library exports;
-3. generated signatures and metadata as the basis for autocomplete and type-aware editor support;
-4. libraries being unable to extend TeaseScript grammar;
-5. official syntax being allowed to lower to public Standard Library exports;
-6. keeping canonical identity, validation, pending actions, time, handles, checkpointing, and provenance in the engine;
-7. requiring serializable lowering or engine-managed continuations for resumable library workflows;
-8. separating public Standard Library exports from privileged platform adapters;
-9. requiring deterministic lowering or exact compatible Standard Library identity/version binding for restore;
-10. treating `say`, common input helpers, acknowledgement helpers, and timer presentation as Standard Library candidates rather than automatically distinct engine systems;
-11. preserving current implementations until replacement linkage is tested;
-12. requiring tests for later Standard Library implementations even when their implementation is outside the current POC slice.
 
 ## Deferred follow-up decisions
 
