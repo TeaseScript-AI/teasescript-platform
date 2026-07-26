@@ -14,6 +14,8 @@ Recent design work for chat pacing and background timers showed that defining ev
 - editor support must work for library functions without allowing arbitrary libraries to mutate the language grammar;
 - future LLM context selection needs stable speaker and conversation-participant provenance without placing personality or prompt logic in the deterministic engine.
 
+Moving composition into TypeScript libraries does not relax ADR 0015. A JavaScript or TypeScript call stack, closure, generator, promise, callback, or module-global variable may not become hidden resumable state. Library behavior that crosses a pending-action or checkpoint boundary must be lowered to explicit serializable engine instructions or represented by an engine-managed serializable continuation.
+
 This ADR proposes the architectural boundary first. It does not finalize the replacement timer syntax, chat-pacing policy, input API, participant schema, Standard Library linkage syntax, or implementation schedule.
 
 ADR 0015 remains authoritative for explicit JSON-safe execution state. ADR 0016 remains authoritative for the shared pending-action model, deterministic time observation, action identity, settlement, checkpoint, and restore semantics. If accepted, this ADR changes where higher-level behavior should be composed; it does not silently replace accepted source syntax or pending-action semantics.
@@ -21,35 +23,46 @@ ADR 0015 remains authoritative for explicit JSON-safe execution state. ADR 0016 
 ## Decision summary
 
 1. Keep the engine core limited to the smallest deterministic, serializable, security-relevant primitives needed to execute TeaseScript and communicate with the player.
-2. Provide a platform-owned Standard Library implemented in TypeScript and versioned with the engine/player distribution.
+2. Provide a platform-owned Standard Library implemented in TypeScript and versioned with the compatible engine/player distribution.
 3. Build author-friendly APIs such as `say`, visible timers, common input helpers, and presentation policies primarily in the Standard Library when they can be composed from core primitives without weakening determinism, validation, checkpointing, or security.
-4. Allow package libraries to import and reuse Standard Library exports and declared package-library dependencies.
+4. Allow package libraries to import and reuse the public, capability-safe Standard Library surface.
 5. Generate type signatures and editor metadata from library exports so ordinary library functions receive autocomplete, parameter hints, hover documentation, diagnostics, navigation, and formatting through the normal call syntax.
 6. Do not allow libraries to add or mutate TeaseScript grammar. New command, block, or other special syntax remains an explicit language/compiler decision.
 7. Permit official TeaseScript syntax to lower to a Standard Library export, a core primitive, or a fixed composition of both. The source form does not determine which internal layer owns the implementation.
 8. Keep stable identity, validation, scheduling, checkpoint, restore, event sequencing, and typed host boundaries in the engine even when a Standard Library wrapper provides the public API.
-9. Preserve currently implemented behavior until the required library-linkage and metadata pipeline exists. This documentation proposal does not move or delete current `say` code.
-10. Require later implementation work to test both the engine primitives and the Standard Library behavior built on them. Deferring a Standard Library slice from the current POC does not exempt it from tests when implemented.
+9. Require every library workflow that can pause, wait for input, schedule background work, or survive a checkpoint to use a serializable engine plan or engine-managed continuation. Ordinary TypeScript execution may remain synchronous but may not suspend invisibly.
+10. Separate public Standard Library exports from privileged platform adapters. Importing a public helper must never grant a package library transitive access to internal capabilities.
+11. Bind deterministic library behavior to the compiled plan/checkpoint. Either the relevant Standard Library behavior is fully lowered into the plan, or the plan/checkpoint records an exact compatible Standard Library identity/version. Restore may never silently use an implicit latest implementation.
+12. Preserve currently implemented behavior until the required library-linkage and metadata pipeline exists. This documentation proposal does not move or delete current `say` code.
+13. Require later implementation work to test both the engine primitives and the Standard Library behavior built on them. Deferring a Standard Library slice from the current POC does not exempt it from tests when implemented.
 
 Every item remains proposed until explicit owner approval changes this ADR to `Accepted`.
 
 ## Layer model
 
+A script does not need a package library in order to use the Standard Library:
+
 ```text
 TeaseScript scripts (.tease)
-        ↓
-Package libraries (.ts)
-        ↓
-Platform Standard Library (.ts)
-        ↓
-Typed engine capability and instruction primitives
-        ↓
-Deterministic runtime state, pending actions, events, and player boundary
+    ├── call public Platform Standard Library exports directly
+    └── call optional Package libraries (.ts)
+            └── call public Platform Standard Library exports
+
+Public Platform Standard Library
+    └── documented typed engine primitives
+
+Privileged platform adapters
+    └── internal engine/player capabilities
+        (not importable through the public Standard Library surface)
+
+Typed engine primitives
+    └── deterministic runtime state, pending actions, events,
+        checkpoint/restore, and player boundary
 ```
 
-Dependencies point downward. A package library may use the Standard Library instead of rebuilding its behavior from engine primitives. The Standard Library may use documented core capabilities. Ordinary scripts normally use the author-facing Standard Library and official TeaseScript syntax.
+Dependencies point toward documented lower-level capabilities. A package library may use the public Standard Library instead of rebuilding its behavior from engine primitives. Ordinary scripts may call the Standard Library directly, call an optional package library, or use official syntax that the compiler lowers to one of those paths.
 
-A package library may also depend on another package library through an explicit, versioned dependency declaration. Cycles, version selection, linkage syntax, and package-resolution rules remain separate decisions.
+Package-library-to-package-library dependencies are not accepted by this ADR. Their dependency declarations, transitive resolution, cycles, lock data, moderation, capability interaction, and version-conflict rules remain a separate open product and architecture decision.
 
 ## Engine-core responsibilities
 
@@ -67,7 +80,9 @@ This includes:
 - typed, bounded, JSON-safe data crossing runtime, player, host, checkpoint, and package boundaries;
 - stable output provenance such as output target identity and speaker identity where required;
 - security and capability enforcement;
-- cleanup, failure, checkpoint, restore, and resume-equivalence rules.
+- cleanup, failure, checkpoint, restore, and resume-equivalence rules;
+- serializable continuations for library workflows that cross pending-action or checkpoint boundaries;
+- validation of the exact library identity/version required by a plan when behavior was not fully lowered into that plan.
 
 The engine should not gain a new state machine merely because an author-facing helper has a new name or presentation style.
 
@@ -108,9 +123,10 @@ action identity
 result destination
 requesting speaker/provenance metadata
 reconstructable Standard UI payload
+serializable continuation
 ```
 
-The Standard Library may compose wrappers such as text, number, choice, image, or confirmation helpers. The engine still validates untrusted completion data and opaque resource references.
+The Standard Library may compose wrappers such as text, number, choice, image, or confirmation helpers. The engine still validates untrusted completion data and opaque resource references. A helper that waits for completion must lower to this explicit pending state; the TypeScript function itself cannot remain suspended.
 
 ### Timed work
 
@@ -141,14 +157,42 @@ Candidate responsibilities include:
 - reusable formatting, conversion, collection, and utility functions;
 - higher-level workflows built from typed core actions.
 
+### Resumability boundary
+
+Ordinary Standard Library code may execute synchronously between engine instruction boundaries. It may calculate values, validate arguments, select configuration, and call synchronous core capabilities.
+
+When a workflow can cross a wait, input, timer, media completion, background handler, or checkpoint boundary, one of these must be true:
+
+1. the compiler/linker lowers the workflow into explicit versioned serializable engine instructions; or
+2. the engine stores an explicit versioned serializable continuation that identifies the remaining workflow state.
+
+A suspended JavaScript/TypeScript call frame, closure, generator, promise, callback, or hidden mutable module state is never canonical resume state. The exact lowering and linkage mechanism remains deferred, but this invariant does not.
+
+### Public surface and privileged adapters
+
+The public Standard Library surface contains only exports that package libraries and scripts are permitted to call. Privileged platform adapters may exist for internal Standard Library implementation, player integration, or capability brokering, but they are separate modules and are not transitively re-exported.
+
+Capability checks occur at the engine/player boundary. A public helper cannot smuggle a privileged adapter, raw host object, DOM handle, stream, callback, or unrestricted network capability to package code.
+
+### Deterministic identity and version binding
+
+A compiled plan/checkpoint must not depend on whichever Standard Library implementation happens to be installed when it is restored.
+
+A conforming implementation must use at least one of these deterministic strategies:
+
+- fully lower the relevant Standard Library behavior into the versioned instruction plan; or
+- bind the plan/checkpoint to an exact compatible Standard Library identity/version and reject or explicitly migrate an incompatible restore.
+
+The exact identity fields, compatibility ranges, packaging format, cache layout, and migration schema remain open. Silent substitution with an implicit latest version is rejected.
+
 The Standard Library is trusted platform code, but it remains subject to the player sandbox and documented capabilities. It may not bypass runtime validation, mutate parent-page state, access account cookies, or create hidden non-serializable execution state.
 
 ## Package-library responsibilities
 
 Package libraries may:
 
-- import Standard Library exports;
-- wrap or combine Standard Library functions;
+- import public Standard Library exports;
+- wrap or combine public Standard Library functions;
 - expose package-specific helpers to `.tease` scripts;
 - create custom UI inside the player iframe through allowed UI capabilities;
 - accept and return typed serializable values and engine-managed references;
@@ -156,10 +200,12 @@ Package libraries may:
 
 Package libraries may not:
 
+- import or receive privileged platform adapters through the public Standard Library;
 - add grammar productions, keywords, token forms, or parser hooks;
 - bypass core pending-action, time, checkpoint, validation, or security rules;
 - access the parent DOM, main-site cookies, unrestricted external networking, or undocumented host capabilities;
-- place callbacks, DOM nodes, promises, browser handles, streams, or mutable class instances into canonical runtime state.
+- place callbacks, DOM nodes, promises, browser handles, streams, or mutable class instances into canonical runtime state;
+- suspend an ordinary TypeScript call across a pending-action or checkpoint boundary.
 
 ## Syntax, functions, and editor tooling
 
@@ -217,9 +263,11 @@ The first Standard Library POC slice may deliberately include only a small set o
 ### Costs
 
 - the project needs a real library-linkage, versioning, declaration, and metadata pipeline;
+- resumable library workflows require lowering or explicit engine-managed continuations;
 - Standard Library behavior requires its own test suite and compatibility policy;
 - official syntax lowering must preserve source spans and useful diagnostics across the library boundary;
-- trusted Standard Library capabilities must be documented so package libraries cannot accidentally gain privileged access;
+- public Standard Library exports and privileged platform adapters require an enforced capability boundary;
+- plans/checkpoints must bind deterministic library behavior instead of resolving an implicit latest version;
 - some existing accepted V30 APIs may later need explicit superseding decisions about their public names or placement.
 
 ## Explicit owner decisions required
@@ -227,14 +275,17 @@ The first Standard Library POC slice may deliberately include only a small set o
 Owner approval or revision is required for:
 
 1. the engine-core/Standard-Library/package-library dependency direction;
-2. package libraries being allowed to import and reuse Standard Library exports;
+2. package libraries being allowed to import and reuse public Standard Library exports;
 3. generated signatures and metadata as the basis for autocomplete and type-aware editor support;
 4. libraries being unable to extend TeaseScript grammar;
 5. official syntax being allowed to lower to Standard Library exports;
 6. keeping canonical identity, validation, pending actions, time, handles, checkpointing, and provenance in the engine;
-7. treating `say`, common input helpers, and timer presentation as Standard Library candidates rather than automatically distinct engine systems;
-8. preserving current implementations until replacement linkage is tested;
-9. requiring tests for later Standard Library implementations even when their implementation is outside the current POC slice.
+7. requiring resumable library workflows to lower to serializable plans or use engine-managed continuations;
+8. separating public Standard Library exports from privileged platform adapters;
+9. requiring deterministic plan/checkpoint binding to lowered behavior or an exact compatible Standard Library identity/version;
+10. treating `say`, common input helpers, and timer presentation as Standard Library candidates rather than automatically distinct engine systems;
+11. preserving current implementations until replacement linkage is tested;
+12. requiring tests for later Standard Library implementations even when their implementation is outside the current POC slice.
 
 ## Deferred follow-up decisions
 
@@ -242,9 +293,11 @@ This ADR intentionally does not decide:
 
 - the exact core capability names or TypeScript interfaces;
 - the `.tease` import/linkage syntax;
-- Standard Library packaging and version compatibility;
+- exact Standard Library packaging, identity fields, and compatibility ranges;
 - generated metadata format and editor protocol;
-- whether Standard Library code has any privileged capability tier;
+- the exact public/internal module split and privileged adapter mechanism;
+- package-library-to-package-library dependencies, transitive resolution, cycles, lock data, moderation, or version conflicts;
+- the exact serializable lowering or continuation representation for library workflows;
 - final `say` syntax and pacing behavior;
 - final timer syntax, handle methods, pause/resume/stop/restart semantics, repetition, persistence, or presentation;
 - final generic interaction schema or `ask...` APIs;
@@ -253,4 +306,4 @@ This ADR intentionally does not decide:
 - migration of existing implemented `say` instructions;
 - which Standard Library functions are included in the next POC slice.
 
-Closed draft PRs #69 and #71 remain historical design references only. Their detailed timer and pacing proposals are not accepted by this ADR.
+Closed draft PRs #69 and #71 and closed issues #67 and #68 remain historical design references only. Their detailed timer and pacing proposals are not accepted by this ADR.
