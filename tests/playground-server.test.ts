@@ -132,7 +132,16 @@ test("workspace automation rejects unsafe methods, bodies, content, and bounds",
   assert.equal((await api("PUT", "/api/workspace/source", "x")).status, 415);
   assert.equal((await api("PUT", "/api/workspace/source", "x", "application/json")).status, 415);
   assert.equal((await api("POST", "/api/workspace/run", "{}", "application/json")).status, 400);
+  assert.equal((await api("POST", "/api/workspace/run", "{}", undefined, port, true)).status, 400);
   assert.equal((await api("PUT", "/api/workspace/source", "x".repeat(70 * 1024), "text/plain; charset=utf-8")).status, 413);
+});
+
+test("workspace automation rejects clients outside the permitted loopback address", async (context) => {
+  const isolatedServer = createPlaygroundServer();
+  const isolatedPort = await listenAt(isolatedServer, "0.0.0.0");
+  context.after(async () => close(isolatedServer));
+  const response = await api("GET", "/api/workspace", undefined, undefined, isolatedPort, false, "127.0.0.2");
+  assert.equal(response.status, 403);
 });
 
 interface HttpResult {
@@ -145,7 +154,7 @@ function get(path: string, requestPort = port): Promise<HttpResult> {
   return api("GET", path, undefined, undefined, requestPort);
 }
 
-function api(method: string, path: string, body?: string, contentType?: string, requestPort = port): Promise<HttpResult> {
+function api(method: string, path: string, body?: string, contentType?: string, requestPort = port, omitContentLength = false, localAddress?: string): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
     const outgoing = request(
       {
@@ -153,9 +162,10 @@ function api(method: string, path: string, body?: string, contentType?: string, 
         port: requestPort,
         method,
         path,
+        localAddress,
         headers: body === undefined ? undefined : {
           ...(contentType === undefined ? {} : { "Content-Type": contentType }),
-          "Content-Length": Buffer.byteLength(body),
+          ...(omitContentLength ? {} : { "Content-Length": Buffer.byteLength(body) }),
         },
       },
       (incoming) => {
@@ -175,6 +185,18 @@ function api(method: string, path: string, body?: string, contentType?: string, 
     );
     outgoing.on("error", reject);
     outgoing.end(body);
+  });
+}
+
+function listenAt(target: typeof server, host: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    target.once("error", reject);
+    target.listen(0, host, () => {
+      target.off("error", reject);
+      const address = target.address();
+      if (address === null || typeof address === "string") { reject(new Error("Expected an IP server address.")); return; }
+      resolve(address.port);
+    });
   });
 }
 

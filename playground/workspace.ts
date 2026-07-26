@@ -63,6 +63,14 @@ export function assertWorkspaceSource(source: unknown): asserts source is string
   }
 }
 
+/** Decodes locally imported source without silently replacing malformed UTF-8 bytes. */
+export function decodeWorkspaceSourceBytes(bytes: ArrayBuffer): string {
+  if (bytes.byteLength > MAX_WORKSPACE_SOURCE_BYTES) {
+    throw new RangeError(`Workspace source must not exceed ${MAX_WORKSPACE_SOURCE_BYTES} UTF-8 bytes.`);
+  }
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
 function diagnostics(values: readonly Diagnostic[]): readonly WorkspaceDiagnostic[] {
   return values.map((value) => Object.freeze({ code: value.code, message: value.message, line: value.span.start.line + 1, column: value.span.start.column + 1, length: value.span.end.offset - value.span.start.offset }));
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileWorkspaceSource, executeWorkspaceSource } from "../playground/workspace.js";
+import { compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSource } from "../playground/workspace.js";
 
 test("workspace helper compiles, halts, and returns JSON-safe data", () => {
   const compiled = compileWorkspaceSource('say "Hello"');
@@ -27,4 +27,11 @@ test("workspace helper is deterministic and returns runtime failures and budgets
   const source = 'say random(1, 10)';
   assert.deepEqual(executeWorkspaceSource(source), executeWorkspaceSource(source));
   assert.equal(executeWorkspaceSource("while true {} ").status, "failed");
+});
+
+test("workspace import decoding rejects malformed UTF-8", () => {
+  assert.throws(
+    () => decodeWorkspaceSourceBytes(new Uint8Array([0xc3, 0x28]).buffer),
+    TypeError,
+  );
 });

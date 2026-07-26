@@ -180,7 +180,9 @@ async function serveWorkspaceApi(request: IncomingMessage, pathname: string, wor
     return;
   }
   if ((pathname === "/api/workspace/compile" || pathname === "/api/workspace/run") && method === "POST") {
-    if (Number(request.headers["content-length"] ?? "0") > 0) {
+    const body = await readBoundedBody(request);
+    if (!body.ok) { sendJson(response, body.status, { error: body.error }); return; }
+    if (body.bytes.length !== 0) {
       sendJson(response, 400, { error: { code: "unexpectedBody", message: "This operation does not accept a request body." } }); return;
     }
     const result = pathname.endsWith("/compile") ? compileWorkspaceSource(workspace.source) : executeWorkspaceSource(workspace.source);
@@ -207,6 +209,16 @@ function isUtf8Text(value: string | string[] | undefined): boolean {
 }
 
 async function readBoundedUtf8(request: IncomingMessage): Promise<{ readonly ok: true; readonly text: string } | { readonly ok: false; readonly status: number; readonly error: { readonly code: string; readonly message: string } }> {
+  const body = await readBoundedBody(request);
+  if (!body.ok) return body;
+  try {
+    return { ok: true, text: new TextDecoder("utf-8", { fatal: true }).decode(body.bytes) };
+  } catch {
+    return { ok: false, status: 400, error: { code: "malformedUtf8", message: "Source must be valid UTF-8 text." } };
+  }
+}
+
+async function readBoundedBody(request: IncomingMessage): Promise<{ readonly ok: true; readonly bytes: Buffer } | { readonly ok: false; readonly status: number; readonly error: { readonly code: string; readonly message: string } }> {
   const length = request.headers["content-length"];
   if (length !== undefined && (!/^\d+$/u.test(length) || Number(length) > MAX_WORKSPACE_REQUEST_BYTES)) {
     request.resume();
@@ -220,11 +232,7 @@ async function readBoundedUtf8(request: IncomingMessage): Promise<{ readonly ok:
     if (size > MAX_WORKSPACE_REQUEST_BYTES) return { ok: false, status: 413, error: { code: "requestTooLarge", message: `Request exceeds ${MAX_WORKSPACE_REQUEST_BYTES} bytes.` } };
     chunks.push(buffer);
   }
-  try {
-    return { ok: true, text: new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)) };
-  } catch {
-    return { ok: false, status: 400, error: { code: "malformedUtf8", message: "Source must be valid UTF-8 text." } };
-  }
+  return { ok: true, bytes: Buffer.concat(chunks) };
 }
 
 interface StaticTarget {

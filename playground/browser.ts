@@ -1,6 +1,6 @@
 import { CheckpointError, createCheckpoint, deserializeCheckpoint, serializeCheckpoint, type InstructionPlan, type InterpreterEvent, type RuntimeSnapshot } from "../src/index.js";
 import { checkpointStorageKey, exampleUrl, isPlaygroundExampleName, PLAYGROUND_EXAMPLES, type PlaygroundExampleName } from "./examples.js";
-import { MAX_WORKSPACE_SOURCE_BYTES, compileWorkspaceSource, executeWorkspaceSnapshot, type WorkspaceResult } from "./workspace.js";
+import { MAX_WORKSPACE_SOURCE_BYTES, compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSnapshot, type WorkspaceResult } from "./workspace.js";
 
 const DRAFT_KEY = "teasescript-playground-draft-v1";
 const elements = {
@@ -29,7 +29,7 @@ elements.sourceFile.addEventListener("change", () => void importSource());
 elements.exportSource.addEventListener("click", exportSource);
 elements.refreshWorkspace.addEventListener("click", () => void refreshAutomationWorkspace());
 elements.exampleSelect.addEventListener("change", () => { if (isPlaygroundExampleName(elements.exampleSelect.value)) { currentExample = elements.exampleSelect.value; void reloadExample(); } });
-elements.source.addEventListener("input", sourceEdited);
+elements.source.addEventListener("input", () => sourceEdited());
 elements.source.addEventListener("scroll", () => { elements.sourceLines.scrollTop = elements.source.scrollTop; });
 new ResizeObserver(() => { elements.playerPanel.style.height = `${elements.sourcePanel.offsetHeight}px`; }).observe(elements.sourcePanel);
 void loadInitialSource();
@@ -45,20 +45,20 @@ async function reloadExample(): Promise<void> {
   try {
     const response = await fetch(exampleUrl(currentExample), { cache: "no-store" });
     if (!response.ok) throw new Error(`Example request failed with HTTP ${response.status}.`);
+    replaceSource(await response.text(), "Repository example loaded.", PLAYGROUND_EXAMPLES[currentExample].label, false);
     safeStorageRemove(DRAFT_KEY);
-    replaceSource(await response.text(), "Repository example loaded.", PLAYGROUND_EXAMPLES[currentExample].label);
     compileAndReset();
   } catch (error) { setActionStatus(errorMessage(error)); }
 }
 
-function replaceSource(value: string, message: string, label: string): void {
-  elements.source.value = value; elements.loadedExampleName.textContent = label; sourceEdited(); setActionStatus(message);
+function replaceSource(value: string, message: string, label: string, saveDraft = true): void {
+  elements.source.value = value; elements.loadedExampleName.textContent = label; sourceEdited(saveDraft); setActionStatus(message);
 }
 
-function sourceEdited(): void {
+function sourceEdited(saveDraft = true): void {
   sourceRevision += 1;
   plan = null; snapshot = null; compiledRevision = null; eventLog = [];
-  elements.transcript.replaceChildren(); safeStorageSet(DRAFT_KEY, elements.source.value); renderState();
+  elements.transcript.replaceChildren(); if (saveDraft) safeStorageSet(DRAFT_KEY, elements.source.value); renderState();
   renderSourceLines();
 }
 
@@ -101,13 +101,13 @@ async function importSource(): Promise<void> {
   const file = elements.sourceFile.files?.[0]; elements.sourceFile.value = "";
   if (file === undefined) return;
   if (!file.name.toLowerCase().endsWith(".tease") || file.size > MAX_WORKSPACE_SOURCE_BYTES) { setActionStatus(`Import requires one .tease file no larger than ${MAX_WORKSPACE_SOURCE_BYTES} bytes.`); return; }
-  try { const text = await file.text(); if (new TextEncoder().encode(text).byteLength > MAX_WORKSPACE_SOURCE_BYTES) throw new Error("Imported source is too large."); replaceSource(text, "Local file loaded; compile it to create a runtime.", file.name); } catch (error) { setActionStatus(`Import failed: ${errorMessage(error)}`); }
+  try { const text = decodeWorkspaceSourceBytes(await file.arrayBuffer()); replaceSource(text, "Local file loaded; compile it to create a runtime.", file.name); } catch (error) { setActionStatus(`Import failed: ${errorMessage(error)}`); }
 }
 
 function exportSource(): void { const blob = new Blob([elements.source.value], { type: "text/plain;charset=utf-8" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "teasescript-workspace.tease"; link.click(); URL.revokeObjectURL(link.href); setActionStatus("Source exported as teasescript-workspace.tease."); }
 
 async function refreshAutomationWorkspace(): Promise<void> {
-  try { const response = await fetch("/api/workspace", { cache: "no-store" }); if (!response.ok) throw new Error(`Automation workspace request failed with HTTP ${response.status}.`); const data = await response.json() as { source: string; result: WorkspaceResult | null }; replaceSource(data.source, "Automation source loaded; compile or run locally to create a fresh browser runtime.", "Automation workspace"); if (data.result !== null) setActionStatus("Automation source loaded. Its result is shown only after recompiling locally to prevent stale state reuse."); } catch (error) { setActionStatus(errorMessage(error)); }
+  try { const response = await fetch("/api/workspace", { cache: "no-store" }); if (!response.ok) throw new Error(`Automation workspace request failed with HTTP ${response.status}.`); const data = await response.json() as { source: string; resultRevision: number | null; result: WorkspaceResult | null }; replaceSource(data.source, "Automation source loaded; local execution is stale until compiled.", "Automation workspace"); if (data.result !== null) { applyResult(data.result, true); compiledRevision = null; renderState(); setActionStatus(`Automation result revision ${data.resultRevision ?? "unknown"} is displayed as view-only; compile before local execution.`); } } catch (error) { setActionStatus(errorMessage(error)); }
 }
 
 function renderDiagnostics(diagnostics: readonly { code: string; message: string; line: number; column: number; length: number }[]): void { elements.diagnostics.replaceChildren(); if (diagnostics.length === 0) { const item = document.createElement("li"); item.className = "diagnostic-ok"; item.textContent = "No parser or semantic diagnostics."; elements.diagnostics.append(item); return; } for (const diagnostic of diagnostics) { const button = document.createElement("button"); button.className = "diagnostic-button"; button.textContent = `${diagnostic.code} (${diagnostic.line}:${diagnostic.column}) ${diagnostic.message}`; button.addEventListener("click", () => { const start = offsetAt(elements.source.value, diagnostic.line, diagnostic.column); elements.source.focus(); elements.source.setSelectionRange(start, start + Math.max(1, diagnostic.length)); }); const item = document.createElement("li"); item.append(button); elements.diagnostics.append(item); } }
