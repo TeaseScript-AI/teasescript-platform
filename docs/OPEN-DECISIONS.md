@@ -1,10 +1,10 @@
 # Current open decisions
 
-Accepted ADRs and V30 override older descriptive documents. Sets, deep value copying, empty collection behavior, speaker fallback, serializable runtime architecture, serializable loop/call frames, source-order evaluation, prepared references, the current user-function model, and the shared resumable pending-action contract are not unimplemented design questions.
+Accepted ADRs and V30 override older descriptive documents. Sets, deep value copying, empty collection behavior, speaker fallback, serializable runtime architecture, serializable loop/call frames, source-order evaluation, prepared references, the current user-function model, the shared resumable pending-action contract, and the engine/Standard-Library boundary are not unimplemented design questions.
 
 ADR 0016 is accepted. It defines persisted nondecreasing session time, foreground/background pending actions, monotonic action IDs, bounded settlement replay, active-first completion lookup, injected time observations, and blocking `wait` as the first implementation slice.
 
-Proposed ADR 0017 defines an owner-reviewable engine-primitive/Standard-Library/package-library boundary. It is not accepted and does not yet change V30 syntax or current implementation placement.
+ADR 0017 is accepted. It defines the engine-primitive/public-Standard-Library/package-library boundary, resumability rules, public-versus-privileged separation, deterministic library binding, and parser-owned grammar boundary. It does not itself decide the deferred public APIs, syntax, or packaging details listed below.
 
 ## Runtime hardening and evolution
 
@@ -16,7 +16,7 @@ Proposed ADR 0017 defines an owner-reviewable engine-primitive/Standard-Library/
 - Complete static type checking and composite equality.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
 - Concrete implementation and migration details for version-4 pending-action fields, operations, and validators.
-- Exact minimal primitive families for text output, typed interactions, foreground delays, and background timed work after ADR 0017 review.
+- Exact minimal primitive families for text output, typed interactions, foreground delays, and background timed work under ADR 0017.
 - Exact serializable lowering or engine-managed continuation representation for resumable library workflows.
 - Player-initiated pause semantics: whether active session time freezes, continues, or follows another policy for local timed work.
 - Optional author-defined recovery/resume points, including rollback scope for variables, RNG, transcript/view state, pending actions, media, account writes, and other external effects.
@@ -39,7 +39,6 @@ The exact version-3 schemas are current POC implementation details, not a promis
 
 ## Remaining language and library work
 
-- Owner approval or revision of proposed ADR 0017.
 - TypeScript-library and Standard Library import/linkage syntax from `.tease`.
 - Standard Library packaging, compatibility, capability access, exact identity binding, migration, and version-selection rules.
 - Public Standard Library versus privileged platform-adapter module and capability boundaries.
@@ -52,7 +51,7 @@ The exact version-3 schemas are current POC implementation details, not a promis
 - Standard Library string methods and detailed API signatures.
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
 - Static treatment of contextual `speaker` access when control-flow analysis can prove that no explicit or default speaker is available: compile-time error, warning, or retained runtime failure. Ordinary narrator output such as `say "Hello"` is a separate valid case and does not require a default speaker.
-- Final `say` composition after the core/Standard-Library boundary is accepted.
+- Final `say` composition under the accepted core/Standard-Library boundary.
 - Exact deterministic **smart autoplay** semantics: how autoplay duration is calculated and how the compiler/runtime identifies the next effective blocking player interaction.
 - Explicit `instant` and autoplay overrides, and whether any exact-duration override remains part of `say`.
 - Exact API and wording for a separate one-action acknowledgement/continue interaction. This should not become the normal chat pacing default.
