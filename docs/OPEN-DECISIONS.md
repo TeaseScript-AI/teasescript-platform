@@ -4,16 +4,19 @@ Accepted ADRs and V30 override older descriptive documents. Sets, deep value cop
 
 ADR 0016 is accepted. It defines persisted nondecreasing session time, foreground/background pending actions, monotonic action IDs, bounded settlement replay, active-first completion lookup, injected time observations, and blocking `wait` as the first implementation slice.
 
+Proposed ADR 0017 defines an owner-reviewable engine-primitive/Standard-Library/package-library boundary. It is not accepted and does not yet change V30 syntax or current implementation placement.
+
 ## Runtime hardening and evolution
 
 - Package/source identity for browser checkpoints and production plan references.
-- Migration policy across plan, snapshot, checkpoint, engine, and package versions.
+- Migration policy across plan, snapshot, checkpoint, engine, Standard Library, and package versions.
 - Production checkpoint frequency, incremental persistence, and performance thresholds.
 - Final internal representation and optimization policy for large immutable/deep-copy values.
 - Host/global representation for future opaque engine references beyond speakers.
 - Complete static type checking and composite equality.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
 - Concrete implementation and migration details for version-4 pending-action fields, operations, and validators.
+- Exact minimal primitive families for text output, typed interactions, foreground delays, and background timed work after ADR 0017 review.
 
 ### Compatibility API lifecycle
 
@@ -31,19 +34,28 @@ The exact version-3 schemas are current POC implementation details, not a promis
 
 ## Remaining language and library work
 
-- TypeScript-library import/linkage syntax from `.tease`.
+- Owner approval or revision of proposed ADR 0017.
+- TypeScript-library and Standard Library import/linkage syntax from `.tease`.
+- Standard Library packaging, compatibility, capability access, and version-selection rules.
+- Generated declaration/editor-metadata format for autocomplete, signatures, hover documentation, navigation, and diagnostics.
+- Package-library dependency declarations, transitive resolution, cycle handling, and version conflicts.
 - Exact unit/date/time/datetime/duration implementation.
 - Standard Library string methods and detailed API signatures.
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
 - Static treatment of contextual `speaker` access when control-flow analysis can prove that no explicit or default speaker is available: compile-time error, warning, or retained runtime failure. Ordinary narrator output such as `say "Hello"` is a separate valid case and does not require a default speaker.
-- Exact post-V30 chat-pacing semantics, including `say(..., wait: ...)`, visible-character counting, checkpoint state, and transcript-channel behavior.
+- Final `say` composition and pacing semantics after the core/Standard-Library boundary is accepted.
+- Final timer author API and lifecycle semantics, including pause, resume, stop, restart-after-stop, repetition, persistence, and visible presentation.
+- Whether accepted command/block syntax lowers directly to core instructions, to Standard Library exports, or to compiler-owned compositions.
 - Remaining accepted V30 constructs and APIs outside the current parser/runtime subset.
 
 ## Player and interactions
 
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and CSP.
 - Action-kind-specific choices, input, buttons, media completion, cancellation, timeout, and recovery policies on the accepted shared pending-action contract.
-- Background-handler interruption, repetition, persistence, ordering, and cleanup beyond the first one-shot timer slice.
+- Generic typed-interaction primitive boundaries versus Standard Library wrappers such as text, number, choice, and image input.
+- Background-handler interruption, lifecycle, ordering, cleanup, and foreground-slot interaction after the public timer API is reconsidered.
+- Stable text-output target handles and the exact message provenance schema.
+- Exact participant/conversation metadata needed to support one shared visible chat with selectively separated future LLM contexts.
 - Camera capability declarations, long-lived stream ownership, device switching, quality negotiation, restore, privacy indicators, and optional simultaneous cameras.
 - Exact `askImage(...)` preview/countdown/retake behavior and direct nullable `takePhoto(...)` capture behavior.
 - Motion detection, sampling, camera resource limits, and scene ownership.
@@ -53,13 +65,14 @@ The exact version-3 schemas are current POC implementation details, not a promis
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
 - Time-integrity logging thresholds and whether a future typed anomaly hook becomes script-visible.
 
-See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md) for the selected direction and explicitly deferred design questions discussed with ADR 0016.
+See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md) for earlier selected directions and deferred questions discussed with ADR 0016. Closed draft PRs #69 and #71 are historical proposals and are not current decisions.
 
 ## Platform and personalities
 
 - Account, toy, history, locks, global-data, and checkpoint storage contracts.
 - Persistent scheduler missed-event behavior, quotas, deduplication, concurrency, and execution location.
 - Continuous-personality lifecycle, assignments, reports, permissions, statuses, and reconnect behavior.
+- Speaker/personality relationships, dynamic LLM prompt assembly, transcript filtering, memory, summaries, and context isolation.
 - Publishing, signing, versioning, moderation, and legacy importer details.
 
 ## Proposals, not decisions
