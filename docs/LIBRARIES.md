@@ -89,6 +89,37 @@ A conforming implementation must either:
 
 The exact identity fields, compatibility ranges, packaging format, and migration schema remain open.
 
+## Future library scopes and default availability
+
+The owner-selected future product direction distinguishes three author-facing library scopes above the engine:
+
+1. **Platform Standard Library** — platform-owned, version-bound, and available by default so ordinary scripts do not require import boilerplate.
+2. **Published community libraries** — independently published reusable libraries that packages explicitly opt into, comparable to plugins or mods.
+3. **Package-local libraries** — libraries bundled with and intended primarily for one package.
+
+Published community libraries and package-local libraries remain package code. They run under the same sandbox, deterministic runtime, capability, validation, checkpoint, and security rules. Publishing a reusable library does not create a new privilege tier.
+
+The initial library-linkage implementation should keep dependency resolution simple:
+
+- the Standard Library is the default prelude;
+- a package explicitly imports published community libraries;
+- package-local libraries may use the public Standard Library and the package's explicitly selected community libraries;
+- published community libraries initially use the public Standard Library but do not depend transitively on other community libraries.
+
+Community-library-to-community-library dependencies may be added later only with exact deterministic version binding, cycle rejection, lock data, moderation policy, and no transitive capability escalation.
+
+### Standard Library alternatives and replacements
+
+Advanced packages may later need to avoid or replace selected Standard Library behavior. The intended direction is explicit package configuration rather than accidental name shadowing.
+
+A future manifest may support concepts equivalent to:
+
+- disabling the automatic Standard Library prelude for an advanced package;
+- importing an alternative library under an explicit namespace;
+- deliberately mapping one or more Standard Library-facing names to compatible alternative exports.
+
+The exact manifest syntax and compatibility contract remain open. Replacements must be intentional and visible in package metadata; importing an unrelated library must not silently change which `say`, timer, or input function a script calls. An alternative implementation remains constrained by engine primitives and cannot weaken validation, checkpointing, permissions, or determinism.
+
 ### Package libraries
 
 Package libraries may:
