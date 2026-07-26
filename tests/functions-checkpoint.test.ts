@@ -4,6 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/instructions.js";
 import {
+  CHECKPOINT_VERSION,
   CheckpointError,
   createCheckpoint,
   restoreCheckpoint,
@@ -518,7 +519,7 @@ test("rejects malformed function-region plans inside checkpoints", () => {
   for (const malformedPlan of plans) {
     assertCheckpointRejected({
       format: "teasescript-checkpoint",
-      version: 4,
+      version: CHECKPOINT_VERSION,
       plan: malformedPlan,
       snapshot: createFreshRuntimeSnapshot(
         malformedPlan === aliasedDestination || malformedPlan === duplicateArgument
@@ -556,7 +557,7 @@ test("rejects cyclic runtime state without overflowing validation", () => {
   const snapshot = createFreshRuntimeSnapshot(compiled);
   const checkpoint = {
     format: "teasescript-checkpoint",
-    version: 4,
+    version: CHECKPOINT_VERSION,
     plan: compiled,
     snapshot,
   } as Record<string, unknown>;

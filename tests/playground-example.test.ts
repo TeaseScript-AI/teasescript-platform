@@ -7,6 +7,7 @@ import {
   checkpointStorageKey,
 } from "../playground/examples.js";
 import { compileSource } from "../src/compiler.js";
+import { CHECKPOINT_VERSION } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 
@@ -53,7 +54,7 @@ test("checkpoint storage keys are format-versioned and example-specific", () => 
     checkpointStorageKey(name as keyof typeof PLAYGROUND_EXAMPLES)
   );
   assert.equal(new Set(keys).size, keys.length);
-  assert.ok(keys.every((key) => /checkpoint-v4:/u.test(key)));
+  assert.ok(keys.every((key) => key.includes(`checkpoint-v${CHECKPOINT_VERSION}:`)));
 });
 
 test("the functions example is allowlisted and visibly exercises the milestone", async () => {

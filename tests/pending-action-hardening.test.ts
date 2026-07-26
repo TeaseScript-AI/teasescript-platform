@@ -9,7 +9,7 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { completeAction, executeInstruction, observeTime, run } from "../src/runtime/engine.js";
+import { completeAction, executeInstruction, observeTime, run, stepToEvent } from "../src/runtime/engine.js";
 import {
   MAX_RUNTIME_SESSION_TIME_MS,
   createFreshRuntimeSnapshot,
@@ -79,9 +79,109 @@ test("terminal root waits validate, round-trip, settle, and resume at the root c
     [...uninterruptedWaiting.events, ...restoredSettled.events, ...restoredFinal.events],
   );
   assert.deepEqual(restoredFinal.snapshot, uninterruptedFinal.snapshot);
+  assert.deepEqual(uninterruptedFinal.events.map((event) => event.kind), ["complete"]);
+  assert.equal(validateRuntimeSnapshot(uninterruptedFinal.snapshot, compiled).valid, true);
+});
+
+test("rejects every forged running root-end shape outside the settled terminal delay transition", () => {
+  const compiled = plan("wait 1 ms\nwait 1 ms");
+  const first = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const second = run(compiled, observeTime(compiled, first.snapshot, 1).snapshot);
+  const settled = observeTime(compiled, second.snapshot, 2).snapshot;
+  assert.equal(settled.status, "running");
+  assert.equal(settled.nextInstruction, compiled.rootEndInstruction);
+  assert.equal(validateRuntimeSnapshot(settled, compiled).valid, true);
+
+  const invalid: Readonly<Record<string, (snapshot: any) => void>> = {
+    extraRootScope: (snapshot) => {
+      snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });
+      snapshot.nextScopeId += 1;
+    },
+    retainedTemporary: (snapshot) => { snapshot.temporaries.push({ id: 999, value: 1 }); },
+    retainedLoopFrame: (snapshot) => { snapshot.loopFrames.push({ kind: "while", loopId: 999, scopeDepth: 1, callFrameId: null }); },
+    retainedCallFrame: (snapshot) => { snapshot.callFrames.push({}); },
+    foregroundAction: (snapshot) => { snapshot.foregroundAction = structuredClone(second.snapshot.foregroundAction); },
+    backgroundAction: (snapshot) => { snapshot.backgroundActions.push({}); },
+    missingSettlement: (snapshot) => { snapshot.lastSettlement = null; },
+    incompatibleSettlement: (snapshot) => { snapshot.lastSettlement.actionId = 1; },
+  };
+  for (const [name, mutate] of Object.entries(invalid)) {
+    const candidate = mutable(settled);
+    mutate(candidate);
+    const validation = validateRuntimeSnapshot(candidate, compiled);
+    assert.equal(validation.valid, false, name);
+    assert.throws(() => restoreCheckpoint({ ...createCheckpoint(compiled, settled), snapshot: candidate }), checkpointError, name);
+  }
+
+  const arbitrary = mutable(createFreshRuntimeSnapshot(compiled));
+  arbitrary.status = "running";
+  arbitrary.nextInstruction = compiled.rootEndInstruction;
+  assert.equal(validateRuntimeSnapshot(arbitrary, compiled).valid, false);
+});
+
+test("rejects an earlier delay settlement forged onto a terminal positive or zero wait", () => {
+  for (const source of [
+    'wait 1 ms\nsay "must run"\nwait 1 ms',
+    'wait 1 ms\nsay "must run"\nwait 0',
+  ]) {
+    const compiled = plan(source);
+    const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+    const earlierSettlement = observeTime(compiled, waiting.snapshot, 1).snapshot;
+    assert.equal(earlierSettlement.status, "running");
+    assert.notEqual(earlierSettlement.nextInstruction, compiled.rootEndInstruction);
+
+    const forged = mutable(earlierSettlement);
+    forged.nextInstruction = compiled.rootEndInstruction;
+    assert.equal(validateRuntimeSnapshot(forged, compiled).valid, false, source);
+    assert.throws(
+      () => restoreCheckpoint({ ...createCheckpoint(compiled, earlierSettlement), snapshot: forged }),
+      checkpointError,
+      source,
+    );
+    assert.throws(
+      () => executeInstruction(compiled, forged),
+      (error: unknown) => error instanceof Error && error.message.includes("canonical settled terminal delay transition"),
+      source,
+    );
+  }
+});
+
+test("terminal delay completion is canonical across execute, event stepping, run, and repeated halted entries", () => {
+  const compiled = plan('function hidden { say "hidden" }\nwait 1 ms');
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const settled = observeTime(compiled, waiting.snapshot, 1);
+  assert.deepEqual([...waiting.events, ...settled.events].map((event) => event.sequence), [1, 2]);
+
+  for (const operation of [executeInstruction, stepToEvent, run]) {
+    const completed = operation(compiled, settled.snapshot);
+    assert.equal(completed.snapshot.status, "halted");
+    assert.equal(validateRuntimeSnapshot(completed.snapshot, compiled).valid, true);
+    assert.deepEqual(completed.events.map((event) => event.kind), ["complete"]);
+    assert.deepEqual(completed.events.map((event) => event.sequence), [3]);
+    assert.deepEqual(operation(compiled, completed.snapshot).events, []);
+  }
+});
+
+test("zero waits remain immediate while terminal waits use ordinary natural completion", () => {
+  const terminalZero = plan("wait 0");
+  const zeroResult = run(terminalZero, createFreshRuntimeSnapshot(terminalZero));
+  assert.equal(zeroResult.snapshot.status, "halted");
+  assert.equal(zeroResult.snapshot.nextActionId, 1);
+  assert.equal(zeroResult.snapshot.foregroundAction, null);
+  assert.equal(zeroResult.snapshot.lastSettlement, null);
+  assert.deepEqual(zeroResult.events.map((event) => event.kind), ["complete"]);
+
+  const visible = plan('wait 0\nsay "visible"');
+  const visibleResult = run(visible, createFreshRuntimeSnapshot(visible));
+  assert.equal(visibleResult.snapshot.nextActionId, 1);
+  assert.equal(visibleResult.snapshot.foregroundAction, null);
+  assert.equal(visibleResult.snapshot.lastSettlement, null);
+  assert.deepEqual(visibleResult.events.map((event) => event.kind), ["say", "complete"]);
+
+  const ordinary = plan('say "ordinary"');
   assert.deepEqual(
-    uninterruptedFinal.events.map((event) => event.kind),
-    [],
+    run(ordinary, createFreshRuntimeSnapshot(ordinary)).events.map((event) => event.kind),
+    ["say", "complete"],
   );
 });
 
@@ -100,6 +200,8 @@ test("#79 validates every settlement relationship and preserves valid replay", (
     completionAtNextSequence: (snapshot) => { snapshot.lastSettlement!.completionEventSequence = snapshot.nextEventSequence; },
     beforeDeadline: (snapshot) => { snapshot.lastSettlement!.completedAtMs = snapshot.lastSettlement!.deadlineMs - 0.5; },
     afterCurrentTime: (snapshot) => { snapshot.lastSettlement!.completedAtMs = snapshot.currentSessionTimeMs + 0.5; },
+    missingOwningInstruction: (snapshot) => { delete snapshot.lastSettlement!.owningInstruction; },
+    wrongContinuationInstruction: (snapshot) => { snapshot.lastSettlement!.continuationInstruction += 1; },
   };
   for (const [name, mutate] of Object.entries(invalid)) {
     const candidate = mutable(active);

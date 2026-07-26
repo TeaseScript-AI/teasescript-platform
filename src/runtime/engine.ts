@@ -136,6 +136,16 @@ function executeCapturedInstruction(
     return result(snapshot, [], 0);
   }
   if (snapshot.status === "waiting") return result(snapshot, [], 0);
+  const events: InterpreterEvent[] = [];
+  if (
+    snapshot.nextInstruction === plan.rootEndInstruction &&
+    snapshot.callFrames.length === 0
+  ) {
+    snapshot.status = "halted";
+    const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
+    events.push(createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan));
+    return result(snapshot, events, 1);
+  }
   const instruction = plan.instructions[snapshot.nextInstruction];
   if (instruction === undefined) {
     snapshot.status = "halted";
@@ -143,7 +153,6 @@ function executeCapturedInstruction(
   }
 
   snapshot.status = "running";
-  const events: InterpreterEvent[] = [];
   const evaluator = new Evaluator(snapshot, capabilities, events);
   try {
     executePlannedInstruction(plan, instruction, snapshot, evaluator, events);
@@ -242,6 +251,8 @@ export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, su
   const completionSequence = takeSequence(current);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
     actionId: action.actionId, actionKind: "delay", settlementKind: "completed",
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
     requestEventSequence: action.requestEventSequence, completionEventSequence: completionSequence,
     deadlineMs: action.deadlineMs, completedAtMs: current.currentSessionTimeMs,
   });

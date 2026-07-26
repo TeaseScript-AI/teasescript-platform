@@ -28,7 +28,7 @@ import {
 } from "./serializable-values.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 4;
+export const RUNTIME_SNAPSHOT_VERSION = 5;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -77,6 +77,8 @@ export interface RuntimeActionSettlementSnapshot {
   readonly actionId: number;
   readonly actionKind: "delay";
   readonly settlementKind: "completed";
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
   readonly requestEventSequence: number;
   readonly completionEventSequence: number;
   readonly deadlineMs: number;
@@ -565,6 +567,7 @@ export function validateCapturedRuntimeSnapshot(
   }
   validateFailure(value.failure, value.status, errors);
   validateStatusConsistency(value, plan, errors);
+  validateRootEndTransition(value, plan, errors);
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }
 
@@ -1607,6 +1610,58 @@ function validateStatusConsistency(
   }
 }
 
+/**
+ * The delay-only version-4 runtime has one reachable running state at the
+ * root-end coordinate: a terminal root delay has settled and is awaiting its
+ * ordinary completion entry. Do not treat the coordinate as a general
+ * running-state escape hatch, because executing such forged state would only
+ * set `halted` and could leave an invalid halted snapshot behind.
+ */
+function validateRootEndTransition(
+  value: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  if (
+    plan === undefined ||
+    value.status !== "running" ||
+    value.nextInstruction !== plan.rootEndInstruction ||
+    !Array.isArray(value.callFrames) ||
+    value.callFrames.length !== 0
+  ) return;
+
+  const settlement = value.lastSettlement;
+  const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
+  const canonical =
+    Array.isArray(value.frames) &&
+    value.frames.length === 1 &&
+    isPlainRecord(value.frames[0]) &&
+    value.frames[0].id === 0 &&
+    Array.isArray(value.callFrames) &&
+    value.callFrames.length === 0 &&
+    Array.isArray(value.loopFrames) &&
+    value.loopFrames.length === 0 &&
+    Array.isArray(value.temporaries) &&
+    value.temporaries.length === 0 &&
+    value.foregroundAction === null &&
+    Array.isArray(value.backgroundActions) &&
+    value.backgroundActions.length === 0 &&
+    value.failure === null &&
+    value.contextualSpeaker === null &&
+    isPlainRecord(settlement) &&
+    settlement.actionKind === "delay" &&
+    settlement.settlementKind === "completed" &&
+    positiveSafeInteger(settlement.actionId) &&
+    positiveSafeInteger(value.nextActionId) &&
+    settlement.actionId === value.nextActionId - 1 &&
+    settlement.owningInstruction === plan.rootEndInstruction - 1 &&
+    settlement.continuationInstruction === plan.rootEndInstruction &&
+    terminalInstruction?.kind === "wait";
+  if (!canonical) {
+    errors.push("Running root-end state is not the canonical settled terminal delay transition.");
+  }
+}
+
 function validSessionTime(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_RUNTIME_SESSION_TIME_MS;
 }
@@ -1635,7 +1690,7 @@ function validatePendingActionState(value: Record<string, unknown>, plan: Instru
     }
   }
   const settlement = value.lastSettlement;
-  if (settlement !== null && (!isPlainRecord(settlement) || settlement.actionKind !== "delay" || settlement.settlementKind !== "completed" || !positiveSafeInteger(settlement.actionId) || !validSettlementChronology(settlement, value) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.completionEventSequence || settlement.completionEventSequence >= (typeof value.nextEventSequence === "number" ? value.nextEventSequence : 0) || settlement.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0) || (isPlainRecord(action) && action.actionId === settlement.actionId))) {
+  if (settlement !== null && (!isPlainRecord(settlement) || settlement.actionKind !== "delay" || settlement.settlementKind !== "completed" || !positiveSafeInteger(settlement.actionId) || !validSettlementProvenance(settlement, plan) || !validSettlementChronology(settlement, value) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.completionEventSequence || settlement.completionEventSequence >= (typeof value.nextEventSequence === "number" ? value.nextEventSequence : 0) || settlement.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0) || (isPlainRecord(action) && action.actionId === settlement.actionId))) {
     errors.push("Runtime lastSettlement is malformed.");
   }
 }
@@ -1652,6 +1707,32 @@ function validSettlementChronology(
     settlement.completedAtMs >= settlement.deadlineMs &&
     settlement.completedAtMs <= currentSessionTimeMs
   );
+}
+
+function validSettlementProvenance(
+  settlement: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  const owningInstruction = settlement.owningInstruction;
+  const continuationInstruction = settlement.continuationInstruction;
+  if (
+    !nonNegativeSafeInteger(owningInstruction) ||
+    !nonNegativeSafeInteger(continuationInstruction) ||
+    continuationInstruction !== owningInstruction + 1
+  ) return false;
+  if (plan === undefined) return true;
+  if (
+    owningInstruction >= plan.instructions.length ||
+    plan.instructions[owningInstruction]?.kind !== "wait"
+  ) return false;
+  const definition = plan.functions.find(
+    (candidate) =>
+      owningInstruction >= candidate.entryInstruction &&
+      owningInstruction < candidate.endInstruction,
+  );
+  return definition === undefined
+    ? continuationInstruction <= plan.rootEndInstruction
+    : continuationInstruction < definition.endInstruction;
 }
 
 function validForegroundActionOwnership(
