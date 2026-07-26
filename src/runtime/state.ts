@@ -565,6 +565,7 @@ export function validateCapturedRuntimeSnapshot(
   }
   validateFailure(value.failure, value.status, errors);
   validateStatusConsistency(value, plan, errors);
+  validateRootEndTransition(value, plan, errors);
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }
 
@@ -1604,6 +1605,56 @@ function validateStatusConsistency(
     ) {
       errors.push("Root execution position is outside the root instruction range.");
     }
+  }
+}
+
+/**
+ * The delay-only version-4 runtime has one reachable running state at the
+ * root-end coordinate: a terminal root delay has settled and is awaiting its
+ * ordinary completion entry. Do not treat the coordinate as a general
+ * running-state escape hatch, because executing such forged state would only
+ * set `halted` and could leave an invalid halted snapshot behind.
+ */
+function validateRootEndTransition(
+  value: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  if (
+    plan === undefined ||
+    value.status !== "running" ||
+    value.nextInstruction !== plan.rootEndInstruction ||
+    !Array.isArray(value.callFrames) ||
+    value.callFrames.length !== 0
+  ) return;
+
+  const settlement = value.lastSettlement;
+  const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
+  const canonical =
+    Array.isArray(value.frames) &&
+    value.frames.length === 1 &&
+    isPlainRecord(value.frames[0]) &&
+    value.frames[0].id === 0 &&
+    Array.isArray(value.callFrames) &&
+    value.callFrames.length === 0 &&
+    Array.isArray(value.loopFrames) &&
+    value.loopFrames.length === 0 &&
+    Array.isArray(value.temporaries) &&
+    value.temporaries.length === 0 &&
+    value.foregroundAction === null &&
+    Array.isArray(value.backgroundActions) &&
+    value.backgroundActions.length === 0 &&
+    value.failure === null &&
+    value.contextualSpeaker === null &&
+    isPlainRecord(settlement) &&
+    settlement.actionKind === "delay" &&
+    settlement.settlementKind === "completed" &&
+    positiveSafeInteger(settlement.actionId) &&
+    positiveSafeInteger(value.nextActionId) &&
+    settlement.actionId === value.nextActionId - 1 &&
+    terminalInstruction?.kind === "wait";
+  if (!canonical) {
+    errors.push("Running root-end state is not the canonical settled terminal delay transition.");
   }
 }
 
