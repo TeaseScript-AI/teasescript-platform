@@ -20,9 +20,37 @@ Accepted post-V30 decisions relevant to the current runtime include:
 - ADR 0013: insertion-ordered `set[...]` collections and `type set` annotations;
 - ADR 0014: recursive value-copy semantics for ordinary values, scalar-only sets, empty collection errors, and speaker display-name fallback behavior;
 - ADR 0015: versioned JSON-safe instruction plans, explicit runtime state, checkpoints, deterministic stepping/RNG/events, and no suspended JavaScript call stack;
-- ADR 0016: resumable pending actions with persisted session time, foreground/background separation, monotonic action IDs, bounded settlement replay, active-first completion lookup, injected time observations, and blocking `wait` as the first implementation slice.
+- ADR 0016: resumable pending actions with persisted session time, foreground/background separation, monotonic action IDs, bounded settlement replay, active-first completion lookup, injected time observations, and blocking `wait` as the first implementation slice;
+- ADR 0017: the accepted boundary between deterministic engine primitives, the public Standard Library, package libraries, and privileged platform adapters.
 
 Direct assignment remains `score = 20`; `set score = 20` remains invalid.
+
+## Accepted engine and Standard Library boundary
+
+ADR 0017 separates the smallest deterministic engine primitives from author-friendly Standard Library APIs:
+
+```text
+TeaseScript scripts
+    ├── call public Standard Library exports directly
+    └── call optional package-library exports
+            └── call public Standard Library exports
+
+Public Standard Library
+    -> typed engine primitives
+    -> deterministic runtime and player boundary
+```
+
+The accepted boundary keeps canonical identity, pending actions, time, validation, handles, checkpointing, events, resumable continuations, and security in the engine. Friendly presentation and composition such as `say` policy, common input helpers, and timer presentation are Standard Library candidates when they can be built without weakening those guarantees.
+
+Package libraries may reuse only public, capability-safe Standard Library exports. Privileged platform adapters remain internal and cannot become transitively accessible through imports.
+
+Ordinary TypeScript library code may run synchronously, but may not suspend invisibly across a pending-action or checkpoint boundary. Such workflows must be lowered into explicit serializable instructions or represented by an engine-managed serializable continuation.
+
+A plan/checkpoint must contain lowered library behavior or bind to an exact compatible Standard Library identity/version. Restore against an implicit latest implementation is not allowed.
+
+Generated TypeScript signatures and editor metadata provide the intended path for autocomplete, parameter hints, hover documentation, and diagnostics for ordinary library calls. Libraries must not mutate TeaseScript grammar; special command or block syntax remains an explicit language/compiler decision.
+
+ADR 0017 does not change accepted V30 syntax, ADR 0016 pending-action semantics, or the currently implemented `say` path. Detailed linkage, API, and migration work remains deferred until separately designed and tested.
 
 ## Implemented POC milestones
 
@@ -104,8 +132,8 @@ POC implementation choices such as full snapshot cloning may later be optimized,
 - AST nodes carry source locations and remain compile-time data.
 - The parser does not perform runtime execution.
 - Runtime output is represented as typed events, not direct HTML.
-- Runtime actions, handles, scopes, loop frames, call frames, temporaries, pending work, session time, and settlement state that survive pause/resume must be explicit and JSON-safe.
-- Do not use suspended JavaScript functions, generators, closures, or implicit module-global mutable state as resumable execution state.
+- Runtime actions, handles, scopes, loop frames, call frames, temporaries, pending work, session time, settlement state, and resumable library continuations must be explicit and JSON-safe.
+- Do not use suspended JavaScript functions, generators, closures, promises, callbacks, or implicit module-global mutable state as resumable execution state.
 
 ## Major remaining groups
 
@@ -113,8 +141,8 @@ POC implementation choices such as full snapshot cloning may later be optimized,
 - implementation of the accepted pending-action contract, then action-kind-specific choices, input, waits, timers, buttons, and media completion;
 - cross-origin iframe host protocol and validated messaging;
 - camera/media lifecycle, resource ownership, persistence, recovery, and custom views;
-- chat-output pacing and time-integrity policy;
-- TypeScript library linkage and richer module selection;
+- implementation planning on the accepted engine/Standard-Library boundary before replacing the timer and chat-pacing proposals;
+- TypeScript library linkage, deterministic version binding, generated declarations/editor metadata, public/privileged module separation, Standard Library packaging, and richer module selection;
 - package/plan identity and migration policy;
 - Laravel persistence, accounts, global data, scheduling, and continuous personalities;
 - complete static typing and remaining V30 coverage.

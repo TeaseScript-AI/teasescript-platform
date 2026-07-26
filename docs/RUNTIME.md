@@ -6,6 +6,23 @@ ADR 0015 requires the AST to remain compile-time data and the runtime to execute
 
 ADR 0016 accepts the resumable pending-action contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities.
 
+## Accepted primitive boundary
+
+ADR 0017 keeps canonical runtime behavior in the engine while moving author-friendly composition into the platform Standard Library when possible.
+
+The engine remains responsible for:
+
+- typed sequenced output and action events;
+- foreground and background pending-action identity;
+- deterministic time observation and settlement;
+- typed completion validation;
+- opaque engine-managed references;
+- checkpoint, restore, cleanup, and resume equivalence;
+- stable speaker/output provenance needed by runtime history;
+- bounded host/player data and security boundaries.
+
+Candidate Standard Library responsibilities include `say` policy, standard output targets, visible timer presentation, common input wrappers, validation/retry helpers, and friendly lifecycle APIs. Exact primitive names and public APIs remain open. The accepted boundary does not change current runtime code, accepted V30 syntax, or ADR 0016 semantics.
+
 ## Current runtime
 
 The implementation includes:
@@ -75,7 +92,7 @@ No checkpoint may contain due-action processing performed against a newer observ
 
 The first source-to-runtime slice is blocking `wait`. See ADR 0016 for the state machine, identity lookup, idempotency, time semantics, validation invariants, test matrix, alternatives, and implementation sequence.
 
-Camera stream ownership, media persistence, and chat-output pacing are adjacent follow-up designs rather than part of the first wait implementation. Their selected direction and open questions are recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
+Camera stream ownership, media persistence, text-output composition, and chat pacing are adjacent follow-up designs rather than part of the first wait implementation. Current direction and open questions are recorded under accepted ADR 0017 and in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
 
 ## Compiler and execution entry points
 
@@ -143,11 +160,13 @@ The override's own state is external to the runtime snapshot. A checkpoint is th
 
 Future player capabilities must return typed, bounded, JSON-safe outcomes correlated to one action ID. Raw DOM exceptions, browser handles, streams, callbacks, and mutable host objects do not enter the snapshot.
 
+Under ADR 0017, Standard Library and package-library wrappers may call documented typed capabilities, but they do not bypass these boundaries or become alternate owners of canonical action state.
+
 ## Visible text boundary
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, and `null` according to the current implemented subset. When the value is a list, the runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects, sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively select or stringify them.
 
-A proposed later chat-pacing design delays only a subsequent `say` event, not unrelated instructions. It uses the final visible text at 17 visible characters per second unless `say(..., wait: ...)` supplies an explicit next-message gate. This is not accepted by ADR 0016 itself; see the follow-up planning document.
+The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded and is not current implementation guidance. ADR 0017 treats a minimal typed text-output event as an engine concern and author-facing `say` behavior as a Standard Library candidate. Final pacing, output-target, speaker, participant, and conversation-provenance semantics require later decisions.
 
 ## Runtime defaults and limits
 
@@ -217,13 +236,14 @@ The exported TypeScript compiler, compatibility wrapper, low-level runtime, snap
 
 ## Remaining runtime work
 
-- implement blocking `wait` as the first accepted pending-action slice;
-- add one-shot non-persistent background timers before the full timer family;
-- define action-kind-specific input, choice, button, media, timeout, and cancellation contracts;
+- implement blocking `wait` as the first accepted pending-action slice while documenting whether its source form lowers directly to the foreground-delay primitive or through a later Standard Library adapter;
+- under accepted ADR 0017, define the minimum background timed-work primitive and pause/resume/stop lifecycle before selecting the public timer API;
+- define action-kind-specific input, choice, button, media, timeout, and cancellation contracts while avoiding unnecessary independent state machines;
+- define typed text-output targets and stable speaker/participant provenance before final chat-pacing and LLM-context work;
 - stable package/plan identity and migration policy;
+- Standard Library linkage, generated declarations/editor metadata, versioning, and capability access;
 - iframe host commands and response correlation;
 - camera stream ownership, media ownership, cleanup, persistence, and recovery;
-- chat-output pacing and checkpoint behavior;
 - time-integrity diagnostics and future server-authoritative scheduling;
 - server checkpoint persistence and conflict resolution;
 - performance profiling and safe optimization of snapshot cloning/liveness metadata.

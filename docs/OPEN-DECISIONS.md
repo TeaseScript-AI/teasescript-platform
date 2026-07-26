@@ -1,19 +1,27 @@
 # Current open decisions
 
-Accepted ADRs and V30 override older descriptive documents. Sets, deep value copying, empty collection behavior, speaker fallback, serializable runtime architecture, serializable loop/call frames, source-order evaluation, prepared references, the current user-function model, and the shared resumable pending-action contract are not unimplemented design questions.
+Accepted ADRs and V30 override older descriptive documents. Sets, deep value copying, empty collection behavior, speaker fallback, serializable runtime architecture, serializable loop/call frames, source-order evaluation, prepared references, the current user-function model, the shared resumable pending-action contract, and the engine/Standard-Library boundary are not unimplemented design questions.
 
 ADR 0016 is accepted. It defines persisted nondecreasing session time, foreground/background pending actions, monotonic action IDs, bounded settlement replay, active-first completion lookup, injected time observations, and blocking `wait` as the first implementation slice.
+
+ADR 0017 is accepted. It defines the engine-primitive/public-Standard-Library/package-library boundary, resumability rules, public-versus-privileged separation, deterministic library binding, and parser-owned grammar boundary. It does not itself decide the deferred public APIs, syntax, or packaging details listed below.
 
 ## Runtime hardening and evolution
 
 - Package/source identity for browser checkpoints and production plan references.
-- Migration policy across plan, snapshot, checkpoint, engine, and package versions.
+- Migration policy across plan, snapshot, checkpoint, engine, Standard Library, and package versions.
 - Production checkpoint frequency, incremental persistence, and performance thresholds.
 - Final internal representation and optimization policy for large immutable/deep-copy values.
 - Host/global representation for future opaque engine references beyond speakers.
 - Complete static type checking and composite equality.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
 - Concrete implementation and migration details for version-4 pending-action fields, operations, and validators.
+- Exact minimal primitive families for text output, typed interactions, foreground delays, and background timed work under ADR 0017.
+- Exact serializable lowering or engine-managed continuation representation for resumable library workflows.
+- Player-initiated pause semantics: whether active session time freezes, continues, or follows another policy for local timed work.
+- Optional author-defined recovery/resume points, including rollback scope for variables, RNG, transcript/view state, pending actions, media, account writes, and other external effects.
+
+Default checkpoint restore should resume the exact validated saved state. Author-defined rollback or restart points are a separate advanced recovery feature and must not silently duplicate irreversible external effects.
 
 ### Compatibility API lifecycle
 
@@ -31,19 +39,35 @@ The exact version-3 schemas are current POC implementation details, not a promis
 
 ## Remaining language and library work
 
-- TypeScript-library import/linkage syntax from `.tease`.
+- TypeScript-library and Standard Library import/linkage syntax from `.tease`.
+- Standard Library packaging, compatibility, capability access, exact identity binding, migration, and version-selection rules.
+- Public Standard Library versus privileged platform-adapter module and capability boundaries.
+- Generated declaration/editor-metadata format for autocomplete, signatures, hover documentation, navigation, and diagnostics.
+- Standard Library default-prelude behavior and the advanced opt-out mechanism.
+- Published community-library and package-local-library packaging, import, moderation, and compatibility rules.
+- Explicit Standard Library replacement/override mappings without silent name shadowing.
+- Community-library dependency declarations, exact version locks, transitive resolution, cycle handling, moderation, capability propagation, and version conflicts. The first linkage slice should not require community-to-community dependencies.
 - Exact unit/date/time/datetime/duration implementation.
 - Standard Library string methods and detailed API signatures.
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
 - Static treatment of contextual `speaker` access when control-flow analysis can prove that no explicit or default speaker is available: compile-time error, warning, or retained runtime failure. Ordinary narrator output such as `say "Hello"` is a separate valid case and does not require a default speaker.
-- Exact post-V30 chat-pacing semantics, including `say(..., wait: ...)`, visible-character counting, checkpoint state, and transcript-channel behavior.
+- Final `say` composition under the accepted core/Standard-Library boundary.
+- Exact deterministic **smart autoplay** semantics: how autoplay duration is calculated and how the compiler/runtime identifies the next effective blocking player interaction.
+- Explicit `instant` and autoplay overrides, and whether any exact-duration override remains part of `say`.
+- Exact API and wording for a separate one-action acknowledgement/continue interaction. This should not become the normal chat pacing default.
+- Programmatic accessibility labels for text, number, choice, confirmation, and custom interactions, including localized defaults and optional author overrides that do not create transcript messages.
+- Final timer author API and lifecycle semantics, including explicit handle syntax, method versus free-function calls, pause, resume, stop, restart-after-stop, repetition, persistence, and visible presentation.
+- Whether accepted command/block syntax lowers directly to core instructions, to public Standard Library exports, or to compiler-owned compositions.
 - Remaining accepted V30 constructs and APIs outside the current parser/runtime subset.
 
 ## Player and interactions
 
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and CSP.
 - Action-kind-specific choices, input, buttons, media completion, cancellation, timeout, and recovery policies on the accepted shared pending-action contract.
-- Background-handler interruption, repetition, persistence, ordering, and cleanup beyond the first one-shot timer slice.
+- Generic typed-interaction primitive boundaries versus Standard Library wrappers such as text, number, choice, confirmation, and image input.
+- Background-handler interruption, lifecycle, ordering, cleanup, and foreground-slot interaction after the public timer API is reconsidered.
+- Stable text-output target handles and the exact message provenance schema.
+- Exact participant/conversation metadata needed to support one shared visible chat with selectively separated future LLM contexts. The current direction starts with `speakerId`, `target`, and unique `participantSpeakerIds`; a separate conversation identity remains deferred.
 - Camera capability declarations, long-lived stream ownership, device switching, quality negotiation, restore, privacy indicators, and optional simultaneous cameras.
 - Exact `askImage(...)` preview/countdown/retake behavior and direct nullable `takePhoto(...)` capture behavior.
 - Motion detection, sampling, camera resource limits, and scene ownership.
@@ -53,13 +77,14 @@ The exact version-3 schemas are current POC implementation details, not a promis
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
 - Time-integrity logging thresholds and whether a future typed anomaly hook becomes script-visible.
 
-See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md) for the selected direction and explicitly deferred design questions discussed with ADR 0016.
+See [`planning/LANGUAGE-LIBRARY-AND-SESSION-DIRECTIONS.md`](planning/LANGUAGE-LIBRARY-AND-SESSION-DIRECTIONS.md) for the latest owner-selected language simplicity, smart-autoplay, first Standard Library slice, explicit timer-handle, library-scope, pause, and recovery direction. The older camera/media follow-up remains authoritative for camera, captured-media, and time-integrity planning only where the newer note does not explicitly supersede it. Closed draft PRs #69 and #71 and closed issues #67 and #68 are historical proposals and are not current decisions.
 
 ## Platform and personalities
 
 - Account, toy, history, locks, global-data, and checkpoint storage contracts.
 - Persistent scheduler missed-event behavior, quotas, deduplication, concurrency, and execution location.
 - Continuous-personality lifecycle, assignments, reports, permissions, statuses, and reconnect behavior.
+- Speaker/personality relationships, dynamic LLM prompt assembly, transcript filtering, memory, summaries, and context isolation.
 - Publishing, signing, versioning, moderation, and legacy importer details.
 
 ## Proposals, not decisions
