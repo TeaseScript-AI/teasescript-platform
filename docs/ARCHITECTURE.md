@@ -17,23 +17,33 @@ Proposed ADR 0017 defines this dependency direction:
 
 ```text
 TeaseScript scripts (.tease)
-        ↓
-Package libraries (.ts)
-        ↓
-Platform Standard Library (.ts)
-        ↓
-Typed engine capability and instruction primitives
-        ↓
-Deterministic runtime state, pending actions, events, and player boundary
+    ├── call public Platform Standard Library exports directly
+    └── call optional Package libraries (.ts)
+            └── call public Platform Standard Library exports
+
+Public Platform Standard Library
+    └── documented typed engine primitives
+
+Privileged platform adapters
+    └── internal engine/player capabilities
+        (not importable through the public Standard Library surface)
+
+Typed engine primitives
+    └── deterministic runtime state, pending actions, events,
+        checkpoint/restore, and player boundary
 ```
 
 The engine owns canonical execution behavior: validation, identities, typed events, pending actions, deterministic time, opaque references, checkpointing, restore, cleanup, and security boundaries.
 
 The Standard Library owns reusable author-facing composition when that behavior can be built safely from core primitives. Candidate examples include chat-oriented `say` policy, visible timer presentation, friendly input helpers, retries, validation helpers, and standard UI conventions.
 
-Package libraries may import the Standard Library and declared package-library dependencies. They should build on shared behavior rather than directly recreating every feature from low-level primitives.
+Package libraries may import the public, capability-safe Standard Library surface. They should build on shared behavior rather than directly recreating every feature from low-level primitives. Package-library-to-package-library dependencies remain a separate open decision.
 
-This layering is proposed rather than accepted. Exact import syntax, version resolution, generated declarations, privileged capability tiers, and the first Standard Library implementation slice remain open.
+Ordinary TypeScript execution may remain synchronous, but it may not suspend invisibly across a pending-action or checkpoint boundary. Resumable library behavior must be lowered into an explicit serializable plan or represented by an engine-managed serializable continuation.
+
+A plan/checkpoint must either contain the lowered library behavior or bind to an exact compatible Standard Library identity/version. Restore against an implicit latest implementation is not permitted.
+
+This layering is proposed rather than accepted. Exact import syntax, version binding, generated declarations, privileged adapter modules, and the first Standard Library implementation slice remain open.
 
 ## Syntax and implementation placement
 
@@ -42,7 +52,7 @@ Public source syntax and internal implementation placement are separate decision
 An official TeaseScript construct may compile to:
 
 - one engine primitive;
-- one Standard Library export;
+- one public Standard Library export;
 - or a fixed compiler-owned composition.
 
 Ordinary library exports use normal function-call syntax and generated type/editor metadata. Libraries may not add grammar productions, keywords, command forms, or parser hooks. New special syntax requires an explicit language/compiler decision.
@@ -71,4 +81,4 @@ JSON-safe after every instruction boundary does not mean serializing or persisti
 
 ## Deferred architecture
 
-The cross-origin host protocol, pending input/timer actions, Standard Library linkage and packaging, generated editor metadata, media handles, server checkpoint persistence, package identity/migrations, and continuous-personality scheduling remain later work.
+The cross-origin host protocol, pending input/timer actions, Standard Library linkage and packaging, deterministic library identity/version binding, generated editor metadata, privileged adapter boundaries, media handles, server checkpoint persistence, package identity/migrations, and continuous-personality scheduling remain later work.
