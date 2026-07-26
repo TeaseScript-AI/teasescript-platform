@@ -6,9 +6,9 @@ The standalone fixed-example playground is implemented as a development proof. I
 
 A production editor should build on the versioned parser/runtime interfaces after the host/player boundary is specified. Debugger history may snapshot selected boundaries; it should not imply that production execution persists every internal instruction.
 
-## Proposed library-aware tooling
+## Accepted library-aware tooling boundary
 
-Under proposed ADR 0017, Standard Library and package-library functions use ordinary TeaseScript call syntax and receive editor support from generated declarations and metadata rather than parser extensions.
+Under accepted ADR 0017, Standard Library and package-library functions use ordinary TeaseScript call syntax and receive editor support from generated declarations and metadata rather than parser extensions.
 
 The metadata pipeline should support at least:
 
