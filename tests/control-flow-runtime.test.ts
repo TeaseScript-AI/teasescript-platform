@@ -7,12 +7,13 @@ import {
   type InstructionPlan,
 } from "../src/instructions.js";
 import {
+  CHECKPOINT_VERSION,
   CheckpointError,
   createCheckpoint,
   restoreCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { run, stepToEvent } from "../src/runtime/engine.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
+import { createFreshRuntimeSnapshot, RUNTIME_SNAPSHOT_VERSION } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("executes exclusive and inclusive integer ranges", () => {
@@ -155,13 +156,13 @@ test("rejects old formats and malformed serialized loop state", () => {
   assertCheckpointRejected(checkpoint, "TSK001");
   checkpoint.version = 2;
   assertCheckpointRejected(checkpoint, "TSK001");
-  checkpoint.version = 4;
+  checkpoint.version = CHECKPOINT_VERSION;
   const snapshot = checkpoint.snapshot as Record<string, unknown>;
   snapshot.version = 1;
   assertCheckpointRejected(checkpoint, "TSK001");
   snapshot.version = 2;
   assertCheckpointRejected(checkpoint, "TSK001");
-  snapshot.version = 4;
+  snapshot.version = RUNTIME_SNAPSHOT_VERSION;
   const checkpointPlan = checkpoint.plan as Record<string, unknown>;
   checkpointPlan.version = 1;
   assertCheckpointRejected(checkpoint, "TSK001");

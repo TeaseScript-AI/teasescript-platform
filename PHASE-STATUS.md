@@ -60,7 +60,7 @@
 - Own-property-only runtime builtin registration and prototype-free named builtin arguments.
 - Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
 
-The current plan, snapshot, and checkpoint formats are version 4 POC formats. The implemented ADR 0016 first slice supports compiler-owned blocking `wait` delays, persisted session time, explicit foreground pending action state, action events, checkpoint/restore, and explicit time settlement; background actions remain intentionally empty.
+The current plan format is version 4 and the runtime-snapshot/checkpoint formats are version 5 POC formats. The implemented ADR 0016 first slice supports compiler-owned blocking `wait` delays, persisted session time, explicit foreground pending action state, action events, checkpoint/restore, and explicit time settlement; background actions remain intentionally empty.
 
 The implemented ADR 0017 infrastructure slice provides a tooling-only exact-identity in-memory library catalog and deterministic static metadata for the documented narrow TypeScript export subset. Its external boundaries use stable capture, a bounded source-text limit before parsing, and bounded retained metadata text before canonicalization. These internal POC identities and metadata shapes are not final package manifests, import syntax, library bindings, or checkpoint data; neither the tooling surface nor privileged adapter internals are exported from the runtime root entry point.
 

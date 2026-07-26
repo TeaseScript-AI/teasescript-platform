@@ -46,7 +46,7 @@ The implementation includes:
 - defensive validation of function regions, parameter progress, call stacks, and prepared-reference state;
 - standalone playground and constrained development server.
 
-Plan, snapshot, and checkpoint formats currently use version 4. They are POC formats rather than permanent public wire-format guarantees.
+Instruction plans use version 4; runtime snapshots and checkpoints use version 5. They are POC formats rather than permanent public wire-format guarantees.
 
 The current implementation contains the first ADR 0016 slice: compiler-owned blocking `wait`, the `waiting` status, persisted session time, one foreground delay action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, and explicit time observation/completion operations. Browser scheduling and all other action kinds remain out of scope.
 
@@ -82,7 +82,7 @@ A blocking instruction evaluates its arguments, stores a complete JSON-safe acti
 
 `wait 0` is deliberately immediate: its duration expression is still evaluated, but it allocates no action ID, creates no pending action or settlement, and emits neither action event. The next source instruction runs normally; if it was the terminal root instruction, ordinary natural completion emits one `complete` event. In contrast, a positive terminal root wait settles with `actionCompleted`; the following runtime entry consumes the one canonical settled root-end transition and emits the sequenced `complete` event. Re-entering an already halted snapshot emits no further completion event.
 
-A duplicate delivery matching `lastSettlement` returns the same canonical recorded settlement without another write, event, RNG advance, handler, or continuation. A newer settlement replaces the previous record.
+A duplicate delivery matching `lastSettlement` returns the same canonical recorded settlement without another write, event, RNG advance, handler, or continuation. A newer settlement replaces the previous record. Each delay settlement retains the action's owning and continuation instruction positions, so a terminal root completion can be proven to originate from the terminal root wait rather than an earlier settlement.
 
 Completion lookup always searches the active foreground action and all active background actions first. Only when no active action matches does the runtime compare `lastSettlement`, classify a lower previously issued ID as `staleAction`, or classify an unissued ID as `unknownAction`. This prevents an older long-running background action from being misclassified after a newer action settles.
 
@@ -185,8 +185,8 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
 Current POC defaults and validation limits are:
 
 - instruction-plan format version: `4`;
-- runtime-snapshot format version: `4`;
-- checkpoint format version: `4`;
+- runtime-snapshot format version: `5`;
+- checkpoint format version: `5`;
 - default maximum call depth: `256`;
 - accepted maximum call depth range: `1` through `4096`;
 - maximum external runtime-data nesting depth: `128` (`MAX_EXTERNAL_RUNTIME_DATA_DEPTH`);
@@ -230,15 +230,15 @@ Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preser
 
 ## Format evolution
 
-Version 4 is the current implemented format. The incompatible waiting status, persisted session-time coordinate, foreground/background action fields, action counter, and settlement record require:
+The current implemented formats retain the version-4 instruction plan and use version 5 runtime snapshots and checkpoints. Version 5 adds the JSON-safe owning- and continuation-instruction provenance required to bind a retained delay settlement to its originating wait:
 
 ```text
 instruction plan version: 4
-runtime snapshot version: 4
-checkpoint version: 4
+runtime snapshot version: 5
+checkpoint version: 5
 ```
 
-These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field in the first version-4 design.
+These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field.
 
 ## API stability boundary
 

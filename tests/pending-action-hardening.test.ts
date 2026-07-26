@@ -119,6 +119,33 @@ test("rejects every forged running root-end shape outside the settled terminal d
   assert.equal(validateRuntimeSnapshot(arbitrary, compiled).valid, false);
 });
 
+test("rejects an earlier delay settlement forged onto a terminal positive or zero wait", () => {
+  for (const source of [
+    'wait 1 ms\nsay "must run"\nwait 1 ms',
+    'wait 1 ms\nsay "must run"\nwait 0',
+  ]) {
+    const compiled = plan(source);
+    const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+    const earlierSettlement = observeTime(compiled, waiting.snapshot, 1).snapshot;
+    assert.equal(earlierSettlement.status, "running");
+    assert.notEqual(earlierSettlement.nextInstruction, compiled.rootEndInstruction);
+
+    const forged = mutable(earlierSettlement);
+    forged.nextInstruction = compiled.rootEndInstruction;
+    assert.equal(validateRuntimeSnapshot(forged, compiled).valid, false, source);
+    assert.throws(
+      () => restoreCheckpoint({ ...createCheckpoint(compiled, earlierSettlement), snapshot: forged }),
+      checkpointError,
+      source,
+    );
+    assert.throws(
+      () => executeInstruction(compiled, forged),
+      (error: unknown) => error instanceof Error && error.message.includes("canonical settled terminal delay transition"),
+      source,
+    );
+  }
+});
+
 test("terminal delay completion is canonical across execute, event stepping, run, and repeated halted entries", () => {
   const compiled = plan('function hidden { say "hidden" }\nwait 1 ms');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
@@ -173,6 +200,8 @@ test("#79 validates every settlement relationship and preserves valid replay", (
     completionAtNextSequence: (snapshot) => { snapshot.lastSettlement!.completionEventSequence = snapshot.nextEventSequence; },
     beforeDeadline: (snapshot) => { snapshot.lastSettlement!.completedAtMs = snapshot.lastSettlement!.deadlineMs - 0.5; },
     afterCurrentTime: (snapshot) => { snapshot.lastSettlement!.completedAtMs = snapshot.currentSessionTimeMs + 0.5; },
+    missingOwningInstruction: (snapshot) => { delete snapshot.lastSettlement!.owningInstruction; },
+    wrongContinuationInstruction: (snapshot) => { snapshot.lastSettlement!.continuationInstruction += 1; },
   };
   for (const [name, mutate] of Object.entries(invalid)) {
     const candidate = mutable(active);

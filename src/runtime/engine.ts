@@ -251,6 +251,8 @@ export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, su
   const completionSequence = takeSequence(current);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
     actionId: action.actionId, actionKind: "delay", settlementKind: "completed",
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
     requestEventSequence: action.requestEventSequence, completionEventSequence: completionSequence,
     deadlineMs: action.deadlineMs, completedAtMs: current.currentSessionTimeMs,
   });

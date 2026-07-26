@@ -28,7 +28,7 @@ import {
 } from "./serializable-values.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 4;
+export const RUNTIME_SNAPSHOT_VERSION = 5;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -77,6 +77,8 @@ export interface RuntimeActionSettlementSnapshot {
   readonly actionId: number;
   readonly actionKind: "delay";
   readonly settlementKind: "completed";
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
   readonly requestEventSequence: number;
   readonly completionEventSequence: number;
   readonly deadlineMs: number;
@@ -1652,6 +1654,8 @@ function validateRootEndTransition(
     positiveSafeInteger(settlement.actionId) &&
     positiveSafeInteger(value.nextActionId) &&
     settlement.actionId === value.nextActionId - 1 &&
+    settlement.owningInstruction === plan.rootEndInstruction - 1 &&
+    settlement.continuationInstruction === plan.rootEndInstruction &&
     terminalInstruction?.kind === "wait";
   if (!canonical) {
     errors.push("Running root-end state is not the canonical settled terminal delay transition.");
@@ -1686,7 +1690,7 @@ function validatePendingActionState(value: Record<string, unknown>, plan: Instru
     }
   }
   const settlement = value.lastSettlement;
-  if (settlement !== null && (!isPlainRecord(settlement) || settlement.actionKind !== "delay" || settlement.settlementKind !== "completed" || !positiveSafeInteger(settlement.actionId) || !validSettlementChronology(settlement, value) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.completionEventSequence || settlement.completionEventSequence >= (typeof value.nextEventSequence === "number" ? value.nextEventSequence : 0) || settlement.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0) || (isPlainRecord(action) && action.actionId === settlement.actionId))) {
+  if (settlement !== null && (!isPlainRecord(settlement) || settlement.actionKind !== "delay" || settlement.settlementKind !== "completed" || !positiveSafeInteger(settlement.actionId) || !validSettlementProvenance(settlement, plan) || !validSettlementChronology(settlement, value) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.completionEventSequence || settlement.completionEventSequence >= (typeof value.nextEventSequence === "number" ? value.nextEventSequence : 0) || settlement.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0) || (isPlainRecord(action) && action.actionId === settlement.actionId))) {
     errors.push("Runtime lastSettlement is malformed.");
   }
 }
@@ -1703,6 +1707,32 @@ function validSettlementChronology(
     settlement.completedAtMs >= settlement.deadlineMs &&
     settlement.completedAtMs <= currentSessionTimeMs
   );
+}
+
+function validSettlementProvenance(
+  settlement: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  const owningInstruction = settlement.owningInstruction;
+  const continuationInstruction = settlement.continuationInstruction;
+  if (
+    !nonNegativeSafeInteger(owningInstruction) ||
+    !nonNegativeSafeInteger(continuationInstruction) ||
+    continuationInstruction !== owningInstruction + 1
+  ) return false;
+  if (plan === undefined) return true;
+  if (
+    owningInstruction >= plan.instructions.length ||
+    plan.instructions[owningInstruction]?.kind !== "wait"
+  ) return false;
+  const definition = plan.functions.find(
+    (candidate) =>
+      owningInstruction >= candidate.entryInstruction &&
+      owningInstruction < candidate.endInstruction,
+  );
+  return definition === undefined
+    ? continuationInstruction <= plan.rootEndInstruction
+    : continuationInstruction < definition.endInstruction;
 }
 
 function validForegroundActionOwnership(
