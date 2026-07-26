@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feat/issue-66-blocking-wait-pending-actions
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
