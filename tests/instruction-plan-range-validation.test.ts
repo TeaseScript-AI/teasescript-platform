@@ -69,6 +69,20 @@ test("rejects an extreme root boundary without building a metadata-sized region"
   });
 });
 
+test("validates many small function regions without changing root or owner semantics", () => {
+  const source = [
+    ...Array.from({ length: 96 }, (_unused, index) =>
+      `function f${index} { return ${index} }`,
+    ),
+    "say f0()",
+  ].join("\n");
+  const compiled = compileSource(source);
+  assert.equal(compiled.diagnostics.length, 0);
+  assert.ok(compiled.plan !== null);
+  const result = validateInstructionPlan(compiled.plan);
+  assert.equal(result.valid, true);
+});
+
 test("rejects unsafe, negative, and fractional function boundaries before dependent validation", () => {
   for (const value of [Number.MAX_SAFE_INTEGER + 1, -1, 1.5]) {
     const malformed = mutablePlan(functionPlan());
