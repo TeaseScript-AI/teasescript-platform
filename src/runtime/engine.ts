@@ -6,6 +6,7 @@ import type {
   InstructionPlan,
 } from "../instructions.js";
 import { captureInstructionPlan } from "../instructions.js";
+import { captureExternalData } from "../external-data-limits.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -13,6 +14,8 @@ import {
 } from "../source.js";
 import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
 import type {
+  ActionCompletedEvent,
+  ActionRequestedEvent,
   CompleteEvent,
   DeveloperWarningEvent,
   ExitEvent,
@@ -45,6 +48,8 @@ import {
 import {
   captureRuntimeSnapshot,
   cloneCapturedRuntimeSnapshot,
+  MAX_RUNTIME_SESSION_TIME_MS,
+  type RuntimeActionSettlementSnapshot,
   type RuntimeBindingSnapshot,
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
@@ -78,6 +83,21 @@ export interface RuntimeOperationResult {
 export interface RuntimeRunOptions {
   readonly instructionBudget?: number;
 }
+
+export type TimeObservationOutcome =
+  | { readonly kind: "observed"; readonly currentSessionTimeMs: number; readonly completion: RuntimeActionSettlementSnapshot | null }
+  | { readonly kind: "invalidObservation"; readonly message: string };
+
+export interface PendingActionOperationResult<T> extends RuntimeOperationResult { readonly outcome: T; }
+
+export type ActionCompletionOutcome =
+  | { readonly kind: "completed"; readonly settlement: RuntimeActionSettlementSnapshot }
+  | { readonly kind: "alreadySettled"; readonly settlement: RuntimeActionSettlementSnapshot }
+  | { readonly kind: "staleAction"; readonly actionId: number }
+  | { readonly kind: "unknownAction"; readonly actionId: number }
+  | { readonly kind: "wrongActionKind"; readonly actionId: number; readonly expectedActionKind: "delay"; readonly receivedActionKind: string }
+  | { readonly kind: "invalidPayload"; readonly message: string }
+  | { readonly kind: "notDue"; readonly actionId: number; readonly currentSessionTimeMs: number; readonly deadlineMs: number };
 
 export class RuntimeDataError extends Error {
   public constructor(
@@ -115,6 +135,7 @@ function executeCapturedInstruction(
   if (snapshot.status === "halted" || snapshot.status === "failed") {
     return result(snapshot, [], 0);
   }
+  if (snapshot.status === "waiting") return result(snapshot, [], 0);
   const instruction = plan.instructions[snapshot.nextInstruction];
   if (instruction === undefined) {
     snapshot.status = "halted";
@@ -155,6 +176,7 @@ export function stepToEvent(
   const events: InterpreterEvent[] = [];
   let instructionsExecuted = 0;
   while (
+    current.status !== "waiting" &&
     current.status !== "halted" &&
     current.status !== "failed" &&
     events.length === 0
@@ -188,7 +210,7 @@ export function run(
   let current = cloneCapturedRuntimeSnapshot(captured.snapshot);
   const events: InterpreterEvent[] = [];
   let instructionsExecuted = 0;
-  while (current.status !== "halted" && current.status !== "failed") {
+  while (current.status !== "waiting" && current.status !== "halted" && current.status !== "failed") {
     if (instructionsExecuted >= budget) {
       const budgetResult = failForBudget(captured.plan, current);
       current = budgetResult.snapshot;
@@ -205,6 +227,54 @@ export function run(
     events.push(...operation.events);
   }
   return result(current, events, instructionsExecuted);
+}
+
+/** Atomically records a host-supplied session-time observation and settles a due delay. */
+export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, suppliedNowMs: unknown): PendingActionOperationResult<TimeObservationOutcome> {
+  const captured = captureExecutableData(plan, snapshot);
+  const current = cloneCapturedRuntimeSnapshot(captured.snapshot);
+  if (!validSessionTime(suppliedNowMs)) return pendingResult(current, [], { kind: "invalidObservation", message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.` });
+  current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, suppliedNowMs);
+  const action = current.foregroundAction;
+  if (action === null || current.currentSessionTimeMs < action.deadlineMs) {
+    return pendingResult(current, [], { kind: "observed", currentSessionTimeMs: current.currentSessionTimeMs, completion: null });
+  }
+  const completionSequence = takeSequence(current);
+  const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
+    actionId: action.actionId, actionKind: "delay", settlementKind: "completed",
+    requestEventSequence: action.requestEventSequence, completionEventSequence: completionSequence,
+    deadlineMs: action.deadlineMs, completedAtMs: current.currentSessionTimeMs,
+  });
+  current.foregroundAction = null;
+  current.lastSettlement = settlement;
+  current.status = "running";
+  current.nextInstruction = action.continuationInstruction;
+  const span = captured.plan.instructions[action.owningInstruction]?.span ?? captured.plan.sourceSpan;
+  const events: InterpreterEvent[] = [Object.freeze({ kind: "actionCompleted", sequence: completionSequence, settlement, span: copySpan(span) } satisfies ActionCompletedEvent)];
+  return pendingResult(current, events, { kind: "observed", currentSessionTimeMs: current.currentSessionTimeMs, completion: settlement });
+}
+
+/** Validated host completion route. Delay payloads carry the observed session time. */
+export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot, request: unknown): PendingActionOperationResult<ActionCompletionOutcome> {
+  const captured = captureExecutableData(plan, snapshot);
+  const current = cloneCapturedRuntimeSnapshot(captured.snapshot);
+  const external = captureExternalData(request);
+  if (!external.ok || !isPlainRecord(external.value)) return pendingResult(current, [], { kind: "invalidPayload", message: "Action completion request must be bounded JSON-safe object data." });
+  const value = external.value;
+  if (!positiveSafeInteger(value.actionId)) return pendingResult(current, [], { kind: "invalidPayload", message: "Action completion actionId must be a positive safe integer." });
+  const actionId = value.actionId;
+  const active = current.foregroundAction?.actionId === actionId ? current.foregroundAction : null;
+  if (active === null) {
+    if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: { ...current.lastSettlement } });
+    return pendingResult(current, [], actionId < current.nextActionId ? { kind: "staleAction", actionId } : { kind: "unknownAction", actionId });
+  }
+  if (value.actionKind !== "delay") return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: "delay", receivedActionKind: typeof value.actionKind === "string" ? value.actionKind : String(value.actionKind) });
+  if (!isPlainRecord(value.payload) || value.payload.kind !== "time" || !validSessionTime(value.payload.currentSessionTimeMs)) return pendingResult(current, [], { kind: "invalidPayload", message: "Delay completion payload must contain a valid time observation." });
+  const effectiveNow = Math.max(current.currentSessionTimeMs, value.payload.currentSessionTimeMs);
+  if (effectiveNow < active.deadlineMs) return pendingResult(current, [], { kind: "notDue", actionId, currentSessionTimeMs: current.currentSessionTimeMs, deadlineMs: active.deadlineMs });
+  const observed = observeTime(captured.plan, current, effectiveNow);
+  if (observed.outcome.kind !== "observed" || observed.outcome.completion === null) throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
+  return Object.freeze({ ...observed, outcome: { kind: "completed" as const, settlement: observed.outcome.completion } });
 }
 
 function executePlannedInstruction(
@@ -399,6 +469,23 @@ function executePlannedInstruction(
         } satisfies SayEvent),
       );
       advance(snapshot);
+      return;
+    }
+    case "wait": {
+      const value = evaluator.evaluate(instruction.duration);
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw fault("TSR050", "Wait duration must be a finite non-negative number.", instruction.duration.span);
+      const multiplier = instruction.unit === "ms" ? 1 : instruction.unit === "min" ? 60_000 : instruction.unit === "h" ? 3_600_000 : 1_000;
+      const durationMs = value * multiplier;
+      const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
+      if (!Number.isFinite(durationMs) || !validSessionTime(deadlineMs)) throw fault("TSR050", "Wait duration is outside the supported session-time range.", instruction.duration.span);
+      if (durationMs === 0) { advance(snapshot); return; }
+      if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER - 1) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      const sequence = takeSequence(snapshot);
+      const action = Object.freeze({ kind: "delay" as const, actionId: snapshot.nextActionId, owningInstruction: snapshot.nextInstruction, continuationInstruction: snapshot.nextInstruction + 1, ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null, scopeDepth: snapshot.frames.length, loopDepth: snapshot.loopFrames.length, createdAtMs: snapshot.currentSessionTimeMs, deadlineMs, expectedCompletion: "time" as const, requestEventSequence: sequence });
+      snapshot.nextActionId += 1;
+      snapshot.foregroundAction = action;
+      snapshot.status = "waiting";
+      events.push(Object.freeze({ kind: "actionRequested", sequence, action: { ...action }, span: copySpan(instruction.span) } satisfies ActionRequestedEvent));
       return;
     }
     case "exit":
@@ -2296,6 +2383,24 @@ function result(
     events: Object.freeze([...events]),
     instructionsExecuted,
   });
+}
+
+function pendingResult<T>(snapshot: RuntimeSnapshot, events: readonly InterpreterEvent[], outcome: T): PendingActionOperationResult<T> {
+  return Object.freeze({ ...result(snapshot, events, 0), outcome });
+}
+
+function validSessionTime(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_RUNTIME_SESSION_TIME_MS;
+}
+
+function positiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {

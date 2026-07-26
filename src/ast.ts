@@ -10,6 +10,7 @@ export type Statement =
   | SpeakerDeclaration
   | SpeakerSetterStatement
   | SayStatement
+  | WaitStatement
   | ExitStatement
   | LetStatement
   | AssignmentStatement
@@ -53,6 +54,14 @@ export interface SayStatement {
   readonly kind: "sayStatement";
   readonly speaker: Identifier | null;
   readonly value: Expression;
+  readonly span: SourceSpan;
+}
+
+/** A compiler-owned blocking delay. A missing unit means seconds. */
+export interface WaitStatement {
+  readonly kind: "waitStatement";
+  readonly duration: Expression;
+  readonly unit: "ms" | "s" | "min" | "h" | null;
   readonly span: SourceSpan;
 }
 

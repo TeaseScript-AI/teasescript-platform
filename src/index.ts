@@ -27,6 +27,7 @@ export {
   type AssignmentTargetPlan,
   type ExpressionPlan,
   type Instruction,
+  type WaitInstruction,
   type InstructionPlan,
   type LoopControlInstruction,
   type LoopStartInstruction,
@@ -57,6 +58,8 @@ export {
 export type { RuntimeErrorInfo } from "./runtime/errors.js";
 export type { RuntimeWarningInfo } from "./runtime/warnings.js";
 export type {
+  ActionCompletedEvent,
+  ActionRequestedEvent,
   ExitEvent,
   CompleteEvent,
   DeveloperWarningEvent,
@@ -67,6 +70,8 @@ export type {
 } from "./runtime/events.js";
 export {
   executeInstruction,
+  completeAction,
+  observeTime,
   run,
   RuntimeDataError,
   stepToEvent,
@@ -75,6 +80,9 @@ export {
   type RuntimeCapabilityCall,
   type RuntimeOperationResult,
   type RuntimeRunOptions,
+  type PendingActionOperationResult,
+  type TimeObservationOutcome,
+  type ActionCompletionOutcome,
 } from "./runtime/engine.js";
 export {
   CHECKPOINT_FORMAT,
@@ -90,6 +98,7 @@ export {
 export {
   createFreshRuntimeSnapshot,
   DEFAULT_MAX_CALL_DEPTH,
+  MAX_RUNTIME_SESSION_TIME_MS,
   MAX_SUPPORTED_CALL_DEPTH,
   RUNTIME_SNAPSHOT_FORMAT,
   RUNTIME_SNAPSHOT_VERSION,
@@ -107,6 +116,9 @@ export {
   type RuntimeForLoopFrameSnapshot,
   type RuntimeWhileLoopFrameSnapshot,
   type RuntimeSnapshot,
+  type RuntimeActionSettlementSnapshot,
+  type RuntimeDelayActionSnapshot,
+  type RuntimePendingActionSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeStatus,
   type SnapshotValidationResult,
@@ -188,6 +200,7 @@ export type {
   ReturnStatement,
   ScalarTypeName,
   SayStatement,
+  WaitStatement,
   SetLiteral,
   SpeakerDeclaration,
   SpeakerProperty,

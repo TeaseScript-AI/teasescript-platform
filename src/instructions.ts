@@ -19,7 +19,7 @@ import {
 import { createSourceSpan, type SourceSpan } from "./source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 3;
+export const INSTRUCTION_PLAN_VERSION = 4;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
@@ -78,6 +78,7 @@ export type Instruction =
   | ReturnValueInstruction
   | ReturnVoidInstruction
   | SayInstruction
+  | WaitInstruction
   | ExitInstruction;
 
 interface InstructionBase {
@@ -257,6 +258,12 @@ export interface SayInstruction extends InstructionBase {
   readonly kind: "say";
   readonly speaker: string | null;
   readonly value: ExpressionPlan;
+}
+
+export interface WaitInstruction extends InstructionBase {
+  readonly kind: "wait";
+  readonly duration: ExpressionPlan;
+  readonly unit: "ms" | "s" | "min" | "h" | null;
 }
 
 export interface ExitInstruction extends InstructionBase {
@@ -779,6 +786,12 @@ class InstructionCompiler {
         this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
         }
+      case "waitStatement": {
+        const lowered = this.#lowerExpression(statement.duration);
+        this.instructions.push({ kind: "wait", duration: lowered.plan, unit: statement.unit, span: copySpan(statement.span) });
+        this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
+        return;
+      }
       case "exitStatement":
         this.instructions.push({ kind: "exit", span: copySpan(statement.span) });
         return;
@@ -1825,6 +1838,12 @@ function validateInstruction(
     case "say":
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      return;
+    case "wait":
+      if (value.unit !== null && !["ms", "s", "min", "h"].includes(String(value.unit))) {
+        errors.push(planError("TSC002", "Wait unit is invalid.", `${path}.unit`));
+      }
+      validateExpression(value.duration, `${path}.duration`, errors, false, temporaryCount);
       return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));

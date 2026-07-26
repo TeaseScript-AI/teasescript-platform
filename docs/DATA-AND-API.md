@@ -98,7 +98,7 @@ Camera and file APIs continue to return engine-managed references rather than br
 
 ## Stability and future contracts
 
-The current TypeScript exports and version-3 plan, snapshot, and checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
+The current TypeScript exports and version-4 plan, snapshot, and checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
 
 Implementation of ADR 0016 requires version-4 plan, snapshot, and checkpoint schemas for the waiting status, persisted session-time coordinate, foreground/background action fields, action counter, and bounded settlement record. Version 4 is an internal POC format revision, not a product release number.
 

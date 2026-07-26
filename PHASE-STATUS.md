@@ -54,7 +54,7 @@
 - Own-property-only runtime builtin registration and prototype-free named builtin arguments.
 - Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
 
-The current plan, snapshot, and checkpoint formats are version 3 POC formats. The completed hardening and test-infrastructure work did not change these format versions.
+The current plan, snapshot, and checkpoint formats are version 4 POC formats. The implemented ADR 0016 first slice supports compiler-owned blocking `wait` delays, persisted session time, explicit foreground pending action state, action events, checkpoint/restore, and explicit time settlement; background actions remain intentionally empty.
 
 ## Verification expected before merge
 

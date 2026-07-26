@@ -518,7 +518,7 @@ test("rejects malformed function-region plans inside checkpoints", () => {
   for (const malformedPlan of plans) {
     assertCheckpointRejected({
       format: "teasescript-checkpoint",
-      version: 3,
+      version: 4,
       plan: malformedPlan,
       snapshot: createFreshRuntimeSnapshot(
         malformedPlan === aliasedDestination || malformedPlan === duplicateArgument
@@ -556,7 +556,7 @@ test("rejects cyclic runtime state without overflowing validation", () => {
   const snapshot = createFreshRuntimeSnapshot(compiled);
   const checkpoint = {
     format: "teasescript-checkpoint",
-    version: 3,
+    version: 4,
     plan: compiled,
     snapshot,
   } as Record<string, unknown>;
