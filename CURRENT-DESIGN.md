@@ -24,6 +24,24 @@ Accepted post-V30 decisions relevant to the current runtime include:
 
 Direct assignment remains `score = 20`; `set score = 20` remains invalid.
 
+## Proposed engine and Standard Library boundary
+
+Proposed ADR 0017 separates the smallest deterministic engine primitives from author-friendly Standard Library APIs:
+
+```text
+TeaseScript scripts
+    -> package libraries
+    -> platform Standard Library
+    -> typed engine primitives
+    -> deterministic runtime and player boundary
+```
+
+The proposal keeps canonical identity, pending actions, time, validation, handles, checkpointing, events, and security in the engine. Friendly presentation and composition such as `say` policy, common input helpers, and timer presentation should be Standard Library candidates when they can be built without weakening those guarantees.
+
+Package libraries should be able to reuse Standard Library exports. Generated TypeScript signatures and editor metadata should provide autocomplete, parameter hints, hover documentation, and diagnostics for ordinary library calls. Libraries must not mutate TeaseScript grammar; special command or block syntax remains an explicit language/compiler decision.
+
+This direction remains proposed. It does not change the accepted V30 syntax, ADR 0016 pending-action semantics, or the currently implemented `say` path until the owner accepts ADR 0017 and a tested library-linkage plan exists.
+
 ## Implemented POC milestones
 
 ### Parser and core language
@@ -113,8 +131,8 @@ POC implementation choices such as full snapshot cloning may later be optimized,
 - implementation of the accepted pending-action contract, then action-kind-specific choices, input, waits, timers, buttons, and media completion;
 - cross-origin iframe host protocol and validated messaging;
 - camera/media lifecycle, resource ownership, persistence, recovery, and custom views;
-- chat-output pacing and time-integrity policy;
-- TypeScript library linkage and richer module selection;
+- owner review of the proposed engine/Standard-Library boundary before replacing the timer and chat-pacing proposals;
+- TypeScript library linkage, generated declarations/editor metadata, Standard Library packaging, and richer module selection;
 - package/plan identity and migration policy;
 - Laravel persistence, accounts, global data, scheduling, and continuous personalities;
 - complete static typing and remaining V30 coverage.
