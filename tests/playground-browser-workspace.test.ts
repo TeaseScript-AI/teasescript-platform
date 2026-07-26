@@ -14,6 +14,9 @@ test("browser playground exposes the bounded editable workspace controls", async
   assert.match(browser, /compiledRevision === sourceRevision/u);
   assert.match(browser, /sourceEdited/u);
   assert.match(browser, /renderSourceLines/u);
+  const styles = await readFile(resolve(process.cwd(), "playground/playground.css"), "utf8");
+  assert.match(styles, /\.source-editor[^}]*resize: vertical/u);
+  assert.match(styles, /\.player-panel \.transcript[^}]*flex: 1 1 auto/u);
   const helper = await readFile(resolve(process.cwd(), "playground/workspace.ts"), "utf8");
   assert.doesNotMatch(helper, /Buffer\.byteLength/u);
 });
