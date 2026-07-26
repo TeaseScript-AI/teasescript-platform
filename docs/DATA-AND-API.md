@@ -45,7 +45,9 @@ Low-level functions remain separately exported for tests, tooling, debugging, an
 
 ### Compatibility host boundary
 
-`execute(program, options)` and `Interpreter` form the current direct-AST compatibility/testing boundary. They run shared finite-literal AST validation and semantic validation using configured global and builtin names before lowering. Non-finite literal values and semantic failures are exposed through ordered `InterpreterCompilationError` diagnostics rather than an unstructured runtime crash.
+`execute(program, options)` and `Interpreter` form the current direct-AST compatibility/testing boundary. They run shared finite-literal AST validation and semantic validation using configured global and builtin names before lowering. Non-finite literal values and semantic failures are exposed through ordered `InterpreterCompilationError` diagnostics rather than an unstructured runtime crash. Because their current `ExecutionResult` cannot represent a pending execution, a valid compiled plan containing any blocking `wait` is conservatively rejected before runtime state creation with error diagnostic `TSC004` and the first canonical wait span. This temporary behavior covers all program regions, including uncalled functions; it does not make `wait` unsupported in TeaseScript.
+
+The explicit plan/snapshot/runtime API remains the canonical resumable route for waits, including pending actions, checkpoints, completion, and resumption. The compatibility APIs remain unresolved POC surfaces: a future resumable compatibility result or lifecycle decision needs separate owner approval.
 
 Compatibility globals and builtin results cross a serializable-value adapter. Values are copied and validated before entering runtime state. Host `RuntimeSpeaker` objects are not currently supported across this boundary; declared TeaseScript speakers remain runtime-owned values.
 
