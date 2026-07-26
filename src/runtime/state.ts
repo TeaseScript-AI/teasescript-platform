@@ -28,11 +28,12 @@ import {
 } from "./serializable-values.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 3;
+export const RUNTIME_SNAPSHOT_VERSION = 4;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
+export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
 
-export type RuntimeStatus = "ready" | "running" | "halted" | "failed";
+export type RuntimeStatus = "ready" | "running" | "waiting" | "halted" | "failed";
 
 export interface RuntimeBindingSnapshot {
   readonly name: string;
@@ -54,6 +55,32 @@ export interface RuntimeFailureSnapshot {
   readonly code: string;
   readonly message: string;
   readonly span: SourceSpan;
+}
+
+export interface RuntimeDelayActionSnapshot {
+  readonly kind: "delay";
+  readonly actionId: number;
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
+  readonly scopeDepth: number;
+  readonly loopDepth: number;
+  readonly createdAtMs: number;
+  readonly deadlineMs: number;
+  readonly expectedCompletion: "time";
+  readonly requestEventSequence: number;
+}
+
+export type RuntimePendingActionSnapshot = RuntimeDelayActionSnapshot;
+
+export interface RuntimeActionSettlementSnapshot {
+  readonly actionId: number;
+  readonly actionKind: "delay";
+  readonly settlementKind: "completed";
+  readonly requestEventSequence: number;
+  readonly completionEventSequence: number;
+  readonly deadlineMs: number;
+  readonly completedAtMs: number;
 }
 
 interface RuntimeLoopFrameBase {
@@ -138,6 +165,11 @@ export interface RuntimeSnapshot {
   nextScopeId: number;
   nextSpeakerId: number;
   nextCallFrameId: number;
+  currentSessionTimeMs: number;
+  foregroundAction: RuntimePendingActionSnapshot | null;
+  readonly backgroundActions: RuntimePendingActionSnapshot[];
+  nextActionId: number;
+  lastSettlement: RuntimeActionSettlementSnapshot | null;
   readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
@@ -147,6 +179,7 @@ export interface FreshRuntimeOptions {
   readonly seed?: number;
   readonly globals?: Readonly<Record<string, SerializableRuntimeValue>>;
   readonly maxCallDepth?: number;
+  readonly initialSessionTimeMs?: number;
 }
 
 export interface SnapshotValidationResult {
@@ -181,6 +214,10 @@ export function createFreshRuntimeSnapshot(
   }
   const bindings: RuntimeBindingSnapshot[] = [];
   const maxCallDepthValue = capturedOptions.maxCallDepth;
+  const initialSessionTimeMs = capturedOptions.initialSessionTimeMs ?? 0;
+  if (!validSessionTime(initialSessionTimeMs)) {
+    throw new RangeError(`initialSessionTimeMs must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.`);
+  }
   const maxCallDepth = maxCallDepthValue === undefined
     ? DEFAULT_MAX_CALL_DEPTH
     : maxCallDepthValue;
@@ -229,6 +266,11 @@ export function createFreshRuntimeSnapshot(
     nextScopeId: 1,
     nextSpeakerId: 1,
     nextCallFrameId: 1,
+    currentSessionTimeMs: initialSessionTimeMs,
+    foregroundAction: null,
+    backgroundActions: [],
+    nextActionId: 1,
+    lastSettlement: null,
     maxCallDepth,
     status: capturedPlan.plan.rootEndInstruction === 0 ? "halted" : "ready",
     failure: null,
@@ -306,6 +348,11 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextScopeId: snapshot.nextScopeId,
     nextSpeakerId: snapshot.nextSpeakerId,
     nextCallFrameId: snapshot.nextCallFrameId,
+    currentSessionTimeMs: snapshot.currentSessionTimeMs,
+    foregroundAction: snapshot.foregroundAction === null ? null : { ...snapshot.foregroundAction },
+    backgroundActions: snapshot.backgroundActions.map((action) => ({ ...action })),
+    nextActionId: snapshot.nextActionId,
+    lastSettlement: snapshot.lastSettlement === null ? null : { ...snapshot.lastSettlement },
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -512,7 +559,8 @@ export function validateCapturedRuntimeSnapshot(
   ) {
     errors.push("Runtime maxCallDepth is outside the supported range.");
   }
-  if (!["ready", "running", "halted", "failed"].includes(String(value.status))) {
+  validatePendingActionState(value, plan, errors);
+  if (!["ready", "running", "waiting", "halted", "failed"].includes(String(value.status))) {
     errors.push("Runtime status is invalid.");
   }
   validateFailure(value.failure, value.status, errors);
@@ -1523,6 +1571,12 @@ function validateStatusConsistency(
   if (value.contextualSpeaker !== null) {
     errors.push("Runtime contextual speaker must be cleared between instructions.");
   }
+  const action = value.foregroundAction;
+  if (value.status === "waiting") {
+    if (!isPlainRecord(action) || action.kind !== "delay") errors.push("Waiting runtime state requires one foreground delay action.");
+  } else if (action !== null) {
+    errors.push("Non-waiting runtime state must not contain a foreground action.");
+  }
   if (value.status === "ready") {
     if (
       value.nextInstruction !== 0 ||
@@ -1550,6 +1604,31 @@ function validateStatusConsistency(
     ) {
       errors.push("Root execution position is outside the root instruction range.");
     }
+  }
+}
+
+function validSessionTime(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_RUNTIME_SESSION_TIME_MS;
+}
+
+function positiveSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && typeof value === "number" && value >= 1;
+}
+
+function validatePendingActionState(value: Record<string, unknown>, plan: InstructionPlan | undefined, errors: string[]): void {
+  if (!validSessionTime(value.currentSessionTimeMs)) errors.push("Runtime currentSessionTimeMs is outside the supported range.");
+  if (!Array.isArray(value.backgroundActions) || value.backgroundActions.length !== 0) errors.push("Runtime backgroundActions must be an empty array in this slice.");
+  if (!positiveSafeInteger(value.nextActionId)) errors.push("Runtime nextActionId must be a positive safe integer.");
+  const action = value.foregroundAction;
+  if (action !== null) {
+    const callIds = Array.isArray(value.callFrames) ? new Set(value.callFrames.filter(isPlainRecord).map((frame) => frame.id)) : new Set<unknown>();
+    if (!isPlainRecord(action) || action.kind !== "delay" || !positiveSafeInteger(action.actionId) || !validSessionTime(action.createdAtMs) || !validSessionTime(action.deadlineMs) || action.deadlineMs < action.createdAtMs || action.expectedCompletion !== "time" || !positiveSafeInteger(action.requestEventSequence) || !nonNegativeSafeInteger(action.owningInstruction) || !nonNegativeSafeInteger(action.continuationInstruction) || !nonNegativeSafeInteger(action.scopeDepth) || !nonNegativeSafeInteger(action.loopDepth) || (action.ownerCallFrameId !== null && !positiveSafeInteger(action.ownerCallFrameId)) || (action.ownerCallFrameId !== null && !callIds.has(action.ownerCallFrameId)) || action.scopeDepth !== (Array.isArray(value.frames) ? value.frames.length : -1) || action.loopDepth !== (Array.isArray(value.loopFrames) ? value.loopFrames.length : -1) || (typeof value.nextEventSequence === "number" && action.requestEventSequence >= value.nextEventSequence) || (plan !== undefined && (action.owningInstruction >= plan.instructions.length || action.continuationInstruction > plan.instructions.length || plan.instructions[action.owningInstruction]?.kind !== "wait" || action.continuationInstruction !== action.owningInstruction + 1)) || action.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0)) {
+      errors.push("Runtime foreground action is malformed.");
+    }
+  }
+  const settlement = value.lastSettlement;
+  if (settlement !== null && (!isPlainRecord(settlement) || settlement.actionKind !== "delay" || settlement.settlementKind !== "completed" || !positiveSafeInteger(settlement.actionId) || !validSessionTime(settlement.deadlineMs) || !validSessionTime(settlement.completedAtMs) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.completionEventSequence))) {
+    errors.push("Runtime lastSettlement is malformed.");
   }
 }
 

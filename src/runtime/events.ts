@@ -1,4 +1,5 @@
 import type { SourceSpan } from "../source.js";
+import type { RuntimeActionSettlementSnapshot, RuntimePendingActionSnapshot } from "./state.js";
 
 export interface OutputSpeaker {
   readonly identifier: string;
@@ -28,6 +29,20 @@ export interface CompleteEvent {
   readonly span: SourceSpan;
 }
 
+export interface ActionRequestedEvent {
+  readonly kind: "actionRequested";
+  readonly sequence: number;
+  readonly action: RuntimePendingActionSnapshot;
+  readonly span: SourceSpan;
+}
+
+export interface ActionCompletedEvent {
+  readonly kind: "actionCompleted";
+  readonly sequence: number;
+  readonly settlement: RuntimeActionSettlementSnapshot;
+  readonly span: SourceSpan;
+}
+
 export interface DeveloperWarningEvent {
   readonly kind: "developerWarning";
   readonly sequence: number;
@@ -49,5 +64,7 @@ export type InterpreterEvent =
   | SayEvent
   | ExitEvent
   | CompleteEvent
+  | ActionRequestedEvent
+  | ActionCompletedEvent
   | DeveloperWarningEvent
   | RuntimeFailureEvent;

@@ -23,9 +23,9 @@ The implementation includes:
 - defensive validation of function regions, parameter progress, call stacks, and prepared-reference state;
 - standalone playground and constrained development server.
 
-Plan, snapshot, and checkpoint formats currently use version 3. They are POC formats rather than permanent public wire-format guarantees.
+Plan, snapshot, and checkpoint formats currently use version 4. They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation does not yet contain `waiting`, persisted session time, foreground/background action fields, action IDs, settlements, clock observations, or action completion operations.
+The current implementation contains the first ADR 0016 slice: compiler-owned blocking `wait`, the `waiting` status, persisted session time, one foreground delay action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, and explicit time observation/completion operations. Browser scheduling and all other action kinds remain out of scope.
 
 ## Accepted resumable pending-action model
 
@@ -169,7 +169,7 @@ A configured instruction budget must be a positive integer. Exhaustion fails det
 
 Externally supplied instruction plans, runtime snapshots, checkpoints, globals, and serializable runtime values are captured into one bounded stable plain-data graph before detailed validation, cloning, freezing, state construction, execution, event emission, or RNG consumption. Enumerable accessors are rejected without invocation, proxy behavior is not retained, and later phases consume only the captured graph. Depth is counted from the external root at zero, and the work limit applies to each bounded capture. Exceeding either implementation limit or failing stable capture is malformed external runtime data. Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`, and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
 
-Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality, duplicate handling, and version-3 formats are unchanged.
+Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality and duplicate handling are unchanged.
 
 A halted snapshot is accepted only at the root completion boundary, including an empty root, or immediately after an `exit` instruction. Halted snapshots must also retain no active call frames, loop frames, temporaries, nested scopes, contextual speaker, or failure state. These checks establish that the serialized state is a possible current runtime state; they do not authenticate its execution history.
 
@@ -187,7 +187,7 @@ The `xorshift32-v1` seed and serialized state must be non-zero unsigned 32-bit i
 - checkpoint restore translates that malformed snapshot state into structured `CheckpointError` code `TSK002`;
 - valid non-zero seeds retain the existing deterministic sequence and do not change the algorithm or versioned formats.
 
-The zero-state rule prevents the absorbing xorshift32 state in which every future state and output remains zero. It does not change the plan, runtime-snapshot, or checkpoint format version; all remain version 3.
+The zero-state rule prevents the absorbing xorshift32 state in which every future state and output remains zero. It does not change the plan, runtime-snapshot, or checkpoint format version.
 
 ## Checkpoint boundary
 
