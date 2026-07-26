@@ -17,6 +17,7 @@ import {
   type ExternalDataFailureKind,
 } from "./external-data-limits.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
+import { recordValidationTestWork } from "./runtime/validation-testing.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
 export const INSTRUCTION_PLAN_VERSION = 4;
@@ -2098,6 +2099,7 @@ function createPlanValidationIndex(
   rootEndInstruction: number | null,
   functions: readonly ValidatedFunctionRange[],
 ): PlanValidationIndex | null {
+  recordValidationTestWork("planOwnerIndexBuilds");
   if (rootEndInstruction === null) return null;
   const owners: Array<InstructionExecutionRegion | undefined> = new Array(instructions.length);
   const root: InstructionExecutionRegion = {

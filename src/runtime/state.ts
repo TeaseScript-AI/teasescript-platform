@@ -26,6 +26,7 @@ import {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
+import { recordValidationTestWork } from "./validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
 export const RUNTIME_SNAPSHOT_VERSION = 5;
@@ -1249,6 +1250,7 @@ function validateCallArgumentConsistency(
   const preparedByParameter = new Map(
     callInstruction.arguments.map((argument) => [argument.parameterName, argument]),
   );
+  recordValidationTestWork("preparedArgumentMapBuilds");
   const callerTemporariesById = createTemporaryMap(callerTemporaries);
   for (const argument of argumentsValue) {
     if (!isPlainRecord(argument) || typeof argument.parameterName !== "string") continue;
@@ -1271,6 +1273,7 @@ function validateCallArgumentConsistency(
 }
 
 function createTemporaryMap(temporaries: readonly unknown[]): ReadonlyMap<number, Record<string, unknown>> {
+  recordValidationTestWork("temporaryMapBuilds");
   const result = new Map<number, Record<string, unknown>>();
   for (const temporary of temporaries) {
     if (isPlainRecord(temporary) && nonNegativeSafeInteger(temporary.id)) {
@@ -1282,6 +1285,7 @@ function createTemporaryMap(temporaries: readonly unknown[]): ReadonlyMap<number
 
 /** Structural equality for values that have already passed serializable-value validation. */
 function sameValidatedSerializableValue(left: unknown, right: unknown): boolean {
+  recordValidationTestWork("structuralValueComparisons");
   if (left === right) return true;
   if (!isPlainRecord(left) || !isPlainRecord(right) || left.kind !== right.kind) return false;
   switch (left.kind) {
@@ -1494,6 +1498,7 @@ interface SnapshotValidationAnalysis {
 }
 
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
+  recordValidationTestWork("snapshotAnalysisBuilds");
   const functionsById = new Map<number, InstructionPlan["functions"][number]>();
   const regionEnds = new Array<number>(plan.instructions.length).fill(plan.rootEndInstruction);
   for (const definition of plan.functions) {
@@ -1503,6 +1508,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     }
   }
   const defaultBindingPositions = new Map<string, number>();
+  recordValidationTestWork("defaultBindingIndexBuilds");
   for (let index = 0; index < plan.instructions.length; index += 1) {
     const instruction = plan.instructions[index];
     if (instruction?.kind === "bindDefaultParameter") {
@@ -1515,6 +1521,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
       new Set(definition.parameters.map((parameter) => parameter.name)),
     ]),
   );
+  recordValidationTestWork("parameterNameIndexBuilds");
   return {
     plan,
     functionsById,
@@ -1564,10 +1571,18 @@ function requiredContinuationTemporaries(
   if (liveIn === undefined) {
     // Charge the full table allocation before allocating or caching it.
     if (!consumeDetailedValidationWork(analysis, analysis.plan.instructions.length)) {
+      recordValidationTestWork("budgetExhaustions");
       return new Set<number>();
     }
+    recordValidationTestWork("livenessComputations");
+    recordValidationTestWork("livenessTableAllocations");
     liveIn = computeContinuationLiveness(analysis, loopFrames);
-    if (!analysis.detailedWorkExceeded) analysis.continuationLiveness.set(loopSignature, liveIn);
+    if (!analysis.detailedWorkExceeded) {
+      analysis.continuationLiveness.set(loopSignature, liveIn);
+      recordValidationTestWork("livenessCacheInsertions");
+    }
+  } else {
+    recordValidationTestWork("livenessCacheHits");
   }
   return liveIn[startInstruction] ?? new Set<number>();
 }
@@ -1608,6 +1623,7 @@ function computeContinuationLiveness(
 }
 
 function consumeDetailedValidationWork(analysis: SnapshotValidationAnalysis, amount = 1): boolean {
+  recordValidationTestWork("detailedWorkConsumed", amount);
   if (analysis.remainingDetailedWork < amount) {
     analysis.detailedWorkExceeded = true;
     return false;
