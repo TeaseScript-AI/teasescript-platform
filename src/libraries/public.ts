@@ -11,6 +11,8 @@ export {
 } from "./catalog.js";
 export {
   LibraryMetadataError,
+  MAX_LIBRARY_METADATA_TEXT_LENGTH,
+  MAX_LIBRARY_METADATA_TOTAL_TEXT_LENGTH,
   MAX_LIBRARY_SOURCE_LENGTH,
   createPublicLibraryMetadata,
   validatePublicLibraryMetadata,

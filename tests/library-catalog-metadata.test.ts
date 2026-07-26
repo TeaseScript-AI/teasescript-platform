@@ -5,6 +5,7 @@ import {
   LibraryCatalog,
   LibraryCatalogError,
   LibraryMetadataError,
+  MAX_LIBRARY_METADATA_TEXT_LENGTH,
   MAX_LIBRARY_SOURCE_LENGTH,
   createExactLibraryIdentity,
   createPublicLibraryMetadata,
@@ -200,6 +201,41 @@ test("externally supplied metadata is frozen, canonical, and has no executable v
       { ...metadata.exports[0]!, name: "aardvark" },
     ],
   }), isMetadataError("invalidMetadata"));
+});
+
+test("external metadata rejects oversized individual and total text before canonicalization", () => {
+  const exportMetadata = {
+    name: "one",
+    kind: "function" as const,
+    parameters: [{ name: "value", optional: false, hasDefault: false, typeDisplay: "string" }],
+    returnTypeDisplay: "void",
+    documentation: null,
+    deprecation: null,
+  };
+  const fields: Array<"name" | "returnTypeDisplay" | "documentation" | "deprecation"> = [
+    "name", "returnTypeDisplay", "documentation", "deprecation",
+  ];
+  for (const field of fields) {
+    const metadata = { identity: { token: "fixture@1" }, exports: [{ ...exportMetadata, [field]: "x".repeat(MAX_LIBRARY_METADATA_TEXT_LENGTH + 1) }] };
+    assert.throws(() => validatePublicLibraryMetadata(metadata), isMetadataError("invalidMetadata"));
+  }
+  for (const field of ["name", "typeDisplay"] as const) {
+    const metadata = {
+      identity: { token: "fixture@1" },
+      exports: [{ ...exportMetadata, parameters: [{ ...exportMetadata.parameters[0]!, [field]: "x".repeat(MAX_LIBRARY_METADATA_TEXT_LENGTH + 1) }] }],
+    };
+    assert.throws(() => validatePublicLibraryMetadata(metadata), isMetadataError("invalidMetadata"));
+  }
+  const boundedText = "x".repeat(MAX_LIBRARY_METADATA_TEXT_LENGTH);
+  const totalMetadata = {
+    identity: { token: "fixture@1" },
+    exports: Array.from({ length: 4 }, (_, index) => ({
+      ...exportMetadata,
+      name: `${index}${boundedText.slice(1)}`,
+      documentation: boundedText,
+    })),
+  };
+  assert.throws(() => validatePublicLibraryMetadata(totalMetadata), isMetadataError("invalidMetadata"));
 });
 
 function isCatalogError(code: LibraryCatalogError["code"]): (error: unknown) => boolean {

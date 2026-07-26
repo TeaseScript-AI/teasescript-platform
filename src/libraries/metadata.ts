@@ -5,6 +5,8 @@ import type { ExactLibraryIdentity, PublicLibraryDefinition } from "./catalog.js
 
 /** Bounds TypeScript parser work at the public tooling-data boundary. */
 export const MAX_LIBRARY_SOURCE_LENGTH = 100_000;
+export const MAX_LIBRARY_METADATA_TEXT_LENGTH = 16_384;
+export const MAX_LIBRARY_METADATA_TOTAL_TEXT_LENGTH = 100_000;
 
 export interface PublicParameterMetadata {
   readonly name: string;
@@ -99,10 +101,12 @@ export function createPublicLibraryMetadata(
     names.add(entry.name);
   }
   exports.sort((left, right) => compareText(left.name, right.name));
-  return Object.freeze({
+  const metadata: PublicLibraryMetadata = Object.freeze({
     identity: Object.freeze({ token: normalizedDefinition.identity.token }),
     exports: Object.freeze(exports),
   });
+  assertMetadataTextBounds(metadata);
+  return metadata;
 }
 
 function captureLibraryDefinition(value: unknown): PublicLibraryDefinition {
@@ -167,6 +171,7 @@ export function validatePublicLibraryMetadata(value: unknown): PublicLibraryMeta
     identity: Object.freeze({ token: metadata.identity.token }),
     exports: Object.freeze(metadata.exports.map((entry) => normalizeExport(entry))),
   });
+  assertMetadataTextBounds(normalized);
   assertCanonical(normalized);
   return normalized;
 }
@@ -213,6 +218,10 @@ function normalizeExport(value: unknown): PublicExportMetadata {
   if (!isDenseArray(value.parameters)) {
     throw new LibraryMetadataError("invalidMetadata", "Library parameter metadata has an invalid shape.");
   }
+  if (!isBoundedMetadataText(value.name) || !isBoundedNullableMetadataText(value.returnTypeDisplay) ||
+    !isBoundedNullableMetadataText(value.documentation) || !isBoundedNullableMetadataText(value.deprecation)) {
+    throw new LibraryMetadataError("invalidMetadata", "Library export metadata text exceeds the supported limit.");
+  }
   const parameters = value.parameters.map((parameter) => normalizeParameter(parameter));
   if (value.kind === "type" && (parameters.length !== 0 || value.returnTypeDisplay !== null)) {
     throw new LibraryMetadataError("invalidMetadata", "Type exports cannot declare function metadata.");
@@ -224,6 +233,9 @@ function normalizeParameter(value: unknown): PublicParameterMetadata {
   if (!isPlainRecord(value) || typeof value.name !== "string" || typeof value.optional !== "boolean" ||
     typeof value.hasDefault !== "boolean" || !nullableString(value.typeDisplay)) {
     throw new LibraryMetadataError("invalidMetadata", "Library parameter metadata has an invalid shape.");
+  }
+  if (!isBoundedMetadataText(value.name) || !isBoundedNullableMetadataText(value.typeDisplay)) {
+    throw new LibraryMetadataError("invalidMetadata", "Library parameter metadata text exceeds the supported limit.");
   }
   return Object.freeze({
     name: value.name,
@@ -245,6 +257,31 @@ function assertCanonical(metadata: PublicLibraryMetadata): void {
   }
 }
 
+function assertMetadataTextBounds(metadata: PublicLibraryMetadata): void {
+  let total = metadata.identity.token.length;
+  for (const entry of metadata.exports) {
+    total = addMetadataText(total, entry.name);
+    total = addMetadataText(total, entry.returnTypeDisplay);
+    total = addMetadataText(total, entry.documentation);
+    total = addMetadataText(total, entry.deprecation);
+    for (const parameter of entry.parameters) {
+      total = addMetadataText(total, parameter.name);
+      total = addMetadataText(total, parameter.typeDisplay);
+    }
+  }
+}
+
+function addMetadataText(total: number, value: string | null): number {
+  if (value !== null && !isBoundedMetadataText(value)) {
+    throw new LibraryMetadataError("invalidMetadata", "Library metadata text exceeds the supported field limit.");
+  }
+  const next = total + (value?.length ?? 0);
+  if (next > MAX_LIBRARY_METADATA_TOTAL_TEXT_LENGTH) {
+    throw new LibraryMetadataError("invalidMetadata", "Library metadata exceeds the supported total text limit.");
+  }
+  return next;
+}
+
 function freezeExport(value: PublicExportMetadata): PublicExportMetadata {
   return Object.freeze({ ...value, parameters: Object.freeze([...value.parameters]) });
 }
@@ -261,6 +298,14 @@ function isIdentity(value: unknown): value is ExactLibraryIdentity {
 
 function nullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
+}
+
+function isBoundedMetadataText(value: string): boolean {
+  return value.length <= MAX_LIBRARY_METADATA_TEXT_LENGTH;
+}
+
+function isBoundedNullableMetadataText(value: unknown): value is string | null {
+  return nullableString(value) && (value === null || isBoundedMetadataText(value));
 }
 
 function isDenseArray(value: readonly unknown[]): boolean {
