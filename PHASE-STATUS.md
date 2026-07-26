@@ -76,7 +76,7 @@ Also inspect the complete diff and verify the playground route/security matrix. 
 
 - complete V30 syntax/runtime coverage and static typing;
 - units, date/time/datetime/duration;
-- choices, input, waits, timers, and resumable pending actions;
+- choices, input, visible/background timers, and pending-action kinds beyond the implemented blocking `wait` delay;
 - cross-origin iframe host protocol;
 - media lifecycle and custom views;
 - TypeScript library linkage and richer modules;

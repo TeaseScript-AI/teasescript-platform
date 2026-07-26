@@ -142,17 +142,19 @@ class Parser {
 
   #parseStatement(): Statement | null {
     if (
-      this.#check(TokenKind.Identifier) &&
-      this.#peek().lexeme === "wait" &&
-      !(this.#peek(1).kind === TokenKind.LeftParenthesis && this.#peek(2).kind === TokenKind.RightParenthesis)
+      this.#check(TokenKind.KeywordWait) &&
+      this.#peek(1).kind === TokenKind.LeftParenthesis &&
+      this.#peek(2).kind === TokenKind.RightParenthesis
     ) {
-      return this.#parseWaitStatement();
+      return this.#parseAssignmentOrExpressionStatement();
     }
     switch (this.#peek().kind) {
       case TokenKind.KeywordSpeaker:
         return this.#parseSpeakerStatement();
       case TokenKind.KeywordSay:
         return this.#parseSayStatement();
+      case TokenKind.KeywordWait:
+        return this.#parseWaitStatement();
       case TokenKind.KeywordExit:
         return this.#parseExitStatement();
       case TokenKind.KeywordLet:
@@ -347,6 +349,18 @@ class Parser {
 
   #parseWaitStatement(): WaitStatement | null {
     const keyword = this.#advance();
+    if (
+      this.#check(TokenKind.LeftParenthesis) &&
+      this.#peek().span.start.offset === keyword.span.end.offset
+    ) {
+      this.#reportToken(
+        parserDiagnosticCode.expectedExpression,
+        "Wait uses command syntax; write 'wait 1' rather than 'wait(1)'.",
+        this.#peek(),
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
     const duration = this.#parseExpression();
     if (duration === null) {
       this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected a duration after 'wait'.");
@@ -561,7 +575,7 @@ class Parser {
 
   #parseFunctionDeclaration(): FunctionDeclaration | null {
     const keyword = this.#advance();
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!this.#check(TokenKind.Identifier) && !this.#check(TokenKind.KeywordWait)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedFunctionName,
         "Expected a function identifier after 'function'.",
@@ -1158,7 +1172,8 @@ class Parser {
     }
     if (
       this.#match(TokenKind.Identifier) ||
-      this.#match(TokenKind.KeywordSpeaker)
+      this.#match(TokenKind.KeywordSpeaker) ||
+      this.#match(TokenKind.KeywordWait)
     ) {
       return this.#identifier(token);
     }
@@ -1670,6 +1685,7 @@ function isExpressionStart(token: Token): boolean {
     token.kind === TokenKind.StringLiteral ||
     token.kind === TokenKind.TemplateStart ||
     token.kind === TokenKind.KeywordSpeaker ||
+    token.kind === TokenKind.KeywordWait ||
     token.kind === TokenKind.KeywordTrue ||
     token.kind === TokenKind.KeywordFalse ||
     token.kind === TokenKind.KeywordNull ||

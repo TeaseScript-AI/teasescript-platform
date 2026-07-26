@@ -18,6 +18,7 @@ export interface LexResult {
 const keywordKinds: ReadonlyMap<string, TokenKind> = new Map([
   ["speaker", TokenKind.KeywordSpeaker],
   ["say", TokenKind.KeywordSay],
+  ["wait", TokenKind.KeywordWait],
   ["as", TokenKind.KeywordAs],
   ["exit", TokenKind.KeywordExit],
   ["let", TokenKind.KeywordLet],

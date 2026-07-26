@@ -731,6 +731,19 @@ function knownNumber(expression: Expression): number | undefined {
     if (operand === undefined) return undefined;
     return expression.operator === "+" ? operand : -operand;
   }
+  if (expression.kind === "binaryExpression") {
+    const left = knownNumber(expression.left);
+    const right = knownNumber(expression.right);
+    if (left === undefined || right === undefined) return undefined;
+    switch (expression.operator) {
+      case "+": return left + right;
+      case "-": return left - right;
+      case "*": return left * right;
+      case "/": return right === 0 ? undefined : left / right;
+      case "%": return right === 0 ? undefined : left % right;
+      default: return undefined;
+    }
+  }
   return undefined;
 }
 
