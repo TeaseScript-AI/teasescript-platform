@@ -13,6 +13,12 @@
 
 ## Implemented in the current repository code
 
+### Local playground workspace
+
+- Native textarea editing of local `.tease` source, versioned local drafts, explicit example reload, bounded local import/export, source revisions, and stale-runtime gating.
+- A shared DOM-free compile/run/step helper used by the browser workspace and ephemeral loopback-only development automation routes.
+- Technical rendering for version-4 pending action events and `waiting` status without browser clock settlement.
+
 ### Language foundation
 
 - Lexer, parser, immutable AST, UTF-16 source spans, structured diagnostics, and semantic validation.
