@@ -158,19 +158,16 @@ textarea {
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .transcript, .diagnostics { margin: 0; padding: 0; list-style: none; }
 .transcript { display: grid; gap: .65rem; max-height: 31rem; overflow: auto; }
-.player-panel { display: flex; flex-direction: column; }
+.player-panel { position: relative; display: flex; flex-direction: column; }
 .player-panel .transcript { flex: 1 1 auto; max-height: none; }
 .future-timer-slot {
-  min-height: 5rem;
-  margin-top: 1rem;
-  padding: .8rem;
-  border: 1px dashed #594170;
-  border-radius: .5rem;
-  color: var(--muted);
-  background: rgba(14, 11, 20, .45);
+  position: absolute;
+  top: .85rem;
+  right: .85rem;
+  margin: 0;
+  padding: 0;
   display: flex;
   align-items: center;
-  gap: .85rem;
 }
 .future-timer-circle {
   display: grid;
@@ -183,7 +180,7 @@ textarea {
   color: var(--accent-strong);
   font: .78rem/1 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
-.future-timer-slot p { margin: 0; font-size: .85rem; }
+.future-timer-slot p { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 
 .transcript li {
   padding: .75rem .85rem;
