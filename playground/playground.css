@@ -135,6 +135,8 @@ pre {
   overflow-wrap: anywhere;
 }
 
+.source-editor { display: grid; grid-template-columns: auto minmax(0, 1fr); min-height: 28rem; overflow: hidden; border: 1px solid #3a2d4f; border-radius: .5rem; background: #0e0b14; }
+.source-editor #source-lines { min-width: 3.3rem; max-height: none; padding: .9rem .55rem; overflow: hidden; border-radius: 0; color: var(--muted); background: #17111f; text-align: right; user-select: none; }
 textarea {
   display: block;
   width: 100%;
@@ -142,8 +144,8 @@ textarea {
   resize: vertical;
   margin: 0;
   padding: .9rem;
-  border: 1px solid #3a2d4f;
-  border-radius: .5rem;
+  border: 0;
+  border-radius: 0;
   color: #e9def8;
   background: #0e0b14;
   font: .83rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
