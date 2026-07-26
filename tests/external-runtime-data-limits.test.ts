@@ -103,6 +103,40 @@ function assertCheckpointError(
   });
 }
 
+function proxyArray(
+  length: number,
+  keys: readonly string[],
+  values: Readonly<Record<string, unknown>> = {},
+): unknown[] {
+  return new Proxy([], {
+    ownKeys() {
+      return keys;
+    },
+    getOwnPropertyDescriptor(_target, key) {
+      if (key === "length") {
+        return {
+          value: length,
+          writable: true,
+          enumerable: false,
+          configurable: false,
+        };
+      }
+      if (typeof key === "string" && key in values) {
+        return {
+          value: values[key],
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        };
+      }
+      return undefined;
+    },
+    get() {
+      throw new Error("capture must not invoke array getters");
+    },
+  });
+}
+
 function activeCallSnapshot(plan: InstructionPlan): RuntimeSnapshot {
   let snapshot = createFreshRuntimeSnapshot(plan);
   for (let steps = 0; steps < 20 && snapshot.callFrames.length === 0; steps += 1) {
@@ -365,6 +399,85 @@ test("external capture bounds sparse array length before detailed validation", (
       path: "$.items",
     },
   });
+});
+
+test("external capture rejects proxy indexes that conflict with validated array length", () => {
+  for (const keys of [["length", "4294967294"], ["4294967294", "length"]]) {
+    assert.deepEqual(captureExternalData(proxyArray(0, keys, { "4294967294": 1 })), {
+      ok: false,
+      failure: { kind: "nonJsonSafeValue", path: "$" },
+    });
+  }
+
+  for (const key of ["0", "1", "4294967295", "01", "1.0"]) {
+    assert.equal(
+      captureExternalData(proxyArray(0, ["length", key], { [key]: 1 })).ok,
+      false,
+      `Expected ${key} to be rejected.`,
+    );
+  }
+
+  const accepted = captureExternalData(proxyArray(2, ["1", "length"], { "1": "present" }));
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) {
+    assert.equal((accepted.value as unknown[])[0], undefined);
+    assert.equal(0 in (accepted.value as unknown[]), false);
+    assert.equal((accepted.value as unknown[])[1], "present");
+    assert.equal((accepted.value as unknown[]).length, 2);
+  }
+});
+
+test("external capture rejects malformed proxy length descriptors without invoking getters", () => {
+  for (const getOwnPropertyDescriptor of [
+    () => undefined,
+    () => ({ get: () => 0, enumerable: false, configurable: false }),
+    () => { throw new Error("raw descriptor failure"); },
+  ]) {
+    const hostile = new Proxy([], { getOwnPropertyDescriptor });
+    assert.deepEqual(captureExternalData(hostile), {
+      ok: false,
+      failure: { kind: "nonJsonSafeValue", path: "$" },
+    });
+  }
+});
+
+test("proxy array length inflation is structured at plan, snapshot, checkpoint, and serializable boundaries", () => {
+  const hostile = () => proxyArray(0, ["length", "4294967294"], { "4294967294": null });
+
+  const malformedPlan = mutablePlan();
+  malformedPlan.instructions = hostile();
+  assert.deepEqual(validateInstructionPlan(malformedPlan), {
+    valid: false,
+    errors: [{
+      code: "TSC002",
+      message: "Plan contains a non-JSON-safe value.",
+      path: "$.instructions",
+    }],
+  });
+
+  const plan = compiledPlan();
+  const malformedSnapshot = mutableSnapshot(plan);
+  (malformedSnapshot as { frames: unknown }).frames = hostile();
+  assert.deepEqual(validateRuntimeSnapshot(malformedSnapshot, plan), {
+    valid: false,
+    errors: ["Runtime snapshot contains a non-JSON-safe value."],
+  });
+
+  const malformedCheckpoint = checkpoint(plan, createFreshRuntimeSnapshot(plan));
+  (malformedCheckpoint.snapshot as { frames: unknown }).frames = hostile();
+  assertCheckpointError(
+    () => restoreCheckpoint(malformedCheckpoint),
+    "Checkpoint contains a non-JSON-safe value.",
+    "$.snapshot",
+  );
+
+  assert.throws(
+    () => cloneSerializableValue({ kind: "list", items: hostile() } as never),
+    (error: unknown) =>
+      error instanceof SerializableValueError &&
+      error.code === "invalid" &&
+      error.message === "$.items is not a JSON-safe runtime value.",
+  );
 });
 
 test("serializable cloning maps huge sparse arrays to the work-limit error", () => {

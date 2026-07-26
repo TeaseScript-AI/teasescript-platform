@@ -177,6 +177,38 @@ test("external metadata validation rejects sparse, oversized, executable, cyclic
   }
 });
 
+test("metadata capture rejects proxy arrays that inflate their validated length", () => {
+  const hostileExports = new Proxy([], {
+    ownKeys() {
+      return ["4294967294", "length"];
+    },
+    getOwnPropertyDescriptor(_target, key) {
+      if (key === "length") {
+        return {
+          value: 0,
+          writable: true,
+          enumerable: false,
+          configurable: false,
+        };
+      }
+      return {
+        value: { name: "ignored" },
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      };
+    },
+    get() {
+      throw new Error("metadata capture must not invoke getters");
+    },
+  });
+
+  assert.throws(
+    () => validatePublicLibraryMetadata({ identity: { token: "fixture@1" }, exports: hostileExports }),
+    isMetadataError("invalidMetadata"),
+  );
+});
+
 test("externally supplied metadata is frozen, canonical, and has no executable values", () => {
   const value = {
     identity: { token: "fixture@1" },
