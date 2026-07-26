@@ -17,7 +17,7 @@ import {
   type RuntimeCheckpoint,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { beginValidationTestStatistics } from "../src/runtime/validation-testing.js";
+import { withValidationTestStatistics } from "../src/runtime/validation-testing.js";
 
 const RANGE_ERROR = "Function instruction range is overlapping or impossible.";
 const ROOT_ERROR = "Root execution boundary is invalid.";
@@ -80,11 +80,18 @@ test("validates many small function regions without changing root or owner seman
   const compiled = compileSource(source);
   assert.equal(compiled.diagnostics.length, 0);
   assert.ok(compiled.plan !== null);
-  const endStatistics = beginValidationTestStatistics();
-  const result = validateInstructionPlan(compiled.plan);
-  const statistics = endStatistics();
+  const { result, statistics } = withValidationTestStatistics((finish) => {
+    const validation = validateInstructionPlan(compiled.plan);
+    return { result: validation, statistics: finish() };
+  });
   assert.equal(result.valid, true);
   assert.equal(statistics.counts.planOwnerIndexBuilds, 1);
+
+  const nextStatistics = withValidationTestStatistics((finish) => {
+    assert.equal(validateInstructionPlan(compiled.plan).valid, true);
+    return finish();
+  });
+  assert.equal(nextStatistics.counts.planOwnerIndexBuilds, 1);
 });
 
 test("rejects unsafe, negative, and fractional function boundaries before dependent validation", () => {

@@ -26,7 +26,10 @@ import {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
-import { recordValidationTestWork } from "./validation-testing.js";
+import {
+  detailedValidationWorkLimitForTesting,
+  recordValidationTestWork,
+} from "./validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
 export const RUNTIME_SNAPSHOT_VERSION = 5;
@@ -518,6 +521,7 @@ export function validateCapturedRuntimeSnapshot(
     value.callFrames,
     callFrameIds,
     plan,
+    analysis,
     errors,
   );
   validateCurrentTemporaryRequirements(
@@ -582,6 +586,7 @@ function validateLoopFrames(
   callFrames: unknown,
   callFrameIds: ReadonlySet<number>,
   plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
   if (!Array.isArray(value)) {
@@ -599,6 +604,14 @@ function validateLoopFrames(
     target: number;
     functionId: number | null;
   }>();
+  const callFramesById = new Map<number, Record<string, unknown>>();
+  if (Array.isArray(callFrames)) {
+    for (const frame of callFrames) {
+      if (isPlainRecord(frame) && nonNegativeSafeInteger(frame.id)) {
+        callFramesById.set(frame.id, frame);
+      }
+    }
+  }
   plan?.instructions.forEach((instruction, index) => {
     if (instruction.kind === "loopStart") {
       plannedLoops.set(instruction.loopId, {
@@ -607,12 +620,7 @@ function validateLoopFrames(
         start: index,
         continueStart: instruction.continueTarget,
         target: instruction.target,
-        functionId:
-          plan.functions.find(
-            (definition) =>
-              index >= definition.entryInstruction &&
-              index < definition.endInstruction,
-          )?.id ?? null,
+        functionId: analysis?.functionIdsByInstruction[index] ?? null,
       });
     }
   });
@@ -641,11 +649,8 @@ function validateLoopFrames(
     }
     previousDepth = frame.scopeDepth;
     const planned = plannedLoops.get(frame.loopId);
-    const owner = Array.isArray(callFrames)
-      ? callFrames.find(
-          (candidate) =>
-            isPlainRecord(candidate) && candidate.id === frame.callFrameId,
-        )
+    const owner = nonNegativeSafeInteger(frame.callFrameId)
+      ? callFramesById.get(frame.callFrameId)
       : undefined;
     const currentOwner = Array.isArray(callFrames) && callFrames.length > 0
       ? (isPlainRecord(callFrames.at(-1)) ? callFrames.at(-1)!.id : undefined)
@@ -1490,6 +1495,7 @@ interface SnapshotValidationAnalysis {
   readonly plan: InstructionPlan;
   readonly functionsById: ReadonlyMap<number, InstructionPlan["functions"][number]>;
   readonly regionEnds: readonly number[];
+  readonly functionIdsByInstruction: readonly (number | null)[];
   readonly continuationLiveness: Map<string, readonly ReadonlySet<number>[]>;
   readonly defaultBindingPositions: ReadonlyMap<string, number>;
   readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
@@ -1501,10 +1507,12 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
   recordValidationTestWork("snapshotAnalysisBuilds");
   const functionsById = new Map<number, InstructionPlan["functions"][number]>();
   const regionEnds = new Array<number>(plan.instructions.length).fill(plan.rootEndInstruction);
+  const functionIdsByInstruction = new Array<number | null>(plan.instructions.length).fill(null);
   for (const definition of plan.functions) {
     functionsById.set(definition.id, definition);
     for (let index = definition.entryInstruction; index < definition.endInstruction; index += 1) {
       regionEnds[index] = definition.endInstruction;
+      functionIdsByInstruction[index] = definition.id;
     }
   }
   const defaultBindingPositions = new Map<string, number>();
@@ -1526,10 +1534,12 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     plan,
     functionsById,
     regionEnds,
+    functionIdsByInstruction,
     continuationLiveness: new Map(),
     defaultBindingPositions,
     parameterNames,
-    remainingDetailedWork: MAX_DETAILED_VALIDATION_WORK,
+    remainingDetailedWork:
+      detailedValidationWorkLimitForTesting() ?? MAX_DETAILED_VALIDATION_WORK,
     detailedWorkExceeded: false,
   };
 }
