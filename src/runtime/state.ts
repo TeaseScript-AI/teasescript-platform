@@ -1154,6 +1154,7 @@ function validateCallFrames(
       frame,
       frames,
       definition,
+      analysis,
       errors,
     );
 
@@ -1208,7 +1209,7 @@ function validateCallFrames(
           frame.parameterState,
           definition,
           nextInstruction,
-          plan!,
+          analysis!,
           errors,
         );
       } else if (isPlainRecord(child) && nonNegativeSafeInteger(child.returnInstruction)) {
@@ -1216,14 +1217,14 @@ function validateCallFrames(
           frame.parameterState,
           definition,
           child.returnInstruction - 1,
-          plan!,
+          analysis!,
           errors,
         );
         validateExactParameterPosition(
           frame.parameterState,
           definition,
           child.returnInstruction,
-          plan!,
+          analysis!,
           errors,
         );
       }
@@ -1312,6 +1313,7 @@ function validateParameterBindings(
   frame: Record<string, unknown>,
   frames: unknown,
   definition: InstructionPlan["functions"][number] | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
   if (
@@ -1336,9 +1338,7 @@ function validateParameterBindings(
   );
   if (
     parameterState.phase !== "body" &&
-    [...bindingNames].some(
-      (name) => !definition.parameters.some((parameter) => parameter.name === name),
-    )
+    [...bindingNames].some((name) => !analysis?.parameterNames.get(definition.id)?.has(name))
   ) {
     errors.push("Runtime function prologue contains a non-parameter binding.");
   }
@@ -1416,11 +1416,11 @@ function validateExactParameterPosition(
   value: unknown,
   definition: InstructionPlan["functions"][number],
   instructionPosition: number,
-  plan: InstructionPlan,
+  analysis: SnapshotValidationAnalysis,
   errors: string[],
 ): void {
   if (!isPlainRecord(value) || !nonNegativeSafeInteger(value.parameterIndex)) return;
-  const expected = expectedParameterProgress(definition, instructionPosition, plan);
+  const expected = expectedParameterProgress(definition, instructionPosition, analysis);
   if (
     expected === null ||
     value.phase !== expected.phase ||
@@ -1433,7 +1433,7 @@ function validateExactParameterPosition(
 function expectedParameterProgress(
   definition: InstructionPlan["functions"][number],
   instructionPosition: number,
-  plan: InstructionPlan,
+  analysis: SnapshotValidationAnalysis,
 ): RuntimeParameterStateSnapshot | null {
   const parameterCount = definition.parameters.length;
   if (
@@ -1451,19 +1451,14 @@ function expectedParameterProgress(
   }
   cursor += 1;
   for (let parameterIndex = 0; parameterIndex < parameterCount; parameterIndex += 1) {
-    const prepare = plan.instructions[cursor];
+    const prepare = analysis.plan.instructions[cursor];
     if (prepare?.kind !== "prepareParameterDefault") return null;
     if (instructionPosition === cursor) {
       return { phase: "defaults", parameterIndex };
     }
-    const bindIndex = plan.instructions.findIndex(
-      (instruction, index) =>
-        index > cursor &&
-        index < prepare.target &&
-        instruction.kind === "bindDefaultParameter" &&
-        instruction.functionId === definition.id &&
-        instruction.parameterIndex === parameterIndex,
-    );
+    const bindIndex = analysis.defaultBindingPositions.get(
+      `${definition.id}:${parameterIndex}`,
+    ) ?? -1;
     if (instructionPosition > cursor && instructionPosition < prepare.target) {
       return {
         phase: "defaults",
@@ -1492,6 +1487,8 @@ interface SnapshotValidationAnalysis {
   readonly functionsById: ReadonlyMap<number, InstructionPlan["functions"][number]>;
   readonly regionEnds: readonly number[];
   readonly continuationLiveness: Map<string, readonly ReadonlySet<number>[]>;
+  readonly defaultBindingPositions: ReadonlyMap<string, number>;
+  readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
   remainingDetailedWork: number;
   detailedWorkExceeded: boolean;
 }
@@ -1505,11 +1502,26 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
       regionEnds[index] = definition.endInstruction;
     }
   }
+  const defaultBindingPositions = new Map<string, number>();
+  for (let index = 0; index < plan.instructions.length; index += 1) {
+    const instruction = plan.instructions[index];
+    if (instruction?.kind === "bindDefaultParameter") {
+      defaultBindingPositions.set(`${instruction.functionId}:${instruction.parameterIndex}`, index);
+    }
+  }
+  const parameterNames = new Map(
+    plan.functions.map((definition) => [
+      definition.id,
+      new Set(definition.parameters.map((parameter) => parameter.name)),
+    ]),
+  );
   return {
     plan,
     functionsById,
     regionEnds,
     continuationLiveness: new Map(),
+    defaultBindingPositions,
+    parameterNames,
     remainingDetailedWork: MAX_DETAILED_VALIDATION_WORK,
     detailedWorkExceeded: false,
   };
@@ -1550,8 +1562,12 @@ function requiredContinuationTemporaries(
     : "none";
   let liveIn = analysis.continuationLiveness.get(loopSignature);
   if (liveIn === undefined) {
+    // Charge the full table allocation before allocating or caching it.
+    if (!consumeDetailedValidationWork(analysis, analysis.plan.instructions.length)) {
+      return new Set<number>();
+    }
     liveIn = computeContinuationLiveness(analysis, loopFrames);
-    analysis.continuationLiveness.set(loopSignature, liveIn);
+    if (!analysis.detailedWorkExceeded) analysis.continuationLiveness.set(loopSignature, liveIn);
   }
   return liveIn[startInstruction] ?? new Set<number>();
 }
@@ -1591,12 +1607,12 @@ function computeContinuationLiveness(
   return liveIn;
 }
 
-function consumeDetailedValidationWork(analysis: SnapshotValidationAnalysis): boolean {
-  if (analysis.remainingDetailedWork === 0) {
+function consumeDetailedValidationWork(analysis: SnapshotValidationAnalysis, amount = 1): boolean {
+  if (analysis.remainingDetailedWork < amount) {
     analysis.detailedWorkExceeded = true;
     return false;
   }
-  analysis.remainingDetailedWork -= 1;
+  analysis.remainingDetailedWork -= amount;
   return true;
 }
 
