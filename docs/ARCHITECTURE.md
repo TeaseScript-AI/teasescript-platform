@@ -11,9 +11,9 @@
 - The final player and package code run inside a sandboxed cross-origin iframe.
 - Package code has no unrestricted external network access.
 
-## Proposed composition layers
+## Accepted composition layers
 
-Proposed ADR 0017 defines this dependency direction:
+ADR 0017 defines this dependency direction:
 
 ```text
 TeaseScript scripts (.tease)
@@ -43,7 +43,7 @@ Ordinary TypeScript execution may remain synchronous, but it may not suspend inv
 
 A plan/checkpoint must either contain the lowered library behavior or bind to an exact compatible Standard Library identity/version. Restore against an implicit latest implementation is not permitted.
 
-This layering is proposed rather than accepted. Exact import syntax, version binding, generated declarations, privileged adapter modules, and the first Standard Library implementation slice remain open.
+This layering is accepted. Exact import syntax, version binding, generated declarations, privileged adapter modules, and the first Standard Library implementation slice remain open.
 
 ## Syntax and implementation placement
 
@@ -57,7 +57,7 @@ An official TeaseScript construct may compile to:
 
 Ordinary library exports use normal function-call syntax and generated type/editor metadata. Libraries may not add grammar productions, keywords, command forms, or parser hooks. New special syntax requires an explicit language/compiler decision.
 
-Accepted V30 forms and current implementation behavior remain authoritative until a later accepted decision supersedes them. Proposed ADR 0017 does not by itself remove current `say` instructions or alter ADR 0016 pending-action semantics.
+Accepted V30 forms and current implementation behavior remain authoritative until a later accepted decision supersedes them. ADR 0017 does not by itself remove current `say` instructions or alter ADR 0016 pending-action semantics.
 
 ## Implemented deterministic vertical slice
 
