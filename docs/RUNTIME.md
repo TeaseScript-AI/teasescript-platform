@@ -124,6 +124,10 @@ Unterminated nested content remains structured: `TSL004` reports an unterminated
 
 Before lowering, the compatibility route runs the shared non-finite-literal AST validation and semantic validation with configured global and builtin names. Non-finite literals produce exact-span `TSC001` diagnostics. These diagnostics are ordered before ordinary semantic diagnostics, and any error throws `InterpreterCompilationError` before lowering, runtime-state creation, event emission, or RNG consumption. `InterpreterOptions.random` is required so compatibility execution remains deterministic.
 
+After valid lowering but before a runtime snapshot is created, the compatibility route rejects a plan containing any compiled blocking `wait` instruction with `InterpreterCompilationError` diagnostic `TSC004`: "Blocking `wait` requires the canonical resumable runtime API." The diagnostic uses the first `wait` instruction in canonical plan order. This conservative whole-program rule includes waits in branches, loops, nested blocks, and called or uncalled function bodies; it prevents this result shape from silently returning partial pre-wait output without a pending action or resume operation.
+
+This is a temporary compatibility-boundary behavior, not a statement that blocking `wait` is unsupported. The canonical plan/snapshot/runtime API continues to support waits, pending actions, checkpoints, completion, and resumption. The long-term lifecycle of the compatibility APIs and any resumable compatibility result require a separate owner-approved decision.
+
 The compatibility result exposes `say` and `exit` events in its `events` array, structured runtime failures in `errors`, and developer warnings in `warnings`.
 
 ### Low-level lowering and runtime route

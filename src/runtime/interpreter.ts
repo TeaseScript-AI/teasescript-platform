@@ -1,6 +1,7 @@
 import type { Program } from "../ast.js";
 import { findNonFiniteNumericLiteralDiagnostics } from "../ast-validation.js";
 import {
+  createDiagnostic,
   DiagnosticSeverity,
   type Diagnostic,
 } from "../diagnostics.js";
@@ -48,6 +49,13 @@ export interface ExecutionResult {
   readonly warnings: readonly RuntimeWarningInfo[];
   readonly exited: boolean;
 }
+
+const compatibilityDiagnosticCode = {
+  blockingWait: "TSC004",
+} as const;
+
+const BLOCKING_WAIT_COMPATIBILITY_MESSAGE =
+  "Blocking `wait` requires the canonical resumable runtime API.";
 
 /** Structured semantic failure from the direct AST compatibility boundary. */
 export class InterpreterCompilationError extends Error {
@@ -115,6 +123,19 @@ export class Interpreter {
     }
 
     const plan = compileProgram(program);
+    const blockingWait = plan.instructions.find(
+      (instruction) => instruction.kind === "wait",
+    );
+    if (blockingWait !== undefined) {
+      throw new InterpreterCompilationError([
+        createDiagnostic(
+          DiagnosticSeverity.Error,
+          compatibilityDiagnosticCode.blockingWait,
+          BLOCKING_WAIT_COMPATIBILITY_MESSAGE,
+          blockingWait.span,
+        ),
+      ]);
+    }
     const initial = createFreshRuntimeSnapshot(plan, { globals });
     const execution = run(
       plan,
