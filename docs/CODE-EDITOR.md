@@ -6,6 +6,8 @@ The standalone fixed-example playground is implemented as a development proof. I
 
 A production editor should build on the versioned parser/runtime interfaces after the host/player boundary is specified. Debugger history may snapshot selected boundaries; it should not imply that production execution persists every internal instruction.
 
+The current library-infrastructure POC can deterministically derive JSON-safe public metadata from a narrow set of ordinary named TypeScript exports. It records export names, kinds, ordered parameters, available type-display text, documentation, deprecation, and an exact owning-library token. The separate tooling module captures external input and rejects source text over 100,000 characters before parsing; it is not part of the runtime root entry point. Editor transport, `.tease` linkage, and the permanent metadata format remain open.
+
 ## Accepted library-aware tooling boundary
 
 Under accepted ADR 0017, Standard Library and package-library functions use ordinary TeaseScript call syntax and receive editor support from generated declarations and metadata rather than parser extensions.
