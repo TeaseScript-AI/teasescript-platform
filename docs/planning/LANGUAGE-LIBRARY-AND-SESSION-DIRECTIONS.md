@@ -1,10 +1,10 @@
 # Language, Standard Library, pacing, and session directions
 
 **Status:** Owner-selected direction and deferred detailed design  
-**Related:** Proposed ADR 0017, accepted ADR 0016  
+**Related:** Accepted ADR 0017, accepted ADR 0016  
 **Implementation status:** Not implemented
 
-This planning note records owner-selected product direction discussed while proposed ADR 0017 is under review. It does not change accepted V30 syntax or implemented runtime behavior.
+This planning note records owner-selected product direction discussed around accepted ADR 0017. It does not change accepted V30 syntax or implemented runtime behavior, and its detailed API directions remain non-binding until separately accepted.
 
 For text-output pacing and public timer API direction, this note supersedes the older corresponding sections in `PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`. Closed PRs #69 and #71 and closed issues #67 and #68 remain historical analysis only.
 
@@ -153,7 +153,6 @@ The first linkage implementation should not require community-library-to-communi
 
 ## Deferred detailed decisions
 
-- owner acceptance or revision of proposed ADR 0017;
 - exact core capability names and TypeScript interfaces;
 - Standard Library linkage, generated metadata, packaging, default prelude, and version binding;
 - exact smart-autoplay duration and gate-consumption rules;
