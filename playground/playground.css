@@ -160,6 +160,16 @@ textarea {
 .transcript { display: grid; gap: .65rem; max-height: 31rem; overflow: auto; }
 .player-panel { display: flex; flex-direction: column; }
 .player-panel .transcript { flex: 1 1 auto; max-height: none; }
+.future-timer-slot {
+  min-height: 5rem;
+  margin-top: 1rem;
+  padding: .8rem;
+  border: 1px dashed #594170;
+  border-radius: .5rem;
+  color: var(--muted);
+  background: rgba(14, 11, 20, .45);
+}
+.future-timer-slot p { margin: 0; font-size: .85rem; }
 
 .transcript li {
   padding: .75rem .85rem;
