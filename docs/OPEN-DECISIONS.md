@@ -78,7 +78,7 @@ The exact version-3 schemas are current POC implementation details, not a promis
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
 - Time-integrity logging thresholds and whether a future typed anomaly hook becomes script-visible.
 
-See [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md) for earlier selected directions and deferred questions discussed with ADR 0016. Closed draft PRs #69 and #71 and closed issues #67 and #68 are historical proposals and are not current decisions.
+See [`planning/LANGUAGE-LIBRARY-AND-SESSION-DIRECTIONS.md`](planning/LANGUAGE-LIBRARY-AND-SESSION-DIRECTIONS.md) for the latest owner-selected language simplicity, smart-autoplay, first Standard Library slice, explicit timer-handle, library-scope, pause, and recovery direction. The older camera/media follow-up remains authoritative for camera, captured-media, and time-integrity planning only where the newer note does not explicitly supersede it. Closed draft PRs #69 and #71 and closed issues #67 and #68 are historical proposals and are not current decisions.
 
 ## Platform and personalities
 
