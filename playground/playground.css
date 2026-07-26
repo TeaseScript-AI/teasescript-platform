@@ -159,6 +159,7 @@ textarea {
 .transcript, .diagnostics { margin: 0; padding: 0; list-style: none; }
 .transcript { display: grid; gap: .65rem; max-height: 31rem; overflow: auto; }
 .player-panel { position: relative; display: flex; flex-direction: column; }
+.player-panel > h2 { min-height: 3.75rem; padding-right: 4.5rem; }
 .player-panel .transcript { flex: 1 1 auto; max-height: none; }
 .future-timer-slot {
   position: absolute;
