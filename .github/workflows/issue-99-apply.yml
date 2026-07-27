@@ -29,8 +29,22 @@ jobs:
           cache: npm
       - name: Apply patch
         if: steps.patch.outputs.present == 'true'
+        shell: bash
         run: |
-          git apply --check .issue-99.patch
+          set +e
+          git apply --check --verbose .issue-99.patch > .issue-99-apply-error.txt 2>&1
+          status=$?
+          set -e
+          if [[ $status -ne 0 ]]; then
+            cat .issue-99-apply-error.txt
+            git config user.name 'Codex for TeaseScript AI'
+            git config user.email '219006439+wqaed401@users.noreply.github.com'
+            git add .issue-99-apply-error.txt
+            git commit -m 'Record issue 99 patch failure'
+            git push origin HEAD:fix/issue-99-prototype-safe-captured-arrays
+            exit $status
+          fi
+          rm -f .issue-99-apply-error.txt
           git apply .issue-99.patch
           git diff --check
       - name: Verify implementation
@@ -48,6 +62,7 @@ jobs:
           git config user.name 'Codex for TeaseScript AI'
           git config user.email '219006439+wqaed401@users.noreply.github.com'
           git add src/external-data-limits.ts src/libraries/metadata.ts docs/SECURITY.md tests/prototype-safe-captured-arrays.test.ts
+          git rm -f --ignore-unmatch .issue-99-apply-error.txt
           git rm .issue-99.patch .github/workflows/issue-99-apply.yml
           git commit -m 'Make captured sparse arrays prototype-safe'
           git push origin HEAD:fix/issue-99-prototype-safe-captured-arrays
