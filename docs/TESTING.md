@@ -16,9 +16,10 @@ The current repository uses:
 - focused tests during development plus the complete configured suite before merge;
 - real source-to-runtime tests where public behavior crosses parser, compiler, instruction-plan, and runtime boundaries;
 - deterministic RNG seeds, JSON checkpoint round trips, and runtime resume-equivalence coverage;
-- playground HTTP and static-path security tests.
+- playground HTTP and static-path security tests;
+- a repository-owned deterministic Phase 1 mutation/property harness for plan and runtime-state boundaries.
 
-The repository currently has no browser-automation or property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
+The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
 ## Test layers
 
@@ -29,6 +30,7 @@ lexer/parser/semantic unit tests
 source-to-runtime contract tests
 runtime invariant and checkpoint tests
 external-data validation and corruption tests
+deterministic property and mutation tests
 player/host integration tests
 browser E2E tests
 performance benchmarks
@@ -77,38 +79,124 @@ The canonical self-contained checkpoint guarantee uses the serialized runtime RN
 
 JSON-safe runtime state at every instruction boundary does not mean production execution must persist after every instruction.
 
-## External-data and mutation testing
+## Implemented Phase 1 property and mutation harness
 
-A future reusable mutation approach should follow this pattern:
+Issue #120 implements a deterministic, test-owned harness around the current public plan, snapshot, pending-action, completion, checkpoint, restore, and resume boundaries. It uses Node's built-in test runner and adds no dependency or production-only hook.
+
+### Layout and discovery
 
 ```text
-valid plan, snapshot, or checkpoint
--> clone
--> mutate one controlled field
--> invoke the documented public validator or restore boundary
--> verify the documented structured result
+tests/property.test.ts
+tests/property/
+  prng.ts
+  fixtures.ts
+  mutations.ts
+  invariants.ts
+  replay.ts
 ```
 
-Mutation categories should include, where applicable:
+`tests/property.test.ts` is a root test entrypoint, so the existing `dist/tests/*.test.js` compiled-test discovery executes the smoke campaign through the normal `npm run check` path. Helper modules remain test-owned and import the public exports from `src/index.ts`.
 
-- missing required fields;
-- wrong primitive types;
-- non-finite or unsafe numeric values;
-- invalid instruction positions;
-- inconsistent status;
-- duplicate or unknown identities;
-- missing temporaries;
-- invalid function, scope, speaker, loop, or frame references;
-- malformed RNG or event-sequence state;
-- cyclic or excessively nested data;
-- prototype-sensitive names;
-- unsupported format versions.
+### Commands and budgets
 
-Do not assume that every unknown extra field must be rejected unless an accepted format contract requires it.
+```shell
+npm run test:property -- --seed 1364229357 --runs 128
+npm run test:property:extended -- --seed 1591436852 --runs 10000
+```
 
-For documented external plan, snapshot, checkpoint, validation, deserialization, and restore boundaries, malformed data must not cause an uncontrolled native stack overflow, hang, silent repair, or partial execution. The boundary must return or throw its documented structured invalid-data result. This requirement does not redefine intentional argument errors of low-level helpers that are not serialized external-data boundaries.
+The required smoke profile defaults to seed `1364229357` and `128` cases. Its first cases execute every mandatory Phase 1 mutation; any remaining cases use the repeatable deterministic schedule. The extended profile defaults to seed `1591436852` and `10,000` cases. A moderate implementation-verification budget is `2,000` cases.
 
-All adversarial cases must be deterministic and bounded by explicit depth, size, and total-work limits.
+Both commands compile the repository before invoking the same `dist/tests/property/replay.js` campaign implementation. After one successful build, independent larger processes may safely use the compiled entrypoint directly with separate seeds:
+
+```shell
+node dist/tests/property/replay.js --profile extended --seed 1591436852 --runs 100000
+```
+
+Do not run several build-producing npm commands concurrently against one checkout. Separate compiled processes are read-only and may run in parallel.
+
+### CLI and replay contract
+
+Supported options are:
+
+- `--profile smoke|extended`;
+- `--seed` as a decimal integer from `1` through `4294967295`;
+- `--runs` as a decimal integer from `1` through `1000000`;
+- `--case` as one zero-based case index below the configured run count;
+- `--progress-every` from `0` through `1000000`.
+
+Signs, fractions, exponents, non-finite text, unsafe values, unsupported ranges, duplicate options, unknown options, and missing values fail clearly. Argument failures return exit status `2`; property or infrastructure failures return `1`; success returns `0`.
+
+Every property failure reports the seed, run budget, case index, mutation/operation ID, property, first boundary, fixture/state catalog summary, cause, and an exact command such as:
+
+```shell
+npm run test:property:extended -- --seed 12345 --runs 250 --case 17
+```
+
+Progress is concise and periodic. Successful large campaigns produce one final signature line. The same seed and budget reproduce the same cases, variants, operation order, observations, and signature.
+
+### Explicit generation bounds
+
+The harness permits at most:
+
+- `1,000,000` cases;
+- at most three controlled field mutations per case;
+- four public operations/work units per case;
+- a declared maximum generated graph depth of `64`;
+- `4,000,000` total work units.
+
+Technical boundary cases use the accepted interaction limits: at most the exact accepted string/collection boundary for valid fixtures and one unit over it for rejection fixtures. There is no real-time sleep, network access, process-global generator state, or unpublished homelab implementation.
+
+### Fixtures and mutation domains
+
+Fixture construction prefers real public compile and runtime paths. Because author-facing interaction syntax is not implemented yet, interaction fixtures replace a compiled `wait` instruction with the current public interaction instruction shape and must pass `validateInstructionPlan(...)` before execution. Every baseline plan and snapshot is validated before mutation.
+
+The catalog covers fresh, running, waiting, continuation-ready, halted, and failed snapshots; delay and generic interaction actions; settlements; valid, invalid, duplicate, stale, and unknown completions; checkpoints; JSON round trips; speakers; scopes; loops; calls; and temporaries.
+
+Controlled mutations cover:
+
+- missing, extra, and wrong-typed fields according to each documented boundary;
+- zero, negative zero, exact numeric boundaries, unsafe integers, and non-finite numbers;
+- action/event, speaker, scope, loop, call-frame, and temporary identities;
+- instruction targets, continuation ownership, destinations, settlement/result relationships, and status chronology;
+- unsupported plan, snapshot, and checkpoint versions;
+- exact-limit and over-limit strings and option collections;
+- sparse arrays, cycles, throwing accessors, non-plain objects, and prototype-sensitive own keys.
+
+Unknown extra fields are observed according to the current contract; the harness does not assume they must be rejected.
+
+### Executable properties
+
+The shared assertions enforce:
+
+```text
+accepted plan + valid snapshot + successful public runtime operation
+=> result snapshot passes the public validator
+=> input plan and input snapshot remain unchanged
+
+invalid or duplicate completion
+=> complete canonical state and emitted events remain unchanged
+
+checkpoint -> JSON -> restore
+=> complete canonical plan and snapshot equality
+
+restore then continue
+=> complete event and final-snapshot equality with uninterrupted execution
+
+mutated external plan/snapshot/checkpoint/request
+=> documented structured acceptance or rejection without incidental native failure,
+   hang, partial mutation, or hidden continuation
+
+same seed + same budget
+=> same cases, mutations, operation order, observations, and signature
+```
+
+A genuine internal programming defect is not concealed. Each confirmed production defect must be reduced to a focused named regression test and handled in the owning repair issue or a separate blocker rather than by weakening the property.
+
+### Large-campaign handoff
+
+A practical first Codex/homelab campaign is `100,000` cases for each of several explicit seeds, for example `1591436852`, `1`, `305419896`, and `3735928559`. The implementation verification measured `2,000` direct cases in about `0.68` seconds and `10,000` in about `2.58` seconds, approximately `3,900` cases per second after build, with roughly `85`–`94` MB process memory. These measurements are environment-specific; use progress output for unattended runs and derive revised estimates from the target machine.
+
+No private configuration or unpublished helper is required. Record any failure's seed, runs, case, property, boundary, state summary, and replay command on the implementation pull request. Rerun the exact case after every harness repair. Convert confirmed production defects to permanent focused regressions and separate issues where the repair is unrelated or substantial.
 
 ## Source-to-runtime conformance corpus
 
@@ -135,9 +223,9 @@ A case may define:
 
 Prefer assertions on public behavior. Do not use complete instruction-plan snapshots as broad golden files. Assert internal instruction structure only when that structure is itself an accepted contract or when a focused lowering test requires it.
 
-## Deterministic fuzz and property testing
+## Future Phase 2 source and model-based testing
 
-Future fuzz and property tests must use fixed seeds and report the failing seed and generated input. Initial implementation should use existing tools unless a demonstrated need justifies a dependency.
+Future Phase 2 fuzz and property tests must use fixed seeds and report the failing seed and generated input. Initial implementation should use existing tools unless a demonstrated need justifies a dependency.
 
 Useful generated inputs include:
 
@@ -145,7 +233,6 @@ Useful generated inputs include:
 - nested templates and interpolations;
 - bounded nested collections;
 - expressions and calls;
-- malformed plans and checkpoints;
 - Unicode and unusual identifiers;
 - incomplete strings, comments, and blocks;
 - deeply nested but otherwise valid source structures, including parentheses, unary expressions, lists, templates, and interpolations;
@@ -164,7 +251,7 @@ Required properties include:
 
 This strategy does not assert that deeply nested valid source or direct AST input currently has a confirmed defect. A bug issue requires a repository reproduction that identifies the first failing public boundary.
 
-Do not select `fast-check` or another dependency through documentation alone.
+Phase 1 does not select `fast-check` or another dependency. Phase 2 may propose one only after concrete implementation evidence and the normal dependency review.
 
 ## Interactive runtime state-machine testing
 
