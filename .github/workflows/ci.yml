@@ -49,10 +49,20 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - name: Reassemble and apply reviewed patch
+      - name: Reassemble reviewed patch
         run: |
           cat .github/pr117-patch.part-* > /tmp/pr117-final.patch
           sha256sum /tmp/pr117-final.patch
+
+      - name: Preserve transported patch for byte comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr117-transported-patch
+          path: /tmp/pr117-final.patch
+          retention-days: 1
+
+      - name: Apply reviewed patch
+        run: |
           git apply --check /tmp/pr117-final.patch
           git apply /tmp/pr117-final.patch
 
