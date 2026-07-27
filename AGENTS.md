@@ -34,8 +34,6 @@ Do not treat planning documents, wishes, research files, historical audits, or s
 
 For parser, compiler, plan, runtime, action, state, checkpoint, and validated host-boundary changes, preserve deterministic public-boundary testing: every accepted plan and successful runtime transition must produce state accepted by the corresponding public validator. Use explicit time/RNG inputs, structured invalid-data handling, and reusable valid-state fixtures where practical. Follow `docs/TESTING.md` and the assigned issue for property or mutation testing; do not add unrelated fuzzing infrastructure, dependencies, or production hooks.
 
-TypeScript strictness and the prohibition on `any` remain required compile-time safeguards, but do not replace runtime validation of external JSON, cross-field state invariants, transition closure, checkpoint equivalence, or bounded-work behavior.
-
 ## Before substantive coding
 
 State briefly:
