@@ -20,6 +20,7 @@ import {
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { recordValidationTestWork } from "./runtime/validation-testing.js";
 import {
+  interactionStringHasNonWhitespace,
   interactionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
@@ -1907,7 +1908,11 @@ function validateInteractionInstruction(
   }
   if (value.target !== "standardChat") errors.push(planError("TSC002", "Interaction target is invalid.", `${path}.target`));
   if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
-  const expected = kind === "button" ? "none" : kind === "number" ? "number" : "string";
+  const expected = kind === "button"
+    ? "none"
+    : kind === "number" || (kind === "choice" && isRecord(value.ui) && value.ui.labelType === "number")
+      ? "number"
+      : "string";
   if (value.expectedResult !== expected) errors.push(planError("TSC002", "Interaction result domain does not match its kind.", `${path}.expectedResult`));
   if (kind === "button") {
     if (value.destinationTemporary !== null) errors.push(planError("TSC002", "Button interaction must not have a result destination.", `${path}.destinationTemporary`));
@@ -1933,7 +1938,9 @@ function validateInteractionInstruction(
   if (!isRecord(accessible) || (accessible.kind !== "text" && accessible.kind !== "localizedDefault")) {
     errors.push(planError("TSC002", "Interaction accessible name is invalid.", `${path}.ui.accessibleName`));
   } else if (accessible.kind === "text") {
-    countString(accessible.text, `${path}.ui.accessibleName.text`);
+    if (countString(accessible.text, `${path}.ui.accessibleName.text`) && !interactionStringHasNonWhitespace(accessible.text)) {
+      errors.push(planError("TSC002", "Explicit interaction accessible name must contain a non-whitespace character.", `${path}.ui.accessibleName.text`));
+    }
   } else {
     const expectedKey = kind === "button" ? "continue" : kind === "number" ? "number" : kind === "choice" ? "chooseOption" : "answer";
     if (accessible.key !== expectedKey) errors.push(planError("TSC002", "Interaction localized accessible-name key does not match its kind.", `${path}.ui.accessibleName.key`));

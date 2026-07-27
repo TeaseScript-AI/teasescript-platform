@@ -345,7 +345,7 @@ function resolveInteractionCompletion(action: RuntimeInteractionActionSnapshot, 
     return { ok: true, result: normalized, transcriptText: normalized };
   }
   if (action.interactionKind === "number") {
-    if (payload.kind !== "submittedText" || typeof payload.submittedText !== "string" || !interactionStringFits(payload.submittedText) || /[\r\n]/u.test(payload.submittedText)) return { ok: false, message: "Number completion requires one line of text within the shared UTF-8 byte limit." };
+    if (payload.kind !== "submittedText" || typeof payload.submittedText !== "string" || !interactionStringFits(payload.submittedText) || /[\r\n\u2028\u2029]/u.test(payload.submittedText)) return { ok: false, message: "Number completion requires one line of text within the shared UTF-8 byte limit." };
     const submitted = payload.submittedText.trim();
     if (!/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/u.test(submitted)) return { ok: false, message: "Number completion is not an accepted decimal or scientific number." };
     const parsed = Number(submitted);

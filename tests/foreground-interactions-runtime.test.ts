@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import {
+  MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
   MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "../src/interaction-limits.js";
@@ -20,7 +21,11 @@ function interactionPlan(interactionKind: InteractionInstruction["interactionKin
   const base = compiled.plan!;
   const waitIndex = base.instructions.findIndex((instruction) => instruction.kind === "wait");
   assert.notEqual(waitIndex, -1);
-  const expectedResult = interactionKind === "button" ? "none" : interactionKind === "number" ? "number" : "string";
+  const expectedResult = interactionKind === "button"
+    ? "none"
+    : interactionKind === "number" || (ui.kind === "choice" && ui.labelType === "number")
+      ? "number"
+      : "string";
   const interaction: InteractionInstruction = {
     kind: "interaction",
     interactionKind,
@@ -100,7 +105,7 @@ test("number accepts TeaseScript decimal/scientific text and preserves its trimm
   assert.equal(Object.is(result.snapshot.temporaries[0]?.value, -0), false);
   const numberTranscript = result.events[0]!;
   assert.equal(numberTranscript.kind === "playerTranscript" && numberTranscript.text, "-0e2");
-  for (const submittedText of ["1\n2", "1,5", "1 000", "1px", "Infinity", "1e999", "one", "+"] ) {
+  for (const submittedText of ["1\n2", "\u20281", "1\u2029", "1,5", "1 000", "1px", "Infinity", "1e999", "one", "+"] ) {
     const pending = waiting(plan);
     const before = JSON.stringify(pending.snapshot);
     const rejected = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "number", payload: { kind: "submittedText", submittedText } });
@@ -126,7 +131,12 @@ test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguou
   assert.equal(choiceTranscript.kind === "playerTranscript" && choiceTranscript.text, "Same");
 
   const numeric = interactionPlan("choice", { kind: "choice", labelType: "number", options: [{ text: "One", label: 1 }, { text: "Two", label: 2 }], accessibleName: defaults.choice });
-  assert.equal(complete(numeric, { kind: "selectedLabel", selectedLabel: 2 }, "choice").snapshot.temporaries[0]?.value, 2);
+  const numericCompleted = complete(numeric, { kind: "selectedLabel", selectedLabel: 2 }, "choice");
+  assert.equal(numericCompleted.snapshot.temporaries[0]?.value, 2);
+  assert.equal(validateRuntimeSnapshot(numericCompleted.snapshot, numeric).valid, true);
+  const numericRestored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(numeric, numericCompleted.snapshot)));
+  assert.equal(numericRestored.snapshot.temporaries[0]?.value, 2);
+  assert.equal(run(numericRestored.plan, numericRestored.snapshot).snapshot.status, "halted");
 });
 
 test("duplicate, stale, unknown, wrong-kind, and over-limit completion preserve ADR 0016 classification", () => {
@@ -185,6 +195,21 @@ test("shared exact string and option boundaries are accepted and over-limit plan
   const rejected = completeAction(completionPlan, overUtf8.snapshot, { actionId: overUtf8.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: `${"é".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2)}x` } });
   assert.equal(rejected.outcome.kind, "invalidPayload");
   assert.deepEqual(rejected.snapshot, overUtf8.snapshot);
+
+  const exactAggregate = interactionPlan("text", {
+    kind: "text",
+    hint: "h".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES - 1),
+    accessibleName: { kind: "text", text: "a" },
+  });
+  assert.equal(validateInstructionPlan(exactAggregate).valid, true);
+  const overAggregate = structuredClone(exactAggregate) as any;
+  overAggregate.instructions[0].ui.hint += "h";
+  assert.equal(validateInstructionPlan(overAggregate).valid, false);
+
+  const hugePending = waiting(completionPlan);
+  const huge = completeAction(completionPlan, hugePending.snapshot, { actionId: hugePending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 16) } });
+  assert.equal(huge.outcome.kind, "invalidPayload");
+  assert.deepEqual(huge.snapshot, hugePending.snapshot);
 });
 
 test("malformed interaction snapshot and settlement data are rejected", () => {
@@ -207,10 +232,49 @@ test("malformed interaction snapshot and settlement data are rejected", () => {
   const wrongTranscript = structuredClone(done.snapshot) as any;
   wrongTranscript.lastSettlement.transcriptText = "different";
   assert.equal(validateRuntimeSnapshot(wrongTranscript, plan).valid, false);
+  const wrongDestination = structuredClone(done.snapshot) as any;
+  wrongDestination.temporaries.find((temporary: any) => temporary.id === 1).value = "other";
+  assert.equal(validateRuntimeSnapshot(wrongDestination, plan).valid, false);
 
   const standaloneUi = structuredClone(pending.snapshot) as any;
   standaloneUi.foregroundAction.ui.accessibleName.key = "continue";
   assert.equal(validateRuntimeSnapshot(standaloneUi).valid, false);
+});
+
+test("pending interaction speaker provenance is bound to the instructed speaker", () => {
+  const compiled = compileSource("speaker alice {}\nspeaker bob {}\nspeaker alice\nwait 1\nexit");
+  assert.deepEqual(compiled.diagnostics, []);
+  const base = compiled.plan!;
+  const waitIndex = base.instructions.findIndex((instruction) => instruction.kind === "wait");
+  const interaction: InteractionInstruction = {
+    kind: "interaction",
+    interactionKind: "button",
+    target: "standardChat",
+    speaker: "alice",
+    destinationTemporary: null,
+    expectedResult: "none",
+    ui: { kind: "button", buttonLabel: "Continue", accessibleName: defaults.button },
+    span: base.instructions[waitIndex]!.span,
+  };
+  const speakerPlan = { ...base, instructions: base.instructions.map((instruction, index) => index === waitIndex ? interaction : instruction) };
+  const pending = waiting(speakerPlan);
+  const bob = pending.snapshot.speakers.find((speaker) => speaker.identifier === "bob")!;
+  const mutated = structuredClone(pending.snapshot) as any;
+  mutated.foregroundAction.speakerId = bob.id;
+  assert.equal(validateRuntimeSnapshot(mutated, speakerPlan).valid, false);
+});
+
+test("explicit accessible names must contain non-whitespace content", () => {
+  for (const text of ["", " \t\r\n", "\u2028\u2029"]) {
+    const base = interactionPlan("button", { kind: "button", buttonLabel: "Continue", accessibleName: defaults.button });
+    const malformed = structuredClone(base) as any;
+    malformed.instructions[0].ui.accessibleName = { kind: "text", text };
+    assert.equal(validateInstructionPlan(malformed).valid, false, JSON.stringify(text));
+    const pending = waiting(base);
+    const malformedSnapshot = structuredClone(pending.snapshot) as any;
+    malformedSnapshot.foregroundAction.ui.accessibleName = { kind: "text", text };
+    assert.equal(validateRuntimeSnapshot(malformedSnapshot, base).valid, false, JSON.stringify(text));
+  }
 });
 
 test("terminal button completion remains inspectable and continuation runs only on later entry", () => {
