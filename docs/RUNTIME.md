@@ -54,6 +54,8 @@ The engine owns action identity, active state, completion validation, transcript
 
 The selected interactions are mandatory and non-cancellable. Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice, and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or continuation.
 
+Result-bearing text, number, and choice instructions require a continuation inside their root or function execution region so the destination temporary can be consumed or cleared. A result-free button may be the terminal root instruction and uses the existing canonical settled root-end transition.
+
 Completion semantics are:
 
 - `askText` normalizes `CRLF` and standalone `CR` to `LF`, otherwise preserves submitted text, rejects whitespace-only input, returns `string`, and uses the same normalized text in the player transcript;
@@ -64,7 +66,7 @@ Completion semantics are:
 
 A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
-Interaction limits version 1 uses three shared technical ceilings: `65,536` UTF-8 bytes for any one string, `65,536` UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion text uses the same per-string ceiling. These values align interaction messages with the existing bounded playground source/message scale while remaining below the `100,000`-value external-data work boundary. They are transport, storage, rendering, and validation safety ceilings, not recommended UI lengths. Over-limit data is rejected without truncation, clamping, or partial state mutation.
+Interaction limits version 1 uses three shared technical ceilings: `65,536` UTF-8 bytes for any one string, `65,536` UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion text uses the same per-string ceiling. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field once, and stops encoding further fields after aggregate exhaustion. These values align interaction messages with the existing bounded playground source/message scale while remaining below the `100,000`-value external-data work boundary. They are transport, storage, rendering, and validation safety ceilings, not recommended UI lengths. Over-limit data is rejected without truncation, clamping, or partial state mutation.
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 

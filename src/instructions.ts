@@ -20,11 +20,11 @@ import {
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { recordValidationTestWork } from "./runtime/validation-testing.js";
 import {
+  boundedInteractionUtf8ByteLength,
   interactionStringHasNonWhitespace,
-  interactionStringFits,
-  interactionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
+  MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "./interaction-limits.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
@@ -1924,17 +1924,27 @@ function validateInteractionInstruction(
     return;
   }
   let aggregate = 0;
+  let aggregateExceeded = false;
   const countString = (candidate: unknown, fieldPath: string): candidate is string => {
     if (typeof candidate !== "string") {
       errors.push(planError("TSC002", "Interaction text must be a string.", fieldPath));
       return false;
     }
-    if (!interactionStringFits(candidate)) {
+    if (aggregateExceeded) {
+      if (candidate.length > MAX_INTERACTION_STRING_UTF8_BYTES) {
+        errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+        return false;
+      }
+      return true;
+    }
+    recordValidationTestWork("interactionUtf8Measurements");
+    const bytes = boundedInteractionUtf8ByteLength(candidate);
+    if (bytes === null) {
       errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
       return false;
     }
-    const bytes = interactionUtf8ByteLength(candidate);
     aggregate += bytes;
+    aggregateExceeded = aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES;
     return true;
   };
   const accessible = value.ui.accessibleName;
@@ -1972,21 +1982,21 @@ function validateInteractionInstruction(
         const validLabel = labelType === "none"
           ? label === null
           : labelType === "identifier"
-            ? typeof label === "string" && countString(label, `${optionPath}.label`) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
+            ? typeof label === "string" && countString(label, `${optionPath}.label`) && (aggregateExceeded || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
             : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
         if (!validLabel) errors.push(planError("TSC002", "Choice option label does not match the choice label type.", `${optionPath}.label`));
-        if (validLabel && (typeof label === "string" || typeof label === "number")) {
+        if (!aggregateExceeded && validLabel && (typeof label === "string" || typeof label === "number")) {
           if (labels.has(label)) errors.push(planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`));
           labels.add(label);
         }
-        if (labelType === "none") {
+        if (!aggregateExceeded && labelType === "none") {
           if (visible.has(option.text as string)) errors.push(planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`));
           visible.add(option.text as string);
         }
       }
     }
   }
-  if (aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES) errors.push(planError("TSC002", "Interaction data exceeds the shared aggregate UTF-8 byte limit.", `${path}.ui`));
+  if (aggregateExceeded) errors.push(planError("TSC002", "Interaction data exceeds the shared aggregate UTF-8 byte limit.", `${path}.ui`));
 }
 
 function validateExpression(
@@ -2275,6 +2285,17 @@ function validateInstructionControlFlowRegions(
     const region = index.owners[instructionIndex];
     if (region === undefined) return;
     const instructionPath = `$.instructions[${instructionIndex}]`;
+    if (
+      instruction.kind === "interaction" &&
+      instruction.interactionKind !== "button" &&
+      instructionIndex + 1 >= region.endInstruction
+    ) {
+      errors.push(planError(
+        "TSC002",
+        "Result-bearing interaction requires a continuation inside its execution region.",
+        instructionPath,
+      ));
+    }
     switch (instruction.kind) {
       case "jump":
       case "jumpIfFalse":
