@@ -36,6 +36,10 @@ ADR 0016 adds these requirements:
 - Time-integrity anomalies are diagnostics, not automatic proof of cheating, until a later policy defines thresholds and script visibility.
 - Restored Standard UI is reconstructed from validated canonical action payloads rather than replaying untrusted host state.
 
+The implemented foreground-interaction boundary captures each completion request through the shared stable external-data graph before inspecting it. Version-1 interaction limits permit at most `65,536` UTF-8 bytes per string, `65,536` UTF-8 bytes across retained strings in one action, and `4,096` choice entries. Plan and snapshot validation use linear set-based duplicate checks and bounded linear matching; over-limit definitions and completions are rejected without truncation or partial mutation. These technical ceilings are not UI length recommendations.
+
+The engine, not the caller, normalizes text, parses numbers, resolves choice labels/text, and derives player transcript content. Successful completion emits `playerTranscript` before `actionCompleted`; invalid or duplicate attempts emit neither event. Interaction result destinations, speaker IDs, target, ownership, options, settlement results, and transcript text are validated against the immutable plan and current snapshot.
+
 Camera permission, long-lived stream ownership, device switching, captured-media retention, encryption, persistent collections, and player-visible privacy indicators require a separate accepted camera/media design. Selected direction and open questions are recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
 
 Exact iframe sandbox flags, CSP, message schemas, capability negotiation, signing, moderation workflows, camera/media privacy policy, and time-integrity policy remain to be specified.

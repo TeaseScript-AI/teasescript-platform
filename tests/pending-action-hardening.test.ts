@@ -146,7 +146,7 @@ test("rejects an earlier delay settlement forged onto a terminal positive or zer
     );
     assert.throws(
       () => executeInstruction(compiled, forged),
-      (error: unknown) => error instanceof Error && error.message.includes("canonical settled terminal delay transition"),
+      (error: unknown) => error instanceof Error && error.message.includes("canonical settled terminal foreground transition"),
       source,
     );
   }

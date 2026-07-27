@@ -1953,9 +1953,13 @@ function validateInteractionInstruction(
       for (let index = 0; index < value.ui.options.length; index += 1) {
         const option = value.ui.options[index];
         const optionPath = `${path}.ui.options[${index}]`;
-        if (!isRecord(option) || !countString(option.text, `${optionPath}.text`)) continue;
+        if (!isRecord(option)) {
+          errors.push(planError("TSC002", "Choice option must be an object.", optionPath));
+          continue;
+        }
+        if (!countString(option.text, `${optionPath}.text`)) continue;
         const label = option.label;
-        const validLabel = labelType === "none" ? label === null : labelType === "identifier" ? typeof label === "string" && label.length > 0 : typeof label === "number" && Number.isFinite(label);
+        const validLabel = labelType === "none" ? label === null : labelType === "identifier" ? typeof label === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label) : typeof label === "number" && Number.isFinite(label);
         if (!validLabel) errors.push(planError("TSC002", "Choice option label does not match the choice label type.", `${optionPath}.label`));
         if (typeof label === "string") countString(label, `${optionPath}.label`);
         if (validLabel && (typeof label === "string" || typeof label === "number")) {

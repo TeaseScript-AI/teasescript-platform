@@ -8,7 +8,7 @@ import {
 } from "../src/interaction-limits.js";
 import type { InstructionPlan, InteractionInstruction, InteractionUiPayload } from "../src/instructions.js";
 import { validateInstructionPlan } from "../src/instructions.js";
-import { createCheckpoint, deserializeCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { completeAction, observeTime, run } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 
@@ -166,6 +166,14 @@ test("shared exact string and option boundaries are accepted and over-limit plan
   const ui = overOptions.instructions.find((instruction) => instruction.kind === "interaction")!.ui as { options: Array<{ text: string; label: number }> };
   ui.options.push({ text: "", label: MAX_INTERACTION_OPTION_ENTRIES });
   assert.equal(validateInstructionPlan(overOptions).valid, false);
+
+  const completionPlan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
+  const accepted = complete(completionPlan, { kind: "submittedText", submittedText: "é".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2) }, "text");
+  assert.equal(accepted.outcome.kind, "completed");
+  const overUtf8 = waiting(completionPlan);
+  const rejected = completeAction(completionPlan, overUtf8.snapshot, { actionId: overUtf8.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: `${"é".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2)}x` } });
+  assert.equal(rejected.outcome.kind, "invalidPayload");
+  assert.deepEqual(rejected.snapshot, overUtf8.snapshot);
 });
 
 test("malformed interaction snapshot and settlement data are rejected", () => {
@@ -185,4 +193,65 @@ test("malformed interaction snapshot and settlement data are rejected", () => {
   const malformedSettlement = structuredClone(done.snapshot) as any;
   malformedSettlement.lastSettlement.result = 1;
   assert.equal(validateRuntimeSnapshot(malformedSettlement, plan).valid, false);
+  const wrongTranscript = structuredClone(done.snapshot) as any;
+  wrongTranscript.lastSettlement.transcriptText = "different";
+  assert.equal(validateRuntimeSnapshot(wrongTranscript, plan).valid, false);
+
+  const standaloneUi = structuredClone(pending.snapshot) as any;
+  standaloneUi.foregroundAction.ui.accessibleName.key = "continue";
+  assert.equal(validateRuntimeSnapshot(standaloneUi).valid, false);
+});
+
+test("terminal button completion remains inspectable and continuation runs only on later entry", () => {
+  const withExit = interactionPlan("button", { kind: "button", buttonLabel: "Done", accessibleName: defaults.button });
+  const plan = { ...withExit, rootEndInstruction: 1, instructions: withExit.instructions.slice(0, 1) };
+  assert.equal(validateInstructionPlan(plan).valid, true);
+  const pending = waiting(plan);
+  const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "button", payload: { kind: "activate" } });
+  assert.equal(completed.snapshot.status, "running");
+  assert.equal(validateRuntimeSnapshot(completed.snapshot, plan).valid, true);
+  assert.deepEqual(completed.events.map((event) => event.kind), ["playerTranscript", "actionCompleted"]);
+  const resumed = run(plan, completed.snapshot);
+  assert.equal(resumed.snapshot.status, "halted");
+  assert.deepEqual(resumed.events.map((event) => event.kind), ["complete"]);
+});
+
+test("hostile completion objects reject before getters, mutation, events, or RNG advancement", () => {
+  const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
+  const pending = waiting(plan);
+  let invoked = false;
+  const request = { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", get payload() { invoked = true; return {}; } };
+  const rejected = completeAction(plan, pending.snapshot, request);
+  assert.equal(rejected.outcome.kind, "invalidPayload");
+  assert.equal(invoked, false);
+  assert.deepEqual(rejected.snapshot, pending.snapshot);
+  assert.deepEqual(rejected.events, []);
+});
+
+test("interaction plan and checkpoint boundaries reject malformed option domains and hostile shapes", () => {
+  const base = interactionPlan("choice", { kind: "choice", labelType: "identifier", options: [{ text: "One", label: "one" }, { text: "Two", label: "two" }], accessibleName: defaults.choice });
+  const mutations: Array<(plan: any) => void> = [
+    (plan) => { plan.instructions[0].ui.options[1].label = "one"; },
+    (plan) => { plan.instructions[0].ui.options[1].label = 2; },
+    (plan) => { plan.instructions[0].ui.labelType = "number"; },
+    (plan) => { plan.instructions[0].expectedResult = "number"; },
+    (plan) => { plan.instructions[0].target = "other"; },
+  ];
+  for (const mutate of mutations) {
+    const malformed = structuredClone(base) as any;
+    mutate(malformed);
+    assert.equal(validateInstructionPlan(malformed).valid, false);
+    assert.throws(() => restoreCheckpoint({ ...createCheckpoint(base, createFreshRuntimeSnapshot(base)), plan: malformed }));
+  }
+  const cyclic = structuredClone(base) as any;
+  cyclic.instructions[0].ui.options[0].cycle = cyclic;
+  assert.equal(validateInstructionPlan(cyclic).valid, false);
+  const sparse = structuredClone(base) as any;
+  delete sparse.instructions[0].ui.options[0];
+  assert.equal(validateInstructionPlan(sparse).valid, false);
+  let invoked = false;
+  const accessor = structuredClone(base) as any;
+  Object.defineProperty(accessor.instructions[0].ui, "options", { enumerable: true, get() { invoked = true; return []; } });
+  assert.equal(validateInstructionPlan(accessor).valid, false);
+  assert.equal(invoked, false);
 });

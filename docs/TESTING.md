@@ -206,6 +206,8 @@ Timed actions must use an injected fake clock or equivalent deterministic time s
 
 ADR 0016 defines the shared contract; action-specific tests remain required for each later API and UI behavior.
 
+The implemented ADR 0018 runtime foundation adds manual validated-plan coverage for button, text, number, unlabelled choice, identifier-labelled choice, and numeric-labelled choice. Tests cover exact normalization/parsing, ambiguous typed choices, canonical transcript ordering and requesting-speaker provenance, duplicate/stale/unknown/wrong-kind classification, checkpoint JSON round trips, terminal continuation, exact UTF-8 and option boundaries, malformed actions/settlements, and hostile completion capture. Every rejected completion compares the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot change unnoticed. Parser/compiler syntax and browser UI coverage remain assigned to their later implementation slices.
+
 ## Browser E2E gate
 
 Real browser automation becomes required after the cross-origin host shell and player exist. Coverage should then include:
