@@ -117,12 +117,26 @@ test("unsupported exports and duplicate public names fail clearly", () => {
     "export type Alias<T> = T",
     "export function rest(...values: string[]): void {}",
     "export function receiver(this: { value: string }, value: string): string { return value }",
+    "function alpha(): void {}\nexport { alpha }",
+    "type PublicType = string\nexport type { PublicType }",
+    "export { helper } from './helper.js'",
+    "export * from './other.js'",
+    "export * as namespaceExport from './other.js'",
   ]) {
     assert.throws(
       () => createPublicLibraryMetadata({ identity, source }),
       isMetadataError("unsupportedExport"),
     );
   }
+});
+
+
+test("private declarations remain absent from public metadata", () => {
+  const metadata = createPublicLibraryMetadata({
+    identity: createExactLibraryIdentity("private-only@1"),
+    source: "function alpha(): void {}\ntype Local = string\ninterface Hidden { value: string }",
+  });
+  assert.deepEqual(metadata.exports, []);
 });
 
 test("metadata generation captures external definitions and bounds TypeScript source", () => {
