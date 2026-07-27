@@ -140,3 +140,8 @@ test("inherited numeric getters are never invoked across captured-data boundarie
       assert.throws(
         () => validatePublicLibraryMetadata(metadata),
         LibraryMetadataError,
+      );
+    },
+  );
+  assert.equal(getterCalls, 0);
+});
