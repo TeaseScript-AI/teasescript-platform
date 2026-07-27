@@ -60,10 +60,14 @@ export function createPublicLibraryMetadata(
 
   const exports: PublicExportMetadata[] = [];
   for (const statement of sourceFile.statements) {
-    if (ts.isExportDeclaration(statement)) {
+    if (
+      ts.isExportDeclaration(statement) ||
+      ts.isExportAssignment(statement) ||
+      ts.isNamespaceExportDeclaration(statement)
+    ) {
       throw new LibraryMetadataError(
         "unsupportedExport",
-        "Export lists and re-exports are not supported in this POC.",
+        "Export lists, export assignments, namespace exports, and re-exports are not supported in this POC.",
       );
     }
     if (!hasExportModifier(statement)) continue;
