@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check:
@@ -28,63 +28,3 @@ jobs:
         run: npm ci
       - name: Check source
         run: npm run check
-
-  finalize-pr117-repair:
-    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'feat/issue-110-foreground-interaction-runtime' }}
-    needs: check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out exact PR branch
-        uses: actions/checkout@v4
-        with:
-          ref: feat/issue-110-foreground-interaction-runtime
-          fetch-depth: 0
-
-      - name: Require staged repair marker
-        run: test -f .github/pr117-patch.ready
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Reassemble and verify reviewed patch
-        run: |
-          head -c -1 .github/pr117-patch.part-00 > /tmp/pr117-final.patch
-          cat .github/pr117-patch.part-01 .github/pr117-patch.part-02 .github/pr117-patch.part-03 .github/pr117-patch.part-04 .github/pr117-patch.part-05 .github/pr117-patch.part-06 >> /tmp/pr117-final.patch
-          head -n 1 .github/pr117-patch.part-07 >> /tmp/pr117-final.patch
-          printf '+' >> /tmp/pr117-final.patch
-          tail -n +2 .github/pr117-patch.part-07 >> /tmp/pr117-final.patch
-          sha256sum /tmp/pr117-final.patch
-          test "$(sha256sum /tmp/pr117-final.patch | cut -d' ' -f1)" = "f666b31cc704ad46767f71dbe3e958c91e594b930b481097719bc8ac5d4cb775"
-          git apply --check /tmp/pr117-final.patch
-          git apply /tmp/pr117-final.patch
-
-      - name: Remove one-time transport files
-        run: |
-          git show 062d5ebe0fed3c96b8b3a91d4fea59d2f1205cae:.github/workflows/ci.yml > .github/workflows/ci.yml
-          rm -f .github/workflows/export-pr117-workspace.yml
-          rm -f .github/workflows/finalize-pr117-repair.yml
-          rm -f .github/pr117-patch.part-*
-          rm -f .github/pr117-patch.ready
-          git diff --check
-
-      - name: Verify exact branch result
-        run: |
-          node --version
-          npm --version
-          npm ci
-          find dist -depth -delete 2>/dev/null || true
-          npm run check
-          node --test dist/tests/foreground-interactions-runtime.test.js
-          npm run build
-          git diff --check
-
-      - name: Commit reviewed repair and cleanup
-        run: |
-          git config user.name "Dropje97"
-          git config user.email "83907974+Dropje97@users.noreply.github.com"
-          git add -A
-          git commit -m "Fix remaining interaction runtime invariants"
-          git push origin HEAD:feat/issue-110-foreground-interaction-runtime

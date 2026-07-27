@@ -323,6 +323,8 @@ function completeInteraction(
     settlementKind: "completed",
     owningInstruction: action.owningInstruction,
     continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    destinationTemporary: action.destinationTemporary,
     requestEventSequence: action.requestEventSequence,
     transcriptEventSequence: transcriptSequence,
     completionEventSequence: completionSequence,
@@ -603,6 +605,18 @@ function executePlannedInstruction(
       return;
     }
     case "interaction": {
+      if (
+        instruction.destinationTemporary !== null &&
+        snapshot.temporaries.some((temporary) =>
+          temporary.id === instruction.destinationTemporary
+        )
+      ) {
+        throw fault(
+          "TSR050",
+          "Interaction result destination is already occupied.",
+          instruction.span,
+        );
+      }
       if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
       assertEventSequenceCapacity(snapshot, 3, instruction.span);
       const speaker = instruction.speaker !== null
@@ -2464,6 +2478,8 @@ function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeAc
     settlementKind: "completed",
     owningInstruction: settlement.owningInstruction,
     continuationInstruction: settlement.continuationInstruction,
+    ownerCallFrameId: settlement.ownerCallFrameId,
+    destinationTemporary: settlement.destinationTemporary,
     requestEventSequence: settlement.requestEventSequence,
     transcriptEventSequence: settlement.transcriptEventSequence,
     completionEventSequence: settlement.completionEventSequence,
