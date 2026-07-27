@@ -27,3 +27,28 @@ The metadata pipeline should support at least:
 - formatter support through the normal function-call grammar.
 
 Special command, block, keyword, and token syntax remains parser-owned. A library export does not register new grammar or a formatter rewrite. The exact metadata format, caching, trust boundary, incremental updates, and Monaco integration remain open.
+
+## Accepted first Standard Library POC tooling
+
+ADR 0018 accepts parser-owned compact forms for `showButton`, `askText`, `askNumber`, `choose`, and `say` pacing in addition to ordinary library metadata. The editor must combine generated Standard Library information with grammar-aware support for those official forms.
+
+The first implementation should provide:
+
+- completion and hover documentation for the automatically available Standard Library names;
+- signature guidance for optional `as speaker`, input hints, labelled and unlabelled choices, identifier and numeric labels, `skippable`, `unskippable`, exact seconds, `0`, and `instant`;
+- diagnostics for attempts to shadow selected Standard Library names;
+- diagnostics for mixed labelled and unlabelled choices, mixed label types, duplicate labels, and duplicate unlabelled visible text;
+- diagnostics for negative, non-finite, unsupported-magnitude, or overflowing explicit pacing values;
+- documentation that input text is a Standard UI hint rather than an automatic speaker transcript message;
+- documentation of exact text/number normalization, simple return types, and permanent non-cancellation;
+- formatting that preserves the accepted compact order and keeps compact `choose` options in one statement;
+- source-span preservation from compact syntax through fully lowered plan instructions;
+- simulator inspection of pending interaction kind, requesting speaker, normalized completion, prepared output, pacing deadline, action location, and skip policy;
+- diagnostics for concrete versioned technical limits selected by the implementation;
+- earlier non-blocking usability warnings for unusually long control text or unusually large choice sets without presenting those warnings as language limits.
+
+The editor may preview the Player application's dynamic choice presentation, but button rows versus dropdown are not canonical runtime state. Buttons may use one or two rows; exact layout measurements and breakpoints remain Player UI work.
+
+Editor metadata must not imply that issue #74's opaque catalog token is a final package version or that the first POC supports imports, package manifests, Standard Library replacement, or checkpoint migration.
+
+The advanced detailed-result option, `showButton` timeout/elapsed return, typing-indicator options, accessibility override field, concrete limit values, LLM interpretation options, and exact choice-layout thresholds remain deferred and must not appear as accepted completion suggestions before their contracts are approved.
