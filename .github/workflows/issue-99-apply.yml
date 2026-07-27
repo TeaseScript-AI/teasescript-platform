@@ -3,6 +3,9 @@ on:
   push:
     branches:
       - fix/issue-99-prototype-safe-captured-arrays
+  pull_request:
+    branches:
+      - main
 permissions:
   contents: write
 jobs:
