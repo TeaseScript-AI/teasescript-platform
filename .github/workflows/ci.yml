@@ -49,14 +49,26 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - name: Reassemble and verify reviewed patch
+      - name: Reassemble reviewed patch
         run: |
           head -c -1 .github/pr117-patch.part-00 > /tmp/pr117-final.patch
           cat .github/pr117-patch.part-01 .github/pr117-patch.part-02 .github/pr117-patch.part-03 .github/pr117-patch.part-04 .github/pr117-patch.part-05 .github/pr117-patch.part-06 >> /tmp/pr117-final.patch
           printf '+' >> /tmp/pr117-final.patch
           cat .github/pr117-patch.part-07 >> /tmp/pr117-final.patch
           sha256sum /tmp/pr117-final.patch
-          test "$(sha256sum /tmp/pr117-final.patch | cut -d' ' -f1)" = "f666b31cc704ad46767f71dbe3e958c91e594b930b481097719bc8ac5d4cb775"
+
+      - name: Preserve corrected patch for verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr117-corrected-patch
+          path: /tmp/pr117-final.patch
+          retention-days: 1
+
+      - name: Verify corrected patch identity
+        run: test "$(sha256sum /tmp/pr117-final.patch | cut -d' ' -f1)" = "f666b31cc704ad46767f71dbe3e958c91e594b930b481097719bc8ac5d4cb775"
+
+      - name: Apply reviewed patch
+        run: |
           git apply --check /tmp/pr117-final.patch
           git apply /tmp/pr117-final.patch
 
