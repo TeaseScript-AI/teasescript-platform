@@ -19,6 +19,7 @@ import {
   interactionStringFits,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
+  MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "../interaction-limits.js";
 import {
   createXorShift32State,
@@ -28,7 +29,6 @@ import {
 } from "./random.js";
 import {
   cloneSerializableValue,
-  serializableEquals,
   validateSerializableValue,
   type SerializableRuntimeProperty,
   type SerializableRuntimeList,
@@ -399,7 +399,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     foregroundAction: snapshot.foregroundAction === null ? null : clonePendingAction(snapshot.foregroundAction),
     backgroundActions: snapshot.backgroundActions.map(clonePendingAction),
     nextActionId: snapshot.nextActionId,
-    lastSettlement: snapshot.lastSettlement === null ? null : { ...snapshot.lastSettlement },
+    lastSettlement: snapshot.lastSettlement === null ? null : cloneSettlement(snapshot.lastSettlement),
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -414,14 +414,76 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
 }
 
 function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendingActionSnapshot {
-  if (action.kind === "delay") return { ...action };
-  return { ...action, ui: cloneInteractionUi(action.ui) };
+  if (action.kind === "delay") return {
+    kind: "delay",
+    actionId: action.actionId,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    scopeDepth: action.scopeDepth,
+    loopDepth: action.loopDepth,
+    createdAtMs: action.createdAtMs,
+    deadlineMs: action.deadlineMs,
+    expectedCompletion: "time",
+    requestEventSequence: action.requestEventSequence,
+  };
+  return {
+    kind: "interaction",
+    interactionKind: action.interactionKind,
+    actionId: action.actionId,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    scopeDepth: action.scopeDepth,
+    loopDepth: action.loopDepth,
+    destinationTemporary: action.destinationTemporary,
+    expectedResult: action.expectedResult,
+    target: action.target,
+    speakerId: action.speakerId,
+    ui: cloneInteractionUi(action.ui),
+    requestEventSequence: action.requestEventSequence,
+  };
 }
 
 function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPayload {
-  const accessibleName = { ...ui.accessibleName };
-  if (ui.kind === "choice") return { ...ui, accessibleName, options: ui.options.map((option) => ({ ...option })) };
-  return { ...ui, accessibleName };
+  const accessibleName = ui.accessibleName.kind === "text"
+    ? { kind: "text" as const, text: ui.accessibleName.text }
+    : { kind: "localizedDefault" as const, key: ui.accessibleName.key };
+  if (ui.kind === "choice") return {
+    kind: "choice",
+    labelType: ui.labelType,
+    options: ui.options.map((option) => ({ text: option.text, label: option.label })),
+    accessibleName,
+  };
+  if (ui.kind === "button") return { kind: "button", buttonLabel: ui.buttonLabel, accessibleName };
+  return { kind: ui.kind, hint: ui.hint, accessibleName };
+}
+
+function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeActionSettlementSnapshot {
+  if (settlement.actionKind === "delay") return {
+    actionId: settlement.actionId,
+    actionKind: "delay",
+    settlementKind: "completed",
+    owningInstruction: settlement.owningInstruction,
+    continuationInstruction: settlement.continuationInstruction,
+    requestEventSequence: settlement.requestEventSequence,
+    completionEventSequence: settlement.completionEventSequence,
+    deadlineMs: settlement.deadlineMs,
+    completedAtMs: settlement.completedAtMs,
+  };
+  return {
+    actionId: settlement.actionId,
+    actionKind: "interaction",
+    interactionKind: settlement.interactionKind,
+    settlementKind: "completed",
+    owningInstruction: settlement.owningInstruction,
+    continuationInstruction: settlement.continuationInstruction,
+    requestEventSequence: settlement.requestEventSequence,
+    transcriptEventSequence: settlement.transcriptEventSequence,
+    completionEventSequence: settlement.completionEventSequence,
+    result: settlement.result,
+    transcriptText: settlement.transcriptText,
+  };
 }
 
 export interface CapturedRuntimeSnapshotResult {
@@ -1860,6 +1922,10 @@ function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && typeof value === "number" && value >= 1;
 }
 
+function hasEventSequenceCapacity(value: unknown, count: number): boolean {
+  return positiveSafeInteger(value) && value <= Number.MAX_SAFE_INTEGER - count;
+}
+
 function validatePendingActionState(value: Record<string, unknown>, plan: InstructionPlan | undefined, errors: string[]): void {
   if (!validSessionTime(value.currentSessionTimeMs)) errors.push("Runtime currentSessionTimeMs is outside the supported range.");
   if (!Array.isArray(value.backgroundActions) || value.backgroundActions.length !== 0) errors.push("Runtime backgroundActions must be an empty array in this slice.");
@@ -1871,6 +1937,11 @@ function validatePendingActionState(value: Record<string, unknown>, plan: Instru
     const delayTimesAreValid =
       isPlainRecord(action) &&
       action.kind === "delay" &&
+      hasExactKeys(action, [
+        "kind", "actionId", "owningInstruction", "continuationInstruction",
+        "ownerCallFrameId", "scopeDepth", "loopDepth", "createdAtMs",
+        "deadlineMs", "expectedCompletion", "requestEventSequence",
+      ]) &&
       validSessionTime(action.createdAtMs) &&
       validSessionTime(action.deadlineMs) &&
       validSessionTime(currentSessionTimeMs) &&
@@ -1878,8 +1949,8 @@ function validatePendingActionState(value: Record<string, unknown>, plan: Instru
       action.deadlineMs > currentSessionTimeMs;
     const baseValid = isPlainRecord(action) && positiveSafeInteger(action.actionId) && positiveSafeInteger(action.requestEventSequence) && nonNegativeSafeInteger(action.owningInstruction) && nonNegativeSafeInteger(action.continuationInstruction) && nonNegativeSafeInteger(action.scopeDepth) && nonNegativeSafeInteger(action.loopDepth) && (action.ownerCallFrameId === null || (positiveSafeInteger(action.ownerCallFrameId) && callIds.has(action.ownerCallFrameId))) && action.scopeDepth === (Array.isArray(value.frames) ? value.frames.length : -1) && action.loopDepth === (Array.isArray(value.loopFrames) ? value.loopFrames.length : -1) && (typeof value.nextEventSequence !== "number" || action.requestEventSequence < value.nextEventSequence) && action.actionId < (typeof value.nextActionId === "number" ? value.nextActionId : 0);
     const kindValid = isPlainRecord(action) && (action.kind === "delay"
-      ? delayTimesAreValid && action.expectedCompletion === "time"
-      : action.kind === "interaction" && validInteractionAction(action, value, plan));
+      ? delayTimesAreValid && action.expectedCompletion === "time" && hasEventSequenceCapacity(value.nextEventSequence, 1)
+      : action.kind === "interaction" && validInteractionAction(action, value, plan) && hasEventSequenceCapacity(value.nextEventSequence, 2));
     if (!baseValid || !kindValid || (plan !== undefined && isPlainRecord(action) && !validForegroundActionOwnership(action, value, plan))) {
       errors.push("Runtime foreground action is malformed.");
     }
@@ -1907,6 +1978,12 @@ function validatePendingActionState(value: Record<string, unknown>, plan: Instru
 }
 
 function validInteractionAction(action: Record<string, unknown>, snapshot: Record<string, unknown>, plan: InstructionPlan | undefined): boolean {
+  if (!hasExactKeys(action, [
+    "kind", "interactionKind", "actionId", "owningInstruction",
+    "continuationInstruction", "ownerCallFrameId", "scopeDepth", "loopDepth",
+    "destinationTemporary", "expectedResult", "target", "speakerId", "ui",
+    "requestEventSequence",
+  ])) return false;
   if (!["button", "text", "number", "choice"].includes(String(action.interactionKind)) || action.target !== "standardChat") return false;
   const expected = action.interactionKind === "button"
     ? "none"
@@ -1917,6 +1994,11 @@ function validInteractionAction(action: Record<string, unknown>, snapshot: Recor
   const speakers = Array.isArray(snapshot.speakers) ? snapshot.speakers : [];
   if (action.speakerId !== null && !speakers.some((speaker) => isPlainRecord(speaker) && speaker.id === action.speakerId)) return false;
   if (action.interactionKind === "button" ? action.destinationTemporary !== null : !positiveSafeInteger(action.destinationTemporary)) return false;
+  if (
+    action.destinationTemporary !== null &&
+    Array.isArray(snapshot.temporaries) &&
+    snapshot.temporaries.some((temporary) => isPlainRecord(temporary) && temporary.id === action.destinationTemporary)
+  ) return false;
   if (!validInteractionUiShape(action.interactionKind as "button" | "text" | "number" | "choice", action.ui)) return false;
   if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
   const instruction = plan.instructions[action.owningInstruction];
@@ -1958,43 +2040,61 @@ function visibleRuntimeBindingValue(snapshot: Record<string, unknown>, name: str
 
 function validInteractionUiShape(kind: "button" | "text" | "number" | "choice", value: unknown): boolean {
   if (!isPlainRecord(value) || value.kind !== kind || !isPlainRecord(value.accessibleName)) return false;
+  const expectedUiKeys = kind === "button"
+    ? ["kind", "buttonLabel", "accessibleName"]
+    : kind === "text" || kind === "number"
+      ? ["kind", "hint", "accessibleName"]
+      : ["kind", "labelType", "options", "accessibleName"];
+  if (!hasExactKeys(value, expectedUiKeys)) return false;
   let aggregate = 0;
+  let measurementExhausted = false;
   const count = (text: unknown): text is string => {
     if (typeof text !== "string") return false;
+    if (measurementExhausted) return text.length <= MAX_INTERACTION_STRING_UTF8_BYTES;
     recordValidationTestWork("interactionUtf8Measurements");
     const bytes = boundedInteractionUtf8ByteLength(text);
-    if (bytes === null) return false;
+    if (bytes === null) {
+      measurementExhausted = true;
+      return false;
+    }
     aggregate += bytes;
-    return aggregate <= MAX_INTERACTION_AGGREGATE_UTF8_BYTES;
+    if (aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES) {
+      measurementExhausted = true;
+      return false;
+    }
+    return true;
   };
   const expectedKey = kind === "button" ? "continue" : kind === "number" ? "number" : kind === "choice" ? "chooseOption" : "answer";
   if (value.accessibleName.kind === "text") {
-    if (!count(value.accessibleName.text) || !interactionStringHasNonWhitespace(value.accessibleName.text)) return false;
-  } else if (value.accessibleName.kind !== "localizedDefault" || value.accessibleName.key !== expectedKey) return false;
-  if (kind === "button") return count(value.buttonLabel);
-  if (kind === "text" || kind === "number") return value.hint === null || count(value.hint);
+    if (!hasExactKeys(value.accessibleName, ["kind", "text"]) || !count(value.accessibleName.text) || measurementExhausted || !interactionStringHasNonWhitespace(value.accessibleName.text)) return false;
+  } else if (!hasExactKeys(value.accessibleName, ["kind", "key"]) || value.accessibleName.kind !== "localizedDefault" || value.accessibleName.key !== expectedKey) return false;
+  if (kind === "button") return count(value.buttonLabel) && !measurementExhausted;
+  if (kind === "text" || kind === "number") return (value.hint === null || count(value.hint)) && !measurementExhausted;
   if (!Array.isArray(value.options) || value.options.length === 0 || value.options.length > MAX_INTERACTION_OPTION_ENTRIES || !["none", "identifier", "number"].includes(String(value.labelType))) return false;
   const labels = new Set<string | number>();
   const texts = new Set<string>();
   for (const option of value.options) {
-    if (!isPlainRecord(option) || !count(option.text)) return false;
+    if (!isPlainRecord(option) || !hasExactKeys(option, ["text", "label"])) return false;
+    const optionText = option.text;
+    const textValid = count(optionText);
+    if (!textValid && !measurementExhausted) return false;
     const label = option.label;
     const validLabel = value.labelType === "none"
       ? label === null
       : value.labelType === "identifier"
-        ? typeof label === "string" && count(label) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
+        ? typeof label === "string" && count(label) && (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
         : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
     if (!validLabel) return false;
-    if (label !== null && (typeof label === "string" || typeof label === "number")) {
+    if (!measurementExhausted && label !== null && (typeof label === "string" || typeof label === "number")) {
       if (labels.has(label)) return false;
       labels.add(label);
     }
-    if (value.labelType === "none") {
-      if (texts.has(option.text)) return false;
-      texts.add(option.text);
+    if (!measurementExhausted && value.labelType === "none") {
+      if (texts.has(optionText as string)) return false;
+      texts.add(optionText as string);
     }
   }
-  return true;
+  return !measurementExhausted;
 }
 
 function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): boolean {
@@ -2012,7 +2112,19 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
 }
 
 function validSettlementKindData(settlement: Record<string, unknown>, snapshot: Record<string, unknown>, plan: InstructionPlan | undefined): boolean {
-  if (settlement.actionKind === "delay") return validSettlementChronology(settlement, snapshot);
+  if (settlement.actionKind === "delay") {
+    return hasExactKeys(settlement, [
+      "actionId", "actionKind", "settlementKind", "owningInstruction",
+      "continuationInstruction", "requestEventSequence", "completionEventSequence",
+      "deadlineMs", "completedAtMs",
+    ]) && validSettlementChronology(settlement, snapshot);
+  }
+  if (!hasExactKeys(settlement, [
+    "actionId", "actionKind", "interactionKind", "settlementKind",
+    "owningInstruction", "continuationInstruction", "requestEventSequence",
+    "transcriptEventSequence", "completionEventSequence", "result",
+    "transcriptText",
+  ])) return false;
   if (!["button", "text", "number", "choice"].includes(String(settlement.interactionKind)) || typeof settlement.transcriptText !== "string" || !interactionStringFits(settlement.transcriptText) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.transcriptEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.transcriptEventSequence || settlement.transcriptEventSequence >= settlement.completionEventSequence) return false;
   const settlementInstruction = plan !== undefined && nonNegativeSafeInteger(settlement.owningInstruction)
     ? plan.instructions[settlement.owningInstruction]
@@ -2027,7 +2139,10 @@ function validSettlementKindData(settlement: Record<string, unknown>, snapshot: 
     resultValid = (typeof settlement.result === "string" && interactionStringFits(settlement.result)) || validNumberResult;
   } else resultValid = typeof settlement.result === "string" && interactionStringFits(settlement.result);
   if (!resultValid) return false;
-  if (settlement.interactionKind === "text" && settlement.result !== settlement.transcriptText) return false;
+  if (
+    settlement.interactionKind === "text" &&
+    (settlement.result !== settlement.transcriptText || settlement.transcriptText.includes("\r") || !interactionStringHasNonWhitespace(settlement.transcriptText))
+  ) return false;
   if (settlement.interactionKind === "number") {
     if (
       typeof settlement.result !== "number" ||
@@ -2044,7 +2159,7 @@ function validSettlementKindData(settlement: Record<string, unknown>, snapshot: 
     const destination = Array.isArray(snapshot.temporaries)
       ? snapshot.temporaries.find((temporary) => isPlainRecord(temporary) && temporary.id === instruction.destinationTemporary)
       : undefined;
-    if (!isPlainRecord(destination) || !serializableEquals(destination.value as SerializableRuntimeValue, settlement.result as SerializableRuntimeValue)) return false;
+    if (!isPlainRecord(destination) || !sameCanonicalSettlementResult(destination.value, settlement.result)) return false;
   }
   if (instruction.ui.kind === "button") return settlement.transcriptText === instruction.ui.buttonLabel;
   if (instruction.ui.kind === "text") return settlement.result === settlement.transcriptText;
@@ -2067,6 +2182,13 @@ function validSettlementChronology(
     settlement.completedAtMs >= settlement.deadlineMs &&
     settlement.completedAtMs <= currentSessionTimeMs
   );
+}
+
+function sameCanonicalSettlementResult(destination: unknown, result: unknown): boolean {
+  if (typeof destination === "number" || typeof result === "number") {
+    return typeof destination === "number" && typeof result === "number" && Object.is(destination, result);
+  }
+  return destination === result;
 }
 
 function validSettlementProvenance(
@@ -2519,6 +2641,11 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
 function runtimeInputDataFailureMessage(

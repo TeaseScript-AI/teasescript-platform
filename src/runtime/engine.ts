@@ -60,6 +60,7 @@ import {
   type RuntimeCallFrameSnapshot,
   type RuntimeTemporarySnapshot,
 } from "./state.js";
+import { recordValidationTestWork } from "./validation-testing.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -246,9 +247,13 @@ export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, su
   const captured = captureExecutableData(plan, snapshot);
   const current = cloneCapturedRuntimeSnapshot(captured.snapshot);
   if (!validSessionTime(suppliedNowMs)) return pendingResult(current, [], { kind: "invalidObservation", message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.` });
-  current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, suppliedNowMs);
+  const effectiveNow = Math.max(current.currentSessionTimeMs, suppliedNowMs);
   const action = current.foregroundAction;
-  if (action === null || action.kind !== "delay" || current.currentSessionTimeMs < action.deadlineMs) {
+  if (action !== null && action.kind === "delay" && effectiveNow >= action.deadlineMs) {
+    assertEventSequenceCapacity(current, 1);
+  }
+  current.currentSessionTimeMs = effectiveNow;
+  if (action === null || action.kind !== "delay" || effectiveNow < action.deadlineMs) {
     return pendingResult(current, [], { kind: "observed", currentSessionTimeMs: current.currentSessionTimeMs, completion: null });
   }
   const completionSequence = takeSequence(current);
@@ -279,7 +284,7 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
   const actionId = value.actionId;
   const active = current.foregroundAction?.actionId === actionId ? current.foregroundAction : null;
   if (active === null) {
-    if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: { ...current.lastSettlement } });
+    if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: cloneSettlement(current.lastSettlement) });
     return pendingResult(current, [], actionId < current.nextActionId ? { kind: "staleAction", actionId } : { kind: "unknownAction", actionId });
   }
   if (value.actionKind !== active.kind) return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: active.kind, receivedActionKind: value.actionKind === "delay" || value.actionKind === "interaction" ? value.actionKind : "<invalid>" });
@@ -307,6 +312,7 @@ function completeInteraction(
   }
   const resolved = resolveInteractionCompletion(action, request.payload);
   if (!resolved.ok) return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
+  assertEventSequenceCapacity(current, 2);
   if (action.destinationTemporary !== null && resolved.result !== null) setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
   const transcriptSequence = takeSequence(current);
   const completionSequence = takeSequence(current);
@@ -345,13 +351,13 @@ function resolveInteractionCompletion(action: RuntimeInteractionActionSnapshot, 
       : { ok: false, message: "Button completion requires activation only." };
   }
   if (action.interactionKind === "text") {
-    if (payload.kind !== "submittedText" || typeof payload.submittedText !== "string" || !interactionStringFits(payload.submittedText)) return { ok: false, message: "Text completion requires submitted text within the shared UTF-8 byte limit." };
+    if (payload.kind !== "submittedText" || typeof payload.submittedText !== "string" || !completionStringFits(payload.submittedText)) return { ok: false, message: "Text completion requires submitted text within the shared UTF-8 byte limit." };
     const normalized = payload.submittedText.replace(/\r\n?/gu, "\n");
-    if (!interactionStringFits(normalized) || /^\s*$/u.test(normalized)) return { ok: false, message: "Text completion must contain a non-whitespace character." };
+    if (/^\s*$/u.test(normalized)) return { ok: false, message: "Text completion must contain a non-whitespace character." };
     return { ok: true, result: normalized, transcriptText: normalized };
   }
   if (action.interactionKind === "number") {
-    if (payload.kind !== "submittedText" || typeof payload.submittedText !== "string" || !interactionStringFits(payload.submittedText) || /[\r\n\u2028\u2029]/u.test(payload.submittedText)) return { ok: false, message: "Number completion requires one line of text within the shared UTF-8 byte limit." };
+    if (payload.kind !== "submittedText" || typeof payload.submittedText !== "string" || !completionStringFits(payload.submittedText) || /[\r\n\u2028\u2029]/u.test(payload.submittedText)) return { ok: false, message: "Number completion requires one line of text within the shared UTF-8 byte limit." };
     const submitted = payload.submittedText.trim();
     if (!/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/u.test(submitted)) return { ok: false, message: "Number completion is not an accepted decimal or scientific number." };
     const parsed = Number(submitted);
@@ -360,13 +366,13 @@ function resolveInteractionCompletion(action: RuntimeInteractionActionSnapshot, 
   }
   if (action.ui.kind !== "choice") return { ok: false, message: "Choice action payload is malformed." };
   let matches: readonly { readonly text: string; readonly label: string | number | null }[] = [];
-  if (payload.kind === "submittedText" && typeof payload.submittedText === "string" && interactionStringFits(payload.submittedText)) {
+  if (payload.kind === "submittedText" && typeof payload.submittedText === "string" && completionStringFits(payload.submittedText)) {
     matches = action.ui.options.filter((option) => option.text === payload.submittedText);
     if (matches.length !== 1) return { ok: false, message: matches.length === 0 ? "Choice text is not available." : "Choice text is ambiguous; select a labelled control." };
   } else if (payload.kind === "selectedLabel" && action.ui.labelType !== "none" && (typeof payload.selectedLabel === "string" || typeof payload.selectedLabel === "number")) {
-    if (typeof payload.selectedLabel === "string" && !interactionStringFits(payload.selectedLabel)) return { ok: false, message: "Choice label exceeds the shared UTF-8 byte limit." };
+    if (typeof payload.selectedLabel === "string" && !completionStringFits(payload.selectedLabel)) return { ok: false, message: "Choice label exceeds the shared UTF-8 byte limit." };
     matches = action.ui.options.filter((option) => option.label === payload.selectedLabel);
-  } else if (payload.kind === "selectedText" && action.ui.labelType === "none" && typeof payload.selectedText === "string" && interactionStringFits(payload.selectedText)) {
+  } else if (payload.kind === "selectedText" && action.ui.labelType === "none" && typeof payload.selectedText === "string" && completionStringFits(payload.selectedText)) {
     matches = action.ui.options.filter((option) => option.text === payload.selectedText);
   } else {
     return { ok: false, message: "Choice completion payload does not match the choice domain." };
@@ -374,6 +380,11 @@ function resolveInteractionCompletion(action: RuntimeInteractionActionSnapshot, 
   if (matches.length !== 1) return { ok: false, message: "Choice selection is not available." };
   const selected = matches[0]!;
   return { ok: true, result: selected.label ?? selected.text, transcriptText: selected.text };
+}
+
+function completionStringFits(value: string): boolean {
+  recordValidationTestWork("interactionUtf8Measurements");
+  return interactionStringFits(value);
 }
 
 function executePlannedInstruction(
@@ -582,6 +593,7 @@ function executePlannedInstruction(
       }
       if (durationMs === 0) { advance(snapshot); return; }
       if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      assertEventSequenceCapacity(snapshot, 2, instruction.span);
       const sequence = takeSequence(snapshot);
       const action = Object.freeze({ kind: "delay" as const, actionId: snapshot.nextActionId, owningInstruction: snapshot.nextInstruction, continuationInstruction: snapshot.nextInstruction + 1, ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null, scopeDepth: snapshot.frames.length, loopDepth: snapshot.loopFrames.length, createdAtMs: snapshot.currentSessionTimeMs, deadlineMs, expectedCompletion: "time" as const, requestEventSequence: sequence });
       snapshot.nextActionId += 1;
@@ -592,6 +604,7 @@ function executePlannedInstruction(
     }
     case "interaction": {
       if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      assertEventSequenceCapacity(snapshot, 3, instruction.span);
       const speaker = instruction.speaker !== null
         ? evaluator.speakerByName(instruction.speaker, instruction.span)
         : snapshot.defaultSpeaker === null
@@ -2405,13 +2418,58 @@ function cloneTemporary(
 }
 
 function cloneInteractionUi(ui: RuntimeInteractionActionSnapshot["ui"]): RuntimeInteractionActionSnapshot["ui"] {
-  const accessibleName = { ...ui.accessibleName };
-  if (ui.kind === "choice") return { ...ui, accessibleName, options: ui.options.map((option) => ({ ...option })) };
-  return { ...ui, accessibleName };
+  const accessibleName = ui.accessibleName.kind === "text"
+    ? { kind: "text" as const, text: ui.accessibleName.text }
+    : { kind: "localizedDefault" as const, key: ui.accessibleName.key };
+  if (ui.kind === "choice") return { kind: "choice", labelType: ui.labelType, options: ui.options.map((option) => ({ text: option.text, label: option.label })), accessibleName };
+  if (ui.kind === "button") return { kind: "button", buttonLabel: ui.buttonLabel, accessibleName };
+  return { kind: ui.kind, hint: ui.hint, accessibleName };
 }
 
 function cloneInteractionAction(action: RuntimeInteractionActionSnapshot): RuntimeInteractionActionSnapshot {
-  return { ...action, ui: cloneInteractionUi(action.ui) };
+  return {
+    kind: "interaction",
+    interactionKind: action.interactionKind,
+    actionId: action.actionId,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    scopeDepth: action.scopeDepth,
+    loopDepth: action.loopDepth,
+    destinationTemporary: action.destinationTemporary,
+    expectedResult: action.expectedResult,
+    target: action.target,
+    speakerId: action.speakerId,
+    ui: cloneInteractionUi(action.ui),
+    requestEventSequence: action.requestEventSequence,
+  };
+}
+
+function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeActionSettlementSnapshot {
+  if (settlement.actionKind === "delay") return {
+    actionId: settlement.actionId,
+    actionKind: "delay",
+    settlementKind: "completed",
+    owningInstruction: settlement.owningInstruction,
+    continuationInstruction: settlement.continuationInstruction,
+    requestEventSequence: settlement.requestEventSequence,
+    completionEventSequence: settlement.completionEventSequence,
+    deadlineMs: settlement.deadlineMs,
+    completedAtMs: settlement.completedAtMs,
+  };
+  return {
+    actionId: settlement.actionId,
+    actionKind: "interaction",
+    interactionKind: settlement.interactionKind,
+    settlementKind: "completed",
+    owningInstruction: settlement.owningInstruction,
+    continuationInstruction: settlement.continuationInstruction,
+    requestEventSequence: settlement.requestEventSequence,
+    transcriptEventSequence: settlement.transcriptEventSequence,
+    completionEventSequence: settlement.completionEventSequence,
+    result: settlement.result,
+    transcriptText: settlement.transcriptText,
+  };
 }
 
 function currentCallFrameId(snapshot: RuntimeSnapshot): number | null {
@@ -2433,6 +2491,12 @@ function assertCounterCanAdvance(value: number, field: string): void {
       `Runtime ${field} cannot be advanced safely.`,
     );
   }
+}
+
+function assertEventSequenceCapacity(snapshot: RuntimeSnapshot, count: number, span?: SourceSpan): void {
+  if (snapshot.nextEventSequence <= Number.MAX_SAFE_INTEGER - count) return;
+  if (span !== undefined) throw fault("TSR051", "Runtime event sequence space is exhausted.", span);
+  throw new RuntimeDataError("TSR101", "Runtime nextEventSequence cannot satisfy the pending action atomically.");
 }
 
 function takeSequence(snapshot: RuntimeSnapshot): number {

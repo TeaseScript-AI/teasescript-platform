@@ -54,7 +54,7 @@ The engine owns action identity, active state, completion validation, transcript
 
 The selected interactions are mandatory and non-cancellable. Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice, and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or continuation.
 
-Result-bearing text, number, and choice instructions require a continuation inside their root or function execution region so the destination temporary can be consumed or cleared. A result-free button may be the terminal root instruction and uses the existing canonical settled root-end transition.
+Result-bearing text, number, and choice instructions require every reachable continuation path to clear the destination temporary before natural root completion or to discard the active temporary set through `return` or `exit`. Reaching another interaction with the same still-live destination is invalid. A result-free button may be the terminal root instruction and uses the existing canonical settled root-end transition.
 
 Completion semantics are:
 
@@ -66,11 +66,11 @@ Completion semantics are:
 
 A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
-Interaction limits version 1 uses three shared technical ceilings: `65,536` UTF-8 bytes for any one string, `65,536` UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion text uses the same per-string ceiling. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field once, and stops encoding further fields after aggregate exhaustion. These values align interaction messages with the existing bounded playground source/message scale while remaining below the `100,000`-value external-data work boundary. They are transport, storage, rendering, and validation safety ceilings, not recommended UI lengths. Over-limit data is rejected without truncation, clamping, or partial state mutation.
+Interaction limits version 1 uses three shared technical ceilings: `65,536` UTF-8 bytes for any one string, `65,536` UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion text uses the same per-string ceiling. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field once, and stops encoding further fields after either a per-string or aggregate failure. Text completion measures the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. These values align interaction messages with the existing bounded playground source/message scale while remaining below the `100,000`-value external-data work boundary. They are transport, storage, rendering, and validation safety ceilings, not recommended UI lengths. Over-limit data is rejected without truncation, clamping, or partial state mutation.
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 
-Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive monotonic sequences, and the bounded settlement retains both sequences, the canonical result, and transcript text for duplicate replay. Continuation execution remains eligible only through a later normal runtime entry.
+Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive monotonic sequences, and the bounded settlement retains both sequences, the canonical result, and transcript text for duplicate replay. Delay creation preflights its request plus future completion sequence; interaction creation preflights its request plus future transcript and completion sequences. Interaction completion rechecks both required sequences before writing its destination. Continuation execution remains eligible only through a later normal runtime entry.
 
 ### Standard composer and dynamic choice presentation
 
@@ -308,7 +308,7 @@ lastSettlement:
     ActionSettlement | null
 ```
 
-A valid current `waiting` snapshot contains exactly one foreground delay or interaction action. Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity, destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request sequence. Non-waiting states contain no foreground action. The background collection remains present but must be empty until the separately scoped pacing implementation versions that schema.
+A valid current `waiting` snapshot contains exactly one foreground delay or interaction action. Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity, destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request sequence. A waiting result destination must still be absent, and every persisted interaction instruction, UI/accessibility/option shape, action, and settlement has an exact supported key set. Non-waiting states contain no foreground action. The background collection remains present but must be empty until the separately scoped pacing implementation versions that schema.
 
 `currentSessionTimeMs` is canonical runtime state. It preserves the nondecreasing session coordinate across checkpoint and restore. A fresh snapshot receives a validated initial coordinate; deterministic tests may use `0`.
 

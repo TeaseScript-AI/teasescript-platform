@@ -1902,6 +1902,12 @@ function validateInteractionInstruction(
   temporaryCount: number,
   errors: PlanValidationError[],
 ): void {
+  if (!hasExactKeys(value, [
+    "kind", "interactionKind", "target", "speaker", "destinationTemporary",
+    "expectedResult", "ui", "span",
+  ])) {
+    errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
+  }
   const kind = value.interactionKind;
   if (!["button", "text", "number", "choice"].includes(String(kind))) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
@@ -1923,14 +1929,23 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction UI payload does not match its kind.", `${path}.ui`));
     return;
   }
+  const uiKeys = kind === "button"
+    ? ["kind", "buttonLabel", "accessibleName"]
+    : kind === "text" || kind === "number"
+      ? ["kind", "hint", "accessibleName"]
+      : ["kind", "labelType", "options", "accessibleName"];
+  if (!hasExactKeys(value.ui, uiKeys)) {
+    errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", `${path}.ui`));
+  }
   let aggregate = 0;
   let aggregateExceeded = false;
+  let measurementExhausted = false;
   const countString = (candidate: unknown, fieldPath: string): candidate is string => {
     if (typeof candidate !== "string") {
       errors.push(planError("TSC002", "Interaction text must be a string.", fieldPath));
       return false;
     }
-    if (aggregateExceeded) {
+    if (measurementExhausted) {
       if (candidate.length > MAX_INTERACTION_STRING_UTF8_BYTES) {
         errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
         return false;
@@ -1940,21 +1955,29 @@ function validateInteractionInstruction(
     recordValidationTestWork("interactionUtf8Measurements");
     const bytes = boundedInteractionUtf8ByteLength(candidate);
     if (bytes === null) {
+      measurementExhausted = true;
       errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
       return false;
     }
     aggregate += bytes;
     aggregateExceeded = aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES;
+    measurementExhausted = aggregateExceeded;
     return true;
   };
   const accessible = value.ui.accessibleName;
   if (!isRecord(accessible) || (accessible.kind !== "text" && accessible.kind !== "localizedDefault")) {
     errors.push(planError("TSC002", "Interaction accessible name is invalid.", `${path}.ui.accessibleName`));
   } else if (accessible.kind === "text") {
-    if (countString(accessible.text, `${path}.ui.accessibleName.text`) && !interactionStringHasNonWhitespace(accessible.text)) {
+    if (!hasExactKeys(accessible, ["kind", "text"])) {
+      errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", `${path}.ui.accessibleName`));
+    }
+    if (countString(accessible.text, `${path}.ui.accessibleName.text`) && !measurementExhausted && !interactionStringHasNonWhitespace(accessible.text)) {
       errors.push(planError("TSC002", "Explicit interaction accessible name must contain a non-whitespace character.", `${path}.ui.accessibleName.text`));
     }
   } else {
+    if (!hasExactKeys(accessible, ["kind", "key"])) {
+      errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", `${path}.ui.accessibleName`));
+    }
     const expectedKey = kind === "button" ? "continue" : kind === "number" ? "number" : kind === "choice" ? "chooseOption" : "answer";
     if (accessible.key !== expectedKey) errors.push(planError("TSC002", "Interaction localized accessible-name key does not match its kind.", `${path}.ui.accessibleName.key`));
   }
@@ -1977,19 +2000,22 @@ function validateInteractionInstruction(
           errors.push(planError("TSC002", "Choice option must be an object.", optionPath));
           continue;
         }
-        if (!countString(option.text, `${optionPath}.text`)) continue;
+        if (!hasExactKeys(option, ["text", "label"])) {
+          errors.push(planError("TSC002", "Choice option contains unsupported fields.", optionPath));
+        }
+        const textValid = countString(option.text, `${optionPath}.text`);
         const label = option.label;
         const validLabel = labelType === "none"
           ? label === null
           : labelType === "identifier"
-            ? typeof label === "string" && countString(label, `${optionPath}.label`) && (aggregateExceeded || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
+            ? typeof label === "string" && countString(label, `${optionPath}.label`) && (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
             : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
         if (!validLabel) errors.push(planError("TSC002", "Choice option label does not match the choice label type.", `${optionPath}.label`));
-        if (!aggregateExceeded && validLabel && (typeof label === "string" || typeof label === "number")) {
+        if (!measurementExhausted && validLabel && (typeof label === "string" || typeof label === "number")) {
           if (labels.has(label)) errors.push(planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`));
           labels.add(label);
         }
-        if (!aggregateExceeded && labelType === "none") {
+        if (!measurementExhausted && textValid && labelType === "none") {
           if (visible.has(option.text as string)) errors.push(planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`));
           visible.add(option.text as string);
         }
@@ -2285,16 +2311,23 @@ function validateInstructionControlFlowRegions(
     const region = index.owners[instructionIndex];
     if (region === undefined) return;
     const instructionPath = `$.instructions[${instructionIndex}]`;
-    if (
-      instruction.kind === "interaction" &&
-      instruction.interactionKind !== "button" &&
-      instructionIndex + 1 >= region.endInstruction
-    ) {
-      errors.push(planError(
-        "TSC002",
-        "Result-bearing interaction requires a continuation inside its execution region.",
-        instructionPath,
-      ));
+    if (instruction.kind === "interaction" && instruction.interactionKind !== "button") {
+      if (
+        instructionIndex + 1 >= region.endInstruction ||
+        !Number.isSafeInteger(instruction.destinationTemporary) ||
+        !interactionDestinationIsDiscarded(
+          instructions,
+          instructionIndex + 1,
+          instruction.destinationTemporary as number,
+          region,
+        )
+      ) {
+        errors.push(planError(
+          "TSC002",
+          "Result-bearing interaction requires every completion path to clear its destination or discard it through return or exit.",
+          instructionPath,
+        ));
+      }
     }
     switch (instruction.kind) {
       case "jump":
@@ -2336,6 +2369,50 @@ function validateInstructionControlFlowRegions(
         return;
     }
   });
+}
+
+function interactionDestinationIsDiscarded(
+  instructions: readonly unknown[],
+  startInstruction: number,
+  destinationTemporary: number,
+  region: InstructionExecutionRegion,
+): boolean {
+  const pending = [startInstruction];
+  const visited = new Set<number>();
+  while (pending.length > 0) {
+    const index = pending.pop()!;
+    if (index < region.startInstruction || index >= region.endInstruction) return false;
+    if (visited.has(index)) continue;
+    visited.add(index);
+    const instruction = instructions[index];
+    if (!isRecord(instruction)) return false;
+    if (instruction.kind === "clearTemporary" && instruction.temporaryId === destinationTemporary) continue;
+    if (instruction.kind === "interaction" && instruction.destinationTemporary === destinationTemporary) return false;
+    if (instruction.kind === "returnValue" || instruction.kind === "returnVoid" || instruction.kind === "exit") continue;
+    const next = index + 1;
+    const add = (candidate: unknown): boolean => {
+      if (!Number.isSafeInteger(candidate)) return false;
+      pending.push(candidate as number);
+      return true;
+    };
+    switch (instruction.kind) {
+      case "jump":
+      case "loopControl":
+        if (!add(instruction.target)) return false;
+        break;
+      case "jumpIfFalse":
+      case "loopStart":
+        if (!add(instruction.target) || !add(next)) return false;
+        break;
+      case "callFunction":
+        if (!add(instruction.returnInstruction)) return false;
+        break;
+      default:
+        add(next);
+        break;
+    }
+  }
+  return true;
 }
 
 function validateInstructionRegionTarget(
@@ -2944,6 +3021,11 @@ function nonNegativeInteger(value: unknown): value is number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
 function planExternalDataFailureMessage(
