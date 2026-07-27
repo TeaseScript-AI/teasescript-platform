@@ -132,7 +132,9 @@ Every property failure reports the seed, run budget, case index, mutation/operat
 npm run test:property:extended -- --seed 12345 --runs 250 --case 17
 ```
 
-Progress is concise and periodic. Successful large campaigns produce one final signature line. The same seed and budget reproduce the same cases, variants, operation order, observations, and signature.
+Progress is concise and periodic. Progress and success lines report the exact accumulated case work units as well as case counts. Successful large campaigns produce one final signature line. The same seed and budget reproduce the same cases, variants, operation order, observations, work-unit total, and signature.
+
+Composite invariant helpers wrap each direct public stage. Failure output therefore reports the first failing stage, such as `createCheckpoint`, `serializeCheckpoint`, `deserializeCheckpoint`, `completeAction:uninterrupted`, or `run:resumed-remainder`, instead of only a composite descriptor label.
 
 ### Explicit generation bounds
 
@@ -140,9 +142,11 @@ The harness permits at most:
 
 - `1,000,000` cases;
 - at most three controlled field mutations per case;
-- four public operations/work units per case;
+- eight conservative direct-public-boundary work units per case;
 - a declared maximum generated graph depth of `64`;
-- `4,000,000` total work units.
+- `8,000,000` total case-execution work units.
+
+Every case definition declares an executable `workUnits` cost. One unit represents one direct call to a documented public validation, runtime, completion, checkpoint, serialization, deserialization, or restore boundary. Composite cases use conservative costs; the resume-equivalence cases declare eight units for seven direct calls. Module initialization rejects missing, unsafe, zero, or over-eight metadata. Before fixture construction, the campaign derives the exact selected case schedule, sums its metadata, and rejects a total above the configured bound. The final result reports the exact executed total. The fixed fixture-catalog setup is separately bounded and does not vary with `--runs`.
 
 Technical boundary cases use the accepted interaction limits: at most the exact accepted string/collection boundary for valid fixtures and one unit over it for rejection fixtures. There is no real-time sleep, network access, process-global generator state, or unpublished homelab implementation.
 
@@ -162,7 +166,7 @@ Controlled mutations cover:
 - exact-limit and over-limit strings and option collections;
 - sparse arrays, cycles, throwing accessors, non-plain objects, and prototype-sensitive own keys.
 
-Unknown extra fields are observed according to the current contract; the harness does not assume they must be rejected.
+Unknown extra fields are observed according to the current contract; the harness does not assume they must be rejected. For the current version-1 completion request boundary, an unknown top-level field is accepted and ignored: the harness compares the complete operation result with the same completion request without that field.
 
 ### Executable properties
 
@@ -176,8 +180,11 @@ accepted plan + valid snapshot + successful public runtime operation
 invalid or duplicate completion
 => complete canonical state and emitted events remain unchanged
 
+checkpoint creation
+=> checkpoint plan and snapshot equal the original canonical inputs
+
 checkpoint -> JSON -> restore
-=> complete canonical plan and snapshot equality
+=> complete canonical plan and snapshot equality with those original inputs
 
 restore then continue
 => complete event and final-snapshot equality with uninterrupted execution

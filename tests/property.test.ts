@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import {
+  PropertyBoundaryFailure,
+  assertResumeEquivalent,
+} from "./property/invariants.js";
+import { createPropertyFixtureCatalog } from "./property/fixtures.js";
 import { propertyCases } from "./property/mutations.js";
 import {
   PROPERTY_SMOKE_RUNS,
   PROPERTY_SMOKE_SEED,
+  MAX_PROPERTY_TOTAL_WORK_UNITS,
+  MAX_PROPERTY_WORK_UNITS_PER_CASE,
   PropertyCampaignFailure,
+  calculateConfiguredWorkUnits,
   createReplayCommand,
   defaultPropertyCampaignConfig,
   describePropertyCase,
@@ -49,6 +57,12 @@ test("required property smoke campaign is deterministic and closes public bounda
   assert.equal(config.seed, PROPERTY_SMOKE_SEED);
   assert.equal(config.runs, PROPERTY_SMOKE_RUNS);
   assert.equal(first.executed, PROPERTY_SMOKE_RUNS);
+  assert.equal(first.totalWorkUnits, calculateConfiguredWorkUnits(config));
+  assert.ok(first.totalWorkUnits <= MAX_PROPERTY_TOTAL_WORK_UNITS);
+  assert.ok(
+    Math.max(...propertyCases().map((definition) => definition.workUnits)) <=
+      MAX_PROPERTY_WORK_UNITS_PER_CASE,
+  );
   assert.deepEqual(second, first);
 });
 
@@ -67,6 +81,7 @@ test("case derivation and exact replay are stable", () => {
   assert.deepEqual(second, first);
   assert.deepEqual(first.firstCase, descriptor);
   assert.equal(first.executed, 1);
+  assert.equal(first.totalWorkUnits, descriptor.workUnits);
   assert.equal(
     createReplayCommand(config, config.caseIndex),
     "npm run test:property:extended -- --seed 12345 --runs 250 --case 211",
@@ -132,7 +147,7 @@ test("property CLI reports failures with non-zero status and exact replay", () =
         config,
         descriptor,
         "fixture:sample",
-        new Error("synthetic failure"),
+        new PropertyBoundaryFailure("serializeCheckpoint", new Error("synthetic failure")),
       );
     },
   );
@@ -143,11 +158,31 @@ test("property CLI reports failures with non-zero status and exact replay", () =
   assert.match(stderr.join(""), /runs=250/);
   assert.match(stderr.join(""), /case=17/);
   assert.match(stderr.join(""), /mutation=/);
-  assert.match(stderr.join(""), /boundary=/);
+  assert.match(stderr.join(""), /boundary=serializeCheckpoint/);
   assert.match(stderr.join(""), /fixture=fixture:sample/);
   assert.match(
     stderr.join(""),
     /npm run test:property:extended -- --seed 12345 --runs 250 --case 17/,
+  );
+});
+
+
+test("composite invariants preserve the exact first failing stage", () => {
+  const fixtures = createPropertyFixtureCatalog();
+  assert.throws(
+    () => assertResumeEquivalent(
+      fixtures.waitingDelay.plan,
+      fixtures.waitingDelay.snapshot,
+      () => {
+        throw new Error("synthetic continue failure");
+      },
+      "observeTime",
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof PropertyBoundaryFailure);
+      assert.equal(error.boundary, "observeTime:uninterrupted");
+      return true;
+    },
   );
 });
 
@@ -162,6 +197,7 @@ test("property CLI returns zero and concise output for a successful campaign", (
     seed: 12345,
     runs: 2,
     executed: 2,
+    totalWorkUnits: 4,
     signature: "1234abcd",
     firstCase: describePropertyCase(12345, 0),
     lastCase: describePropertyCase(12345, 1),
@@ -175,6 +211,6 @@ test("property CLI returns zero and concise output for a successful campaign", (
   assert.equal(status, 0);
   assert.deepEqual(stderr, []);
   assert.deepEqual(stdout, [
-    "property campaign passed seed=12345 runs=2 executed=2 signature=1234abcd\n",
+    "property campaign passed seed=12345 runs=2 executed=2 work=4 signature=1234abcd\n",
   ]);
 });

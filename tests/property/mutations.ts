@@ -49,6 +49,7 @@ export interface PropertyCaseDefinition {
   readonly id: string;
   readonly property: string;
   readonly boundary: string;
+  readonly workUnits: number;
   readonly repeatable: boolean;
   readonly execute: (
     fixtures: PropertyFixtureCatalog,
@@ -80,6 +81,7 @@ function structuredPlanCase(
     id,
     property: "structured external plan boundary",
     boundary: "validateInstructionPlan",
+    workUnits: 2,
     repeatable: options.repeatable ?? true,
     execute(fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) {
       const source = options.fixture === "interaction"
@@ -129,6 +131,7 @@ function structuredSnapshotCase(
     id,
     property: "structured external snapshot boundary",
     boundary: "validateRuntimeSnapshot",
+    workUnits: 2,
     repeatable: options.repeatable ?? true,
     execute(fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) {
       const fixture = fixtures[fixtureName];
@@ -161,6 +164,7 @@ function structuredCheckpointCase(
     id,
     property: "structured external checkpoint boundary",
     boundary: "restoreCheckpoint",
+    workUnits: 2,
     repeatable: options.repeatable ?? true,
     execute(fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) {
       const value = cloneCheckpointValue(fixtures.textCheckpoint);
@@ -179,11 +183,13 @@ function structuredCheckpointCase(
 const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   Object.freeze({
     id: "runtime-run-closes-over-validator",
+    workUnits: 2,
     property: "successful runtime operation closes over validator",
     boundary: "run",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
       const operation = assertSuccessfulRuntimeOperation(
+        "run",
         fixtures.fresh.plan,
         fixtures.fresh.snapshot,
         () => run(fixtures.fresh.plan, fixtures.fresh.snapshot),
@@ -193,11 +199,13 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "runtime-execute-instruction-closes-over-validator",
+    workUnits: 2,
     property: "successful runtime operation closes over validator",
     boundary: "executeInstruction",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
       const operation = assertSuccessfulRuntimeOperation(
+        "executeInstruction",
         fixtures.running.plan,
         fixtures.running.snapshot,
         () => executeInstruction(fixtures.running.plan, fixtures.running.snapshot),
@@ -207,11 +215,13 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "delay-observation-closes-over-validator",
+    workUnits: 2,
     property: "successful runtime operation closes over validator",
     boundary: "observeTime",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
       const operation = assertSuccessfulRuntimeOperation(
+        "observeTime",
         fixtures.waitingDelay.plan,
         fixtures.waitingDelay.snapshot,
         () => observeTime(
@@ -226,11 +236,13 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "delay-completion-request-closes-over-validator",
+    workUnits: 2,
     property: "successful runtime operation closes over validator",
     boundary: "completeAction",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
       const operation = assertSuccessfulRuntimeOperation(
+        "completeAction",
         fixtures.waitingDelay.plan,
         fixtures.waitingDelay.snapshot,
         () => completeAction(
@@ -245,11 +257,13 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "interaction-completion-closes-over-validator",
+    workUnits: 2,
     property: "successful runtime operation closes over validator",
     boundary: "completeAction",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
       const operation = assertSuccessfulRuntimeOperation(
+        "completeAction",
         fixtures.waitingText.plan,
         fixtures.waitingText.snapshot,
         () => completeAction(
@@ -264,6 +278,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "invalid-completion-preserves-state",
+    workUnits: 2,
     property: "invalid completion does not mutate canonical state",
     boundary: "completeAction",
     repeatable: true,
@@ -286,6 +301,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "duplicate-completion-preserves-state",
+    workUnits: 2,
     property: "duplicate completion does not mutate canonical state",
     boundary: "completeAction",
     repeatable: true,
@@ -301,6 +317,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "checkpoint-json-roundtrip-equivalent",
+    workUnits: 4,
     property: "checkpoint JSON round trip is canonical",
     boundary: "serializeCheckpoint/deserializeCheckpoint",
     repeatable: true,
@@ -314,6 +331,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "delay-restore-resume-equivalent",
+    workUnits: 8,
     property: "restored execution equals uninterrupted execution",
     boundary: "checkpoint/observeTime/run",
     repeatable: true,
@@ -322,12 +340,14 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
         fixtures.waitingDelay.plan,
         fixtures.waitingDelay.snapshot,
         (plan, snapshot) => observeTime(plan, snapshot, 1_000),
+        "observeTime",
       );
       return observation("equivalent", summarizeFixture(fixtures.waitingDelay));
     },
   }),
   Object.freeze({
     id: "interaction-restore-resume-equivalent",
+    workUnits: 8,
     property: "restored execution equals uninterrupted execution",
     boundary: "checkpoint/completeAction/run",
     repeatable: true,
@@ -336,6 +356,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
         fixtures.waitingText.plan,
         fixtures.waitingText.snapshot,
         (plan, snapshot) => completeAction(plan, snapshot, fixtures.validTextCompletion),
+        "completeAction",
       );
       return observation("equivalent", summarizeFixture(fixtures.waitingText));
     },
@@ -380,6 +401,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }, { fixture: "interaction" }),
   Object.freeze({
     id: "plan-exact-string-limit-accepted",
+    workUnits: 1,
     property: "exact technical string boundary is accepted",
     boundary: "validateInstructionPlan",
     repeatable: false,
@@ -391,6 +413,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "plan-over-string-limit-structured",
+    workUnits: 1,
     property: "over-limit string is rejected structurally",
     boundary: "validateInstructionPlan",
     repeatable: false,
@@ -402,6 +425,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "plan-exact-option-limit-accepted",
+    workUnits: 1,
     property: "exact technical collection boundary is accepted",
     boundary: "validateInstructionPlan",
     repeatable: false,
@@ -413,6 +437,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "plan-over-option-limit-structured",
+    workUnits: 1,
     property: "over-limit collection is rejected structurally",
     boundary: "validateInstructionPlan",
     repeatable: false,
@@ -424,6 +449,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "plan-over-aggregate-string-limit-structured",
+    workUnits: 1,
     property: "aggregate technical string limit is enforced",
     boundary: "validateInstructionPlan",
     repeatable: false,
@@ -492,6 +518,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "snapshot-exact-numeric-boundaries-accepted",
+    workUnits: 1,
     property: "exact numeric boundaries receive documented treatment",
     boundary: "validateRuntimeSnapshot",
     repeatable: true,
@@ -615,6 +642,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
 
   Object.freeze({
     id: "completion-missing-action-id",
+    workUnits: 2,
     property: "malformed completion is structured and non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -632,25 +660,48 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "completion-extra-field",
+    workUnits: 4,
     property: "extra completion fields receive documented treatment",
     boundary: "completeAction",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
       const request = cloneRecord(fixtures.validTextCompletion);
-      request.extra = "ignored-or-rejected-by-contract";
-      const before = structuredClone(fixtures.waitingText.snapshot);
-      const result = completeAction(
+      request.extra = "ignored-by-version-1-contract";
+      const expected = assertSuccessfulRuntimeOperation(
+        "completeAction",
         fixtures.waitingText.plan,
         fixtures.waitingText.snapshot,
-        request,
+        () => completeAction(
+          fixtures.waitingText.plan,
+          fixtures.waitingText.snapshot,
+          fixtures.validTextCompletion,
+        ),
       );
-      assert.deepEqual(fixtures.waitingText.snapshot, before);
-      assertAcceptedSnapshot(fixtures.waitingText.plan, result.snapshot);
-      return observation(result.outcome.kind, summarizeFixture(fixtures.waitingText));
+      const actual = assertSuccessfulRuntimeOperation(
+        "completeAction",
+        fixtures.waitingText.plan,
+        fixtures.waitingText.snapshot,
+        () => completeAction(
+          fixtures.waitingText.plan,
+          fixtures.waitingText.snapshot,
+          request,
+        ),
+      );
+      assert.equal(actual.outcome.kind, "completed");
+      assert.deepEqual(
+        actual,
+        expected,
+        "An unknown completion field changed the canonical completion result.",
+      );
+      return observation(
+        "accepted:completed-equivalent",
+        summarizeFixture(fixtures.waitingText),
+      );
     },
   }),
   Object.freeze({
     id: "completion-wrong-primitive-type",
+    workUnits: 2,
     property: "malformed completion is structured and non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -673,6 +724,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       ][index]!,
       property: "malformed completion is structured and non-mutating",
       boundary: "completeAction",
+      workUnits: 2,
       repeatable: true,
       execute(fixtures: PropertyFixtureCatalog) {
         const request = { ...fixtures.validTextCompletion, actionId };
@@ -688,6 +740,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   ),
   Object.freeze({
     id: "completion-wrong-action-kind",
+    workUnits: 2,
     property: "wrong completion kind is non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -704,6 +757,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "completion-unknown-action-id",
+    workUnits: 2,
     property: "unknown completion is non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -724,6 +778,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "completion-stale-action-id",
+    workUnits: 4,
     property: "stale completion is non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -742,6 +797,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "completion-over-limit-text",
+    workUnits: 2,
     property: "over-limit completion is non-mutating",
     boundary: "completeAction",
     repeatable: false,
@@ -764,6 +820,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "completion-cycle",
+    workUnits: 2,
     property: "hostile completion is structured and non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -781,6 +838,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "completion-accessor",
+    workUnits: 2,
     property: "hostile completion is structured and non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -798,6 +856,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "completion-non-plain-object",
+    workUnits: 2,
     property: "hostile completion is structured and non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -815,6 +874,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "runtime-malformed-plan-structured",
+    workUnits: 2,
     property: "runtime malformed external data is structured and non-mutating",
     boundary: "run",
     repeatable: true,
@@ -828,6 +888,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }),
   Object.freeze({
     id: "runtime-malformed-snapshot-structured",
+    workUnits: 2,
     property: "runtime malformed external data is structured and non-mutating",
     boundary: "run",
     repeatable: true,

@@ -11,6 +11,7 @@ import {
   type PropertyCaseObservation,
   type PropertyCaseVariant,
 } from "./mutations.js";
+import { PropertyBoundaryFailure } from "./invariants.js";
 import {
   MAX_PROPERTY_SEED,
   createPropertyPrng,
@@ -28,10 +29,9 @@ export const PROPERTY_EXTENDED_RUNS = 10_000;
 export const PROPERTY_MODERATE_RUNS = 2_000;
 export const MAX_PROPERTY_RUNS = 1_000_000;
 export const MAX_PROPERTY_MUTATIONS_PER_CASE = 3;
-export const MAX_PROPERTY_OPERATION_COUNT = 4;
-export const PROPERTY_WORK_UNITS_PER_CASE = 4;
+export const MAX_PROPERTY_WORK_UNITS_PER_CASE = 8;
 export const MAX_PROPERTY_TOTAL_WORK_UNITS =
-  MAX_PROPERTY_RUNS * PROPERTY_WORK_UNITS_PER_CASE;
+  MAX_PROPERTY_RUNS * MAX_PROPERTY_WORK_UNITS_PER_CASE;
 
 export type PropertyProfile = "smoke" | "extended";
 
@@ -48,6 +48,7 @@ export interface PropertyCaseDescriptor {
   readonly id: string;
   readonly property: string;
   readonly boundary: string;
+  readonly workUnits: number;
   readonly variant: PropertyCaseVariant;
 }
 
@@ -55,6 +56,7 @@ export interface PropertyCampaignResult {
   readonly seed: number;
   readonly runs: number;
   readonly executed: number;
+  readonly totalWorkUnits: number;
   readonly signature: string;
   readonly firstCase: PropertyCaseDescriptor;
   readonly lastCase: PropertyCaseDescriptor;
@@ -64,6 +66,7 @@ export interface PropertyProgress {
   readonly seed: number;
   readonly runs: number;
   readonly completed: number;
+  readonly completedWorkUnits: number;
   readonly currentCase: PropertyCaseDescriptor;
 }
 
@@ -101,6 +104,9 @@ export class PropertyCampaignFailure extends Error {
       ? `${cause.name}: ${cause.message}`
       : String(cause);
     const replayCommand = createReplayCommand(config, descriptor.index);
+    const boundary = cause instanceof PropertyBoundaryFailure
+      ? cause.boundary
+      : descriptor.boundary;
     super(
       [
         `Property campaign failed at ${descriptor.property}.`,
@@ -108,7 +114,7 @@ export class PropertyCampaignFailure extends Error {
         `runs=${config.runs}`,
         `case=${descriptor.index}`,
         `mutation=${descriptor.id}`,
-        `boundary=${descriptor.boundary}`,
+        `boundary=${boundary}`,
         `fixture=${fixtureSummary}`,
         `cause=${causeText}`,
         `replay=${replayCommand}`,
@@ -121,7 +127,7 @@ export class PropertyCampaignFailure extends Error {
     this.caseIndex = descriptor.index;
     this.caseId = descriptor.id;
     this.property = descriptor.property;
-    this.boundary = descriptor.boundary;
+    this.boundary = boundary;
     this.fixtureSummary = fixtureSummary;
     this.replayCommand = replayCommand;
   }
@@ -131,6 +137,24 @@ export class PropertyCliArgumentError extends Error {
   public constructor(message: string) {
     super(message);
     this.name = "PropertyCliArgumentError";
+  }
+}
+
+validatePropertyDefinitions();
+
+function validatePropertyDefinitions(): void {
+  const definitions = [...MANDATORY_PROPERTY_CASES, ...REPEATABLE_PROPERTY_CASES];
+  for (const definition of definitions) {
+    if (
+      !Number.isSafeInteger(definition.workUnits) ||
+      definition.workUnits < 1 ||
+      definition.workUnits > MAX_PROPERTY_WORK_UNITS_PER_CASE
+    ) {
+      throw new Error(
+        `Property case ${definition.id} has invalid workUnits=${definition.workUnits}; ` +
+          `expected 1..${MAX_PROPERTY_WORK_UNITS_PER_CASE}.`,
+      );
+    }
   }
 }
 
@@ -184,12 +208,6 @@ export function validatePropertyCampaignConfig(
       `--progress-every must be an integer from 0 through ${MAX_PROPERTY_RUNS}.`,
     );
   }
-  const totalWork = config.runs * PROPERTY_WORK_UNITS_PER_CASE;
-  if (totalWork > MAX_PROPERTY_TOTAL_WORK_UNITS) {
-    throw new PropertyCliArgumentError(
-      `Configured work ${totalWork} exceeds ${MAX_PROPERTY_TOTAL_WORK_UNITS} units.`,
-    );
-  }
 }
 
 export function describePropertyCase(
@@ -218,6 +236,7 @@ export function describePropertyCase(
     id: definition.id,
     property: definition.property,
     boundary: definition.boundary,
+    workUnits: definition.workUnits,
     variant: Object.freeze({
       first: first.value,
       second: second.value,
@@ -231,13 +250,20 @@ export function runPropertyCampaign(
   options: PropertyCampaignOptions = {},
 ): PropertyCampaignResult {
   validatePropertyCampaignConfig(config);
+  const selectedCount = config.caseIndex === undefined ? config.runs : 1;
+  const configuredWorkUnits = calculateConfiguredWorkUnits(config);
+  if (configuredWorkUnits > MAX_PROPERTY_TOTAL_WORK_UNITS) {
+    throw new PropertyCliArgumentError(
+      `Configured work ${configuredWorkUnits} exceeds ${MAX_PROPERTY_TOTAL_WORK_UNITS} units.`,
+    );
+  }
   const fixtures = createPropertyFixtureCatalog();
   const catalogSummary = summarizePropertyFixtureCatalog(fixtures);
-  const selectedCount = config.caseIndex === undefined ? config.runs : 1;
   let signature = 0x811c_9dc5;
   let firstCase: PropertyCaseDescriptor | undefined;
   let lastCase: PropertyCaseDescriptor | undefined;
   let completed = 0;
+  let completedWorkUnits = 0;
 
   for (let offset = 0; offset < selectedCount; offset += 1) {
     const caseIndex = config.caseIndex ?? offset;
@@ -259,10 +285,12 @@ export function runPropertyCampaign(
     signature = updateSignature(
       signature,
       `${descriptor.index}|${descriptor.id}|${descriptor.property}|${descriptor.boundary}|` +
+        `${descriptor.workUnits}|` +
         `${descriptor.variant.first},${descriptor.variant.second},${descriptor.variant.third}|` +
         `${observation.detail}|${observation.fixtureSummary}`,
     );
     completed += 1;
+    completedWorkUnits += descriptor.workUnits;
     if (
       options.onProgress !== undefined &&
       config.progressEvery > 0 &&
@@ -272,6 +300,7 @@ export function runPropertyCampaign(
         seed: config.seed,
         runs: config.runs,
         completed,
+        completedWorkUnits,
         currentCase: descriptor,
       }));
     }
@@ -284,10 +313,27 @@ export function runPropertyCampaign(
     seed: config.seed,
     runs: config.runs,
     executed: completed,
+    totalWorkUnits: completedWorkUnits,
     signature: signature.toString(16).padStart(8, "0"),
     firstCase,
     lastCase,
   });
+}
+
+export function calculateConfiguredWorkUnits(
+  config: Pick<PropertyCampaignConfig, "seed" | "runs" | "caseIndex">,
+): number {
+  const selectedCount = config.caseIndex === undefined ? config.runs : 1;
+  let total = 0;
+  for (let offset = 0; offset < selectedCount; offset += 1) {
+    const caseIndex = config.caseIndex ?? offset;
+    const descriptor = describePropertyCase(config.seed, caseIndex);
+    total += descriptor.workUnits;
+    if (!Number.isSafeInteger(total)) {
+      throw new PropertyCliArgumentError("Configured property work is not a safe integer.");
+    }
+  }
+  return total;
 }
 
 export function parsePropertyCliArguments(
@@ -370,18 +416,21 @@ export function runPropertyCli(
   }
 
   try {
+    const configuredWorkUnits = calculateConfiguredWorkUnits(config);
     const result = campaignRunner(config, {
       onProgress(progress) {
         io.stdout(
           `property progress seed=${progress.seed} completed=${progress.completed}/` +
             `${config.caseIndex === undefined ? config.runs : 1} ` +
+            `work=${progress.completedWorkUnits}/${configuredWorkUnits} ` +
             `case=${progress.currentCase.index}:${progress.currentCase.id}\n`,
         );
       },
     });
     io.stdout(
       `property campaign passed seed=${result.seed} runs=${result.runs} ` +
-        `executed=${result.executed} signature=${result.signature}\n`,
+        `executed=${result.executed} work=${result.totalWorkUnits} ` +
+        `signature=${result.signature}\n`,
     );
     return 0;
   } catch (error) {
