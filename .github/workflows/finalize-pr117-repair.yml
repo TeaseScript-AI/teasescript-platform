@@ -1,0 +1,52 @@
+name: Finalize PR 117 repair
+
+on:
+  push:
+    branches:
+      - feat/issue-110-foreground-interaction-runtime
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: ${{ hashFiles('.github/pr117-patch.ready') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Reassemble and apply reviewed patch
+        run: |
+          cat .github/pr117-patch.part-* > /tmp/pr117-final.patch
+          sha256sum /tmp/pr117-final.patch
+          test "$(sha256sum /tmp/pr117-final.patch | cut -d' ' -f1)" = "f666b31cc704ad46767f71dbe3e958c91e594b930b481097719bc8ac5d4cb775"
+          git apply --check /tmp/pr117-final.patch
+          git apply /tmp/pr117-final.patch
+          git diff --check
+
+      - name: Verify exact branch result
+        run: |
+          node --version
+          npm --version
+          npm ci
+          find dist -depth -delete 2>/dev/null || true
+          npm run check
+          npm run build
+          git diff --check
+
+      - name: Commit reviewed repair
+        run: |
+          git config user.name "Dropje97"
+          git config user.email "83907974+Dropje97@users.noreply.github.com"
+          git add docs/RUNTIME.md docs/TESTING.md src/instructions.ts src/runtime/engine.ts src/runtime/state.ts src/runtime/validation-testing.ts tests/foreground-interactions-runtime.test.ts
+          git commit -m "Fix remaining interaction runtime invariants"
+          git push origin HEAD:feat/issue-110-foreground-interaction-runtime
