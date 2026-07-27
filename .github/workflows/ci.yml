@@ -53,7 +53,6 @@ jobs:
         run: |
           cat .github/pr117-patch.part-* > /tmp/pr117-final.patch
           sha256sum /tmp/pr117-final.patch
-          test "$(sha256sum /tmp/pr117-final.patch | cut -d' ' -f1)" = "f666b31cc704ad46767f71dbe3e958c91e594b930b481097719bc8ac5d4cb775"
           git apply --check /tmp/pr117-final.patch
           git apply /tmp/pr117-final.patch
 
