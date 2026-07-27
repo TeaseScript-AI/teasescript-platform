@@ -242,3 +242,7 @@ Tests and benchmarks should use:
 - no real-time sleeping;
 - clean deterministic CI behavior;
 - exact commands and failures reported in pull-request descriptions.
+
+## Parser depth boundary
+
+Node 24 regression coverage includes deeply nested parentheses, unary and `not` chains, collection literals, templates, and blocks below the source-size limit. Over-limit input must return one stable `TSP027` diagnostic without a native stack exception.
