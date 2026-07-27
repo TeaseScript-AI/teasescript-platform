@@ -1,0 +1,34 @@
+name: Diagnose issue 99 CI
+on:
+  pull_request:
+    branches:
+      - main
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issue-99-prototype-safe-captured-arrays
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Record check output
+        shell: bash
+        run: |
+          set +e
+          npm ci > .issue-99-ci.txt 2>&1
+          install_status=$?
+          npm run check >> .issue-99-ci.txt 2>&1
+          check_status=$?
+          printf '\ninstall_status=%s\ncheck_status=%s\n' "$install_status" "$check_status" >> .issue-99-ci.txt
+          set -e
+          git config user.name 'Codex for TeaseScript AI'
+          git config user.email '219006439+wqaed401@users.noreply.github.com'
+          git add .issue-99-ci.txt
+          git commit -m 'Record issue 99 CI diagnostics'
+          git push origin HEAD:fix/issue-99-prototype-safe-captured-arrays
