@@ -28,3 +28,14 @@ jobs:
         run: npm ci
       - name: Check source
         run: npm run check
+      - name: Export workspace for final repair
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr117-workspace
+          path: |
+            .
+            !.git
+            !node_modules
+            !dist
+          include-hidden-files: true
+          retention-days: 1
