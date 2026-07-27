@@ -23,16 +23,15 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           state = Path('src/runtime/state.ts')
           text = state.read_text()
-          old = '''    if (bindings.some((binding) => binding.name === name)) {
-              throw new TypeError(`Duplicate global '${name}'.`);
-            }
-          '''
-          if old not in text:
-              raise SystemExit('expected duplicate-global scan not found')
-          state.write_text(text.replace(old, '', 1))
+          pattern = re.compile(r"    if \(bindings\.some\(\(binding\) => binding\.name === name\)\) \{\n      throw new TypeError\(`Duplicate global '\$\{name\}'\.`\);\n    \}\n")
+          text, count = pattern.subn('', text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected one duplicate-global scan, found {count}')
+          state.write_text(text)
 
           security = Path('docs/SECURITY.md')
           text = security.read_text()
