@@ -1,4 +1,5 @@
 import type { Program } from "../ast.js";
+import { EXTERNAL_DATA_WORK_MESSAGE, MAX_EXTERNAL_RUNTIME_DATA_WORK } from "../external-data-limits.js";
 import { findNonFiniteNumericLiteralDiagnostics } from "../ast-validation.js";
 import {
   createDiagnostic,
@@ -21,7 +22,11 @@ import {
   toHostRuntimeValue,
 } from "./serializable-values.js";
 import { createFreshRuntimeSnapshot } from "./state.js";
-import type { RuntimeValue } from "./values.js";
+import {
+  createRuntimeList,
+  createRuntimeObject,
+  type RuntimeValue,
+} from "./values.js";
 import {
   createRuntimeWarning,
   type RuntimeWarningInfo,
@@ -175,13 +180,47 @@ export class Interpreter {
 function captureCompatibilityGlobals(
   globals: Readonly<Record<string, RuntimeValue>>,
 ): Record<string, ReturnType<typeof fromHostRuntimeValue>> {
+  const entries = captureOwnDataEntries(globals, "Interpreter globals");
+  const keyWork = createRuntimeList(entries.map(() => null));
+  const values = createRuntimeObject(
+    new Map<string, RuntimeValue>(
+      entries.map(
+        ([name, value]) => [name, value as RuntimeValue] as const,
+      ),
+    ),
+  );
+  const aggregate = fromHostRuntimeValue(
+    createRuntimeObject(
+      new Map<string, RuntimeValue>([
+        ["keyWork", keyWork],
+        ["values", values],
+      ]),
+    ),
+  );
+  if (
+    aggregate === null ||
+    typeof aggregate !== "object" ||
+    aggregate.kind !== "object"
+  ) {
+    throw new TypeError("Interpreter globals are malformed.");
+  }
+  const valuesProperty = aggregate.properties.find(
+    (property) => property.name === "values",
+  )?.value;
+  if (
+    valuesProperty === null ||
+    typeof valuesProperty !== "object" ||
+    valuesProperty.kind !== "object"
+  ) {
+    throw new TypeError("Interpreter globals are malformed.");
+  }
   const captured: Record<string, ReturnType<typeof fromHostRuntimeValue>> =
     Object.create(null) as Record<
       string,
       ReturnType<typeof fromHostRuntimeValue>
     >;
-  for (const [name, value] of captureOwnDataEntries(globals, "Interpreter globals")) {
-    captured[name] = fromHostRuntimeValue(value as RuntimeValue);
+  for (const property of valuesProperty.properties) {
+    captured[property.name] = property.value;
   }
   return captured;
 }
@@ -216,6 +255,9 @@ function captureOwnDataEntries(
   }
   if (prototype !== Object.prototype && prototype !== null) {
     throw new TypeError(`${label} must be a plain object.`);
+  }
+  if (keys.length > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
+    throw new TypeError(EXTERNAL_DATA_WORK_MESSAGE);
   }
   const entries: Array<readonly [string, unknown]> = [];
   for (const key of keys) {

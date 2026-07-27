@@ -312,7 +312,7 @@ function captureHostRuntimeValue(
     );
   }
 
-  const properties = captureHostDataProperties(value, path);
+  const properties = captureHostDataProperties(value, path, budget);
   const kind = properties.get("kind");
   active.add(value);
   try {
@@ -324,7 +324,7 @@ function captureHostRuntimeValue(
     }
     if (kind === "list") {
       assertOnlyHostProperties(properties, ["kind", "items"]);
-      const items = captureHostArrayItems(properties.get("items"), `${path}.items`);
+      const items = captureHostArrayItems(properties.get("items"), `${path}.items`, budget);
       return {
         kind: "list",
         items: items.map((item, index) =>
@@ -340,7 +340,7 @@ function captureHostRuntimeValue(
     }
     if (kind === "set") {
       assertOnlyHostProperties(properties, ["kind", "items"]);
-      const items = captureHostArrayItems(properties.get("items"), `${path}.items`);
+      const items = captureHostArrayItems(properties.get("items"), `${path}.items`, budget);
       if (budget.visited + items.length > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
         throw new SerializableValueError("invalid", EXTERNAL_DATA_WORK_MESSAGE);
       }
@@ -423,6 +423,7 @@ function captureHostRuntimeValue(
 function captureHostDataProperties(
   value: object,
   path: string,
+  budget: HostCaptureBudget,
 ): Map<string, unknown> {
   let prototype: object | null;
   let keys: readonly (string | symbol)[];
@@ -438,6 +439,7 @@ function captureHostDataProperties(
   if (prototype !== Object.prototype && prototype !== null) {
     throw new SerializableValueError("invalid", "Runtime value is malformed.");
   }
+  chargeHostCaptureWork(budget, keys.length);
 
   const properties = new Map<string, unknown>();
   for (const key of keys) {
@@ -468,7 +470,7 @@ function captureHostDataProperties(
   return properties;
 }
 
-function captureHostArrayItems(value: unknown, path: string): unknown[] {
+function captureHostArrayItems(value: unknown, path: string, budget: HostCaptureBudget): unknown[] {
   let array: boolean;
   let keys: readonly (string | symbol)[];
   try {
@@ -478,6 +480,7 @@ function captureHostArrayItems(value: unknown, path: string): unknown[] {
   } catch {
     throw new SerializableValueError("invalid", `${path} must be an array.`);
   }
+  chargeHostCaptureWork(budget, keys.length);
 
   let length: number | null = null;
   const descriptors = new Map<string, PropertyDescriptor>();
@@ -538,6 +541,20 @@ function captureHostArrayItems(value: unknown, path: string): unknown[] {
     items[index] = descriptor.value;
   }
   return items;
+}
+
+function chargeHostCaptureWork(
+  budget: HostCaptureBudget,
+  units: number,
+): void {
+  if (
+    !Number.isSafeInteger(units) ||
+    units < 0 ||
+    budget.visited > MAX_EXTERNAL_RUNTIME_DATA_WORK - units
+  ) {
+    throw new SerializableValueError("invalid", EXTERNAL_DATA_WORK_MESSAGE);
+  }
+  budget.visited += units;
 }
 
 function assertOnlyHostProperties(
