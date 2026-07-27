@@ -30,22 +30,11 @@ Do not treat planning documents, wishes, research files, historical audits, or s
 - Do not weaken tests to hide failures.
 - Do not implement deferred capabilities merely because they appear in planning or reference material.
 
-## Future property-testing compatibility
+## Property-testable boundaries
 
-For parser, compiler, plan, runtime, state, checkpoint, action, and validated host-boundary changes:
+For parser, compiler, plan, runtime, action, state, checkpoint, and validated host-boundary changes, preserve deterministic public-boundary testing: every accepted plan and successful runtime transition must produce state accepted by the corresponding public validator. Use explicit time/RNG inputs, structured invalid-data handling, and reusable valid-state fixtures where practical. Follow `docs/TESTING.md` and the assigned issue for property or mutation testing; do not add unrelated fuzzing infrastructure, dependencies, or production hooks.
 
-- preserve deterministic behavior and injected or explicit time and RNG state;
-- route untrusted data through the existing capture and public validation boundaries;
-- ensure every accepted plan and every successful runtime operation produces state accepted by the corresponding public validator;
-- use documented diagnostics, outcomes, or structured invalid-data errors for expected invalid input rather than leaking incidental native exceptions;
-- keep checkpoint JSON round trips and deterministic replay stable;
-- avoid hidden process-global mutable state, nondeterministic caches, and direct real-time waits;
-- add reusable test fixtures/builders when they simplify construction of valid plans, snapshots, actions, settlements, or checkpoints;
-- turn every confirmed defect into a focused permanent regression test.
-
-Do not add a fuzzing dependency, production test hook, or unrelated fuzzing infrastructure unless the assigned issue explicitly owns that work and documents the required dependency trade-offs.
-
-When relevant, read `docs/planning/PROPERTY-AND-FUZZ-TESTING-ROADMAP.md` and issues #120 and #121. That roadmap prepares future work but does not expand the current issue's implementation scope.
+TypeScript strictness and the prohibition on `any` remain required compile-time safeguards, but do not replace runtime validation of external JSON, cross-field state invariants, transition closure, checkpoint equivalence, or bounded-work behavior.
 
 ## Before substantive coding
 
