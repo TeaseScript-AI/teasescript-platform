@@ -76,6 +76,37 @@ export interface RuntimeDelayActionSnapshot {
   readonly requestEventSequence: number;
 }
 
+export type RuntimeInteractionKind = "button" | "text" | "number" | "choice";
+
+export interface RuntimeInteractionOptionSnapshot {
+  readonly visibleText: string;
+  readonly label: string | number | null;
+}
+
+/** JSON-safe generic foreground interaction payload; no browser state is retained. */
+export interface RuntimeInteractionActionSnapshot {
+  readonly kind: RuntimeInteractionKind;
+  readonly actionId: number;
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
+  readonly scopeDepth: number;
+  readonly loopDepth: number;
+  readonly requestEventSequence: number;
+  readonly target: "standardChat";
+  readonly requestingSpeakerId: number | null;
+  readonly controlText: string;
+  readonly accessibleNameKey: string;
+  readonly resultTemporary: number | null;
+  readonly expectedResult: "none" | "string" | "number";
+  readonly options: readonly RuntimeInteractionOptionSnapshot[];
+}
+
+/**
+ * The public pending-action union remains delay-only until the schema validator
+ * and completion boundary land together. The generic interaction member is
+ * declared above so that the next change can widen this atomically.
+ */
 export type RuntimePendingActionSnapshot = RuntimeDelayActionSnapshot;
 
 export interface RuntimeActionSettlementSnapshot {
