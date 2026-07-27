@@ -36,6 +36,17 @@ function interactionPlan(interactionKind: InteractionInstruction["interactionKin
   return plan;
 }
 
+function buttonPlanFromSource(source: string): InstructionPlan {
+  const compiled = compileSource(source);
+  assert.deepEqual(compiled.diagnostics, []);
+  const base = compiled.plan!;
+  const waitIndex = base.instructions.findIndex((instruction) => instruction.kind === "wait");
+  const interaction: InteractionInstruction = { kind: "interaction", interactionKind: "button", target: "standardChat", speaker: null, destinationTemporary: null, expectedResult: "none", ui: { kind: "button", buttonLabel: "Continue", accessibleName: defaults.button }, span: base.instructions[waitIndex]!.span };
+  const plan = { ...base, instructions: base.instructions.map((instruction, index) => index === waitIndex ? interaction : instruction) };
+  assert.equal(validateInstructionPlan(plan).valid, true);
+  return plan;
+}
+
 const defaults = {
   button: { kind: "localizedDefault", key: "continue" },
   text: { kind: "localizedDefault", key: "answer" },
@@ -254,4 +265,21 @@ test("interaction plan and checkpoint boundaries reject malformed option domains
   Object.defineProperty(accessor.instructions[0].ui, "options", { enumerable: true, get() { invoked = true; return []; } });
   assert.equal(validateInstructionPlan(accessor).valid, false);
   assert.equal(invoked, false);
+});
+
+test("interaction ownership survives active call, scope, and loop frames", () => {
+  for (const plan of [
+    buttonPlanFromSource("function prompt { wait 1\nreturn }\nprompt()\nexit"),
+    buttonPlanFromSource("repeat 1 { wait 1 }\nexit"),
+  ]) {
+    const pending = waiting(plan);
+    const action = pending.snapshot.foregroundAction!;
+    if (pending.snapshot.callFrames.length > 0) assert.equal(action.ownerCallFrameId, pending.snapshot.callFrames.at(-1)!.id);
+    assert.equal(action.scopeDepth, pending.snapshot.frames.length);
+    assert.equal(action.loopDepth, pending.snapshot.loopFrames.length);
+    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, pending.snapshot)));
+    const completed = completeAction(restored.plan, restored.snapshot, { actionId: action.actionId, actionKind: "interaction", interactionKind: "button", payload: { kind: "activate" } });
+    assert.equal(completed.outcome.kind, "completed");
+    assert.equal(run(restored.plan, completed.snapshot).snapshot.status, "halted");
+  }
 });
