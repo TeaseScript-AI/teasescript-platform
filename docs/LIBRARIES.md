@@ -14,7 +14,7 @@ This catalog/metadata tooling is intentionally not exported from the runtime roo
 
 Public library definitions and metadata are separate from internal privileged platform adapters. Registering a public library accepts inert TypeScript source and metadata only; it does not expose DOM, cookie, network, browser-handle, runtime, or host capabilities.
 
-The exact `.tease` import/linkage syntax, generated metadata format, versioning rules, and complete Standard Library API remain open. Historical examples using the rejected procedure concept, explicit ordinary-function invocation keywords, or procedure-based scheduling are not authoritative.
+The exact `.tease` import/linkage syntax, generated metadata format, versioning rules, and complete Standard Library API beyond the accepted first POC remain open. Historical examples using the rejected procedure concept, explicit ordinary-function invocation keywords, or procedure-based scheduling are not authoritative.
 
 ## Accepted dependency model
 
@@ -65,7 +65,7 @@ Candidate Standard Library behavior includes:
 - retries, validation helpers, formatting, and utility functions;
 - reusable Standard UI workflows built from typed core capabilities.
 
-The exact exports remain separate API decisions. Listing a candidate here does not make it implemented or accepted syntax.
+ADR 0018 accepts the first concrete subset described below. Listing another candidate here does not make it implemented or accepted syntax.
 
 ### Resumability boundary
 
@@ -93,7 +93,143 @@ A conforming implementation must either:
 - fully lower the relevant Standard Library behavior into the versioned instruction plan; or
 - bind the plan/checkpoint to an exact compatible Standard Library identity/version and reject or explicitly migrate an incompatible restore.
 
-The exact identity fields, compatibility ranges, packaging format, and migration schema remain open.
+The exact identity fields, compatibility ranges, packaging format, and migration schema remain open for behavior not covered by ADR 0018's full-lowering decision.
+
+## Accepted first Standard Library POC contract
+
+ADR 0018 selects this ordered author-facing sequence:
+
+1. `showButton`, `askText`, `askNumber`, and `choose` on one generic typed foreground-interaction primitive;
+2. `say` with deterministic smart autoplay and player-controlled gate completion.
+
+`wait` remains compiler/core-owned. Camera, files, media, background timers, persistence, custom UI, and LLM interpretation are excluded.
+
+### Default prelude
+
+The first POC Platform Standard Library is automatically available without an import. Its selected direct names are protected:
+
+```text
+showButton
+askText
+askNumber
+choose
+say
+```
+
+Ordinary scripts may not shadow these names. The first POC has no default-prelude opt-out, replacement mapping, alternative Standard Library, or namespace requirement.
+
+Published community libraries and package-local libraries still require a later explicit import and manifest decision. Importing another library must never silently change which Standard Library implementation a direct name resolves to.
+
+### First-POC lowering choice
+
+The selected resumable helpers are fully lowered into explicit versioned plan instructions and JSON-safe state. A checkpoint contains the original plan and does not perform runtime lookup against a current or `latest` Standard Library implementation.
+
+A new session may be compiled with a newer compatible Standard Library/compiler, but an active or restored session remains bound to its original plan and captured pacing configuration. No checkpoint migration is included.
+
+The current issue #74 exact token and metadata format remain tooling-only POC infrastructure. ADR 0018 does not add those values to plans/checkpoints and does not treat them as a final package or semver identity.
+
+### Generic interaction wrapper family
+
+The four blocking helpers share one engine action family with typed kinds equivalent to:
+
+```text
+button
+text
+number
+choice
+```
+
+`choose` is the source construct; `choice` is the internal interaction noun.
+
+The engine owns action identity, continuation, result destination, expected type, allowed values, completion validation, canonical transcript-result derivation, events, checkpoint/restore, and bounded duplicate settlement behavior. The Standard Library/compiler own author-facing defaults, compact syntax, Standard UI payload, localized feedback, and accessibility defaults.
+
+The interactions are mandatory and permanently non-cancellable. `askText`, `askNumber`, and `choose` never return `null`; `showButton` has no useful first-slice return value. Invalid input keeps the same action active.
+
+Interaction definitions and completions are subject to shared versioned platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits. ADR 0018 does not impose separate product-facing character counts on answers, hints, buttons, or choices. Concrete implementation constants must be selected and tested before implementation merge. Over-limit data is rejected without truncation or partial state mutation.
+
+### Author-facing interaction semantics
+
+`askText` normalizes line endings to `LF`, otherwise preserves submitted text exactly, rejects whitespace-only input, returns `string`, and uses that same normalized text in the player transcript.
+
+`askNumber` trims surrounding whitespace, parses the accepted TeaseScript decimal/scientific forms on one line, returns a finite `number`, canonicalizes negative zero to `0`, and preserves the trimmed submitted number text in the transcript. It adds no first-POC range parameters.
+
+`choose` returns visible text for unlabelled options. Labelled choices retain identifier and numeric labels from V30 capability. Identifier labels return `string`; numeric labels return `number`; one choice may not mix label types. Duplicate unlabelled visible text is invalid; labelled options may repeat visible text when their labels are unique.
+
+A labelled button or dropdown control supplies its label to the engine; an unlabelled control supplies its visible text. The engine validates the selection and derives the canonical visible player-transcript text from the stored action. Manually typed choice input uses exact unambiguous visible-text matching.
+
+`showButton` presents one button, blocks until activation, derives the player transcript from its stored visible label, and then completes. V30 timeout and elapsed-time behavior remains later work.
+
+All four helpers support `as speaker` provenance. The speaker identifies who requested the answer. It does not automatically emit the control text as a speaker message.
+
+### `say` composition
+
+`Say` remains compact official syntax, but ADR 0018 moves pacing policy into a fully lowered Standard Library/compiler composition above typed text output.
+
+Supported pacing is:
+
+```text
+omitted -> smart autoplay
+positive number -> exact seconds
+0 -> immediate
+instant -> alias for 0
+```
+
+Positive explicit durations may be fractional. Invalid, non-finite, unsupported-magnitude, or overflowing values fail before partial gate creation.
+
+Supported per-message skip modifiers are:
+
+```text
+skippable
+unskippable
+```
+
+Without a modifier, `say` uses the effective speaker's `defaultSaySkippable` presentation setting and otherwise platform default `true`.
+
+Smart autoplay captures non-negative safe-integer millisecond account values `baseDelayMs`, `delayPerWordMs`, and `delayPerCharacterMs` when the session starts. Defaults are `1500`, `300`, and `30`. Duration is:
+
+```text
+baseDelayMs + max(
+    wordCount * delayPerWordMs,
+    visibleCharacterCount * delayPerCharacterMs
+)
+```
+
+All arithmetic and deadline construction is checked. There is no extra product reading-time cap, but ADR 0016 numeric and deadline limits still apply. Account changes do not modify an active or restored session.
+
+A positive gate is an ADR 0016 `chatPacingGate` action. It begins in `backgroundActions`, may move with the same identity into `foregroundAction` when a later prepared `say` must wait, and uses ordinary action events, settlement replay, checkpointing, and time observation. It is not hidden library state.
+
+`showButton`, `askText`, `askNumber`, and `choose` settle and consume a background gate before creating their foreground interaction. `wait` does not consume it; both may coexist and use the persisted session-time coordinate.
+
+A skippable gate may be completed by a primary click/tap within the player iframe viewport or by Space while the focused empty composer is active. This completes only the gate. Interactive controls have event priority, and unskippable gates reject those completion attempts.
+
+### Standard UI and transcript conventions
+
+The Standard UI uses one fixed chat composer. Foreground interaction controls appear directly above it, and the composer is focused automatically.
+
+Choice buttons may occupy one or two rows. The Player application may instead render a dropdown when viewport, font, zoom, accessibility, or text constraints make buttons impractical. The presentation is not canonical runtime/checkpoint state and does not change completion or transcript semantics.
+
+Valid input and choice/button activations become player-authored transcript messages according to the accepted normalization and derivation rules. Control labels, field hints, localized validation feedback, and accessibility names do not automatically create duplicate speaker transcript output.
+
+### Player and developer controls
+
+The normal Player application has no player-facing pause control, and this POC introduces no author-facing pause command. Developer mode may provide Run, Step, Pause, checkpoint, restore, and debugger controls. Browser-unavailability and reconnect time policy remains separate.
+
+### Deferred Standard Library details
+
+The first POC does not settle:
+
+- advanced parenthesized call forms;
+- detailed result objects with elapsed time or metadata;
+- the option name that selects a detailed return type;
+- `showButton` timeout and elapsed return;
+- custom compact `choose` field hints;
+- exact concrete platform limit values;
+- exact dynamic choice-layout breakpoints;
+- the advanced accessibility override field;
+- a deterministic speaker-aware typing indicator;
+- LLM implementation and author-facing interpretation options;
+- multiple text targets or conversation partitioning;
+- final imports, manifests, lockfiles, semver, replacement, or migration.
 
 ## Future library scopes and default availability
 
@@ -166,8 +302,10 @@ The editor and compiler may use that information for:
 
 A library export does not automatically create new command or block syntax. Special syntax remains defined by the official TeaseScript grammar and compiler, although that syntax may lower to a public Standard Library export.
 
+ADR 0018 compact forms therefore require parser-owned syntax support in addition to generated metadata. Their lowering must preserve source spans and useful diagnostics.
+
 ## POC boundary
 
-The first Standard Library POC slice may intentionally expose only a small selected API. Current engine behavior such as implemented `say` output remains in place until library linkage, generated metadata, deterministic version binding, compatibility behavior, and tests are available.
+The accepted first Standard Library contract is not implemented by this documentation decision. Current engine behavior such as implemented `say` output remains in place until the relevant lowering, typed interactions, populated background actions, pacing state, editor support, security boundaries, and checkpoint/resume tests are available.
 
-Standard Library implementation and tests may be scheduled after the current engine-focused slice, but implemented Standard Library behavior ultimately requires unit, integration, editor-metadata, security-boundary, and checkpoint/resume coverage appropriate to the capabilities it composes.
+Implemented Standard Library behavior ultimately requires unit, integration, editor-metadata, security-boundary, bounded-data, event-ordering, and checkpoint/resume coverage appropriate to the capabilities it composes.
