@@ -242,9 +242,6 @@ export function createFreshRuntimeSnapshot(
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
     const failure = validateSerializableValue(value, `globals.${name}`);
     if (failure !== null) throw new TypeError(failure);
-    if (bindings.some((binding) => binding.name === name)) {
-      throw new TypeError(`Duplicate global '${name}'.`);
-    }
     bindings.push({
       name,
       value: cloneSerializableValue(value as SerializableRuntimeValue),
