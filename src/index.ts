@@ -9,6 +9,14 @@ export {
   MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
   MAX_EXTERNAL_RUNTIME_DATA_WORK,
 } from "./external-data-limits.js";
+export {
+  INTERACTION_LIMITS_VERSION,
+  INTERACTION_WHITESPACE_CLASSIFICATION,
+  MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
+  MAX_INTERACTION_OPTION_ENTRIES,
+  MAX_INTERACTION_STRING_UTF8_BYTES,
+  interactionUtf8ByteLength,
+} from "./interaction-limits.js";
 export { lex, type LexResult } from "./lexer.js";
 export { parse, type ParseResult } from "./parser.js";
 export {
@@ -28,6 +36,12 @@ export {
   type ExpressionPlan,
   type Instruction,
   type WaitInstruction,
+  type InteractionInstruction,
+  type InteractionKind,
+  type InteractionResultDomain,
+  type InteractionUiPayload,
+  type InteractionChoiceOption,
+  type InteractionAccessibleName,
   type InstructionPlan,
   type LoopControlInstruction,
   type LoopStartInstruction,
@@ -60,6 +74,7 @@ export type { RuntimeWarningInfo } from "./runtime/warnings.js";
 export type {
   ActionCompletedEvent,
   ActionRequestedEvent,
+  PlayerTranscriptEvent,
   ExitEvent,
   CompleteEvent,
   DeveloperWarningEvent,
@@ -118,6 +133,9 @@ export {
   type RuntimeSnapshot,
   type RuntimeActionSettlementSnapshot,
   type RuntimeDelayActionSnapshot,
+  type RuntimeInteractionActionSnapshot,
+  type RuntimeDelayActionSettlementSnapshot,
+  type RuntimeInteractionActionSettlementSnapshot,
   type RuntimePendingActionSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeStatus,

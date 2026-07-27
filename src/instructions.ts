@@ -14,14 +14,25 @@ import {
 import {
   EXTERNAL_DATA_DEPTH_MESSAGE,
   EXTERNAL_DATA_WORK_MESSAGE,
+  MAX_EXTERNAL_RUNTIME_DATA_WORK,
   captureExternalData,
   type ExternalDataFailureKind,
 } from "./external-data-limits.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
-import { recordValidationTestWork } from "./runtime/validation-testing.js";
+import {
+  interactionControlFlowWorkLimitForTesting,
+  recordValidationTestWork,
+} from "./runtime/validation-testing.js";
+import {
+  boundedInteractionUtf8ByteLength,
+  interactionStringHasNonWhitespace,
+  MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
+  MAX_INTERACTION_OPTION_ENTRIES,
+  MAX_INTERACTION_STRING_UTF8_BYTES,
+} from "./interaction-limits.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 4;
+export const INSTRUCTION_PLAN_VERSION = 5;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
@@ -81,6 +92,7 @@ export type Instruction =
   | ReturnVoidInstruction
   | SayInstruction
   | WaitInstruction
+  | InteractionInstruction
   | ExitInstruction;
 
 interface InstructionBase {
@@ -266,6 +278,31 @@ export interface WaitInstruction extends InstructionBase {
   readonly kind: "wait";
   readonly duration: ExpressionPlan;
   readonly unit: "ms" | "s" | "min" | "h" | null;
+}
+
+export type InteractionKind = "button" | "text" | "number" | "choice";
+export type InteractionResultDomain = "none" | "string" | "number";
+export type InteractionAccessibleName =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "localizedDefault"; readonly key: "answer" | "number" | "chooseOption" | "continue" };
+export type InteractionChoiceOption =
+  | { readonly text: string; readonly label: null }
+  | { readonly text: string; readonly label: string }
+  | { readonly text: string; readonly label: number };
+export type InteractionUiPayload =
+  | { readonly kind: "button"; readonly buttonLabel: string; readonly accessibleName: InteractionAccessibleName }
+  | { readonly kind: "text" | "number"; readonly hint: string | null; readonly accessibleName: InteractionAccessibleName }
+  | { readonly kind: "choice"; readonly labelType: "none" | "identifier" | "number"; readonly options: readonly InteractionChoiceOption[]; readonly accessibleName: InteractionAccessibleName };
+
+/** Compiler/Standard-Library prepared foreground interaction. No source syntax is added by this slice. */
+export interface InteractionInstruction extends InstructionBase {
+  readonly kind: "interaction";
+  readonly interactionKind: InteractionKind;
+  readonly target: "standardChat";
+  readonly speaker: string | null;
+  readonly destinationTemporary: number | null;
+  readonly expectedResult: InteractionResultDomain;
+  readonly ui: InteractionUiPayload;
 }
 
 export interface ExitInstruction extends InstructionBase {
@@ -1855,9 +1892,141 @@ function validateInstruction(
       }
       validateExpression(value.duration, `${path}.duration`, errors, false, temporaryCount);
       return;
+    case "interaction":
+      validateInteractionInstruction(value, path, temporaryCount, errors);
+      return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));
   }
+}
+
+function validateInteractionInstruction(
+  value: Record<string, unknown>,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  if (!hasExactKeys(value, [
+    "kind", "interactionKind", "target", "speaker", "destinationTemporary",
+    "expectedResult", "ui", "span",
+  ])) {
+    errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
+  }
+  const kind = value.interactionKind;
+  if (!["button", "text", "number", "choice"].includes(String(kind))) {
+    errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
+  }
+  if (value.target !== "standardChat") errors.push(planError("TSC002", "Interaction target is invalid.", `${path}.target`));
+  if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
+  const expected = kind === "button"
+    ? "none"
+    : kind === "number" || (kind === "choice" && isRecord(value.ui) && value.ui.labelType === "number")
+      ? "number"
+      : "string";
+  if (value.expectedResult !== expected) errors.push(planError("TSC002", "Interaction result domain does not match its kind.", `${path}.expectedResult`));
+  if (kind === "button") {
+    if (value.destinationTemporary !== null) errors.push(planError("TSC002", "Button interaction must not have a result destination.", `${path}.destinationTemporary`));
+  } else {
+    validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+  }
+  if (!isRecord(value.ui) || value.ui.kind !== kind) {
+    errors.push(planError("TSC002", "Interaction UI payload does not match its kind.", `${path}.ui`));
+    return;
+  }
+  const uiKeys = kind === "button"
+    ? ["kind", "buttonLabel", "accessibleName"]
+    : kind === "text" || kind === "number"
+      ? ["kind", "hint", "accessibleName"]
+      : ["kind", "labelType", "options", "accessibleName"];
+  if (!hasExactKeys(value.ui, uiKeys)) {
+    errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", `${path}.ui`));
+  }
+  let aggregate = 0;
+  let aggregateExceeded = false;
+  let measurementExhausted = false;
+  const countString = (candidate: unknown, fieldPath: string): candidate is string => {
+    if (typeof candidate !== "string") {
+      errors.push(planError("TSC002", "Interaction text must be a string.", fieldPath));
+      return false;
+    }
+    if (measurementExhausted) {
+      if (candidate.length > MAX_INTERACTION_STRING_UTF8_BYTES) {
+        errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+        return false;
+      }
+      return true;
+    }
+    recordValidationTestWork("interactionUtf8Measurements");
+    const bytes = boundedInteractionUtf8ByteLength(candidate);
+    if (bytes === null) {
+      measurementExhausted = true;
+      errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+      return false;
+    }
+    aggregate += bytes;
+    aggregateExceeded = aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES;
+    measurementExhausted = aggregateExceeded;
+    return true;
+  };
+  const accessible = value.ui.accessibleName;
+  if (!isRecord(accessible) || (accessible.kind !== "text" && accessible.kind !== "localizedDefault")) {
+    errors.push(planError("TSC002", "Interaction accessible name is invalid.", `${path}.ui.accessibleName`));
+  } else if (accessible.kind === "text") {
+    if (!hasExactKeys(accessible, ["kind", "text"])) {
+      errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", `${path}.ui.accessibleName`));
+    }
+    if (countString(accessible.text, `${path}.ui.accessibleName.text`) && !measurementExhausted && !interactionStringHasNonWhitespace(accessible.text)) {
+      errors.push(planError("TSC002", "Explicit interaction accessible name must contain a non-whitespace character.", `${path}.ui.accessibleName.text`));
+    }
+  } else {
+    if (!hasExactKeys(accessible, ["kind", "key"])) {
+      errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", `${path}.ui.accessibleName`));
+    }
+    const expectedKey = kind === "button" ? "continue" : kind === "number" ? "number" : kind === "choice" ? "chooseOption" : "answer";
+    if (accessible.key !== expectedKey) errors.push(planError("TSC002", "Interaction localized accessible-name key does not match its kind.", `${path}.ui.accessibleName.key`));
+  }
+  if (kind === "button") countString(value.ui.buttonLabel, `${path}.ui.buttonLabel`);
+  if (kind === "text" || kind === "number") {
+    if (value.ui.hint !== null) countString(value.ui.hint, `${path}.ui.hint`);
+  }
+  if (kind === "choice") {
+    const labelType = value.ui.labelType;
+    if (!["none", "identifier", "number"].includes(String(labelType))) errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.ui.labelType`));
+    if (!Array.isArray(value.ui.options) || value.ui.options.length === 0 || value.ui.options.length > MAX_INTERACTION_OPTION_ENTRIES) {
+      errors.push(planError("TSC002", "Choice options exceed the shared collection boundary or are empty.", `${path}.ui.options`));
+    } else {
+      const labels = new Set<string | number>();
+      const visible = new Set<string>();
+      for (let index = 0; index < value.ui.options.length; index += 1) {
+        const option = value.ui.options[index];
+        const optionPath = `${path}.ui.options[${index}]`;
+        if (!isRecord(option)) {
+          errors.push(planError("TSC002", "Choice option must be an object.", optionPath));
+          continue;
+        }
+        if (!hasExactKeys(option, ["text", "label"])) {
+          errors.push(planError("TSC002", "Choice option contains unsupported fields.", optionPath));
+        }
+        const textValid = countString(option.text, `${optionPath}.text`);
+        const label = option.label;
+        const validLabel = labelType === "none"
+          ? label === null
+          : labelType === "identifier"
+            ? typeof label === "string" && countString(label, `${optionPath}.label`) && (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
+            : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
+        if (!validLabel) errors.push(planError("TSC002", "Choice option label does not match the choice label type.", `${optionPath}.label`));
+        if (!measurementExhausted && validLabel && (typeof label === "string" || typeof label === "number")) {
+          if (labels.has(label)) errors.push(planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`));
+          labels.add(label);
+        }
+        if (!measurementExhausted && textValid && labelType === "none") {
+          if (visible.has(option.text as string)) errors.push(planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`));
+          visible.add(option.text as string);
+        }
+      }
+    }
+  }
+  if (aggregateExceeded) errors.push(planError("TSC002", "Interaction data exceeds the shared aggregate UTF-8 byte limit.", `${path}.ui`));
 }
 
 function validateExpression(
@@ -2134,6 +2303,118 @@ function createPlanValidationIndex(
   return { owners, functionsById };
 }
 
+function instructionMayRequestForeground(
+  instruction: Record<string, unknown>,
+): boolean {
+  if (instruction.kind === "interaction") return true;
+  if (instruction.kind !== "wait") return false;
+  return !(
+    isRecord(instruction.duration) &&
+    instruction.duration.kind === "literal" &&
+    instruction.duration.value === 0
+  );
+}
+
+function collectReturningFunctions(
+  instructions: readonly unknown[],
+  functions: readonly ValidatedFunctionRange[],
+  budget: InteractionControlFlowBudget,
+): ReadonlySet<number> {
+  const returning = new Set<number>();
+  let changed = true;
+  while (changed && !budget.exceeded) {
+    changed = false;
+    for (const definition of functions) {
+      if (returning.has(definition.id)) continue;
+      const region: InstructionExecutionRegion = {
+        kind: "function",
+        functionId: definition.id,
+        startInstruction: definition.entryInstruction,
+        endInstruction: definition.endInstruction,
+      };
+      const pending = [definition.entryInstruction];
+      const visited = new Set<number>();
+      while (pending.length > 0) {
+        if (!consumeInteractionControlFlowWork(budget)) break;
+        const instructionIndex = pending.pop()!;
+        if (visited.has(instructionIndex)) continue;
+        visited.add(instructionIndex);
+        const instruction = instructions[instructionIndex];
+        if (!isRecord(instruction)) continue;
+        if (instruction.kind === "returnValue" || instruction.kind === "returnVoid") {
+          returning.add(definition.id);
+          changed = true;
+          break;
+        }
+        for (const successor of instructionRegionSuccessors(
+          instructions,
+          instructionIndex,
+          region,
+          returning,
+        )) {
+          if (!consumeInteractionControlFlowWork(budget)) break;
+          if (!visited.has(successor)) pending.push(successor);
+        }
+      }
+      if (budget.exceeded) break;
+    }
+  }
+  return returning;
+}
+
+function collectForegroundFunctions(
+  instructions: readonly unknown[],
+  functions: readonly ValidatedFunctionRange[],
+  returningFunctions: ReadonlySet<number>,
+  budget: InteractionControlFlowBudget,
+): ReadonlySet<number> {
+  const foreground = new Set<number>();
+  let changed = true;
+  while (changed && !budget.exceeded) {
+    changed = false;
+    for (const definition of functions) {
+      if (foreground.has(definition.id)) continue;
+      const region: InstructionExecutionRegion = {
+        kind: "function",
+        functionId: definition.id,
+        startInstruction: definition.entryInstruction,
+        endInstruction: definition.endInstruction,
+      };
+      const pending = [definition.entryInstruction];
+      const visited = new Set<number>();
+      while (pending.length > 0) {
+        if (!consumeInteractionControlFlowWork(budget)) break;
+        const instructionIndex = pending.pop()!;
+        if (visited.has(instructionIndex)) continue;
+        visited.add(instructionIndex);
+        const instruction = instructions[instructionIndex];
+        if (!isRecord(instruction)) continue;
+        if (
+          instructionMayRequestForeground(instruction) ||
+          (instruction.kind === "callFunction" &&
+            Number.isSafeInteger(instruction.functionId) &&
+            foreground.has(instruction.functionId as number))
+        ) {
+          foreground.add(definition.id);
+          changed = true;
+          break;
+        }
+        for (const successor of instructionRegionSuccessors(
+          instructions,
+          instructionIndex,
+          region,
+          returningFunctions,
+        )) {
+          if (!consumeInteractionControlFlowWork(budget)) break;
+          if (!visited.has(successor)) pending.push(successor);
+        }
+      }
+      if (budget.exceeded) break;
+    }
+  }
+  return foreground;
+}
+
 function validateInstructionControlFlowRegions(
   instructions: readonly unknown[],
   index: PlanValidationIndex | null,
@@ -2141,11 +2422,89 @@ function validateInstructionControlFlowRegions(
 ): void {
   if (index === null) return;
 
+  const budget: InteractionControlFlowBudget = {
+    remaining:
+      interactionControlFlowWorkLimitForTesting() ??
+      MAX_EXTERNAL_RUNTIME_DATA_WORK * 10,
+    exceeded: false,
+  };
+  const functions = [...index.functionsById.values()];
+  const returningFunctions = collectReturningFunctions(
+    instructions,
+    functions,
+    budget,
+  );
+  const foregroundFunctions = collectForegroundFunctions(
+    instructions,
+    functions,
+    returningFunctions,
+    budget,
+  );
+  const predecessors = buildInstructionPredecessors(
+    instructions,
+    index,
+    returningFunctions,
+    budget,
+  );
+  const reachable = buildReachableInstructions(
+    instructions,
+    index,
+    returningFunctions,
+    budget,
+  );
+
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
     const region = index.owners[instructionIndex];
     if (region === undefined) return;
     const instructionPath = `$.instructions[${instructionIndex}]`;
+    if (
+      !budget.exceeded &&
+      reachable[instructionIndex] === true &&
+      instruction.kind === "interaction" &&
+      instruction.interactionKind !== "button"
+    ) {
+      const destinationTemporary = instruction.destinationTemporary;
+      const occupied = Number.isSafeInteger(destinationTemporary)
+        ? interactionDestinationMayBeLiveBefore(
+            instructions,
+            instructionIndex,
+            destinationTemporary as number,
+            region,
+            predecessors,
+            reachable,
+            budget,
+          )
+        : null;
+      if (occupied === true) {
+        errors.push(planError(
+          "TSC002",
+          "Result-bearing interaction destination may already be live when the interaction is reached.",
+          `${instructionPath}.destinationTemporary`,
+        ));
+      }
+
+      const discarded =
+        instructionIndex + 1 < region.endInstruction &&
+        Number.isSafeInteger(destinationTemporary)
+          ? interactionDestinationIsDiscarded(
+              instructions,
+              instructionIndex + 1,
+              destinationTemporary as number,
+              region,
+              foregroundFunctions,
+              returningFunctions,
+              budget,
+            )
+          : false;
+      if (discarded === false) {
+        errors.push(planError(
+          "TSC002",
+          "Result-bearing interaction requires every completion path to clear its destination or discard it through return or exit.",
+          instructionPath,
+        ));
+      }
+    }
     switch (instruction.kind) {
       case "jump":
       case "jumpIfFalse":
@@ -2186,6 +2545,255 @@ function validateInstructionControlFlowRegions(
         return;
     }
   });
+
+  if (budget.exceeded) {
+    errors.push(planError(
+      "TSC002",
+      "Interaction control-flow validation exceeds the supported work limit.",
+      "$.instructions",
+    ));
+  }
+}
+
+interface InteractionControlFlowBudget {
+  remaining: number;
+  exceeded: boolean;
+}
+
+function consumeInteractionControlFlowWork(
+  budget: InteractionControlFlowBudget,
+  amount = 1,
+): boolean {
+  recordValidationTestWork("interactionControlFlowSteps", amount);
+  if (budget.remaining < amount) {
+    budget.exceeded = true;
+    return false;
+  }
+  budget.remaining -= amount;
+  return true;
+}
+
+function buildInstructionPredecessors(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  returningFunctions: ReadonlySet<number>,
+  budget: InteractionControlFlowBudget,
+): readonly (readonly number[])[] {
+  const predecessors: number[][] = Array.from(
+    { length: instructions.length },
+    () => [],
+  );
+  for (let instructionIndex = 0; instructionIndex < instructions.length; instructionIndex += 1) {
+    if (!consumeInteractionControlFlowWork(budget)) break;
+    const region = index.owners[instructionIndex];
+    if (region === undefined) continue;
+    for (const successor of instructionRegionSuccessors(
+      instructions,
+      instructionIndex,
+      region,
+      returningFunctions,
+    )) {
+      if (!consumeInteractionControlFlowWork(budget)) break;
+      predecessors[successor]?.push(instructionIndex);
+    }
+  }
+  return predecessors;
+}
+
+function buildReachableInstructions(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  returningFunctions: ReadonlySet<number>,
+  budget: InteractionControlFlowBudget,
+): readonly boolean[] {
+  const reachable = new Array<boolean>(instructions.length).fill(false);
+  const pending: number[] = [];
+  if (index.owners[0]?.kind === "root") pending.push(0);
+  for (const definition of index.functionsById.values()) {
+    pending.push(definition.entryInstruction);
+  }
+  while (pending.length > 0) {
+    if (!consumeInteractionControlFlowWork(budget)) break;
+    const instructionIndex = pending.pop()!;
+    if (reachable[instructionIndex] === true) continue;
+    const region = index.owners[instructionIndex];
+    if (region === undefined) continue;
+    reachable[instructionIndex] = true;
+    for (const successor of instructionRegionSuccessors(
+      instructions,
+      instructionIndex,
+      region,
+      returningFunctions,
+    )) {
+      if (!consumeInteractionControlFlowWork(budget)) break;
+      if (reachable[successor] !== true) pending.push(successor);
+    }
+  }
+  return reachable;
+}
+
+function instructionRegionSuccessors(
+  instructions: readonly unknown[],
+  instructionIndex: number,
+  region: InstructionExecutionRegion,
+  returningFunctions?: ReadonlySet<number>,
+): readonly number[] {
+  const instruction = instructions[instructionIndex];
+  if (!isRecord(instruction)) return [];
+  const next = instructionIndex + 1 < region.endInstruction
+    ? instructionIndex + 1
+    : null;
+  const candidates: unknown[] = [];
+  switch (instruction.kind) {
+    case "jump":
+    case "loopControl":
+      candidates.push(instruction.target);
+      break;
+    case "jumpIfFalse":
+    case "loopStart":
+    case "prepareParameterDefault":
+      candidates.push(instruction.target);
+      if (next !== null) candidates.push(next);
+      break;
+    case "callFunction":
+      if (
+        returningFunctions === undefined ||
+        (Number.isSafeInteger(instruction.functionId) &&
+          returningFunctions.has(instruction.functionId as number))
+      ) {
+        candidates.push(instruction.returnInstruction);
+      }
+      break;
+    case "returnValue":
+    case "returnVoid":
+    case "exit":
+      break;
+    default:
+      if (next !== null) candidates.push(next);
+      break;
+  }
+  return candidates.filter(
+    (candidate): candidate is number =>
+      Number.isSafeInteger(candidate) &&
+      (candidate as number) >= region.startInstruction &&
+      (candidate as number) < region.endInstruction,
+  );
+}
+
+function interactionDestinationMayBeLiveBefore(
+  instructions: readonly unknown[],
+  interactionIndex: number,
+  destinationTemporary: number,
+  region: InstructionExecutionRegion,
+  predecessors: readonly (readonly number[])[],
+  reachable: readonly boolean[],
+  budget: InteractionControlFlowBudget,
+): boolean | null {
+  const pending = [...(predecessors[interactionIndex] ?? [])];
+  const visited = new Set<number>();
+  while (pending.length > 0) {
+    if (!consumeInteractionControlFlowWork(budget)) return null;
+    const index = pending.pop()!;
+    if (index < region.startInstruction || index >= region.endInstruction) continue;
+    if (reachable[index] !== true) continue;
+    if (visited.has(index)) continue;
+    visited.add(index);
+    const instruction = instructions[index];
+    if (!isRecord(instruction)) continue;
+    if (instruction.kind === "clearTemporary" && instruction.temporaryId === destinationTemporary) {
+      continue;
+    }
+    if (instructionProducesTemporary(instruction, destinationTemporary)) {
+      return true;
+    }
+    for (const predecessor of predecessors[index] ?? []) pending.push(predecessor);
+  }
+  return false;
+}
+
+function instructionProducesTemporary(
+  instruction: Record<string, unknown>,
+  temporaryId: number,
+): boolean {
+  return (
+    (instruction.kind === "storeTemporary" && instruction.temporaryId === temporaryId) ||
+    (instruction.kind === "prepareReference" && instruction.destinationTemporary === temporaryId) ||
+    (instruction.kind === "callFunction" && instruction.destinationTemporary === temporaryId) ||
+    (instruction.kind === "interaction" && instruction.destinationTemporary === temporaryId)
+  );
+}
+
+function interactionDestinationIsDiscarded(
+  instructions: readonly unknown[],
+  startInstruction: number,
+  destinationTemporary: number,
+  region: InstructionExecutionRegion,
+  foregroundFunctions: ReadonlySet<number>,
+  returningFunctions: ReadonlySet<number>,
+  budget: InteractionControlFlowBudget,
+): boolean | null {
+  const pending: Array<{ readonly index: number; readonly live: boolean }> = [
+    { index: startInstruction, live: true },
+  ];
+  const entryState = new Map<number, boolean>();
+  while (pending.length > 0) {
+    if (!consumeInteractionControlFlowWork(budget)) return null;
+    const current = pending.pop()!;
+    if (current.index < region.startInstruction || current.index >= region.endInstruction) {
+      return current.live ? false : true;
+    }
+    const existing = entryState.get(current.index);
+    if (existing !== undefined) {
+      if (existing !== current.live) return false;
+      continue;
+    }
+    entryState.set(current.index, current.live);
+    const instruction = instructions[current.index];
+    if (!isRecord(instruction)) return false;
+
+    if (
+      current.live &&
+      (instructionMayRequestForeground(instruction) ||
+        (instruction.kind === "callFunction" &&
+          Number.isSafeInteger(instruction.functionId) &&
+          foregroundFunctions.has(instruction.functionId as number)))
+    ) return false;
+
+    let live = current.live;
+    if (
+      instruction.kind === "clearTemporary" &&
+      instruction.temporaryId === destinationTemporary
+    ) {
+      live = false;
+    } else if (instructionProducesTemporary(instruction, destinationTemporary)) {
+      if (live) return false;
+      if (instruction.kind === "interaction") continue;
+      live = false;
+    }
+
+    if (
+      instruction.kind === "returnValue" ||
+      instruction.kind === "returnVoid" ||
+      instruction.kind === "exit"
+    ) continue;
+    if (
+      instruction.kind === "callFunction" &&
+      Number.isSafeInteger(instruction.functionId) &&
+      !returningFunctions.has(instruction.functionId as number)
+    ) continue;
+    const successors = instructionRegionSuccessors(
+      instructions,
+      current.index,
+      region,
+      returningFunctions,
+    );
+    if (successors.length === 0) {
+      if (live) return false;
+      continue;
+    }
+    for (const successor of successors) pending.push({ index: successor, live });
+  }
+  return true;
 }
 
 function validateInstructionRegionTarget(
@@ -2794,6 +3402,11 @@ function nonNegativeInteger(value: unknown): value is number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
 function planExternalDataFailureMessage(

@@ -43,6 +43,16 @@ export interface ActionCompletedEvent {
   readonly span: SourceSpan;
 }
 
+/** Canonical player-authored Standard-chat transcript output. */
+export interface PlayerTranscriptEvent {
+  readonly kind: "playerTranscript";
+  readonly sequence: number;
+  readonly target: "standardChat";
+  readonly requestingSpeakerId: number | null;
+  readonly text: string;
+  readonly span: SourceSpan;
+}
+
 export interface DeveloperWarningEvent {
   readonly kind: "developerWarning";
   readonly sequence: number;
@@ -66,5 +76,6 @@ export type InterpreterEvent =
   | CompleteEvent
   | ActionRequestedEvent
   | ActionCompletedEvent
+  | PlayerTranscriptEvent
   | DeveloperWarningEvent
   | RuntimeFailureEvent;

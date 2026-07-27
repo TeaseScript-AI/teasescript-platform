@@ -31,7 +31,7 @@ Candidate Standard Library responsibilities include `say` policy, standard outpu
 
 ## Accepted first Standard Library runtime contract
 
-ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`, followed by a separate `say` smart-autoplay slice. The contract is accepted but not implemented by the current runtime.
+ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`, followed by a separate `say` smart-autoplay slice. The generic runtime family is implemented for manually constructed validated plans; author-facing syntax, Standard Library lowering, Player UI, and smart autoplay remain separate work.
 
 ### Generic foreground interactions
 
@@ -54,6 +54,8 @@ The engine owns action identity, active state, completion validation, transcript
 
 The selected interactions are mandatory and non-cancellable. Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice, and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or continuation.
 
+Result-bearing text, number, and choice instructions require the destination temporary to be absent on every path that reaches the interaction. Every reachable continuation path must then clear that temporary before natural root completion or discard the active temporary set through `return` or `exit`. While the result remains live, the plan may execute ordinary deterministic instructions and pure function calls, but it may not request another foreground action or overwrite the destination. A literal `wait 0` remains immediate and does not create that conflict. Branches may not merge incompatible live/released states. The plan validator charges this interaction control-flow analysis against a fixed work budget. A result-free button may be the terminal root instruction and uses the existing canonical settled root-end transition.
+
 Completion semantics are:
 
 - `askText` normalizes `CRLF` and standalone `CR` to `LF`, otherwise preserves submitted text, rejects whitespace-only input, returns `string`, and uses the same normalized text in the player transcript;
@@ -64,7 +66,11 @@ Completion semantics are:
 
 A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
-Interaction definitions and completion payloads are subject to shared versioned platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits. ADR 0018 does not fix separate per-field character counts. The implementation must select concrete shared constants and test them before implementation merge. Over-limit data is rejected without truncation, clamping, or partial state mutation.
+Interaction limits version 1 uses three shared technical ceilings: `65,536` UTF-8 bytes for any one string, `65,536` UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion text uses the same per-string ceiling. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field once, and stops encoding further fields after either a per-string or aggregate failure. Text completion measures the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. These values align interaction messages with the existing bounded playground source/message scale while remaining below the `100,000`-value external-data work boundary. They are transport, storage, rendering, and validation safety ceilings, not recommended UI lengths. Over-limit data is rejected without truncation, clamping, or partial state mutation.
+
+Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
+
+Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text, destination temporary, and owning call-frame identity for duplicate replay and checkpoint provenance. Delay creation preflights its request plus future completion sequence; interaction creation preflights its request plus future transcript and completion sequences. Interaction completion rechecks both required sequences before writing its destination. Continuation execution remains eligible only through a later normal runtime entry.
 
 ### Standard composer and dynamic choice presentation
 
@@ -274,9 +280,9 @@ The implementation includes:
 - defensive validation of function regions, parameter progress, call stacks, and prepared-reference state;
 - standalone playground and constrained development server.
 
-Instruction plans use version 4; runtime snapshots and checkpoints use version 5. They are POC formats rather than permanent public wire-format guarantees.
+Instruction plans use version 5; runtime snapshots and checkpoints use version 6. They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation contains the first ADR 0016 slice: compiler-owned blocking `wait`, the `waiting` status, persisted session time, one foreground delay action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, and explicit time observation/completion operations. Browser scheduling and all other action kinds remain out of scope.
+The current implementation contains compiler-owned blocking `wait` and one generic foreground `interaction` instruction/action family for button, text, number, and choice. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, author-facing interaction syntax, Player controls, and background pacing remain out of scope.
 
 ## Accepted resumable pending-action model
 
@@ -302,7 +308,7 @@ lastSettlement:
     ActionSettlement | null
 ```
 
-A valid current implemented `waiting` snapshot contains exactly one foreground delay action. Its creation time is no later than the persisted session coordinate and its deadline is strictly later; a due action is settled only by an explicit time observation and is never silently repaired during restore. Non-waiting current states contain none. The implemented slice includes the background collection in the schema but requires it to remain empty. ADR 0018 implementation will require explicit schema-version changes before populated background gates are valid.
+A valid current `waiting` snapshot contains exactly one foreground delay or interaction action. Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity, destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request sequence. A waiting result destination must still be absent. A completed interaction settlement keeps immutable destination and owner identity for duplicate replay, while the separate bounded `lastSettlementResultState` field records whether that result is `live`, `released`, or not applicable. Validation binds a live result to the exact owner temporary even after unrelated instructions or while its caller temporaries are suspended by a pure nested function call. Clearing the destination, returning from its owner function, or exiting marks the lifecycle released without rewriting the recorded settlement. Every persisted interaction instruction, UI/accessibility/option shape, action, settlement, and lifecycle value has an exact supported shape. Non-waiting states contain no foreground action. The background collection remains present but must be empty until the separately scoped pacing implementation versions that schema.
 
 `currentSessionTimeMs` is canonical runtime state. It preserves the nondecreasing session coordinate across checkpoint and restore. A fresh snapshot receives a validated initial coordinate; deterministic tests may use `0`.
 
@@ -310,7 +316,7 @@ A blocking instruction evaluates its arguments, stores a complete JSON-safe acti
 
 `wait 0` is deliberately immediate: its duration expression is still evaluated, but it allocates no action ID, creates no pending action or settlement, and emits neither action event. The next source instruction runs normally; if it was the terminal root instruction, ordinary natural completion emits one `complete` event. In contrast, a positive terminal root wait settles with `actionCompleted`; the following runtime entry consumes the canonical settled root-end transition and emits the sequenced `complete` event. Re-entering an already halted snapshot emits no further completion event.
 
-A duplicate delivery matching `lastSettlement` returns the same canonical recorded settlement without another write, event, RNG advance, handler, or continuation. A newer settlement replaces the previous record. Each delay settlement retains owning and continuation instruction positions.
+A duplicate delivery matching `lastSettlement` returns the same immutable canonical recorded settlement without another write, event, RNG advance, handler, or continuation. Result-lifecycle release is tracked outside that settlement, so consuming or clearing a result cannot change duplicate replay data. A newer settlement replaces the previous record only after any live interaction result has been released. Each delay settlement retains owning and continuation instruction positions.
 
 Completion lookup always searches the active foreground action and all active background actions first. Only when no active action matches does the runtime compare `lastSettlement`, classify a lower previously issued ID as `staleAction`, or classify an unissued ID as `unknownAction`.
 
@@ -326,7 +332,7 @@ settle actions due at effectiveNow
 
 No checkpoint may contain due-action processing performed against a newer observation while retaining the older session-time value.
 
-The first source-to-runtime slice is blocking `wait`. See ADR 0016 for the shared state machine, identity lookup, idempotency, time semantics, validation invariants, test matrix, alternatives, and implementation sequence. ADR 0018 accepts the next interaction and chat-pacing design without changing current implementation status.
+Blocking `wait` remains the first source-to-runtime slice. The generic interaction runtime is now the second foreground use of ADR 0016, exercised through manual validated plans until its separate parser/compiler issue lands. Smart-autoplay and `chatPacingGate` remain unimplemented.
 
 ## Compiler and execution entry points
 
@@ -456,17 +462,17 @@ Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preser
 
 ## Format evolution
 
-The current implemented formats retain the version-4 instruction plan and use version 5 runtime snapshots and checkpoints. Version 5 adds the JSON-safe owning- and continuation-instruction provenance required to bind a retained delay settlement to its originating wait:
+The current formats use version 5 instruction plans and version 6 runtime snapshots/checkpoints. These versions add the generic interaction instruction/action/settlement family and canonical player-transcript event data while retaining delay provenance:
 
 ```text
-instruction plan version: 4
-runtime snapshot version: 5
-checkpoint version: 5
+instruction plan version: 5
+runtime snapshot version: 6
+checkpoint version: 6
 ```
 
 These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field.
 
-ADR 0018 does not change these constants through documentation. Implementation must explicitly increment every affected format before accepting interaction kinds, populated background actions, prepared pacing output, or captured smart-autoplay settings.
+No migration is provided; older incompatible objects are rejected through the existing structured boundaries. Populated background actions, prepared pacing output, or captured smart-autoplay settings require their own later explicit format changes.
 
 ## API stability boundary
 
@@ -474,8 +480,7 @@ The exported TypeScript compiler, compatibility wrapper, low-level runtime, snap
 
 ## Remaining runtime work
 
-- preserve the implemented blocking `wait` slice while implementing ADR 0018 only through explicit versioned schema changes;
-- implement one generic typed foreground-interaction family with shared concrete bounded-data constants and canonical transcript derivation;
+- preserve blocking `wait` and the implemented generic interaction family while adding later ADR 0018 slices only through explicit versioned schema changes;
 - implement `chatPacingGate` through ADR 0016 background/foreground action state, checked captured settings, prepared output, and exact event ordering;
 - under ADR 0017, define the minimum background timed-work primitive and pause/resume/stop lifecycle for timers separately from developer runtime pause;
 - define action-kind-specific media, advanced timeout, and detailed-result contracts without unnecessary independent state machines;

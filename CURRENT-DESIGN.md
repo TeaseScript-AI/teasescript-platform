@@ -127,7 +127,7 @@ The current implementation also:
 - restricts automatic visible-list text selection to strings and finite numbers after one item is selected;
 - rejects malformed zero `xorshift32-v1` seed, direct state, runtime snapshot state, and restored checkpoint state.
 
-Instruction plans use version 4; runtime snapshots and checkpoints use version 5. The implemented pending-action slice provides compiler-owned blocking `wait` delays with explicit host time observation, one foreground action, JSON-safe checkpoint/restore, and bounded last-settlement replay. Complete static typing and the wider V30 runtime/API surface remain out of scope.
+Instruction plans use version 5; runtime snapshots and checkpoints use version 6. The pending-action runtime provides compiler-owned blocking `wait` delays plus ADR 0018's generic foreground-interaction foundation, with explicit typed completion, JSON-safe checkpoint/restore, canonical player transcript events, and bounded last-settlement replay. Author-facing interaction syntax and Player UI remain unimplemented. Complete static typing and the wider V30 runtime/API surface remain out of scope.
 
 ## Accepted pending-action direction
 
