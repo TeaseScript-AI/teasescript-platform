@@ -302,7 +302,7 @@ function pathSegment(parentIsArray: boolean, key: string): string {
     : `[${JSON.stringify(key)}]`;
 }
 
-function createCapturedArray(length: number): unknown[] {
+export function createCapturedArray(length: number): unknown[] {
   const captured = new Array<unknown>(length);
   Object.setPrototypeOf(captured, CAPTURED_ARRAY_PROTOTYPE);
   return captured;

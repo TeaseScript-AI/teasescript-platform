@@ -8,6 +8,7 @@ import type {
 } from "./ast.js";
 import {
   AST_VALIDATION_CODES,
+  captureProgramAst,
   findNonFiniteNumericLiteralDiagnostics,
 } from "./ast-validation.js";
 import {
@@ -441,7 +442,7 @@ export class InstructionCompilationError extends Error {
   readonly span: SourceSpan;
 
   public constructor(
-    readonly code: "TSC001" | "TSC003",
+    readonly code: "TSC001" | "TSC003" | "TSC005",
     message: string,
     span: SourceSpan,
   ) {
@@ -452,7 +453,16 @@ export class InstructionCompilationError extends Error {
 }
 
 export function compileProgram(program: Program): InstructionPlan {
-  const nonFiniteDiagnostic = findNonFiniteNumericLiteralDiagnostics(program)[0];
+  const capture = captureProgramAst(program);
+  if (capture.program === null) {
+    throw new InstructionCompilationError(
+      AST_VALIDATION_CODES.invalidExternalAst,
+      capture.diagnostic!.message,
+      capture.diagnostic!.span,
+    );
+  }
+  const capturedProgram = capture.program;
+  const nonFiniteDiagnostic = findNonFiniteNumericLiteralDiagnostics(capturedProgram)[0];
   if (nonFiniteDiagnostic !== undefined) {
     throw new InstructionCompilationError(
       AST_VALIDATION_CODES.nonFiniteNumericLiteral,
@@ -460,13 +470,13 @@ export function compileProgram(program: Program): InstructionPlan {
       nonFiniteDiagnostic.span,
     );
   }
-  const declarations = program.statements.filter(
+  const declarations = capturedProgram.statements.filter(
     (statement): statement is FunctionDeclaration =>
       statement.kind === "functionDeclaration",
   );
   const compiler = new InstructionCompiler(declarations);
   compiler.compileStatements(
-    program.statements.filter(
+    capturedProgram.statements.filter(
       (statement) => statement.kind !== "functionDeclaration",
     ),
   );
@@ -475,7 +485,7 @@ export function compileProgram(program: Program): InstructionPlan {
   return deepFreeze({
     format: INSTRUCTION_PLAN_FORMAT,
     version: INSTRUCTION_PLAN_VERSION,
-    sourceSpan: copySpan(program.span),
+    sourceSpan: copySpan(capturedProgram.span),
     rootEndInstruction,
     temporaryCount: compiler.temporaryCount,
     functions: compiler.functions,

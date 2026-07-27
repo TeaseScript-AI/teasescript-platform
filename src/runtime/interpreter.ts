@@ -1,6 +1,6 @@
 import type { Program } from "../ast.js";
 import { EXTERNAL_DATA_WORK_MESSAGE, MAX_EXTERNAL_RUNTIME_DATA_WORK } from "../external-data-limits.js";
-import { findNonFiniteNumericLiteralDiagnostics } from "../ast-validation.js";
+import { captureProgramAst, findNonFiniteNumericLiteralDiagnostics } from "../ast-validation.js";
 import {
   createDiagnostic,
   DiagnosticSeverity,
@@ -111,10 +111,15 @@ export class Interpreter {
   }
 
   public execute(program: Program): ExecutionResult {
+    const capture = captureProgramAst(program);
+    if (capture.program === null) {
+      throw new InterpreterCompilationError([capture.diagnostic!]);
+    }
+    const capturedProgram = capture.program;
     const globals = captureCompatibilityGlobals(this.#options.globals ?? {});
     const builtins = captureCompatibilityBuiltins(this.#options.builtins ?? {});
-    const astDiagnostics = findNonFiniteNumericLiteralDiagnostics(program);
-    const semantic = validateSemantics(program, {
+    const astDiagnostics = findNonFiniteNumericLiteralDiagnostics(capturedProgram);
+    const semantic = validateSemantics(capturedProgram, {
       globals: Object.keys(globals),
       builtins: Object.keys(builtins),
     });
@@ -127,7 +132,7 @@ export class Interpreter {
       throw new InterpreterCompilationError(diagnostics);
     }
 
-    const plan = compileProgram(program);
+    const plan = compileProgram(capturedProgram);
     const blockingWait = plan.instructions.find(
       (instruction) => instruction.kind === "wait",
     );
