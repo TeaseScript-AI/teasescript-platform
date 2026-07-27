@@ -29,6 +29,8 @@ export type ExternalDataCaptureResult =
       readonly failure: ExternalDataFailure;
     };
 
+const CAPTURED_ARRAY_PROTOTYPE = createCapturedArrayPrototype();
+
 interface PathNode {
   readonly parent: PathNode | null;
   readonly segment: string;
@@ -67,7 +69,7 @@ type WorkItem =
  * Captures an externally supplied JSON-like graph into stable plain data while
  * enforcing the shared depth/work limits. Enumerable accessors are rejected
  * without invocation. Proxy traps are observed only during this capture; the
- * returned graph retains no proxy, accessor, or prototype behavior.
+ * returned graph retains no caller-controlled proxy, accessor, or prototype behavior.
  */
 export function captureExternalData(
   value: unknown,
@@ -231,7 +233,7 @@ export function captureExternalData(
     }
 
     const captured = array
-      ? new Array(arrayLength!)
+      ? createCapturedArray(arrayLength!)
       : (Object.create(prototype) as Record<string, unknown>);
     assignCaptured(item.target, captured, (root) => {
       capturedRoot = root;
@@ -298,6 +300,24 @@ function pathSegment(parentIsArray: boolean, key: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)
     ? `.${key}`
     : `[${JSON.stringify(key)}]`;
+}
+
+function createCapturedArray(length: number): unknown[] {
+  const captured = new Array<unknown>(length);
+  Object.setPrototypeOf(captured, CAPTURED_ARRAY_PROTOTYPE);
+  return captured;
+}
+
+function createCapturedArrayPrototype(): object {
+  const prototype = Object.create(null) as object;
+  for (const key of Reflect.ownKeys(Array.prototype)) {
+    if (typeof key === "string" && canonicalArrayIndex(key) !== null) continue;
+    const descriptor = Reflect.getOwnPropertyDescriptor(Array.prototype, key);
+    if (descriptor !== undefined) {
+      Reflect.defineProperty(prototype, key, descriptor);
+    }
+  }
+  return Object.freeze(prototype);
 }
 
 function canonicalArrayIndex(key: string): number | null {
