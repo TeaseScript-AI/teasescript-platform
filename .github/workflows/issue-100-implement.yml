@@ -1,0 +1,93 @@
+name: Implement issue 100
+on:
+  pull_request:
+    branches:
+      - main
+permissions:
+  contents: write
+jobs:
+  implement:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/issue-100-reject-export-declarations
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Apply export-declaration repair
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          metadata = Path('src/libraries/metadata.ts')
+          text = metadata.read_text()
+          old = '''  const exports: PublicExportMetadata[] = [];
+            for (const statement of sourceFile.statements) {
+              if (!hasExportModifier(statement)) continue;
+          '''
+          new = '''  const exports: PublicExportMetadata[] = [];
+            for (const statement of sourceFile.statements) {
+              if (ts.isExportDeclaration(statement)) {
+                throw new LibraryMetadataError(
+                  "unsupportedExport",
+                  "Export lists and re-exports are not supported in this POC.",
+                );
+              }
+              if (!hasExportModifier(statement)) continue;
+          '''
+          if old not in text:
+              raise SystemExit('metadata export loop anchor not found')
+          metadata.write_text(text.replace(old, new, 1))
+
+          tests = Path('tests/library-catalog-metadata.test.ts')
+          text = tests.read_text()
+          anchor = '''    "export function receiver(this: { value: string }, value: string): string { return value }",
+            ]) {
+          '''
+          replacement = '''    "export function receiver(this: { value: string }, value: string): string { return value }",
+              "function alpha(): void {}\\nexport { alpha }",
+              "type PublicType = string\\nexport type { PublicType }",
+              "export { helper } from './helper.js'",
+              "export * from './other.js'",
+              "export * as namespaceExport from './other.js'",
+            ]) {
+          '''
+          if anchor not in text:
+              raise SystemExit('unsupported-export test anchor not found')
+          text = text.replace(anchor, replacement, 1)
+          insertion = '''
+          test("private declarations remain absent from public metadata", () => {
+            const metadata = createPublicLibraryMetadata({
+              identity: createExactLibraryIdentity("private-only@1"),
+              source: "function alpha(): void {}\\ntype Local = string\\ninterface Hidden { value: string }",
+            });
+            assert.deepEqual(metadata.exports, []);
+          });
+
+          '''
+          marker = 'test("metadata generation captures external definitions and bounds TypeScript source", () => {'
+          if marker not in text:
+              raise SystemExit('private metadata insertion point not found')
+          tests.write_text(text.replace(marker, insertion + marker, 1))
+          PY
+          git diff --check
+      - name: Verify
+        run: |
+          npm ci
+          npm run build
+          node --test dist/tests/library-catalog-metadata.test.js dist/tests/library-validation-pipeline.test.js dist/tests/library-export-boundary.test.js
+          npm run check:libraries
+          npm run check
+          npm run build
+          git diff --check
+      - name: Commit implementation
+        run: |
+          git config user.name 'Codex for TeaseScript AI'
+          git config user.email '219006439+wqaed401@users.noreply.github.com'
+          git add src/libraries/metadata.ts tests/library-catalog-metadata.test.ts
+          git commit -m 'Reject unsupported TypeScript export declarations'
+          git push origin HEAD:fix/issue-100-reject-export-declarations
