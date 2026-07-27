@@ -15,15 +15,13 @@ export const MAX_INTERACTION_AGGREGATE_UTF8_BYTES = 65_536;
 const encoder = new TextEncoder();
 
 export function interactionUtf8ByteLength(value: string): number {
-  // UTF-8 is never shorter than the source UTF-16 code-unit count. This
-  // constant-time rejection avoids allocating an oversized encoded copy.
-  if (value.length > MAX_INTERACTION_STRING_UTF8_BYTES) {
-    return MAX_INTERACTION_STRING_UTF8_BYTES + 1;
-  }
   return encoder.encode(value).byteLength;
 }
 
 export function interactionStringFits(value: string): boolean {
+  // UTF-8 is never shorter than the source UTF-16 code-unit count. This
+  // constant-time rejection avoids allocating an oversized encoded copy.
+  if (value.length > MAX_INTERACTION_STRING_UTF8_BYTES) return false;
   return interactionUtf8ByteLength(value) <= MAX_INTERACTION_STRING_UTF8_BYTES;
 }
 

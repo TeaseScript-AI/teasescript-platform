@@ -21,10 +21,10 @@ import { createSourceSpan, type SourceSpan } from "./source.js";
 import { recordValidationTestWork } from "./runtime/validation-testing.js";
 import {
   interactionStringHasNonWhitespace,
+  interactionStringFits,
   interactionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
-  MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "./interaction-limits.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
@@ -1929,8 +1929,11 @@ function validateInteractionInstruction(
       errors.push(planError("TSC002", "Interaction text must be a string.", fieldPath));
       return false;
     }
+    if (!interactionStringFits(candidate)) {
+      errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+      return false;
+    }
     const bytes = interactionUtf8ByteLength(candidate);
-    if (bytes > MAX_INTERACTION_STRING_UTF8_BYTES) errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
     aggregate += bytes;
     return true;
   };
@@ -1966,9 +1969,12 @@ function validateInteractionInstruction(
         }
         if (!countString(option.text, `${optionPath}.text`)) continue;
         const label = option.label;
-        const validLabel = labelType === "none" ? label === null : labelType === "identifier" ? typeof label === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label) : typeof label === "number" && Number.isFinite(label);
+        const validLabel = labelType === "none"
+          ? label === null
+          : labelType === "identifier"
+            ? typeof label === "string" && countString(label, `${optionPath}.label`) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
+            : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
         if (!validLabel) errors.push(planError("TSC002", "Choice option label does not match the choice label type.", `${optionPath}.label`));
-        if (typeof label === "string") countString(label, `${optionPath}.label`);
         if (validLabel && (typeof label === "string" || typeof label === "number")) {
           if (labels.has(label)) errors.push(planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`));
           labels.add(label);

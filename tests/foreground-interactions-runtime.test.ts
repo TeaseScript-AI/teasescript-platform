@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import {
+  interactionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
   MAX_INTERACTION_STRING_UTF8_BYTES,
@@ -139,6 +140,60 @@ test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguou
   assert.equal(run(numericRestored.plan, numericRestored.snapshot).snapshot.status, "halted");
 });
 
+test("choice completion snapshots validate without a plan for every result domain", () => {
+  const cases = [
+    interactionPlan("choice", { kind: "choice", labelType: "none", options: [{ text: "Visible", label: null }], accessibleName: defaults.choice }),
+    interactionPlan("choice", { kind: "choice", labelType: "identifier", options: [{ text: "Visible", label: "named" }], accessibleName: defaults.choice }),
+    interactionPlan("choice", { kind: "choice", labelType: "number", options: [{ text: "Visible", label: 1 }], accessibleName: defaults.choice }),
+  ] as const;
+  const payloads = [
+    { kind: "selectedText", selectedText: "Visible" },
+    { kind: "selectedLabel", selectedLabel: "named" },
+    { kind: "selectedLabel", selectedLabel: 1 },
+  ] as const;
+  for (let index = 0; index < cases.length; index += 1) {
+    const completed = complete(cases[index]!, payloads[index], "choice");
+    assert.equal(validateRuntimeSnapshot(completed.snapshot).valid, true);
+    for (const malformedResult of [null, { kind: "object", properties: [] }, -0]) {
+      const malformed = structuredClone(completed.snapshot) as any;
+      malformed.lastSettlement.result = malformedResult;
+      malformed.temporaries[0].value = malformedResult;
+      assert.equal(validateRuntimeSnapshot(malformed).valid, false);
+    }
+  }
+  const identifier = complete(cases[1], payloads[1], "choice");
+  const wrongForExactPlan = structuredClone(identifier.snapshot) as any;
+  wrongForExactPlan.lastSettlement.result = 1;
+  wrongForExactPlan.temporaries[0].value = 1;
+  assert.equal(validateRuntimeSnapshot(wrongForExactPlan).valid, true);
+  assert.equal(validateRuntimeSnapshot(wrongForExactPlan, cases[1]).valid, false);
+});
+
+test("numeric choice rejects negative-zero labels and stores JSON-stable zero results", () => {
+  const valid = interactionPlan("choice", { kind: "choice", labelType: "number", options: [{ text: "Zero", label: 0 }], accessibleName: defaults.choice });
+  const negativeZeroPlan = structuredClone(valid) as any;
+  negativeZeroPlan.instructions[0].ui.options[0].label = -0;
+  assert.equal(validateInstructionPlan(negativeZeroPlan).valid, false);
+
+  const pending = waiting(valid);
+  const negativeZeroAction = structuredClone(pending.snapshot) as any;
+  negativeZeroAction.foregroundAction.ui.options[0].label = -0;
+  assert.equal(validateRuntimeSnapshot(negativeZeroAction).valid, false);
+  assert.equal(validateRuntimeSnapshot(negativeZeroAction, valid).valid, false);
+
+  for (const payload of [
+    { kind: "selectedLabel", selectedLabel: -0 },
+    { kind: "submittedText", submittedText: "Zero" },
+  ]) {
+    const completed = complete(valid, payload, "choice");
+    assert.equal(Object.is((completed.snapshot.lastSettlement as any)?.result, -0), false);
+    assert.equal(validateRuntimeSnapshot(completed.snapshot, valid).valid, true);
+    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(valid, completed.snapshot)));
+    assert.equal(Object.is((restored.snapshot.lastSettlement as any)?.result, -0), false);
+    assert.equal(run(restored.plan, restored.snapshot).snapshot.status, "halted");
+  }
+});
+
 test("duplicate, stale, unknown, wrong-kind, and over-limit completion preserve ADR 0016 classification", () => {
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const pending = waiting(plan);
@@ -174,6 +229,7 @@ test("pending interaction survives JSON checkpoint restore with monotonic events
 });
 
 test("shared exact string and option boundaries are accepted and over-limit plans are rejected linearly", () => {
+  assert.equal(interactionUtf8ByteLength("x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 4_464)), 70_000);
   const exact = interactionPlan("button", { kind: "button", buttonLabel: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES), accessibleName: defaults.button });
   assert.equal(validateInstructionPlan(exact).valid, true);
   const tooLong = structuredClone(exact) as unknown as { instructions: Array<Record<string, unknown>> };
@@ -262,6 +318,34 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
   const mutated = structuredClone(pending.snapshot) as any;
   mutated.foregroundAction.speakerId = bob.id;
   assert.equal(validateRuntimeSnapshot(mutated, speakerPlan).valid, false);
+
+  const swappedIdentifiers = structuredClone(pending.snapshot) as any;
+  const alice = swappedIdentifiers.speakers.find((speaker: any) => speaker.identifier === "alice");
+  const swappedBob = swappedIdentifiers.speakers.find((speaker: any) => speaker.identifier === "bob");
+  [alice.identifier, swappedBob.identifier] = [swappedBob.identifier, alice.identifier];
+  swappedIdentifiers.foregroundAction.speakerId = swappedBob.id;
+  assert.equal(validateRuntimeSnapshot(swappedIdentifiers, speakerPlan).valid, false);
+
+  const alteredBinding = structuredClone(pending.snapshot) as any;
+  const aliceBinding = alteredBinding.frames.flatMap((frame: any) => frame.bindings).find((binding: any) => binding.name === "alice");
+  aliceBinding.value.speakerId = bob.id;
+  assert.equal(validateRuntimeSnapshot(alteredBinding, speakerPlan).valid, false);
+
+  const bindingResolved = structuredClone(pending.snapshot) as any;
+  const binding = bindingResolved.frames.flatMap((frame: any) => frame.bindings).find((candidate: any) => candidate.name === "alice");
+  binding.value.speakerId = bob.id;
+  bindingResolved.foregroundAction.speakerId = bob.id;
+  assert.equal(validateRuntimeSnapshot(bindingResolved, speakerPlan).valid, true);
+
+  const defaultSpeakerPlan = structuredClone(speakerPlan) as any;
+  defaultSpeakerPlan.instructions[waitIndex].speaker = null;
+  assert.equal(validateInstructionPlan(defaultSpeakerPlan).valid, true);
+  const defaultPending = waiting(defaultSpeakerPlan);
+  const defaultAction = defaultPending.snapshot.foregroundAction;
+  assert.equal(defaultAction?.kind === "interaction" && defaultAction.speakerId, defaultPending.snapshot.defaultSpeaker);
+  const wrongDefault = structuredClone(defaultPending.snapshot) as any;
+  wrongDefault.foregroundAction.speakerId = bob.id;
+  assert.equal(validateRuntimeSnapshot(wrongDefault, defaultSpeakerPlan).valid, false);
 });
 
 test("explicit accessible names must contain non-whitespace content", () => {
@@ -274,6 +358,41 @@ test("explicit accessible names must contain non-whitespace content", () => {
     const malformedSnapshot = structuredClone(pending.snapshot) as any;
     malformedSnapshot.foregroundAction.ui.accessibleName = { kind: "text", text };
     assert.equal(validateRuntimeSnapshot(malformedSnapshot, base).valid, false, JSON.stringify(text));
+  }
+});
+
+test("very large regex-bearing interaction strings fast-reject at plan and snapshot boundaries", () => {
+  const huge = "a".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 32);
+  const button = interactionPlan("button", { kind: "button", buttonLabel: "Continue", accessibleName: defaults.button });
+  const hugeAccessible = structuredClone(button) as any;
+  hugeAccessible.instructions[0].ui.accessibleName = { kind: "text", text: huge };
+  assert.equal(validateInstructionPlan(hugeAccessible).valid, false);
+
+  const identifier = interactionPlan("choice", { kind: "choice", labelType: "identifier", options: [{ text: "Visible", label: "valid" }], accessibleName: defaults.choice });
+  const hugeIdentifier = structuredClone(identifier) as any;
+  hugeIdentifier.instructions[0].ui.options[0].label = huge;
+  assert.equal(validateInstructionPlan(hugeIdentifier).valid, false);
+
+  const pending = waiting(identifier);
+  const hostile = structuredClone(pending.snapshot) as any;
+  hostile.foregroundAction.ui.options[0].label = huge;
+  assert.equal(validateRuntimeSnapshot(hostile).valid, false);
+});
+
+test("huge completion kind tokens are not reflected or allowed to mutate canonical state", () => {
+  const plan = interactionPlan("button", { kind: "button", buttonLabel: "Continue", accessibleName: defaults.button });
+  const pending = waiting(plan);
+  const huge = "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 32);
+  for (const request of [
+    { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: huge },
+    { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: huge },
+  ]) {
+    const before = JSON.stringify(pending.snapshot);
+    const rejected = completeAction(plan, pending.snapshot, request);
+    assert.equal(rejected.outcome.kind, "wrongActionKind");
+    assert.equal(rejected.outcome.kind === "wrongActionKind" && rejected.outcome.receivedActionKind, "<invalid>");
+    assert.deepEqual(rejected.events, []);
+    assert.equal(JSON.stringify(rejected.snapshot), before);
   }
 });
 

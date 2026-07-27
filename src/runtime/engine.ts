@@ -282,7 +282,7 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
     if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: { ...current.lastSettlement } });
     return pendingResult(current, [], actionId < current.nextActionId ? { kind: "staleAction", actionId } : { kind: "unknownAction", actionId });
   }
-  if (value.actionKind !== active.kind) return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: active.kind, receivedActionKind: typeof value.actionKind === "string" ? value.actionKind : "<invalid>" });
+  if (value.actionKind !== active.kind) return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: active.kind, receivedActionKind: value.actionKind === "delay" || value.actionKind === "interaction" ? value.actionKind : "<invalid>" });
   if (active.kind === "interaction") return completeInteraction(captured.plan, current, active, value);
   if (!isPlainRecord(value.payload) || value.payload.kind !== "time" || !validSessionTime(value.payload.currentSessionTimeMs)) return pendingResult(current, [], { kind: "invalidPayload", message: "Delay completion payload must contain a valid time observation." });
   const effectiveNow = Math.max(current.currentSessionTimeMs, value.payload.currentSessionTimeMs);
@@ -298,7 +298,13 @@ function completeInteraction(
   action: RuntimeInteractionActionSnapshot,
   request: Record<string, unknown>,
 ): PendingActionOperationResult<ActionCompletionOutcome> {
-  if (request.interactionKind !== action.interactionKind) return pendingResult(current, [], { kind: "wrongActionKind", actionId: action.actionId, expectedActionKind: "interaction", receivedActionKind: typeof request.interactionKind === "string" ? `interaction:${request.interactionKind}` : "<invalid>" });
+  if (request.interactionKind !== action.interactionKind) {
+    const receivedInteractionKind = request.interactionKind;
+    const receivedActionKind = receivedInteractionKind === "button" || receivedInteractionKind === "text" || receivedInteractionKind === "number" || receivedInteractionKind === "choice"
+      ? `interaction:${receivedInteractionKind}`
+      : "<invalid>";
+    return pendingResult(current, [], { kind: "wrongActionKind", actionId: action.actionId, expectedActionKind: "interaction", receivedActionKind });
+  }
   const resolved = resolveInteractionCompletion(action, request.payload);
   if (!resolved.ok) return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
   if (action.destinationTemporary !== null && resolved.result !== null) setTemporary(current.temporaries, action.destinationTemporary, resolved.result);

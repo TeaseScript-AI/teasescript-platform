@@ -1905,10 +1905,37 @@ function validInteractionAction(action: Record<string, unknown>, snapshot: Recor
   if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
   const instruction = plan.instructions[action.owningInstruction];
   if (instruction?.kind !== "interaction" || instruction.interactionKind !== action.interactionKind || instruction.expectedResult !== action.expectedResult || instruction.destinationTemporary !== action.destinationTemporary || instruction.target !== action.target || !interactionUiEqual(instruction.ui, action.ui)) return false;
+  const explicitSpeaker = instruction.speaker === null
+    ? undefined
+    : visibleRuntimeBindingValue(snapshot, instruction.speaker);
   const expectedSpeakerId = instruction.speaker === null
     ? snapshot.defaultSpeaker
-    : speakers.find((speaker) => isPlainRecord(speaker) && speaker.identifier === instruction.speaker)?.id;
+    : isPlainRecord(explicitSpeaker) && explicitSpeaker.kind === "speakerReference"
+      ? explicitSpeaker.speakerId
+      : undefined;
   return action.speakerId === (expectedSpeakerId ?? null);
+}
+
+function visibleRuntimeBindingValue(snapshot: Record<string, unknown>, name: string): unknown {
+  if (!Array.isArray(snapshot.frames)) return undefined;
+  const lastCall = Array.isArray(snapshot.callFrames) ? snapshot.callFrames.at(-1) : undefined;
+  const functionBase = isPlainRecord(lastCall) && nonNegativeSafeInteger(lastCall.scopeBaseDepth)
+    ? lastCall.scopeBaseDepth
+    : undefined;
+  const minimum = functionBase ?? 0;
+  for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
+    const frame = snapshot.frames[index];
+    if (!isPlainRecord(frame) || !Array.isArray(frame.bindings)) continue;
+    const binding = frame.bindings.find((candidate) => isPlainRecord(candidate) && candidate.name === name);
+    if (isPlainRecord(binding)) return binding.value;
+  }
+  if (functionBase !== undefined) {
+    const root = snapshot.frames[0];
+    if (!isPlainRecord(root) || !Array.isArray(root.bindings)) return undefined;
+    const binding = root.bindings.find((candidate) => isPlainRecord(candidate) && candidate.name === name);
+    if (isPlainRecord(binding)) return binding.value;
+  }
+  return undefined;
 }
 
 function validInteractionUiShape(kind: "button" | "text" | "number" | "choice", value: unknown): boolean {
@@ -1931,7 +1958,11 @@ function validInteractionUiShape(kind: "button" | "text" | "number" | "choice", 
   for (const option of value.options) {
     if (!isPlainRecord(option) || !count(option.text)) return false;
     const label = option.label;
-    const validLabel = value.labelType === "none" ? label === null : value.labelType === "identifier" ? typeof label === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label) && count(label) : typeof label === "number" && Number.isFinite(label);
+    const validLabel = value.labelType === "none"
+      ? label === null
+      : value.labelType === "identifier"
+        ? typeof label === "string" && count(label) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
+        : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
     if (!validLabel) return false;
     if (label !== null && (typeof label === "string" || typeof label === "number")) {
       if (labels.has(label)) return false;
@@ -1966,7 +1997,15 @@ function validSettlementKindData(settlement: Record<string, unknown>, snapshot: 
     ? plan.instructions[settlement.owningInstruction]
     : undefined;
   const numericChoice = settlementInstruction?.kind === "interaction" && settlementInstruction.ui.kind === "choice" && settlementInstruction.ui.labelType === "number";
-  const resultValid = settlement.interactionKind === "button" ? settlement.result === null : settlement.interactionKind === "number" || numericChoice ? typeof settlement.result === "number" && Number.isFinite(settlement.result) && !Object.is(settlement.result, -0) : typeof settlement.result === "string" && interactionStringFits(settlement.result);
+  const validStringResult = typeof settlement.result === "string" && interactionStringFits(settlement.result);
+  const validNumberResult = typeof settlement.result === "number" && Number.isFinite(settlement.result) && !Object.is(settlement.result, -0);
+  const resultValid = settlement.interactionKind === "button"
+    ? settlement.result === null
+    : settlement.interactionKind === "number" || numericChoice
+      ? validNumberResult
+      : settlement.interactionKind === "choice" && plan === undefined
+        ? validStringResult || validNumberResult
+        : validStringResult;
   if (!resultValid || plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return resultValid;
   const instruction = plan.instructions[settlement.owningInstruction];
   if (instruction?.kind !== "interaction" || instruction.interactionKind !== settlement.interactionKind) return false;
