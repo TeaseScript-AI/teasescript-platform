@@ -266,6 +266,7 @@ export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, su
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;
+  current.lastSettlementResultState = "none";
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   const span = captured.plan.instructions[action.owningInstruction]?.span ?? captured.plan.sourceSpan;
@@ -333,6 +334,7 @@ function completeInteraction(
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;
+  current.lastSettlementResultState = action.destinationTemporary === null ? "none" : "live";
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
@@ -533,7 +535,14 @@ function executePlannedInstruction(
       const index = snapshot.temporaries.findIndex(
         (temporary) => temporary.id === instruction.temporaryId,
       );
-      if (index >= 0) snapshot.temporaries.splice(index, 1);
+      if (index >= 0) {
+        releaseInteractionSettlementDestination(
+          snapshot,
+          currentCallFrameId(snapshot),
+          instruction.temporaryId,
+        );
+        snapshot.temporaries.splice(index, 1);
+      }
       advance(snapshot);
       return;
     }
@@ -594,6 +603,7 @@ function executePlannedInstruction(
         throw fault("TSR050", "Wait duration cannot produce a representable future deadline.", instruction.duration.span);
       }
       if (durationMs === 0) { advance(snapshot); return; }
+      assertNoLiveInteractionSettlement(snapshot, instruction.span);
       if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
       assertEventSequenceCapacity(snapshot, 2, instruction.span);
       const sequence = takeSequence(snapshot);
@@ -605,6 +615,7 @@ function executePlannedInstruction(
       return;
     }
     case "interaction": {
+      assertNoLiveInteractionSettlement(snapshot, instruction.span);
       if (
         instruction.destinationTemporary !== null &&
         snapshot.temporaries.some((temporary) =>
@@ -648,6 +659,7 @@ function executePlannedInstruction(
       return;
     }
     case "exit":
+      releaseInteractionSettlementDestination(snapshot, undefined);
       snapshot.defaultSpeaker = null;
       snapshot.contextualSpeaker = null;
       snapshot.frames.splice(1);
@@ -853,6 +865,7 @@ function returnFromFunction(
 ): void {
   const { frame } = activeFunction(plan, snapshot, span);
   const returned = cloneSerializableValue(value);
+  releaseInteractionSettlementDestination(snapshot, frame.id);
   snapshot.frames.splice(frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
   snapshot.callFrames.pop();
@@ -2486,6 +2499,39 @@ function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeAc
     result: settlement.result,
     transcriptText: settlement.transcriptText,
   };
+}
+
+
+function assertNoLiveInteractionSettlement(
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+): void {
+  if (
+    snapshot.lastSettlement?.actionKind === "interaction" &&
+    snapshot.lastSettlementResultState === "live"
+  ) {
+    throw fault(
+      "TSR050",
+      "Interaction result must be consumed or cleared before another foreground action.",
+      span,
+    );
+  }
+}
+
+function releaseInteractionSettlementDestination(
+  snapshot: RuntimeSnapshot,
+  ownerCallFrameId: number | null | undefined,
+  destinationTemporary?: number,
+): void {
+  const settlement = snapshot.lastSettlement;
+  if (
+    settlement?.actionKind !== "interaction" ||
+    snapshot.lastSettlementResultState !== "live" ||
+    (ownerCallFrameId !== undefined && settlement.ownerCallFrameId !== ownerCallFrameId) ||
+    (destinationTemporary !== undefined &&
+      settlement.destinationTemporary !== destinationTemporary)
+  ) return;
+  snapshot.lastSettlementResultState = "released";
 }
 
 function currentCallFrameId(snapshot: RuntimeSnapshot): number | null {

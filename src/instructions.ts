@@ -2303,6 +2303,118 @@ function createPlanValidationIndex(
   return { owners, functionsById };
 }
 
+function instructionMayRequestForeground(
+  instruction: Record<string, unknown>,
+): boolean {
+  if (instruction.kind === "interaction") return true;
+  if (instruction.kind !== "wait") return false;
+  return !(
+    isRecord(instruction.duration) &&
+    instruction.duration.kind === "literal" &&
+    instruction.duration.value === 0
+  );
+}
+
+function collectReturningFunctions(
+  instructions: readonly unknown[],
+  functions: readonly ValidatedFunctionRange[],
+  budget: InteractionControlFlowBudget,
+): ReadonlySet<number> {
+  const returning = new Set<number>();
+  let changed = true;
+  while (changed && !budget.exceeded) {
+    changed = false;
+    for (const definition of functions) {
+      if (returning.has(definition.id)) continue;
+      const region: InstructionExecutionRegion = {
+        kind: "function",
+        functionId: definition.id,
+        startInstruction: definition.entryInstruction,
+        endInstruction: definition.endInstruction,
+      };
+      const pending = [definition.entryInstruction];
+      const visited = new Set<number>();
+      while (pending.length > 0) {
+        if (!consumeInteractionControlFlowWork(budget)) break;
+        const instructionIndex = pending.pop()!;
+        if (visited.has(instructionIndex)) continue;
+        visited.add(instructionIndex);
+        const instruction = instructions[instructionIndex];
+        if (!isRecord(instruction)) continue;
+        if (instruction.kind === "returnValue" || instruction.kind === "returnVoid") {
+          returning.add(definition.id);
+          changed = true;
+          break;
+        }
+        for (const successor of instructionRegionSuccessors(
+          instructions,
+          instructionIndex,
+          region,
+          returning,
+        )) {
+          if (!consumeInteractionControlFlowWork(budget)) break;
+          if (!visited.has(successor)) pending.push(successor);
+        }
+      }
+      if (budget.exceeded) break;
+    }
+  }
+  return returning;
+}
+
+function collectForegroundFunctions(
+  instructions: readonly unknown[],
+  functions: readonly ValidatedFunctionRange[],
+  returningFunctions: ReadonlySet<number>,
+  budget: InteractionControlFlowBudget,
+): ReadonlySet<number> {
+  const foreground = new Set<number>();
+  let changed = true;
+  while (changed && !budget.exceeded) {
+    changed = false;
+    for (const definition of functions) {
+      if (foreground.has(definition.id)) continue;
+      const region: InstructionExecutionRegion = {
+        kind: "function",
+        functionId: definition.id,
+        startInstruction: definition.entryInstruction,
+        endInstruction: definition.endInstruction,
+      };
+      const pending = [definition.entryInstruction];
+      const visited = new Set<number>();
+      while (pending.length > 0) {
+        if (!consumeInteractionControlFlowWork(budget)) break;
+        const instructionIndex = pending.pop()!;
+        if (visited.has(instructionIndex)) continue;
+        visited.add(instructionIndex);
+        const instruction = instructions[instructionIndex];
+        if (!isRecord(instruction)) continue;
+        if (
+          instructionMayRequestForeground(instruction) ||
+          (instruction.kind === "callFunction" &&
+            Number.isSafeInteger(instruction.functionId) &&
+            foreground.has(instruction.functionId as number))
+        ) {
+          foreground.add(definition.id);
+          changed = true;
+          break;
+        }
+        for (const successor of instructionRegionSuccessors(
+          instructions,
+          instructionIndex,
+          region,
+          returningFunctions,
+        )) {
+          if (!consumeInteractionControlFlowWork(budget)) break;
+          if (!visited.has(successor)) pending.push(successor);
+        }
+      }
+      if (budget.exceeded) break;
+    }
+  }
+  return foreground;
+}
+
 function validateInstructionControlFlowRegions(
   instructions: readonly unknown[],
   index: PlanValidationIndex | null,
@@ -2316,7 +2428,30 @@ function validateInstructionControlFlowRegions(
       MAX_EXTERNAL_RUNTIME_DATA_WORK * 10,
     exceeded: false,
   };
-  const predecessors = buildInstructionPredecessors(instructions, index, budget);
+  const functions = [...index.functionsById.values()];
+  const returningFunctions = collectReturningFunctions(
+    instructions,
+    functions,
+    budget,
+  );
+  const foregroundFunctions = collectForegroundFunctions(
+    instructions,
+    functions,
+    returningFunctions,
+    budget,
+  );
+  const predecessors = buildInstructionPredecessors(
+    instructions,
+    index,
+    returningFunctions,
+    budget,
+  );
+  const reachable = buildReachableInstructions(
+    instructions,
+    index,
+    returningFunctions,
+    budget,
+  );
 
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
@@ -2325,6 +2460,7 @@ function validateInstructionControlFlowRegions(
     const instructionPath = `$.instructions[${instructionIndex}]`;
     if (
       !budget.exceeded &&
+      reachable[instructionIndex] === true &&
       instruction.kind === "interaction" &&
       instruction.interactionKind !== "button"
     ) {
@@ -2336,6 +2472,7 @@ function validateInstructionControlFlowRegions(
             destinationTemporary as number,
             region,
             predecessors,
+            reachable,
             budget,
           )
         : null;
@@ -2355,6 +2492,8 @@ function validateInstructionControlFlowRegions(
               instructionIndex + 1,
               destinationTemporary as number,
               region,
+              foregroundFunctions,
+              returningFunctions,
               budget,
             )
           : false;
@@ -2437,6 +2576,7 @@ function consumeInteractionControlFlowWork(
 function buildInstructionPredecessors(
   instructions: readonly unknown[],
   index: PlanValidationIndex,
+  returningFunctions: ReadonlySet<number>,
   budget: InteractionControlFlowBudget,
 ): readonly (readonly number[])[] {
   const predecessors: number[][] = Array.from(
@@ -2451,6 +2591,7 @@ function buildInstructionPredecessors(
       instructions,
       instructionIndex,
       region,
+      returningFunctions,
     )) {
       if (!consumeInteractionControlFlowWork(budget)) break;
       predecessors[successor]?.push(instructionIndex);
@@ -2459,10 +2600,43 @@ function buildInstructionPredecessors(
   return predecessors;
 }
 
+function buildReachableInstructions(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  returningFunctions: ReadonlySet<number>,
+  budget: InteractionControlFlowBudget,
+): readonly boolean[] {
+  const reachable = new Array<boolean>(instructions.length).fill(false);
+  const pending: number[] = [];
+  if (index.owners[0]?.kind === "root") pending.push(0);
+  for (const definition of index.functionsById.values()) {
+    pending.push(definition.entryInstruction);
+  }
+  while (pending.length > 0) {
+    if (!consumeInteractionControlFlowWork(budget)) break;
+    const instructionIndex = pending.pop()!;
+    if (reachable[instructionIndex] === true) continue;
+    const region = index.owners[instructionIndex];
+    if (region === undefined) continue;
+    reachable[instructionIndex] = true;
+    for (const successor of instructionRegionSuccessors(
+      instructions,
+      instructionIndex,
+      region,
+      returningFunctions,
+    )) {
+      if (!consumeInteractionControlFlowWork(budget)) break;
+      if (reachable[successor] !== true) pending.push(successor);
+    }
+  }
+  return reachable;
+}
+
 function instructionRegionSuccessors(
   instructions: readonly unknown[],
   instructionIndex: number,
   region: InstructionExecutionRegion,
+  returningFunctions?: ReadonlySet<number>,
 ): readonly number[] {
   const instruction = instructions[instructionIndex];
   if (!isRecord(instruction)) return [];
@@ -2482,7 +2656,13 @@ function instructionRegionSuccessors(
       if (next !== null) candidates.push(next);
       break;
     case "callFunction":
-      candidates.push(instruction.returnInstruction);
+      if (
+        returningFunctions === undefined ||
+        (Number.isSafeInteger(instruction.functionId) &&
+          returningFunctions.has(instruction.functionId as number))
+      ) {
+        candidates.push(instruction.returnInstruction);
+      }
       break;
     case "returnValue":
     case "returnVoid":
@@ -2506,6 +2686,7 @@ function interactionDestinationMayBeLiveBefore(
   destinationTemporary: number,
   region: InstructionExecutionRegion,
   predecessors: readonly (readonly number[])[],
+  reachable: readonly boolean[],
   budget: InteractionControlFlowBudget,
 ): boolean | null {
   const pending = [...(predecessors[interactionIndex] ?? [])];
@@ -2514,6 +2695,7 @@ function interactionDestinationMayBeLiveBefore(
     if (!consumeInteractionControlFlowWork(budget)) return null;
     const index = pending.pop()!;
     if (index < region.startInstruction || index >= region.endInstruction) continue;
+    if (reachable[index] !== true) continue;
     if (visited.has(index)) continue;
     visited.add(index);
     const instruction = instructions[index];
@@ -2546,24 +2728,70 @@ function interactionDestinationIsDiscarded(
   startInstruction: number,
   destinationTemporary: number,
   region: InstructionExecutionRegion,
+  foregroundFunctions: ReadonlySet<number>,
+  returningFunctions: ReadonlySet<number>,
   budget: InteractionControlFlowBudget,
 ): boolean | null {
-  const pending = [startInstruction];
-  const visited = new Set<number>();
+  const pending: Array<{ readonly index: number; readonly live: boolean }> = [
+    { index: startInstruction, live: true },
+  ];
+  const entryState = new Map<number, boolean>();
   while (pending.length > 0) {
     if (!consumeInteractionControlFlowWork(budget)) return null;
-    const index = pending.pop()!;
-    if (index < region.startInstruction || index >= region.endInstruction) return false;
-    if (visited.has(index)) continue;
-    visited.add(index);
-    const instruction = instructions[index];
+    const current = pending.pop()!;
+    if (current.index < region.startInstruction || current.index >= region.endInstruction) {
+      return current.live ? false : true;
+    }
+    const existing = entryState.get(current.index);
+    if (existing !== undefined) {
+      if (existing !== current.live) return false;
+      continue;
+    }
+    entryState.set(current.index, current.live);
+    const instruction = instructions[current.index];
     if (!isRecord(instruction)) return false;
-    if (instruction.kind === "clearTemporary" && instruction.temporaryId === destinationTemporary) continue;
-    if (instructionProducesTemporary(instruction, destinationTemporary)) return false;
-    if (instruction.kind === "returnValue" || instruction.kind === "returnVoid" || instruction.kind === "exit") continue;
-    const successors = instructionRegionSuccessors(instructions, index, region);
-    if (successors.length === 0) return false;
-    for (const successor of successors) pending.push(successor);
+
+    if (
+      current.live &&
+      (instructionMayRequestForeground(instruction) ||
+        (instruction.kind === "callFunction" &&
+          Number.isSafeInteger(instruction.functionId) &&
+          foregroundFunctions.has(instruction.functionId as number)))
+    ) return false;
+
+    let live = current.live;
+    if (
+      instruction.kind === "clearTemporary" &&
+      instruction.temporaryId === destinationTemporary
+    ) {
+      live = false;
+    } else if (instructionProducesTemporary(instruction, destinationTemporary)) {
+      if (live) return false;
+      if (instruction.kind === "interaction") continue;
+      live = false;
+    }
+
+    if (
+      instruction.kind === "returnValue" ||
+      instruction.kind === "returnVoid" ||
+      instruction.kind === "exit"
+    ) continue;
+    if (
+      instruction.kind === "callFunction" &&
+      Number.isSafeInteger(instruction.functionId) &&
+      !returningFunctions.has(instruction.functionId as number)
+    ) continue;
+    const successors = instructionRegionSuccessors(
+      instructions,
+      current.index,
+      region,
+      returningFunctions,
+    );
+    if (successors.length === 0) {
+      if (live) return false;
+      continue;
+    }
+    for (const successor of successors) pending.push({ index: successor, live });
   }
   return true;
 }

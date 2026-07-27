@@ -222,6 +222,7 @@ export interface RuntimeSnapshot {
   readonly backgroundActions: RuntimePendingActionSnapshot[];
   nextActionId: number;
   lastSettlement: RuntimeActionSettlementSnapshot | null;
+  lastSettlementResultState: "none" | "live" | "released";
   readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
@@ -320,6 +321,7 @@ export function createFreshRuntimeSnapshot(
     backgroundActions: [],
     nextActionId: 1,
     lastSettlement: null,
+    lastSettlementResultState: "none",
     maxCallDepth,
     status: capturedPlan.plan.rootEndInstruction === 0 ? "halted" : "ready",
     failure: null,
@@ -402,6 +404,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     backgroundActions: snapshot.backgroundActions.map(clonePendingAction),
     nextActionId: snapshot.nextActionId,
     lastSettlement: snapshot.lastSettlement === null ? null : cloneSettlement(snapshot.lastSettlement),
+    lastSettlementResultState: snapshot.lastSettlementResultState,
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -1974,6 +1977,23 @@ function validatePendingActionState(
   if (settlement !== null && (!isPlainRecord(settlement) || !["delay", "interaction"].includes(String(settlement.actionKind)) || settlement.settlementKind !== "completed" || !positiveSafeInteger(settlement.actionId) || !validSettlementProvenance(settlement, plan) || !validSettlementKindData(settlement, value, plan, analysis) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.completionEventSequence || settlement.completionEventSequence >= (typeof value.nextEventSequence === "number" ? value.nextEventSequence : 0) || settlement.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0) || (isPlainRecord(action) && action.actionId === settlement.actionId))) {
     errors.push("Runtime lastSettlement is malformed.");
   }
+  const resultState = value.lastSettlementResultState;
+  if (resultState !== "none" && resultState !== "live" && resultState !== "released") {
+    errors.push("Runtime lastSettlementResultState is invalid.");
+  }
+  const resultBearingSettlement =
+    isPlainRecord(settlement) &&
+    settlement.actionKind === "interaction" &&
+    settlement.interactionKind !== "button";
+  if (
+    (resultBearingSettlement && resultState === "none") ||
+    (!resultBearingSettlement && resultState !== "none")
+  ) {
+    errors.push("Runtime settlement-result lifecycle does not match lastSettlement.");
+  }
+  if (resultState === "live" && action !== null) {
+    errors.push("Runtime cannot retain a live interaction result while another foreground action is active.");
+  }
   if (
     isPlainRecord(action) &&
     isPlainRecord(settlement) &&
@@ -2142,8 +2162,8 @@ function validSettlementKindData(
   if (!hasExactKeys(settlement, [
     "actionId", "actionKind", "interactionKind", "settlementKind",
     "owningInstruction", "continuationInstruction", "ownerCallFrameId",
-    "destinationTemporary", "requestEventSequence", "transcriptEventSequence",
-    "completionEventSequence", "result",
+    "destinationTemporary", "requestEventSequence",
+    "transcriptEventSequence", "completionEventSequence", "result",
     "transcriptText",
   ])) return false;
   if (!["button", "text", "number", "choice"].includes(String(settlement.interactionKind)) || typeof settlement.transcriptText !== "string" || !interactionStringFits(settlement.transcriptText) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.transcriptEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.transcriptEventSequence || settlement.transcriptEventSequence >= settlement.completionEventSequence) return false;
@@ -2160,17 +2180,22 @@ function validSettlementKindData(
     resultValid = (typeof settlement.result === "string" && interactionStringFits(settlement.result)) || validNumberResult;
   } else resultValid = typeof settlement.result === "string" && interactionStringFits(settlement.result);
   if (!resultValid) return false;
-  const settlementDestinationValid = settlement.interactionKind === "button"
-    ? settlement.destinationTemporary === null
-    : positiveSafeInteger(settlement.destinationTemporary);
-  if (
-    !settlementDestinationValid ||
-    (settlement.ownerCallFrameId !== null &&
-      !positiveSafeInteger(settlement.ownerCallFrameId))
+
+  const resultBearing = settlement.interactionKind !== "button";
+  const resultState = snapshot.lastSettlementResultState;
+  if (resultBearing) {
+    if (
+      !positiveSafeInteger(settlement.destinationTemporary) ||
+      (resultState !== "live" && resultState !== "released")
+    ) return false;
+  } else if (
+    settlement.destinationTemporary !== null ||
+    resultState !== "none"
   ) return false;
   if (
     settlement.ownerCallFrameId !== null &&
-    (!positiveSafeInteger(snapshot.nextCallFrameId) ||
+    (!positiveSafeInteger(settlement.ownerCallFrameId) ||
+      !positiveSafeInteger(snapshot.nextCallFrameId) ||
       settlement.ownerCallFrameId >= snapshot.nextCallFrameId)
   ) return false;
   if (
@@ -2186,34 +2211,30 @@ function validSettlementKindData(
     const parsed = Number(settlement.transcriptText);
     if (!Number.isFinite(parsed) || (Object.is(parsed, -0) ? 0 : parsed) !== settlement.result) return false;
   }
-  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
-  const instruction = plan.instructions[settlement.owningInstruction];
-  if (instruction?.kind !== "interaction" || instruction.interactionKind !== settlement.interactionKind) return false;
-  if (
-    settlement.destinationTemporary !== instruction.destinationTemporary ||
-    !validInteractionSettlementOwner(settlement, snapshot, analysis)
-  ) return false;
-  const liveTemporaries = interactionSettlementLiveTemporaries(
-    settlement,
-    snapshot,
-    instruction.destinationTemporary,
-    analysis,
-  );
-  if (liveTemporaries !== null) {
-    const destination = liveTemporaries.find((temporary) =>
-      isPlainRecord(temporary) &&
-      temporary.id === instruction.destinationTemporary
+
+  if (resultState === "live") {
+    const temporaries = interactionSettlementOwnerTemporaries(settlement, snapshot);
+    if (temporaries === null) return false;
+    const destination = temporaries.find((temporary) =>
+      isPlainRecord(temporary) && temporary.id === settlement.destinationTemporary
     );
     if (
       !isPlainRecord(destination) ||
       !sameCanonicalSettlementResult(destination.value, settlement.result)
     ) return false;
   }
+
+  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  const instruction = plan.instructions[settlement.owningInstruction];
+  if (instruction?.kind !== "interaction" || instruction.interactionKind !== settlement.interactionKind) return false;
+  if (
+    settlement.destinationTemporary !== instruction.destinationTemporary ||
+    !validInteractionSettlementOwner(settlement, snapshot, analysis) ||
+    !validInteractionSettlementDestinationState(settlement, snapshot, analysis)
+  ) return false;
   if (instruction.ui.kind === "button") return settlement.transcriptText === instruction.ui.buttonLabel;
   if (instruction.ui.kind === "text") return settlement.result === settlement.transcriptText;
-  if (instruction.ui.kind === "number") {
-    return true;
-  }
+  if (instruction.ui.kind === "number") return true;
   if (instruction.ui.kind !== "choice") return false;
   return instruction.ui.options.some((option) => option.text === settlement.transcriptText && (option.label ?? option.text) === settlement.result);
 }
@@ -2235,113 +2256,136 @@ function validInteractionSettlementOwner(
   const activeOwner = callFrames.find((frame) =>
     isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId
   );
+  if (snapshot.lastSettlementResultState === "live" && activeOwner === undefined) return false;
   return activeOwner === undefined ||
     (isPlainRecord(activeOwner) && activeOwner.functionId === ownerFunctionId);
 }
 
-function interactionSettlementLiveTemporaries(
+function interactionSettlementOwnerTemporaries(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  destinationTemporary: number | null,
-  analysis: SnapshotValidationAnalysis | undefined,
 ): readonly unknown[] | null {
-  if (
-    destinationTemporary === null ||
-    analysis === undefined ||
-    !nonNegativeSafeInteger(settlement.owningInstruction) ||
-    !nonNegativeSafeInteger(settlement.continuationInstruction)
-  ) return null;
-
-  const owningInstruction = settlement.owningInstruction;
-  const continuationInstruction = settlement.continuationInstruction;
-  const ownerFunctionId = analysis.functionIdsByInstruction[owningInstruction] ?? null;
   const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
-  let temporaries: readonly unknown[];
-  let currentInstruction: number;
-
   if (settlement.ownerCallFrameId === null) {
-    if (ownerFunctionId !== null) return null;
     if (callFrames.length === 0) {
-      if (!Array.isArray(snapshot.temporaries) || !nonNegativeSafeInteger(snapshot.nextInstruction)) return null;
-      temporaries = snapshot.temporaries;
-      currentInstruction = snapshot.nextInstruction;
-    } else {
-      const first = callFrames[0];
-      if (
-        !isPlainRecord(first) ||
-        !Array.isArray(first.callerTemporaries) ||
-        !nonNegativeSafeInteger(first.returnInstruction)
-      ) return null;
-      temporaries = first.callerTemporaries;
-      currentInstruction = first.returnInstruction - 1;
+      return Array.isArray(snapshot.temporaries) ? snapshot.temporaries : null;
     }
-  } else {
-    if (!positiveSafeInteger(settlement.ownerCallFrameId) || ownerFunctionId === null) return null;
-    const ownerIndex = callFrames.findIndex((frame) =>
-      isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId
-    );
-    if (ownerIndex < 0) return null;
-    const owner = callFrames[ownerIndex];
-    if (!isPlainRecord(owner) || owner.functionId !== ownerFunctionId) return null;
-    if (ownerIndex === callFrames.length - 1) {
-      if (!Array.isArray(snapshot.temporaries) || !nonNegativeSafeInteger(snapshot.nextInstruction)) return null;
-      temporaries = snapshot.temporaries;
-      currentInstruction = snapshot.nextInstruction;
-    } else {
-      const child = callFrames[ownerIndex + 1];
-      if (
-        !isPlainRecord(child) ||
-        !Array.isArray(child.callerTemporaries) ||
-        !nonNegativeSafeInteger(child.returnInstruction)
-      ) return null;
-      temporaries = child.callerTemporaries;
-      currentInstruction = child.returnInstruction - 1;
-    }
+    const first = callFrames[0];
+    return isPlainRecord(first) && Array.isArray(first.callerTemporaries)
+      ? first.callerTemporaries
+      : null;
   }
-
-  if (!interactionSettlementResultMustRemainLive(
-    owningInstruction,
-    continuationInstruction,
-    currentInstruction,
-    destinationTemporary,
-    analysis,
-  )) return null;
-  return temporaries;
+  if (!positiveSafeInteger(settlement.ownerCallFrameId)) return null;
+  const ownerIndex = callFrames.findIndex((frame) =>
+    isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId
+  );
+  if (ownerIndex < 0) return null;
+  if (ownerIndex === callFrames.length - 1) {
+    return Array.isArray(snapshot.temporaries) ? snapshot.temporaries : null;
+  }
+  const child = callFrames[ownerIndex + 1];
+  return isPlainRecord(child) && Array.isArray(child.callerTemporaries)
+    ? child.callerTemporaries
+    : null;
 }
 
-function interactionSettlementResultMustRemainLive(
+function validInteractionSettlementDestinationState(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  analysis: SnapshotValidationAnalysis | undefined,
+): boolean {
+  const resultState = snapshot.lastSettlementResultState;
+  if (resultState === "none") return true;
+  if (
+    analysis === undefined ||
+    !nonNegativeSafeInteger(settlement.owningInstruction) ||
+    !nonNegativeSafeInteger(settlement.continuationInstruction) ||
+    !positiveSafeInteger(settlement.destinationTemporary)
+  ) return true;
+
+  const context = interactionSettlementOwnerContext(settlement, snapshot);
+  if (context === null) {
+    return resultState === "released";
+  }
+  if (snapshot.status === "halted") {
+    return resultState === "released";
+  }
+  const possible = interactionSettlementDestinationStatesAtCurrent(
+    settlement.owningInstruction,
+    settlement.continuationInstruction,
+    context.currentInstruction,
+    settlement.destinationTemporary,
+    analysis,
+  );
+  if (possible === null) return false;
+  return resultState === "live"
+    ? possible.live
+    : possible.released;
+}
+
+function interactionSettlementOwnerContext(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): { readonly currentInstruction: number } | null {
+  const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
+  if (settlement.ownerCallFrameId === null) {
+    if (callFrames.length === 0) {
+      return nonNegativeSafeInteger(snapshot.nextInstruction)
+        ? { currentInstruction: snapshot.nextInstruction }
+        : null;
+    }
+    const first = callFrames[0];
+    return isPlainRecord(first) && nonNegativeSafeInteger(first.returnInstruction)
+      ? { currentInstruction: first.returnInstruction - 1 }
+      : null;
+  }
+  if (!positiveSafeInteger(settlement.ownerCallFrameId)) return null;
+  const ownerIndex = callFrames.findIndex((frame) =>
+    isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId
+  );
+  if (ownerIndex < 0) return null;
+  if (ownerIndex === callFrames.length - 1) {
+    return nonNegativeSafeInteger(snapshot.nextInstruction)
+      ? { currentInstruction: snapshot.nextInstruction }
+      : null;
+  }
+  const child = callFrames[ownerIndex + 1];
+  return isPlainRecord(child) && nonNegativeSafeInteger(child.returnInstruction)
+    ? { currentInstruction: child.returnInstruction - 1 }
+    : null;
+}
+
+function interactionSettlementDestinationStatesAtCurrent(
   owningInstruction: number,
   continuationInstruction: number,
   currentInstruction: number,
   destinationTemporary: number,
   analysis: SnapshotValidationAnalysis,
-): boolean {
+): { readonly live: boolean; readonly released: boolean } | null {
   const ownerFunctionId = analysis.functionIdsByInstruction[owningInstruction] ?? null;
-  const currentFunctionId = analysis.functionIdsByInstruction[currentInstruction] ?? null;
-  if (ownerFunctionId !== currentFunctionId) return false;
-
   const regionEnd = analysis.regionEnds[owningInstruction];
   if (
     regionEnd === undefined ||
     continuationInstruction > regionEnd ||
     currentInstruction < 0 ||
     currentInstruction > regionEnd
-  ) return false;
-  if (currentInstruction === continuationInstruction) return true;
+  ) return null;
 
-  const pending: Array<{ readonly instruction: number; readonly preserved: boolean }> = [
-    { instruction: continuationInstruction, preserved: true },
+  const pending: Array<{ readonly instruction: number; readonly live: boolean }> = [
+    { instruction: continuationInstruction, live: true },
   ];
   const visited = new Set<string>();
-  const reached: boolean[] = [];
+  let mayLive = false;
+  let mayReleased = false;
   while (pending.length > 0) {
-    if (!consumeDetailedValidationWork(analysis)) return false;
+    if (!consumeDetailedValidationWork(analysis)) return null;
     const current = pending.pop()!;
-    const key = `${current.instruction}:${current.preserved ? 1 : 0}`;
+    const key = `${current.instruction}:${current.live ? 1 : 0}`;
     if (visited.has(key)) continue;
     visited.add(key);
     if (current.instruction === currentInstruction) {
-      reached.push(current.preserved);
+      if (current.live) mayLive = true;
+      else mayReleased = true;
       continue;
     }
     if (
@@ -2351,13 +2395,15 @@ function interactionSettlementResultMustRemainLive(
     ) continue;
     const instruction = analysis.plan.instructions[current.instruction];
     if (instruction === undefined) continue;
-    const preserved = current.preserved &&
+    const live = current.live &&
       !instructionKilledTemporaries(instruction).has(destinationTemporary);
     for (const successor of instructionSuccessors(analysis, current.instruction)) {
-      pending.push({ instruction: successor, preserved });
+      pending.push({ instruction: successor, live });
     }
   }
-  return reached.length > 0 && reached.every(Boolean);
+  return mayLive || mayReleased
+    ? { live: mayLive, released: mayReleased }
+    : null;
 }
 
 function validSettlementChronology(

@@ -1085,7 +1085,7 @@ test("interaction settlement provenance survives unrelated instructions until cl
   assert.throws(() => createCheckpoint(functionPlan, forgedFunction));
 
   const suspendedBase = compileSource(
-    "function nested { wait 1\nreturn }\nwait 1\nnested()\nexit",
+    "function nested { say \"nested\"\nreturn }\nwait 1\nnested()\nexit",
   ).plan!;
   const suspendedDestination = suspendedBase.temporaryCount + 1;
   const suspendedPlan: InstructionPlan = {
@@ -1113,11 +1113,12 @@ test("interaction settlement provenance survives unrelated instructions until cl
     interactionKind: "text",
     payload: { kind: "submittedText", submittedText: "caller answer" },
   });
-  const nestedWaiting = run(suspendedPlan, suspendedCompleted.snapshot);
-  assert.equal(nestedWaiting.snapshot.status, "waiting");
-  assert.equal(nestedWaiting.snapshot.foregroundAction?.kind, "delay");
-  assert.equal(validateRuntimeSnapshot(nestedWaiting.snapshot, suspendedPlan).valid, true);
-  const forgedCaller = structuredClone(nestedWaiting.snapshot);
+  const nestedEvent = stepToEvent(suspendedPlan, suspendedCompleted.snapshot);
+  assert.equal(nestedEvent.snapshot.status, "running");
+  assert.deepEqual(nestedEvent.events.map((event) => event.kind), ["say"]);
+  assert.equal(nestedEvent.snapshot.foregroundAction, null);
+  assert.equal(validateRuntimeSnapshot(nestedEvent.snapshot, suspendedPlan).valid, true);
+  const forgedCaller = structuredClone(nestedEvent.snapshot);
   const callerTemporary = forgedCaller.callFrames[0]!.callerTemporaries.find(
     (temporary) => temporary.id === suspendedDestination,
   );
@@ -1132,6 +1133,49 @@ test("interaction settlement provenance survives unrelated instructions until cl
     (forgedOwner.lastSettlement as any).ownerCallFrameId = null;
   }
   assert.equal(validateRuntimeSnapshot(forgedOwner, functionPlan).valid, false);
+
+  const historicalBase = buttonPlanFromSource(
+    "function noop { return }\nfunction prompt { wait 1\nsay \"between\"\nreturn }\nnoop()\nprompt()\nexit",
+  );
+  const historicalInteractionIndex = historicalBase.instructions.findIndex(
+    (candidate) => candidate.kind === "interaction",
+  );
+  const historicalDestination = historicalBase.temporaryCount + 1;
+  const historicalPlan: InstructionPlan = {
+    ...historicalBase,
+    temporaryCount: historicalDestination,
+    instructions: historicalBase.instructions.map((candidate, index) =>
+      index === historicalInteractionIndex
+        ? {
+            ...interaction,
+            destinationTemporary: historicalDestination,
+            span: candidate.span,
+          }
+        : candidate
+    ),
+  };
+  assert.equal(
+    validateInstructionPlan(historicalPlan).valid,
+    true,
+    JSON.stringify(validateInstructionPlan(historicalPlan).errors),
+  );
+  const historicalPending = waiting(historicalPlan);
+  assert.equal(historicalPending.snapshot.foregroundAction?.ownerCallFrameId, 2);
+  const historicalCompleted = completeAction(historicalPlan, historicalPending.snapshot, {
+    actionId: historicalPending.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "second invocation" },
+  });
+  const historicalAfterSay = stepToEvent(historicalPlan, historicalCompleted.snapshot);
+  const forgedHistoricalOwner = structuredClone(historicalAfterSay.snapshot);
+  if (forgedHistoricalOwner.lastSettlement?.actionKind === "interaction") {
+    (forgedHistoricalOwner.lastSettlement as any).ownerCallFrameId = 1;
+  }
+  assert.equal(
+    validateRuntimeSnapshot(forgedHistoricalOwner, historicalPlan).valid,
+    false,
+  );
 
   const clearAndReusePlan: InstructionPlan = {
     ...base,
@@ -1165,6 +1209,10 @@ test("interaction settlement provenance survives unrelated instructions until cl
   });
   const afterReuse = stepToEvent(clearAndReusePlan, reuseCompleted.snapshot);
   assert.equal(afterReuse.snapshot.temporaries[0]?.value, "replacement");
+  assert.equal(afterReuse.snapshot.lastSettlement?.actionKind, "interaction");
+  if (afterReuse.snapshot.lastSettlement?.actionKind === "interaction") {
+    assert.equal(afterReuse.snapshot.lastSettlementResultState, "released");
+  }
   assert.equal(validateRuntimeSnapshot(afterReuse.snapshot, clearAndReusePlan).valid, true);
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(clearAndReusePlan, afterReuse.snapshot)),
@@ -1226,4 +1274,126 @@ test("interaction control-flow validation is charged and fails before quadratic 
     return finish();
   });
   assert.ok((cappedStats.counts.interactionControlFlowSteps ?? 0) <= 121);
+});
+
+test("interaction destination analysis ignores unreachable producers", () => {
+  const base = interactionPlan("text", {
+    kind: "text",
+    hint: null,
+    accessibleName: defaults.text,
+  });
+  const span = base.instructions[0]!.span;
+  const plan: InstructionPlan = {
+    ...base,
+    temporaryCount: 1,
+    rootEndInstruction: 5,
+    instructions: [
+      { kind: "jump", target: 2, span },
+      {
+        kind: "storeTemporary",
+        temporaryId: 1,
+        value: { kind: "literal", value: "unreachable", span },
+        expectBoolean: false,
+        span,
+      },
+      base.instructions[0]!,
+      { kind: "clearTemporary", temporaryId: 1, span },
+      base.instructions[1]!,
+    ],
+  };
+  assert.equal(
+    validateInstructionPlan(plan).valid,
+    true,
+    JSON.stringify(validateInstructionPlan(plan).errors),
+  );
+  const pending = run(plan, createFreshRuntimeSnapshot(plan));
+  assert.equal(pending.snapshot.status, "waiting");
+  assert.equal(pending.snapshot.foregroundAction?.kind, "interaction");
+  assert.deepEqual(pending.snapshot.temporaries, []);
+});
+
+test("interaction result provenance cannot become ambiguous at a control-flow merge", () => {
+  const base = interactionPlan("text", {
+    kind: "text",
+    hint: null,
+    accessibleName: defaults.text,
+  });
+  const interaction = base.instructions[0]!;
+  const exit = base.instructions[1]!;
+  const span = interaction.span;
+  const ambiguous: InstructionPlan = {
+    ...base,
+    rootEndInstruction: 10,
+    instructions: [
+      interaction,
+      {
+        kind: "jumpIfFalse",
+        condition: { kind: "literal", value: true, span },
+        target: 4,
+        span,
+      },
+      {
+        kind: "say",
+        speaker: null,
+        value: { kind: "literal", value: "preserve", span },
+        span,
+      },
+      { kind: "jump", target: 6, span },
+      { kind: "clearTemporary", temporaryId: 1, span },
+      {
+        kind: "storeTemporary",
+        temporaryId: 1,
+        value: { kind: "literal", value: "replacement", span },
+        expectBoolean: false,
+        span,
+      },
+      {
+        kind: "say",
+        speaker: null,
+        value: { kind: "literal", value: "join", span },
+        span,
+      },
+      {
+        kind: "evaluate",
+        expression: { kind: "temporary", temporaryId: 1, span },
+        span,
+      },
+      { kind: "clearTemporary", temporaryId: 1, span },
+      exit,
+    ],
+  };
+  const ambiguousValidation = validateInstructionPlan(ambiguous);
+  assert.equal(ambiguousValidation.valid, false);
+  assert.ok(ambiguousValidation.errors.some((error) =>
+    error.message.includes("clear its destination")
+  ));
+
+  const uniform: InstructionPlan = {
+    ...base,
+    rootEndInstruction: 7,
+    instructions: [
+      interaction,
+      {
+        kind: "jumpIfFalse",
+        condition: { kind: "literal", value: true, span },
+        target: 4,
+        span,
+      },
+      { kind: "clearTemporary", temporaryId: 1, span },
+      { kind: "jump", target: 5, span },
+      { kind: "clearTemporary", temporaryId: 1, span },
+      {
+        kind: "say",
+        speaker: null,
+        value: { kind: "literal", value: "join", span },
+        span,
+      },
+      exit,
+    ],
+  };
+  assert.equal(
+    validateInstructionPlan(uniform).valid,
+    true,
+    JSON.stringify(validateInstructionPlan(uniform).errors),
+  );
 });
