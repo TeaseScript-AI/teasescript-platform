@@ -60,6 +60,12 @@ export function createPublicLibraryMetadata(
 
   const exports: PublicExportMetadata[] = [];
   for (const statement of sourceFile.statements) {
+    if (ts.isExportDeclaration(statement)) {
+      throw new LibraryMetadataError(
+        "unsupportedExport",
+        "Export lists and re-exports are not supported in this POC.",
+      );
+    }
     if (!hasExportModifier(statement)) continue;
     if (ts.isFunctionDeclaration(statement) && statement.name !== undefined) {
       assertSupportedFunction(statement);
