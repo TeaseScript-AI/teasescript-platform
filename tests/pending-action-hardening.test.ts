@@ -14,8 +14,14 @@ import {
   MAX_RUNTIME_SESSION_TIME_MS,
   createFreshRuntimeSnapshot,
   validateRuntimeSnapshot,
+  type RuntimeDelayActionSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+
+function delayAction(snapshot: RuntimeSnapshot): RuntimeDelayActionSnapshot {
+  assert.equal(snapshot.foregroundAction?.kind, "delay");
+  return snapshot.foregroundAction as RuntimeDelayActionSnapshot;
+}
 
 function plan(source: string) {
   const compiled = compileSource(source);
@@ -231,8 +237,8 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
   for (const [source, expected] of conversions) {
     const compiled = plan(`${source}\nexit`);
     const result = run(compiled, createFreshRuntimeSnapshot(compiled));
-    assert.equal(result.snapshot.foregroundAction!.deadlineMs, expected, source);
-    assert.ok(result.snapshot.foregroundAction!.deadlineMs > result.snapshot.foregroundAction!.createdAtMs, source);
+    assert.equal(delayAction(result.snapshot).deadlineMs, expected, source);
+    assert.ok(delayAction(result.snapshot).deadlineMs > delayAction(result.snapshot).createdAtMs, source);
   }
 
   for (const source of [
@@ -251,17 +257,17 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
 
   const sequential = plan("wait 0.1 ms\nwait 0.2 ms\nexit");
   const first = run(sequential, createFreshRuntimeSnapshot(sequential));
-  assert.equal(first.snapshot.foregroundAction!.deadlineMs, 0.1);
+  assert.equal(delayAction(first.snapshot).deadlineMs, 0.1);
   const afterFirst = observeTime(sequential, first.snapshot, 0.1);
   const second = run(sequential, afterFirst.snapshot);
   assert.equal(second.snapshot.status, "waiting");
-  assert.equal(second.snapshot.foregroundAction!.createdAtMs, 0.1);
-  assert.ok(second.snapshot.foregroundAction!.deadlineMs > 0.1);
+  assert.equal(delayAction(second.snapshot).createdAtMs, 0.1);
+  assert.ok(delayAction(second.snapshot).deadlineMs > 0.1);
 
   const largestFractional = plan("wait 0.5 ms\nexit");
   const start = 2 ** 52 - 0.5;
   const pending = run(largestFractional, createFreshRuntimeSnapshot(largestFractional, { initialSessionTimeMs: start }));
-  assert.equal(pending.snapshot.foregroundAction!.deadlineMs, 2 ** 52);
+  assert.equal(delayAction(pending.snapshot).deadlineMs, 2 ** 52);
   const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(largestFractional, pending.snapshot)));
   assert.equal(observeTime(restored.plan, restored.snapshot, 2 ** 52).snapshot.status, "running");
 });

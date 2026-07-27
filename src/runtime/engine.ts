@@ -7,6 +7,7 @@ import type {
 } from "../instructions.js";
 import { captureInstructionPlan } from "../instructions.js";
 import { captureExternalData } from "../external-data-limits.js";
+import { interactionStringFits } from "../interaction-limits.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -21,6 +22,7 @@ import type {
   ExitEvent,
   InterpreterEvent,
   OutputSpeaker,
+  PlayerTranscriptEvent,
   RuntimeFailureEvent,
   SayEvent,
 } from "./events.js";
@@ -50,6 +52,7 @@ import {
   cloneCapturedRuntimeSnapshot,
   MAX_RUNTIME_SESSION_TIME_MS,
   type RuntimeActionSettlementSnapshot,
+  type RuntimeInteractionActionSnapshot,
   type RuntimeBindingSnapshot,
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
@@ -95,7 +98,7 @@ export type ActionCompletionOutcome =
   | { readonly kind: "alreadySettled"; readonly settlement: RuntimeActionSettlementSnapshot }
   | { readonly kind: "staleAction"; readonly actionId: number }
   | { readonly kind: "unknownAction"; readonly actionId: number }
-  | { readonly kind: "wrongActionKind"; readonly actionId: number; readonly expectedActionKind: "delay"; readonly receivedActionKind: string }
+  | { readonly kind: "wrongActionKind"; readonly actionId: number; readonly expectedActionKind: "delay" | "interaction"; readonly receivedActionKind: string }
   | { readonly kind: "invalidPayload"; readonly message: string }
   | { readonly kind: "notDue"; readonly actionId: number; readonly currentSessionTimeMs: number; readonly deadlineMs: number };
 
@@ -245,7 +248,7 @@ export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, su
   if (!validSessionTime(suppliedNowMs)) return pendingResult(current, [], { kind: "invalidObservation", message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.` });
   current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, suppliedNowMs);
   const action = current.foregroundAction;
-  if (action === null || current.currentSessionTimeMs < action.deadlineMs) {
+  if (action === null || action.kind !== "delay" || current.currentSessionTimeMs < action.deadlineMs) {
     return pendingResult(current, [], { kind: "observed", currentSessionTimeMs: current.currentSessionTimeMs, completion: null });
   }
   const completionSequence = takeSequence(current);
@@ -279,13 +282,92 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
     if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: { ...current.lastSettlement } });
     return pendingResult(current, [], actionId < current.nextActionId ? { kind: "staleAction", actionId } : { kind: "unknownAction", actionId });
   }
-  if (value.actionKind !== "delay") return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: "delay", receivedActionKind: typeof value.actionKind === "string" ? value.actionKind : "<invalid>" });
+  if (value.actionKind !== active.kind) return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: active.kind, receivedActionKind: typeof value.actionKind === "string" ? value.actionKind : "<invalid>" });
+  if (active.kind === "interaction") return completeInteraction(captured.plan, current, active, value);
   if (!isPlainRecord(value.payload) || value.payload.kind !== "time" || !validSessionTime(value.payload.currentSessionTimeMs)) return pendingResult(current, [], { kind: "invalidPayload", message: "Delay completion payload must contain a valid time observation." });
   const effectiveNow = Math.max(current.currentSessionTimeMs, value.payload.currentSessionTimeMs);
   if (effectiveNow < active.deadlineMs) return pendingResult(current, [], { kind: "notDue", actionId, currentSessionTimeMs: current.currentSessionTimeMs, deadlineMs: active.deadlineMs });
   const observed = observeTime(captured.plan, current, effectiveNow);
   if (observed.outcome.kind !== "observed" || observed.outcome.completion === null) throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
   return Object.freeze({ ...observed, outcome: { kind: "completed" as const, settlement: observed.outcome.completion } });
+}
+
+function completeInteraction(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  action: RuntimeInteractionActionSnapshot,
+  request: Record<string, unknown>,
+): PendingActionOperationResult<ActionCompletionOutcome> {
+  if (request.interactionKind !== action.interactionKind) return pendingResult(current, [], { kind: "wrongActionKind", actionId: action.actionId, expectedActionKind: "interaction", receivedActionKind: typeof request.interactionKind === "string" ? `interaction:${request.interactionKind}` : "<invalid>" });
+  const resolved = resolveInteractionCompletion(action, request.payload);
+  if (!resolved.ok) return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
+  if (action.destinationTemporary !== null && resolved.result !== null) setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
+  const transcriptSequence = takeSequence(current);
+  const completionSequence = takeSequence(current);
+  const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: action.interactionKind,
+    settlementKind: "completed",
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    requestEventSequence: action.requestEventSequence,
+    transcriptEventSequence: transcriptSequence,
+    completionEventSequence: completionSequence,
+    result: resolved.result,
+    transcriptText: resolved.transcriptText,
+  });
+  current.foregroundAction = null;
+  current.lastSettlement = settlement;
+  current.status = "running";
+  current.nextInstruction = action.continuationInstruction;
+  const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
+  const events: InterpreterEvent[] = [
+    Object.freeze({ kind: "playerTranscript", sequence: transcriptSequence, target: action.target, requestingSpeakerId: action.speakerId, text: resolved.transcriptText, span: copySpan(span) } satisfies PlayerTranscriptEvent),
+    Object.freeze({ kind: "actionCompleted", sequence: completionSequence, settlement, span: copySpan(span) } satisfies ActionCompletedEvent),
+  ];
+  return pendingResult(current, events, { kind: "completed", settlement });
+}
+
+type ResolvedInteraction = { readonly ok: true; readonly result: string | number | null; readonly transcriptText: string } | { readonly ok: false; readonly message: string };
+
+function resolveInteractionCompletion(action: RuntimeInteractionActionSnapshot, payload: unknown): ResolvedInteraction {
+  if (!isPlainRecord(payload)) return { ok: false, message: "Interaction completion payload must be an object." };
+  if (action.interactionKind === "button") {
+    return payload.kind === "activate" && action.ui.kind === "button"
+      ? { ok: true, result: null, transcriptText: action.ui.buttonLabel }
+      : { ok: false, message: "Button completion requires activation only." };
+  }
+  if (action.interactionKind === "text") {
+    if (payload.kind !== "submittedText" || typeof payload.submittedText !== "string" || !interactionStringFits(payload.submittedText)) return { ok: false, message: "Text completion requires submitted text within the shared UTF-8 byte limit." };
+    const normalized = payload.submittedText.replace(/\r\n?/gu, "\n");
+    if (!interactionStringFits(normalized) || /^\s*$/u.test(normalized)) return { ok: false, message: "Text completion must contain a non-whitespace character." };
+    return { ok: true, result: normalized, transcriptText: normalized };
+  }
+  if (action.interactionKind === "number") {
+    if (payload.kind !== "submittedText" || typeof payload.submittedText !== "string" || !interactionStringFits(payload.submittedText) || /[\r\n]/u.test(payload.submittedText)) return { ok: false, message: "Number completion requires one line of text within the shared UTF-8 byte limit." };
+    const submitted = payload.submittedText.trim();
+    if (!/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/u.test(submitted)) return { ok: false, message: "Number completion is not an accepted decimal or scientific number." };
+    const parsed = Number(submitted);
+    if (!Number.isFinite(parsed)) return { ok: false, message: "Number completion must be finite." };
+    return { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted };
+  }
+  if (action.ui.kind !== "choice") return { ok: false, message: "Choice action payload is malformed." };
+  let matches: readonly { readonly text: string; readonly label: string | number | null }[] = [];
+  if (payload.kind === "submittedText" && typeof payload.submittedText === "string" && interactionStringFits(payload.submittedText)) {
+    matches = action.ui.options.filter((option) => option.text === payload.submittedText);
+    if (matches.length !== 1) return { ok: false, message: matches.length === 0 ? "Choice text is not available." : "Choice text is ambiguous; select a labelled control." };
+  } else if (payload.kind === "selectedLabel" && action.ui.labelType !== "none" && (typeof payload.selectedLabel === "string" || typeof payload.selectedLabel === "number")) {
+    if (typeof payload.selectedLabel === "string" && !interactionStringFits(payload.selectedLabel)) return { ok: false, message: "Choice label exceeds the shared UTF-8 byte limit." };
+    matches = action.ui.options.filter((option) => option.label === payload.selectedLabel);
+  } else if (payload.kind === "selectedText" && action.ui.labelType === "none" && typeof payload.selectedText === "string" && interactionStringFits(payload.selectedText)) {
+    matches = action.ui.options.filter((option) => option.text === payload.selectedText);
+  } else {
+    return { ok: false, message: "Choice completion payload does not match the choice domain." };
+  }
+  if (matches.length !== 1) return { ok: false, message: "Choice selection is not available." };
+  const selected = matches[0]!;
+  return { ok: true, result: selected.label ?? selected.text, transcriptText: selected.text };
 }
 
 function executePlannedInstruction(
@@ -500,6 +582,36 @@ function executePlannedInstruction(
       snapshot.foregroundAction = action;
       snapshot.status = "waiting";
       events.push(Object.freeze({ kind: "actionRequested", sequence, action: { ...action }, span: copySpan(instruction.span) } satisfies ActionRequestedEvent));
+      return;
+    }
+    case "interaction": {
+      if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      const speaker = instruction.speaker !== null
+        ? evaluator.speakerByName(instruction.speaker, instruction.span)
+        : snapshot.defaultSpeaker === null
+          ? null
+          : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
+      const sequence = takeSequence(snapshot);
+      const action: RuntimeInteractionActionSnapshot = Object.freeze({
+        kind: "interaction",
+        interactionKind: instruction.interactionKind,
+        actionId: snapshot.nextActionId,
+        owningInstruction: snapshot.nextInstruction,
+        continuationInstruction: snapshot.nextInstruction + 1,
+        ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null,
+        scopeDepth: snapshot.frames.length,
+        loopDepth: snapshot.loopFrames.length,
+        destinationTemporary: instruction.destinationTemporary,
+        expectedResult: instruction.expectedResult,
+        target: instruction.target,
+        speakerId: speaker?.id ?? null,
+        ui: cloneInteractionUi(instruction.ui),
+        requestEventSequence: sequence,
+      });
+      snapshot.nextActionId += 1;
+      snapshot.foregroundAction = action;
+      snapshot.status = "waiting";
+      events.push(Object.freeze({ kind: "actionRequested", sequence, action: cloneInteractionAction(action), span: copySpan(instruction.span) } satisfies ActionRequestedEvent));
       return;
     }
     case "exit":
@@ -2284,6 +2396,16 @@ function cloneTemporary(
     id: temporary.id,
     value: cloneSerializableValue(temporary.value),
   };
+}
+
+function cloneInteractionUi(ui: RuntimeInteractionActionSnapshot["ui"]): RuntimeInteractionActionSnapshot["ui"] {
+  const accessibleName = { ...ui.accessibleName };
+  if (ui.kind === "choice") return { ...ui, accessibleName, options: ui.options.map((option) => ({ ...option })) };
+  return { ...ui, accessibleName };
+}
+
+function cloneInteractionAction(action: RuntimeInteractionActionSnapshot): RuntimeInteractionActionSnapshot {
+  return { ...action, ui: cloneInteractionUi(action.ui) };
 }
 
 function currentCallFrameId(snapshot: RuntimeSnapshot): number | null {

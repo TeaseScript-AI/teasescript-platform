@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import {
+  INSTRUCTION_PLAN_VERSION,
   validateInstructionPlan,
   type InstructionPlan,
 } from "../src/instructions.js";
@@ -168,7 +169,7 @@ test("rejects old formats and malformed serialized loop state", () => {
   assertCheckpointRejected(checkpoint, "TSK001");
   checkpointPlan.version = 2;
   assertCheckpointRejected(checkpoint, "TSK001");
-  checkpointPlan.version = 4;
+  checkpointPlan.version = INSTRUCTION_PLAN_VERSION;
   const loops = snapshot.loopFrames as Array<Record<string, unknown>>;
   loops[0]!.position = 99;
   assertCheckpointRejected(checkpoint, "TSK002");

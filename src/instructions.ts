@@ -19,9 +19,15 @@ import {
 } from "./external-data-limits.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { recordValidationTestWork } from "./runtime/validation-testing.js";
+import {
+  interactionUtf8ByteLength,
+  MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
+  MAX_INTERACTION_OPTION_ENTRIES,
+  MAX_INTERACTION_STRING_UTF8_BYTES,
+} from "./interaction-limits.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 4;
+export const INSTRUCTION_PLAN_VERSION = 5;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
@@ -81,6 +87,7 @@ export type Instruction =
   | ReturnVoidInstruction
   | SayInstruction
   | WaitInstruction
+  | InteractionInstruction
   | ExitInstruction;
 
 interface InstructionBase {
@@ -266,6 +273,31 @@ export interface WaitInstruction extends InstructionBase {
   readonly kind: "wait";
   readonly duration: ExpressionPlan;
   readonly unit: "ms" | "s" | "min" | "h" | null;
+}
+
+export type InteractionKind = "button" | "text" | "number" | "choice";
+export type InteractionResultDomain = "none" | "string" | "number";
+export type InteractionAccessibleName =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "localizedDefault"; readonly key: "answer" | "number" | "chooseOption" | "continue" };
+export type InteractionChoiceOption =
+  | { readonly text: string; readonly label: null }
+  | { readonly text: string; readonly label: string }
+  | { readonly text: string; readonly label: number };
+export type InteractionUiPayload =
+  | { readonly kind: "button"; readonly buttonLabel: string; readonly accessibleName: InteractionAccessibleName }
+  | { readonly kind: "text" | "number"; readonly hint: string | null; readonly accessibleName: InteractionAccessibleName }
+  | { readonly kind: "choice"; readonly labelType: "none" | "identifier" | "number"; readonly options: readonly InteractionChoiceOption[]; readonly accessibleName: InteractionAccessibleName };
+
+/** Compiler/Standard-Library prepared foreground interaction. No source syntax is added by this slice. */
+export interface InteractionInstruction extends InstructionBase {
+  readonly kind: "interaction";
+  readonly interactionKind: InteractionKind;
+  readonly target: "standardChat";
+  readonly speaker: string | null;
+  readonly destinationTemporary: number | null;
+  readonly expectedResult: InteractionResultDomain;
+  readonly ui: InteractionUiPayload;
 }
 
 export interface ExitInstruction extends InstructionBase {
@@ -1855,9 +1887,89 @@ function validateInstruction(
       }
       validateExpression(value.duration, `${path}.duration`, errors, false, temporaryCount);
       return;
+    case "interaction":
+      validateInteractionInstruction(value, path, temporaryCount, errors);
+      return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));
   }
+}
+
+function validateInteractionInstruction(
+  value: Record<string, unknown>,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  const kind = value.interactionKind;
+  if (!["button", "text", "number", "choice"].includes(String(kind))) {
+    errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
+  }
+  if (value.target !== "standardChat") errors.push(planError("TSC002", "Interaction target is invalid.", `${path}.target`));
+  if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
+  const expected = kind === "button" ? "none" : kind === "number" ? "number" : "string";
+  if (value.expectedResult !== expected) errors.push(planError("TSC002", "Interaction result domain does not match its kind.", `${path}.expectedResult`));
+  if (kind === "button") {
+    if (value.destinationTemporary !== null) errors.push(planError("TSC002", "Button interaction must not have a result destination.", `${path}.destinationTemporary`));
+  } else {
+    validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+  }
+  if (!isRecord(value.ui) || value.ui.kind !== kind) {
+    errors.push(planError("TSC002", "Interaction UI payload does not match its kind.", `${path}.ui`));
+    return;
+  }
+  let aggregate = 0;
+  const countString = (candidate: unknown, fieldPath: string): candidate is string => {
+    if (typeof candidate !== "string") {
+      errors.push(planError("TSC002", "Interaction text must be a string.", fieldPath));
+      return false;
+    }
+    const bytes = interactionUtf8ByteLength(candidate);
+    if (bytes > MAX_INTERACTION_STRING_UTF8_BYTES) errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+    aggregate += bytes;
+    return true;
+  };
+  const accessible = value.ui.accessibleName;
+  if (!isRecord(accessible) || (accessible.kind !== "text" && accessible.kind !== "localizedDefault")) {
+    errors.push(planError("TSC002", "Interaction accessible name is invalid.", `${path}.ui.accessibleName`));
+  } else if (accessible.kind === "text") {
+    countString(accessible.text, `${path}.ui.accessibleName.text`);
+  } else {
+    const expectedKey = kind === "button" ? "continue" : kind === "number" ? "number" : kind === "choice" ? "chooseOption" : "answer";
+    if (accessible.key !== expectedKey) errors.push(planError("TSC002", "Interaction localized accessible-name key does not match its kind.", `${path}.ui.accessibleName.key`));
+  }
+  if (kind === "button") countString(value.ui.buttonLabel, `${path}.ui.buttonLabel`);
+  if (kind === "text" || kind === "number") {
+    if (value.ui.hint !== null) countString(value.ui.hint, `${path}.ui.hint`);
+  }
+  if (kind === "choice") {
+    const labelType = value.ui.labelType;
+    if (!["none", "identifier", "number"].includes(String(labelType))) errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.ui.labelType`));
+    if (!Array.isArray(value.ui.options) || value.ui.options.length === 0 || value.ui.options.length > MAX_INTERACTION_OPTION_ENTRIES) {
+      errors.push(planError("TSC002", "Choice options exceed the shared collection boundary or are empty.", `${path}.ui.options`));
+    } else {
+      const labels = new Set<string | number>();
+      const visible = new Set<string>();
+      for (let index = 0; index < value.ui.options.length; index += 1) {
+        const option = value.ui.options[index];
+        const optionPath = `${path}.ui.options[${index}]`;
+        if (!isRecord(option) || !countString(option.text, `${optionPath}.text`)) continue;
+        const label = option.label;
+        const validLabel = labelType === "none" ? label === null : labelType === "identifier" ? typeof label === "string" && label.length > 0 : typeof label === "number" && Number.isFinite(label);
+        if (!validLabel) errors.push(planError("TSC002", "Choice option label does not match the choice label type.", `${optionPath}.label`));
+        if (typeof label === "string") countString(label, `${optionPath}.label`);
+        if (validLabel && (typeof label === "string" || typeof label === "number")) {
+          if (labels.has(label)) errors.push(planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`));
+          labels.add(label);
+        }
+        if (labelType === "none") {
+          if (visible.has(option.text as string)) errors.push(planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`));
+          visible.add(option.text as string);
+        }
+      }
+    }
+  }
+  if (aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES) errors.push(planError("TSC002", "Interaction data exceeds the shared aggregate UTF-8 byte limit.", `${path}.ui`));
 }
 
 function validateExpression(
