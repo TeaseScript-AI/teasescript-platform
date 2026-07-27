@@ -1,0 +1,20 @@
+
+added 3 packages, and audited 4 packages in 860ms
+
+found 0 vulnerabilities
+
+> teasescript-platform@0.0.0 check
+> npm test
+
+
+> teasescript-platform@0.0.0 test
+> npm run build && npm run test:compiled
+
+
+> teasescript-platform@0.0.0 build
+> tsc
+
+tests/prototype-safe-captured-arrays.test.ts(143,1): error TS1005: ')' expected.
+
+install_status=0
+check_status=2
