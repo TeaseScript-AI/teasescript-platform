@@ -1,212 +1,85 @@
-# Repository source-layout proposal
+# Concrete repository source-layout proposal
 
-**Status:** Proposal for owner review; non-authoritative  
+**Status:** Proposal for review; non-authoritative until approved  
 **Issue:** #118  
-**Scope:** Repository organization only; no behavior, API, or serialized-format change
+**Recommended option:** A — focused seam extraction now  
+**Scope:** Folder and module ownership only; no behavior, public API meaning, or serialized-format change
 
-## Purpose
+## Decision requested
 
-The current repository structure was deliberately simple for the first vertical parser/runtime POC. That simplicity was useful: one TypeScript package, one build, one test command, a visible runtime directory, and a separate technical playground.
+Approve one near-term source-layout direction before ADR 0018 issues add substantially more code to the current hotspots.
 
-The next ADR 0018 stages will add compact interaction syntax, pacing actions, Player controls, editor/simulator support, and wider integration coverage. The existing layout now concentrates too many responsibilities in a few files and uses directory names that no longer express the accepted architecture precisely.
+This document recommends **Option A**: perform one focused behavior-neutral refactor after #110 is merged and before further ADR 0018 implementation is merged. It also records two practical alternatives so a review agent can compare cost and risk.
 
-This document proposes a staged source-layout direction. It does not accept a physical migration, schedule refactoring, change public APIs, or authorize a monorepo. Any file moves require separately approved implementation issues.
+The proposal does not itself move production files. After approval, one separate implementation issue and pull request should apply the selected option from the then-current `main`.
 
-## Authority boundary
+## Problem being solved
 
-This proposal maps existing accepted architecture to filesystem ownership. It does not redefine that architecture.
+The current layout was effective for the first vertical POC, but several files now own too many unrelated responsibilities:
 
-The following remain authoritative:
+- `src/instructions.ts` combines plan types, lowering, capture, and validation;
+- `src/runtime/engine.ts` combines execution, completion, time observation, evaluation, and mutation helpers;
+- `src/runtime/state.ts` combines snapshot types, construction, cloning, capture, validation, and pending-action invariants;
+- `src/libraries/` contains catalog/metadata tooling and a privileged-adapter placeholder rather than the Platform Standard Library;
+- the actual Platform Standard Library has no unambiguous source location;
+- Player and technical workspace/editor code are likely to grow into the same playground modules;
+- #111–#115 will repeatedly touch these same areas.
 
-- ADR 0007 for executable `.tease` modules versus reusable `.ts` libraries;
-- ADR 0015 for versioned instruction plans, explicit JSON-safe runtime state, and no suspended JavaScript call stack;
-- ADR 0016 for one shared pending-action model, foreground/background actions, deterministic time, settlements, and checkpoint behavior;
-- ADR 0017 for the dependency direction among TeaseScript, the Platform Standard Library, package libraries, engine primitives, and privileged adapters;
-- ADR 0018 for the first Standard Library POC and its fully lowered interaction and pacing behavior;
-- `docs/CODE-EDITOR.md` for the distinction between the current technical playground and the future production editor/Player surfaces;
-- the Player runtime, Host shell, Platform backend, and Authoring tools tracks in `docs/planning/POC-TO-ALPHA-BACKLOG.md`.
+The goal is not to maximize folder depth. The goal is to create a few stable responsibility seams before more independent work converges on the same files.
 
-When this proposal conflicts with an accepted ADR or current topic document, the accepted document wins.
+## Documentation review
 
-## Documentation survey
+No accepted document already defines a complete filesystem layout. The useful existing direction is logical:
 
-No current accepted document defines a complete repository filesystem layout. Existing material defines logical responsibilities and deployment boundaries, which should guide the layout without being mistaken for an already accepted directory tree.
+| Source | Use in this proposal |
+| --- | --- |
+| ADR 0007 | Retain the `.tease` executable-content versus `.ts` reusable-library distinction. |
+| ADRs 0015 and 0016 | Retain one compiler/runtime/checkpoint model; folders must not create separate runtimes. |
+| ADR 0017 | Primary input for separating Platform Standard Library, library tooling, engine primitives, and privileged adapters. |
+| ADR 0018 | Retain fully lowered interaction and pacing behavior; author-facing syntax does not place all implementation in the Standard Library folder. |
+| `docs/LIBRARIES.md` | Confirms that the current catalog/metadata POC is tooling-only and should not be confused with the Platform Standard Library. |
+| `docs/CODE-EDITOR.md` | Supports separating the technical workspace/editor surface from the immersive Player surface. |
+| POC-to-alpha tracks | Useful responsibility names, but not mandatory npm packages or top-level folders. |
+| Historical V30/V31 reviews and legacy backlog | Superseded or non-authoritative for repository structure. |
+| Tease package folder/tag ideas | Concern package content, not repository source organization. |
 
-| Source | Status for this proposal | Retained or rejected direction |
-| --- | --- | --- |
-| ADR 0007 | Retained | `.tease` files are executable content modules; `.ts` files are reusable libraries. This is a language/package distinction, not a reason to place repository source in content folders. |
-| ADRs 0015 and 0016 | Retained | Compiler plans, runtime state, pending actions, events, checkpoints, and validation remain one deterministic model. Physical modules may be split, but not into independent runtimes. |
-| ADR 0017 | Primary structural input | The Platform Standard Library, package-library tooling, engine primitives, and privileged adapters are different responsibility and trust boundaries. The source tree should make those distinctions visible. |
-| ADR 0018 | Retained with an important placement rule | The first helpers are fully lowered. Parser syntax, compiler lowering, runtime actions, Standard Library policy/metadata, and Player rendering therefore belong in different modules even when authors see one friendly API. |
-| `docs/LIBRARIES.md` | Retained | The current catalog/metadata POC is tooling-only and not exported from the runtime root. This supports separating `library-tooling` from the actual Platform Standard Library. |
-| `docs/CODE-EDITOR.md` | Retained | The technical workspace is not the production editor or immersive Player. The playground should develop internal workspace/player seams before both surfaces grow further. |
-| `docs/planning/POC-TO-ALPHA-BACKLOG.md` | Partially reusable | Its tracks provide useful responsibility names, but they are planning tracks rather than required top-level folders or npm packages. |
-| `docs/planning/LANGUAGE-LIBRARY-AND-SESSION-DIRECTIONS.md` | Retained | It reinforces the automatic Platform Standard Library prelude and future three-scope library model, but does not define filesystem packaging. |
-| Legacy `POST-POC-DEVELOPMENT-BACKLOG.md` and historical V30/V31 reviews | Superseded for structure decisions | They contain historical assumptions and cannot establish current source layout. |
-| Research archive and legacy architecture/library documents | Reference only | They contain no accepted repository layout. Older procedure/library examples and historical runtime divisions do not override V30 or ADRs 0015–0018. |
-| Folder- and tag-based tease-module ideas in `WISHES.xml` | Unrelated to repository source layout | Those folders concern package content organization. Current direction explicitly avoids hiding session semantics in fixed folder rules. |
+Therefore this proposal maps current accepted boundaries to source ownership without importing an obsolete architecture.
 
-### Result of the survey
+# Option A — focused seam extraction now
 
-The useful older material is already expressed as logical boundaries in current ADRs and topic documents. There is no accepted old filesystem proposal that should be copied wholesale.
+**Recommendation: approve this option.**
 
-The proposal should therefore:
+It fixes the ambiguous library naming and the two most immediate conflict hotspots while keeping the repository as one TypeScript package. It deliberately does not reorganize every language file, test, or deployment component.
 
-- preserve the accepted logical boundaries;
-- reject historical syntax and runtime assumptions;
-- avoid confusing package content folders with repository implementation folders;
-- avoid treating planning tracks as mandatory packages;
-- introduce only the module seams justified by current repository growth.
-
-## Current structure
-
-The current high-level layout is:
-
-```text
-src/          language, compiler, plan model, runtime entry points, library tooling
-playground/   development server, technical workspace, browser UI
-tests/        all test categories
-docs/         current documentation, ADRs, planning, references
-tools/        development workflow tooling
-examples/     TeaseScript examples
-```
-
-This remains a good top-level POC shape. The problem is mainly inside `src/`, `playground/`, and `tests/`.
-
-### Current growth hotspots
-
-The issue #110 draft artifact was reviewed only for structural evidence. It contains approximately:
-
-```text
-src/instructions.ts             2,962 lines
-src/runtime/engine.ts           2,568 lines
-src/runtime/state.ts            2,472 lines
-src/parser.ts                   1,837 lines
-src/semantic.ts                   853 lines
-src/runtime/serializable-values.ts
-                                  757 lines
-src/lexer.ts                      711 lines
-```
-
-File length alone is not a defect. The structural concern is that each large file combines several change reasons:
-
-- `instructions.ts`: public plan types, compiler lowering, capture, validation, control-flow validation, and interaction plan data;
-- `runtime/state.ts`: snapshot model, creation, cloning, capture, full validation, liveness analysis, pending-action invariants, and settlement invariants;
-- `runtime/engine.ts`: run/step operations, time observation, action completion, instruction execution, evaluation, mutation helpers, and prepared references;
-- `parser.ts`: all grammar and recovery behavior in one module;
-- `playground/browser.ts`: a likely future overlap point between authoring workspace and Player presentation;
-- flat `tests/`: language, compiler, runtime, hardening, library tooling, server, and browser tests share one directory.
-
-ADR 0018 issues #111–#115 will repeatedly touch those same ownership areas unless explicit seams are introduced.
-
-## Naming decision proposed for review
-
-Use the accepted product term **Platform Standard Library** in documentation and `standard-library` in source paths.
-
-Do not use `system-libraries`. That term suggests operating-system or low-level runtime libraries and does not match ADR 0017 terminology.
-
-The source tree should distinguish:
-
-```text
-standard-library/   platform-owned author-facing policy, defaults, declarations,
-                    metadata, and reusable capability-safe composition
-
-library-tooling/    package/community-library catalog, metadata extraction,
-                    validation, publication support, and editor tooling inputs
-
-platform-internal/  privileged adapters and capability brokers that public
-                    Standard Library or package-library imports cannot reach
-```
-
-The current `src/libraries/` contains catalog and metadata tooling, not the Platform Standard Library. Keeping that name while real Standard Library code is added would make the directory ambiguous.
-
-## Placement rule for author-facing APIs
-
-An author-facing API does not belong entirely in `standard-library/` merely because it is described as a Standard Library function.
-
-For an interaction such as `askText`:
-
-```text
-compact source grammar
-    -> language/parser
-
-source-to-plan lowering and prepared values
-    -> compiler
-
-canonical pending action, completion, result, transcript, settlement
-    -> runtime
-
-author-facing defaults, declarations, documentation metadata,
-and reusable synchronous composition
-    -> standard-library
-
-input rendering and localized feedback
-    -> Player/Standard UI
-```
-
-This preserves one deterministic engine. The Standard Library must not become a second runtime or hide checkpoint-relevant state.
-
-## Near-term target map
-
-The following is a responsibility map, not a requirement to create every directory immediately:
+## Resulting near-term structure
 
 ```text
 src/
-  language/
-    ast.ts
-    ast-validation.ts
-    diagnostics.ts
-    lexer.ts
-    parser.ts
-    protected-names.ts
-    semantic.ts
-    source.ts
-    token.ts
-
   compiler/
-    index.ts
-    lowering/
-      expressions.ts
-      statements.ts
-      interactions.ts
-      pacing.ts
     plan/
       model.ts
       capture.ts
       validation.ts
+    lowering/
+      interactions.ts      # created by/for #111 when real code exists
+      pacing.ts            # created by/for #112 when real code exists
 
   runtime/
     actions/
       model.ts
       delay.ts
       interaction.ts
-      pacing.ts
       settlement.ts
-    engine/
-      execute.ts
-      run.ts
+      pacing.ts            # created by/for #112 when real code exists
+    operations/
       complete-action.ts
       observe-time.ts
-    state/
-      model.ts
-      create.ts
-      clone.ts
-      validation.ts
-      invariants.ts
-    values/
-      serializable-values.ts
-      compatibility-values.ts
-    checkpoint.ts
-    events.ts
-    errors.ts
-    random.ts
-    warnings.ts
 
   standard-library/
+    public.ts              # created only when there is a real public surface
     prelude/
-    contracts/
-    metadata.ts
-    public.ts
+      interactions.ts      # defaults/declarations/metadata, not canonical runtime state
+      say.ts               # pacing policy/default metadata, not a second scheduler
 
   library-tooling/
     catalog.ts
@@ -214,290 +87,295 @@ src/
     public.ts
 
   platform-internal/
-    adapters/
+    privileged-platform-adapters.ts
 
-  shared/
-    external-data-limits.ts
-    interaction-limits.ts
+  instructions.ts         # temporary compatibility facade
+  index.ts                 # existing public compatibility facade
 
-  index.ts
-```
-
-### KISS constraints
-
-This map is intentionally not a file-generation checklist.
-
-- Do not create empty directories merely to match the diagram.
-- Do not create one file per command.
-- Extract a module only when it owns a cohesive responsibility or removes a demonstrated conflict hotspot.
-- Keep `src/index.ts` as the compatibility facade until explicit public entry points are justified.
-- Keep one TypeScript package and one build for the near term.
-- Do not add dependency-injection frameworks, package workspaces, or architectural lint dependencies without a demonstrated need.
-
-## Dependency direction
-
-The intended source dependency direction is:
-
-```text
-language
-    -> compiler plan and lowering
-        -> runtime public contracts
-
-standard-library policy/declarations
-    -> compiler lowering and public typed capabilities
-        -> runtime actions
-
-Player/workspace adapters
-    -> public compiler/runtime APIs
-
-library-tooling
-    -> language/compiler metadata inputs
-    -/-> runtime root
-    -/-> privileged adapters
-
-platform-internal adapters
-    -> internal engine/player capability boundary
-    -/-> public Standard Library exports
-    -/-> package libraries
-```
-
-A directory move must not create dependency cycles or expose privileged adapters through a convenient barrel export.
-
-## Proposed migration stages
-
-### Stage 0 — no broad moves in issue #110
-
-Issue #110 is a semantic runtime change and is already under separate review. A repository-wide move in that branch would obscure the interaction implementation diff and increase review risk.
-
-The proposal may be reviewed and merged while #110 is open, but physical migration should use the final merged #110 state.
-
-### Stage 1 — clarify library and trust-boundary naming
-
-A first behavior-neutral implementation issue should:
-
-1. rename `src/libraries/` to `src/library-tooling/`;
-2. move the privileged-adapter placeholder to `src/platform-internal/`;
-3. update direct imports and tooling tests;
-4. preserve the fact that library tooling is not exported from the runtime root;
-5. add no real Standard Library implementation merely to populate a directory;
-6. prove build output and behavior remain unchanged.
-
-This stage removes the most misleading current name with limited semantic risk.
-
-### Stage 2 — extract plan and runtime-action seams
-
-A separate behavior-neutral issue should work from the merged #110 model and:
-
-1. keep a compatibility facade at the existing instruction-plan import path;
-2. separate plan model, capture, and validation responsibilities;
-3. introduce a shared `runtime/actions` model for delay, interaction, settlement, and later pacing behavior;
-4. separate action completion and time observation from general instruction execution where practical;
-5. preserve all public exports, diagnostic codes, event ordering, and serialized JSON shapes;
-6. prove no plan, snapshot, or checkpoint version changes are required merely for file movement.
-
-This stage may need two pull requests if plan extraction and runtime extraction create an unreviewable combined diff.
-
-### Stage 3 — place new ADR 0018 code into established seams
-
-After the preceding seams are accepted:
-
-- issue #111 interaction grammar remains in language modules and interaction lowering in compiler modules;
-- issue #112 pacing action behavior belongs with runtime actions, while source pacing syntax/lowering remains in language/compiler modules;
-- Standard Library declarations, defaults, and tooling metadata are added to `standard-library/` only when there is actual code to own;
-- issue #113 uses a Player-facing browser/controller area;
-- issue #114 uses a workspace/editor/simulator area;
-- neither browser surface imports arbitrary runtime internals.
-
-If #111 or #112 is already active before a structural implementation lands, do not force a large mid-branch rebase. Finish the active feature coherently, then extract from the merged state.
-
-### Stage 4 — separate playground responsibilities
-
-Before both Player and editor surfaces become large, evolve the temporary application toward:
-
-```text
 playground/
-  server/
-  workspace/
-    controller.ts
-    browser.ts
-  player/
-    controller.ts
-    interactions.ts
-    pacing-input.ts
-  shared/
-  index.html
-  playground.css
+  player/                  # new #113 Player-facing code
+  workspace/               # new #114 technical editor/simulator code
+  shared/                  # only genuinely shared browser helpers
+  ...existing entry files
 ```
 
-This remains one temporary development application. It does not decide the final cross-origin host protocol or create a second public Node server.
+This is the selected near-term map, not a requirement to create empty files. A directory is created when the refactor moves real code into it or the owning ADR issue adds real code.
 
-The physical split should follow actual #113/#114 ownership rather than pre-creating empty modules.
+## Exact changes in the behavior-neutral implementation PR
 
-### Stage 5 — group tests during ordinary work
+### 1. Clarify library and trust-boundary naming
 
-Use gradual grouping rather than a cosmetic all-at-once move:
+Move the existing catalog/metadata implementation:
 
 ```text
-tests/
-  language/
-  compiler/
-  runtime/
-    actions/
-    checkpoint/
-    hardening/
-  standard-library/
-  library-tooling/
-  playground/
-    workspace/
-    player/
-    server/
-  integration/
-    source-to-runtime/
-    resume-equivalence/
-  helpers/
+src/libraries/catalog.ts
+    -> src/library-tooling/catalog.ts
+
+src/libraries/metadata.ts
+    -> src/library-tooling/metadata.ts
+
+src/libraries/public.ts
+    -> src/library-tooling/public.ts
 ```
 
-Move a coherent test group when its owning feature or structural issue already changes it. Keep behavior-oriented names and avoid mirroring every production subdirectory mechanically.
+Move every other current file whose only responsibility is catalog, metadata extraction, validation, or tooling support into `src/library-tooling/` while preserving cohesive relative grouping.
 
-### Stage 6 — explicit public entry points after the vertical slice
-
-The current broad `src/index.ts` remains useful during the POC. After ADR 0018 stabilizes, review whether the repository needs documented compiler, runtime, and tooling entry points.
-
-Possible later entries are:
+Move the privileged adapter placeholder:
 
 ```text
-compiler API
-runtime API
-library-tooling API
-editor-support API
+src/libraries/internal/privileged-platform-adapters.ts
+    -> src/platform-internal/privileged-platform-adapters.ts
 ```
 
-Do not split the public API merely to make the directory diagram symmetrical. First identify real consumers and compatibility expectations.
+Rules:
 
-## Long-term application/package split
+- `library-tooling` remains absent from the runtime root export;
+- `platform-internal` is never re-exported through public Standard Library or package-library surfaces;
+- no actual Standard Library implementation is invented merely to populate `standard-library/`;
+- direct internal imports and tests are updated mechanically.
 
-A later repository shape may become appropriate when the repository contains both a real Laravel application and an independently built Player:
+### 2. Extract the instruction-plan seam
+
+Split the current `src/instructions.ts` responsibilities into:
 
 ```text
-apps/
-  platform-web/          Laravel application and only public backend
-  player/                cross-origin iframe/PWA application
+src/compiler/plan/model.ts
+    plan versions, instruction and expression-plan types,
+    shared plan constants, and discriminated unions
 
-packages/
-  teasescript-engine/
-  standard-library/
-  editor-support/
-  library-tooling/
+src/compiler/plan/capture.ts
+    capture of untrusted plan-shaped data into safe internal data
 
-docs/
-examples/
-tools/
+src/compiler/plan/validation.ts
+    complete plan validation and structural invariants
 ```
 
-This proposal does **not** accept that monorepo now.
+Compiler lowering that currently lives in `instructions.ts` moves to cohesive compiler modules. Existing generic lowering may remain in one compiler module; interaction- and pacing-specific modules are added only when #111/#112 provide real code.
 
-A package split should require concrete evidence such as:
+`src/instructions.ts` remains temporarily and re-exports the same public names from the new modules. Existing consumers must not be forced to change in the same migration.
 
-- independent build or deployment lifecycles;
-- different runtime dependency sets;
-- a real Laravel/Composer application boundary;
-- a separately deployed Player bundle;
-- multiple actual consumers of the TypeScript engine;
-- release/versioning requirements that cannot be handled cleanly in one package.
+### 3. Extract the pending-action seam
 
-Until then, npm workspaces, multiple TypeScript builds, Composer path packages, and cross-package version management would add more complexity than they remove.
-
-## Public compatibility during moves
-
-Behavior-neutral structure changes must preserve:
-
-- `src/index.ts` public exports unless an explicit API issue changes them;
-- tooling-only exports that intentionally remain outside the runtime root;
-- importable source paths used by repository tests, or provide temporary re-export facades;
-- diagnostic codes and source spans;
-- instruction-plan JSON shape and version;
-- runtime snapshot/checkpoint JSON shape and version;
-- event names and ordering;
-- deterministic execution, RNG, and resume equivalence;
-- package scripts and one clean build/test flow.
-
-A file move alone is not a reason to bump a serialized format version.
-
-## Coordination with ADR 0018 issues
+Move pending-action types and cohesive behavior into:
 
 ```text
-#110 runtime foundation
-    -> should finish without repository-wide moves
+src/runtime/actions/model.ts
+    shared action union, common identity/ownership fields, and location types
 
-structure implementation selected from this proposal
-    -> should use merged #110 as its base
+src/runtime/actions/delay.ts
+    delay-specific construction/validation/settlement helpers
 
-#111 syntax and lowering
-#112 pacing
-    -> should use the resulting seams only when the structure work is merged first
+src/runtime/actions/interaction.ts
+    ADR 0018 interaction-specific construction/validation/completion helpers
 
-#113 Player and #114 editor
-    -> should coordinate playground file ownership
-
-#115 vertical acceptance
-    -> verifies behavior, not whether every optional target directory exists
+src/runtime/actions/settlement.ts
+    settlement types, replay classification, and shared validation
 ```
 
-This proposal does not automatically insert a new blocking dependency into tracker #109. The owner should decide whether a behavior-neutral structure implementation lands before #111, between later issues, or after the ADR 0018 vertical slice.
+Separate the two public mutation operations from general instruction execution:
 
-## Risks
+```text
+src/runtime/operations/complete-action.ts
+src/runtime/operations/observe-time.ts
+```
 
-### Excessive movement
+`src/runtime/engine.ts` remains the central execution facade and may delegate to/re-export these operations. Instruction execution, expression evaluation, and unrelated mutation helpers are not broadly reorganized in this refactor.
 
-Large renames can make semantic history and pull-request review harder. Mitigation: separate naming, plan extraction, runtime extraction, playground separation, and test grouping into small behavior-neutral changes.
+`src/runtime/state.ts` remains in place for this first migration. Action model extraction may reduce its size, but snapshot construction, cloning, and whole-state validation are not split merely to make the tree look symmetrical.
 
-### Artificial fragmentation
+### 4. Preserve compatibility
 
-Many tiny modules can make navigation worse. Mitigation: extract by cohesive responsibility, not line count or one-command-per-file rules.
+The implementation must preserve:
 
-### Accidental API expansion
+- all existing exports from `src/index.ts`;
+- existing supported direct imports through compatibility re-exports where repository consumers rely on them;
+- diagnostic codes and spans;
+- runtime event kinds and ordering;
+- instruction-plan, runtime-snapshot, and checkpoint JSON shapes;
+- plan/snapshot/checkpoint format versions;
+- deterministic evaluation and RNG behavior;
+- test behavior and generated build output semantics.
 
-New barrel files may expose internals. Mitigation: preserve existing public entry points and review every re-export explicitly.
+A file move alone is not a reason for a format-version bump.
 
-### Accidental serialized change
+### 5. Keep the migration reviewable
 
-Refactoring validation or clone code can alter accepted JSON shapes or error behavior. Mitigation: no version bump or shape change in a structure-only PR; compare full plans, snapshots, checkpoints, and events in tests.
+Use one implementation issue and one behavior-neutral PR with logical commits:
 
-### Active-branch conflicts
+1. rename library tooling and move privileged adapters;
+2. extract plan model/capture/validation and add the compatibility facade;
+3. extract runtime actions and completion/time operations;
+4. update documentation and run full verification.
 
-Moving files while feature branches are open creates unnecessary rebases. Mitigation: schedule physical moves only against a known merged base and avoid rewriting another agent's branch.
+No ADR 0018 feature behavior should be added in that branch.
 
-## Open owner decisions
+## Placement rules for ADR 0018 work
 
-This proposal requests review of these choices:
+### Issue #111 — compact interactions and protected prelude
 
-1. Accept `standard-library`, `library-tooling`, and `platform-internal` as the preferred directory names.
-2. Decide whether library/trust-boundary naming should be the first physical structure change.
-3. Decide whether plan extraction and runtime-action extraction should be one issue or two.
-4. Decide when the structure implementation should occur relative to issues #111–#115.
-5. Retain one TypeScript package until real deployment/package evidence justifies `apps/` and `packages/`.
+- parser and semantic changes remain in the current language modules unless a later dedicated language move is approved;
+- interaction lowering belongs in `src/compiler/lowering/interactions.ts`;
+- plan representation uses `src/compiler/plan/`;
+- canonical pending interaction behavior belongs in `src/runtime/actions/interaction.ts`;
+- author-facing defaults/declarations/metadata may use `src/standard-library/prelude/interactions.ts` only when there is real code to own;
+- compact syntax must not be implemented as an invisibly suspended TypeScript call.
 
-## Explicit non-goals
+### Issue #112 — smart autoplay and pacing
 
-This proposal does not decide or implement:
+- source syntax remains in parser/compiler ownership;
+- pacing lowering belongs in `src/compiler/lowering/pacing.ts`;
+- `chatPacingGate` action behavior belongs in `src/runtime/actions/pacing.ts`;
+- completion and time settlement reuse `runtime/operations/`;
+- Standard Library `say` policy/default declarations may use `src/standard-library/prelude/say.ts`;
+- no browser timer or hidden library scheduler is introduced.
 
-- Standard Library import syntax, manifests, lockfiles, or version selection;
-- community-library dependency resolution;
-- exact Standard Library package identity;
-- a new runtime, scheduler, or checkpoint model;
-- final Player/host messaging, CSP, sandbox flags, or deployment;
-- Laravel project scaffolding;
-- npm workspaces or a monorepo;
-- final editor framework or metadata transport;
-- a source-file size rule;
-- mandatory one-to-one correspondence between folders and architecture diagrams.
+### Issue #113 — Standard Player controls
 
-## Proposed acceptance outcome
+New immersive Player-facing browser/controller code belongs in:
 
-Approval of this document should mean only:
+```text
+playground/player/
+```
 
-- the terminology and staged direction are suitable for implementation planning;
-- future source additions should avoid worsening the identified mixed-responsibility directories;
-- physical moves may be proposed in focused behavior-neutral issues.
+It consumes public compiler/runtime/workspace APIs and must not become a second canonical state machine.
 
-Approval should not be interpreted as completing any migration or accepting the long-term monorepo example.
+### Issue #114 — editor, formatter, and simulator
+
+Reusable DOM-free authoring support may use a later `src/editor-support/` module when real reusable code exists. Browser integration belongs in:
+
+```text
+playground/workspace/
+```
+
+It remains separate from immersive Player interaction rendering.
+
+### Issue #115 — final integration
+
+New vertical acceptance tests should be grouped only when the existing test runner supports the directory without broad unrelated movement. Existing tests are not reorganized wholesale by the structure refactor.
+
+## Timing with active branches
+
+Recommended order:
+
+1. merge the reviewed #110 implementation;
+2. approve this proposal;
+3. merge the behavior-neutral structure implementation PR from the latest `main`;
+4. rebase or update active #111–#115 branches once onto that new `main`;
+5. continue semantic work in the selected locations.
+
+Do not mix this migration into #110 or force-push another agent's branch. When an active dependent PR is already too advanced to rebase safely, finish that coherent feature first and apply the same extraction immediately after its merge. The coordinator should select one ordering and prevent both layouts from being merged concurrently.
+
+## What Option A deliberately does not do
+
+- no wholesale move of lexer, parser, AST, semantic, or diagnostics files into `src/language/`;
+- no complete split of `runtime/state.ts` or every helper in `runtime/engine.ts`;
+- no mass reorganization of existing tests;
+- no npm workspaces, monorepo, or multiple engine packages;
+- no Laravel or production Player scaffolding;
+- no final Standard Library package identity, imports, manifests, versions, or replacement mechanism;
+- no behavior change, schema migration, or format-version bump;
+- no one-file-per-command policy and no empty architectural shells.
+
+# Option B — naming and trust-boundary move only
+
+Perform only:
+
+```text
+src/libraries/ -> src/library-tooling/
+src/libraries/internal/privileged-platform-adapters.ts
+    -> src/platform-internal/privileged-platform-adapters.ts
+```
+
+Reserve `src/standard-library/` for future real code, but leave `instructions.ts`, `runtime/engine.ts`, and `runtime/state.ts` unchanged.
+
+## Advantages
+
+- smallest diff and lowest immediate rebase cost;
+- resolves the most misleading folder name;
+- can be completed quickly while feature branches remain active.
+
+## Disadvantages
+
+- does not reduce the main conflict hotspots for #111 and #112;
+- action completion, time observation, and plan validation continue growing in central files;
+- a second structural refactor remains necessary almost immediately.
+
+## When to choose it
+
+Choose Option B only when active feature branches are already too advanced for the focused extraction to land safely before them.
+
+# Option C — broad domain reorganization now
+
+Move the full language layer, compiler, runtime state, tests, playground, and public APIs into a comprehensive domain tree in one coordinated refactor.
+
+Possible end state:
+
+```text
+src/language/
+src/compiler/
+src/runtime/actions/
+src/runtime/engine/
+src/runtime/state/
+src/standard-library/
+src/library-tooling/
+src/platform-internal/
+src/editor-support/
+playground/player/
+playground/workspace/
+tests/language/
+tests/compiler/
+tests/runtime/
+tests/player/
+```
+
+## Advantages
+
+- strongest long-term ownership map;
+- reduces the need for later mechanical moves;
+- makes most accepted architecture boundaries visible immediately.
+
+## Disadvantages
+
+- very large rename/import diff;
+- high conflict and review cost while ADR 0018 work is active;
+- makes it harder to prove that no behavior changed;
+- encourages empty abstractions and premature package-like boundaries;
+- delays actual feature implementation.
+
+## Recommendation
+
+Do not choose Option C now. Revisit broader grouping after ADR 0018 vertical acceptance or when concrete deployment/package boundaries exist.
+
+# Why Option A is recommended
+
+Option A is the smallest option that addresses both classes of current problem:
+
+1. ambiguous library/trust-boundary naming;
+2. central plan and pending-action conflict hotspots.
+
+Option B fixes only the naming problem. Option C fixes substantially more than current evidence requires. Option A provides useful seams for #111–#114 without turning the POC into a premature monorepo or a lengthy architecture project.
+
+# Implementation acceptance criteria
+
+The later behavior-neutral implementation is complete when:
+
+- selected files live under the approved directories;
+- old supported import paths continue through compatibility re-exports;
+- runtime-root exports do not expose library tooling or privileged adapters;
+- no observable runtime, compiler, diagnostic, event, or serialized-data behavior changes;
+- no plan/snapshot/checkpoint version changes occur merely due to file movement;
+- #111–#114 have clear target locations;
+- the full configured test/build/check suite passes;
+- `git diff --check` passes and the worktree is clean;
+- the PR contains no unrelated ADR 0018 feature implementation.
+
+# Review checklist
+
+The review agent should return one of these outcomes:
+
+- **Approve Option A** — proceed with the focused behavior-neutral implementation;
+- **Select Option B** — use the naming-only fallback because active branch conflict is too high;
+- **Select Option C** — only with a concrete justification for accepting the broader cost now;
+- **Request changes** — identify the exact directory, ownership, dependency, compatibility, or timing concern.
+
+The review should specifically check that the selected option preserves ADRs 0015–0018, does not expose privileged adapters, does not create a second runtime, and does not silently alter serialized formats.
