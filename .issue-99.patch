@@ -10,7 +10,7 @@ diff --git a/src/external-data-limits.ts b/src/external-data-limits.ts
  interface PathNode {
    readonly parent: PathNode | null;
    readonly segment: string;
-@@ -68,8 +70,8 @@ type WorkItem =
+@@ -68,7 +70,7 @@ type WorkItem =
  /**
   * Captures an externally supplied JSON-like graph into stable plain data while
   * enforcing the shared depth/work limits. Enumerable accessors are rejected
@@ -29,7 +29,7 @@ diff --git a/src/external-data-limits.ts b/src/external-data-limits.ts
        : (Object.create(prototype) as Record<string, unknown>);
      assignCaptured(item.target, captured, (root) => {
        capturedRoot = root;
-@@ -302,6 +304,27 @@ function pathSegment(parentIsArray: boolean, key: string): string {
+@@ -302,6 +304,24 @@ function pathSegment(parentIsArray: boolean, key: string): string {
      : `[${JSON.stringify(key)}]`;
  }
  
