@@ -1,0 +1,1 @@
+error: corrupt patch at .issue-99.patch:23
