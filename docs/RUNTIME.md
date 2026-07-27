@@ -27,7 +27,235 @@ The engine remains responsible for:
 - stable speaker/output provenance needed by runtime history;
 - bounded host/player data and security boundaries.
 
-Candidate Standard Library responsibilities include `say` policy, standard output targets, visible timer presentation, common input wrappers, validation/retry helpers, and friendly lifecycle APIs. Exact primitive names and public APIs remain open. The accepted boundary does not change current runtime code, accepted V30 syntax, or ADR 0016 semantics.
+Candidate Standard Library responsibilities include `say` policy, standard output targets, visible timer presentation, common input wrappers, validation/retry helpers, and friendly lifecycle APIs. ADR 0018 accepts the first concrete text/output slice described below. The accepted decisions do not by themselves change current runtime code or format constants.
+
+## Accepted first Standard Library runtime contract
+
+ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`, followed by a separate `say` smart-autoplay slice. The contract is accepted but not implemented by the current runtime.
+
+### Generic foreground interactions
+
+One discriminated pending-action family must carry JSON-safe data equivalent to:
+
+```text
+kind: button | text | number | choice
+action identity
+owning and continuation instruction positions
+result destination when applicable
+expected result type
+validated Standard UI payload
+choice labels and visible values when applicable
+target
+optional requesting speaker identity
+accessible-name data or localized default key
+```
+
+The engine owns action identity, active state, completion validation, transcript-result derivation, result writes, events, settlement replay, checkpoint/restore, and structured rejection. Compiler/Standard Library lowering owns compact syntax and default UI payload.
+
+The selected interactions are mandatory and non-cancellable. Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice, and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or continuation.
+
+Completion semantics are:
+
+- `askText` normalizes `CRLF` and standalone `CR` to `LF`, otherwise preserves submitted text, rejects whitespace-only input, returns `string`, and uses the same normalized text in the player transcript;
+- `askNumber` accepts one line of text, trims surrounding whitespace, parses accepted TeaseScript decimal/scientific forms, requires a finite result, canonicalizes negative zero to numeric `0`, returns `number`, and preserves the trimmed submitted text in the transcript;
+- an unlabelled `choose` returns visible text;
+- a labelled `choose` accepts one exact stored identifier or numeric label and returns `string` or `number` respectively;
+- `showButton` has no useful first-slice return value or timeout.
+
+A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
+
+Interaction definitions and completion payloads are subject to shared versioned platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits. ADR 0018 does not fix separate per-field character counts. The implementation must select concrete shared constants and test them before implementation merge. Over-limit data is rejected without truncation, clamping, or partial state mutation.
+
+### Standard composer and dynamic choice presentation
+
+The Standard Player application uses one fixed composer. During a foreground interaction it becomes the answer field, receives focus by default, and blocks ordinary free-chat submission. Choice and button controls appear immediately above it.
+
+Choice buttons may occupy one or two rows. The Player application may render the same choice group as a dropdown when viewport, text, font, zoom, accessibility, or other layout constraints make buttons impractical. Button-versus-dropdown presentation is not canonical runtime/checkpoint state and does not change labels, visible text, completion validation, transcript output, or return values.
+
+Field hints, control labels, requesting-speaker metadata, localized validation feedback, and accessibility labels are not duplicate speaker transcript messages.
+
+### Minimal first-POC provenance
+
+The first POC uses one Standard chat target but retains an explicit validated target identity in output and interaction data. `speakerId` is optional: a declared/current/default speaker uses its stable ID, while narrator/system output has no invented speaker.
+
+A broader involved-speaker collection and separate conversation identity remain deferred.
+
+### Smart-autoplay session settings
+
+A fresh session captures:
+
+```text
+baseDelayMs
+delayPerWordMs
+delayPerCharacterMs
+```
+
+Each value is a non-negative JavaScript safe integer representing whole milliseconds. Missing values use platform defaults; a present invalid, fractional, negative, non-finite, or unsafe value causes a structured session-configuration error rather than silent clamping or fallback.
+
+Platform defaults are:
+
+```text
+baseDelayMs = 1500
+delayPerWordMs = 300
+delayPerCharacterMs = 30
+```
+
+The smart delay is:
+
+```text
+delayMs =
+    baseDelayMs +
+    max(
+        wordCount * delayPerWordMs,
+        visibleCharacterCount * delayPerCharacterMs
+    )
+```
+
+The measured value is the final emitted text after expression evaluation, interpolation, escapes, deterministic list selection, and source-string newline folding. Words are maximal non-whitespace sequences; visible characters are Unicode code points.
+
+All counts, multiplication, addition, and deadline construction use checked arithmetic. A non-finite, unsafe, unsupported-magnitude, or overflowing result fails before an action ID or partial gate is created. There is no additional product reading-time cap, but ADR 0016 numeric-magnitude and deadline-overflow limits still apply.
+
+The captured settings are deterministic session data. Account changes do not alter an active or restored session. A calculated delay of `0` creates no pacing action or action events.
+
+### Pacing gate as an ADR 0016 action
+
+A positive pacing gate is one pending-action kind conceptually named `chatPacingGate`. It uses ADR 0016 action identity, absolute deadline, active-first lookup, typed completion, bounded `lastSettlement`, event sequencing, checkpoint/restore, and continuation rules. It is not a second hidden pacing state machine.
+
+The first POC has at most one active pacing gate because it has one Standard chat target.
+
+#### Initial message and background gate
+
+A normal or positive-duration `say` evaluates speaker, text, pacing, skip policy, and deterministic text selection once in source order.
+
+When no earlier gate blocks it, one atomic instruction boundary:
+
+1. emits the text-output event;
+2. stores a positive `chatPacingGate` in `backgroundActions` with a new action ID, absolute deadline, and skip policy;
+3. emits `actionRequested` for that gate;
+4. continues unrelated non-blocking execution.
+
+The text-output event precedes `actionRequested`. No checkpoint may contain the emitted text without the positive gate established by the same instruction.
+
+#### A later `say` becomes foreground-blocked
+
+When execution reaches a later normal or positive-duration `say` while the background gate remains active:
+
+1. evaluate and store the later prepared output once, including speaker, final text, pacing, skip policy, and RNG results;
+2. atomically move the same gate from `backgroundActions` to `foregroundAction` without changing its action ID or deadline;
+3. attach the prepared-output continuation;
+4. set status to `waiting` and stop normal execution.
+
+The move emits no second `actionRequested`. The accepted invariant remains:
+
+```text
+status == waiting
+if and only if
+foregroundAction != null
+```
+
+Settlement emits `actionCompleted` before continuation. A later normal runtime entry emits the prepared text exactly once and creates its next positive gate when applicable. Prepared text and RNG results are not reevaluated after waiting or restore.
+
+#### Time and player completion
+
+`observeTime(...)` may settle a due pacing gate while it is background work or the foreground action blocking prepared output. It uses the persisted `currentSessionTimeMs` and absolute-deadline semantics shared with `wait`.
+
+When one time observation settles multiple timed actions, deterministic ordering is:
+
+1. ascending `deadlineMs`;
+2. ascending action ID for equal deadlines.
+
+Each settlement emits its own sequenced `actionCompleted`. Continuations do not execute inside the observation mutation.
+
+A primary click, touch activation, or eligible Space key submits a typed completion for the active pacing-gate action ID:
+
+- a skippable gate settles normally;
+- an unskippable gate rejects the attempt without state mutation;
+- active foreground/background lookup occurs before settled, stale, or unknown classification;
+- a duplicate matching current `lastSettlement` returns `alreadySettled` without another event, output, RNG change, or continuation;
+- a foreground skip makes prepared output eligible only for a later runtime entry.
+
+Skip settles only the pacing gate. It does not skip arbitrary instructions, complete `wait`, cancel an interaction, or create a player transcript message.
+
+#### Consumption by a foreground interaction
+
+When `showButton`, `askText`, `askNumber`, or `choose` is reached while a pacing gate remains active as background work, one atomic transition:
+
+1. settles the pacing gate with typed settlement `consumedByForegroundInteraction`;
+2. removes it from `backgroundActions` and updates bounded `lastSettlement`;
+3. emits `actionCompleted` for the gate;
+4. creates the new interaction as the sole `foregroundAction`;
+5. sets status to `waiting`;
+6. emits `actionRequested` for the interaction.
+
+Event order is:
+
+```text
+actionCompleted(chatPacingGate)
+actionRequested(interaction)
+```
+
+No checkpoint may expose an intermediate state with neither the old gate nor the new interaction.
+
+#### `instant`, `0`, and `wait`
+
+When `say ..., 0` or `say ..., instant` executes while a pacing gate remains active as background work, one atomic transition settles the old gate with `supersededByInstantOutput`, emits `actionCompleted`, emits the current text-output event, and creates no new gate.
+
+If a gate is already the foreground action blocking prepared output, ordinary execution cannot reach another `say`; time or a permitted player completion must settle that foreground gate first.
+
+`wait` does not consume a pacing gate. A valid future snapshot may contain:
+
+```text
+foregroundAction: delay
+backgroundActions: [chatPacingGate]
+status: waiting
+```
+
+A time observation may settle either or both according to deadline and action-ID ordering. The continuation after the foreground delay runs only during a later runtime entry.
+
+For:
+
+```tease
+say as mistress "One"
+wait 1
+say as mistress "Two"
+```
+
+the actual separation is the longer of the remaining `say` gate and the explicit one-second wait. The durations are not automatically added.
+
+Player-authored messages do not create gates. No compiler lookahead across branches, calls, or loops is used.
+
+### Skippable gate completion
+
+Effective skip policy comes from explicit `skippable`/`unskippable`, then the effective speaker's `defaultSaySkippable`, then platform default `true`.
+
+A skippable gate may complete through:
+
+- a primary click anywhere in the player iframe viewport, including background or unused space;
+- a primary touch activation;
+- Space while the focused Standard composer is empty.
+
+A real interactive control has priority and must not also trigger viewport-wide gate completion. Ordinary keys type into the focused composer. Space is normal input when text is already present and does not skip during text composition, a relevant selection, or focus on another interactive control. Unskippable gates reject click, tap, and Space completion.
+
+### Player and developer controls
+
+The normal Player application has no player-facing pause control and ADR 0018 adds no author-facing pause command. Developer mode may expose Pause alongside Run, Step, checkpoint, restore, and debugger controls. Developer pause is tooling and does not establish player-initiated pause semantics.
+
+Browser unavailability, reload, reconnect, device sleep, visibility changes, and server-authoritative deadlines remain separate lifecycle/time-integrity work.
+
+### Checkpoint and event requirements
+
+Implementation must preserve ADR 0015 and ADR 0016:
+
+- plans, prepared output, pending interaction data, captured pacing settings, deadlines, and skip policy are JSON-safe;
+- source expressions and deterministic RNG choices are not reevaluated after waiting or restore;
+- restore reads no clock and silently completes nothing;
+- the Player application submits explicit time observations and typed completions;
+- action/output events remain typed and sequenced;
+- duplicate delivery is idempotent through bounded settlement replay;
+- settlement and continuation remain separate inspectable runtime boundaries;
+- every required plan, snapshot, and checkpoint schema change is explicitly versioned before implementation merge.
+
+The selected behavior is fully lowered into the instruction plan. The issue #74 exact library token is not added to plan/checkpoint data, no implicit latest lookup occurs, and no migration is included.
 
 ## Current runtime
 
@@ -52,7 +280,7 @@ The current implementation contains the first ADR 0016 slice: compiler-owned blo
 
 ## Accepted resumable pending-action model
 
-ADR 0016 accepts this conceptual version-4 snapshot state:
+ADR 0016 accepts this conceptual snapshot state:
 
 ```text
 status:
@@ -74,17 +302,17 @@ lastSettlement:
     ActionSettlement | null
 ```
 
-A valid `waiting` snapshot contains exactly one foreground delay action. Its creation time is no later than the persisted session coordinate and its deadline is strictly later; a due action is settled only by an explicit time observation and is never silently repaired during restore. Non-waiting states contain none. The first implementation slice includes the background collection in the version-4 schema but requires it to remain empty.
+A valid current implemented `waiting` snapshot contains exactly one foreground delay action. Its creation time is no later than the persisted session coordinate and its deadline is strictly later; a due action is settled only by an explicit time observation and is never silently repaired during restore. Non-waiting current states contain none. The implemented slice includes the background collection in the schema but requires it to remain empty. ADR 0018 implementation will require explicit schema-version changes before populated background gates are valid.
 
-`currentSessionTimeMs` is canonical runtime state. It preserves the nondecreasing session coordinate across checkpoint and restore. A fresh version-4 snapshot receives a validated initial coordinate; deterministic tests may use `0`.
+`currentSessionTimeMs` is canonical runtime state. It preserves the nondecreasing session coordinate across checkpoint and restore. A fresh snapshot receives a validated initial coordinate; deterministic tests may use `0`.
 
 A blocking instruction evaluates its arguments, stores a complete JSON-safe action and continuation, advances to `waiting`, emits `actionRequested`, and stops. A validated completion stores its result and bounded `lastSettlement`, removes the matching action, emits `actionCompleted`, and leaves continuation or handler execution to the next runtime entry call.
 
-`wait 0` is deliberately immediate: its duration expression is still evaluated, but it allocates no action ID, creates no pending action or settlement, and emits neither action event. The next source instruction runs normally; if it was the terminal root instruction, ordinary natural completion emits one `complete` event. In contrast, a positive terminal root wait settles with `actionCompleted`; the following runtime entry consumes the one canonical settled root-end transition and emits the sequenced `complete` event. Re-entering an already halted snapshot emits no further completion event.
+`wait 0` is deliberately immediate: its duration expression is still evaluated, but it allocates no action ID, creates no pending action or settlement, and emits neither action event. The next source instruction runs normally; if it was the terminal root instruction, ordinary natural completion emits one `complete` event. In contrast, a positive terminal root wait settles with `actionCompleted`; the following runtime entry consumes the canonical settled root-end transition and emits the sequenced `complete` event. Re-entering an already halted snapshot emits no further completion event.
 
-A duplicate delivery matching `lastSettlement` returns the same canonical recorded settlement without another write, event, RNG advance, handler, or continuation. A newer settlement replaces the previous record. Each delay settlement retains the action's owning and continuation instruction positions, so a terminal root completion can be proven to originate from the terminal root wait rather than an earlier settlement.
+A duplicate delivery matching `lastSettlement` returns the same canonical recorded settlement without another write, event, RNG advance, handler, or continuation. A newer settlement replaces the previous record. Each delay settlement retains owning and continuation instruction positions.
 
-Completion lookup always searches the active foreground action and all active background actions first. Only when no active action matches does the runtime compare `lastSettlement`, classify a lower previously issued ID as `staleAction`, or classify an unissued ID as `unknownAction`. This prevents an older long-running background action from being misclassified after a newer action settles.
+Completion lookup always searches the active foreground action and all active background actions first. Only when no active action matches does the runtime compare `lastSettlement`, classify a lower previously issued ID as `staleAction`, or classify an unissued ID as `unknownAction`.
 
 Timed actions store an absolute deadline derived from `currentSessionTimeMs`. The runtime does not read browser or operating-system clocks directly. The player maps monotonic elapsed deltas onto the session coordinate, schedules wake-ups, and submits validated observations; tests use a fake clock and never sleep in real time.
 
@@ -98,9 +326,7 @@ settle actions due at effectiveNow
 
 No checkpoint may contain due-action processing performed against a newer observation while retaining the older session-time value.
 
-The first source-to-runtime slice is blocking `wait`. See ADR 0016 for the state machine, identity lookup, idempotency, time semantics, validation invariants, test matrix, alternatives, and implementation sequence.
-
-Camera stream ownership, media persistence, text-output composition, and chat pacing are adjacent follow-up designs rather than part of the first wait implementation. Current direction and open questions are recorded under accepted ADR 0017 and in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
+The first source-to-runtime slice is blocking `wait`. See ADR 0016 for the shared state machine, identity lookup, idempotency, time semantics, validation invariants, test matrix, alternatives, and implementation sequence. ADR 0018 accepts the next interaction and chat-pacing design without changing current implementation status.
 
 ## Compiler and execution entry points
 
@@ -150,7 +376,7 @@ The low-level runtime entry points are:
 
 Each low-level runtime entry validates the instruction plan and runtime snapshot before executing or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
 
-When ADR 0016 is implemented, these entry points must also stop cleanly at `waiting`. Separate validated operations submit time observations and typed action completions; ordinary execution entry points may not bypass the pending action.
+These entry points stop cleanly at `waiting`. Separate validated operations submit time observations and typed action completions; ordinary execution entry points may not bypass a pending foreground action.
 
 ## Host values and capabilities
 
@@ -178,7 +404,7 @@ Under ADR 0017, Standard Library and package-library wrappers may call documente
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, and `null` according to the current implemented subset. When the value is a list, the runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects, sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively select or stringify them.
 
-The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded and is not current implementation guidance. ADR 0017 treats a minimal typed text-output event as an engine concern and author-facing `say` behavior as a Standard Library candidate. Final pacing, output-target, speaker, participant, and conversation-provenance semantics require later decisions.
+The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 now defines the accepted deterministic first-POC smart-autoplay and pacing-action contract. That contract remains unimplemented until the required versioned runtime changes land.
 
 ## Runtime defaults and limits
 
@@ -226,7 +452,7 @@ Runtime state must be serializable at every instruction boundary, but normal exe
 
 A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore validates the checkpoint, instruction plan, snapshot, format versions, references, function/call progress, RNG state, and other structural invariants before execution resumes.
 
-Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. The player submits an explicit observation after restore; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
+Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. The Player application submits an explicit observation after restore; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
 
 ## Format evolution
 
@@ -240,18 +466,22 @@ checkpoint version: 5
 
 These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field.
 
+ADR 0018 does not change these constants through documentation. Implementation must explicitly increment every affected format before accepting interaction kinds, populated background actions, prepared pacing output, or captured smart-autoplay settings.
+
 ## API stability boundary
 
 The exported TypeScript compiler, compatibility wrapper, low-level runtime, snapshot, checkpoint, and RNG functions are current POC surfaces used by the repository and tests. Their presence in `src/index.ts` does not by itself establish a permanent third-party API or wire-format compatibility promise. Long-term package API stability and migration policy remain open.
 
 ## Remaining runtime work
 
-- maintain the implemented blocking `wait` slice while deferring Standard Library linkage and all other pending-action kinds;
-- under accepted ADR 0017, define the minimum background timed-work primitive and pause/resume/stop lifecycle before selecting the public timer API;
-- define action-kind-specific input, choice, button, media, timeout, and cancellation contracts while avoiding unnecessary independent state machines;
-- define typed text-output targets and stable speaker/participant provenance before final chat-pacing and LLM-context work;
+- preserve the implemented blocking `wait` slice while implementing ADR 0018 only through explicit versioned schema changes;
+- implement one generic typed foreground-interaction family with shared concrete bounded-data constants and canonical transcript derivation;
+- implement `chatPacingGate` through ADR 0016 background/foreground action state, checked captured settings, prepared output, and exact event ordering;
+- under ADR 0017, define the minimum background timed-work primitive and pause/resume/stop lifecycle for timers separately from developer runtime pause;
+- define action-kind-specific media, advanced timeout, and detailed-result contracts without unnecessary independent state machines;
+- define broader text-output targets and involved-speaker/conversation provenance before multi-context LLM work;
 - stable package/plan identity and migration policy;
-- Standard Library linkage, generated declarations/editor metadata, versioning, and capability access;
+- Standard Library imports, generated declarations/editor metadata transport, versioning, and capability access;
 - iframe host commands and response correlation;
 - camera stream ownership, media ownership, cleanup, persistence, and recovery;
 - time-integrity diagnostics and future server-authoritative scheduling;
