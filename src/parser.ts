@@ -58,6 +58,8 @@ export interface ParseResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
+export const MAX_PARSER_NESTING_DEPTH = 64;
+
 const parserDiagnosticCode = {
   expectedStatement: "TSP001",
   expectedStatementEnd: "TSP002",
@@ -85,6 +87,7 @@ const parserDiagnosticCode = {
   expectedFunctionName: "TSP024",
   expectedParameter: "TSP025",
   emptyFunctionParameters: "TSP026",
+  nestingDepth: "TSP027",
 } as const;
 
 /** Parses the accepted core-language milestone. */
@@ -106,12 +109,34 @@ class Parser {
   readonly #diagnostics: Diagnostic[] = [];
   #current = 0;
   #recoveredAtStatementBoundary = false;
+  #nestingDepth = 0;
+  #reportedNestingDepth = false;
 
   public constructor(private readonly tokens: readonly Token[]) {}
 
   public get diagnostics(): readonly Diagnostic[] {
     return this.#diagnostics;
   }
+
+  #withNesting<T>(operation: () => T, fallback: T): T {
+  if (this.#nestingDepth >= MAX_PARSER_NESTING_DEPTH) {
+    if (!this.#reportedNestingDepth) {
+      this.#reportedNestingDepth = true;
+      this.#reportToken(
+        parserDiagnosticCode.nestingDepth,
+        `Parser nesting exceeds the supported depth of ${MAX_PARSER_NESTING_DEPTH}.`,
+        this.#peek(),
+      );
+    }
+    return fallback;
+  }
+  this.#nestingDepth += 1;
+  try {
+    return operation();
+  } finally {
+    this.#nestingDepth -= 1;
+  }
+}
 
   public parseProgram(): Program {
     const statements: Statement[] = [];
@@ -463,6 +488,10 @@ class Parser {
   }
 
   #parseIfStatement(): IfStatement | null {
+  return this.#withNesting(() => this.#parseIfStatementWithinNesting(), null);
+}
+
+  #parseIfStatementWithinNesting(): IfStatement | null {
     const keyword = this.#advance();
     const condition = this.#parseRequiredExpression();
     if (condition === null) {
@@ -707,6 +736,10 @@ class Parser {
   }
 
   #parseBlock(): Block | null {
+  return this.#withNesting(() => this.#parseBlockWithinNesting(), null);
+}
+
+  #parseBlockWithinNesting(): Block | null {
     if (!this.#match(TokenKind.LeftBrace)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedBlock,
@@ -849,6 +882,11 @@ class Parser {
   }
 
   #parseNot(): Expression | null {
+  if (!this.#check(TokenKind.KeywordNot)) return this.#parseComparison();
+  return this.#withNesting(() => this.#parseNotWithinNesting(), null);
+}
+
+  #parseNotWithinNesting(): Expression | null {
     if (this.#match(TokenKind.KeywordNot)) {
       const operator = this.#previous();
       this.#skipContinuationNewlines();
@@ -1001,6 +1039,16 @@ class Parser {
   }
 
   #parseUnaryArithmetic(): Expression | null {
+  if (!this.#check(TokenKind.Plus) && !this.#check(TokenKind.Minus)) {
+    return this.#parsePostfix();
+  }
+  return this.#withNesting(
+    () => this.#parseUnaryArithmeticWithinNesting(),
+    null,
+  );
+}
+
+  #parseUnaryArithmeticWithinNesting(): Expression | null {
     if (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus)) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
@@ -1203,6 +1251,15 @@ class Parser {
   }
 
   #parseParenthesized(start: Token): ParenthesizedExpression | null {
+  return this.#withNesting(
+    () => this.#parseParenthesizedWithinNesting(start),
+    null,
+  );
+}
+
+  #parseParenthesizedWithinNesting(
+    start: Token,
+  ): ParenthesizedExpression | null {
     this.#skipNewlines();
     const expression = this.#parseRequiredExpression();
     this.#skipNewlines();
@@ -1222,7 +1279,14 @@ class Parser {
     });
   }
 
-  #parseListLiteral(start: Token): Expression {
+  #parseListLiteral(start: Token): Expression | null {
+  return this.#withNesting(
+    () => this.#parseListLiteralWithinNesting(start),
+    null,
+  );
+}
+
+  #parseListLiteralWithinNesting(start: Token): Expression {
     const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
     const end = this.#consumeClosingDelimiter(
       TokenKind.RightBracket,
@@ -1235,7 +1299,14 @@ class Parser {
     });
   }
 
-  #parseSetLiteral(start: Token): SetLiteral {
+  #parseSetLiteral(start: Token): SetLiteral | null {
+  return this.#withNesting(
+    () => this.#parseSetLiteralWithinNesting(start),
+    null,
+  );
+}
+
+  #parseSetLiteralWithinNesting(start: Token): SetLiteral {
     const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
     const end = this.#consumeClosingDelimiter(
       TokenKind.RightBracket,
@@ -1272,7 +1343,14 @@ class Parser {
     return elements;
   }
 
-  #parseObjectLiteral(start: Token): ObjectLiteral {
+  #parseObjectLiteral(start: Token): ObjectLiteral | null {
+  return this.#withNesting(
+    () => this.#parseObjectLiteralWithinNesting(start),
+    null,
+  );
+}
+
+  #parseObjectLiteralWithinNesting(start: Token): ObjectLiteral {
     const properties: ObjectProperty[] = [];
     this.#skipNewlines();
     while (
@@ -1330,6 +1408,13 @@ class Parser {
   }
 
   #parseTemplateLiteral(start: Token): TemplateLiteral | null {
+  return this.#withNesting(
+    () => this.#parseTemplateLiteralWithinNesting(start),
+    null,
+  );
+}
+
+  #parseTemplateLiteralWithinNesting(start: Token): TemplateLiteral | null {
     const parts: TemplatePart[] = [];
     let valid = true;
     while (

@@ -76,6 +76,12 @@ Complete static typing and the wider V30 Standard Library/runtime APIs are not i
 
 The current implemented `say` and `say as` paths remain unchanged by ADR 0017. A later migration may lower those forms through a tested Standard Library path while preserving source spans, diagnostics, visible output, speaker identity, deterministic RNG use, and checkpoint behavior.
 
+## Diagnostics
+
+Parser and semantic diagnostics are deterministic source-associated data. Resource-bound failures must be returned through this diagnostic model rather than exposed as native host exceptions.
+
+The source parser enforces a maximum recursive nesting depth of `64`. Inputs that exceed it return one `TSP027` error diagnostic rather than exposing a native JavaScript stack failure.
+
 ## Protected names
 
 Grammar keywords, type names, engine names, and implemented core built-ins are centrally protected from user declarations even when a protected future engine API is not yet callable. Protection does not make a deferred API implemented.
