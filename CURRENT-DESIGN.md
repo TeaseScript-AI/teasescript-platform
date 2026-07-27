@@ -21,7 +21,8 @@ Accepted post-V30 decisions relevant to the current runtime include:
 - ADR 0014: recursive value-copy semantics for ordinary values, scalar-only sets, empty collection errors, and speaker display-name fallback behavior;
 - ADR 0015: versioned JSON-safe instruction plans, explicit runtime state, checkpoints, deterministic stepping/RNG/events, and no suspended JavaScript call stack;
 - ADR 0016: resumable pending actions with persisted session time, foreground/background separation, monotonic action IDs, bounded settlement replay, active-first completion lookup, injected time observations, and blocking `wait` as the first implementation slice;
-- ADR 0017: the accepted boundary between deterministic engine primitives, the public Standard Library, package libraries, and privileged platform adapters.
+- ADR 0017: the accepted boundary between deterministic engine primitives, the public Standard Library, package libraries, and privileged platform adapters;
+- ADR 0018: the accepted first Standard Library POC contract for `showButton`, `askText`, `askNumber`, `choose`, `say` smart autoplay, one generic interaction family, and ADR 0016 pacing actions.
 
 Direct assignment remains `score = 20`; `set score = 20` remains invalid.
 
@@ -40,7 +41,7 @@ Public Standard Library
     -> deterministic runtime and player boundary
 ```
 
-The accepted boundary keeps canonical identity, pending actions, time, validation, handles, checkpointing, events, resumable continuations, and security in the engine. Friendly presentation and composition such as `say` policy, common input helpers, and timer presentation are Standard Library candidates when they can be built without weakening those guarantees.
+The accepted boundary keeps canonical identity, pending actions, time, validation, handles, checkpointing, events, resumable continuations, and security in the engine. Friendly presentation and composition such as `say` policy, common input helpers, and timer presentation belong in the Standard Library when they can be built without weakening those guarantees.
 
 Package libraries may reuse only public, capability-safe Standard Library exports. Privileged platform adapters remain internal and cannot become transitively accessible through imports.
 
@@ -50,7 +51,32 @@ A plan/checkpoint must contain lowered library behavior or bind to an exact comp
 
 Generated TypeScript signatures and editor metadata provide the intended path for autocomplete, parameter hints, hover documentation, and diagnostics for ordinary library calls. Libraries must not mutate TeaseScript grammar; special command or block syntax remains an explicit language/compiler decision.
 
-ADR 0017 does not change accepted V30 syntax, ADR 0016 pending-action semantics, or the currently implemented `say` path. Detailed linkage, API, and migration work remains deferred until separately designed and tested.
+## Accepted first Standard Library POC contract
+
+ADR 0018 accepts this implementation sequence:
+
+1. `showButton`, `askText`, `askNumber`, and `choose` through one generic typed foreground interaction;
+2. `say` smart autoplay through one ADR 0016 `chatPacingGate` action that can move from background work to the foreground slot when it blocks a prepared later message.
+
+The selected names are an automatic protected prelude with no first-POC opt-out or replacement. Their resumable behavior is fully lowered into versioned plan data. Existing sessions keep their original plan and captured pacing configuration; no implicit latest restore or checkpoint migration is accepted.
+
+The interaction contract includes:
+
+- mandatory, non-null, non-cancellable completion;
+- exact `askText` line-ending normalization and whitespace-only rejection;
+- exact one-line `askNumber` parsing and transcript preservation;
+- unlabelled, identifier-labelled, and numeric-labelled `choose` results without mixing label types;
+- engine-derived canonical transcript text for choices and `showButton`;
+- dynamic button or dropdown presentation that is not canonical runtime state;
+- shared versioned technical limits without separate per-field character caps in the ADR;
+- one Standard chat target and optional stable `speakerId` provenance;
+- localized accessible-name defaults.
+
+Smart autoplay captures non-negative safe-integer millisecond account settings and uses checked arithmetic. A positive gate uses ordinary action identity, deadlines, `backgroundActions`, `foregroundAction`, events, settlement replay, checkpointing, and deterministic time observation. `wait` does not consume the gate; the accepted foreground interactions do. `0` and `instant` settle an earlier background gate and emit immediately.
+
+The normal Player application has no player-facing pause control or author-facing session-pause command. Developer mode may provide Run, Step, Pause, checkpoint, restore, and debugger controls. Browser unavailability and reconnect time integrity remain separate work.
+
+ADR 0018 is accepted documentation, not current implementation. Every required plan, snapshot, and checkpoint schema change must be explicitly versioned during implementation.
 
 ## Implemented POC milestones
 
@@ -117,9 +143,9 @@ ADR 0016 accepts:
 - absolute deadlines on the persisted injected session coordinate;
 - typed completion operations and `actionRequested`/`actionCompleted` events;
 - blocking `wait` as the first source-to-runtime implementation slice;
-- version-4 internal plan, snapshot, and checkpoint schemas when the new fields are implemented.
+- explicit format-version changes whenever new action kinds or populated background actions are implemented.
 
-The first slice does not implement camera/media lifecycle, chat pacing, the production host protocol, or Laravel scheduling. Selected camera, media-persistence, time-integrity, and chat-pacing directions are recorded as explicit follow-up design work in [`docs/planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](docs/planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
+The implemented first slice does not yet include ADR 0018 interactions or pacing, camera/media lifecycle, the production host protocol, or Laravel scheduling.
 
 ## Runtime execution and performance boundary
 
@@ -137,12 +163,12 @@ POC implementation choices such as full snapshot cloning may later be optimized,
 
 ## Major remaining groups
 
+- implementation of ADR 0018's protected prelude, compact syntax, generic foreground interactions, shared concrete data limits, dynamic Standard UI, and pacing action;
 - units, date, time, datetime, and duration values;
-- implementation of the accepted pending-action contract, then action-kind-specific choices, input, waits, timers, buttons, and media completion;
+- timer, media, and other pending-action kinds beyond blocking `wait` and the accepted first interaction/pacing contract;
 - cross-origin iframe host protocol and validated messaging;
 - camera/media lifecycle, resource ownership, persistence, recovery, and custom views;
-- implementation planning on the accepted engine/Standard-Library boundary before replacing the timer and chat-pacing proposals;
-- TypeScript library linkage, deterministic version binding, generated declarations/editor metadata, public/privileged module separation, Standard Library packaging, and richer module selection;
+- TypeScript library imports, deterministic version binding beyond fully lowered behavior, generated declarations/editor metadata transport, Standard Library packaging, and richer module selection;
 - package/plan identity and migration policy;
 - Laravel persistence, accounts, global data, scheduling, and continuous personalities;
 - complete static typing and remaining V30 coverage.
