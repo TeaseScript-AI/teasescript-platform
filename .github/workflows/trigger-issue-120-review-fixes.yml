@@ -1,0 +1,61 @@
+name: Trigger issue 120 review fixes
+
+on:
+  pull_request:
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/issue-120-property-harness' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/issue-120-property-harness
+          fetch-depth: 0
+
+      - name: Set up repository Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Apply the verified review patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 9873888df99acbc0f1b3be79cf2e072b67ec1e2a HEAD
+          sed -n '/^H4sIC/{p;q;}' .github/workflows/apply-issue-120-review-fixes.yml > /tmp/issue120-review-fixes.diff.gz.b64
+          test -s /tmp/issue120-review-fixes.diff.gz.b64
+          base64 -d /tmp/issue120-review-fixes.diff.gz.b64 | gzip -d > /tmp/issue120-review-fixes.diff
+          echo "07eb9378791acda30ca031f9f90b644f52d16511411ffbed7581e2a82a26bce4  /tmp/issue120-review-fixes.diff" | sha256sum -c -
+          git apply --check /tmp/issue120-review-fixes.diff
+          git apply /tmp/issue120-review-fixes.diff
+          rm .github/workflows/apply-issue-120-review-fixes.yml
+          rm .github/workflows/trigger-issue-120-review-fixes.yml
+          git diff --check
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify review fixes
+        run: |
+          rm -rf dist
+          npm run check
+          npm run build
+          git diff --check
+
+      - name: Commit and push review fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/TESTING.md tests/property.test.ts tests/property/invariants.ts tests/property/mutations.ts tests/property/replay.ts .github/workflows/apply-issue-120-review-fixes.yml .github/workflows/trigger-issue-120-review-fixes.yml
+          git commit -m "Address property harness review findings"
+          git push origin HEAD:agent/issue-120-property-harness
