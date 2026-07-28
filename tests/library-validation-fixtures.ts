@@ -1,4 +1,4 @@
-import { MAX_LIBRARY_SOURCE_LENGTH } from "../src/libraries/public.js";
+import { MAX_LIBRARY_SOURCE_LENGTH } from "../src/library-tooling/public.js";
 
 /** Local, non-authoritative development fixtures; none define a library contract. */
 export const validLibraryFixtures = Object.freeze([

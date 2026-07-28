@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import type { InstructionPlan } from "../src/instructions.js";
+import type { InstructionPlan } from "../src/plan/model.js";
 import {
   CHECKPOINT_VERSION,
   CheckpointError,
@@ -24,7 +24,7 @@ import {
 import {
   withDetailedValidationWorkLimitForTesting,
   withValidationTestStatistics,
-} from "../src/runtime/validation-testing.js";
+} from "../src/validation-testing.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("restores every instruction boundary during defaults and nested calls", () => {

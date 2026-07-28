@@ -17,7 +17,7 @@ import {
   type RuntimeCheckpoint,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { withValidationTestStatistics } from "../src/runtime/validation-testing.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
 
 const RANGE_ERROR = "Function instruction range is overlapping or impossible.";
 const ROOT_ERROR = "Root execution boundary is invalid.";

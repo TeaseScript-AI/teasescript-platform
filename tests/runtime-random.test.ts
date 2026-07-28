@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import type { InstructionPlan } from "../src/instructions.js";
+import type { InstructionPlan } from "../src/plan/model.js";
 import {
   CheckpointError,
   createCheckpoint,

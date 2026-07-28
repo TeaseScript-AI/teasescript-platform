@@ -5,7 +5,7 @@ import {
   createExactLibraryIdentity,
   validatePublicLibraryMetadata,
   type PublicLibraryMetadata,
-} from "../src/libraries/public.js";
+} from "../src/library-tooling/public.js";
 
 /**
  * Development/test-only static validation harness. Its result is deliberately

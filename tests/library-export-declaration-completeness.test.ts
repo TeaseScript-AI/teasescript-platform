@@ -5,7 +5,7 @@ import {
   LibraryMetadataError,
   createExactLibraryIdentity,
   createPublicLibraryMetadata,
-} from "../src/libraries/public.js";
+} from "../src/library-tooling/public.js";
 
 const identity = createExactLibraryIdentity("export-completeness@1");
 

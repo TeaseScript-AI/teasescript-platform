@@ -8,15 +8,15 @@ import {
   MAX_INTERACTION_OPTION_ENTRIES,
   MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "../src/interaction-limits.js";
-import type { InstructionPlan, InteractionInstruction, InteractionUiPayload } from "../src/instructions.js";
-import { validateInstructionPlan } from "../src/instructions.js";
+import type { InstructionPlan, InteractionInstruction, InteractionUiPayload } from "../src/plan/model.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { completeAction, observeTime, run, stepToEvent } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import {
   withInteractionControlFlowWorkLimitForTesting,
   withValidationTestStatistics,
-} from "../src/runtime/validation-testing.js";
+} from "../src/validation-testing.js";
 
 function interactionPlan(interactionKind: InteractionInstruction["interactionKind"], ui: InteractionUiPayload, options: { speaker?: string | null } = {}): InstructionPlan {
   const source = options.speaker === undefined ? "wait 1\nexit" : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;

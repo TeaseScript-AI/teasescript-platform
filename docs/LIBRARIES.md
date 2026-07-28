@@ -12,6 +12,13 @@ The current POC includes an internal exact-identity catalog and generated, JSON-
 
 This catalog/metadata tooling is intentionally not exported from the runtime root entry point. It imports the TypeScript compiler and remains a separate tooling-only module, so ordinary engine consumers do not load or require that compiler at runtime.
 
+The implementation is canonically located in `src/library-tooling/`:
+`catalog.ts`, `metadata.ts`, and `public.ts`. The old
+`src/libraries/public.ts` path is a temporary re-export facade covered by a
+focused compatibility test. Privileged adapter placeholders are kept in
+`src/platform-internal/` and are not reachable through the runtime root or
+library-tooling public surface.
+
 Public library definitions and metadata are separate from internal privileged platform adapters. Registering a public library accepts inert TypeScript source and metadata only; it does not expose DOM, cookie, network, browser-handle, runtime, or host capabilities.
 
 The exact `.tease` import/linkage syntax, generated metadata format, versioning rules, and complete Standard Library API beyond the accepted first POC remain open. Historical examples using the rejected procedure concept, explicit ordinary-function invocation keywords, or procedure-based scheduling are not authoritative.

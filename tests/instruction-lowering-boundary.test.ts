@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   compileProgram,
   InstructionCompilationError,
-} from "../src/instructions.js";
+} from "../src/compiler/compile-program.js";
 import { parse } from "../src/parser.js";
 
 const source = [

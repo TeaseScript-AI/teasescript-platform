@@ -82,3 +82,47 @@ JSON-safe after every instruction boundary does not mean serializing or persisti
 ## Deferred architecture
 
 The cross-origin host protocol, pending input/timer actions, Standard Library linkage and packaging, deterministic library identity/version binding, generated editor metadata, privileged adapter boundaries, media handles, server checkpoint persistence, package identity/migrations, and continuous-personality scheduling remain later work.
+
+## Implemented source-layout seams
+
+The behavior-neutral Option A refactor is implemented for the code present on
+the starting `main`. `src/plan/model.ts` contains only the serializable plan
+contract; `capture.ts` and `validation.ts` own hostile-data capture and plan
+validation, with the small private capture support seam shared to avoid a
+capture/validation cycle. `src/compiler/compile-program.ts` owns compilation
+orchestration, while `src/compiler/lowering/compiler.ts` owns the cohesive
+stateful lowering pass.
+
+Serializable pending-action and settlement contracts live in
+`src/runtime/actions/model.ts`; action modules remain pure. The two atomic
+public transitions live in `src/runtime/operations/complete-action.ts` and
+`observe-time.ts`. Their small `model.ts` and `support.ts` companions hold
+shared operation results and common capture/sequence helpers so the engine can
+execute instructions without duplicating operation logic. Whole-snapshot
+construction, cloning, validation, and cross-state invariants remain in
+`src/runtime/state.ts`.
+
+Library catalog and metadata tooling lives under `src/library-tooling/`.
+Privileged adapter placeholders live under `src/platform-internal/` and are
+not part of the runtime root export. No `src/standard-library/` shell was
+created because no real Standard Library implementation is present.
+
+The technical playground workspace controller lives at
+`playground/workspace/controller.ts`; the existing entry path remains a
+compatibility facade. No speculative Player or shared browser folders were
+added.
+
+### Compatibility facade inventory
+
+| Old path | Canonical path | Exposed symbols or responsibility | Known repository consumers | External-support status | Owner | Removal condition |
+| --- | --- | --- | --- | --- | --- | --- |
+| `src/instructions.ts` | `src/plan/*`, `src/compiler/*` | Plan, validation, and compilation symbols | Compatibility test only | Temporarily supported; external status unknown | Compiler/runtime owners | Later cleanup after dependent branches migrate and external direct-import status is decided |
+| `src/libraries/public.ts` | `src/library-tooling/public.ts` | Catalog and metadata tooling | Compatibility test only | Temporarily supported; external status unknown | Library tooling owner | Evidence-based cleanup after repository and dependent consumers migrate |
+| `playground/workspace.ts` | `playground/workspace/controller.ts` | Technical workspace compile/run/decode controller | Compatibility test only; browser/server use canonical path | Repository compatibility only | Workspace owner | Remove after consumers and external-support status are accounted for |
+| `src/runtime/validation-testing.ts` | `src/validation-testing.ts` | Test-only validation instrumentation | Compatibility test only; production and ordinary tests use the canonical path | Repository compatibility only; not a root public export | Runtime validation owner | Remove after direct-import compatibility is no longer required and external-support status is decided |
+
+`tools/check-legacy-imports.mjs` resolves static import/export specifiers to
+repository paths before rejecting legacy paths, including local and deep
+relative forms. Facades, the dedicated compatibility test, and its isolated
+invalid-import fixtures are the narrow documented exceptions; the facades
+remain intentionally retained in this issue.

@@ -4,9 +4,9 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import {
   INSTRUCTION_PLAN_VERSION,
-  validateInstructionPlan,
   type InstructionPlan,
-} from "../src/instructions.js";
+} from "../src/plan/model.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   CHECKPOINT_VERSION,
   CheckpointError,

@@ -2,7 +2,7 @@
 
 ## Playground execution helper
 
-`playground/workspace.ts` is the DOM-free adapter shared by the browser controller and development automation routes. It uses the public compiler and canonical `run`/`stepToEvent` runtime interfaces to create fresh validated snapshots and return JSON-safe diagnostics, events, plan, snapshot, status, and instruction count. It stops on `halted`, `failed`, `waiting`, or the canonical instruction-budget failure and does not use the compatibility `Interpreter.execute(...)` route.
+`playground/workspace/controller.ts` is the DOM-free adapter shared by the browser controller and development automation routes. The old `playground/workspace.ts` path is a compatibility facade. It uses the public compiler and canonical `run`/`stepToEvent` runtime interfaces to create fresh validated snapshots and return JSON-safe diagnostics, events, plan, snapshot, status, and instruction count. It stops on `halted`, `failed`, `waiting`, or the canonical instruction-budget failure and does not use the compatibility `Interpreter.execute(...)` route.
 
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
 
@@ -11,6 +11,21 @@ A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neith
 ADR 0015 requires the AST to remain compile-time data and the runtime to execute a validated, versioned, JSON-safe instruction plan using explicit versioned state. Checkpoints, event sequence numbers, RNG state, scopes, speakers, loop frames, call frames, temporaries, prepared references, and structured failure information must be serializable without a suspended JavaScript call stack.
 
 ADR 0016 accepts the resumable pending-action contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities.
+
+## Implemented runtime ownership
+
+Shared serializable action and settlement contracts are owned by
+`src/runtime/actions/model.ts` and re-exported from `state.ts` for direct-import
+compatibility. Pure interaction normalization and matching live in
+`actions/interaction.ts`; delay helpers and replay classification remain
+action-specific. Canonical completion and time-observation transitions are
+implemented in `src/runtime/operations/complete-action.ts` and
+`src/runtime/operations/observe-time.ts`, with a small shared operation support
+module for validated input capture, result construction, and event-sequence
+allocation. `src/runtime/engine.ts` re-exports those operations for direct
+compatibility and remains the execution facade for instructions, expressions,
+`run`, and orchestration. No new action state machine or pacing implementation
+was added.
 
 ## Accepted primitive boundary
 

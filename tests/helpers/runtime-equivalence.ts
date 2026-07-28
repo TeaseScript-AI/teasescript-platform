@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { compileSource } from "../../src/compiler.js";
-import { validateInstructionPlan } from "../../src/instructions.js";
+import { validateInstructionPlan } from "../../src/plan/validation.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,

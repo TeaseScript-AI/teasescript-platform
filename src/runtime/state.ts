@@ -1,11 +1,23 @@
 import type {
+  RuntimeActionSettlementSnapshot,
+  RuntimePendingActionSnapshot,
+} from "./actions/model.js";
+export type {
+  RuntimeActionSettlementSnapshot,
+  RuntimeDelayActionSnapshot,
+  RuntimeDelayActionSettlementSnapshot,
+  RuntimeInteractionActionSnapshot,
+  RuntimeInteractionActionSettlementSnapshot,
+  RuntimePendingActionSnapshot,
+} from "./actions/model.js";
+
+import type {
   ExpressionPlan,
   Instruction,
   InstructionPlan,
-  InteractionResultDomain,
   InteractionUiPayload,
-} from "../instructions.js";
-import { captureInstructionPlan } from "../instructions.js";
+} from "../plan/model.js";
+import { captureInstructionPlan } from "../plan/capture.js";
 import {
   EXTERNAL_DATA_DEPTH_MESSAGE,
   EXTERNAL_DATA_WORK_MESSAGE,
@@ -39,7 +51,7 @@ import {
 import {
   detailedValidationWorkLimitForTesting,
   recordValidationTestWork,
-} from "./validation-testing.js";
+} from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
 export const RUNTIME_SNAPSHOT_VERSION = 6;
@@ -71,69 +83,6 @@ export interface RuntimeFailureSnapshot {
   readonly message: string;
   readonly span: SourceSpan;
 }
-
-export interface RuntimeDelayActionSnapshot {
-  readonly kind: "delay";
-  readonly actionId: number;
-  readonly owningInstruction: number;
-  readonly continuationInstruction: number;
-  readonly ownerCallFrameId: number | null;
-  readonly scopeDepth: number;
-  readonly loopDepth: number;
-  readonly createdAtMs: number;
-  readonly deadlineMs: number;
-  readonly expectedCompletion: "time";
-  readonly requestEventSequence: number;
-}
-
-export interface RuntimeInteractionActionSnapshot {
-  readonly kind: "interaction";
-  readonly interactionKind: "button" | "text" | "number" | "choice";
-  readonly actionId: number;
-  readonly owningInstruction: number;
-  readonly continuationInstruction: number;
-  readonly ownerCallFrameId: number | null;
-  readonly scopeDepth: number;
-  readonly loopDepth: number;
-  readonly destinationTemporary: number | null;
-  readonly expectedResult: InteractionResultDomain;
-  readonly target: "standardChat";
-  readonly speakerId: number | null;
-  readonly ui: InteractionUiPayload;
-  readonly requestEventSequence: number;
-}
-
-export type RuntimePendingActionSnapshot = RuntimeDelayActionSnapshot | RuntimeInteractionActionSnapshot;
-
-export interface RuntimeDelayActionSettlementSnapshot {
-  readonly actionId: number;
-  readonly actionKind: "delay";
-  readonly settlementKind: "completed";
-  readonly owningInstruction: number;
-  readonly continuationInstruction: number;
-  readonly requestEventSequence: number;
-  readonly completionEventSequence: number;
-  readonly deadlineMs: number;
-  readonly completedAtMs: number;
-}
-
-export interface RuntimeInteractionActionSettlementSnapshot {
-  readonly actionId: number;
-  readonly actionKind: "interaction";
-  readonly interactionKind: "button" | "text" | "number" | "choice";
-  readonly settlementKind: "completed";
-  readonly owningInstruction: number;
-  readonly continuationInstruction: number;
-  readonly ownerCallFrameId: number | null;
-  readonly destinationTemporary: number | null;
-  readonly requestEventSequence: number;
-  readonly transcriptEventSequence: number;
-  readonly completionEventSequence: number;
-  readonly result: string | number | null;
-  readonly transcriptText: string;
-}
-
-export type RuntimeActionSettlementSnapshot = RuntimeDelayActionSettlementSnapshot | RuntimeInteractionActionSettlementSnapshot;
 
 interface RuntimeLoopFrameBase {
   readonly loopId: number;

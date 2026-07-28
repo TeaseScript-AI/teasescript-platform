@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSource } from "../playground/workspace.js";
+import { compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSource } from "../playground/workspace/controller.js";
 
 test("workspace helper compiles, halts, and returns JSON-safe data", () => {
   const compiled = compileWorkspaceSource('say "Hello"');
