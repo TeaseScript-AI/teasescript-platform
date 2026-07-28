@@ -94,8 +94,6 @@ export type {
 } from "./runtime/events.js";
 export {
   executeInstruction,
-  completeAction,
-  observeTime,
   run,
   RuntimeDataError,
   stepToEvent,
@@ -104,10 +102,14 @@ export {
   type RuntimeCapabilityCall,
   type RuntimeOperationResult,
   type RuntimeRunOptions,
-  type PendingActionOperationResult,
-  type TimeObservationOutcome,
-  type ActionCompletionOutcome,
 } from "./runtime/engine.js";
+export { completeAction } from "./runtime/operations/complete-action.js";
+export { observeTime } from "./runtime/operations/observe-time.js";
+export type {
+  PendingActionOperationResult,
+  TimeObservationOutcome,
+  ActionCompletionOutcome,
+} from "./runtime/operations/model.js";
 export {
   CHECKPOINT_FORMAT,
   CHECKPOINT_VERSION,
@@ -140,16 +142,18 @@ export {
   type RuntimeForLoopFrameSnapshot,
   type RuntimeWhileLoopFrameSnapshot,
   type RuntimeSnapshot,
-  type RuntimeActionSettlementSnapshot,
-  type RuntimeDelayActionSnapshot,
-  type RuntimeInteractionActionSnapshot,
-  type RuntimeDelayActionSettlementSnapshot,
-  type RuntimeInteractionActionSettlementSnapshot,
-  type RuntimePendingActionSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeStatus,
   type SnapshotValidationResult,
 } from "./runtime/state.js";
+export type {
+  RuntimeActionSettlementSnapshot,
+  RuntimeDelayActionSnapshot,
+  RuntimeInteractionActionSnapshot,
+  RuntimeDelayActionSettlementSnapshot,
+  RuntimeInteractionActionSettlementSnapshot,
+  RuntimePendingActionSnapshot,
+} from "./runtime/actions/model.js";
 export {
   DEFAULT_PLAYGROUND_SEED,
   createXorShift32State,

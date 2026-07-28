@@ -21,8 +21,12 @@ The current repository uses:
 
 The source-layout refactor keeps the required property layout unchanged and
 adds `tools/check-legacy-imports.mjs` to the normal `npm run check` path. The
-check is dependency-free and reports each legacy import with its file and line
-number; only facade files and the dedicated compatibility test are allowlisted.
+check is dependency-free, scans static import/export specifiers, resolves
+relative `.js`/`.ts` paths, and reports each legacy import with its file, line,
+original specifier, and canonical replacement. Facades, the dedicated
+compatibility test, and its isolated invalid-import fixtures are the only
+documented exceptions; focused tests cover local, deep, canonical, and allowed
+specifier forms.
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 

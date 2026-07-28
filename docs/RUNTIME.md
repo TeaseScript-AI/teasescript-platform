@@ -14,14 +14,18 @@ ADR 0016 accepts the resumable pending-action contract for waits, timers, choice
 
 ## Implemented runtime ownership
 
-Shared serializable action and settlement contracts are grouped under
-`src/runtime/actions/`. Pure interaction normalization and matching live in
-`actions/interaction.ts`; delay helpers and replay classifications remain
-action-specific. Canonical completion and time-observation entrypoints are
-`src/runtime/operations/complete-action.ts` and
-`src/runtime/operations/observe-time.ts`. `src/runtime/engine.ts` remains the
-execution facade for instructions, expressions, `run`, and orchestration.
-No new action state machine or pacing implementation was added.
+Shared serializable action and settlement contracts are owned by
+`src/runtime/actions/model.ts` and re-exported from `state.ts` for direct-import
+compatibility. Pure interaction normalization and matching live in
+`actions/interaction.ts`; delay helpers and replay classification remain
+action-specific. Canonical completion and time-observation transitions are
+implemented in `src/runtime/operations/complete-action.ts` and
+`src/runtime/operations/observe-time.ts`, with a small shared operation support
+module for validated input capture, result construction, and event-sequence
+allocation. `src/runtime/engine.ts` re-exports those operations for direct
+compatibility and remains the execution facade for instructions, expressions,
+`run`, and orchestration. No new action state machine or pacing implementation
+was added.
 
 ## Accepted primitive boundary
 

@@ -86,11 +86,21 @@ The cross-origin host protocol, pending input/timer actions, Standard Library li
 ## Implemented source-layout seams
 
 The behavior-neutral Option A refactor is implemented for the code present on
-the starting `main`. Plan contracts are under `src/plan/`, compiler entry and
-lowering boundaries are under `src/compiler/`, pure pending-action helpers are
-under `src/runtime/actions/`, and canonical operation entrypoints are under
-`src/runtime/operations/`. Whole-snapshot construction, cloning, validation,
-and cross-state invariants remain in `src/runtime/state.ts`.
+the starting `main`. `src/plan/model.ts` contains only the serializable plan
+contract; `capture.ts` and `validation.ts` own hostile-data capture and plan
+validation, with the small private capture support seam shared to avoid a
+capture/validation cycle. `src/compiler/compile-program.ts` owns compilation
+orchestration, while `src/compiler/lowering/compiler.ts` owns the cohesive
+stateful lowering pass.
+
+Serializable pending-action and settlement contracts live in
+`src/runtime/actions/model.ts`; action modules remain pure. The two atomic
+public transitions live in `src/runtime/operations/complete-action.ts` and
+`observe-time.ts`. Their small `model.ts` and `support.ts` companions hold
+shared operation results and common capture/sequence helpers so the engine can
+execute instructions without duplicating operation logic. Whole-snapshot
+construction, cloning, validation, and cross-state invariants remain in
+`src/runtime/state.ts`.
 
 Library catalog and metadata tooling lives under `src/library-tooling/`.
 Privileged adapter placeholders live under `src/platform-internal/` and are
@@ -110,6 +120,8 @@ added.
 | `src/libraries/public.ts` | `src/library-tooling/public.ts` | Catalog and metadata tooling | Compatibility test only | Temporarily supported; external status unknown | Library tooling owner | Evidence-based cleanup after repository and dependent consumers migrate |
 | `playground/workspace.ts` | `playground/workspace/controller.ts` | Technical workspace compile/run/decode controller | Compatibility test only; browser/server use canonical path | Repository compatibility only | Workspace owner | Remove after consumers and external-support status are accounted for |
 
-`tools/check-legacy-imports.mjs` prevents new repository-owned imports from
-these paths. The compatibility test is the narrow documented allowlist; the
-facades remain intentionally retained in this issue.
+`tools/check-legacy-imports.mjs` resolves static import/export specifiers to
+repository paths before rejecting legacy paths, including local and deep
+relative forms. Facades, the dedicated compatibility test, and its isolated
+invalid-import fixtures are the narrow documented exceptions; the facades
+remain intentionally retained in this issue.

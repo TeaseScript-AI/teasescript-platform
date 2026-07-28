@@ -1,6 +1,6 @@
 import { interactionStringFits } from "../../interaction-limits.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
-import type { RuntimeInteractionActionSnapshot } from "../state.js";
+import type { RuntimeInteractionActionSnapshot } from "./model.js";
 
 export type ResolvedInteraction =
   | { readonly ok: true; readonly result: string | number | null; readonly transcriptText: string }

@@ -5,23 +5,38 @@ import type {
   Instruction,
   InstructionPlan,
 } from "../plan/model.js";
-import { captureInstructionPlan } from "../plan/capture.js";
-import { captureExternalData } from "../external-data-limits.js";
 import {
   createSourcePosition,
   createSourceSpan,
   type SourceSpan,
 } from "../source.js";
 import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
+import {
+  assertCounterCanAdvance,
+  assertEventSequenceCapacity,
+  captureExecutableData,
+  copySpan,
+  result,
+  setTemporary,
+  takeSequence,
+} from "./operations/support.js";
+import type { RuntimeOperationResult } from "./operations/model.js";
+export { completeAction } from "./operations/complete-action.js";
+export { observeTime } from "./operations/observe-time.js";
+export type {
+  ActionCompletionOutcome,
+  PendingActionOperationResult,
+  RuntimeOperationResult,
+  TimeObservationOutcome,
+} from "./operations/model.js";
+export { RuntimeDataError } from "./operations/support.js";
 import type {
-  ActionCompletedEvent,
   ActionRequestedEvent,
   CompleteEvent,
   DeveloperWarningEvent,
   ExitEvent,
   InterpreterEvent,
   OutputSpeaker,
-  PlayerTranscriptEvent,
   RuntimeFailureEvent,
   SayEvent,
 } from "./events.js";
@@ -47,11 +62,7 @@ import {
   type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import {
-  captureRuntimeSnapshot,
   cloneCapturedRuntimeSnapshot,
-  MAX_RUNTIME_SESSION_TIME_MS,
-  type RuntimeActionSettlementSnapshot,
-  type RuntimeInteractionActionSnapshot,
   type RuntimeBindingSnapshot,
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
@@ -59,7 +70,7 @@ import {
   type RuntimeCallFrameSnapshot,
   type RuntimeTemporarySnapshot,
 } from "./state.js";
-import { resolveInteractionCompletion } from "./actions/interaction.js";
+import type { RuntimeInteractionActionSnapshot } from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 
 export interface RuntimeCapabilityCall {
@@ -78,43 +89,8 @@ export interface RuntimeCapabilities {
   readonly random?: RandomSource;
 }
 
-export interface RuntimeOperationResult {
-  readonly snapshot: RuntimeSnapshot;
-  readonly events: readonly InterpreterEvent[];
-  readonly instructionsExecuted: number;
-}
-
 export interface RuntimeRunOptions {
   readonly instructionBudget?: number;
-}
-
-export type TimeObservationOutcome =
-  | { readonly kind: "observed"; readonly currentSessionTimeMs: number; readonly completion: RuntimeActionSettlementSnapshot | null }
-  | { readonly kind: "invalidObservation"; readonly message: string };
-
-export interface PendingActionOperationResult<T> extends RuntimeOperationResult { readonly outcome: T; }
-
-export type ActionCompletionOutcome =
-  | { readonly kind: "completed"; readonly settlement: RuntimeActionSettlementSnapshot }
-  | { readonly kind: "alreadySettled"; readonly settlement: RuntimeActionSettlementSnapshot }
-  | { readonly kind: "staleAction"; readonly actionId: number }
-  | { readonly kind: "unknownAction"; readonly actionId: number }
-  | { readonly kind: "wrongActionKind"; readonly actionId: number; readonly expectedActionKind: "delay" | "interaction"; readonly receivedActionKind: string }
-  | { readonly kind: "invalidPayload"; readonly message: string }
-  | { readonly kind: "notDue"; readonly actionId: number; readonly currentSessionTimeMs: number; readonly deadlineMs: number };
-
-export class RuntimeDataError extends Error {
-  public constructor(
-    readonly code: "TSR100" | "TSR101",
-    message: string,
-  ) {
-    super(message);
-    this.name = "RuntimeDataError";
-  }
-
-  public toInfo(): Readonly<{ code: string; message: string }> {
-    return Object.freeze({ code: this.code, message: this.message });
-  }
 }
 
 export function executeInstruction(
@@ -243,107 +219,12 @@ export function run(
 }
 
 /** Atomically records a host-supplied session-time observation and settles a due delay. */
-export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, suppliedNowMs: unknown): PendingActionOperationResult<TimeObservationOutcome> {
-  const captured = captureExecutableData(plan, snapshot);
-  const current = cloneCapturedRuntimeSnapshot(captured.snapshot);
-  if (!isValidSessionTime(suppliedNowMs)) return pendingResult(current, [], { kind: "invalidObservation", message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.` });
-  const effectiveNow = Math.max(current.currentSessionTimeMs, suppliedNowMs);
-  const action = current.foregroundAction;
-  if (action !== null && action.kind === "delay" && effectiveNow >= action.deadlineMs) {
-    assertEventSequenceCapacity(current, 1);
-  }
-  current.currentSessionTimeMs = effectiveNow;
-  if (action === null || action.kind !== "delay" || effectiveNow < action.deadlineMs) {
-    return pendingResult(current, [], { kind: "observed", currentSessionTimeMs: current.currentSessionTimeMs, completion: null });
-  }
-  const completionSequence = takeSequence(current);
-  const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
-    actionId: action.actionId, actionKind: "delay", settlementKind: "completed",
-    owningInstruction: action.owningInstruction,
-    continuationInstruction: action.continuationInstruction,
-    requestEventSequence: action.requestEventSequence, completionEventSequence: completionSequence,
-    deadlineMs: action.deadlineMs, completedAtMs: current.currentSessionTimeMs,
-  });
-  current.foregroundAction = null;
-  current.lastSettlement = settlement;
-  current.lastSettlementResultState = "none";
-  current.status = "running";
-  current.nextInstruction = action.continuationInstruction;
-  const span = captured.plan.instructions[action.owningInstruction]?.span ?? captured.plan.sourceSpan;
-  const events: InterpreterEvent[] = [Object.freeze({ kind: "actionCompleted", sequence: completionSequence, settlement, span: copySpan(span) } satisfies ActionCompletedEvent)];
-  return pendingResult(current, events, { kind: "observed", currentSessionTimeMs: current.currentSessionTimeMs, completion: settlement });
-}
+
 
 /** Validated host completion route. Delay payloads carry the observed session time. */
-export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot, request: unknown): PendingActionOperationResult<ActionCompletionOutcome> {
-  const captured = captureExecutableData(plan, snapshot);
-  const current = cloneCapturedRuntimeSnapshot(captured.snapshot);
-  const external = captureExternalData(request);
-  if (!external.ok || !isPlainRecord(external.value)) return pendingResult(current, [], { kind: "invalidPayload", message: "Action completion request must be bounded JSON-safe object data." });
-  const value = external.value;
-  if (!positiveSafeInteger(value.actionId)) return pendingResult(current, [], { kind: "invalidPayload", message: "Action completion actionId must be a positive safe integer." });
-  const actionId = value.actionId;
-  const active = current.foregroundAction?.actionId === actionId ? current.foregroundAction : null;
-  if (active === null) {
-    if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: cloneSettlement(current.lastSettlement) });
-    return pendingResult(current, [], actionId < current.nextActionId ? { kind: "staleAction", actionId } : { kind: "unknownAction", actionId });
-  }
-  if (value.actionKind !== active.kind) return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: active.kind, receivedActionKind: value.actionKind === "delay" || value.actionKind === "interaction" ? value.actionKind : "<invalid>" });
-  if (active.kind === "interaction") return completeInteraction(captured.plan, current, active, value);
-  if (!isPlainRecord(value.payload) || value.payload.kind !== "time" || !isValidSessionTime(value.payload.currentSessionTimeMs)) return pendingResult(current, [], { kind: "invalidPayload", message: "Delay completion payload must contain a valid time observation." });
-  const effectiveNow = Math.max(current.currentSessionTimeMs, value.payload.currentSessionTimeMs);
-  if (effectiveNow < active.deadlineMs) return pendingResult(current, [], { kind: "notDue", actionId, currentSessionTimeMs: current.currentSessionTimeMs, deadlineMs: active.deadlineMs });
-  const observed = observeTime(captured.plan, current, effectiveNow);
-  if (observed.outcome.kind !== "observed" || observed.outcome.completion === null) throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
-  return Object.freeze({ ...observed, outcome: { kind: "completed" as const, settlement: observed.outcome.completion } });
-}
 
-function completeInteraction(
-  plan: InstructionPlan,
-  current: RuntimeSnapshot,
-  action: RuntimeInteractionActionSnapshot,
-  request: Record<string, unknown>,
-): PendingActionOperationResult<ActionCompletionOutcome> {
-  if (request.interactionKind !== action.interactionKind) {
-    const receivedInteractionKind = request.interactionKind;
-    const receivedActionKind = receivedInteractionKind === "button" || receivedInteractionKind === "text" || receivedInteractionKind === "number" || receivedInteractionKind === "choice"
-      ? `interaction:${receivedInteractionKind}`
-      : "<invalid>";
-    return pendingResult(current, [], { kind: "wrongActionKind", actionId: action.actionId, expectedActionKind: "interaction", receivedActionKind });
-  }
-  const resolved = resolveInteractionCompletion(action, request.payload);
-  if (!resolved.ok) return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
-  assertEventSequenceCapacity(current, 2);
-  if (action.destinationTemporary !== null && resolved.result !== null) setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
-  const transcriptSequence = takeSequence(current);
-  const completionSequence = takeSequence(current);
-  const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
-    actionId: action.actionId,
-    actionKind: "interaction",
-    interactionKind: action.interactionKind,
-    settlementKind: "completed",
-    owningInstruction: action.owningInstruction,
-    continuationInstruction: action.continuationInstruction,
-    ownerCallFrameId: action.ownerCallFrameId,
-    destinationTemporary: action.destinationTemporary,
-    requestEventSequence: action.requestEventSequence,
-    transcriptEventSequence: transcriptSequence,
-    completionEventSequence: completionSequence,
-    result: resolved.result,
-    transcriptText: resolved.transcriptText,
-  });
-  current.foregroundAction = null;
-  current.lastSettlement = settlement;
-  current.lastSettlementResultState = action.destinationTemporary === null ? "none" : "live";
-  current.status = "running";
-  current.nextInstruction = action.continuationInstruction;
-  const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
-  const events: InterpreterEvent[] = [
-    Object.freeze({ kind: "playerTranscript", sequence: transcriptSequence, target: action.target, requestingSpeakerId: action.speakerId, text: resolved.transcriptText, span: copySpan(span) } satisfies PlayerTranscriptEvent),
-    Object.freeze({ kind: "actionCompleted", sequence: completionSequence, settlement, span: copySpan(span) } satisfies ActionCompletedEvent),
-  ];
-  return pendingResult(current, events, { kind: "completed", settlement });
-}
+
+
 
 function executePlannedInstruction(
   plan: InstructionPlan,
@@ -2376,18 +2257,7 @@ function readTemporary(
   return temporary.value;
 }
 
-function setTemporary(
-  temporaries: RuntimeTemporarySnapshot[],
-  temporaryId: number,
-  value: SerializableRuntimeValue,
-): void {
-  const existing = temporaries.find((item) => item.id === temporaryId);
-  if (existing === undefined) {
-    temporaries.push({ id: temporaryId, value: cloneSerializableValue(value) });
-  } else {
-    existing.value = cloneSerializableValue(value);
-  }
-}
+
 
 function cloneTemporary(
   temporary: RuntimeTemporarySnapshot,
@@ -2426,34 +2296,7 @@ function cloneInteractionAction(action: RuntimeInteractionActionSnapshot): Runti
   };
 }
 
-function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeActionSettlementSnapshot {
-  if (settlement.actionKind === "delay") return {
-    actionId: settlement.actionId,
-    actionKind: "delay",
-    settlementKind: "completed",
-    owningInstruction: settlement.owningInstruction,
-    continuationInstruction: settlement.continuationInstruction,
-    requestEventSequence: settlement.requestEventSequence,
-    completionEventSequence: settlement.completionEventSequence,
-    deadlineMs: settlement.deadlineMs,
-    completedAtMs: settlement.completedAtMs,
-  };
-  return {
-    actionId: settlement.actionId,
-    actionKind: "interaction",
-    interactionKind: settlement.interactionKind,
-    settlementKind: "completed",
-    owningInstruction: settlement.owningInstruction,
-    continuationInstruction: settlement.continuationInstruction,
-    ownerCallFrameId: settlement.ownerCallFrameId,
-    destinationTemporary: settlement.destinationTemporary,
-    requestEventSequence: settlement.requestEventSequence,
-    transcriptEventSequence: settlement.transcriptEventSequence,
-    completionEventSequence: settlement.completionEventSequence,
-    result: settlement.result,
-    transcriptText: settlement.transcriptText,
-  };
-}
+
 
 
 function assertNoLiveInteractionSettlement(
@@ -2500,27 +2343,11 @@ function advance(snapshot: RuntimeSnapshot): void {
   snapshot.nextInstruction += 1;
 }
 
-function assertCounterCanAdvance(value: number, field: string): void {
-  if (value >= Number.MAX_SAFE_INTEGER) {
-    throw new RuntimeDataError(
-      "TSR101",
-      `Runtime ${field} cannot be advanced safely.`,
-    );
-  }
-}
 
-function assertEventSequenceCapacity(snapshot: RuntimeSnapshot, count: number, span?: SourceSpan): void {
-  if (snapshot.nextEventSequence <= Number.MAX_SAFE_INTEGER - count) return;
-  if (span !== undefined) throw fault("TSR051", "Runtime event sequence space is exhausted.", span);
-  throw new RuntimeDataError("TSR101", "Runtime nextEventSequence cannot satisfy the pending action atomically.");
-}
 
-function takeSequence(snapshot: RuntimeSnapshot): number {
-  assertCounterCanAdvance(snapshot.nextEventSequence, "nextEventSequence");
-  const sequence = snapshot.nextEventSequence;
-  snapshot.nextEventSequence += 1;
-  return sequence;
-}
+
+
+
 
 function createCompleteEvent(snapshot: RuntimeSnapshot, span: SourceSpan): CompleteEvent {
   return Object.freeze({
@@ -2560,74 +2387,25 @@ function failForBudget(plan: InstructionPlan, snapshot: RuntimeSnapshot): Runtim
   return result(copy, events, 0);
 }
 
-interface CapturedExecutableData {
-  readonly plan: InstructionPlan;
-  readonly snapshot: RuntimeSnapshot;
-}
-
-function captureExecutableData(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
-): CapturedExecutableData {
-  const capturedPlan = captureInstructionPlan(plan);
-  if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
-    throw new RuntimeDataError(
-      "TSR100",
-      capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
-    );
-  }
-  const capturedSnapshot = captureRuntimeSnapshot(snapshot, capturedPlan.plan);
-  if (!capturedSnapshot.validation.valid || capturedSnapshot.snapshot === null) {
-    throw new RuntimeDataError(
-      "TSR101",
-      capturedSnapshot.validation.errors[0] ?? "Malformed runtime snapshot.",
-    );
-  }
-  return Object.freeze({
-    plan: capturedPlan.plan,
-    snapshot: capturedSnapshot.snapshot,
-  });
-}
-
 function instructionBudget(value: number | undefined): number {
   const budget = value ?? 10_000;
   if (!Number.isInteger(budget) || budget < 1) throw new RangeError("Instruction budget must be a positive integer.");
   return budget;
 }
 
-function result(
-  snapshot: RuntimeSnapshot,
-  events: readonly InterpreterEvent[],
-  instructionsExecuted: number,
-): RuntimeOperationResult {
-  return Object.freeze({
-    snapshot,
-    events: Object.freeze([...events]),
-    instructionsExecuted,
-  });
-}
 
-function pendingResult<T>(snapshot: RuntimeSnapshot, events: readonly InterpreterEvent[], outcome: T): PendingActionOperationResult<T> {
-  return Object.freeze({ ...result(snapshot, events, 0), outcome });
-}
 
-function positiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
-}
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
+
+
+
+
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, span);
 }
 
-function copySpan(span: SourceSpan): SourceSpan {
-  return createSourceSpan(span.start, span.end);
-}
+
 
 function isList(value: SerializableRuntimeValue): value is SerializableRuntimeList {
   return typeof value === "object" && value !== null && value.kind === "list";
