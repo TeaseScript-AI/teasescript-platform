@@ -12,7 +12,7 @@ ADR 0018 is partially implemented. PR #117 implemented and versioned the generic
 
 ## Runtime hardening and evolution
 
-Proposed ADR 0019, [`decisions/0019-resource-limit-governance.md`](decisions/0019-resource-limit-governance.md), defines the repository-wide taxonomy, evidence, end-to-end proof, registry, and change-governance contract for technical resource limits. It remains non-authoritative until Peter explicitly approves its exact text. Issue #131 collects raw inventory and reproduction evidence in parallel without applying the proposed taxonomy; after acceptance, issue #129 owns the authoritative synthesis, missing measurements, registry, and production-repair work. The proposal does not reclassify current numeric values.
+Proposed ADR 0019, [`decisions/0019-resource-limit-governance.md`](decisions/0019-resource-limit-governance.md), defines the repository-wide taxonomy, evidence, end-to-end proof, registry, and change-governance contract for technical resource limits. It remains non-authoritative until the designated product owner explicitly approves its exact text. Issue #131 collects raw inventory and reproduction evidence in parallel without applying the proposed taxonomy; after acceptance, issue #129 owns the authoritative synthesis, missing measurements, registry, and production-repair work. The proposal does not reclassify current numeric values.
 
 - Package/source identity for browser checkpoints and production plan references.
 - Migration policy across plan, snapshot, checkpoint, engine, Standard Library, and package versions.
