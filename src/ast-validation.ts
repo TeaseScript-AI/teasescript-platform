@@ -356,24 +356,15 @@ function validInteractionAstShapes(root: Record<string, unknown>): boolean {
         !isSupportedExpressionNode(value.label) ||
         !isSourceSpan(value.span)
       ) return false;
-    } else if (value.kind === "interactionExpression") {
-      if (
-        !["text", "number", "choice"].includes(String(value.interactionKind)) ||
-        !isSourceSpan(value.commandSpan) ||
-        !(value.asSpan === null || isSourceSpan(value.asSpan)) ||
-        !(value.speaker === null || isIdentifierNode(value.speaker)) ||
-        ((value.asSpan === null) !== (value.speaker === null)) ||
-        !(value.hint === null || isSupportedExpressionNode(value.hint)) ||
-        !Array.isArray(value.options) ||
-        !value.options.every(isInteractionChoiceOptionNode) ||
-        !validInteractionChoiceSeparators(value.options) ||
-        !isSourceSpan(value.span) ||
-        (value.interactionKind === "choice"
-          ? value.hint !== null || value.options.length === 0
-          : value.options.length !== 0)
-      ) return false;
-    } else if (value.kind === "interactionChoiceOption" && !isInteractionChoiceOptionNode(value)) {
-      return false;
+      continue;
+    }
+    if (value.kind === "interactionExpression") {
+      if (!isSupportedExpressionNode(value)) return false;
+      continue;
+    }
+    if (value.kind === "interactionChoiceOption") {
+      if (!isInteractionChoiceOptionNode(value)) return false;
+      continue;
     }
     for (const nested of Object.values(value)) work.push(nested);
   }
@@ -381,12 +372,15 @@ function validInteractionAstShapes(root: Record<string, unknown>): boolean {
 }
 
 function isInteractionChoiceOptionNode(value: unknown): boolean {
+  return isInteractionChoiceOptionMetadata(value) && isSupportedExpressionNode(value.value);
+}
+
+function isInteractionChoiceOptionMetadata(value: unknown): value is Record<string, unknown> {
   return isPlainRecord(value) &&
     value.kind === "interactionChoiceOption" &&
     (value.label === null || isIdentifierNode(value.label) || isNumberLiteralNode(value.label)) &&
     (value.colonSpan === null || isSourceSpan(value.colonSpan)) &&
     ((value.label === null) === (value.colonSpan === null)) &&
-    isSupportedExpressionNode(value.value) &&
     (value.separatorSpan === null || isSourceSpan(value.separatorSpan)) &&
     isSourceSpan(value.span);
 }
@@ -465,18 +459,20 @@ function isSupportedExpressionNode(root: unknown): boolean {
         work.push(value.index);
         work.push(value.object);
         break;
-      case "callExpression":
+      case "callExpression": {
         if (!Array.isArray(value.arguments) || !["none", "positional", "named"].includes(String(value.argumentStyle))) return false;
+        if (value.argumentStyle === "none" && value.arguments.length !== 0) return false;
         work.push(value.callee);
         for (const argument of value.arguments) {
           if (!isPlainRecord(argument) || !isSourceSpan(argument.span)) return false;
-          if (argument.kind === "positionalArgument") {
+          if (argument.kind === "positionalArgument" && value.argumentStyle === "positional") {
             work.push(argument.value);
-          } else if (argument.kind === "namedArgument" && isIdentifierNode(argument.name)) {
+          } else if (argument.kind === "namedArgument" && value.argumentStyle === "named" && isIdentifierNode(argument.name)) {
             work.push(argument.value);
           } else return false;
         }
         break;
+      }
       case "unaryExpression":
         if (!["+", "-", "not"].includes(String(value.operator))) return false;
         work.push(value.operand);
@@ -498,13 +494,13 @@ function isSupportedExpressionNode(root: unknown): boolean {
             !(value.speaker === null || isIdentifierNode(value.speaker)) ||
             ((value.asSpan === null) !== (value.speaker === null)) ||
             !Array.isArray(value.options) ||
-            !value.options.every(isInteractionChoiceOptionNode) ||
+            !value.options.every(isInteractionChoiceOptionMetadata) ||
             !validInteractionChoiceSeparators(value.options) ||
             (value.interactionKind === "choice"
               ? value.hint !== null || value.options.length === 0
               : value.options.length !== 0)) return false;
         if (value.hint !== null) work.push(value.hint);
-        for (const option of value.options) work.push((option as Record<string, unknown>).value);
+        for (const option of value.options) work.push(option.value);
         break;
       default:
         return false;

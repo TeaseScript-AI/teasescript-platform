@@ -612,6 +612,10 @@ test("direct interaction AST capture rejects unsupported nested expressions and 
   textWithOptions.statements[0].initializer.options = [parsedChoice.statements[0].initializer.options[0]];
   cases.push(textWithOptions);
 
+  const mismatchedCallStyle = structuredClone(parse('showButton helper("Continue")').program) as any;
+  mismatchedCallStyle.statements[0].label.argumentStyle = "none";
+  cases.push(mismatchedCallStyle);
+
   for (const malformed of cases) {
     assert.throws(
       () => compileProgram(malformed),
