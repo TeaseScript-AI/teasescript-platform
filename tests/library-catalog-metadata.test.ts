@@ -10,7 +10,7 @@ import {
   createExactLibraryIdentity,
   createPublicLibraryMetadata,
   validatePublicLibraryMetadata,
-} from "../src/libraries/public.js";
+} from "../src/library-tooling/public.js";
 
 const FIXTURE_SOURCE = `
 /** Beta documentation.\n * @deprecated Use alpha instead. */

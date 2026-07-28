@@ -4,9 +4,9 @@ import { dirname, resolve } from "node:path";
 import test from "node:test";
 
 import * as root from "../src/index.js";
-import * as publicLibraries from "../src/libraries/public.js";
-import { LibraryCatalog, LibraryCatalogError } from "../src/libraries/public.js";
-import { privilegedPlatformAdapterMarker } from "../src/libraries/internal/privileged-platform-adapters.js";
+import * as publicLibraries from "../src/library-tooling/public.js";
+import { LibraryCatalog, LibraryCatalogError } from "../src/library-tooling/public.js";
+import { privilegedPlatformAdapterMarker } from "../src/platform-internal/privileged-platform-adapters.js";
 
 test("public library surface does not export privileged adapter values", () => {
   assert.equal("LibraryCatalog" in root, false);

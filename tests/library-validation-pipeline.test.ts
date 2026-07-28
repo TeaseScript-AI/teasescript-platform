@@ -11,7 +11,7 @@ import {
   createExactLibraryIdentity,
   createPublicLibraryMetadata,
   validatePublicLibraryMetadata,
-} from "../src/libraries/public.js";
+} from "../src/library-tooling/public.js";
 import { invalidLibraryFixtures, validLibraryFixtures } from "./library-validation-fixtures.js";
 import { validateDevelopmentLibrary } from "./library-validation-runner.js";
 
@@ -88,7 +88,7 @@ test("externally supplied metadata rejects hostile shapes and text bounds with s
 test("runner depends only on public static tooling and cannot expose privileged capabilities", () => {
   const runnerSource = readFileSync(resolve(process.cwd(), "tests/library-validation-runner.ts"), "utf8");
   const imports = [...runnerSource.matchAll(/from "([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(imports, ["../src/libraries/public.js"]);
+  assert.deepEqual(imports, ["../src/library-tooling/public.js"]);
   assert.doesNotMatch(runnerSource, /privileged-platform-adapters/);
   const result = validateDevelopmentLibrary("fixtures.inert@exact-1", "export function alpha(): void { throw new Error('must not execute') }");
   assert.equal(result.ok, true);

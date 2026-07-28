@@ -18,7 +18,7 @@ import { captureExternalData } from "../src/external-data-limits.js";
 import {
   LibraryMetadataError,
   validatePublicLibraryMetadata,
-} from "../src/libraries/public.js";
+} from "../src/library-tooling/public.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
 
 const inheritedExport = Object.freeze({
