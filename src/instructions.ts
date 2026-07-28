@@ -2,3 +2,4 @@
 export * from "./plan/model.js";
 export * from "./plan/capture.js";
 export * from "./plan/validation.js";
+export * from "./compiler/compile-program.js";

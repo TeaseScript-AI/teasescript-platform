@@ -1,5 +1,5 @@
 import { interactionStringFits } from "../../interaction-limits.js";
-import { recordValidationTestWork } from "../validation-testing.js";
+import { recordValidationTestWork } from "../../validation-testing.js";
 import type { RuntimeInteractionActionSnapshot } from "../state.js";
 
 export type ResolvedInteraction =

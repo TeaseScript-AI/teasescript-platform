@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import {
-  validateInstructionPlan,
-  type InstructionPlan,
-} from "../src/plan/model.js";
+import type { InstructionPlan } from "../src/plan/model.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 
 test("assigns deterministic function and temporary IDs", () => {
   const source = [

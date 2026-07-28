@@ -39,7 +39,7 @@ import {
 import {
   detailedValidationWorkLimitForTesting,
   recordValidationTestWork,
-} from "./validation-testing.js";
+} from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
 export const RUNTIME_SNAPSHOT_VERSION = 6;

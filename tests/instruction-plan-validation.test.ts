@@ -5,7 +5,8 @@ import { compileSource } from "../src/compiler.js";
 import {
   validateInstructionPlan,
 } from "../src/plan/validation.js";
-import type { Instruction, InstructionPlan, PlanValidationResult } from "../src/plan/model.js";
+import type { Instruction, InstructionPlan } from "../src/plan/model.js";
+import type { PlanValidationResult } from "../src/plan/validation.js";
 import {
   CheckpointError,
   createCheckpoint,

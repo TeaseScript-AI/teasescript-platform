@@ -55,9 +55,14 @@ export {
 } from "./plan/model.js";
 export {
   validateInstructionPlan,
+  validateCapturedInstructionPlan,
   type PlanValidationError,
   type PlanValidationResult,
 } from "./plan/validation.js";
+export {
+  captureInstructionPlan,
+  type CapturedInstructionPlanResult,
+} from "./plan/capture.js";
 export {
   validateSemantics,
   type SemanticValidationOptions,
