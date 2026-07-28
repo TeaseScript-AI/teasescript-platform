@@ -82,3 +82,34 @@ JSON-safe after every instruction boundary does not mean serializing or persisti
 ## Deferred architecture
 
 The cross-origin host protocol, pending input/timer actions, Standard Library linkage and packaging, deterministic library identity/version binding, generated editor metadata, privileged adapter boundaries, media handles, server checkpoint persistence, package identity/migrations, and continuous-personality scheduling remain later work.
+
+## Implemented source-layout seams
+
+The behavior-neutral Option A refactor is implemented for the code present on
+the starting `main`. Plan contracts are under `src/plan/`, compiler entry and
+lowering boundaries are under `src/compiler/`, pure pending-action helpers are
+under `src/runtime/actions/`, and canonical operation entrypoints are under
+`src/runtime/operations/`. Whole-snapshot construction, cloning, validation,
+and cross-state invariants remain in `src/runtime/state.ts`.
+
+Library catalog and metadata tooling lives under `src/library-tooling/`.
+Privileged adapter placeholders live under `src/platform-internal/` and are
+not part of the runtime root export. No `src/standard-library/` shell was
+created because no real Standard Library implementation is present.
+
+The technical playground workspace controller lives at
+`playground/workspace/controller.ts`; the existing entry path remains a
+compatibility facade. No speculative Player or shared browser folders were
+added.
+
+### Compatibility facade inventory
+
+| Old path | Canonical path | Exposed symbols or responsibility | Known repository consumers | External-support status | Owner | Removal condition |
+| --- | --- | --- | --- | --- | --- | --- |
+| `src/instructions.ts` | `src/plan/*`, `src/compiler/*` | Plan, validation, and compilation symbols | Compatibility test only | Temporarily supported; external status unknown | Compiler/runtime owners | Later cleanup after dependent branches migrate and external direct-import status is decided |
+| `src/libraries/public.ts` | `src/library-tooling/public.ts` | Catalog and metadata tooling | Compatibility test only | Temporarily supported; external status unknown | Library tooling owner | Evidence-based cleanup after repository and dependent consumers migrate |
+| `playground/workspace.ts` | `playground/workspace/controller.ts` | Technical workspace compile/run/decode controller | Compatibility test only; browser/server use canonical path | Repository compatibility only | Workspace owner | Remove after consumers and external-support status are accounted for |
+
+`tools/check-legacy-imports.mjs` prevents new repository-owned imports from
+these paths. The compatibility test is the narrow documented allowlist; the
+facades remain intentionally retained in this issue.

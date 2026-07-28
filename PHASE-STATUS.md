@@ -2,7 +2,7 @@
 
 ## Evidence boundary
 
-- Current repository baseline for this status update: `96737a19bcd85b559ead3cc0c1623efc3044e3c0` on `main`, the merge of PR #119 after PR #123.
+- Current repository baseline for this status update: `926f4a4bb2583103b7379251e88bc0b7b7472e62` on `main`, including the synchronized status update before issue #124.
 - The seven-item implemented-foundation hardening set tracked by issue #7 is complete, including the compiler/template work in PR #19, RNG-state work in PR #20, and the direct-AST non-finite-number boundary repair in PR #34.
 - PR #37 added sequenced `TSW002` developer warnings when `list.remove(value)` finds no matching value while preserving the unchanged list.
 - PR #48 completed the owner-selected reusable runtime resume-equivalence outcome tracked as `POC-ENGINE-002`, with a shared test-only helper and bounded corpus that checks every completed instruction boundary through a real JSON checkpoint round trip.
@@ -10,7 +10,7 @@
 - PR #45 rejects core and configured injected builtin identifiers when they are used as ordinary runtime values while preserving direct builtin calls.
 - PR #117 completed issue #110 by implementing the generic typed foreground-interaction runtime, shared version-1 interaction limits, canonical player transcript events, typed completion, and versioned checkpoint/restore behavior.
 - PR #122 documented the staged property/fuzz testing roadmap. PR #123 completed issue #120 and the selected `POC-ENGINE-003` adversarial runtime-data mutation-testing outcome with a deterministic repository-owned Phase 1 harness.
-- PR #119 recorded the owner-approved Option A source-layout proposal. It changes documentation only; issue #124 owns the behavior-neutral physical implementation from current `main`.
+- PR #119 recorded the owner-approved Option A source-layout proposal; issue #124 applies its behavior-neutral physical implementation from this baseline.
 - Final verification reported for PR #123 used Node `v24.18.0` and npm `11.16.0`; the complete configured check passed 505 tests with 0 failures.
 - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
@@ -41,6 +41,7 @@
 - One-instruction and event-boundary stepping with instruction budgets.
 - Standalone repository-backed browser playground and constrained development server.
 - Reusable deterministic resume-equivalence coverage that compares uninterrupted execution with execution restored from a JSON-roundtripped checkpoint after every completed instruction boundary across a small bounded runtime-state corpus.
+- The approved Option A source-layout seams and compatibility facades are implemented without changing plan v5, runtime-snapshot v6, or checkpoint v6.
 - One generic typed foreground-interaction instruction/action/settlement family for runtime-created button, text, number, and choice actions.
 - Engine-owned text normalization, number parsing, exact choice matching, requesting-speaker provenance, canonical player transcript derivation, mandatory retry behavior, and bounded duplicate settlement replay.
 - Shared version-1 interaction limits of 65,536 UTF-8 bytes for one retained string, 65,536 aggregate UTF-8 bytes per interaction definition, and 4,096 choice options.
@@ -102,4 +103,7 @@ Also inspect the complete diff and verify the playground route/security matrix. 
 - Laravel persistence, accounts, catalog/publishing, moderation, scheduling, and global data;
 - continuous-personality services and LLM/vision integration.
 
-The next owner-selected implementation task is issue #124, the behavior-neutral implementation of the approved Option A source-layout refactor. Owner-selected pre-alpha and alpha obligations that remain open are tracked in `docs/planning/POC-TO-ALPHA-BACKLOG.md`; inclusion there does not otherwise schedule them.
+Issue #124 implements the approved behavior-neutral Option A source-layout
+refactor on its dedicated branch. Owner-selected pre-alpha and alpha
+obligations that remain open are tracked in `docs/planning/POC-TO-ALPHA-BACKLOG.md`;
+inclusion there does not otherwise schedule them.

@@ -19,6 +19,11 @@ The current repository uses:
 - playground HTTP and static-path security tests;
 - a repository-owned deterministic Phase 1 mutation/property harness for plan and runtime-state boundaries.
 
+The source-layout refactor keeps the required property layout unchanged and
+adds `tools/check-legacy-imports.mjs` to the normal `npm run check` path. The
+check is dependency-free and reports each legacy import with its file and line
+number; only facade files and the dedicated compatibility test are allowlisted.
+
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
 ## Test layers

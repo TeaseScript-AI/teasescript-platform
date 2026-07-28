@@ -1,6 +1,6 @@
 # Concrete repository source-layout proposal
 
-**Status:** Proposal for review; non-authoritative until approved  
+**Status:** Implemented behavior-neutral Option A baseline; retained as the source-layout record
 **Issue:** #118  
 **Recommended option:** A — focused seam extraction now  
 **Scope:** Folder and module ownership only; no behavior, public API meaning, or serialized-format change
@@ -11,7 +11,11 @@ Approve one near-term source-layout direction before ADR 0018 issues add substan
 
 This document recommends **Option A**: perform one focused behavior-neutral refactor after #110 is merged and before further ADR 0018 implementation is merged. It also records two practical alternatives so a review agent can compare cost and risk.
 
-The proposal does not itself move production files. After approval, one separate implementation issue and pull request should apply the selected option from the then-current `main`.
+The proposal originally did not move production files. Its selected Option A
+has now been applied by issue #124 from the then-current `main`; the concrete
+implementation and compatibility inventory in `docs/ARCHITECTURE.md` are the
+current ownership record. Deferred feature folders remain absent unless real
+owning code exists.
 
 ## Problem being solved
 

@@ -11,6 +11,14 @@
 - The player, engine, Standard Library, package libraries, standard UI, and custom UI eventually run inside a sandboxed cross-origin iframe.
 - Use one deterministic engine, one state model, and one save/checkpoint format for finite sessions and long-running personalities.
 
+The current source layout uses shared plan contracts under `src/plan/`,
+compiler seams under `src/compiler/`, pure runtime action helpers under
+`src/runtime/actions/`, runtime operation entrypoints under
+`src/runtime/operations/`, tooling under `src/library-tooling/`, and
+privileged adapters under `src/platform-internal/`. Compatibility facades are
+retained during migration; this layout refactor does not change format
+versions.
+
 ## TeaseScript authority
 
 `docs/specifications/accepted-syntaxes-v30.md` is the accepted syntax baseline unless a later accepted ADR or explicitly recorded post-V30 decision supersedes a specific point.
