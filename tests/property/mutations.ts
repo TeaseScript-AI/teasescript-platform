@@ -1,31 +1,35 @@
 import assert from "node:assert/strict";
 
 import {
+  EXTERNAL_DATA_DEPTH_MESSAGE,
+  EXTERNAL_DATA_WORK_MESSAGE,
+  MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
+  MAX_EXTERNAL_RUNTIME_DATA_WORK,
   MAX_INTERACTION_STRING_UTF8_BYTES,
   completeAction,
   createFreshRuntimeSnapshot,
   executeInstruction,
   observeTime,
+  restoreCheckpoint,
   run,
   type InstructionPlan,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import {
-  createExactLimitButtonPlan,
-  createExactLimitChoicePlan,
-  createInteractionPlan,
-  createOverLimitButtonPlan,
-  createOverLimitChoicePlan,
+  exactUtf8String,
   summarizeFixture,
   type PropertyFixtureCatalog,
 } from "./fixtures.js";
 import {
-  assertAcceptedPlan,
   assertAcceptedSnapshot,
   assertCheckpointRoundTrip,
   assertCompletionRejectedWithoutMutation,
   assertResumeEquivalent,
+  assertSuccessfulCompletionOperation,
   assertSuccessfulRuntimeOperation,
+  capturePropertyValue,
+  assertPropertyValueUnchanged,
+  atPropertyBoundary,
   cloneCheckpointValue,
   observeCheckpointBoundary,
   observePlanBoundary,
@@ -50,7 +54,12 @@ export interface PropertyCaseDefinition {
   readonly property: string;
   readonly boundary: string;
   readonly workUnits: number;
+  readonly mutationCount: number;
   readonly repeatable: boolean;
+  readonly describe: (
+    fixtures: PropertyFixtureCatalog,
+    variant: PropertyCaseVariant,
+  ) => string;
   readonly execute: (
     fixtures: PropertyFixtureCatalog,
     variant: PropertyCaseVariant,
@@ -70,11 +79,13 @@ function structuredPlanCase(
     value: Record<string, unknown>,
     fixtures: PropertyFixtureCatalog,
     variant: PropertyCaseVariant,
-  ) => void,
+  ) => void | (() => void),
   options: {
     readonly repeatable?: boolean;
     readonly fixture?: "simple" | "interaction";
     readonly expected?: "accepted" | "rejected";
+    readonly detailIncludes?: string;
+    readonly mutationCount?: number;
   } = {},
 ): PropertyCaseDefinition {
   return Object.freeze({
@@ -82,19 +93,25 @@ function structuredPlanCase(
     property: "structured external plan boundary",
     boundary: "validateInstructionPlan",
     workUnits: 2,
+    mutationCount: options.mutationCount ?? 1,
     repeatable: options.repeatable ?? true,
+    describe(fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) {
+      return caseContext(id, `plan:${options.fixture ?? "simple"}`, fixtures, variant);
+    },
     execute(fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) {
       const source = options.fixture === "interaction"
         ? fixtures.waitingText.plan
         : fixtures.simplePlan;
       const value = cloneRecord(source);
-      mutate(value, fixtures, variant);
-      const before = comparableClone(value);
+      const postcondition = mutate(value, fixtures, variant);
+      const before = capturePropertyValue(value);
       const first = observePlanBoundary(value);
       const second = observePlanBoundary(value);
       assert.deepEqual(second, first);
-      assertComparableUnchanged(value, before, "Plan boundary mutated its input.");
+      assertPropertyValueUnchanged(value, before, "Plan boundary mutated its input.");
       assert.equal(first.kind, options.expected ?? "rejected");
+      if (options.detailIncludes !== undefined) assert.match(first.detail, new RegExp(options.detailIncludes));
+      postcondition?.();
       return observation(stableObservation(first), `plan:${options.fixture ?? "simple"}`);
     },
   });
@@ -121,10 +138,12 @@ function structuredSnapshotCase(
     value: Record<string, unknown>,
     fixtures: PropertyFixtureCatalog,
     variant: PropertyCaseVariant,
-  ) => void,
+  ) => void | (() => void),
   options: {
     readonly repeatable?: boolean;
     readonly expected?: "accepted" | "rejected";
+    readonly detailIncludes?: string;
+    readonly mutationCount?: number;
   } = {},
 ): PropertyCaseDefinition {
   return Object.freeze({
@@ -132,17 +151,23 @@ function structuredSnapshotCase(
     property: "structured external snapshot boundary",
     boundary: "validateRuntimeSnapshot",
     workUnits: 2,
+    mutationCount: options.mutationCount ?? 1,
     repeatable: options.repeatable ?? true,
+    describe(fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) {
+      return caseContext(id, summarizeFixture(fixtures[fixtureName]), fixtures, variant);
+    },
     execute(fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) {
       const fixture = fixtures[fixtureName];
       const value = cloneRecord(fixture.snapshot);
-      mutate(value, fixtures, variant);
-      const before = comparableClone(value);
+      const postcondition = mutate(value, fixtures, variant);
+      const before = capturePropertyValue(value);
       const first = observeSnapshotBoundary(value, fixture.plan);
       const second = observeSnapshotBoundary(value, fixture.plan);
       assert.deepEqual(second, first);
-      assertComparableUnchanged(value, before, "Snapshot boundary mutated its input.");
+      assertPropertyValueUnchanged(value, before, "Snapshot boundary mutated its input.");
       assert.equal(first.kind, options.expected ?? "rejected");
+      if (options.detailIncludes !== undefined) assert.match(first.detail, new RegExp(options.detailIncludes));
+      postcondition?.();
       return observation(stableObservation(first), summarizeFixture(fixture));
     },
   });
@@ -154,36 +179,238 @@ function structuredCheckpointCase(
     value: Record<string, unknown>,
     fixtures: PropertyFixtureCatalog,
     variant: PropertyCaseVariant,
-  ) => void,
+  ) => void | (() => void),
   options: {
     readonly repeatable?: boolean;
     readonly expected?: "accepted" | "rejected";
+    readonly detailIncludes?: string;
+    readonly mutationCount?: number;
   } = {},
 ): PropertyCaseDefinition {
   return Object.freeze({
     id,
     property: "structured external checkpoint boundary",
     boundary: "restoreCheckpoint",
-    workUnits: 2,
+    workUnits: 3,
+    mutationCount: options.mutationCount ?? 1,
     repeatable: options.repeatable ?? true,
+    describe(fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) {
+      return caseContext(id, "checkpoint:waiting-text", fixtures, variant);
+    },
     execute(fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) {
       const value = cloneCheckpointValue(fixtures.textCheckpoint);
-      mutate(value, fixtures, variant);
-      const before = comparableClone(value);
+      const postcondition = mutate(value, fixtures, variant);
+      const before = capturePropertyValue(value);
       const first = observeCheckpointBoundary(value);
       const second = observeCheckpointBoundary(value);
       assert.deepEqual(second, first);
-      assertComparableUnchanged(value, before, "Checkpoint boundary mutated its input.");
+      assertPropertyValueUnchanged(value, before, "Checkpoint boundary mutated its input.");
       assert.equal(first.kind, options.expected ?? "rejected");
+      if (options.detailIncludes !== undefined) assert.match(first.detail, new RegExp(options.detailIncludes));
+      postcondition?.();
       return observation(stableObservation(first), "checkpoint:waiting-text");
     },
   });
 }
 
+function acceptedPlanCanonicalCase(
+  id: string,
+  mutate: (
+    value: Record<string, unknown>,
+    fixtures: PropertyFixtureCatalog,
+    variant: PropertyCaseVariant,
+  ) => void,
+): PropertyCaseDefinition {
+  return defineCase({
+    id,
+    property: "accepted extra plan data is canonically ignored",
+    boundary: "run",
+    workUnits: 4,
+    mutationCount: 1,
+    repeatable: true,
+    describe(fixtures, variant) {
+      return caseContext(id, summarizeFixture(fixtures.fresh), fixtures, variant);
+    },
+    execute(fixtures, variant) {
+      const modifiedPlan = cloneRecord(fixtures.fresh.plan);
+      mutate(modifiedPlan, fixtures, variant);
+      const modifiedBefore = capturePropertyValue(modifiedPlan);
+      const baseline = assertSuccessfulRuntimeOperation(
+        "run:baseline",
+        fixtures.fresh.plan,
+        fixtures.fresh.snapshot,
+        () => run(fixtures.fresh.plan, fixtures.fresh.snapshot),
+      );
+      const modified = assertSuccessfulRuntimeOperation(
+        "run:accepted-extra-plan",
+        modifiedPlan as unknown as InstructionPlan,
+        fixtures.fresh.snapshot,
+        () => run(modifiedPlan as unknown as InstructionPlan, fixtures.fresh.snapshot),
+      );
+      assert.deepEqual(modified, baseline);
+      assertPropertyValueUnchanged(
+        modifiedPlan,
+        modifiedBefore,
+        "Accepted plan boundary mutated the caller-owned plan.",
+      );
+      return observation("accepted:canonical-equivalent", summarizeFixture(fixtures.fresh));
+    },
+  });
+}
+
+function acceptedSnapshotCanonicalCase(
+  id: string,
+  mutate: (
+    value: Record<string, unknown>,
+    fixtures: PropertyFixtureCatalog,
+    variant: PropertyCaseVariant,
+  ) => void,
+): PropertyCaseDefinition {
+  return defineCase({
+    id,
+    property: "accepted extra snapshot data is canonically ignored",
+    boundary: "run",
+    workUnits: 4,
+    mutationCount: 1,
+    repeatable: true,
+    describe(fixtures, variant) {
+      return caseContext(id, summarizeFixture(fixtures.running), fixtures, variant);
+    },
+    execute(fixtures, variant) {
+      const modifiedSnapshot = cloneRecord(fixtures.running.snapshot);
+      mutate(modifiedSnapshot, fixtures, variant);
+      const modifiedBefore = capturePropertyValue(modifiedSnapshot);
+      const baseline = assertSuccessfulRuntimeOperation(
+        "run:baseline",
+        fixtures.running.plan,
+        fixtures.running.snapshot,
+        () => run(fixtures.running.plan, fixtures.running.snapshot),
+      );
+      const modified = assertSuccessfulRuntimeOperation(
+        "run:accepted-extra-snapshot",
+        fixtures.running.plan,
+        modifiedSnapshot as unknown as RuntimeSnapshot,
+        () => run(
+          fixtures.running.plan,
+          modifiedSnapshot as unknown as RuntimeSnapshot,
+        ),
+      );
+      assert.deepEqual(modified, baseline);
+      assertPropertyValueUnchanged(
+        modifiedSnapshot,
+        modifiedBefore,
+        "Accepted snapshot boundary mutated the caller-owned snapshot.",
+      );
+      return observation("accepted:canonical-equivalent", summarizeFixture(fixtures.running));
+    },
+  });
+}
+
+function acceptedCheckpointCanonicalCase(
+  id: string,
+  mutate: (
+    value: Record<string, unknown>,
+    fixtures: PropertyFixtureCatalog,
+    variant: PropertyCaseVariant,
+  ) => void,
+): PropertyCaseDefinition {
+  return defineCase({
+    id,
+    property: "accepted extra checkpoint data is canonically ignored",
+    boundary: "restoreCheckpoint",
+    workUnits: 3,
+    mutationCount: 1,
+    repeatable: true,
+    describe(fixtures, variant) {
+      return caseContext(id, "checkpoint:waiting-text", fixtures, variant);
+    },
+    execute(fixtures, variant) {
+      const modified = cloneCheckpointValue(fixtures.textCheckpoint);
+      mutate(modified, fixtures, variant);
+      const baselineBefore = capturePropertyValue(fixtures.textCheckpoint);
+      const modifiedBefore = capturePropertyValue(modified);
+      const baseline = atPropertyBoundary(
+        "restoreCheckpoint:baseline",
+        () => restoreCheckpoint(fixtures.textCheckpoint),
+      );
+      const restored = atPropertyBoundary(
+        "restoreCheckpoint:accepted-extra",
+        () => restoreCheckpoint(modified),
+      );
+      assert.deepEqual(restored, baseline);
+      assertPropertyValueUnchanged(
+        fixtures.textCheckpoint,
+        baselineBefore,
+        "Baseline checkpoint restore mutated its input.",
+      );
+      assertPropertyValueUnchanged(
+        modified,
+        modifiedBefore,
+        "Accepted checkpoint restore mutated its input.",
+      );
+      return observation("accepted:canonical-equivalent", "checkpoint:waiting-text");
+    },
+  });
+}
+
+function defineCase(
+  definition: Omit<PropertyCaseDefinition, "describe"> & {
+    readonly describe?: PropertyCaseDefinition["describe"];
+  },
+): PropertyCaseDefinition {
+  return Object.freeze({
+    ...definition,
+    describe: definition.describe ?? ((fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) =>
+      caseContext(
+        definition.id,
+        defaultFixtureContext(definition.id, fixtures),
+        fixtures,
+        variant,
+      )),
+  });
+}
+
+function defaultFixtureContext(
+  caseId: string,
+  fixtures: PropertyFixtureCatalog,
+): string {
+  if (caseId === "duplicate-completion-preserves-state") {
+    return summarizeFixture(fixtures.settledText);
+  }
+  if (caseId.startsWith("delay-") || caseId === "action-id-capacity-operation") {
+    return summarizeFixture(fixtures.waitingDelay);
+  }
+  if (
+    caseId.startsWith("interaction-") ||
+    caseId.startsWith("invalid-completion") ||
+    caseId.startsWith("completion-") ||
+    caseId.startsWith("checkpoint-")
+  ) {
+    return summarizeFixture(fixtures.waitingText);
+  }
+  if (caseId === "runtime-execute-instruction-closes-over-validator") {
+    return summarizeFixture(fixtures.running);
+  }
+  if (caseId.startsWith("runtime-")) {
+    return summarizeFixture(fixtures.fresh);
+  }
+  return `case:${caseId}`;
+}
+
+function caseContext(
+  caseId: string,
+  fixture: string,
+  _fixtures: PropertyFixtureCatalog,
+  variant: PropertyCaseVariant,
+): string {
+  return JSON.stringify({ caseId, fixture, variant });
+}
+
 const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
-  Object.freeze({
+  defineCase({
     id: "runtime-run-closes-over-validator",
     workUnits: 2,
+    mutationCount: 0,
     property: "successful runtime operation closes over validator",
     boundary: "run",
     repeatable: true,
@@ -197,9 +424,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(operation.snapshot.status, summarizeFixture(fixtures.fresh));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "runtime-execute-instruction-closes-over-validator",
     workUnits: 2,
+    mutationCount: 0,
     property: "successful runtime operation closes over validator",
     boundary: "executeInstruction",
     repeatable: true,
@@ -213,9 +441,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(operation.snapshot.status, summarizeFixture(fixtures.running));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "delay-observation-closes-over-validator",
     workUnits: 2,
+    mutationCount: 0,
     property: "successful runtime operation closes over validator",
     boundary: "observeTime",
     repeatable: true,
@@ -234,51 +463,44 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation("observed", summarizeFixture(fixtures.waitingDelay));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "delay-completion-request-closes-over-validator",
     workUnits: 2,
+    mutationCount: 0,
     property: "successful runtime operation closes over validator",
     boundary: "completeAction",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
-      const operation = assertSuccessfulRuntimeOperation(
-        "completeAction",
+      const operation = assertSuccessfulCompletionOperation(
         fixtures.waitingDelay.plan,
         fixtures.waitingDelay.snapshot,
-        () => completeAction(
-          fixtures.waitingDelay.plan,
-          fixtures.waitingDelay.snapshot,
-          fixtures.validDelayCompletion,
-        ),
+        fixtures.validDelayCompletion,
       );
       assert.equal(operation.outcome.kind, "completed");
       return observation("completed", summarizeFixture(fixtures.waitingDelay));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "interaction-completion-closes-over-validator",
     workUnits: 2,
+    mutationCount: 0,
     property: "successful runtime operation closes over validator",
     boundary: "completeAction",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
-      const operation = assertSuccessfulRuntimeOperation(
-        "completeAction",
+      const operation = assertSuccessfulCompletionOperation(
         fixtures.waitingText.plan,
         fixtures.waitingText.snapshot,
-        () => completeAction(
-          fixtures.waitingText.plan,
-          fixtures.waitingText.snapshot,
-          fixtures.validTextCompletion,
-        ),
+        fixtures.validTextCompletion,
       );
       assert.equal(operation.outcome.kind, "completed");
       return observation("completed", summarizeFixture(fixtures.waitingText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "invalid-completion-preserves-state",
     workUnits: 2,
+    mutationCount: 0,
     property: "invalid completion does not mutate canonical state",
     boundary: "completeAction",
     repeatable: true,
@@ -299,9 +521,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(result.outcome.kind, summarizeFixture(fixtures.waitingText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "duplicate-completion-preserves-state",
     workUnits: 2,
+    mutationCount: 0,
     property: "duplicate completion does not mutate canonical state",
     boundary: "completeAction",
     repeatable: true,
@@ -315,9 +538,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(result.outcome.kind, summarizeFixture(fixtures.settledText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "checkpoint-json-roundtrip-equivalent",
     workUnits: 4,
+    mutationCount: 0,
     property: "checkpoint JSON round trip is canonical",
     boundary: "serializeCheckpoint/deserializeCheckpoint",
     repeatable: true,
@@ -329,9 +553,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(restored.snapshot.status, summarizeFixture(fixtures.waitingText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "delay-restore-resume-equivalent",
-    workUnits: 8,
+    workUnits: 12,
+    mutationCount: 0,
     property: "restored execution equals uninterrupted execution",
     boundary: "checkpoint/observeTime/run",
     repeatable: true,
@@ -345,9 +570,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation("equivalent", summarizeFixture(fixtures.waitingDelay));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "interaction-restore-resume-equivalent",
-    workUnits: 8,
+    workUnits: 12,
+    mutationCount: 0,
     property: "restored execution equals uninterrupted execution",
     boundary: "checkpoint/completeAction/run",
     repeatable: true,
@@ -365,9 +591,9 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   structuredPlanCase("plan-missing-format", (value) => {
     delete value.format;
   }),
-  structuredPlanCase("plan-extra-root-field", (value, _fixtures, variant) => {
+  acceptedPlanCanonicalCase("plan-extra-root-field", (value, _fixtures, variant) => {
     value.extra = `retained-${variant.first.toString(16)}`;
-  }, { expected: "accepted" }),
+  }),
   structuredPlanCase("plan-wrong-version", (value, _fixtures, variant) => {
     value.version = 6 + (variant.first % 10_000);
   }),
@@ -399,84 +625,64 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
     const instruction = interactionInstructionRecord(value);
     instruction.destinationTemporary = 0;
   }, { fixture: "interaction" }),
-  Object.freeze({
+  defineCase({
     id: "plan-exact-string-limit-accepted",
-    workUnits: 1,
+    workUnits: 2,
+    mutationCount: 1,
     property: "exact technical string boundary is accepted",
     boundary: "validateInstructionPlan",
     repeatable: false,
-    execute() {
-      const plan = createExactLimitButtonPlan();
-      assertAcceptedPlan(plan);
-      return observation("accepted", "plan:exact-button-string-limit");
+    execute(fixtures: PropertyFixtureCatalog) {
+      const result = assertStablePlanBoundary(fixtures.exactLimitButtonPlan, "accepted");
+      return observation(stableObservation(result), "plan:exact-button-string-limit:multibyte");
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "plan-over-string-limit-structured",
-    workUnits: 1,
+    workUnits: 2,
+    mutationCount: 1,
     property: "over-limit string is rejected structurally",
     boundary: "validateInstructionPlan",
     repeatable: false,
-    execute() {
-      const result = observePlanBoundary(createOverLimitButtonPlan());
-      assert.equal(result.kind, "rejected");
-      return observation(stableObservation(result), "plan:over-button-string-limit");
+    execute(fixtures: PropertyFixtureCatalog) {
+      const result = assertStablePlanBoundary(fixtures.overLimitButtonPlan, "rejected");
+      return observation(stableObservation(result), "plan:over-button-string-limit:multibyte");
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "plan-exact-option-limit-accepted",
-    workUnits: 1,
+    workUnits: 2,
+    mutationCount: 1,
     property: "exact technical collection boundary is accepted",
     boundary: "validateInstructionPlan",
     repeatable: false,
-    execute() {
-      const plan = createExactLimitChoicePlan();
-      assertAcceptedPlan(plan);
-      return observation("accepted", "plan:exact-choice-option-limit");
+    execute(fixtures: PropertyFixtureCatalog) {
+      const result = assertStablePlanBoundary(fixtures.exactLimitChoicePlan, "accepted");
+      return observation(stableObservation(result), "plan:exact-choice-option-limit");
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "plan-over-option-limit-structured",
-    workUnits: 1,
+    workUnits: 2,
+    mutationCount: 1,
     property: "over-limit collection is rejected structurally",
     boundary: "validateInstructionPlan",
     repeatable: false,
-    execute() {
-      const result = observePlanBoundary(createOverLimitChoicePlan());
-      assert.equal(result.kind, "rejected");
+    execute(fixtures: PropertyFixtureCatalog) {
+      const result = assertStablePlanBoundary(fixtures.overLimitChoicePlan, "rejected");
       return observation(stableObservation(result), "plan:over-choice-option-limit");
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "plan-over-aggregate-string-limit-structured",
-    workUnits: 1,
+    workUnits: 2,
+    mutationCount: 2,
     property: "aggregate technical string limit is enforced",
     boundary: "validateInstructionPlan",
     repeatable: false,
-    execute() {
-      const plan = createInteractionPlan("button", {
-        kind: "button",
-        buttonLabel: "x",
-        accessibleName: { kind: "localizedDefault", key: "continue" },
-      });
-      const mutated = structuredClone(plan) as InstructionPlan;
-      const instruction = mutated.instructions.find(
-        (candidate) => candidate.kind === "interaction",
-      );
-      assert.ok(instruction !== undefined && instruction.kind === "interaction");
-      assert.equal(instruction.ui.kind, "button");
-      const ui = instruction.ui as unknown as {
-        buttonLabel: string;
-        accessibleName: { kind: "text"; text: string };
-      };
-      ui.buttonLabel = "x".repeat((MAX_INTERACTION_STRING_UTF8_BYTES / 2) + 1);
-      ui.accessibleName = {
-        kind: "text",
-        text: "y".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2),
-      };
-      const result = observePlanBoundary(mutated);
-      assert.equal(result.kind, "rejected");
-      return observation(stableObservation(result), "plan:over-aggregate-string-limit");
+    execute(fixtures: PropertyFixtureCatalog) {
+      const result = assertStablePlanBoundary(fixtures.overAggregateStringPlan, "rejected");
+      return observation(stableObservation(result), "plan:over-aggregate-string-limit:multibyte");
     },
   }),
   structuredPlanCase("plan-sparse-instructions", (value) => {
@@ -487,26 +693,39 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
     value.cycle = value;
   }),
   structuredPlanCase("plan-accessor", (value) => {
-    defineThrowingAccessor(value, "format");
+    const calls = defineThrowingAccessor(value, "format");
+    return () => assert.equal(calls(), 0, "Plan validation invoked an untrusted getter.");
   }),
   structuredPlanCase("plan-non-plain-object", (value) => {
     Object.setPrototypeOf(value, { inherited: true });
   }),
-  structuredPlanCase("plan-prototype-sensitive-own-key", (value) => {
+  acceptedPlanCanonicalCase("plan-prototype-sensitive-own-key", (value) => {
     Object.defineProperty(value, "__proto__", {
       value: "own-data",
       enumerable: true,
       configurable: true,
       writable: true,
     });
-  }, { expected: "accepted" }),
+  }),
+  structuredPlanCase("plan-exact-depth-boundary-accepted", (value) => {
+    value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH - 1);
+  }, { expected: "accepted", repeatable: false }),
+  structuredPlanCase("plan-over-depth-boundary-structured", (value) => {
+    value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH);
+  }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_DEPTH_MESSAGE }),
+  structuredPlanCase("plan-exact-work-boundary-accepted", (value) => {
+    value.padding = sparseArray(MAX_EXTERNAL_RUNTIME_DATA_WORK);
+  }, { expected: "accepted", repeatable: false }),
+  structuredPlanCase("plan-over-work-boundary-structured", (value) => {
+    value.padding = sparseArray(MAX_EXTERNAL_RUNTIME_DATA_WORK + 1);
+  }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_WORK_MESSAGE }),
 
   structuredSnapshotCase("snapshot-missing-status", "running", (value) => {
     delete value.status;
   }),
-  structuredSnapshotCase("snapshot-extra-root-field", "running", (value, _fixtures, variant) => {
+  acceptedSnapshotCanonicalCase("snapshot-extra-root-field", (value, _fixtures, variant) => {
     value.extra = `retained-${variant.first.toString(16)}`;
-  }, { expected: "accepted" }),
+  }),
   structuredSnapshotCase("snapshot-wrong-version", "running", (value, _fixtures, variant) => {
     value.version = 7 + (variant.first % 10_000);
   }),
@@ -516,22 +735,16 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   structuredSnapshotCase("snapshot-unsafe-event-sequence", "running", (value) => {
     value.nextEventSequence = Number.MAX_SAFE_INTEGER + 1;
   }),
-  Object.freeze({
-    id: "snapshot-exact-numeric-boundaries-accepted",
-    workUnits: 1,
-    property: "exact numeric boundaries receive documented treatment",
-    boundary: "validateRuntimeSnapshot",
-    repeatable: true,
-    execute(fixtures: PropertyFixtureCatalog) {
-      const snapshot = structuredClone(fixtures.running.snapshot) as RuntimeSnapshot;
-      snapshot.currentSessionTimeMs = Number.MAX_SAFE_INTEGER;
-      snapshot.nextActionId = Number.MAX_SAFE_INTEGER;
-      snapshot.nextEventSequence = Number.MAX_SAFE_INTEGER;
-      const result = observeSnapshotBoundary(snapshot, fixtures.running.plan);
-      assert.equal(result.kind, "accepted");
-      return observation(stableObservation(result), summarizeFixture(fixtures.running));
+  structuredSnapshotCase(
+    "snapshot-exact-numeric-boundaries-accepted",
+    "running",
+    (value) => {
+      value.currentSessionTimeMs = Number.MAX_SAFE_INTEGER;
+      value.nextActionId = Number.MAX_SAFE_INTEGER;
+      value.nextEventSequence = Number.MAX_SAFE_INTEGER;
     },
-  }),
+    { expected: "accepted", mutationCount: 3 },
+  ),
   structuredSnapshotCase("snapshot-zero-session-time", "running", (value) => {
     value.currentSessionTimeMs = 0;
   }, { expected: "accepted" }),
@@ -594,19 +807,32 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
     value.cycle = value;
   }),
   structuredSnapshotCase("snapshot-accessor", "running", (value) => {
-    defineThrowingAccessor(value, "status");
+    const calls = defineThrowingAccessor(value, "status");
+    return () => assert.equal(calls(), 0, "Snapshot validation invoked an untrusted getter.");
   }),
   structuredSnapshotCase("snapshot-non-plain-object", "running", (value) => {
     Object.setPrototypeOf(value, { inherited: true });
   }),
-  structuredSnapshotCase("snapshot-prototype-sensitive-own-key", "running", (value) => {
+  acceptedSnapshotCanonicalCase("snapshot-prototype-sensitive-own-key", (value) => {
     Object.defineProperty(value, "constructor", {
       value: "own-data",
       enumerable: true,
       configurable: true,
       writable: true,
     });
-  }, { expected: "accepted" }),
+  }),
+  structuredSnapshotCase("snapshot-exact-depth-boundary-accepted", "running", (value) => {
+    value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH - 1);
+  }, { expected: "accepted", repeatable: false }),
+  structuredSnapshotCase("snapshot-over-depth-boundary-structured", "running", (value) => {
+    value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH);
+  }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_DEPTH_MESSAGE }),
+  structuredSnapshotCase("snapshot-exact-work-boundary-accepted", "running", (value) => {
+    value.padding = sparseArray(MAX_EXTERNAL_RUNTIME_DATA_WORK);
+  }, { expected: "accepted", repeatable: false }),
+  structuredSnapshotCase("snapshot-over-work-boundary-structured", "running", (value) => {
+    value.padding = sparseArray(MAX_EXTERNAL_RUNTIME_DATA_WORK + 1);
+  }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_WORK_MESSAGE }),
 
   structuredCheckpointCase("checkpoint-wrong-version", (value, _fixtures, variant) => {
     value.version = 7 + (variant.first % 10_000);
@@ -620,9 +846,17 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   structuredCheckpointCase("checkpoint-plan-snapshot-mismatch", (value, fixtures) => {
     value.plan = structuredClone(fixtures.simplePlan);
   }),
-  structuredCheckpointCase("checkpoint-extra-root-field", (value, _fixtures, variant) => {
+  acceptedCheckpointCanonicalCase("checkpoint-extra-root-field", (value, _fixtures, variant) => {
     value.extra = `retained-${variant.first.toString(16)}`;
-  }, { expected: "accepted" }),
+  }),
+  acceptedCheckpointCanonicalCase("checkpoint-prototype-sensitive-own-key", (value) => {
+    Object.defineProperty(value, "__proto__", {
+      value: "own-data",
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }),
   structuredCheckpointCase("checkpoint-non-finite-number", (value, _fixtures, variant) => {
     recordValue(value.snapshot).currentSessionTimeMs = [
       Number.NaN,
@@ -634,15 +868,29 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
     value.cycle = value;
   }),
   structuredCheckpointCase("checkpoint-accessor", (value) => {
-    defineThrowingAccessor(value, "format");
+    const calls = defineThrowingAccessor(value, "format");
+    return () => assert.equal(calls(), 0, "Checkpoint restore invoked an untrusted getter.");
   }),
   structuredCheckpointCase("checkpoint-non-plain-object", (value) => {
     Object.setPrototypeOf(value, { inherited: true });
   }),
+  structuredCheckpointCase("checkpoint-exact-depth-boundary-accepted", (value) => {
+    value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH - 1);
+  }, { expected: "accepted", repeatable: false }),
+  structuredCheckpointCase("checkpoint-over-depth-boundary-structured", (value) => {
+    value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH);
+  }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_DEPTH_MESSAGE }),
+  structuredCheckpointCase("checkpoint-exact-work-boundary-accepted", (value) => {
+    value.padding = sparseArray(MAX_EXTERNAL_RUNTIME_DATA_WORK);
+  }, { expected: "accepted", repeatable: false }),
+  structuredCheckpointCase("checkpoint-over-work-boundary-structured", (value) => {
+    value.padding = sparseArray(MAX_EXTERNAL_RUNTIME_DATA_WORK + 1);
+  }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_WORK_MESSAGE }),
 
-  Object.freeze({
+  defineCase({
     id: "completion-missing-action-id",
     workUnits: 2,
+    mutationCount: 1,
     property: "malformed completion is structured and non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -658,36 +906,33 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(result.outcome.kind, summarizeFixture(fixtures.waitingText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "completion-extra-field",
     workUnits: 4,
+    mutationCount: 1,
     property: "extra completion fields receive documented treatment",
     boundary: "completeAction",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
       const request = cloneRecord(fixtures.validTextCompletion);
       request.extra = "ignored-by-version-1-contract";
-      const expected = assertSuccessfulRuntimeOperation(
-        "completeAction",
+      const requestBefore = capturePropertyValue(request);
+      const expected = assertSuccessfulCompletionOperation(
         fixtures.waitingText.plan,
         fixtures.waitingText.snapshot,
-        () => completeAction(
-          fixtures.waitingText.plan,
-          fixtures.waitingText.snapshot,
-          fixtures.validTextCompletion,
-        ),
+        fixtures.validTextCompletion,
       );
-      const actual = assertSuccessfulRuntimeOperation(
-        "completeAction",
+      const actual = assertSuccessfulCompletionOperation(
         fixtures.waitingText.plan,
         fixtures.waitingText.snapshot,
-        () => completeAction(
-          fixtures.waitingText.plan,
-          fixtures.waitingText.snapshot,
-          request,
-        ),
+        request,
       );
       assert.equal(actual.outcome.kind, "completed");
+      assertPropertyValueUnchanged(
+        request,
+        requestBefore,
+        "Accepted completion mutated the caller-owned request.",
+      );
       assert.deepEqual(
         actual,
         expected,
@@ -699,9 +944,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       );
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "completion-wrong-primitive-type",
     workUnits: 2,
+    mutationCount: 1,
     property: "malformed completion is structured and non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -716,7 +962,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
     },
   }),
   ...[Number.MAX_SAFE_INTEGER + 1, Number.POSITIVE_INFINITY, -0].map(
-    (actionId, index): PropertyCaseDefinition => Object.freeze({
+    (actionId, index): PropertyCaseDefinition => defineCase({
       id: [
         "completion-unsafe-action-id",
         "completion-non-finite-action-id",
@@ -725,6 +971,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       property: "malformed completion is structured and non-mutating",
       boundary: "completeAction",
       workUnits: 2,
+      mutationCount: 1,
       repeatable: true,
       execute(fixtures: PropertyFixtureCatalog) {
         const request = { ...fixtures.validTextCompletion, actionId };
@@ -738,9 +985,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       },
     }),
   ),
-  Object.freeze({
+  defineCase({
     id: "completion-wrong-action-kind",
     workUnits: 2,
+    mutationCount: 1,
     property: "wrong completion kind is non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -755,9 +1003,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(result.outcome.kind, summarizeFixture(fixtures.waitingText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "completion-unknown-action-id",
     workUnits: 2,
+    mutationCount: 1,
     property: "unknown completion is non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -776,14 +1025,18 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(result.outcome.kind, summarizeFixture(fixtures.waitingText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "completion-stale-action-id",
     workUnits: 4,
+    mutationCount: 1,
     property: "stale completion is non-mutating",
     boundary: "completeAction",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
-      const snapshot = createFreshRuntimeSnapshot(fixtures.simplePlan, { seed: 12345 });
+      const snapshot = atPropertyBoundary(
+        "createFreshRuntimeSnapshot",
+        () => createFreshRuntimeSnapshot(fixtures.simplePlan, { seed: 12345 }),
+      );
       snapshot.nextActionId = 3;
       assertAcceptedSnapshot(fixtures.simplePlan, snapshot);
       const result = assertCompletionRejectedWithoutMutation(
@@ -795,9 +1048,34 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(result.outcome.kind, "snapshot:stale-classification");
     },
   }),
-  Object.freeze({
+  defineCase({
+    id: "completion-exact-multibyte-text-limit",
+    workUnits: 2,
+    mutationCount: 1,
+    property: "exact multibyte completion byte limit is accepted",
+    boundary: "completeAction",
+    repeatable: false,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const request = {
+        ...fixtures.validTextCompletion,
+        payload: {
+          kind: "submittedText",
+          submittedText: exactUtf8String(MAX_INTERACTION_STRING_UTF8_BYTES),
+        },
+      };
+      const result = assertSuccessfulCompletionOperation(
+        fixtures.waitingText.plan,
+        fixtures.waitingText.snapshot,
+        request,
+      );
+      assert.equal(result.outcome.kind, "completed");
+      return observation(result.outcome.kind, summarizeFixture(fixtures.waitingText));
+    },
+  }),
+  defineCase({
     id: "completion-over-limit-text",
     workUnits: 2,
+    mutationCount: 1,
     property: "over-limit completion is non-mutating",
     boundary: "completeAction",
     repeatable: false,
@@ -806,7 +1084,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
         ...fixtures.validTextCompletion,
         payload: {
           kind: "submittedText",
-          submittedText: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 1),
+          submittedText: exactUtf8String(MAX_INTERACTION_STRING_UTF8_BYTES + 1),
         },
       };
       const result = assertCompletionRejectedWithoutMutation(
@@ -818,9 +1096,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(result.outcome.kind, summarizeFixture(fixtures.waitingText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "completion-cycle",
     workUnits: 2,
+    mutationCount: 1,
     property: "hostile completion is structured and non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -836,27 +1115,30 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(result.outcome.kind, summarizeFixture(fixtures.waitingText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "completion-accessor",
     workUnits: 2,
+    mutationCount: 1,
     property: "hostile completion is structured and non-mutating",
     boundary: "completeAction",
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
       const request = cloneRecord(fixtures.validTextCompletion);
-      defineThrowingAccessor(request, "actionId");
+      const calls = defineThrowingAccessor(request, "actionId");
       const result = assertCompletionRejectedWithoutMutation(
         fixtures.waitingText.plan,
         fixtures.waitingText.snapshot,
         request,
         ["invalidPayload"],
       );
+      assert.equal(calls(), 0, "Completion handling invoked an untrusted getter.");
       return observation(result.outcome.kind, summarizeFixture(fixtures.waitingText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "completion-non-plain-object",
     workUnits: 2,
+    mutationCount: 1,
     property: "hostile completion is structured and non-mutating",
     boundary: "completeAction",
     repeatable: true,
@@ -872,9 +1154,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(result.outcome.kind, summarizeFixture(fixtures.waitingText));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "runtime-malformed-plan-structured",
-    workUnits: 2,
+    workUnits: 1,
+    mutationCount: 1,
     property: "runtime malformed external data is structured and non-mutating",
     boundary: "run",
     repeatable: true,
@@ -886,9 +1169,10 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       return observation(stableObservation(result), summarizeFixture(fixtures.fresh));
     },
   }),
-  Object.freeze({
+  defineCase({
     id: "runtime-malformed-snapshot-structured",
-    workUnits: 2,
+    workUnits: 1,
+    mutationCount: 1,
     property: "runtime malformed external data is structured and non-mutating",
     boundary: "run",
     repeatable: true,
@@ -898,6 +1182,206 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       const result = observeRuntimeBoundary(fixtures.simplePlan, snapshot);
       assert.equal(result.kind, "rejected");
       return observation(stableObservation(result), summarizeFixture(fixtures.fresh));
+    },
+  }),
+  defineCase({
+    id: "runtime-hostile-plan-accessor-structured",
+    workUnits: 1,
+    mutationCount: 1,
+    property: "hostile runtime plan reaches the structured run boundary",
+    boundary: "run",
+    repeatable: true,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const plan = cloneRecord(fixtures.simplePlan);
+      const calls = defineThrowingAccessor(plan, "format");
+      const result = observeRuntimeBoundary(plan, fixtures.fresh.snapshot);
+      assert.equal(result.kind, "rejected");
+      assert.equal(calls(), 0, "Runtime plan capture invoked an untrusted getter.");
+      return observation(stableObservation(result), "runtime-plan:accessor");
+    },
+  }),
+  defineCase({
+    id: "runtime-hostile-plan-non-plain-structured",
+    workUnits: 1,
+    mutationCount: 1,
+    property: "hostile runtime plan reaches the structured run boundary",
+    boundary: "run",
+    repeatable: true,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const plan = cloneRecord(fixtures.simplePlan);
+      Object.setPrototypeOf(plan, { inherited: true });
+      const result = observeRuntimeBoundary(plan, fixtures.fresh.snapshot);
+      assert.equal(result.kind, "rejected");
+      return observation(stableObservation(result), "runtime-plan:non-plain");
+    },
+  }),
+  defineCase({
+    id: "runtime-hostile-plan-cycle-structured",
+    workUnits: 1,
+    mutationCount: 1,
+    property: "cyclic runtime plan reaches the structured run boundary",
+    boundary: "run",
+    repeatable: true,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const plan = cloneRecord(fixtures.simplePlan);
+      plan.cycle = plan;
+      const result = observeRuntimeBoundary(plan, fixtures.fresh.snapshot);
+      assert.equal(result.kind, "rejected");
+      return observation(stableObservation(result), "runtime-plan:cycle");
+    },
+  }),
+  defineCase({
+    id: "runtime-hostile-snapshot-accessor-structured",
+    workUnits: 1,
+    mutationCount: 1,
+    property: "hostile runtime snapshot reaches the structured run boundary",
+    boundary: "run",
+    repeatable: true,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const snapshot = cloneRecord(fixtures.fresh.snapshot);
+      const calls = defineThrowingAccessor(snapshot, "status");
+      const result = observeRuntimeBoundary(fixtures.simplePlan, snapshot);
+      assert.equal(result.kind, "rejected");
+      assert.equal(calls(), 0, "Runtime snapshot capture invoked an untrusted getter.");
+      return observation(stableObservation(result), "runtime-snapshot:accessor");
+    },
+  }),
+  defineCase({
+    id: "runtime-hostile-snapshot-non-plain-structured",
+    workUnits: 1,
+    mutationCount: 1,
+    property: "hostile runtime snapshot reaches the structured run boundary",
+    boundary: "run",
+    repeatable: true,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const snapshot = cloneRecord(fixtures.fresh.snapshot);
+      Object.setPrototypeOf(snapshot, { inherited: true });
+      const result = observeRuntimeBoundary(fixtures.simplePlan, snapshot);
+      assert.equal(result.kind, "rejected");
+      return observation(stableObservation(result), "runtime-snapshot:non-plain");
+    },
+  }),
+  defineCase({
+    id: "runtime-hostile-snapshot-cycle-structured",
+    workUnits: 1,
+    mutationCount: 1,
+    property: "cyclic runtime snapshot reaches the structured run boundary",
+    boundary: "run",
+    repeatable: true,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const snapshot = cloneRecord(fixtures.fresh.snapshot);
+      snapshot.cycle = snapshot;
+      const result = observeRuntimeBoundary(fixtures.simplePlan, snapshot);
+      assert.equal(result.kind, "rejected");
+      return observation(stableObservation(result), "runtime-snapshot:cycle");
+    },
+  }),
+  defineCase({
+    id: "interaction-event-capacity-exact-operation",
+    workUnits: 5,
+    mutationCount: 1,
+    property: "near-limit interaction event capacity closes over execution",
+    boundary: "run/completeAction",
+    repeatable: false,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const snapshot = atPropertyBoundary(
+        "createFreshRuntimeSnapshot",
+        () => createFreshRuntimeSnapshot(fixtures.waitingText.plan, { seed: 12345 }),
+      );
+      snapshot.nextEventSequence = Number.MAX_SAFE_INTEGER - 3;
+      const pending = assertSuccessfulRuntimeOperation(
+        "run", fixtures.waitingText.plan, snapshot,
+        () => run(fixtures.waitingText.plan, snapshot),
+      );
+      assert.equal(pending.snapshot.status, "waiting");
+      const action = pending.snapshot.foregroundAction;
+      assert.ok(action !== null && action.kind === "interaction");
+      const completionRequest = {
+        actionId: action.actionId,
+        actionKind: "interaction",
+        interactionKind: "text",
+        payload: { kind: "submittedText", submittedText: "ok" },
+      };
+      const completed = assertSuccessfulCompletionOperation(
+        fixtures.waitingText.plan,
+        pending.snapshot,
+        completionRequest,
+      );
+      assert.equal(completed.outcome.kind, "completed");
+      assert.equal(completed.snapshot.nextEventSequence, Number.MAX_SAFE_INTEGER);
+      return observation("completed-at-event-limit", "capacity:interaction-exact");
+    },
+  }),
+  defineCase({
+    id: "interaction-event-capacity-exhausted-operation",
+    workUnits: 3,
+    mutationCount: 1,
+    property: "insufficient interaction event capacity fails without partial state",
+    boundary: "run",
+    repeatable: false,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const snapshot = atPropertyBoundary(
+        "createFreshRuntimeSnapshot",
+        () => createFreshRuntimeSnapshot(fixtures.waitingText.plan, { seed: 12345 }),
+      );
+      snapshot.nextEventSequence = Number.MAX_SAFE_INTEGER - 2;
+      const result = assertSuccessfulRuntimeOperation(
+        "run", fixtures.waitingText.plan, snapshot,
+        () => run(fixtures.waitingText.plan, snapshot),
+      );
+      assert.equal(result.snapshot.status, "failed");
+      assert.equal(result.snapshot.foregroundAction, null);
+      assert.equal(result.snapshot.nextActionId, snapshot.nextActionId);
+      return observation("failed-atomically", "capacity:interaction-exhausted");
+    },
+  }),
+  defineCase({
+    id: "delay-event-capacity-exact-operation",
+    workUnits: 5,
+    mutationCount: 1,
+    property: "near-limit delay event capacity closes over execution",
+    boundary: "run/observeTime",
+    repeatable: false,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const snapshot = atPropertyBoundary(
+        "createFreshRuntimeSnapshot",
+        () => createFreshRuntimeSnapshot(fixtures.waitingDelay.plan, { seed: 12345 }),
+      );
+      snapshot.nextEventSequence = Number.MAX_SAFE_INTEGER - 2;
+      const pending = assertSuccessfulRuntimeOperation(
+        "run", fixtures.waitingDelay.plan, snapshot,
+        () => run(fixtures.waitingDelay.plan, snapshot),
+      );
+      const completed = assertSuccessfulRuntimeOperation(
+        "observeTime", fixtures.waitingDelay.plan, pending.snapshot,
+        () => observeTime(fixtures.waitingDelay.plan, pending.snapshot, 1_000),
+      );
+      assert.equal(completed.outcome.kind, "observed");
+      assert.equal(completed.snapshot.nextEventSequence, Number.MAX_SAFE_INTEGER);
+      return observation("observed-at-event-limit", "capacity:delay-exact");
+    },
+  }),
+  defineCase({
+    id: "action-id-capacity-operation",
+    workUnits: 3,
+    mutationCount: 1,
+    property: "near-limit action IDs receive documented execution treatment",
+    boundary: "run",
+    repeatable: false,
+    execute(fixtures: PropertyFixtureCatalog) {
+      const snapshot = atPropertyBoundary(
+        "createFreshRuntimeSnapshot",
+        () => createFreshRuntimeSnapshot(fixtures.waitingDelay.plan, { seed: 12345 }),
+      );
+      snapshot.nextActionId = Number.MAX_SAFE_INTEGER - 1;
+      const result = assertSuccessfulRuntimeOperation(
+        "run", fixtures.waitingDelay.plan, snapshot,
+        () => run(fixtures.waitingDelay.plan, snapshot),
+      );
+      assert.equal(result.snapshot.status, "waiting");
+      assert.equal(result.snapshot.foregroundAction?.actionId, Number.MAX_SAFE_INTEGER - 1);
+      assert.equal(result.snapshot.nextActionId, Number.MAX_SAFE_INTEGER);
+      return observation("pending-at-action-limit", "capacity:action-id-exact");
     },
   }),
 ]);
@@ -910,43 +1394,29 @@ export function repeatablePropertyCases(): readonly PropertyCaseDefinition[] {
   return CASES.filter((definition) => definition.repeatable);
 }
 
-const NOT_COMPARABLE = Symbol("property-not-comparable");
-
-type ComparableClone = unknown | typeof NOT_COMPARABLE;
-
-function comparableClone(value: unknown): ComparableClone {
-  if (!hasComparableDescriptors(value, new WeakSet<object>())) return NOT_COMPARABLE;
-  return structuredClone(value);
+function assertStablePlanBoundary(
+  value: unknown,
+  expected: "accepted" | "rejected",
+) {
+  const before = capturePropertyValue(value);
+  const first = observePlanBoundary(value);
+  const second = observePlanBoundary(value);
+  assert.deepEqual(second, first);
+  assertPropertyValueUnchanged(value, before, "Plan boundary mutated its input.");
+  assert.equal(first.kind, expected);
+  return first;
 }
 
-function assertComparableUnchanged(
-  value: unknown,
-  before: ComparableClone,
-  message: string,
-): void {
-  if (before !== NOT_COMPARABLE) assert.deepEqual(value, before, message);
+function deepArray(depth: number): unknown {
+  let value: unknown = 0;
+  for (let index = 0; index < depth; index += 1) value = [value];
+  return value;
 }
 
-function hasComparableDescriptors(
-  value: unknown,
-  seen: WeakSet<object>,
-): boolean {
-  if (typeof value !== "object" || value === null) return true;
-  if (seen.has(value)) return true;
-  seen.add(value);
-  const prototype = Object.getPrototypeOf(value);
-  if (
-    prototype !== null &&
-    prototype !== Object.prototype &&
-    prototype !== Array.prototype
-  ) return false;
-  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
-    if (descriptor.get !== undefined || descriptor.set !== undefined) return false;
-    if ("value" in descriptor && !hasComparableDescriptors(descriptor.value, seen)) {
-      return false;
-    }
-  }
-  return true;
+function sparseArray(length: number): unknown[] {
+  const value: unknown[] = [];
+  value.length = length;
+  return value;
 }
 
 function cloneRecord(value: unknown): Record<string, unknown> {
@@ -976,14 +1446,17 @@ function interactionInstructionRecord(
 function defineThrowingAccessor(
   value: Record<string, unknown>,
   key: string,
-): void {
+): () => number {
+  let calls = 0;
   Object.defineProperty(value, key, {
     get(): never {
+      calls += 1;
       throw new Error("property harness accessor must not run");
     },
     enumerable: true,
     configurable: true,
   });
+  return () => calls;
 }
 
 function replaceRecord(

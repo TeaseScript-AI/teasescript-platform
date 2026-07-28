@@ -1,17 +1,21 @@
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import {
+  assertPropertyFixtureCatalogFrozen,
   createPropertyFixtureCatalog,
-  summarizePropertyFixtureCatalog,
+  type PropertyFixtureCatalog,
 } from "./fixtures.js";
 import {
   propertyCases,
-  repeatablePropertyCases,
   type PropertyCaseDefinition,
   type PropertyCaseObservation,
   type PropertyCaseVariant,
 } from "./mutations.js";
-import { PropertyBoundaryFailure } from "./invariants.js";
+import {
+  PropertyBoundaryFailure,
+  measurePropertyBoundaryWork,
+} from "./invariants.js";
 import {
   MAX_PROPERTY_SEED,
   createPropertyPrng,
@@ -19,8 +23,7 @@ import {
   propertyIndex,
 } from "./prng.js";
 
-const MANDATORY_PROPERTY_CASES = propertyCases();
-const REPEATABLE_PROPERTY_CASES = Object.freeze([...repeatablePropertyCases()]);
+const MANDATORY_PROPERTY_CASES = Object.freeze([...propertyCases()]);
 
 export const PROPERTY_SMOKE_SEED = 1_364_229_357;
 export const PROPERTY_SMOKE_RUNS = 128;
@@ -29,9 +32,11 @@ export const PROPERTY_EXTENDED_RUNS = 10_000;
 export const PROPERTY_MODERATE_RUNS = 2_000;
 export const MAX_PROPERTY_RUNS = 1_000_000;
 export const MAX_PROPERTY_MUTATIONS_PER_CASE = 3;
-export const MAX_PROPERTY_WORK_UNITS_PER_CASE = 8;
+export const MAX_PROPERTY_WORK_UNITS_PER_CASE = 16;
 export const MAX_PROPERTY_TOTAL_WORK_UNITS =
   MAX_PROPERTY_RUNS * MAX_PROPERTY_WORK_UNITS_PER_CASE;
+export const MAX_PROPERTY_TOTAL_MUTATIONS =
+  MAX_PROPERTY_RUNS * MAX_PROPERTY_MUTATIONS_PER_CASE;
 
 export type PropertyProfile = "smoke" | "extended";
 
@@ -49,6 +54,7 @@ export interface PropertyCaseDescriptor {
   readonly property: string;
   readonly boundary: string;
   readonly workUnits: number;
+  readonly mutationCount: number;
   readonly variant: PropertyCaseVariant;
 }
 
@@ -57,9 +63,11 @@ export interface PropertyCampaignResult {
   readonly runs: number;
   readonly executed: number;
   readonly totalWorkUnits: number;
+  readonly totalMutations: number;
   readonly signature: string;
   readonly firstCase: PropertyCaseDescriptor;
   readonly lastCase: PropertyCaseDescriptor;
+  readonly trace?: readonly string[];
 }
 
 export interface PropertyProgress {
@@ -67,11 +75,15 @@ export interface PropertyProgress {
   readonly runs: number;
   readonly completed: number;
   readonly completedWorkUnits: number;
+  readonly completedMutations: number;
   readonly currentCase: PropertyCaseDescriptor;
 }
 
 export interface PropertyCampaignOptions {
   readonly onProgress?: (progress: PropertyProgress) => void;
+  readonly captureTrace?: boolean;
+  readonly caseDefinitions?: readonly PropertyCaseDefinition[];
+  readonly fixtureFactory?: () => PropertyFixtureCatalog;
 }
 
 export interface PropertyCliIo {
@@ -140,11 +152,17 @@ export class PropertyCliArgumentError extends Error {
   }
 }
 
-validatePropertyDefinitions();
+validatePropertyDefinitions(MANDATORY_PROPERTY_CASES);
 
-function validatePropertyDefinitions(): void {
-  const definitions = [...MANDATORY_PROPERTY_CASES, ...REPEATABLE_PROPERTY_CASES];
+export function validatePropertyDefinitions(
+  definitions: readonly PropertyCaseDefinition[],
+): void {
+  const identifiers = new Set<string>();
   for (const definition of definitions) {
+    if (identifiers.has(definition.id)) {
+      throw new Error(`Duplicate property case ID: ${definition.id}.`);
+    }
+    identifiers.add(definition.id);
     if (
       !Number.isSafeInteger(definition.workUnits) ||
       definition.workUnits < 1 ||
@@ -153,6 +171,16 @@ function validatePropertyDefinitions(): void {
       throw new Error(
         `Property case ${definition.id} has invalid workUnits=${definition.workUnits}; ` +
           `expected 1..${MAX_PROPERTY_WORK_UNITS_PER_CASE}.`,
+      );
+    }
+    if (
+      !Number.isSafeInteger(definition.mutationCount) ||
+      definition.mutationCount < 0 ||
+      definition.mutationCount > MAX_PROPERTY_MUTATIONS_PER_CASE
+    ) {
+      throw new Error(
+        `Property case ${definition.id} has invalid mutationCount=${definition.mutationCount}; ` +
+          `expected 0..${MAX_PROPERTY_MUTATIONS_PER_CASE}.`,
       );
     }
   }
@@ -214,35 +242,7 @@ export function describePropertyCase(
   seed: number,
   caseIndex: number,
 ): PropertyCaseDescriptor {
-  if (!Number.isSafeInteger(caseIndex) || caseIndex < 0) {
-    throw new RangeError("Property case index must be a non-negative safe integer.");
-  }
-  let state = createPropertyPrng(mixSeedWithCaseIndex(seed, caseIndex));
-  const selection = nextPropertyUint32(state);
-  state = selection.state;
-  const first = nextPropertyUint32(state);
-  state = first.state;
-  const second = nextPropertyUint32(state);
-  state = second.state;
-  const third = nextPropertyUint32(state);
-
-  const definition = caseIndex < MANDATORY_PROPERTY_CASES.length
-    ? MANDATORY_PROPERTY_CASES[caseIndex]!
-    : REPEATABLE_PROPERTY_CASES[
-        propertyIndex(selection.value, REPEATABLE_PROPERTY_CASES.length)
-      ]!;
-  return Object.freeze({
-    index: caseIndex,
-    id: definition.id,
-    property: definition.property,
-    boundary: definition.boundary,
-    workUnits: definition.workUnits,
-    variant: Object.freeze({
-      first: first.value,
-      second: second.value,
-      third: third.value,
-    }),
-  });
+  return describePropertyCaseFromDefinitions(seed, caseIndex, MANDATORY_PROPERTY_CASES);
 }
 
 export function runPropertyCampaign(
@@ -250,47 +250,92 @@ export function runPropertyCampaign(
   options: PropertyCampaignOptions = {},
 ): PropertyCampaignResult {
   validatePropertyCampaignConfig(config);
+  const definitions = Object.freeze([
+    ...(options.caseDefinitions ?? MANDATORY_PROPERTY_CASES),
+  ]);
+  validatePropertyDefinitions(definitions);
   const selectedCount = config.caseIndex === undefined ? config.runs : 1;
-  const configuredWorkUnits = calculateConfiguredWorkUnits(config);
-  if (configuredWorkUnits > MAX_PROPERTY_TOTAL_WORK_UNITS) {
+  const configured = calculateConfiguredBounds(config, definitions);
+  if (configured.workUnits > MAX_PROPERTY_TOTAL_WORK_UNITS) {
     throw new PropertyCliArgumentError(
-      `Configured work ${configuredWorkUnits} exceeds ${MAX_PROPERTY_TOTAL_WORK_UNITS} units.`,
+      `Configured work ${configured.workUnits} exceeds ${MAX_PROPERTY_TOTAL_WORK_UNITS} units.`,
     );
   }
-  const fixtures = createPropertyFixtureCatalog();
-  const catalogSummary = summarizePropertyFixtureCatalog(fixtures);
-  let signature = 0x811c_9dc5;
+  if (configured.mutations > MAX_PROPERTY_TOTAL_MUTATIONS) {
+    throw new PropertyCliArgumentError(
+      `Configured mutations ${configured.mutations} exceed ${MAX_PROPERTY_TOTAL_MUTATIONS}.`,
+    );
+  }
+
+  const fixtures = (options.fixtureFactory ?? createPropertyFixtureCatalog)();
+  assertPropertyFixtureCatalogFrozen(fixtures);
+  const digest = createHash("sha256");
+  const trace = options.captureTrace === true ? [] as string[] : undefined;
   let firstCase: PropertyCaseDescriptor | undefined;
   let lastCase: PropertyCaseDescriptor | undefined;
   let completed = 0;
   let completedWorkUnits = 0;
+  let completedMutations = 0;
 
   for (let offset = 0; offset < selectedCount; offset += 1) {
     const caseIndex = config.caseIndex ?? offset;
-    const descriptor = describePropertyCase(config.seed, caseIndex);
-    const definition = definitionForDescriptor(descriptor);
-    let observation: PropertyCaseObservation;
+    const descriptor = describePropertyCaseFromDefinitions(config.seed, caseIndex, definitions);
+    let caseContext = JSON.stringify({
+      caseId: descriptor.id,
+      fixture: "unresolved",
+      variant: descriptor.variant,
+    });
+    let caseObservation: PropertyCaseObservation;
+    let actualBoundaries: readonly string[] = Object.freeze([]);
     try {
-      observation = definition.execute(fixtures, descriptor.variant);
-    } catch (error) {
-      throw new PropertyCampaignFailure(
-        config,
-        descriptor,
-        catalogSummary,
-        error,
+      const definition = definitionForDescriptor(descriptor, definitions);
+      caseContext = definition.describe(fixtures, descriptor.variant);
+      const measured = measurePropertyBoundaryWork(
+        () => definition.execute(fixtures, descriptor.variant),
       );
+      caseObservation = measured.value;
+      actualBoundaries = measured.boundaries;
+      if (actualBoundaries.length < 1) {
+        throw new PropertyBoundaryFailure(
+          "work-accounting",
+          new Error(`Case ${descriptor.id} executed no documented public boundary.`),
+        );
+      }
+      if (actualBoundaries.length > descriptor.workUnits) {
+        throw new PropertyBoundaryFailure(
+          "work-accounting",
+          new Error(
+            `Case ${descriptor.id} executed ${actualBoundaries.length} public boundaries ` +
+              `but declares a conservative limit of ${descriptor.workUnits}: ` +
+              actualBoundaries.join(", "),
+          ),
+        );
+      }
+    } catch (error) {
+      throw new PropertyCampaignFailure(config, descriptor, caseContext, error);
     }
+
     firstCase ??= descriptor;
     lastCase = descriptor;
-    signature = updateSignature(
-      signature,
-      `${descriptor.index}|${descriptor.id}|${descriptor.property}|${descriptor.boundary}|` +
-        `${descriptor.workUnits}|` +
-        `${descriptor.variant.first},${descriptor.variant.second},${descriptor.variant.third}|` +
-        `${observation.detail}|${observation.fixtureSummary}`,
-    );
+    const traceEntry = JSON.stringify({
+      index: descriptor.index,
+      id: descriptor.id,
+      property: descriptor.property,
+      boundary: descriptor.boundary,
+      workUnits: descriptor.workUnits,
+      actualWorkUnits: actualBoundaries.length,
+      boundaries: actualBoundaries,
+      mutationCount: descriptor.mutationCount,
+      variant: descriptor.variant,
+      observation: caseObservation,
+    });
+    digest.update(traceEntry);
+    digest.update("\n");
+    trace?.push(traceEntry);
     completed += 1;
-    completedWorkUnits += descriptor.workUnits;
+    completedWorkUnits += actualBoundaries.length;
+    completedMutations += descriptor.mutationCount;
+
     if (
       options.onProgress !== undefined &&
       config.progressEvery > 0 &&
@@ -301,6 +346,7 @@ export function runPropertyCampaign(
         runs: config.runs,
         completed,
         completedWorkUnits,
+        completedMutations,
         currentCase: descriptor,
       }));
     }
@@ -314,26 +360,43 @@ export function runPropertyCampaign(
     runs: config.runs,
     executed: completed,
     totalWorkUnits: completedWorkUnits,
-    signature: signature.toString(16).padStart(8, "0"),
+    totalMutations: completedMutations,
+    signature: digest.digest("hex"),
     firstCase,
     lastCase,
+    ...(trace === undefined ? {} : { trace: Object.freeze(trace) }),
   });
 }
 
 export function calculateConfiguredWorkUnits(
   config: Pick<PropertyCampaignConfig, "seed" | "runs" | "caseIndex">,
 ): number {
+  return calculateConfiguredBounds(config, MANDATORY_PROPERTY_CASES).workUnits;
+}
+
+export function calculateConfiguredMutationCount(
+  config: Pick<PropertyCampaignConfig, "seed" | "runs" | "caseIndex">,
+): number {
+  return calculateConfiguredBounds(config, MANDATORY_PROPERTY_CASES).mutations;
+}
+
+function calculateConfiguredBounds(
+  config: Pick<PropertyCampaignConfig, "seed" | "runs" | "caseIndex">,
+  definitions: readonly PropertyCaseDefinition[],
+): { readonly workUnits: number; readonly mutations: number } {
   const selectedCount = config.caseIndex === undefined ? config.runs : 1;
-  let total = 0;
+  let workUnits = 0;
+  let mutations = 0;
   for (let offset = 0; offset < selectedCount; offset += 1) {
     const caseIndex = config.caseIndex ?? offset;
-    const descriptor = describePropertyCase(config.seed, caseIndex);
-    total += descriptor.workUnits;
-    if (!Number.isSafeInteger(total)) {
-      throw new PropertyCliArgumentError("Configured property work is not a safe integer.");
+    const descriptor = describePropertyCaseFromDefinitions(config.seed, caseIndex, definitions);
+    workUnits += descriptor.workUnits;
+    mutations += descriptor.mutationCount;
+    if (!Number.isSafeInteger(workUnits) || !Number.isSafeInteger(mutations)) {
+      throw new PropertyCliArgumentError("Configured property bounds are not safe integers.");
     }
   }
-  return total;
+  return Object.freeze({ workUnits, mutations });
 }
 
 export function parsePropertyCliArguments(
@@ -417,12 +480,14 @@ export function runPropertyCli(
 
   try {
     const configuredWorkUnits = calculateConfiguredWorkUnits(config);
+    const configuredMutations = calculateConfiguredMutationCount(config);
     const result = campaignRunner(config, {
       onProgress(progress) {
         io.stdout(
           `property progress seed=${progress.seed} completed=${progress.completed}/` +
             `${config.caseIndex === undefined ? config.runs : 1} ` +
             `work=${progress.completedWorkUnits}/${configuredWorkUnits} ` +
+            `mutations=${progress.completedMutations}/${configuredMutations} ` +
             `case=${progress.currentCase.index}:${progress.currentCase.id}\n`,
         );
       },
@@ -430,7 +495,7 @@ export function runPropertyCli(
     io.stdout(
       `property campaign passed seed=${result.seed} runs=${result.runs} ` +
         `executed=${result.executed} work=${result.totalWorkUnits} ` +
-        `signature=${result.signature}\n`,
+        `mutations=${result.totalMutations} signature=${result.signature}\n`,
     );
     return 0;
   } catch (error) {
@@ -456,8 +521,10 @@ export function createReplayCommand(
 
 export function propertyCliUsage(): string {
   return [
-    "Usage: npm run test:property[:extended] -- [options]",
-    "  --profile smoke|extended",
+    "Usage:",
+    "  npm run test:property -- [--profile smoke|extended] [options]",
+    "  npm run test:property:extended -- [options]",
+    "The extended wrapper already selects the extended profile; use the generic wrapper to override it.",
     `  --seed 1..${MAX_PROPERTY_SEED}`,
     `  --runs 1..${MAX_PROPERTY_RUNS}`,
     "  --case 0..runs-1",
@@ -465,29 +532,66 @@ export function propertyCliUsage(): string {
   ].join("\n");
 }
 
-function definitionForDescriptor(
-  descriptor: PropertyCaseDescriptor,
-): PropertyCaseDefinition {
-  const describedAgain = describePropertyCaseDescriptorAndDefinition(
-    descriptor.index,
-    descriptor.id,
-  );
-  return describedAgain;
+function describePropertyCaseFromDefinitions(
+  seed: number,
+  caseIndex: number,
+  definitions: readonly PropertyCaseDefinition[],
+): PropertyCaseDescriptor {
+  if (!Number.isSafeInteger(caseIndex) || caseIndex < 0) {
+    throw new RangeError("Property case index must be a non-negative safe integer.");
+  }
+  if (definitions.length === 0) throw new Error("Property case catalog is empty.");
+  const repeatable = definitions.filter((definition) => definition.repeatable);
+  if (caseIndex >= definitions.length && repeatable.length === 0) {
+    throw new Error("Property case catalog has no repeatable cases.");
+  }
+
+  let state = createPropertyPrng(mixSeedWithCaseIndex(seed, caseIndex));
+  const selection = nextPropertyUint32(state);
+  state = selection.state;
+  const first = nextPropertyUint32(state);
+  state = first.state;
+  const second = nextPropertyUint32(state);
+  state = second.state;
+  const third = nextPropertyUint32(state);
+
+  const definition = caseIndex < definitions.length
+    ? definitions[caseIndex]!
+    : repeatable[propertyIndex(selection.value, repeatable.length)]!;
+  return Object.freeze({
+    index: caseIndex,
+    id: definition.id,
+    property: definition.property,
+    boundary: definition.boundary,
+    workUnits: definition.workUnits,
+    mutationCount: definition.mutationCount,
+    variant: Object.freeze({
+      first: first.value,
+      second: second.value,
+      third: third.value,
+    }),
+  });
 }
 
-function describePropertyCaseDescriptorAndDefinition(
-  caseIndex: number,
-  expectedId: string,
+function definitionForDescriptor(
+  descriptor: PropertyCaseDescriptor,
+  definitions: readonly PropertyCaseDefinition[],
 ): PropertyCaseDefinition {
-  const mandatory = MANDATORY_PROPERTY_CASES[caseIndex];
+  const mandatory = definitions[descriptor.index];
   if (mandatory !== undefined) {
-    if (mandatory.id !== expectedId) throw new Error(`Property case changed: ${expectedId}.`);
+    if (mandatory.id !== descriptor.id) {
+      throw new Error(`Property case changed: ${descriptor.id}.`);
+    }
     return mandatory;
   }
-  const definition = REPEATABLE_PROPERTY_CASES.find(
-    (candidate) => candidate.id === expectedId,
+  const repeatableById = new Map(
+    definitions.filter((definition) => definition.repeatable).map((definition) => [
+      definition.id,
+      definition,
+    ] as const),
   );
-  if (definition === undefined) throw new Error(`Unknown property case: ${expectedId}.`);
+  const definition = repeatableById.get(descriptor.id);
+  if (definition === undefined) throw new Error(`Unknown property case: ${descriptor.id}.`);
   return definition;
 }
 
@@ -516,15 +620,6 @@ function parseUnsignedDecimal(
   const value = Number(rawValue);
   if (!Number.isSafeInteger(value) || (!allowZero && value === 0)) {
     throw new PropertyCliArgumentError(`${option} is outside the supported range.`);
-  }
-  return value;
-}
-
-function updateSignature(signature: number, text: string): number {
-  let value = signature >>> 0;
-  for (const byte of new TextEncoder().encode(text)) {
-    value ^= byte;
-    value = Math.imul(value, 0x0100_0193) >>> 0;
   }
   return value;
 }

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 
 import {
+  MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
+  MAX_EXTERNAL_RUNTIME_DATA_WORK,
   MAX_INTERACTION_OPTION_ENTRIES,
   MAX_INTERACTION_STRING_UTF8_BYTES,
   compileSource,
@@ -49,10 +51,15 @@ export interface PropertyFixtureCatalog {
   readonly duplicateTextCompletion: Readonly<Record<string, unknown>>;
   readonly textCompletionResult: PendingActionOperationResult<ActionCompletionOutcome>;
   readonly textCheckpoint: RuntimeCheckpoint;
+  readonly exactLimitButtonPlan: InstructionPlan;
+  readonly overLimitButtonPlan: InstructionPlan;
+  readonly exactLimitChoicePlan: InstructionPlan;
+  readonly overLimitChoicePlan: InstructionPlan;
+  readonly overAggregateStringPlan: InstructionPlan;
 }
 
-export const MAX_PROPERTY_GRAPH_DEPTH = 64;
-export const MAX_PROPERTY_COLLECTION_SIZE = MAX_INTERACTION_OPTION_ENTRIES + 1;
+export const MAX_PROPERTY_GRAPH_DEPTH = MAX_EXTERNAL_RUNTIME_DATA_DEPTH;
+export const MAX_PROPERTY_COLLECTION_SIZE = MAX_EXTERNAL_RUNTIME_DATA_WORK;
 export const MAX_PROPERTY_STRING_UTF8_BYTES =
   MAX_INTERACTION_STRING_UTF8_BYTES + 1;
 
@@ -116,7 +123,7 @@ export function createInteractionPlan(
 export function createExactLimitButtonPlan(): InstructionPlan {
   return createInteractionPlan("button", {
     kind: "button",
-    buttonLabel: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES),
+    buttonLabel: exactUtf8String(MAX_INTERACTION_STRING_UTF8_BYTES),
     accessibleName: DEFAULT_ACCESSIBLE_NAMES.button,
   });
 }
@@ -133,7 +140,7 @@ export function createOverLimitButtonPlan(): InstructionPlan {
       candidate.kind === "interaction",
   );
   assert.ok(instruction !== undefined && instruction.ui.kind === "button");
-  (instruction.ui as { buttonLabel: string }).buttonLabel = "x".repeat(
+  (instruction.ui as { buttonLabel: string }).buttonLabel = exactUtf8String(
     MAX_INTERACTION_STRING_UTF8_BYTES + 1,
   );
   return mutated;
@@ -170,6 +177,31 @@ export function createOverLimitChoicePlan(): InstructionPlan {
       text: "",
       label: index,
     }));
+  return mutated;
+}
+
+
+export function createOverAggregateStringPlan(): InstructionPlan {
+  const plan = createInteractionPlan("button", {
+    kind: "button",
+    buttonLabel: "x",
+    accessibleName: DEFAULT_ACCESSIBLE_NAMES.button,
+  });
+  const mutated = structuredClone(plan) as InstructionPlan;
+  const instruction = mutated.instructions.find(
+    (candidate): candidate is InteractionInstruction =>
+      candidate.kind === "interaction",
+  );
+  assert.ok(instruction !== undefined && instruction.ui.kind === "button");
+  const ui = instruction.ui as unknown as {
+    buttonLabel: string;
+    accessibleName: { kind: "text"; text: string };
+  };
+  ui.buttonLabel = exactUtf8String((MAX_INTERACTION_STRING_UTF8_BYTES / 2) + 1);
+  ui.accessibleName = {
+    kind: "text",
+    text: exactUtf8String(MAX_INTERACTION_STRING_UTF8_BYTES / 2),
+  };
   return mutated;
 }
 
@@ -305,6 +337,11 @@ export function createPropertyFixtureCatalog(): PropertyFixtureCatalog {
     duplicateTextCompletion,
     textCompletionResult,
     textCheckpoint: createCheckpoint(textPlan, waitingTextResult.snapshot),
+    exactLimitButtonPlan: createExactLimitButtonPlan(),
+    overLimitButtonPlan: createOverLimitButtonPlan(),
+    exactLimitChoicePlan: createExactLimitChoicePlan(),
+    overLimitChoicePlan: createOverLimitChoicePlan(),
+    overAggregateStringPlan: createOverAggregateStringPlan(),
   });
 
   for (const entry of [
@@ -326,12 +363,19 @@ export function createPropertyFixtureCatalog(): PropertyFixtureCatalog {
     assertValidPlan(entry.plan);
     assertValidSnapshot(entry.plan, entry.snapshot);
   }
+  assert.equal(validateInstructionPlan(catalog.exactLimitButtonPlan).valid, true);
+  assert.equal(validateInstructionPlan(catalog.overLimitButtonPlan).valid, false);
+  assert.equal(validateInstructionPlan(catalog.exactLimitChoicePlan).valid, true);
+  assert.equal(validateInstructionPlan(catalog.overLimitChoicePlan).valid, false);
+  assert.equal(validateInstructionPlan(catalog.overAggregateStringPlan).valid, false);
+  assertFixtureSemantics(catalog);
   assertPropertyFixtureBounds(catalog);
+  deepFreezePropertyFixtureCatalog(catalog);
   return catalog;
 }
 
 export function assertPropertyFixtureBounds(value: unknown): void {
-  const seen = new WeakSet<object>();
+  const ancestors = new WeakSet<object>();
   const encoder = new TextEncoder();
 
   function visit(current: unknown, depth: number, path: string): void {
@@ -346,25 +390,117 @@ export function assertPropertyFixtureBounds(value: unknown): void {
       );
       return;
     }
-    if (typeof current !== "object" || current === null) return;
-    if (seen.has(current)) return;
-    seen.add(current);
-    if (Array.isArray(current)) {
-      assert.ok(
-        current.length <= MAX_PROPERTY_COLLECTION_SIZE,
-        `${path} exceeds property fixture collection size ${MAX_PROPERTY_COLLECTION_SIZE}.`,
-      );
-      for (let index = 0; index < current.length; index += 1) {
-        if (Object.hasOwn(current, index)) visit(current[index], depth + 1, `${path}[${index}]`);
+    if ((typeof current !== "object" || current === null) && typeof current !== "function") return;
+    if (typeof current === "function") return;
+    if (ancestors.has(current)) return;
+    ancestors.add(current);
+    try {
+      if (Array.isArray(current)) {
+        assert.ok(
+          current.length <= MAX_PROPERTY_COLLECTION_SIZE,
+          `${path} exceeds property fixture collection size ${MAX_PROPERTY_COLLECTION_SIZE}.`,
+        );
       }
-      return;
-    }
-    for (const key of Object.keys(current)) {
-      visit((current as Record<string, unknown>)[key], depth + 1, `${path}.${key}`);
+      for (const key of Reflect.ownKeys(current)) {
+        if (Array.isArray(current) && key === "length") continue;
+        const descriptor = Object.getOwnPropertyDescriptor(current, key);
+        assert.notEqual(descriptor, undefined, `${path} lost own property ${String(key)}.`);
+        assert.ok(
+          descriptor !== undefined && "value" in descriptor,
+          `${path}.${String(key)} must not contain an accessor fixture property.`,
+        );
+        visit(
+          descriptor.value,
+          depth + 1,
+          typeof key === "symbol" ? `${path}[${String(key)}]` : `${path}.${key}`,
+        );
+      }
+    } finally {
+      ancestors.delete(current);
     }
   }
 
   visit(value, 0, "$fixtures");
+}
+
+
+export function assertPropertyFixtureCatalogFrozen(value: unknown): void {
+  const seen = new WeakSet<object>();
+  function visit(current: unknown, path: string): void {
+    if (
+      ((typeof current !== "object" || current === null) && typeof current !== "function") ||
+      seen.has(current as object)
+    ) return;
+    if (typeof current === "function") return;
+    seen.add(current);
+    assert.equal(Object.isFrozen(current), true, `${path} is not frozen.`);
+    for (const key of Reflect.ownKeys(current)) {
+      const descriptor = Object.getOwnPropertyDescriptor(current, key);
+      if (descriptor !== undefined && "value" in descriptor) {
+        visit(descriptor.value, `${path}.${String(key)}`);
+      }
+    }
+  }
+  visit(value, "$fixtures");
+}
+
+export function exactUtf8String(byteLength: number): string {
+  assert.ok(Number.isSafeInteger(byteLength) && byteLength >= 0);
+  const twoByteCharacters = Math.floor(byteLength / 2);
+  return "é".repeat(twoByteCharacters) + (byteLength % 2 === 0 ? "" : "a");
+}
+
+function assertFixtureSemantics(catalog: PropertyFixtureCatalog): void {
+  assertFixtureState(catalog.fresh, "ready", null);
+  assertFixtureState(catalog.running, "running", null);
+  assertFixtureState(catalog.halted, "halted", null);
+  assertFixtureState(catalog.failed, "failed", null);
+  assertFixtureState(catalog.waitingDelay, "waiting", "delay");
+  assertFixtureState(catalog.settledDelay, "running", null);
+  assert.equal(catalog.settledDelay.snapshot.lastSettlement?.actionKind, "delay");
+  assertFixtureState(catalog.waitingText, "waiting", "interaction", "text");
+  assertFixtureState(catalog.settledText, "running", null);
+  assert.equal(catalog.settledText.snapshot.lastSettlement?.actionKind, "interaction");
+  assertFixtureState(catalog.waitingButton, "waiting", "interaction", "button");
+  assertFixtureState(catalog.waitingChoice, "waiting", "interaction", "choice");
+  assertFixtureState(catalog.activeSpeaker, "waiting", "delay");
+  assert.equal(catalog.activeSpeaker.snapshot.speakers.length, 1);
+  assertFixtureState(catalog.activeScope, "waiting", "delay");
+  assert.equal(catalog.activeScope.snapshot.frames.length, 2);
+  assertFixtureState(catalog.activeLoop, "waiting", "delay");
+  assert.equal(catalog.activeLoop.snapshot.loopFrames.length, 1);
+  assertFixtureState(catalog.activeCall, "waiting", "delay");
+  assert.equal(catalog.activeCall.snapshot.callFrames.length, 1);
+}
+
+function assertFixtureState(
+  fixtureValue: PlanSnapshotFixture,
+  status: RuntimeSnapshot["status"],
+  actionKind: "delay" | "interaction" | null,
+  interactionKind?: InteractionInstruction["interactionKind"],
+): void {
+  assert.equal(fixtureValue.snapshot.status, status, fixtureValue.name);
+  assert.equal(fixtureValue.snapshot.foregroundAction?.kind ?? null, actionKind, fixtureValue.name);
+  if (interactionKind !== undefined) {
+    const action = fixtureValue.snapshot.foregroundAction;
+    assert.ok(action !== null && action.kind === "interaction", fixtureValue.name);
+    assert.equal(action.interactionKind, interactionKind, fixtureValue.name);
+  }
+}
+
+function deepFreezePropertyFixtureCatalog(value: unknown): void {
+  const seen = new WeakSet<object>();
+  function freeze(current: unknown): void {
+    if ((typeof current !== "object" || current === null) && typeof current !== "function") return;
+    if (typeof current === "function" || seen.has(current)) return;
+    seen.add(current);
+    for (const key of Reflect.ownKeys(current)) {
+      const descriptor = Object.getOwnPropertyDescriptor(current, key);
+      if (descriptor !== undefined && "value" in descriptor) freeze(descriptor.value);
+    }
+    Object.freeze(current);
+  }
+  freeze(value);
 }
 
 export function summarizePropertyFixtureCatalog(

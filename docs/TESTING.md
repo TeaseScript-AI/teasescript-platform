@@ -100,11 +100,11 @@ tests/property/
 ### Commands and budgets
 
 ```shell
-npm run test:property -- --seed 1364229357 --runs 128
+npm run test:property -- --profile smoke --seed 1364229357 --runs 128
 npm run test:property:extended -- --seed 1591436852 --runs 10000
 ```
 
-The required smoke profile defaults to seed `1364229357` and `128` cases. Its first cases execute every mandatory Phase 1 mutation; any remaining cases use the repeatable deterministic schedule. The extended profile defaults to seed `1591436852` and `10,000` cases. A moderate implementation-verification budget is `2,000` cases.
+The required smoke profile defaults to seed `1364229357` and `128` cases. The current mandatory catalog contains `102` ordered cases, all executed at the start of every smoke run; the remaining cases use the repeatable deterministic schedule. The extended profile defaults to seed `1591436852` and `10,000` cases. A moderate implementation-verification budget is `2,000` cases.
 
 Both commands compile the repository before invoking the same `dist/tests/property/replay.js` campaign implementation. After one successful build, independent larger processes may safely use the compiled entrypoint directly with separate seeds:
 
@@ -126,7 +126,7 @@ Supported options are:
 
 Signs, fractions, exponents, non-finite text, unsafe values, unsupported ranges, duplicate options, unknown options, and missing values fail clearly. Argument failures return exit status `2`; property or infrastructure failures return `1`; success returns `0`.
 
-Every property failure reports the seed, run budget, case index, mutation/operation ID, property, first boundary, fixture/state catalog summary, cause, and an exact command such as:
+Every property failure reports the seed, run budget, case index, mutation/operation ID, property, first boundary, case-specific fixture/state context, generated variant, cause, and an exact command such as:
 
 ```shell
 npm run test:property:extended -- --seed 12345 --runs 250 --case 17
@@ -142,11 +142,13 @@ The harness permits at most:
 
 - `1,000,000` cases;
 - at most three controlled field mutations per case;
-- eight conservative direct-public-boundary work units per case;
+- sixteen conservative direct-public-boundary work units per case;
 - a declared maximum generated graph depth of `64`;
-- `8,000,000` total case-execution work units.
+- `16,000,000` total case-execution work units.
 
-Every case definition declares an executable `workUnits` cost. One unit represents one direct call to a documented public validation, runtime, completion, checkpoint, serialization, deserialization, or restore boundary. Composite cases use conservative costs; the resume-equivalence cases declare eight units for seven direct calls. Module initialization rejects missing, unsafe, zero, or over-eight metadata. Before fixture construction, the campaign derives the exact selected case schedule, sums its metadata, and rejects a total above the configured bound. The final result reports the exact executed total. The fixed fixture-catalog setup is separately bounded and does not vary with `--runs`.
+Every case definition declares a conservative `workUnits` ceiling. One measured unit represents one direct call to a documented public validation, runtime, completion, checkpoint, serialization, deserialization, or restore boundary. The harness instruments these calls during execution, rejects a case that performs no public boundary, and fails when measured calls exceed the declared ceiling. Composite resume-equivalence cases currently declare twelve units. Module initialization rejects missing, unsafe, zero, or over-sixteen metadata. Before fixture construction, the campaign derives the exact selected schedule, sums its ceilings, and rejects a total above the configured bound. Progress and final output report the measured executed total; the configured ceiling remains available for comparison. Deterministic schedule-generation overhead and the fixed fixture-catalog setup are bounded separately from public-operation work and do not vary per executed boundary.
+
+Each case also declares a conservative controlled-mutation count from zero through three. Module initialization rejects invalid metadata, the selected schedule is summed before execution, and progress/final output report the accumulated declared mutation count.
 
 Technical boundary cases use the accepted interaction limits: at most the exact accepted string/collection boundary for valid fixtures and one unit over it for rejection fixtures. There is no real-time sleep, network access, process-global generator state, or unpublished homelab implementation.
 
@@ -154,7 +156,9 @@ Technical boundary cases use the accepted interaction limits: at most the exact 
 
 Fixture construction prefers real public compile and runtime paths. Because author-facing interaction syntax is not implemented yet, interaction fixtures replace a compiled `wait` instruction with the current public interaction instruction shape and must pass `validateInstructionPlan(...)` before execution. Every baseline plan and snapshot is validated before mutation.
 
-The catalog covers fresh, running, waiting, continuation-ready, halted, and failed snapshots; delay and generic interaction actions; settlements; valid, invalid, duplicate, stale, and unknown completions; checkpoints; JSON round trips; speakers; scopes; loops; calls; and temporaries.
+The catalog covers fresh, running, waiting, continuation-ready, halted, and failed snapshots; delay and generic interaction actions; settlements; valid, invalid, duplicate, stale, and unknown completions; checkpoints; JSON round trips; speakers; scopes; loops; calls; and temporaries. Builders assert the exact lifecycle status, pending-action kind, interaction kind, settlement, and active frame structures promised by each fixture name before the catalog is frozen.
+
+The complete fixture catalog is recursively frozen. Every case receives that same immutable catalog, and the campaign verifies the freeze before and after execution. A required regression also proves that a case observed inside a full campaign has the exact same trace entry as isolated `--case` replay.
 
 Controlled mutations cover:
 
@@ -194,14 +198,17 @@ mutated external plan/snapshot/checkpoint/request
    hang, partial mutation, or hidden continuation
 
 same seed + same budget
-=> same cases, mutations, operation order, observations, and signature
+=> same complete trace of cases, variants, measured boundary order, mutations, and observations
+=> same SHA-256 signature
 ```
+
+The mandatory catalog is pinned by ordered case ID and count, rejects duplicate IDs, and must fit inside the smoke budget. Known PRNG vectors, a seed/index descriptor vector, and the complete 128-case smoke SHA-256 signature are pinned. The required smoke test captures and compares the exact trace twice; the CLI prints only the compact digest.
 
 A genuine internal programming defect is not concealed. Each confirmed production defect must be reduced to a focused named regression test and handled in the owning repair issue or a separate blocker rather than by weakening the property.
 
 ### Large-campaign handoff
 
-A practical first Codex/homelab campaign is `100,000` cases for each of several explicit seeds, for example `1591436852`, `1`, `305419896`, and `3735928559`. The implementation verification measured `2,000` direct cases in about `0.68` seconds and `10,000` in about `2.58` seconds, approximately `3,900` cases per second after build, with roughly `85`–`94` MB process memory. These measurements are environment-specific; use progress output for unattended runs and derive revised estimates from the target machine.
+A practical first Codex/homelab campaign is `100,000` cases for each of several explicit seeds, for example `1591436852`, `1`, `305419896`, and `3735928559`. On Node `24.18.0`, the strengthened implementation measured `2,000` direct cases in about `1.58` seconds after build with approximately `149` MB maximum resident memory. The complete required suite passed `504` tests in about `7.74` seconds including build with approximately `446` MB maximum resident memory. These measurements are environment-specific; use progress output for unattended runs and derive revised estimates from the target machine.
 
 No private configuration or unpublished helper is required. Record any failure's seed, runs, case, property, boundary, state summary, and replay command on the implementation pull request. Rerun the exact case after every harness repair. Convert confirmed production defects to permanent focused regressions and separate issues where the repair is unrelated or substantial.
 
