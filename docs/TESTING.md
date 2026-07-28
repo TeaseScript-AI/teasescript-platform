@@ -208,7 +208,7 @@ A genuine internal programming defect is not concealed. Each confirmed productio
 
 ### Large-campaign handoff
 
-A practical first Codex/homelab campaign is `100,000` cases for each of several explicit seeds, for example `1591436852`, `1`, `305419896`, and `3735928559`. On Node `24.18.0`, the strengthened implementation measured `2,000` direct cases in about `1.58` seconds after build with approximately `149` MB maximum resident memory. The complete required suite passed `504` tests in about `7.74` seconds including build with approximately `446` MB maximum resident memory. These measurements are environment-specific; use progress output for unattended runs and derive revised estimates from the target machine.
+A practical first Codex/homelab campaign is `100,000` cases for each of several explicit seeds, for example `1591436852`, `1`, `305419896`, and `3735928559`. On Node `24.18.0`, the strengthened implementation measured `2,000` direct cases in about `1.58` seconds after build with approximately `149` MB maximum resident memory. The complete required suite passed `505` tests in about `7.40` seconds including build with approximately `446` MB maximum resident memory. These measurements are environment-specific; use progress output for unattended runs and derive revised estimates from the target machine.
 
 No private configuration or unpublished helper is required. Record any failure's seed, runs, case, property, boundary, state summary, and replay command on the implementation pull request. Rerun the exact case after every harness repair. Convert confirmed production defects to permanent focused regressions and separate issues where the repair is unrelated or substantial.
 
