@@ -20,8 +20,9 @@ classifying, justifying, testing, documenting, and changing technical limits.
 A defensive capture allowance, a compiler guard, an execution quantum, a UI
 warning, and an officially supported engine capacity can therefore be confused
 with each other. A round implementation value may become a documented promise
-without evidence that the heaviest valid representation survives compilation,
-execution, checkpointing, serialization, restore, and deterministic resumption.
+without evidence that one or more worst-case or Pareto-relevant valid forms for
+every applicable resource dimension survive the complete engine and platform
+path.
 
 This ADR defines governance terminology and evidence requirements. It does not
 select or change a numeric limit, reclassify any current value, alter a public
@@ -36,7 +37,10 @@ alone does not change its status.
 ## Decision summary
 
 1. Every explicit or implicit repository limit must have one primary category,
-   an owner, a boundary, a unit, a concrete risk, and an evidence status.
+   an owner, a boundary, a measurement definition, a concrete risk, and an
+   evidence status. The measurement definition is a quantitative unit or a
+   qualitative domain or predicate, with a reason when no quantitative unit
+   applies.
 2. Limits with different threat models or semantic purposes must not share one
    value merely for convenience. Coupled limits must record the coupling and
    downstream expansion explicitly.
@@ -64,8 +68,26 @@ input or execution.
 
 A **boundary** is the public or internal operation at which a limit is applied,
 such as source capture, parsing, semantic validation, lowering, plan capture,
-plan validation, snapshot creation, checkpoint creation, restore, host-message
-validation, storage, or a tooling command.
+plan validation, snapshot creation, checkpoint creation, restore, Player
+presentation, host-message validation, transport, rendering, storage, or a
+tooling command.
+
+A **measurement definition** states how the governed property is evaluated. It
+uses a quantitative unit when the property is measurable, such as bytes, nodes,
+instructions, frames, or validation work. A qualitative representation
+invariant instead records its accepted domain, predicate, or structural
+criterion. When no quantitative unit applies, the registry records that fact
+and its rationale rather than inventing an artificial unit.
+
+A **resource dimension** is one independently relevant axis of resource use,
+such as source bytes, AST nodes, graph-capture work, instruction count,
+temporaries, frames, validation work, message bytes, rendered controls, or
+checkpoint bytes.
+
+A **worst-form evidence set** contains one or more valid representations that
+are worst-case or Pareto-relevant for every applicable resource dimension and
+coupled downstream budget. No single representation is assumed to maximize all
+dimensions.
 
 An **officially supported maximum** is a value or formula deliberately offered
 as supported capacity for a documented input class. It is stronger than an
@@ -130,9 +152,10 @@ Engine representational capacity is an officially supported maximum for a
 specified valid source, plan, runtime-state, snapshot, checkpoint, action, or
 other engine-owned representation.
 
-A capacity claim requires evidence for the heaviest valid representation and
-all applicable downstream layers. It must define the input class, unit, public
-boundary, expansion model, safety margin, and compatibility consequences.
+A capacity claim requires a worst-form evidence set and proof across all
+applicable downstream engine and platform layers. It must define the input
+class, measurement definition, public boundary, resource dimensions, expansion
+model, safety margin, and compatibility consequences.
 
 ### Parser, compiler, or runtime implementation guard
 
@@ -199,22 +222,23 @@ The following distinctions are mandatory:
 - A provisional POC guard is not a permanent public compatibility promise.
 - A test that imports a production constant and checks `max` and `max + 1`
   proves implementation agreement at that boundary. It does not prove that the
-  number is correct, justified, representative of the heaviest valid form, or
-  supported end to end.
+  number is correct, justified, covered by the required worst-form evidence
+  set, or supported end to end.
 - Raising a general security or hostile-input budget is not the default repair
   for an inefficient compiler-generated, plan, snapshot, checkpoint, or other
   internal representation. The representation, expansion, and owning budget
   must be analysed first.
 - Sharing a number across boundaries does not establish that the boundaries
-  have the same threat model, unit, expansion factor, evidence, or compatibility
-  contract.
+  have the same threat model, measurement definition, expansion factor,
+  evidence, or compatibility contract.
 - A product default, warning threshold, and technical rejection limit may have
   different values and owners.
 
 ## End-to-end maximum invariant
 
-For every officially supported source or public-input maximum, each applicable
-maximum-form input must survive the complete public path:
+For every officially supported source or public-input maximum, each
+representation in the applicable worst-form evidence set must survive at least
+this minimum engine sequence:
 
 1. capture or parsing;
 2. semantic validation;
@@ -228,29 +252,42 @@ maximum-form input must survive the complete public path:
 10. resumed completion;
 11. deterministic uninterrupted-versus-resumed equivalence.
 
-The proof uses the heaviest valid representation, not only the cheapest example.
-When the accepted input class has materially different forms, such as static
-and dynamically lowered forms, root-owned and function-owned forms, or waiting
-and completed states, evidence covers every form that can produce the worst
-downstream expansion.
+The numbered sequence is the minimum engine chain, not the entire public
+platform path. Evidence must also traverse every applicable Player application,
+parent/player or host-message, typed host integration, transport or API,
+rendering or Standard/custom UI, persistence or storage, and other platform
+boundary through which the accepted data must travel. An engine maximum is not
+`proven` when a required Player, message, transport, rendering, or storage
+boundary still rejects or cannot safely represent it.
 
-A layer may be marked not applicable only with a concrete boundary reason. For
-example, a tooling-only metadata field that is never compiled, placed in a
-runtime snapshot, or stored in a checkpoint does not require runtime or resume
-tests. It still requires focused tests for every applicable tooling, capture,
-validation, serialization, transport, or storage boundary and must not be
-reported as engine capacity.
+Resource use is multidimensional. The proof identifies every applicable
+resource dimension and coupled downstream budget, then uses one or more
+worst-case or Pareto-relevant valid forms for each. No single globally
+"heaviest" representation is presumed. When the accepted input class has
+materially different forms, such as static and dynamically lowered forms,
+root-owned and function-owned forms, or waiting and completed states, the
+worst-form evidence set covers every form needed to bound those dimensions and
+their downstream expansions.
+
+A layer or boundary may be marked not applicable only with a concrete reason.
+For example, a tooling-only metadata field that is never compiled, sent to the
+Player, placed in a runtime snapshot, or stored in a checkpoint does not require
+runtime, Player, or resume tests. It still requires focused tests for every
+applicable tooling, capture, validation, serialization, transport, rendering,
+or storage boundary and must not be reported as engine capacity.
 
 ### Downstream-derived upstream capacity
 
 When a downstream boundary cannot support an upstream maximum, the supported
-upstream maximum must be derived from the downstream contract and the heaviest
-valid expansion. The earliest suitable upstream boundary then rejects the
-unsupported input with a focused structured diagnostic.
+upstream maximum must be derived from the downstream contract and the
+worst-case or Pareto-relevant expansions for every applicable resource
+dimension and coupled budget. The earliest suitable upstream boundary then
+rejects the unsupported input with a focused structured diagnostic.
 
 The repository must not knowingly accept an upstream maximum that later fails
 incidentally in lowering, plan validation, snapshot creation, checkpointing,
-serialization, restore, or resumed execution.
+serialization, restore, resumed execution, Player presentation, host-message
+validation, transport, rendering, or storage.
 
 A downstream constraint may instead be repaired or structurally separated, but
 that repair belongs to its own implementation decision and evidence. This ADR
@@ -262,8 +299,9 @@ Every registry entry uses one of these statuses.
 
 ### `proven`
 
-`proven` means the current value or formula is justified for its declared
-category, unit, boundary, and input class.
+`proven` means the current value, predicate, accepted domain, or formula is
+justified for its declared category, measurement definition, boundary, and
+input class.
 
 Where relevant, evidence includes:
 
@@ -271,10 +309,12 @@ Where relevant, evidence includes:
 - a derivation, external constraint, accepted product policy, or deterministic
   structural measurement supporting the value or formula;
 - tests through the documented public boundary;
-- `max - 1`, `max`, and `max + 1` behavior;
-- the cheapest and heaviest valid representations;
-- worst-form downstream expansion and every interacting budget;
-- all applicable end-to-end maximum-invariant stages;
+- `max - 1`, `max`, and `max + 1` behavior where a quantitative ordered
+  limit makes those cases meaningful;
+- a cheapest valid baseline where useful;
+- the worst-form evidence set for every applicable resource dimension and
+  coupled downstream budget;
+- all applicable minimum-engine and public-platform invariant stages;
 - checkpoint creation, JSON round trip, public restore, resumed completion, and
   uninterrupted-versus-resumed equivalence where runtime state applies;
 - deterministic bounded failure with no partial mutation at the rejecting
@@ -334,12 +374,15 @@ implicit hard bound. Each entry contains at least:
 - public or internal boundary;
 - constant, option, formula, or implicit mechanism;
 - primary taxonomy category;
-- unit;
-- current value or formula;
+- measurement definition: quantitative unit or qualitative domain, predicate,
+  or structural criterion;
+- an explicit not-applicable rationale when no quantitative unit exists;
+- current value, predicate, accepted domain, or formula;
 - concrete risk, invariant, or policy it prevents or enforces;
 - evidence status and evidence source;
-- cheapest valid representation where relevant;
-- heaviest valid representation where relevant;
+- cheapest valid baseline where relevant;
+- one or more worst-case or Pareto-relevant valid representations for every
+  applicable resource dimension and coupled downstream budget;
 - downstream expansion and all coupled or interacting budgets;
 - safety margin and its rationale;
 - configuration surface and accepted range, when configurable;
@@ -349,7 +392,8 @@ implicit hard bound. Each entry contains at least:
 - required checkpoint and JSON-round-trip tests where runtime state applies;
 - required restore, resume, and uninterrupted-versus-resumed equivalence tests
   where runtime continuation applies;
-- explicit not-applicable reasons for omitted layers or tests;
+- explicit not-applicable reasons for omitted quantitative units, layers,
+  boundaries, or tests;
 - recommendation, repair direction, or unresolved owner decision.
 
 The registry is authoritative for classification and evidence routing after it
@@ -359,9 +403,9 @@ that inventory or assign evidence statuses to current repository values.
 
 ## Decision and versioning triggers
 
-A proposed limit change first identifies the category, owner, boundary, unit,
-evidence status, downstream effects, and compatibility impact. The following
-triggers then apply cumulatively.
+A proposed limit change first identifies the category, owner, boundary,
+measurement definition, evidence status, downstream effects, and compatibility
+impact. The following triggers then apply cumulatively.
 
 ### Implementation, tests, and documentation only
 
@@ -450,11 +494,15 @@ show why the constant or formula is appropriate.
 
 Where applicable, limit tests cover:
 
-- `max - 1`, `max`, and `max + 1`;
-- cheapest and worst valid forms;
+- `max - 1`, `max`, and `max + 1` for quantitative ordered limits;
+- a cheapest valid baseline where useful;
+- one or more worst-case or Pareto-relevant forms for every applicable resource
+  dimension and coupled downstream budget;
 - static and dynamically expanded forms;
 - root-owned and function-owned forms;
 - fresh, waiting, completed, checkpointed, restored, and resumed states;
+- the minimum engine sequence and every applicable Player, host-message,
+  transport, rendering, and storage boundary;
 - deterministic structured rejection and input-state immutability;
 - uninterrupted-versus-resumed equivalence.
 
@@ -485,13 +533,14 @@ statuses.
 
 ### Benefits
 
-- Technical limits gain explicit owners, meanings, units, risks, and evidence.
+- Technical limits gain explicit owners, meanings, measurement definitions,
+  risks, and evidence.
 - Defensive hostile-input budgets no longer silently define internal engine
   capacity.
 - UI guidance, execution scheduling, permanent policy, and representational
   capacity remain distinguishable.
-- Capacity claims become testable through the complete deterministic runtime
-  and checkpoint path.
+- Capacity claims become testable through the minimum deterministic engine
+  chain and every applicable public platform boundary.
 - Future limit changes expose their product, architecture, format, migration,
   and compatibility consequences before implementation.
 
@@ -524,7 +573,11 @@ This ADR does not:
 
 ## Follow-up
 
-After this ADR is explicitly accepted, a separate child issue under #129 should
-populate the registry, reproduce cross-boundary conflicts through public APIs,
-measure worst valid forms, propose focused repairs, and request the required
-owner or ADR decisions. That work must not be folded into this governance PR.
+Issue #131 already collects raw repository inventory, coupling, and
+cross-boundary reproduction evidence in parallel without applying this proposed
+taxonomy. After this ADR is explicitly accepted, the authoritative Phase 2
+synthesis under #129 must consume and validate #131's evidence, reproduce only
+missing or unresolved cases through public APIs, populate the registry, measure
+the required worst-form evidence sets, propose focused repairs, and request the
+required owner or ADR decisions. That work must not be folded into this
+governance PR.
