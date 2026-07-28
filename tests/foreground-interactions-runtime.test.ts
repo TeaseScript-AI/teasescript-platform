@@ -16,7 +16,7 @@ import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runt
 import {
   withInteractionControlFlowWorkLimitForTesting,
   withValidationTestStatistics,
-} from "../src/runtime/validation-testing.js";
+} from "../src/validation-testing.js";
 
 function interactionPlan(interactionKind: InteractionInstruction["interactionKind"], ui: InteractionUiPayload, options: { speaker?: string | null } = {}): InstructionPlan {
   const source = options.speaker === undefined ? "wait 1\nexit" : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;

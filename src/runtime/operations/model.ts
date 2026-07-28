@@ -8,10 +8,6 @@ export interface RuntimeOperationResult {
   readonly instructionsExecuted: number;
 }
 
-export interface RuntimeRunOptions {
-  readonly instructionBudget?: number;
-}
-
 export type TimeObservationOutcome =
   | { readonly kind: "observed"; readonly currentSessionTimeMs: number; readonly completion: RuntimeActionSettlementSnapshot | null }
   | { readonly kind: "invalidObservation"; readonly message: string };

@@ -20,12 +20,14 @@ function checkFixture(name: string): { readonly status: number; readonly output:
 }
 
 test("legacy import checker resolves relative legacy specifiers and exceptions", () => {
-  for (const name of ["one-level", "deep", "source-local", "workspace"]) {
+  for (const name of ["one-level", "deep", "source-local", "workspace", "validation-testing"]) {
     const result = checkFixture(name);
     assert.equal(result.status, 1, `${name}: ${result.output}`);
     assert.match(result.output, /resolves to/u);
   }
-  const valid = checkFixture("valid");
-  assert.equal(valid.status, 0, valid.output);
-  assert.match(valid.output, /passed/u);
+  for (const name of ["valid", "validation-testing-valid"]) {
+    const valid = checkFixture(name);
+    assert.equal(valid.status, 0, `${name}: ${valid.output}`);
+    assert.match(valid.output, /passed/u);
+  }
 });

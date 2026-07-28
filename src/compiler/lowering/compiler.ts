@@ -6,7 +6,7 @@ import type {
   Statement,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
-import { InstructionCompilationError } from "../compile-program.js";
+import { InstructionCompilationError } from "../errors.js";
 import type {
   ArgumentPlan,
   AssignmentTargetPlan,

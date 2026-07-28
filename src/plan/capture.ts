@@ -1,6 +1,10 @@
 import type { InstructionPlan } from "./model.js";
-import { capturePlanData, isPlanCaptureFailure } from "./capture-support.js";
-import { captureFailureValidation, validateCapturedInstructionPlan, type PlanValidationResult } from "./validation.js";
+import {
+  captureFailureValidation,
+  capturePlanData,
+  isPlanCaptureFailure,
+} from "./capture-support.js";
+import { validateCapturedInstructionPlan, type PlanValidationResult } from "./validation.js";
 
 export interface CapturedInstructionPlanResult {
   readonly validation: PlanValidationResult;

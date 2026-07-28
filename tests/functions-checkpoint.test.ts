@@ -24,7 +24,7 @@ import {
 import {
   withDetailedValidationWorkLimitForTesting,
   withValidationTestStatistics,
-} from "../src/runtime/validation-testing.js";
+} from "../src/validation-testing.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("restores every instruction boundary during defaults and nested calls", () => {

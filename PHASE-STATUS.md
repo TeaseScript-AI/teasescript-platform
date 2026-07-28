@@ -103,7 +103,7 @@ Also inspect the complete diff and verify the playground route/security matrix. 
 - Laravel persistence, accounts, catalog/publishing, moderation, scheduling, and global data;
 - continuous-personality services and LLM/vision integration.
 
-Issue #124 implements the approved behavior-neutral Option A source-layout
-refactor on its dedicated branch. Owner-selected pre-alpha and alpha
+PR #126 completes issue #124's approved behavior-neutral Option A source-layout
+refactor. Owner-selected pre-alpha and alpha
 obligations that remain open are tracked in `docs/planning/POC-TO-ALPHA-BACKLOG.md`;
 inclusion there does not otherwise schedule them.

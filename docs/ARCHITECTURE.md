@@ -119,6 +119,7 @@ added.
 | `src/instructions.ts` | `src/plan/*`, `src/compiler/*` | Plan, validation, and compilation symbols | Compatibility test only | Temporarily supported; external status unknown | Compiler/runtime owners | Later cleanup after dependent branches migrate and external direct-import status is decided |
 | `src/libraries/public.ts` | `src/library-tooling/public.ts` | Catalog and metadata tooling | Compatibility test only | Temporarily supported; external status unknown | Library tooling owner | Evidence-based cleanup after repository and dependent consumers migrate |
 | `playground/workspace.ts` | `playground/workspace/controller.ts` | Technical workspace compile/run/decode controller | Compatibility test only; browser/server use canonical path | Repository compatibility only | Workspace owner | Remove after consumers and external-support status are accounted for |
+| `src/runtime/validation-testing.ts` | `src/validation-testing.ts` | Test-only validation instrumentation | Compatibility test only; production and ordinary tests use the canonical path | Repository compatibility only; not a root public export | Runtime validation owner | Remove after direct-import compatibility is no longer required and external-support status is decided |
 
 `tools/check-legacy-imports.mjs` resolves static import/export specifiers to
 repository paths before rejecting legacy paths, including local and deep

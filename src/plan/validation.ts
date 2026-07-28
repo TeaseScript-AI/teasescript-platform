@@ -14,7 +14,11 @@ import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
 } from "./model.js";
-import { capturePlanData, isPlanCaptureFailure } from "./capture-support.js";
+import {
+  captureFailureValidation,
+  capturePlanData,
+  isPlanCaptureFailure,
+} from "./capture-support.js";
 
 export interface PlanValidationError {
   readonly code: "TSC001" | "TSC002";
@@ -32,10 +36,6 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
   return isPlanCaptureFailure(capture)
     ? captureFailureValidation(capture.message, capture.path)
     : validateCapturedInstructionPlan(capture.value);
-}
-
-export function captureFailureValidation(message: string, path: string): PlanValidationResult {
-  return invalidPlan("TSC002", message, path);
 }
 
 export function validateCapturedInstructionPlan(

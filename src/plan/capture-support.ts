@@ -5,6 +5,7 @@ import {
   captureExternalData,
   type ExternalDataFailureKind,
 } from "../external-data-limits.js";
+import type { PlanValidationError, PlanValidationResult } from "./validation.js";
 
 export interface CapturedPlanData {
   readonly value: unknown;
@@ -30,6 +31,18 @@ export function isPlanCaptureFailure(
   value: CapturedPlanData | PlanCaptureFailure,
 ): value is PlanCaptureFailure {
   return "message" in value;
+}
+
+export function captureFailureValidation(
+  message: string,
+  path: string,
+): PlanValidationResult {
+  const error: PlanValidationError = Object.freeze({
+    code: "TSC002",
+    message,
+    path,
+  });
+  return Object.freeze({ valid: false, errors: Object.freeze([error]) });
 }
 
 function planExternalDataFailureMessage(kind: ExternalDataFailureKind): string {

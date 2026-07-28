@@ -11,22 +11,10 @@ import {
   type InstructionPlan,
 } from "../plan/model.js";
 import { InstructionCompiler } from "./lowering/compiler.js";
+import { InstructionCompilationError } from "./errors.js";
 
 export type { InstructionPlan } from "../plan/model.js";
-
-export class InstructionCompilationError extends Error {
-  readonly span: SourceSpan;
-
-  public constructor(
-    readonly code: "TSC001" | "TSC003" | "TSC005",
-    message: string,
-    span: SourceSpan,
-  ) {
-    super(message);
-    this.name = "InstructionCompilationError";
-    this.span = copySpan(span);
-  }
-}
+export { InstructionCompilationError } from "./errors.js";
 
 export function compileProgram(program: Program): InstructionPlan {
   const capture = captureProgramAst(program);

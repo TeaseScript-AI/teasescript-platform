@@ -22,12 +22,17 @@ const legacyModules = [
     legacyPath: "playground/workspace.ts",
     canonicalPath: "playground/workspace/controller.ts",
   },
+  {
+    legacyPath: "src/runtime/validation-testing.ts",
+    canonicalPath: "src/validation-testing.ts",
+  },
 ];
 const extensions = new Set([".ts", ".mjs", ".js"]);
 const allowedFiles = new Set([
   "src/instructions.ts",
   "src/libraries/public.ts",
   "playground/workspace.ts",
+  "src/runtime/validation-testing.ts",
   compatibilityTest,
 ]);
 const checkerFixtureDirectory = path.resolve(
