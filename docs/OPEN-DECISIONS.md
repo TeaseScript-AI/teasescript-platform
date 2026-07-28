@@ -8,7 +8,7 @@ ADR 0017 is accepted. It defines the engine-primitive/public-Standard-Library/pa
 
 ADR 0018 is accepted. It defines the first Standard Library POC contract for `showButton`, `askText`, `askNumber`, `choose`, and `say` smart autoplay. It accepts the automatic protected prelude, full plan lowering, mandatory foreground interactions, exact first-POC input normalization, choice-label behavior, dynamic non-canonical button/dropdown presentation, bounded interaction-data policy, validated captured pacing settings, and one ADR 0016 `chatPacingGate` lifecycle. The normal Player application has no player-facing pause control; Pause remains developer/debugger tooling.
 
-ADR 0018 is not implemented by its documentation PR. Implementation must explicitly version affected plan, snapshot, and checkpoint schemas and select concrete shared technical limit constants before implementation merge.
+ADR 0018 is partially implemented. PR #117 implemented and versioned the generic foreground-interaction runtime, typed completion and transcript behavior, and concrete version-1 interaction limits. Author-facing compact syntax, smart-autoplay pacing, Standard Player controls, editor support, and final vertical acceptance remain implementation work rather than open contract decisions.
 
 ## Runtime hardening and evolution
 
@@ -19,7 +19,7 @@ ADR 0018 is not implemented by its documentation PR. Implementation must explici
 - Host/global representation for future opaque engine references beyond speakers.
 - Complete static type checking and composite equality.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
-- Concrete implementation and migration details for pending-action schema changes beyond the current blocking-`wait` slice, including populated background actions and prepared pacing output.
+- Concrete implementation and migration details for pending-action schema changes beyond the implemented blocking-`wait` and generic foreground-interaction slices, including populated background actions and prepared pacing output.
 - Exact minimal primitive families for background timed work and future media capabilities under ADR 0017.
 - Exact serializable lowering or engine-managed continuation representation for resumable library workflows not covered by ADR 0018's full-lowering choice.
 - Browser-unavailability, reload, reconnect, device-sleep, and visibility-change time-integrity policy for local timed work. This is not a player-facing pause command.
@@ -39,7 +39,7 @@ Decide whether that compatibility surface should:
 
 This decision must define the intended support period, migration expectations, public-export impact, and whether the host-value and serializable-value models remain separate. Until then, the current exports remain implemented POC behavior rather than a permanent alpha commitment.
 
-The current plan version 4 and runtime/checkpoint version 5 schemas are POC implementation details, not a promise of permanent wire-format compatibility.
+The current plan version 5 and runtime/checkpoint version 6 schemas are POC implementation details, not a promise of permanent wire-format compatibility.
 
 ## Remaining language and library work
 
@@ -54,7 +54,6 @@ The current plan version 4 and runtime/checkpoint version 5 schemas are POC impl
 - Standard Library string methods and detailed API signatures beyond the first POC.
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
 - Static treatment of contextual `speaker` access when control-flow analysis can prove that no explicit or default speaker is available: compile-time error, warning, or retained runtime failure. Ordinary narrator output such as `say "Hello"` is a separate valid case and does not require a default speaker.
-- Concrete shared platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits for ADR 0018 interactions. These are implementation constants, not separate per-field product limits.
 - Advanced `showButton` timeout and elapsed-time return.
 - Detailed interaction result objects containing elapsed time or metadata, including the exact option name that selects the object return type.
 - Advanced parenthesized input/choice forms, richer validation options, and custom compact `choose` field hints.

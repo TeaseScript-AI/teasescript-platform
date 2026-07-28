@@ -187,37 +187,6 @@ Create a measured performance baseline and production optimization plan for the 
 
 This item may move to **Ready for phase** after benchmark workloads, measurement commands, acceptance thresholds, and a prioritized optimization plan are owner-approved. Individual optimizations must then be scheduled explicitly.
 
-### POC-ENGINE-003 — Add adversarial runtime-data mutation testing
-
-- **Track:** Engine core
-- **Target gate:** Before pre-alpha
-- **Planning state:** Ready for phase
-- **Scheduling:** Unscheduled
-
-#### Required outcome
-
-Create reusable deterministic mutation coverage for documented external plan, runtime-snapshot, and checkpoint boundaries, including:
-
-- reusable one-field mutation utilities;
-- valid baseline plans, snapshots, and checkpoints;
-- controlled missing, wrong-type, invalid-reference, identity, RNG, sequence, version, cyclic, and excessive-nesting mutations;
-- verification of the documented structured validation, deserialization, or restore result;
-- explicit depth, size, and total-work bounds;
-- no uncontrolled native stack overflow, hang, silent repair, or partial execution at the documented boundary.
-
-#### Boundaries
-
-- Do not decide through this item that every unknown extra field must be rejected.
-- Do not change plan, snapshot, or checkpoint formats unless a separate accepted decision requires it.
-- The structured-result requirement applies to documented external-data boundaries and does not redefine intentional argument errors from unrelated low-level helpers.
-
-#### Dependencies and references
-
-- [ADR 0015 — Serializable runtime architecture](../decisions/0015-serializable-runtime-architecture.md)
-- [`docs/RUNTIME.md`](../RUNTIME.md), sections **Low-level lowering and runtime route** and **Checkpoint boundary**
-- [`docs/TESTING.md`](../TESTING.md), section **External-data and mutation testing**
-- [`docs/SECURITY.md`](../SECURITY.md)
-
 ### POC-ENGINE-004 — Establish a source-to-runtime conformance corpus
 
 - **Track:** Engine core

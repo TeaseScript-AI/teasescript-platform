@@ -76,7 +76,7 @@ Smart autoplay captures non-negative safe-integer millisecond account settings a
 
 The normal Player application has no player-facing pause control or author-facing session-pause command. Developer mode may provide Run, Step, Pause, checkpoint, restore, and debugger controls. Browser unavailability and reconnect time integrity remain separate work.
 
-ADR 0018 is accepted documentation, not current implementation. Every required plan, snapshot, and checkpoint schema change must be explicitly versioned during implementation.
+ADR 0018 is partially implemented. The generic foreground-interaction runtime and concrete version-1 technical limits are implemented and versioned; author-facing interaction syntax, smart-autoplay pacing, Standard Player controls, editor support, and final vertical acceptance remain separate work.
 
 ## Implemented POC milestones
 
@@ -145,7 +145,7 @@ ADR 0016 accepts:
 - blocking `wait` as the first source-to-runtime implementation slice;
 - explicit format-version changes whenever new action kinds or populated background actions are implemented.
 
-The implemented first slice does not yet include ADR 0018 interactions or pacing, camera/media lifecycle, the production host protocol, or Laravel scheduling.
+The implemented pending-action slices include blocking `wait` and the generic foreground-interaction family. They do not yet include `chatPacingGate`, populated background actions, camera/media lifecycle, the production host protocol, or Laravel scheduling.
 
 ## Runtime execution and performance boundary
 
@@ -163,7 +163,7 @@ POC implementation choices such as full snapshot cloning may later be optimized,
 
 ## Major remaining groups
 
-- implementation of ADR 0018's protected prelude, compact syntax, generic foreground interactions, shared concrete data limits, dynamic Standard UI, and pacing action;
+- implementation of ADR 0018's protected prelude and compact interaction syntax, smart-autoplay pacing action, dynamic Standard UI, editor/simulator support, and final vertical acceptance;
 - units, date, time, datetime, and duration values;
 - timer, media, and other pending-action kinds beyond blocking `wait` and the accepted first interaction/pacing contract;
 - cross-origin iframe host protocol and validated messaging;

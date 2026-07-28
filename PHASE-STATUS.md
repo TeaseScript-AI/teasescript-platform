@@ -2,13 +2,16 @@
 
 ## Evidence boundary
 
-- Current repository baseline for this status update: `9c5736e8ddaf48f9c265329c913c4d2efa427bcc` on `main`.
-- The seven-item implemented-foundation hardening set tracked by issue #7 is complete at this baseline, including the compiler/template work in PR #19, RNG-state work in PR #20, and the direct-AST non-finite-number boundary repair in PR #34.
+- Current repository baseline for this status update: `96737a19bcd85b559ead3cc0c1623efc3044e3c0` on `main`, the merge of PR #119 after PR #123.
+- The seven-item implemented-foundation hardening set tracked by issue #7 is complete, including the compiler/template work in PR #19, RNG-state work in PR #20, and the direct-AST non-finite-number boundary repair in PR #34.
 - PR #37 added sequenced `TSW002` developer warnings when `list.remove(value)` finds no matching value while preserving the unchanged list.
 - PR #48 completed the owner-selected reusable runtime resume-equivalence outcome tracked as `POC-ENGINE-002`, with a shared test-only helper and bounded corpus that checks every completed instruction boundary through a real JSON checkpoint round trip.
 - PR #46 rejects ordinary instruction-plan control-flow targets that cross between root and function execution regions before execution or checkpoint restore.
 - PR #45 rejects core and configured injected builtin identifiers when they are used as ordinary runtime values while preserving direct builtin calls.
-- Final post-merge verification reported for PR #45 at this baseline passed with 301 tests, 0 failures, and a successful TypeScript build.
+- PR #117 completed issue #110 by implementing the generic typed foreground-interaction runtime, shared version-1 interaction limits, canonical player transcript events, typed completion, and versioned checkpoint/restore behavior.
+- PR #122 documented the staged property/fuzz testing roadmap. PR #123 completed issue #120 and the selected `POC-ENGINE-003` adversarial runtime-data mutation-testing outcome with a deterministic repository-owned Phase 1 harness.
+- PR #119 recorded the owner-approved Option A source-layout proposal. It changes documentation only; issue #124 owns the behavior-neutral physical implementation from current `main`.
+- Final verification reported for PR #123 used Node `v24.18.0` and npm `11.16.0`; the complete configured check passed 505 tests with 0 failures.
 - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
 ## Implemented in the current repository code
@@ -17,7 +20,7 @@
 
 - Native textarea editing of local `.tease` source, versioned local drafts, explicit example reload, bounded local import/export, source revisions, and stale-runtime gating.
 - A shared DOM-free compile/run/step helper used by the browser workspace and ephemeral loopback-only development automation routes.
-- Technical rendering for version-4 pending action events and `waiting` status without browser clock settlement.
+- Technical rendering for current typed pending-action events and `waiting` status without browser clock settlement.
 
 ### Language foundation
 
@@ -38,6 +41,15 @@
 - One-instruction and event-boundary stepping with instruction budgets.
 - Standalone repository-backed browser playground and constrained development server.
 - Reusable deterministic resume-equivalence coverage that compares uninterrupted execution with execution restored from a JSON-roundtripped checkpoint after every completed instruction boundary across a small bounded runtime-state corpus.
+- One generic typed foreground-interaction instruction/action/settlement family for runtime-created button, text, number, and choice actions.
+- Engine-owned text normalization, number parsing, exact choice matching, requesting-speaker provenance, canonical player transcript derivation, mandatory retry behavior, and bounded duplicate settlement replay.
+- Shared version-1 interaction limits of 65,536 UTF-8 bytes for one retained string, 65,536 aggregate UTF-8 bytes per interaction definition, and 4,096 choice options.
+
+### Deterministic mutation and property testing
+
+- A repository-owned test-only Phase 1 harness with deterministic seeds, exact case replay, reusable valid fixtures, controlled one-or-few-field mutations, and bounded work accounting.
+- Public-boundary properties cover plan/snapshot closure, rejection immutability, checkpoint JSON equivalence, restore-and-resume equivalence, structured hostile-input handling, fixture integrity, and reproducible campaign signatures.
+- The normal required check includes a bounded smoke campaign; larger campaigns use the same implementation through explicit extended commands.
 
 ### Control flow
 
@@ -60,7 +72,7 @@
 - Own-property-only runtime builtin registration and prototype-free named builtin arguments.
 - Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
 
-The current plan format is version 5 and the runtime-snapshot/checkpoint formats are version 6 POC formats. The implemented pending-action foundation supports compiler-owned blocking `wait` delays and one generic typed foreground-interaction action family for runtime-created button, text, number, and choice actions. Author-facing interaction syntax and Player UI remain unimplemented; background actions remain intentionally empty.
+The current plan format is version 5 and the runtime-snapshot/checkpoint formats are version 6 POC formats. The implemented pending-action foundation supports compiler-owned blocking `wait` delays and one generic typed foreground-interaction action family. Author-facing interaction syntax, smart-autoplay pacing, and Player UI remain unimplemented; background actions remain intentionally empty.
 
 The implemented ADR 0017 infrastructure slice provides a tooling-only exact-identity in-memory library catalog and deterministic static metadata for the documented narrow TypeScript export subset. Its external boundaries use stable capture, a bounded source-text limit before parsing, and bounded retained metadata text before canonicalization. These internal POC identities and metadata shapes are not final package manifests, import syntax, library bindings, or checkpoint data; neither the tooling surface nor privileged adapter internals are exported from the runtime root entry point.
 
@@ -82,11 +94,12 @@ Also inspect the complete diff and verify the playground route/security matrix. 
 
 - complete V30 syntax/runtime coverage and static typing;
 - units, date/time/datetime/duration;
-- choices, input, visible/background timers, and pending-action kinds beyond the implemented blocking `wait` delay;
+- author-facing `showButton`, `askText`, `askNumber`, and `choose` syntax and lowering;
+- `say` smart autoplay, `chatPacingGate`, populated background actions, visible/background timers, and Player interaction controls;
 - cross-origin iframe host protocol;
 - media lifecycle and custom views;
 - TypeScript library linkage and richer modules;
 - Laravel persistence, accounts, catalog/publishing, moderation, scheduling, and global data;
 - continuous-personality services and LLM/vision integration.
 
-The next implementation milestone remains unselected. Owner-selected pre-alpha and alpha obligations are tracked in `docs/planning/POC-TO-ALPHA-BACKLOG.md`; inclusion there does not schedule them.
+The next owner-selected implementation task is issue #124, the behavior-neutral implementation of the approved Option A source-layout refactor. Owner-selected pre-alpha and alpha obligations that remain open are tracked in `docs/planning/POC-TO-ALPHA-BACKLOG.md`; inclusion there does not otherwise schedule them.
