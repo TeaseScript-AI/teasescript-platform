@@ -6,7 +6,7 @@ import {
   DiagnosticSeverity,
   type Diagnostic,
 } from "../diagnostics.js";
-import { compileProgram } from "../instructions.js";
+import { compileProgram } from "../compiler/compile-program.js";
 import { validateSemantics } from "../semantic.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {

@@ -2,7 +2,7 @@ import {
   captureInstructionPlan,
   validateCapturedInstructionPlan,
   type InstructionPlan,
-} from "../instructions.js";
+} from "../plan/model.js";
 import {
   EXTERNAL_DATA_DEPTH_MESSAGE,
   EXTERNAL_DATA_WORK_MESSAGE,

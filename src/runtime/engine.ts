@@ -4,8 +4,8 @@ import type {
   ExpressionPlan,
   Instruction,
   InstructionPlan,
-} from "../instructions.js";
-import { captureInstructionPlan } from "../instructions.js";
+} from "../plan/model.js";
+import { captureInstructionPlan } from "../plan/capture.js";
 import { captureExternalData } from "../external-data-limits.js";
 import { interactionStringFits } from "../interaction-limits.js";
 import {

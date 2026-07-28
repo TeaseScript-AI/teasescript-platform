@@ -1,7 +1,7 @@
 import type { Program } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnostics } from "./ast-validation.js";
 import { DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { compileProgram, type InstructionPlan } from "./instructions.js";
+import { compileProgram, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import {
