@@ -27,10 +27,11 @@ export {
 } from "./compiler.js";
 export {
   compileProgram,
+  InstructionCompilationError,
+} from "./compiler/compile-program.js";
+export {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
-  InstructionCompilationError,
-  validateInstructionPlan,
   type ArgumentPlan,
   type AssignmentTargetPlan,
   type ExpressionPlan,
@@ -45,15 +46,18 @@ export {
   type InstructionPlan,
   type LoopControlInstruction,
   type LoopStartInstruction,
-  type PlanValidationError,
-  type PlanValidationResult,
   type RangeExpressionPlan,
   type CompiledFunctionDefinition,
   type CompiledFunctionParameter,
   type CallFunctionInstruction,
   type PreparedCallArgument,
   type TemporaryExpressionPlan,
-} from "./instructions.js";
+} from "./plan/model.js";
+export {
+  validateInstructionPlan,
+  type PlanValidationError,
+  type PlanValidationResult,
+} from "./plan/validation.js";
 export {
   validateSemantics,
   type SemanticValidationOptions,

@@ -6,7 +6,7 @@ import { parse } from "../src/parser.js";
 import {
   InstructionCompilationError,
   compileProgram,
-} from "../src/instructions.js";
+} from "../src/plan/model.js";
 import {
   InterpreterCompilationError,
   execute,

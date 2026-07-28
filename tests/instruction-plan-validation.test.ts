@@ -4,10 +4,8 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import {
   validateInstructionPlan,
-  type Instruction,
-  type InstructionPlan,
-  type PlanValidationResult,
-} from "../src/instructions.js";
+} from "../src/plan/validation.js";
+import type { Instruction, InstructionPlan, PlanValidationResult } from "../src/plan/model.js";
 import {
   CheckpointError,
   createCheckpoint,

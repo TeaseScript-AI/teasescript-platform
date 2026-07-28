@@ -6,7 +6,7 @@ import { captureProgramAst } from "../src/ast-validation.js";
 import {
   InstructionCompilationError,
   compileProgram,
-} from "../src/instructions.js";
+} from "../src/plan/model.js";
 import { parse } from "../src/parser.js";
 
 function mutableProgram(source: string): Program & Record<string, unknown> {

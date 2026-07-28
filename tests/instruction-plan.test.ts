@@ -5,7 +5,7 @@ import { compileSource } from "../src/compiler.js";
 import {
   validateInstructionPlan,
   type InstructionPlan,
-} from "../src/instructions.js";
+} from "../src/plan/model.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { run } from "../src/runtime/engine.js";
 

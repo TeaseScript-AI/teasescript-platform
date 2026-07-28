@@ -5,7 +5,7 @@ import { compileSource } from "../src/compiler.js";
 import {
   validateInstructionPlan,
   type InstructionPlan,
-} from "../src/instructions.js";
+} from "../src/plan/model.js";
 
 test("assigns deterministic function and temporary IDs", () => {
   const source = [

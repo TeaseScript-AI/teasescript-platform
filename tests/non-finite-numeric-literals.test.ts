@@ -6,7 +6,7 @@ import { compileSource } from "../src/compiler.js";
 import {
   compileProgram,
   InstructionCompilationError,
-} from "../src/instructions.js";
+} from "../src/plan/model.js";
 import { parse } from "../src/parser.js";
 import type { SourceSpan } from "../src/source.js";
 import {

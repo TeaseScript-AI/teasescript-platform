@@ -6,7 +6,7 @@ import {
   INSTRUCTION_PLAN_VERSION,
   validateInstructionPlan,
   type InstructionPlan,
-} from "../src/instructions.js";
+} from "../src/plan/model.js";
 import {
   CHECKPOINT_VERSION,
   CheckpointError,
