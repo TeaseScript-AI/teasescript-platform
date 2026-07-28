@@ -2217,8 +2217,9 @@ function validSettlementKindData(
     !validInteractionSettlementOwner(settlement, snapshot, analysis) ||
     !validInteractionSettlementDestinationState(settlement, snapshot, analysis)
   ) return false;
-  return instruction.preparedUi !== undefined ||
-    (instruction.ui !== null && interactionUiEqual(instruction.ui, settlement.ui));
+  return instruction.preparedUi !== undefined
+    ? retainedPreparedInteractionUiEqual(instruction.preparedUi, settlement.ui, snapshot.temporaries)
+    : instruction.ui !== null && interactionUiEqual(instruction.ui, settlement.ui);
 }
 
 function preparedInteractionUiEqual(
@@ -2226,28 +2227,63 @@ function preparedInteractionUiEqual(
   actual: unknown,
   temporariesValue: unknown,
 ): boolean {
+  return preparedInteractionUiMatches(prepared, actual, temporariesValue, false);
+}
+
+function retainedPreparedInteractionUiEqual(
+  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
+  actual: unknown,
+  temporariesValue: unknown,
+): boolean {
+  return preparedInteractionUiMatches(prepared, actual, temporariesValue, true);
+}
+
+function preparedInteractionUiMatches(
+  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
+  actual: unknown,
+  temporariesValue: unknown,
+  allowMissingTextTemporaries: boolean,
+): boolean {
   if (!isPlainRecord(actual) || !Array.isArray(temporariesValue)) return false;
-  const temporaryText = (id: number): string | null => {
+  if (!interactionAccessibleNameEqual(prepared.accessibleName, actual.accessibleName)) return false;
+  const temporaryText = (id: number): { readonly found: boolean; readonly value: string | null } => {
     const temporary = temporariesValue.find((item) => isPlainRecord(item) && item.id === id);
-    return isPlainRecord(temporary) && typeof temporary.value === "string" ? temporary.value : null;
+    if (!isPlainRecord(temporary)) return { found: false, value: null };
+    return typeof temporary.value === "string"
+      ? { found: true, value: temporary.value }
+      : { found: true, value: null };
+  };
+  const textMatches = (id: number, candidate: unknown): boolean => {
+    const temporary = temporaryText(id);
+    if (!temporary.found) return allowMissingTextTemporaries && typeof candidate === "string";
+    return temporary.value !== null && candidate === temporary.value;
   };
   if (prepared.kind === "button") {
-    return actual.kind === "button" && temporaryText(prepared.buttonLabelTemporary) === actual.buttonLabel;
+    return actual.kind === "button" && textMatches(prepared.buttonLabelTemporary, actual.buttonLabel);
   }
   if (prepared.kind !== "choice") {
-    const hint = prepared.hintTemporary === null ? null : temporaryText(prepared.hintTemporary);
-    return actual.kind === prepared.kind && (
-      hint !== null
-        ? actual.hint === hint
-        : prepared.hintTemporary === null && actual.hint === null
-    );
+    if (actual.kind !== prepared.kind) return false;
+    if (prepared.hintTemporary === null) return actual.hint === null;
+    return textMatches(prepared.hintTemporary, actual.hint);
   }
   if (actual.kind !== "choice" || actual.labelType !== prepared.labelType || !Array.isArray(actual.options) || actual.options.length !== prepared.options.length) return false;
   const actualOptions = actual.options;
   return prepared.options.every((option, index) => {
     const candidate = actualOptions[index];
-    return isPlainRecord(candidate) && candidate.text === temporaryText(option.textTemporary) && candidate.label === option.label;
+    return isPlainRecord(candidate) &&
+      candidate.label === option.label &&
+      textMatches(option.textTemporary, candidate.text);
   });
+}
+
+function interactionAccessibleNameEqual(
+  expected: import("../plan/model.js").InteractionAccessibleName,
+  actual: unknown,
+): boolean {
+  if (!isPlainRecord(actual) || actual.kind !== expected.kind) return false;
+  return expected.kind === "text"
+    ? actual.text === expected.text
+    : actual.key === expected.key;
 }
 
 function validInteractionSettlementOwner(

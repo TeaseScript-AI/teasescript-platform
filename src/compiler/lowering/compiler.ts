@@ -41,6 +41,7 @@ export class InstructionCompiler {
   >;
   #nextLoopId = 1;
   #nextTemporaryId = 1;
+  #contextualSpeakerTemporary: number | null = null;
 
   public constructor(private readonly declarations: readonly FunctionDeclaration[]) {
     this.#functionByName = new Map(
@@ -444,7 +445,18 @@ export class InstructionCompiler {
       case "nullLiteral":
       case "numberLiteral":
       case "stringLiteral":
+        return { plan: compileExpression(expression), temporaryIds: [] };
       case "identifier":
+        if (expression.name === "speaker" && this.#contextualSpeakerTemporary !== null) {
+          return {
+            plan: {
+              kind: "temporary",
+              temporaryId: this.#contextualSpeakerTemporary,
+              span: copySpan(expression.span),
+            },
+            temporaryIds: [],
+          };
+        }
         return { plan: compileExpression(expression), temporaryIds: [] };
       case "parenthesizedExpression": {
         const nested = this.#lowerExpression(expression.expression);
@@ -609,7 +621,7 @@ export class InstructionCompiler {
 
   #compileShowButton(statement: ShowButtonStatement): void {
     const speakerTemporary = this.#prepareInteractionSpeaker(statement.speaker?.name ?? null, statement.asSpan ?? statement.commandSpan);
-    const staticLabel = staticStringValue(statement.label);
+    const staticLabel = staticVisibleText(statement.label);
     if (staticLabel !== undefined) {
       this.instructions.push({
         kind: "interaction",
@@ -629,7 +641,10 @@ export class InstructionCompiler {
       this.#emitTemporaryCleanup([speakerTemporary], statement.span);
       return;
     }
-    const label = this.#materializeExpression(this.#lowerExpression(statement.label), statement.label.span);
+    const label = this.#materializeExpression(
+      this.#lowerInteractionPayload(statement.label, speakerTemporary),
+      statement.label.span,
+    );
     const temporaryId = (label.plan as TemporaryExpressionPlan).temporaryId;
     this.instructions.push({
       kind: "interaction",
@@ -655,7 +670,7 @@ export class InstructionCompiler {
     const values = expression.interactionKind === "choice"
       ? expression.options.map((option) => option.value)
       : expression.hint === null ? [] : [expression.hint];
-    const staticValues = values.map(staticStringValue);
+    const staticValues = values.map(staticVisibleText);
     const allStatic = staticValues.every((value) => value !== undefined);
     const labelType = expression.options[0]?.label?.kind === "numberLiteral"
       ? "number"
@@ -710,7 +725,10 @@ export class InstructionCompiler {
       };
     }
     const preparedValues = values.map((value) =>
-      this.#materializeExpression(this.#lowerExpression(value), value.span)
+      this.#materializeExpression(
+        this.#lowerInteractionPayload(value, speakerTemporary),
+        value.span,
+      )
     );
     let preparedUi: PreparedInteractionUiPayload;
     if (expression.interactionKind === "text" || expression.interactionKind === "number") {
@@ -756,6 +774,20 @@ export class InstructionCompiler {
       plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(expression.span) },
       temporaryIds: [speakerTemporary, ...preparedValues.flatMap((item) => item.temporaryIds), destinationTemporary],
     };
+  }
+
+
+  #lowerInteractionPayload(
+    expression: Expression,
+    speakerTemporary: number,
+  ): LoweredExpression {
+    const previous = this.#contextualSpeakerTemporary;
+    this.#contextualSpeakerTemporary = speakerTemporary;
+    try {
+      return this.#lowerExpression(expression);
+    } finally {
+      this.#contextualSpeakerTemporary = previous;
+    }
   }
 
   #prepareInteractionSpeaker(speaker: string | null, span: SourceSpan): number {
@@ -1168,16 +1200,31 @@ function compileExpression(expression: Expression): ExpressionPlan {
   }
 }
 
-function staticStringValue(expression: Expression): string | undefined {
+function staticVisibleText(expression: Expression): string | undefined {
   switch (expression.kind) {
     case "stringLiteral":
       return expression.value;
+    case "numberLiteral":
+      return Number.isFinite(expression.value) ? String(expression.value) : undefined;
+    case "booleanLiteral":
+      return expression.value ? "true" : "false";
+    case "nullLiteral":
+      return "null";
     case "parenthesizedExpression":
-      return staticStringValue(expression.expression);
-    case "templateLiteral":
-      return expression.parts.every((part) => part.kind === "templateText")
-        ? expression.parts.map((part) => part.kind === "templateText" ? part.value : "").join("")
-        : undefined;
+      return staticVisibleText(expression.expression);
+    case "templateLiteral": {
+      const parts: string[] = [];
+      for (const part of expression.parts) {
+        if (part.kind === "templateText") {
+          parts.push(part.value);
+          continue;
+        }
+        const value = staticVisibleText(part.expression);
+        if (value === undefined) return undefined;
+        parts.push(value);
+      }
+      return parts.join("");
+    }
     default:
       return undefined;
   }

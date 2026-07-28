@@ -436,6 +436,7 @@ function validateInteractionInstruction(
       errors.push(planError("TSC002", "Prepared interaction must not also contain static UI data.", `${path}.ui`));
     }
     validatePreparedInteractionUi(value.preparedUi, kind, path, temporaryCount, errors);
+    validatePreparedInteractionTemporaryUniqueness(value, kind, path, temporaryCount, errors);
     return;
   }
   if (!isRecord(value.ui) || value.ui.kind !== kind) {
@@ -536,6 +537,54 @@ function validateInteractionInstruction(
     }
   }
   if (aggregateExceeded) errors.push(planError("TSC002", "Interaction data exceeds the shared aggregate UTF-8 byte limit.", `${path}.ui`));
+}
+
+
+function validatePreparedInteractionTemporaryUniqueness(
+  instruction: Record<string, unknown>,
+  kind: unknown,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  const seen = new Set<number>();
+  const register = (value: unknown, fieldPath: string): void => {
+    if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > temporaryCount) return;
+    const temporaryId = value as number;
+    if (seen.has(temporaryId)) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared interaction temporary references must be pairwise unique.",
+        fieldPath,
+      ));
+      return;
+    }
+    seen.add(temporaryId);
+  };
+
+  if (instruction.speakerTemporary !== undefined) {
+    register(instruction.speakerTemporary, `${path}.speakerTemporary`);
+  }
+  if (kind !== "button") {
+    register(instruction.destinationTemporary, `${path}.destinationTemporary`);
+  }
+  const ui = instruction.preparedUi;
+  if (!isRecord(ui)) return;
+  const uiPath = `${path}.preparedUi`;
+  if (kind === "button") {
+    register(ui.buttonLabelTemporary, `${uiPath}.buttonLabelTemporary`);
+    return;
+  }
+  if (kind === "text" || kind === "number") {
+    if (ui.hintTemporary !== null) register(ui.hintTemporary, `${uiPath}.hintTemporary`);
+    return;
+  }
+  if (kind !== "choice" || !Array.isArray(ui.options)) return;
+  ui.options.forEach((option, index) => {
+    if (isRecord(option)) {
+      register(option.textTemporary, `${uiPath}.options[${index}].textTemporary`);
+    }
+  });
 }
 
 function validatePreparedInteractionUi(

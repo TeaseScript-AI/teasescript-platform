@@ -526,3 +526,221 @@ test("legacy direct-AST execution rejects compact blocking interactions", () => 
       && error.diagnostics.some((diagnostic) => diagnostic.code === "TSC006"),
   );
 });
+
+test("dynamic compact payloads resolve their captured interaction speaker without leaking context", () => {
+  const buttonPlan = compiled([
+    'speaker mistress { title: "Mistress" }',
+    "showButton as mistress speaker.title",
+  ].join("\n"));
+  const buttonPending = run(buttonPlan, createFreshRuntimeSnapshot(buttonPlan));
+  const buttonAction = buttonPending.snapshot.foregroundAction;
+  if (buttonAction === null || buttonAction.kind !== "interaction" || buttonAction.ui.kind !== "button") {
+    throw new Error("Expected pending button interaction.");
+  }
+  assert.equal(buttonAction.ui.buttonLabel, "Mistress");
+
+  const textPlan = compiled([
+    'speaker mistress { title: "Mistress" }',
+    "function echo(value) { return value }",
+    'let answer = askText as mistress `For ${echo(speaker.title)}`',
+  ].join("\n"));
+  const textPending = run(textPlan, createFreshRuntimeSnapshot(textPlan));
+  const textAction = textPending.snapshot.foregroundAction;
+  if (textAction === null || textAction.kind !== "interaction" || textAction.ui.kind !== "text") {
+    throw new Error("Expected pending text interaction.");
+  }
+  assert.equal(textAction.ui.hint, "For Mistress");
+
+  const choicePlan = compiled([
+    'speaker mistress { title: "Mistress" }',
+    'let result = choose as mistress speaker.title, `Yes, ${speaker.title}`',
+  ].join("\n"));
+  const choicePending = run(choicePlan, createFreshRuntimeSnapshot(choicePlan));
+  const choiceAction = choicePending.snapshot.foregroundAction;
+  if (choiceAction === null || choiceAction.kind !== "interaction" || choiceAction.ui.kind !== "choice") {
+    throw new Error("Expected pending choice interaction.");
+  }
+  assert.deepEqual(choiceAction.ui.options.map((option) => option.text), ["Mistress", "Yes, Mistress"]);
+
+  const leaked = compileSource([
+    'speaker mistress { title: "Mistress" }',
+    "function forbidden { return speaker.title }",
+    "showButton as mistress forbidden()",
+  ].join("\n"));
+  assert.equal(leaked.plan, null);
+  assert.ok(leaked.diagnostics.some((diagnostic) => diagnostic.code === "TSV002"));
+});
+
+test("prepared interaction plan validation rejects temporary aliasing only inside one materialization", () => {
+  const sourcePlan = compiled("let result = choose first, second", { globals: ["first", "second"] });
+  const mutations = [
+    (interaction: any) => { interaction.preparedUi.options[1].textTemporary = interaction.preparedUi.options[0].textTemporary; },
+    (interaction: any) => { interaction.speakerTemporary = interaction.preparedUi.options[0].textTemporary; },
+    (interaction: any) => { interaction.destinationTemporary = interaction.preparedUi.options[0].textTemporary; },
+  ];
+  for (const mutate of mutations) {
+    const malformed = structuredClone(sourcePlan) as any;
+    const interaction = malformed.instructions.find((instruction: any) => instruction.kind === "interaction");
+    mutate(interaction);
+    const validation = validateInstructionPlan(malformed);
+    assert.equal(validation.valid, false);
+    assert.ok(validation.errors.some((error) => error.code === "TSC002" && error.message.includes("pairwise unique")));
+  }
+  assert.equal(validateInstructionPlan(sourcePlan).valid, true);
+});
+
+test("direct interaction AST capture rejects unsupported nested expressions and cross-field corruption", () => {
+  const cases: any[] = [];
+
+  const button = structuredClone(parse('showButton "Continue"').program) as any;
+  button.statements[0].label = { kind: "hostileExpression", span: button.statements[0].label.span };
+  cases.push(button);
+
+  const choice = structuredClone(parse('let result = choose ("One")').program) as any;
+  choice.statements[0].initializer.options[0].value.expression = {
+    kind: "hostileExpression",
+    span: choice.statements[0].initializer.options[0].value.expression.span,
+  };
+  cases.push(choice);
+
+  const choiceWithHint = structuredClone(parse('let result = choose "One"').program) as any;
+  choiceWithHint.statements[0].initializer.hint = choiceWithHint.statements[0].initializer.options[0].value;
+  cases.push(choiceWithHint);
+
+  const textWithOptions = structuredClone(parse('let result = askText "Hint"').program) as any;
+  const parsedChoice = structuredClone(parse('let result = choose "One"').program) as any;
+  textWithOptions.statements[0].initializer.options = [parsedChoice.statements[0].initializer.options[0]];
+  cases.push(textWithOptions);
+
+  for (const malformed of cases) {
+    assert.throws(
+      () => compileProgram(malformed),
+      (error: unknown) => error instanceof InstructionCompilationError && error.code === "TSC005",
+    );
+  }
+
+  assert.doesNotThrow(() => compileProgram(parse('showButton "Continue"').program));
+  assert.doesNotThrow(() => compileProgram(parse('let result = choose first: "One", second: "Two"').program));
+});
+
+test("static unlabelled choice duplicate detection uses canonical visible text", () => {
+  const rejected = [
+    'let x = choose true, "true"',
+    'let x = choose false, "false"',
+    'let x = choose null, "null"',
+    'let x = choose 1, "1"',
+    'let x = choose -1, "-1"',
+    'let x = choose 1 + 1, "2"',
+    'let x = choose (true), `true`',
+    'let x = choose `${true}`, "true"',
+    'let x = choose `value ${1 + 1}`, "value 2"',
+  ];
+  for (const source of rejected) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "TSV030"), source);
+  }
+});
+
+test("numeric contexts classify compact interaction result domains narrowly", () => {
+  assert.notEqual(compileSource('repeat (askNumber) { say "again" }').plan, null);
+  assert.notEqual(compileSource('repeat (choose 1: "Once", 2: "Twice"\n) { say "again" }').plan, null);
+
+  const rejected = [
+    'repeat (askText) { say "never" }',
+    'repeat (choose "Once", "Twice"\n) { say "never" }',
+    'repeat (choose once: "Once", twice: "Twice"\n) { say "never" }',
+  ];
+  for (const source of rejected) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "TSV011"), source);
+  }
+});
+
+test("prepared waiting and completed snapshots retain exact static UI provenance", () => {
+  const buttonPlan = compiled("showButton label", { globals: ["label"] });
+  const buttonPending = run(buttonPlan, createFreshRuntimeSnapshot(buttonPlan, { globals: { label: "Continue" } }));
+  const wrongButtonAccessible = structuredClone(buttonPending.snapshot) as any;
+  wrongButtonAccessible.foregroundAction.ui.accessibleName.key = "answer";
+  assert.equal(validateRuntimeSnapshot(wrongButtonAccessible, buttonPlan).valid, false);
+
+  const choicePlan = compiled("let result = choose first: firstText, second: secondText", {
+    globals: ["firstText", "secondText"],
+  });
+  const choicePending = run(choicePlan, createFreshRuntimeSnapshot(choicePlan, {
+    globals: { firstText: "One", secondText: "Two" },
+  }));
+  for (const mutate of [
+    (snapshot: any) => { snapshot.foregroundAction.ui.accessibleName.key = "answer"; },
+    (snapshot: any) => { snapshot.foregroundAction.ui.labelType = "number"; },
+    (snapshot: any) => { snapshot.foregroundAction.ui.options[0].label = "other"; },
+    (snapshot: any) => { snapshot.foregroundAction.ui.options.pop(); },
+  ]) {
+    const malformed = structuredClone(choicePending.snapshot) as any;
+    mutate(malformed);
+    assert.equal(validateRuntimeSnapshot(malformed, choicePlan).valid, false);
+  }
+
+  const completed = completePending(choicePlan, choicePending.snapshot, "choice", { kind: "selectedLabel", selectedLabel: "first" });
+  const afterCleanup = run(choicePlan, completed.snapshot).snapshot;
+  for (const mutate of [
+    (snapshot: any) => { snapshot.lastSettlement.ui.accessibleName.key = "answer"; },
+    (snapshot: any) => { snapshot.lastSettlement.ui.labelType = "number"; },
+    (snapshot: any) => { snapshot.lastSettlement.ui.options[0].label = "other"; },
+    (snapshot: any) => { snapshot.lastSettlement.ui.options.pop(); },
+  ]) {
+    const malformed = structuredClone(afterCleanup) as any;
+    mutate(malformed);
+    assert.equal(validateRuntimeSnapshot(malformed, choicePlan).valid, false);
+    const checkpoint = structuredClone(createCheckpoint(choicePlan, afterCleanup)) as any;
+    mutate(checkpoint.snapshot);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
+  }
+});
+
+test("completed interaction settlement UI is deeply immutable across all returned aliases", () => {
+  const plan = compiled("let result = choose first, second", { globals: ["first", "second"] });
+  const pending = run(plan, createFreshRuntimeSnapshot(plan, { globals: { first: "One", second: "Two" } }));
+  const completed = completePending(plan, pending.snapshot, "choice", { kind: "selectedText", selectedText: "One" });
+  assert.equal(completed.outcome.kind, "completed");
+  if (completed.outcome.kind !== "completed") return;
+  const settlement = completed.outcome.settlement;
+  assert.equal(settlement.actionKind, "interaction");
+  if (settlement.actionKind !== "interaction") return;
+  const event = completed.events.find((candidate) => candidate.kind === "actionCompleted");
+  if (event === undefined || event.kind !== "actionCompleted") throw new Error("Expected actionCompleted event.");
+  assert.equal(completed.snapshot.lastSettlement, settlement);
+  assert.equal(event.settlement, settlement);
+  assert.equal(Object.isFrozen(settlement), true);
+  assert.equal(Object.isFrozen(settlement.ui), true);
+  assert.equal(Object.isFrozen(settlement.ui.accessibleName), true);
+  assert.equal(settlement.ui.kind, "choice");
+  if (settlement.ui.kind !== "choice") return;
+  const choiceUi = settlement.ui;
+  assert.equal(Object.isFrozen(choiceUi.options), true);
+  assert.ok(choiceUi.options.every((option) => Object.isFrozen(option)));
+  assert.throws(() => { (choiceUi.options[0] as any).text = "Mutated"; }, TypeError);
+  assert.equal((completed.snapshot.lastSettlement as any).ui.options[0].text, "One");
+  assert.equal((event.settlement as any).ui.options[0].text, "One");
+
+  const duplicate = completeAction(plan, completed.snapshot, {
+    actionId: settlement.actionId,
+    actionKind: "interaction",
+    interactionKind: "choice",
+    payload: { kind: "selectedText", selectedText: "Two" },
+  });
+  assert.equal(duplicate.outcome.kind, "alreadySettled");
+  if (duplicate.outcome.kind !== "alreadySettled") return;
+  const replay = duplicate.outcome.settlement;
+  assert.equal(replay.actionKind, "interaction");
+  if (replay.actionKind !== "interaction") return;
+  assert.equal(Object.isFrozen(replay), true);
+  assert.equal(Object.isFrozen(replay.ui), true);
+  assert.equal(replay.ui.kind, "choice");
+  if (replay.ui.kind !== "choice") return;
+  const replayChoiceUi = replay.ui;
+  assert.equal(Object.isFrozen(replayChoiceUi.options), true);
+  assert.ok(replayChoiceUi.options.every((option) => Object.isFrozen(option)));
+  assert.throws(() => { (replayChoiceUi.options[0] as any).text = "Mutated"; }, TypeError);
+});

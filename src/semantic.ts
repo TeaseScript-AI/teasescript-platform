@@ -699,7 +699,7 @@ class SemanticValidator {
         }
         labels.add(key);
       } else {
-        const text = knownString(option.value);
+        const text = staticVisibleText(option.value);
         if (text !== undefined) {
           if (visible.has(text)) {
             this.#report(semanticCode.duplicateInteractionChoice, "Unlabelled choice text must be unique.", option.value.span);
@@ -718,7 +718,7 @@ class SemanticValidator {
   ): void {
     let aggregate = 0;
     for (const value of [...extraStrings, ...expressions.flatMap((expression) => {
-      const known = knownString(expression);
+      const known = staticVisibleText(expression);
       return known === undefined ? [] : [known];
     })]) {
       const bytes = boundedInteractionUtf8ByteLength(value);
@@ -891,13 +891,41 @@ function knownNumber(expression: Expression): number | undefined {
   return undefined;
 }
 
-function knownString(expression: Expression): string | undefined {
-  if (expression.kind === "stringLiteral") return expression.value;
-  if (expression.kind === "parenthesizedExpression") return knownString(expression.expression);
-  if (expression.kind === "templateLiteral" && expression.parts.every((part) => part.kind === "templateText")) {
-    return expression.parts.map((part) => part.kind === "templateText" ? part.value : "").join("");
+function staticVisibleText(expression: Expression): string | undefined {
+  switch (expression.kind) {
+    case "stringLiteral":
+      return expression.value;
+    case "numberLiteral":
+      return Number.isFinite(expression.value) ? String(expression.value) : undefined;
+    case "unaryExpression":
+    case "binaryExpression": {
+      const value = knownNumber(expression);
+      return value !== undefined && Number.isFinite(value)
+        ? String(Object.is(value, -0) ? 0 : value)
+        : undefined;
+    }
+    case "booleanLiteral":
+      return expression.value ? "true" : "false";
+    case "nullLiteral":
+      return "null";
+    case "parenthesizedExpression":
+      return staticVisibleText(expression.expression);
+    case "templateLiteral": {
+      const parts: string[] = [];
+      for (const part of expression.parts) {
+        if (part.kind === "templateText") {
+          parts.push(part.value);
+          continue;
+        }
+        const value = staticVisibleText(part.expression);
+        if (value === undefined) return undefined;
+        parts.push(value);
+      }
+      return parts.join("");
+    }
+    default:
+      return undefined;
   }
-  return undefined;
 }
 
 function collectInteractions(expression: Expression): Array<Extract<Expression, { kind: "interactionExpression" }>> {
@@ -932,6 +960,11 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
   if (expression.kind === "parenthesizedExpression") {
     return isDefinitelyNonNumeric(expression.expression);
   }
+  if (expression.kind === "interactionExpression") {
+    if (expression.interactionKind === "number") return false;
+    if (expression.interactionKind !== "choice") return true;
+    return expression.options[0]?.label?.kind !== "numberLiteral";
+  }
   return (
     expression.kind === "stringLiteral" ||
     expression.kind === "booleanLiteral" ||
@@ -940,7 +973,6 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
     expression.kind === "templateLiteral" ||
-    expression.kind === "interactionExpression" ||
     expression.kind === "rangeExpression"
   );
 }
