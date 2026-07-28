@@ -11,7 +11,7 @@ import {
 import { parse } from "../src/parser.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, deserializeCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
-import { completeAction, run } from "../src/runtime/engine.js";
+import { completeAction, executeInstruction, run } from "../src/runtime/engine.js";
 import { execute, InterpreterCompilationError } from "../src/runtime/interpreter.js";
 import { createSerializableList } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
@@ -33,6 +33,20 @@ function completePending(plan: ReturnType<typeof compiled>, snapshot: ReturnType
     interactionKind,
     payload,
   });
+}
+
+function snapshotImmediatelyBeforeInteraction(
+  plan: ReturnType<typeof compiled>,
+  snapshot: ReturnType<typeof createFreshRuntimeSnapshot>,
+  capabilities: Parameters<typeof executeInstruction>[2] = {},
+) {
+  let current = snapshot;
+  while (plan.instructions[current.nextInstruction]?.kind !== "interaction") {
+    const step = executeInstruction(plan, current, capabilities);
+    assert.notEqual(step.snapshot.status, "failed");
+    current = step.snapshot;
+  }
+  return current;
 }
 
 test("compact interaction forms preserve immutable command, speaker, label, separator, option, and construct spans", () => {
@@ -199,6 +213,14 @@ test("dynamic interaction UI uses the established visible-text conversion once b
     options: [{ text: "2", label: null }, { text: "3", label: null }],
     accessibleName: { kind: "localizedDefault", key: "chooseOption" },
   });
+  const listInstruction = listPlan.instructions.find((instruction) => instruction.kind === "interaction");
+  assert.ok(listInstruction?.kind === "interaction" && listInstruction.preparedUi?.kind === "choice");
+  assert.deepEqual(
+    listInstruction.preparedUi.options.map((option) =>
+      listPending.snapshot.temporaries.find((temporary) => temporary.id === option.textTemporary)?.value,
+    ),
+    ["2", "3"],
+  );
 
   const seededFirst = run(listPlan, createFreshRuntimeSnapshot(listPlan, { seed: 1591436852 }));
   const seededSecond = run(listPlan, createFreshRuntimeSnapshot(listPlan, { seed: 1591436852 }));
@@ -214,6 +236,57 @@ test("dynamic interaction UI uses the established visible-text conversion once b
   assert.equal(unsupported.snapshot.failure?.code, "TSR021");
   assert.equal(unsupported.snapshot.foregroundAction, null);
   assert.equal(unsupported.snapshot.nextActionId, 1);
+});
+
+test("dynamic interaction UI commits prepared text and serialized RNG only after full validation", () => {
+  const cases = [
+    {
+      name: "a later dynamic unlabelled duplicate",
+      plan: compiled('let result = choose first, "same"', { globals: ["first"] }),
+      globals: { first: createSerializableList(["same"]) },
+      code: "TSR052",
+    },
+    {
+      name: "an aggregate overflow after list selection",
+      plan: compiled("let result = choose first, second", { globals: ["first", "second"] }),
+      globals: {
+        first: createSerializableList(["a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2)]),
+        second: "b".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2 + 1),
+      },
+      code: "TSR052",
+    },
+    {
+      name: "an unsupported selected list item after an earlier value",
+      plan: compiled("let result = choose first, second", { globals: ["first", "second"] }),
+      globals: {
+        first: createSerializableList(["first"]),
+        second: createSerializableList([true]),
+      },
+      code: "TSR021",
+    },
+  ] as const;
+  for (const scenario of cases) {
+    const before = snapshotImmediatelyBeforeInteraction(
+      scenario.plan,
+      createFreshRuntimeSnapshot(scenario.plan, { globals: scenario.globals, seed: 1591436852 }),
+    );
+    const temporaries = structuredClone(before.temporaries);
+    const rng = structuredClone(before.rng);
+    const nextActionId = before.nextActionId;
+    const nextEventSequence = before.nextEventSequence;
+    const failed = executeInstruction(scenario.plan, before);
+    assert.equal(failed.snapshot.failure?.code, scenario.code, scenario.name);
+    assert.equal(failed.snapshot.foregroundAction, null, scenario.name);
+    assert.equal(failed.snapshot.nextActionId, nextActionId, scenario.name);
+    // The existing structured failure event consumes its one sequence; no
+    // interaction request or transcript sequence is allocated.
+    assert.equal(failed.snapshot.nextEventSequence, nextEventSequence + 1, scenario.name);
+    assert.deepEqual(failed.snapshot.temporaries, temporaries, scenario.name);
+    assert.deepEqual(failed.snapshot.rng, rng, scenario.name);
+    assert.equal(failed.snapshot.lastSettlement, null, scenario.name);
+    assert.equal(failed.snapshot.nextInstruction, before.nextInstruction, scenario.name);
+    assert.deepEqual(failed.events.map((event) => event.kind), ["runtimeFailure"], scenario.name);
+  }
 });
 
 test("dynamic list payload selection is fixed before checkpoint restore and is never reevaluated", () => {
@@ -241,6 +314,17 @@ test("dynamic list payload selection is fixed before checkpoint restore and is n
     ? resumed.snapshot.foregroundAction.ui.buttonLabel
     : null, label);
   assert.deepEqual(resumed.snapshot.rng, savedRng);
+
+  const uninterrupted = run(
+    plan,
+    completePending(plan, pending.snapshot, "button", { kind: "activate" }).snapshot,
+  );
+  const restoredCompleted = run(
+    restored.plan,
+    completePending(restored.plan, restored.snapshot, "button", { kind: "activate" }).snapshot,
+  );
+  assert.deepEqual(restoredCompleted.snapshot, uninterrupted.snapshot);
+  assert.deepEqual(restoredCompleted.events, uninterrupted.events);
 });
 
 test("requesting speaker is captured before payload side effects change the default speaker", () => {
@@ -406,7 +490,7 @@ test("exact dynamic string boundary is accepted and narrator fallback remains nu
   assert.equal(action.ui.kind === "button" ? action.ui.buttonLabel.length : 0, MAX_INTERACTION_STRING_UTF8_BYTES);
 });
 
-test("exact aggregate and option-count limits apply to compact source", () => {
+test("the compact static labelled representation reaches the provisional generic option payload ceiling", () => {
   const aggregatePlan = compiled("let result = choose first, second", { globals: ["first", "second"] });
   const half = MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2;
   const aggregatePending = run(aggregatePlan, createFreshRuntimeSnapshot(aggregatePlan, {

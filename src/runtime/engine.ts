@@ -46,7 +46,7 @@ import type {
   RuntimeFailureEvent,
   SayEvent,
 } from "./events.js";
-import { nextXorShift32, type RandomSource } from "./random.js";
+import { nextXorShift32, type RandomSource, type XorShift32State } from "./random.js";
 import {
   addSerializableSetValue,
   cloneSerializableValue,
@@ -473,10 +473,6 @@ function executePlannedInstruction(
     }
     case "interaction": {
       assertNoLiveInteractionSettlement(snapshot, instruction.span);
-      const ui = instruction.preparedUi === undefined
-        ? instruction.ui
-        : materializeInteractionUi(instruction.preparedUi, snapshot.temporaries, evaluator, instruction.span);
-      if (ui === null) throw fault("TSR052", "Interaction UI data is unavailable.", instruction.span);
       if (
         instruction.destinationTemporary !== null &&
         snapshot.temporaries.some((temporary) =>
@@ -502,9 +498,19 @@ function executePlannedInstruction(
             : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
         : preparedSpeaker === null
           ? null
-          : isSpeakerReference(preparedSpeaker)
+        : isSpeakerReference(preparedSpeaker)
             ? evaluator.speakerById(preparedSpeaker.speakerId, instruction.span)
             : (() => { throw fault("TSR052", "Prepared interaction speaker is invalid.", instruction.span); })();
+      const ui = instruction.preparedUi === undefined
+        ? instruction.ui
+        : materializeInteractionUi(
+          instruction.preparedUi,
+          snapshot.temporaries,
+          snapshot.rng,
+          evaluator,
+          instruction.span,
+        );
+      if (ui === null) throw fault("TSR052", "Interaction UI data is unavailable.", instruction.span);
       const sequence = takeSequence(snapshot);
       const action: RuntimeInteractionActionSnapshot = Object.freeze({
         kind: "interaction",
@@ -552,40 +558,46 @@ function executePlannedInstruction(
 function materializeInteractionUi(
   prepared: PreparedInteractionUiPayload,
   temporaries: RuntimeTemporarySnapshot[],
+  canonicalRng: XorShift32State,
   evaluator: Evaluator,
   span: SourceSpan,
 ): InteractionUiPayload {
+  const stagedRng: XorShift32State = {
+    algorithm: canonicalRng.algorithm,
+    state: canonicalRng.state,
+  };
+  const stagedTexts: Array<{ readonly temporary: RuntimeTemporarySnapshot; readonly text: string }> = [];
   const readText = (temporaryId: number): string => {
     const temporary = temporaries.find((item) => item.id === temporaryId);
     if (temporary === undefined) {
       throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
     }
-    const text = evaluator.visibleText(temporary.value, span);
-    // A prepared payload is consumed exactly once. Persist the canonical text
-    // so waiting-state validation and checkpoint restore never select again.
-    temporary.value = text;
+    const text = evaluator.visibleTextWithRng(temporary.value, span, stagedRng);
+    stagedTexts.push({ temporary, text });
     return text;
   };
+  let ui: InteractionUiPayload;
   if (prepared.kind === "button") {
-    const ui = { kind: "button" as const, buttonLabel: readText(prepared.buttonLabelTemporary), accessibleName: prepared.accessibleName };
-    assertInteractionUiLimits(ui, span);
-    return ui;
+    ui = { kind: "button", buttonLabel: readText(prepared.buttonLabelTemporary), accessibleName: prepared.accessibleName };
+  } else if (prepared.kind !== "choice") {
+    ui = { kind: prepared.kind, hint: prepared.hintTemporary === null ? null : readText(prepared.hintTemporary), accessibleName: prepared.accessibleName };
+  } else {
+    const options = prepared.options.map((option) => ({ text: readText(option.textTemporary), label: option.label }));
+    ui = { kind: "choice", labelType: prepared.labelType, options, accessibleName: prepared.accessibleName };
   }
-  if (prepared.kind !== "choice") {
-    const ui = { kind: prepared.kind, hint: prepared.hintTemporary === null ? null : readText(prepared.hintTemporary), accessibleName: prepared.accessibleName };
-    assertInteractionUiLimits(ui, span);
-    return ui;
-  }
-  const options = prepared.options.map((option) => ({ text: readText(option.textTemporary), label: option.label }));
-  const ui = { kind: "choice" as const, labelType: prepared.labelType, options, accessibleName: prepared.accessibleName };
   assertInteractionUiLimits(ui, span);
-  if (ui.labelType === "none") {
+  if (ui.kind === "choice" && ui.labelType === "none") {
     const visible = new Set<string>();
     for (const option of ui.options) {
       if (visible.has(option.text)) throw fault("TSR052", "Unlabelled choice text must evaluate to unique strings.", span);
       visible.add(option.text);
     }
   }
+  // Commit only after every selected value and the complete payload pass
+  // validation. An injected RandomSource remains caller-owned, but the
+  // canonical serialized RNG changes only at this transaction boundary.
+  for (const staged of stagedTexts) staged.temporary.value = staged.text;
+  canonicalRng.state = stagedRng.state;
   return ui;
 }
 
@@ -1462,14 +1474,22 @@ class Evaluator {
   }
 
   public visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
+    return this.visibleTextWithRng(value, span, this.snapshot.rng);
+  }
+
+  public visibleTextWithRng(
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+    rng: XorShift32State,
+  ): string {
     if (isList(value)) {
-      const selected = this.#randomItem(value.items, span);
+      const selected = this.#randomItem(value.items, span, rng);
       if (typeof selected === "string") return selected;
       if (typeof selected === "number" && Number.isFinite(selected)) return String(selected);
       throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
     }
     if (typeof value === "string") return value;
-    if (typeof value === "number") return String(value);
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
     if (typeof value === "boolean") return value ? "true" : "false";
     if (value === null) return "null";
     throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
@@ -1738,8 +1758,8 @@ class Evaluator {
     return value;
   }
 
-  #findRandom(span: SourceSpan): number {
-    const random = this.capabilities.random?.next() ?? nextXorShift32(this.snapshot.rng);
+  #findRandom(span: SourceSpan, rng = this.snapshot.rng): number {
+    const random = this.capabilities.random?.next() ?? nextXorShift32(rng);
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
       throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
     }
@@ -1817,9 +1837,10 @@ class Evaluator {
   #randomItem(
     items: readonly SerializableRuntimeValue[],
     span: SourceSpan,
+    rng = this.snapshot.rng,
   ): SerializableRuntimeValue {
     if (items.length === 0) throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
-    return items[Math.floor(this.#findRandom(span) * items.length)]!;
+    return items[Math.floor(this.#findRandom(span, rng) * items.length)]!;
   }
 
   #getProperty(value: SerializableRuntimeValue, name: string, span: SourceSpan): SerializableRuntimeValue {

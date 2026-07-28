@@ -44,7 +44,7 @@
 - The approved Option A source-layout seams and compatibility facades are implemented without changing plan v5, runtime-snapshot v6, or checkpoint v6.
 - One generic typed foreground-interaction instruction/action/settlement family for runtime-created button, text, number, and choice actions.
 - Engine-owned text normalization, number parsing, exact choice matching, requesting-speaker provenance, canonical player transcript derivation, mandatory retry behavior, and bounded duplicate settlement replay.
-- Shared version-1 interaction limits of 65,536 UTF-8 bytes for one retained string, 65,536 aggregate UTF-8 bytes per interaction definition, and 4,096 choice options.
+- Shared version-1 interaction limits of 65,536 UTF-8 bytes for one retained string, 65,536 aggregate UTF-8 bytes per interaction definition, and a provisional generic runtime-payload ceiling of 4,096 choice options. Static and dynamic compact choices lower differently; #129 owns derivation of their end-to-end source/compiler/plan/snapshot/checkpoint capacity.
 
 ### Deterministic mutation and property testing
 
