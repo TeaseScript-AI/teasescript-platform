@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TeaseScript player UI recommended mockup</title>
+<style>
+:root{color-scheme:dark;--page:#080b10;--surface:#111722;--surface2:#1a2331;--line:#334155;--text:#eef4ff;--muted:#91a0b5;--accent:#65a7ff;--primary:#347eea;--speaker:#b58cff;--player:#66b2ff;--success:#65c789;--rail:48rem}
+*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0}body{min-width:20rem;overflow:hidden;color:var(--text);background:var(--page);font:15px/1.45 Inter,ui-sans-serif,system-ui,sans-serif}button,input{font:inherit}button{min-height:2.5rem;border:1px solid var(--line);border-radius:.6rem;padding:.45rem .75rem;color:var(--text);background:#202b3b;cursor:pointer}button:hover{border-color:var(--accent)}button:focus-visible,input:focus-visible,[role=separator]:focus-visible{outline:.1875rem solid rgb(101 167 255/.72);outline-offset:.125rem}button:disabled{cursor:not-allowed;opacity:.45}
+.app{display:grid;grid-template-rows:auto minmax(0,1fr);height:100dvh}
+.toolbar{display:flex;flex-wrap:wrap;gap:.45rem;align-items:center;padding:.65rem .75rem;border-bottom:1px solid var(--line);background:#0d121a;z-index:30}.toolbar-label{color:var(--muted);font-size:.78rem;font-weight:700}.toolbar-spacer{flex:1}.small{min-height:2.1rem;padding:.3rem .58rem;font-size:.78rem}.small[aria-pressed=true]{border-color:var(--accent);background:var(--primary)}.theme{display:none;position:absolute;z-index:40;top:3.6rem;right:.75rem;grid-template-columns:repeat(2,minmax(7rem,1fr));gap:.65rem;width:min(24rem,calc(100% - 1.5rem));padding:.8rem;border:1px solid var(--line);border-radius:.75rem;background:#111722;box-shadow:0 1rem 3rem #0008}.theme.open{display:grid}.theme label{display:grid;gap:.3rem;color:var(--muted);font-size:.75rem}.theme input{width:100%;height:2.2rem}
+.demo-area{display:grid;min-height:0;padding:.75rem;overflow:auto;place-items:stretch;background:linear-gradient(45deg,#ffffff05 25%,transparent 25% 75%,#ffffff05 75%),#090d13;background-size:1.5rem 1.5rem}
+.preview-frame{display:grid;width:100%;height:100%;min-height:0;place-items:stretch}.preview-frame.phone-fit{position:relative;display:block;align-self:start;justify-self:center;overflow:hidden}
+.shell{width:100%;height:100%;min-height:0;overflow:hidden;border:1px solid #4a5870;border-radius:.9rem;background:#0c1118;box-shadow:0 1rem 3rem #0008;container:player/inline-size}.shell.tablet{width:clamp(35rem,50vw,51.25rem);max-width:100%;justify-self:center}.shell.phone{position:absolute;top:0;left:50%;width:24.375rem!important;height:52.75rem!important;min-height:52.75rem!important;max-height:52.75rem!important;border-radius:1.6rem;transform:translateX(-50%) scale(var(--phone-scale,1));transform-origin:top center}
+.player{--topbar:3rem;--chat:36%;--timer-x:83%;display:grid;grid-template-rows:var(--topbar) minmax(10rem,1fr) .4375rem minmax(11.5rem,var(--chat));width:100%;height:100%;min-height:0;background:#0e141d}
+.topbar{display:flex;gap:.55rem;align-items:center;min-width:0;block-size:var(--topbar);padding-block:.375rem;padding-inline:max(.75rem,env(safe-area-inset-left)) max(.75rem,env(safe-area-inset-right));border-bottom:1px solid var(--line);background:#111722f5}.title{min-width:0;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.package{min-width:0;color:var(--muted);font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.grow{flex:1}.status{display:flex;gap:.35rem;align-items:center;color:var(--muted);font-size:.72rem;white-space:nowrap}.status::before{content:"";width:.45rem;height:.45rem;border-radius:50%;background:var(--success)}.icon{min-width:2.5rem;min-height:2.25rem;padding:.25rem .55rem}
+.stage{position:relative;min-height:0;overflow:hidden;background:#000}.stage svg{display:block;width:100%;height:100%}.scope{position:absolute;left:.75rem;bottom:.75rem;padding:.3rem .5rem;border:1px solid #ffffff35;border-radius:.4rem;color:#ffffffc2;background:#0007;font-size:.65rem}
+.timer{position:absolute;z-index:8;top:max(.8rem,env(safe-area-inset-top));left:clamp(4.5rem,var(--timer-x),calc(100% - 4.5rem));width:9rem;aspect-ratio:1;transform:translateX(-50%);filter:drop-shadow(0 .2rem .5rem #000c);pointer-events:none}.timer svg{transform:rotate(-90deg)}.timer circle{fill:#070b11c9;stroke-width:4}.timer .bg{stroke:#ffffff30}.timer .progress{stroke:var(--accent);stroke-linecap:round;stroke-dasharray:100.53;transition:stroke-dashoffset .2s linear}.timer-text{position:absolute;inset:0;display:grid;place-items:center;color:#fff;font:700 1.35rem/1 ui-monospace,monospace;text-shadow:0 .1rem .2rem #000}
+.shell.tablet .timer,.shell.phone .timer{left:auto;right:max(.75rem,env(safe-area-inset-right));transform:none}.shell.tablet .timer{width:7.125rem}.shell.phone .timer{width:4.75rem}
+.actions{position:absolute;z-index:9;display:flex;flex-direction:column;align-items:flex-end;gap:.4rem;pointer-events:auto}.action,.action-toggle{min-height:2.25rem;border-color:#a4b8d68a;color:#f4f8fff0;background:#0f16218a;box-shadow:0 .2rem .6rem #0004;backdrop-filter:blur(.125rem);text-align:right;text-shadow:0 .08rem .12rem #000c}.action{white-space:nowrap}.action-toggle{border-radius:999px}.actions.collapsed{gap:0}.actions.collapsed .action{display:none}.actions.collapsed .action-toggle{border-radius:.65rem}
+.splitter{position:relative;min-height:.4375rem;border:0;border-radius:0;padding:0;background:#39465a;cursor:row-resize;touch-action:none}.splitter::after{content:"";position:absolute;left:50%;top:50%;width:2.5rem;height:.125rem;border-radius:99px;background:#9aa7b8;transform:translate(-50%,-50%)}.splitter:hover{background:var(--accent)}
+.chat{position:relative;display:grid;grid-template-rows:minmax(0,1fr) auto;min-height:0;background:var(--surface)}.log{grid-area:1/1;min-height:0;overflow:auto;scrollbar-gutter:stable;scroll-padding-block-end:4.5rem}.rail,.interaction-rail{inline-size:min(100%,var(--rail));max-inline-size:48rem;margin-inline:auto}.rail{padding-block:.7rem .5rem;padding-inline:clamp(.7rem,2cqw,1.5rem)}.message{display:flex;width:100%;min-width:0;margin-bottom:.65rem}.message.speaker{justify-content:flex-start}.message.player-message{justify-content:flex-end}.block{min-width:0;max-width:min(84%,52ch)}.meta{margin:0 .2rem .2rem;color:var(--muted);font-size:.66rem}.player-message .meta{text-align:right}.bubble{min-width:0;padding:.55rem .7rem;border:1px solid var(--line);border-radius:.75rem;color:#eef4ff;background:#171f2b;line-height:1.45;overflow-wrap:anywhere;word-break:break-word}.speaker .bubble{border-left-color:var(--speaker);border-top-left-radius:.25rem}.player-message .bubble{border-right-color:var(--player);border-top-right-radius:.25rem;background:#1a2a3d}
+.jump-row{z-index:7;grid-area:1/1;align-self:end;display:flex;justify-content:center;padding:0 .6rem .5rem;pointer-events:none}.jump{display:none;min-height:2rem;margin:0;padding:.27rem .75rem;border:1px solid #ffffff3b;border-radius:999px;color:#ffffffe0;background:#070a0f61;box-shadow:0 .25rem .8rem #0004;backdrop-filter:blur(.1875rem);text-shadow:-1px -1px #000,1px -1px #000,-1px 1px #000,1px 1px #000;opacity:.86;pointer-events:auto}.jump.visible{display:inline-block}
+.interaction{border-top:1px solid var(--line);padding:.55rem;background:#18212d}.interaction-rail{display:grid;gap:.45rem}.choices{display:flex;flex-wrap:wrap;gap:.45rem;justify-content:center}.choice{min-height:2.5rem;flex:0 1 auto}.choice[aria-pressed=true]{border-color:var(--accent);background:var(--primary)}.composer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.45rem}.composer input{min-width:0;min-height:2.5rem;border:1px solid var(--line);border-radius:.55rem;padding:.5rem .7rem;color:var(--text);background:#0b1119}.send{border-color:#3c83d4;background:var(--primary)}
+.keyboard{display:none;position:absolute;z-index:20;left:0;right:0;bottom:0;height:15rem;grid-template-rows:repeat(4,1fr);gap:.3rem;padding:.45rem;background:#b9bec8}.keyboard-row{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:.25rem}.keyboard-row:nth-child(2){padding-inline:.6rem}.keyboard-row:nth-child(3){padding-inline:1.35rem}.keyboard-row:last-child{grid-template-columns:1fr 4fr 1fr}.key{min-width:0;min-height:0;height:100%;border:0;border-radius:.3rem;padding:0;color:#1b1e24;background:#f5f6f8;cursor:default}.shell.phone.keyboard-open .keyboard{display:grid}.shell.phone.keyboard-open .player{height:calc(100% - 15rem);grid-template-rows:var(--topbar) minmax(9rem,1fr) .4375rem minmax(11.5rem,42%)}.shell.phone.keyboard-open .topbar{block-size:var(--topbar);min-block-size:var(--topbar);padding-block:.375rem}
+@media(max-width:48rem){.package,.status span{display:none}.toolbar-spacer{display:none}.toolbar{align-items:flex-start}.timer-position{display:none}}
+@media(max-height:38rem){.toolbar{padding:.4rem}.small{min-height:1.9rem}.demo-area{padding:.4rem}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+@media(prefers-reduced-transparency:reduce){.action,.action-toggle,.jump{background:#111722;backdrop-filter:none;opacity:1}}
+</style>
+</head>
+<body>
+<main class="app" data-mockup-build="recommended-r13-clean">
+<div class="toolbar">
+<span class="toolbar-label">Preview viewport</span>
+<button class="small viewport" data-mode="auto" aria-pressed="true">Auto</button>
+<button class="small viewport" data-mode="wide" aria-pressed="false">Wide desktop</button>
+<button class="small viewport" data-mode="tablet" aria-pressed="false">Half-width</button>
+<button class="small viewport" data-mode="phone" aria-pressed="false">Phone</button>
+<button class="small" id="keyboardToggle" disabled>Keyboard</button>
+<span class="toolbar-spacer"></span>
+<span class="toolbar-label">Layout</span>
+<button class="small ratio" data-chat="28">Media focus</button>
+<button class="small ratio" data-chat="36" aria-pressed="true">Balanced</button>
+<button class="small ratio" data-chat="48">Chat focus</button>
+<button class="small" id="restartTimer">Restart timer</button>
+<span class="toolbar-label timer-position">Timer x</span>
+<button class="small timer-position" data-timer="60">60%</button>
+<button class="small timer-position" data-timer="67">67%</button>
+<button class="small timer-position" data-timer="75">75%</button>
+<button class="small timer-position" data-timer="83" aria-pressed="true">83%</button>
+<button class="small" id="themeToggle">Theme</button>
+</div>
+<div class="theme" id="themePanel">
+<label>Interaction accent<input type="color" value="#65a7ff" data-theme="--accent"></label>
+<label>Primary action<input type="color" value="#347eea" data-theme="--primary"></label>
+<label>Speaker accent<input type="color" value="#b58cff" data-theme="--speaker"></label>
+<label>Player accent<input type="color" value="#66b2ff" data-theme="--player"></label>
+</div>
+<div class="demo-area" id="demoArea">
+<div class="preview-frame" id="previewFrame">
+<div class="shell" id="shell">
+<div class="player" id="player">
+<header class="topbar">
+<div class="title">The Observatory</div><div class="package">Northstar Package · Vale Studio</div><div class="grow"></div>
+<div class="status" id="status"><span>Running</span></div>
+<button class="icon" id="pause">Pause</button><button class="icon" aria-label="More options">•••</button>
+</header>
+<section class="stage" id="stage" aria-label="Package media or custom view">
+<svg viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid meet" aria-label="Neutral observatory placeholder">
+<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#3e5275"/><stop offset="1" stop-color="#121827"/></linearGradient></defs>
+<rect width="1200" height="600" fill="url(#sky)"/>
+<g fill="#dce5ef"><circle cx="210" cy="100" r="3"/><circle cx="430" cy="75" r="2"/><circle cx="760" cy="105" r="3"/><circle cx="1010" cy="80" r="2"/></g>
+<path d="M210 520 Q600 175 990 520" fill="none" stroke="#cad3de" stroke-width="45"/>
+<path d="M0 560 Q290 460 560 510 Q770 430 1200 500 V600 H0Z" fill="#05070d"/>
+<path d="M580 315 H640 V515 H580Z" fill="#414959"/>
+<g id="instrument" style="transform-box:view-box;transform-origin:610px 375px;transition:transform .2s ease">
+<path d="M520 360 L820 205 L860 260 L560 415Z" fill="#7f8da7"/>
+<circle cx="842" cy="232" r="52" fill="#99a8c4"/>
+<path d="M520 360 L560 415 L470 415Z" fill="#d1d9e3"/>
+</g>
+</svg>
+<div class="scope">Package media / custom view</div>
+<div class="timer" id="timer"><svg viewBox="0 0 40 40"><circle class="bg" cx="20" cy="20" r="16"/><circle class="progress" id="timerRing" cx="20" cy="20" r="16"/></svg><div class="timer-text" id="timerText">0:24</div></div>
+<div class="actions" id="actions">
+<button class="action-toggle" id="collapseActions" aria-expanded="true" aria-label="Collapse permanent actions">⋯</button>
+<button class="action" data-action="A">A</button><button class="action" data-action="Longer action B">Longer action B</button><button class="action" data-action="C">C</button>
+</div>
+</section>
+<button class="splitter" id="splitter" role="separator" aria-orientation="horizontal" aria-valuemin="28" aria-valuemax="55" aria-valuenow="36" aria-label="Resize conversation"></button>
+<section class="chat">
+<div class="log" id="chatLog" role="log" aria-live="polite">
+<div class="rail" id="chatRail">
+<article class="message speaker"><div class="block"><div class="meta">Arden · 20:15</div><div class="bubble">Can we correct it manually?</div></div></article>
+<article class="message speaker"><div class="block"><div class="meta">Arden · 20:15</div><div class="bubble">Yes, but the adjustment changes tonight's observation window.</div></div></article>
+<article class="message player-message"><div class="block"><div class="meta">Player · 20:16</div><div class="bubble">Then I want to inspect both controls first.</div></div></article>
+<article class="message speaker"><div class="block"><div class="meta">Arden · 20:16</div><div class="bubble">You have enough time for one careful decision.</div></div></article>
+</div></div>
+<div class="jump-row"><button class="jump" id="jumpLatest">Jump to latest</button></div>
+<div class="interaction"><div class="interaction-rail"><div class="choices">
+<button class="choice" data-choice="Align west">Align west</button><button class="choice" data-choice="Align east">Align east</button>
+</div><form class="composer" id="composer"><input id="messageInput" aria-label="Player response" placeholder="Type a response…"><button class="send">Send</button></form></div></div>
+</section>
+<div class="keyboard" id="keyboard" aria-hidden="true">
+<div class="keyboard-row">Q W E R T Y U I O P</div><div class="keyboard-row">A S D F G H J K L</div><div class="keyboard-row">Z X C V B N M</div><div class="keyboard-row">123|space|return</div>
+</div>
+</div></div></div></div>
+<div id="announcer" role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)"></div>
+</main>
+<script>
+(()=>{"use strict";
+const shell=document.getElementById("shell"),player=document.getElementById("player"),demoArea=document.getElementById("demoArea"),previewFrame=document.getElementById("previewFrame"),keyboardToggle=document.getElementById("keyboardToggle"),chatLog=document.getElementById("chatLog"),chatRail=document.getElementById("chatRail"),jump=document.getElementById("jumpLatest"),splitter=document.getElementById("splitter"),stage=document.getElementById("stage"),timer=document.getElementById("timer"),actions=document.getElementById("actions"),collapseActions=document.getElementById("collapseActions"),announcer=document.getElementById("announcer"),messageInput=document.getElementById("messageInput"),composer=document.getElementById("composer"),pause=document.getElementById("pause"),status=document.getElementById("status"),timerText=document.getElementById("timerText"),timerRing=document.getElementById("timerRing");
+let previewMode="auto",chatRatio=36,dragging=false,autoScrolling=false,timerValue=24,timerPaused=false;
+const phoneW=390,phoneH=844,circ=100.53;
+function logicalMode(){return matchMedia("(max-width:36rem)").matches?"phone":"wide"}
+function updateFrame(){
+ const phone=shell.classList.contains("phone");
+ if(!phone){previewFrame.className="preview-frame";previewFrame.removeAttribute("style");shell.style.removeProperty("--phone-scale");return}
+ const cs=getComputedStyle(demoArea),w=demoArea.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight),h=demoArea.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
+ if(w<120||h<100)return;
+ const fit=Math.min(1,w/phoneW,h/phoneH),scale=Math.max(fit,Math.min(.7,w/phoneW));
+ previewFrame.className="preview-frame phone-fit";previewFrame.style.width=Math.round(phoneW*scale)+"px";previewFrame.style.height=Math.round(phoneH*scale)+"px";shell.style.setProperty("--phone-scale",scale)
+}
+function applyMode(mode){
+ shell.classList.remove("tablet","phone","keyboard-open");keyboardToggle.disabled=mode!=="phone";keyboardToggle.textContent="Keyboard";
+ if(mode==="tablet")shell.classList.add("tablet");if(mode==="phone")shell.classList.add("phone");
+ document.querySelectorAll(".timer-position").forEach(x=>x.disabled=mode!=="wide");
+ document.querySelectorAll(".viewport").forEach(b=>b.setAttribute("aria-pressed",previewMode==="auto"?String(b.dataset.mode==="auto"):String(b.dataset.mode===mode)));
+ requestAnimationFrame(()=>requestAnimationFrame(()=>{updateFrame();positionActions(true)}))
+}
+function syncAuto(){if(previewMode==="auto")applyMode(logicalMode())}
+document.querySelectorAll(".viewport").forEach(b=>b.onclick=()=>{previewMode=b.dataset.mode;previewMode==="auto"?syncAuto():applyMode(previewMode)});
+addEventListener("resize",()=>{syncAuto();updateFrame();positionActions(true)},{passive:true});
+keyboardToggle.onclick=()=>{if(!shell.classList.contains("phone"))return;shell.classList.toggle("keyboard-open");keyboardToggle.textContent=shell.classList.contains("keyboard-open")?"Hide keyboard":"Keyboard";requestAnimationFrame(()=>positionActions(true))};
+function setRatio(v){chatRatio=Math.max(28,Math.min(55,Number(v)));player.style.setProperty("--chat",chatRatio+"%");splitter.setAttribute("aria-valuenow",chatRatio);document.querySelectorAll(".ratio").forEach(b=>b.setAttribute("aria-pressed",String(Number(b.dataset.chat)===chatRatio)));requestAnimationFrame(()=>positionActions(false))}
+document.querySelectorAll(".ratio").forEach(b=>b.onclick=()=>setRatio(b.dataset.chat));
+splitter.onkeydown=e=>{if(e.key==="ArrowUp"){e.preventDefault();setRatio(chatRatio+2)}if(e.key==="ArrowDown"){e.preventDefault();setRatio(chatRatio-2)}if(e.key==="Home"){e.preventDefault();setRatio(28)}if(e.key==="End"){e.preventDefault();setRatio(55)}};
+splitter.onpointerdown=e=>{dragging=true;splitter.setPointerCapture(e.pointerId)};
+splitter.onpointermove=e=>{if(!dragging)return;const r=player.getBoundingClientRect();setRatio(100-(100*(e.clientY-r.top)/r.height))};
+splitter.onpointerup=e=>{dragging=false;splitter.releasePointerCapture(e.pointerId)};
+let preferredBottom=null;
+function positionActions(recalc=false){
+ if(recalc||preferredBottom===null){const timerBox=timer.getBoundingClientRect(),stageBox=stage.getBoundingClientRect(),scaleY=stageBox.height/stage.offsetHeight;const timerBottom=(timerBox.bottom-stageBox.top)/Math.max(.001,scaleY);preferredBottom=timerBottom+(stage.offsetHeight*.72-timerBottom)/2}
+ const sb=stage.getBoundingClientRect(),tb=timer.getBoundingClientRect(),sx=sb.width/stage.offsetWidth,sy=sb.height/stage.offsetHeight,aw=actions.offsetWidth,ah=actions.offsetHeight,gap=12;
+ const left=Math.max(gap,Math.min(stage.clientWidth-aw-gap,(tb.right-sb.left)/Math.max(.001,sx)-aw));
+ const bottom=Math.min(preferredBottom,stage.clientHeight-gap);let top=bottom-ah;const timerBottom=(tb.bottom-sb.top)/Math.max(.001,sy);const maxTop=Math.max(gap,stage.clientHeight-ah-gap);top=Math.min(maxTop,Math.max(timerBottom+gap,top));
+ actions.style.left=left+"px";actions.style.top=top+"px"
+}
+new ResizeObserver(()=>positionActions(false)).observe(stage);
+collapseActions.onclick=()=>{actions.classList.toggle("collapsed");const c=actions.classList.contains("collapsed");collapseActions.textContent=c?"A · Lon… · C":"⋯";collapseActions.setAttribute("aria-expanded",String(!c));collapseActions.setAttribute("aria-label",c?"Expand permanent actions":"Collapse permanent actions");preferredBottom=null;positionActions(true)};
+document.querySelectorAll(".action").forEach(b=>b.onclick=()=>announcer.textContent="Permanent action "+b.dataset.action+" selected.");
+document.querySelectorAll("[data-timer]").forEach(b=>b.onclick=()=>{player.style.setProperty("--timer-x",b.dataset.timer+"%");document.querySelectorAll("[data-timer]").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));preferredBottom=null;positionActions(true)});
+function timerRender(){timerText.textContent="0:"+String(timerValue).padStart(2,"0");timerRing.style.strokeDashoffset=String(circ*(1-timerValue/24))}
+document.getElementById("restartTimer").onclick=()=>{timerValue=24;timerPaused=false;pause.textContent="Pause";status.querySelector("span").textContent="Running";timerRender()};
+pause.onclick=()=>{timerPaused=!timerPaused;pause.textContent=timerPaused?"Resume":"Pause";status.querySelector("span").textContent=timerPaused?"Paused":"Running"};
+setInterval(()=>{if(!timerPaused&&timerValue>0){timerValue--;timerRender();if(timerValue===0)status.querySelector("span").textContent="Waiting"}},1000);
+document.getElementById("themeToggle").onclick=()=>document.getElementById("themePanel").classList.toggle("open");
+document.querySelectorAll("[data-theme]").forEach(i=>i.oninput=()=>document.documentElement.style.setProperty(i.dataset.theme,i.value));
+function distance(){return Math.max(0,chatLog.scrollHeight-chatLog.scrollTop-chatLog.clientHeight)}
+function updateJump(){if(autoScrolling){jump.classList.remove("visible");return}jump.classList.toggle("visible",distance()>Math.max(220,chatLog.clientHeight*1.25))}
+let scrollTimer=null;function finishScroll(){autoScrolling=false;updateJump()}function scrollLatest(behavior="smooth"){autoScrolling=true;jump.classList.remove("visible");chatLog.scrollTo({top:chatLog.scrollHeight,behavior});clearTimeout(scrollTimer);scrollTimer=setTimeout(finishScroll,180)}
+chatLog.onscroll=()=>{if(autoScrolling){clearTimeout(scrollTimer);scrollTimer=setTimeout(finishScroll,180)}else updateJump()};jump.onclick=()=>scrollLatest();
+function addMessage(text){const near=distance()<48,a=document.createElement("article");a.className="message player-message";a.innerHTML='<div class="block"><div class="meta">Player · now</div><div class="bubble"></div></div>';a.querySelector(".bubble").textContent=text;chatRail.append(a);if(near)requestAnimationFrame(()=>{if(a.offsetHeight>chatLog.clientHeight-16){autoScrolling=true;const top=a.getBoundingClientRect().top-chatLog.getBoundingClientRect().top+chatLog.scrollTop;chatLog.scrollTo({top,behavior:"smooth"});clearTimeout(scrollTimer);scrollTimer=setTimeout(finishScroll,180)}else scrollLatest()});else updateJump()}
+document.querySelectorAll(".choice").forEach(b=>b.onclick=()=>{document.querySelectorAll(".choice").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));document.getElementById("instrument").style.transform=b.dataset.choice==="Align west"?"scaleX(-1)":"scaleX(1)";addMessage(b.dataset.choice)});
+composer.onsubmit=e=>{e.preventDefault();const t=messageInput.value.trim();if(!t)return;addMessage(t);messageInput.value="";messageInput.focus()};
+document.querySelectorAll(".keyboard-row").forEach((row,index)=>{const parts=row.textContent.trim().split(index===3?"|":/\s+/);row.textContent="";parts.forEach(k=>{const b=document.createElement("button");b.type="button";b.className="key";b.tabIndex=-1;b.textContent=k;row.append(b)})});
+requestAnimationFrame(()=>{syncAuto();setRatio(36);timerRender();scrollLatest("auto");positionActions(true)})
+})();
+</script>
+</body>
+</html>
