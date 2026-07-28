@@ -38,6 +38,8 @@ Special command, block, keyword, and token syntax remains parser-owned. A librar
 
 ADR 0018 accepts parser-owned compact forms for `showButton`, `askText`, `askNumber`, `choose`, and `say` pacing in addition to ordinary library metadata. The editor must combine generated Standard Library information with grammar-aware support for those official forms.
 
+The engine compiler now implements the four Slice A interaction forms, their protected-name and choice diagnostics, and exact source spans. Rich completion, hover, formatting, simulator inspection, `say` pacing support, and Player previews remain editor work.
+
 The first implementation should provide:
 
 - completion and hover documentation for the automatically available Standard Library names;

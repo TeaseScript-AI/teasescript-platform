@@ -4,7 +4,13 @@ import type {
   ExpressionPlan,
   Instruction,
   InstructionPlan,
+  InteractionUiPayload,
+  PreparedInteractionUiPayload,
 } from "../plan/model.js";
+import {
+  boundedInteractionUtf8ByteLength,
+  MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
+} from "../interaction-limits.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -366,6 +372,22 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     }
+    case "prepareInteractionSpeaker": {
+      const speaker = instruction.speaker !== null
+        ? evaluator.speakerByName(instruction.speaker, instruction.span)
+        : snapshot.contextualSpeaker !== null
+          ? evaluator.speakerById(snapshot.contextualSpeaker, instruction.span)
+          : snapshot.defaultSpeaker !== null
+            ? evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
+            : null;
+      setTemporary(snapshot.temporaries, instruction.destinationTemporary, speaker === null ? null : {
+        kind: "speakerReference",
+        speakerId: speaker.id,
+        identifier: speaker.identifier,
+      });
+      advance(snapshot);
+      return;
+    }
     case "clearTemporary": {
       const index = snapshot.temporaries.findIndex(
         (temporary) => temporary.id === instruction.temporaryId,
@@ -451,6 +473,10 @@ function executePlannedInstruction(
     }
     case "interaction": {
       assertNoLiveInteractionSettlement(snapshot, instruction.span);
+      const ui = instruction.preparedUi === undefined
+        ? instruction.ui
+        : materializeInteractionUi(instruction.preparedUi, snapshot.temporaries, instruction.span);
+      if (ui === null) throw fault("TSR052", "Interaction UI data is unavailable.", instruction.span);
       if (
         instruction.destinationTemporary !== null &&
         snapshot.temporaries.some((temporary) =>
@@ -465,11 +491,20 @@ function executePlannedInstruction(
       }
       if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
       assertEventSequenceCapacity(snapshot, 3, instruction.span);
-      const speaker = instruction.speaker !== null
-        ? evaluator.speakerByName(instruction.speaker, instruction.span)
-        : snapshot.defaultSpeaker === null
+      const preparedSpeaker = instruction.speakerTemporary === undefined
+        ? undefined
+        : readTemporary(snapshot.temporaries, instruction.speakerTemporary, instruction.span);
+      const speaker = preparedSpeaker === undefined
+        ? instruction.speaker !== null
+          ? evaluator.speakerByName(instruction.speaker, instruction.span)
+          : snapshot.defaultSpeaker === null
+            ? null
+            : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
+        : preparedSpeaker === null
           ? null
-          : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
+          : isSpeakerReference(preparedSpeaker)
+            ? evaluator.speakerById(preparedSpeaker.speakerId, instruction.span)
+            : (() => { throw fault("TSR052", "Prepared interaction speaker is invalid.", instruction.span); })();
       const sequence = takeSequence(snapshot);
       const action: RuntimeInteractionActionSnapshot = Object.freeze({
         kind: "interaction",
@@ -484,7 +519,7 @@ function executePlannedInstruction(
         expectedResult: instruction.expectedResult,
         target: instruction.target,
         speakerId: speaker?.id ?? null,
-        ui: cloneInteractionUi(instruction.ui),
+        ui: cloneInteractionUi(ui),
         requestEventSequence: sequence,
       });
       snapshot.nextActionId += 1;
@@ -511,6 +546,60 @@ function executePlannedInstruction(
         } satisfies ExitEvent),
       );
       return;
+  }
+}
+
+function materializeInteractionUi(
+  prepared: PreparedInteractionUiPayload,
+  temporaries: readonly RuntimeTemporarySnapshot[],
+  span: SourceSpan,
+): InteractionUiPayload {
+  const readText = (temporaryId: number): string => {
+    const value = readTemporary(temporaries, temporaryId, span);
+    if (typeof value !== "string") throw fault("TSR052", "Interaction text must evaluate to a string.", span);
+    return value;
+  };
+  if (prepared.kind === "button") {
+    const ui = { kind: "button" as const, buttonLabel: readText(prepared.buttonLabelTemporary), accessibleName: prepared.accessibleName };
+    assertInteractionUiLimits(ui, span);
+    return ui;
+  }
+  if (prepared.kind !== "choice") {
+    const ui = { kind: prepared.kind, hint: prepared.hintTemporary === null ? null : readText(prepared.hintTemporary), accessibleName: prepared.accessibleName };
+    assertInteractionUiLimits(ui, span);
+    return ui;
+  }
+  const options = prepared.options.map((option) => ({ text: readText(option.textTemporary), label: option.label }));
+  const ui = { kind: "choice" as const, labelType: prepared.labelType, options, accessibleName: prepared.accessibleName };
+  assertInteractionUiLimits(ui, span);
+  if (ui.labelType === "none") {
+    const visible = new Set<string>();
+    for (const option of ui.options) {
+      if (visible.has(option.text)) throw fault("TSR052", "Unlabelled choice text must evaluate to unique strings.", span);
+      visible.add(option.text);
+    }
+  }
+  return ui;
+}
+
+function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): void {
+  const strings: string[] = [];
+  if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
+  if (ui.kind === "button") strings.push(ui.buttonLabel);
+  else if (ui.kind === "text" || ui.kind === "number") {
+    if (ui.hint !== null) strings.push(ui.hint);
+  } else if (ui.kind === "choice") {
+    for (const option of ui.options) {
+      strings.push(option.text);
+      if (typeof option.label === "string") strings.push(option.label);
+    }
+  }
+  let aggregate = 0;
+  for (const value of strings) {
+    const bytes = boundedInteractionUtf8ByteLength(value);
+    if (bytes === null) throw fault("TSR052", "Interaction text exceeds the shared UTF-8 byte limit.", span);
+    aggregate += bytes;
+    if (aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES) throw fault("TSR052", "Interaction data exceeds the shared aggregate UTF-8 byte limit.", span);
   }
 }
 

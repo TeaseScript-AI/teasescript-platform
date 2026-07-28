@@ -16,6 +16,11 @@ import {
   CORE_RUNTIME_BUILTINS,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
+import {
+  boundedInteractionUtf8ByteLength,
+  MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
+  MAX_INTERACTION_OPTION_ENTRIES,
+} from "./interaction-limits.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -61,6 +66,10 @@ const semanticCode = {
   functionAssignment: "TSV026",
   unsupportedFunctionAnnotation: "TSV027",
   functionValue: "TSV028",
+  invalidInteractionChoice: "TSV029",
+  duplicateInteractionChoice: "TSV030",
+  interactionLimit: "TSV031",
+  unsupportedBlockingContext: "TSV032",
 } as const;
 
 export function validateSemantics(
@@ -94,9 +103,14 @@ class SemanticValidator {
   readonly #protectedNames: ReadonlySet<string>;
   readonly #root = new SemanticScope();
   readonly #functions = new Map<string, FunctionDeclaration>();
+  readonly #invalidConfiguredNames: readonly string[];
   #functionDepth = 0;
 
   public constructor(options: SemanticValidationOptions) {
+    this.#invalidConfiguredNames = Object.freeze([
+      ...(options.globals ?? []),
+      ...(options.builtins ?? []),
+    ].filter((name) => ["showButton", "askText", "askNumber", "choose"].includes(name)));
     this.#builtins = new Set([
       ...CORE_RUNTIME_BUILTINS,
       ...(options.builtins ?? []),
@@ -111,6 +125,13 @@ class SemanticValidator {
   }
 
   public validate(program: Program): void {
+    for (const name of new Set(this.#invalidConfiguredNames)) {
+      this.#report(
+        semanticCode.duplicateDeclaration,
+        `Configured name '${name}' conflicts with a protected TeaseScript name.`,
+        program.span,
+      );
+    }
     for (const statement of program.statements) {
       if (statement.kind !== "functionDeclaration") continue;
       if (this.#functions.has(statement.name.name)) {
@@ -157,6 +178,7 @@ class SemanticValidator {
   ): void {
     switch (statement.kind) {
       case "letStatement":
+        this.#validateBlockingGroup([statement.initializer]);
         this.#validateExpression(statement.initializer, scope, null);
         this.#declare(statement.name.name, "variable", statement.name.span, scope);
         return;
@@ -169,6 +191,7 @@ class SemanticValidator {
         );
         const names = new Set<string>();
         for (const property of statement.properties) {
+          this.#validateBlockingGroup([property.value]);
           if (names.has(property.name.name)) {
             this.#report(
               semanticCode.duplicateProperty,
@@ -189,6 +212,7 @@ class SemanticValidator {
         this.#validateSpeakerReference(statement.speaker.name, statement.speaker.span, scope);
         return;
       case "sayStatement": {
+        this.#validateBlockingGroup([statement.value]);
         const contextualSpeaker =
           statement.speaker === null
             ? "speaker"
@@ -202,7 +226,15 @@ class SemanticValidator {
         this.#validateExpression(statement.value, scope, contextualSpeaker);
         return;
       }
+      case "showButtonStatement": {
+        this.#validateBlockingGroup([statement.label]);
+        const contextualSpeaker = this.#interactionSpeaker(statement.speaker, scope);
+        this.#validateExpression(statement.label, scope, contextualSpeaker);
+        this.#validateStaticInteractionStrings([statement.label], statement.span);
+        return;
+      }
       case "waitStatement": {
+        this.#validateBlockingGroup([statement.duration]);
         this.#validateExpression(statement.duration, scope, null);
         const known = knownNumber(statement.duration);
         if (known !== undefined && known < 0) {
@@ -211,13 +243,20 @@ class SemanticValidator {
         return;
       }
       case "assignmentStatement":
+        this.#validateBlockingGroup(statement.target.kind === "identifier"
+          ? [statement.value]
+          : statement.target.kind === "indexExpression"
+            ? [statement.target.object, statement.target.index, statement.value]
+            : [statement.target.object, statement.value]);
         this.#validateAssignmentTarget(statement.target, scope);
         this.#validateExpression(statement.value, scope, null);
         return;
       case "expressionStatement":
+        this.#validateBlockingGroup([statement.expression]);
         this.#validateExpression(statement.expression, scope, null);
         return;
       case "ifStatement":
+        this.#validateBlockingGroup([statement.condition]);
         this.#validateExpression(statement.condition, scope, null);
         this.#validateBlock(statement.thenBlock, scope, loopDepth);
         if (statement.elseBlock !== null) {
@@ -229,6 +268,7 @@ class SemanticValidator {
         }
         return;
       case "repeatStatement":
+        this.#validateBlockingGroup([statement.count]);
         this.#validateExpression(statement.count, scope, null);
         const knownCount = knownNumber(statement.count);
         if (
@@ -250,6 +290,7 @@ class SemanticValidator {
         this.#validateBlock(statement.body, scope, loopDepth + 1);
         return;
       case "forStatement": {
+        this.#validateBlockingGroup([statement.iterable]);
         this.#validateExpression(statement.iterable, scope, null);
         if (isDefinitelyNonIterable(statement.iterable)) {
           this.#report(
@@ -280,6 +321,7 @@ class SemanticValidator {
         return;
       }
       case "whileStatement":
+        this.#validateBlockingGroup([statement.condition]);
         this.#validateExpression(statement.condition, scope, null);
         this.#validateBlock(statement.body, scope, loopDepth + 1);
         return;
@@ -309,6 +351,7 @@ class SemanticValidator {
           );
         }
         if (statement.value !== null) {
+          this.#validateBlockingGroup([statement.value]);
           this.#validateExpression(statement.value, scope, null);
         }
         return;
@@ -362,6 +405,7 @@ class SemanticValidator {
     for (let index = 0; index < declaration.parameters.length; index += 1) {
       const parameter = declaration.parameters[index]!;
       if (parameter.defaultValue !== null) {
+        this.#validateBlockingGroup([parameter.defaultValue]);
         const laterNames = new Set(
           declaration.parameters.slice(index + 1).map((item) => item.name.name),
         );
@@ -389,6 +433,17 @@ class SemanticValidator {
       new SemanticScope(parent),
       loopDepth,
     );
+  }
+
+  #validateBlockingGroup(expressions: readonly Expression[]): void {
+    const interactions = expressions.flatMap(collectInteractions);
+    for (const interaction of interactions.slice(1)) {
+      this.#report(
+        semanticCode.unsupportedBlockingContext,
+        "This expression contains multiple blocking interactions; the current explicit lowering supports one blocking interaction per expression context.",
+        interaction.span,
+      );
+    }
   }
 
   #validateAssignmentTarget(
@@ -436,6 +491,16 @@ class SemanticValidator {
       case "numberLiteral":
       case "stringLiteral":
         return;
+      case "interactionExpression": {
+        const contextualSpeaker = this.#interactionSpeaker(expression.speaker, scope);
+        if (expression.interactionKind === "choice") {
+          this.#validateChoice(expression, scope, contextualSpeaker);
+        } else if (expression.hint !== null) {
+          this.#validateExpression(expression.hint, scope, contextualSpeaker);
+          this.#validateStaticInteractionStrings([expression.hint], expression.span);
+        }
+        return;
+      }
       case "identifier":
         if (expression.name === "speaker" && contextualSpeaker !== null) return;
         const binding = scope.resolve(expression.name);
@@ -587,6 +652,85 @@ class SemanticValidator {
           );
         }
         return;
+    }
+  }
+
+  #interactionSpeaker(
+    speaker: Extract<Expression, { kind: "interactionExpression" }>["speaker"],
+    scope: SemanticScope,
+  ): string | null {
+    return speaker === null
+      ? "speaker"
+      : this.#validateSpeakerReference(speaker.name, speaker.span, scope)
+        ? speaker.name
+        : null;
+  }
+
+  #validateChoice(
+    expression: Extract<Expression, { kind: "interactionExpression" }>,
+    scope: SemanticScope,
+    contextualSpeaker: string | null,
+  ): void {
+    if (expression.options.length === 0) {
+      this.#report(semanticCode.invalidInteractionChoice, "A choice requires at least one option.", expression.span);
+      return;
+    }
+    if (expression.options.length > MAX_INTERACTION_OPTION_ENTRIES) {
+      this.#report(semanticCode.interactionLimit, `A choice may contain at most ${MAX_INTERACTION_OPTION_ENTRIES} options.`, expression.span);
+    }
+    const labelled = expression.options.map((option) => option.label !== null);
+    if (labelled.some(Boolean) && labelled.some((value) => !value)) {
+      this.#report(semanticCode.invalidInteractionChoice, "Labelled and unlabelled choice options may not be mixed.", expression.span);
+    }
+    const labelKinds = new Set(expression.options.flatMap((option) => option.label === null ? [] : [option.label.kind]));
+    if (labelKinds.size > 1) {
+      this.#report(semanticCode.invalidInteractionChoice, "Identifier and numeric choice labels may not be mixed.", expression.span);
+    }
+    const labels = new Set<string>();
+    const visible = new Map<string, SourceSpan>();
+    for (const option of expression.options) {
+      this.#validateExpression(option.value, scope, contextualSpeaker);
+      if (option.label !== null) {
+        const key = option.label.kind === "identifier"
+          ? `identifier:${option.label.name}`
+          : `number:${Object.is(option.label.value, -0) ? 0 : option.label.value}`;
+        if (labels.has(key)) {
+          this.#report(semanticCode.duplicateInteractionChoice, "Choice labels must be unique.", option.label.span);
+        }
+        labels.add(key);
+      } else {
+        const text = knownString(option.value);
+        if (text !== undefined) {
+          if (visible.has(text)) {
+            this.#report(semanticCode.duplicateInteractionChoice, "Unlabelled choice text must be unique.", option.value.span);
+          }
+          visible.set(text, option.value.span);
+        }
+      }
+    }
+    this.#validateStaticInteractionStrings(expression.options.map((option) => option.value), expression.span, expression.options.flatMap((option) => option.label?.kind === "identifier" ? [option.label.name] : []));
+  }
+
+  #validateStaticInteractionStrings(
+    expressions: readonly Expression[],
+    span: SourceSpan,
+    extraStrings: readonly string[] = [],
+  ): void {
+    let aggregate = 0;
+    for (const value of [...extraStrings, ...expressions.flatMap((expression) => {
+      const known = knownString(expression);
+      return known === undefined ? [] : [known];
+    })]) {
+      const bytes = boundedInteractionUtf8ByteLength(value);
+      if (bytes === null) {
+        this.#report(semanticCode.interactionLimit, "Interaction text exceeds the shared UTF-8 byte limit.", span);
+        return;
+      }
+      aggregate += bytes;
+      if (aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES) {
+        this.#report(semanticCode.interactionLimit, "Interaction data exceeds the shared aggregate UTF-8 byte limit.", span);
+        return;
+      }
     }
   }
 
@@ -747,6 +891,43 @@ function knownNumber(expression: Expression): number | undefined {
   return undefined;
 }
 
+function knownString(expression: Expression): string | undefined {
+  if (expression.kind === "stringLiteral") return expression.value;
+  if (expression.kind === "parenthesizedExpression") return knownString(expression.expression);
+  if (expression.kind === "templateLiteral" && expression.parts.every((part) => part.kind === "templateText")) {
+    return expression.parts.map((part) => part.kind === "templateText" ? part.value : "").join("");
+  }
+  return undefined;
+}
+
+function collectInteractions(expression: Expression): Array<Extract<Expression, { kind: "interactionExpression" }>> {
+  if (expression.kind === "interactionExpression") {
+    return [
+      expression,
+      ...(expression.hint === null ? [] : collectInteractions(expression.hint)),
+      ...expression.options.flatMap((option) => collectInteractions(option.value)),
+    ];
+  }
+  switch (expression.kind) {
+    case "booleanLiteral":
+    case "nullLiteral":
+    case "numberLiteral":
+    case "stringLiteral":
+    case "identifier": return [];
+    case "parenthesizedExpression": return collectInteractions(expression.expression);
+    case "listLiteral":
+    case "setLiteral": return expression.elements.flatMap(collectInteractions);
+    case "objectLiteral": return expression.properties.flatMap((property) => collectInteractions(property.value));
+    case "templateLiteral": return expression.parts.flatMap((part) => part.kind === "templateInterpolation" ? collectInteractions(part.expression) : []);
+    case "propertyAccessExpression": return collectInteractions(expression.object);
+    case "indexExpression": return [...collectInteractions(expression.object), ...collectInteractions(expression.index)];
+    case "callExpression": return [...collectInteractions(expression.callee), ...expression.arguments.flatMap((argument) => collectInteractions(argument.value))];
+    case "unaryExpression": return collectInteractions(expression.operand);
+    case "binaryExpression": return [...collectInteractions(expression.left), ...collectInteractions(expression.right)];
+    case "rangeExpression": return [...collectInteractions(expression.start), ...collectInteractions(expression.end)];
+  }
+}
+
 function isDefinitelyNonNumeric(expression: Expression): boolean {
   if (expression.kind === "parenthesizedExpression") {
     return isDefinitelyNonNumeric(expression.expression);
@@ -759,6 +940,7 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
     expression.kind === "templateLiteral" ||
+    expression.kind === "interactionExpression" ||
     expression.kind === "rangeExpression"
   );
 }
@@ -774,6 +956,7 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     expression.kind === "numberLiteral" ||
     expression.kind === "objectLiteral" ||
     expression.kind === "templateLiteral"
+    || expression.kind === "interactionExpression"
   );
 }
 
@@ -848,6 +1031,11 @@ function visitExpression(
     case "rangeExpression":
       visitExpression(expression.start, visitor);
       visitExpression(expression.end, visitor);
+      return;
+    case "interactionExpression":
+      if (expression.speaker !== null) visitor(expression.speaker);
+      if (expression.hint !== null) visitExpression(expression.hint, visitor);
+      expression.options.forEach((option) => visitExpression(option.value, visitor));
       return;
   }
 }

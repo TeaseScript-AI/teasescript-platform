@@ -151,7 +151,7 @@ const EXPECTED_PROPERTY_CASE_IDS = Object.freeze([
 ] as const);
 
 const PINNED_SMOKE_SIGNATURE =
-  "7f44ebca5b8bafdae0137e25f5651b370a7bea57bfb7c6aa1f9867e7d7cbc6cd";
+  "9020487e4ea81d02b916e4f0f692ec4e60a04a0ec27cbd11253b984dfb9e3316";
 
 const malformedArguments: readonly (readonly string[])[] = Object.freeze([
   Object.freeze(["--seed", "0"]),

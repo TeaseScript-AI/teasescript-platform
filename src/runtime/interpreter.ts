@@ -57,10 +57,13 @@ export interface ExecutionResult {
 
 const compatibilityDiagnosticCode = {
   blockingWait: "TSC004",
+  blockingInteraction: "TSC006",
 } as const;
 
 const BLOCKING_WAIT_COMPATIBILITY_MESSAGE =
   "Blocking `wait` requires the canonical resumable runtime API.";
+const BLOCKING_INTERACTION_COMPATIBILITY_MESSAGE =
+  "Blocking interactions require the canonical resumable runtime API.";
 
 /** Structured semantic failure from the direct AST compatibility boundary. */
 export class InterpreterCompilationError extends Error {
@@ -143,6 +146,19 @@ export class Interpreter {
           compatibilityDiagnosticCode.blockingWait,
           BLOCKING_WAIT_COMPATIBILITY_MESSAGE,
           blockingWait.span,
+        ),
+      ]);
+    }
+    const blockingInteraction = plan.instructions.find(
+      (instruction) => instruction.kind === "interaction",
+    );
+    if (blockingInteraction !== undefined) {
+      throw new InterpreterCompilationError([
+        createDiagnostic(
+          DiagnosticSeverity.Error,
+          compatibilityDiagnosticCode.blockingInteraction,
+          BLOCKING_INTERACTION_COMPATIBILITY_MESSAGE,
+          blockingInteraction.span,
         ),
       ]);
     }

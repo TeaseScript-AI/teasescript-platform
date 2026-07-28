@@ -109,6 +109,8 @@ ADR 0018 selects this ordered author-facing sequence:
 1. `showButton`, `askText`, `askNumber`, and `choose` on one generic typed foreground-interaction primitive;
 2. `say` with deterministic smart autoplay and player-controlled gate completion.
 
+The first item is implemented as ADR 0018 Slice A. The compiler fully lowers the compact forms into explicit versioned instructions, temporaries, and JSON-safe continuation state while reusing the existing generic interaction completion and settlement path. The second item remains unimplemented.
+
 `wait` remains compiler/core-owned. Camera, files, media, background timers, persistence, custom UI, and LLM interpretation are excluded.
 
 ### Default prelude

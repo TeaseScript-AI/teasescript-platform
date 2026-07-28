@@ -30,6 +30,8 @@ specifier forms.
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
+ADR 0018 Slice A tests compile real compact interaction source through parser, semantic validation, versioned lowering, the generic interaction runtime, completion, transcript emission, checkpoint JSON restore, and call-frame resume. The property fixture catalog likewise reaches button, text, and labelled choice waiting states from real source rather than replacing unrelated instructions in a manually built plan.
+
 ## Test layers
 
 The testing strategy uses complementary layers:
@@ -163,7 +165,7 @@ Technical boundary cases use the accepted interaction limits: at most the exact 
 
 ### Fixtures and mutation domains
 
-Fixture construction prefers real public compile and runtime paths. Because author-facing interaction syntax is not implemented yet, interaction fixtures replace a compiled `wait` instruction with the current public interaction instruction shape and must pass `validateInstructionPlan(...)` before execution. Every baseline plan and snapshot is validated before mutation.
+Fixture construction prefers real public compile and runtime paths. The primary button, text, and labelled-choice interaction fixtures compile ADR 0018 Slice A source through the public pipeline; narrowly targeted hostile and exact-limit plan fixtures remain manual so they can isolate the validator boundary. Every baseline plan and snapshot is validated before mutation.
 
 The catalog covers fresh, running, waiting, continuation-ready, halted, and failed snapshots; delay and generic interaction actions; settlements; valid, invalid, duplicate, stale, and unknown completions; checkpoints; JSON round trips; speakers; scopes; loops; calls; and temporaries. Builders assert the exact lifecycle status, pending-action kind, interaction kind, settlement, and active frame structures promised by each fixture name before the catalog is frozen.
 

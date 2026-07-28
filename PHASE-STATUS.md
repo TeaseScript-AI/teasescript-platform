@@ -73,7 +73,7 @@
 - Own-property-only runtime builtin registration and prototype-free named builtin arguments.
 - Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
 
-The current plan format is version 5 and the runtime-snapshot/checkpoint formats are version 6 POC formats. The implemented pending-action foundation supports compiler-owned blocking `wait` delays and one generic typed foreground-interaction action family. Author-facing interaction syntax, smart-autoplay pacing, and Player UI remain unimplemented; background actions remain intentionally empty.
+The current plan format is version 6 and the runtime-snapshot/checkpoint formats are version 6 POC formats. ADR 0018 Slice A implements parser-owned compact `showButton`, `askText`, `askNumber`, and `choose` forms through the existing generic typed foreground-interaction family, with explicit speaker/payload preparation, result temporaries, call-frame ownership, checkpoint restore, and atomic dynamic validation. Smart-autoplay pacing and Player UI remain unimplemented; background actions remain intentionally empty.
 
 The implemented ADR 0017 infrastructure slice provides a tooling-only exact-identity in-memory library catalog and deterministic static metadata for the documented narrow TypeScript export subset. Its external boundaries use stable capture, a bounded source-text limit before parsing, and bounded retained metadata text before canonicalization. These internal POC identities and metadata shapes are not final package manifests, import syntax, library bindings, or checkpoint data; neither the tooling surface nor privileged adapter internals are exported from the runtime root entry point.
 
@@ -95,7 +95,6 @@ Also inspect the complete diff and verify the playground route/security matrix. 
 
 - complete V30 syntax/runtime coverage and static typing;
 - units, date/time/datetime/duration;
-- author-facing `showButton`, `askText`, `askNumber`, and `choose` syntax and lowering;
 - `say` smart autoplay, `chatPacingGate`, populated background actions, visible/background timers, and Player interaction controls;
 - cross-origin iframe host protocol;
 - media lifecycle and custom views;

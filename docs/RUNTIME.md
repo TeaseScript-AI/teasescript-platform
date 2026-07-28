@@ -46,7 +46,7 @@ Candidate Standard Library responsibilities include `say` policy, standard outpu
 
 ## Accepted first Standard Library runtime contract
 
-ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`, followed by a separate `say` smart-autoplay slice. The generic runtime family is implemented for manually constructed validated plans; author-facing syntax, Standard Library lowering, Player UI, and smart autoplay remain separate work.
+ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`, followed by a separate `say` smart-autoplay slice. Slice A implements author-facing compact syntax and compiler lowering through that existing family. Player UI and smart autoplay remain separate work.
 
 ### Generic foreground interactions
 
@@ -295,9 +295,9 @@ The implementation includes:
 - defensive validation of function regions, parameter progress, call stacks, and prepared-reference state;
 - standalone playground and constrained development server.
 
-Instruction plans use version 5; runtime snapshots and checkpoints use version 6. They are POC formats rather than permanent public wire-format guarantees.
+Instruction plans use version 6; runtime snapshots and checkpoints use version 6. They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation contains compiler-owned blocking `wait` and one generic foreground `interaction` instruction/action family for button, text, number, and choice. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, author-facing interaction syntax, Player controls, and background pacing remain out of scope.
+The current implementation contains compiler-owned blocking `wait` and one generic foreground `interaction` instruction/action family for button, text, number, and choice. Compact source payloads are prepared in source order into explicit temporaries before the action becomes pending; requesting-speaker provenance is prepared first, and result destinations remain owned by the current root or call frame. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, Player controls, and background pacing remain out of scope.
 
 ## Accepted resumable pending-action model
 
@@ -347,7 +347,7 @@ settle actions due at effectiveNow
 
 No checkpoint may contain due-action processing performed against a newer observation while retaining the older session-time value.
 
-Blocking `wait` remains the first source-to-runtime slice. The generic interaction runtime is now the second foreground use of ADR 0016, exercised through manual validated plans until its separate parser/compiler issue lands. Smart-autoplay and `chatPacingGate` remain unimplemented.
+Blocking `wait` remains the first source-to-runtime slice. ADR 0018 Slice A is the second foreground use of ADR 0016 and reaches the generic interaction runtime from compact source through explicit versioned lowering. Smart-autoplay and `chatPacingGate` remain unimplemented.
 
 ## Compiler and execution entry points
 
@@ -477,10 +477,10 @@ Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preser
 
 ## Format evolution
 
-The current formats use version 5 instruction plans and version 6 runtime snapshots/checkpoints. These versions add the generic interaction instruction/action/settlement family and canonical player-transcript event data while retaining delay provenance:
+The current formats use version 6 instruction plans and version 6 runtime snapshots/checkpoints. Plan version 6 adds compiler-prepared compact-interaction payload and speaker references while reusing the version 6 runtime interaction action, settlement, snapshot, and checkpoint schemas:
 
 ```text
-instruction plan version: 5
+instruction plan version: 6
 runtime snapshot version: 6
 checkpoint version: 6
 ```

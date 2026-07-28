@@ -1,9 +1,8 @@
 import type { Program } from "./ast.js";
-import { findNonFiniteNumericLiteralDiagnostics } from "./ast-validation.js";
+import { findNonFiniteNumericLiteralDiagnosticsInCapturedProgram } from "./ast-validation.js";
 import { DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { compileProgram, type InstructionPlan } from "./compiler/compile-program.js";
+import { compileParserOwnedProgram, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
-import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import {
   validateSemantics,
   type SemanticValidationOptions,
@@ -29,18 +28,12 @@ export function compileSource(
   const parsed = parse(source);
   const parserDiagnostics = Object.freeze([
     ...parsed.diagnostics,
-    ...findNonFiniteNumericLiteralDiagnostics(parsed.program),
+    ...findNonFiniteNumericLiteralDiagnosticsInCapturedProgram(parsed.program),
   ]);
   const hasParserErrors = hasErrors(parserDiagnostics);
   const semantic = hasParserErrors
     ? Object.freeze({ diagnostics: Object.freeze([]) })
-    : validateSemantics(parsed.program, {
-        ...options,
-        builtins: Object.freeze([
-          ...CORE_RUNTIME_BUILTINS,
-          ...(options.builtins ?? []),
-        ]),
-      });
+    : validateSemantics(parsed.program, options);
   const diagnostics = Object.freeze([
     ...parserDiagnostics,
     ...semantic.diagnostics,
@@ -50,7 +43,7 @@ export function compileSource(
     parserDiagnostics,
     semanticDiagnostics: semantic.diagnostics,
     diagnostics,
-    plan: hasErrors(diagnostics) ? null : compileProgram(parsed.program),
+    plan: hasErrors(diagnostics) ? null : compileParserOwnedProgram(parsed.program),
   });
 }
 

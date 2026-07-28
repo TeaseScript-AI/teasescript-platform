@@ -197,9 +197,16 @@ export function findNonFiniteNumericLiteralDiagnostics(
     return Object.freeze([capture.diagnostic!]);
   }
 
+  return findNonFiniteNumericLiteralDiagnosticsInCapturedProgram(capture.program);
+}
+
+/** Internal traversal for parser-owned or already captured AST data. */
+export function findNonFiniteNumericLiteralDiagnosticsInCapturedProgram(
+  program: Program,
+): readonly Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const work = createCapturedArray(0) as unknown[];
-  work.push(capture.program);
+  work.push(program);
   while (work.length > 0) {
     const value = work.pop();
     if (value === null || typeof value !== "object") continue;
@@ -325,7 +332,69 @@ function isProgramRoot(value: unknown): value is Program {
   return isPlainRecord(value) &&
     value.kind === "program" &&
     Array.isArray(value.statements) &&
+    isSourceSpan(value.span) &&
+    validInteractionAstShapes(value);
+}
+
+function validInteractionAstShapes(root: Record<string, unknown>): boolean {
+  const work = createCapturedArray(1);
+  Reflect.defineProperty(work, "0", { value: root, writable: true, enumerable: true, configurable: true });
+  while (work.length > 0) {
+    const value = work.pop();
+    if (value === null || typeof value !== "object") continue;
+    if (Array.isArray(value)) {
+      for (const item of value) work.push(item);
+      continue;
+    }
+    if (!isPlainRecord(value)) return false;
+    if (value.kind === "showButtonStatement") {
+      if (
+        !isSourceSpan(value.commandSpan) ||
+        !(value.asSpan === null || isSourceSpan(value.asSpan)) ||
+        !(value.speaker === null || isIdentifierNode(value.speaker)) ||
+        !isAstNode(value.label) ||
+        !isSourceSpan(value.span)
+      ) return false;
+    } else if (value.kind === "interactionExpression") {
+      if (
+        !["text", "number", "choice"].includes(String(value.interactionKind)) ||
+        !isSourceSpan(value.commandSpan) ||
+        !(value.asSpan === null || isSourceSpan(value.asSpan)) ||
+        !(value.speaker === null || isIdentifierNode(value.speaker)) ||
+        !(value.hint === null || isAstNode(value.hint)) ||
+        !Array.isArray(value.options) ||
+        !value.options.every(isInteractionChoiceOptionNode) ||
+        !isSourceSpan(value.span) ||
+        (value.interactionKind === "choice" ? value.hint !== null : value.options.length !== 0)
+      ) return false;
+    } else if (value.kind === "interactionChoiceOption" && !isInteractionChoiceOptionNode(value)) {
+      return false;
+    }
+    for (const nested of Object.values(value)) work.push(nested);
+  }
+  return true;
+}
+
+function isInteractionChoiceOptionNode(value: unknown): boolean {
+  return isPlainRecord(value) &&
+    value.kind === "interactionChoiceOption" &&
+    (value.label === null || isIdentifierNode(value.label) || isNumberLiteralNode(value.label)) &&
+    (value.colonSpan === null || isSourceSpan(value.colonSpan)) &&
+    isAstNode(value.value) &&
+    (value.separatorSpan === null || isSourceSpan(value.separatorSpan)) &&
     isSourceSpan(value.span);
+}
+
+function isIdentifierNode(value: unknown): boolean {
+  return isPlainRecord(value) && value.kind === "identifier" && typeof value.name === "string" && isSourceSpan(value.span);
+}
+
+function isNumberLiteralNode(value: unknown): boolean {
+  return isPlainRecord(value) && value.kind === "numberLiteral" && typeof value.raw === "string" && typeof value.value === "number" && (value.numericType === "integer" || value.numericType === "number") && isSourceSpan(value.span);
+}
+
+function isAstNode(value: unknown): boolean {
+  return isPlainRecord(value) && typeof value.kind === "string" && isSourceSpan(value.span);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

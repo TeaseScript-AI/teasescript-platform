@@ -64,6 +64,8 @@ ADR 0018 selects direct Standard Library names with no import and no first-POC o
 
 ### Basic interactions
 
+ADR 0018 Slice A is implemented. These forms are parser-owned compact syntax and lower to the existing versioned generic interaction instruction; they are not ordinary TypeScript-style library calls or runtime library lookups.
+
 ```tease
 showButton "Continue"
 showButton as mistress "Ready"

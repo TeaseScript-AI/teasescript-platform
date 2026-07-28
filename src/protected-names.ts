@@ -67,6 +67,7 @@ export const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "cancelSchedule",
   "askText",
   "askNumber",
+  "showButton",
   "askInteger",
   "askBoolean",
   "askDate",
