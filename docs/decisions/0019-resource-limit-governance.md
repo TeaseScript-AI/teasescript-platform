@@ -30,9 +30,9 @@ boundary, or declare any existing value correct or incorrect. The complete
 repository inventory, measurements, and production repairs remain separate
 follow-up work under issue #129.
 
-This ADR remains `Proposed` until Peter explicitly approves its exact text in
-issue #130 or its pull request. Approval of the workstream or technical review
-alone does not change its status.
+This ADR remains `Proposed` until the designated product owner explicitly
+approves its exact text in issue #130 or its pull request. Approval of the
+workstream or technical review alone does not change its status.
 
 ## Decision summary
 
@@ -74,9 +74,9 @@ tooling command.
 
 An **owner** is the repository role or decision authority accountable for a
 limit's boundary, rationale, evidence, and change decisions. Ownership is not
-automatically assigned to Peter or to the agent or contributor performing the
-work; the registry must name the applicable product, architecture, component,
-security, platform, or tooling authority.
+automatically assigned to the ADR approver or to the agent or contributor
+performing the work; the registry must name the applicable product,
+architecture, component, security, platform, or tooling authority.
 
 A **measurement definition** states how the governed property is evaluated. It
 uses a quantitative unit when the property is measurable, such as bytes, nodes,
@@ -436,7 +436,7 @@ The example does not pre-approve any concrete change.
 
 ### Explicit owner product-policy decision
 
-Peter's explicit product-policy decision is required when changing:
+An explicit product-owner decision is required when changing:
 
 - a product default;
 - a UI warning intended as official product guidance;
