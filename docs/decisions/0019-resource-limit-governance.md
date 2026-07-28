@@ -72,6 +72,12 @@ plan validation, snapshot creation, checkpoint creation, restore, Player
 presentation, host-message validation, transport, rendering, storage, or a
 tooling command.
 
+An **owner** is the repository role or decision authority accountable for a
+limit's boundary, rationale, evidence, and change decisions. Ownership is not
+automatically assigned to Peter or to the agent or contributor performing the
+work; the registry must name the applicable product, architecture, component,
+security, platform, or tooling authority.
+
 A **measurement definition** states how the governed property is evaluated. It
 uses a quantitative unit when the property is measurable, such as bytes, nodes,
 instructions, frames, or validation work. A qualitative representation
@@ -237,8 +243,8 @@ The following distinctions are mandatory:
 ## End-to-end maximum invariant
 
 For every officially supported source or public-input maximum, each
-representation in the applicable worst-form evidence set must survive at least
-this minimum engine sequence:
+representation in the applicable worst-form evidence set must survive every
+applicable stage of at least this minimum engine sequence:
 
 1. capture or parsing;
 2. semantic validation;
@@ -328,15 +334,17 @@ applicable rather than silently omitting it.
 ### `provisional`
 
 `provisional` means the limit is a deliberate deterministic current guard, but
-its exact value or formula lacks complete capacity evidence, final product
-policy, or both. The entry records the missing evidence or owner decision.
+its value, predicate, accepted domain, or formula lacks complete evidence, final
+product policy, or both. The entry records the missing evidence or owner
+decision.
 
 ### `suspicious`
 
 `suspicious` means available evidence indicates a likely category error,
 circular justification, boundary coupling, unsupported worst form, unexplained
-expansion, inconsistent public behavior, or another reason the current value or
-formula should not be trusted as a capacity claim.
+expansion, inconsistent public behavior, or another reason the current value,
+predicate, accepted domain, or formula should not be trusted as a justified
+contract.
 
 Suspicious does not by itself authorize changing the value or weakening the
 boundary. It requires focused reproduction, measurement, or design work.
@@ -450,7 +458,9 @@ A new or amended ADR is required when a change alters:
   transport, storage, or execution budgets;
 - the relationship between execution quanta and permanent failure policy;
 - an accepted engine representational-capacity contract;
-- cross-component coupling, formulas, or public compatibility semantics;
+- cross-component coupling, or a formula change that alters architecture,
+  cross-component coupling, an accepted capacity contract, or public
+  compatibility semantics;
 - an existing accepted ADR decision.
 
 An accepted ADR is never silently overridden by a registry edit or production
