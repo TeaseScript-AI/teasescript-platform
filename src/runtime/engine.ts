@@ -7,7 +7,6 @@ import type {
 } from "../plan/model.js";
 import { captureInstructionPlan } from "../plan/capture.js";
 import { captureExternalData } from "../external-data-limits.js";
-import { interactionStringFits } from "../interaction-limits.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -60,7 +59,8 @@ import {
   type RuntimeCallFrameSnapshot,
   type RuntimeTemporarySnapshot,
 } from "./state.js";
-import { recordValidationTestWork } from "./validation-testing.js";
+import { resolveInteractionCompletion } from "./actions/interaction.js";
+import { isValidSessionTime } from "./actions/delay.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -246,7 +246,7 @@ export function run(
 export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, suppliedNowMs: unknown): PendingActionOperationResult<TimeObservationOutcome> {
   const captured = captureExecutableData(plan, snapshot);
   const current = cloneCapturedRuntimeSnapshot(captured.snapshot);
-  if (!validSessionTime(suppliedNowMs)) return pendingResult(current, [], { kind: "invalidObservation", message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.` });
+  if (!isValidSessionTime(suppliedNowMs)) return pendingResult(current, [], { kind: "invalidObservation", message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.` });
   const effectiveNow = Math.max(current.currentSessionTimeMs, suppliedNowMs);
   const action = current.foregroundAction;
   if (action !== null && action.kind === "delay" && effectiveNow >= action.deadlineMs) {
@@ -290,7 +290,7 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
   }
   if (value.actionKind !== active.kind) return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: active.kind, receivedActionKind: value.actionKind === "delay" || value.actionKind === "interaction" ? value.actionKind : "<invalid>" });
   if (active.kind === "interaction") return completeInteraction(captured.plan, current, active, value);
-  if (!isPlainRecord(value.payload) || value.payload.kind !== "time" || !validSessionTime(value.payload.currentSessionTimeMs)) return pendingResult(current, [], { kind: "invalidPayload", message: "Delay completion payload must contain a valid time observation." });
+  if (!isPlainRecord(value.payload) || value.payload.kind !== "time" || !isValidSessionTime(value.payload.currentSessionTimeMs)) return pendingResult(current, [], { kind: "invalidPayload", message: "Delay completion payload must contain a valid time observation." });
   const effectiveNow = Math.max(current.currentSessionTimeMs, value.payload.currentSessionTimeMs);
   if (effectiveNow < active.deadlineMs) return pendingResult(current, [], { kind: "notDue", actionId, currentSessionTimeMs: current.currentSessionTimeMs, deadlineMs: active.deadlineMs });
   const observed = observeTime(captured.plan, current, effectiveNow);
@@ -343,52 +343,6 @@ function completeInteraction(
     Object.freeze({ kind: "actionCompleted", sequence: completionSequence, settlement, span: copySpan(span) } satisfies ActionCompletedEvent),
   ];
   return pendingResult(current, events, { kind: "completed", settlement });
-}
-
-type ResolvedInteraction = { readonly ok: true; readonly result: string | number | null; readonly transcriptText: string } | { readonly ok: false; readonly message: string };
-
-function resolveInteractionCompletion(action: RuntimeInteractionActionSnapshot, payload: unknown): ResolvedInteraction {
-  if (!isPlainRecord(payload)) return { ok: false, message: "Interaction completion payload must be an object." };
-  if (action.interactionKind === "button") {
-    return payload.kind === "activate" && action.ui.kind === "button"
-      ? { ok: true, result: null, transcriptText: action.ui.buttonLabel }
-      : { ok: false, message: "Button completion requires activation only." };
-  }
-  if (action.interactionKind === "text") {
-    if (payload.kind !== "submittedText" || typeof payload.submittedText !== "string" || !completionStringFits(payload.submittedText)) return { ok: false, message: "Text completion requires submitted text within the shared UTF-8 byte limit." };
-    const normalized = payload.submittedText.replace(/\r\n?/gu, "\n");
-    if (/^\s*$/u.test(normalized)) return { ok: false, message: "Text completion must contain a non-whitespace character." };
-    return { ok: true, result: normalized, transcriptText: normalized };
-  }
-  if (action.interactionKind === "number") {
-    if (payload.kind !== "submittedText" || typeof payload.submittedText !== "string" || !completionStringFits(payload.submittedText) || /[\r\n\u2028\u2029]/u.test(payload.submittedText)) return { ok: false, message: "Number completion requires one line of text within the shared UTF-8 byte limit." };
-    const submitted = payload.submittedText.trim();
-    if (!/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/u.test(submitted)) return { ok: false, message: "Number completion is not an accepted decimal or scientific number." };
-    const parsed = Number(submitted);
-    if (!Number.isFinite(parsed)) return { ok: false, message: "Number completion must be finite." };
-    return { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted };
-  }
-  if (action.ui.kind !== "choice") return { ok: false, message: "Choice action payload is malformed." };
-  let matches: readonly { readonly text: string; readonly label: string | number | null }[] = [];
-  if (payload.kind === "submittedText" && typeof payload.submittedText === "string" && completionStringFits(payload.submittedText)) {
-    matches = action.ui.options.filter((option) => option.text === payload.submittedText);
-    if (matches.length !== 1) return { ok: false, message: matches.length === 0 ? "Choice text is not available." : "Choice text is ambiguous; select a labelled control." };
-  } else if (payload.kind === "selectedLabel" && action.ui.labelType !== "none" && (typeof payload.selectedLabel === "string" || typeof payload.selectedLabel === "number")) {
-    if (typeof payload.selectedLabel === "string" && !completionStringFits(payload.selectedLabel)) return { ok: false, message: "Choice label exceeds the shared UTF-8 byte limit." };
-    matches = action.ui.options.filter((option) => option.label === payload.selectedLabel);
-  } else if (payload.kind === "selectedText" && action.ui.labelType === "none" && typeof payload.selectedText === "string" && completionStringFits(payload.selectedText)) {
-    matches = action.ui.options.filter((option) => option.text === payload.selectedText);
-  } else {
-    return { ok: false, message: "Choice completion payload does not match the choice domain." };
-  }
-  if (matches.length !== 1) return { ok: false, message: "Choice selection is not available." };
-  const selected = matches[0]!;
-  return { ok: true, result: selected.label ?? selected.text, transcriptText: selected.text };
-}
-
-function completionStringFits(value: string): boolean {
-  recordValidationTestWork("interactionUtf8Measurements");
-  return interactionStringFits(value);
 }
 
 function executePlannedInstruction(
@@ -598,7 +552,7 @@ function executePlannedInstruction(
       const multiplier = instruction.unit === "ms" ? 1 : instruction.unit === "min" ? 60_000 : instruction.unit === "h" ? 3_600_000 : 1_000;
       const durationMs = value * multiplier;
       const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
-      if (!Number.isFinite(durationMs) || !validSessionTime(deadlineMs)) throw fault("TSR050", "Wait duration is outside the supported session-time range.", instruction.duration.span);
+      if (!Number.isFinite(durationMs) || !isValidSessionTime(deadlineMs)) throw fault("TSR050", "Wait duration is outside the supported session-time range.", instruction.duration.span);
       if (value > 0 && (durationMs <= 0 || deadlineMs <= snapshot.currentSessionTimeMs)) {
         throw fault("TSR050", "Wait duration cannot produce a representable future deadline.", instruction.duration.span);
       }
@@ -2655,10 +2609,6 @@ function result(
 
 function pendingResult<T>(snapshot: RuntimeSnapshot, events: readonly InterpreterEvent[], outcome: T): PendingActionOperationResult<T> {
   return Object.freeze({ ...result(snapshot, events, 0), outcome });
-}
-
-function validSessionTime(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_RUNTIME_SESSION_TIME_MS;
 }
 
 function positiveSafeInteger(value: unknown): value is number {

@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLAYGROUND_EXAMPLES } from "./examples.js";
-import { MAX_WORKSPACE_SOURCE_BYTES, compileWorkspaceSource, executeWorkspaceSource, type WorkspaceResult } from "./workspace.js";
+import { MAX_WORKSPACE_SOURCE_BYTES, compileWorkspaceSource, executeWorkspaceSource, type WorkspaceResult } from "./workspace/controller.js";
 
 export const MAX_WORKSPACE_REQUEST_BYTES = MAX_WORKSPACE_SOURCE_BYTES + 1024;
 

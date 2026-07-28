@@ -1,6 +1,6 @@
 import { CheckpointError, createCheckpoint, deserializeCheckpoint, serializeCheckpoint, type InstructionPlan, type InterpreterEvent, type RuntimeSnapshot } from "../src/index.js";
 import { checkpointStorageKey, exampleUrl, isPlaygroundExampleName, PLAYGROUND_EXAMPLES, type PlaygroundExampleName } from "./examples.js";
-import { MAX_WORKSPACE_SOURCE_BYTES, compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSnapshot, type WorkspaceResult } from "./workspace.js";
+import { MAX_WORKSPACE_SOURCE_BYTES, compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSnapshot, type WorkspaceResult } from "./workspace/controller.js";
 
 const DRAFT_KEY = "teasescript-playground-draft-v1";
 const elements = {
