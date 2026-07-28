@@ -76,6 +76,7 @@ function completeInteraction(
     completionEventSequence: completionSequence,
     result: resolved.result,
     transcriptText: resolved.transcriptText,
+    ui: cloneInteractionUi(action.ui),
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;
@@ -88,4 +89,20 @@ function completeInteraction(
     Object.freeze({ kind: "actionCompleted", sequence: completionSequence, settlement, span: copySpan(span) } satisfies ActionCompletedEvent),
   ];
   return pendingResult(current, events, { kind: "completed", settlement });
+}
+
+function cloneInteractionUi(ui: RuntimeInteractionActionSnapshot["ui"]): RuntimeInteractionActionSnapshot["ui"] {
+  const accessibleName = ui.accessibleName.kind === "text"
+    ? { kind: "text" as const, text: ui.accessibleName.text }
+    : { kind: "localizedDefault" as const, key: ui.accessibleName.key };
+  if (ui.kind === "choice") {
+    return {
+      kind: "choice",
+      labelType: ui.labelType,
+      options: ui.options.map((option) => ({ text: option.text, label: option.label })),
+      accessibleName,
+    };
+  }
+  if (ui.kind === "button") return { kind: "button", buttonLabel: ui.buttonLabel, accessibleName };
+  return { kind: ui.kind, hint: ui.hint, accessibleName };
 }

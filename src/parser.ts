@@ -1373,7 +1373,17 @@ class Parser {
         separatorSpan,
         span: spanFrom(label?.span ?? value.span, value.span),
       }));
-      if (separatorSpan === null) break;
+      if (separatorSpan === null) {
+        if (!this.#check(TokenKind.Newline) && !this.#check(TokenKind.EndOfFile)) {
+          this.#reportSpan(
+            parserDiagnosticCode.expectedChoiceSeparator,
+            "Expected ',' or the end of the statement after a choice option.",
+            this.#peek().span,
+          );
+          this.#synchronizeStatement();
+        }
+        break;
+      }
       if (this.#check(TokenKind.Newline) || this.#check(TokenKind.EndOfFile)) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedChoiceOption,

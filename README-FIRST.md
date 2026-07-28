@@ -27,7 +27,7 @@ The current repository implementation includes:
 - ADR 0018 Slice A compact `showButton`, `askText`, `askNumber`, and `choose` syntax lowered through the single generic foreground-interaction runtime family;
 - a standalone fixed-example browser playground.
 
-Instruction plans use version 6; runtime snapshots and checkpoints use version 6. These are POC formats, not permanent public wire-format promises.
+Instruction plans use version 6; runtime snapshots and checkpoints use version 7. These are POC formats, not permanent public wire-format promises.
 
 This does not mean that the complete V30 language, static type system, timers, input, media, cross-origin player host, Laravel persistence, accounts, publishing, or continuous personalities are implemented.
 

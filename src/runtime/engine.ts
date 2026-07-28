@@ -475,7 +475,7 @@ function executePlannedInstruction(
       assertNoLiveInteractionSettlement(snapshot, instruction.span);
       const ui = instruction.preparedUi === undefined
         ? instruction.ui
-        : materializeInteractionUi(instruction.preparedUi, snapshot.temporaries, instruction.span);
+        : materializeInteractionUi(instruction.preparedUi, snapshot.temporaries, evaluator, instruction.span);
       if (ui === null) throw fault("TSR052", "Interaction UI data is unavailable.", instruction.span);
       if (
         instruction.destinationTemporary !== null &&
@@ -551,13 +551,20 @@ function executePlannedInstruction(
 
 function materializeInteractionUi(
   prepared: PreparedInteractionUiPayload,
-  temporaries: readonly RuntimeTemporarySnapshot[],
+  temporaries: RuntimeTemporarySnapshot[],
+  evaluator: Evaluator,
   span: SourceSpan,
 ): InteractionUiPayload {
   const readText = (temporaryId: number): string => {
-    const value = readTemporary(temporaries, temporaryId, span);
-    if (typeof value !== "string") throw fault("TSR052", "Interaction text must evaluate to a string.", span);
-    return value;
+    const temporary = temporaries.find((item) => item.id === temporaryId);
+    if (temporary === undefined) {
+      throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
+    }
+    const text = evaluator.visibleText(temporary.value, span);
+    // A prepared payload is consumed exactly once. Persist the canonical text
+    // so waiting-state validation and checkpoint restore never select again.
+    temporary.value = text;
+    return text;
   };
   if (prepared.kind === "button") {
     const ui = { kind: "button" as const, buttonLabel: readText(prepared.buttonLabelTemporary), accessibleName: prepared.accessibleName };

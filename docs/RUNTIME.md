@@ -295,7 +295,7 @@ The implementation includes:
 - defensive validation of function regions, parameter progress, call stacks, and prepared-reference state;
 - standalone playground and constrained development server.
 
-Instruction plans use version 6; runtime snapshots and checkpoints use version 6. They are POC formats rather than permanent public wire-format guarantees.
+Instruction plans use version 6; runtime snapshots and checkpoints use version 7. They are POC formats rather than permanent public wire-format guarantees.
 
 The current implementation contains compiler-owned blocking `wait` and one generic foreground `interaction` instruction/action family for button, text, number, and choice. Compact source payloads are prepared in source order into explicit temporaries before the action becomes pending; requesting-speaker provenance is prepared first, and result destinations remain owned by the current root or call frame. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, Player controls, and background pacing remain out of scope.
 
@@ -477,12 +477,12 @@ Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preser
 
 ## Format evolution
 
-The current formats use version 6 instruction plans and version 6 runtime snapshots/checkpoints. Plan version 6 adds compiler-prepared compact-interaction payload and speaker references while reusing the version 6 runtime interaction action, settlement, snapshot, and checkpoint schemas:
+The current formats use version 6 instruction plans and version 7 runtime snapshots/checkpoints. Plan version 6 adds compiler-prepared compact-interaction payload and speaker references. Snapshot/checkpoint version 7 retains the canonical materialized interaction UI in each interaction settlement so restored validation remains able to prove transcript and result provenance after preparation temporaries clear:
 
 ```text
 instruction plan version: 6
-runtime snapshot version: 6
-checkpoint version: 6
+runtime snapshot version: 7
+checkpoint version: 7
 ```
 
 These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field.

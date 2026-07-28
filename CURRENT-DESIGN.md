@@ -135,7 +135,7 @@ The current implementation also:
 - restricts automatic visible-list text selection to strings and finite numbers after one item is selected;
 - rejects malformed zero `xorshift32-v1` seed, direct state, runtime snapshot state, and restored checkpoint state.
 
-Instruction plans use version 6; runtime snapshots and checkpoints use version 6. The pending-action runtime provides compiler-owned blocking `wait` delays plus ADR 0018 Slice A's compact interaction syntax and generic foreground-interaction family, with explicit payload preparation, typed completion, JSON-safe checkpoint/restore, canonical player transcript events, and bounded last-settlement replay. Player UI and smart-autoplay pacing remain unimplemented. Complete static typing and the wider V30 runtime/API surface remain out of scope.
+Instruction plans use version 6; runtime snapshots and checkpoints use version 7. The pending-action runtime provides compiler-owned blocking `wait` delays plus ADR 0018 Slice A's compact interaction syntax and generic foreground-interaction family, with explicit payload preparation, typed completion, JSON-safe checkpoint/restore, retained canonical interaction-settlement provenance, canonical player transcript events, and bounded last-settlement replay. Player UI and smart-autoplay pacing remain unimplemented. Complete static typing and the wider V30 runtime/API surface remain out of scope.
 
 ## Accepted pending-action direction
 

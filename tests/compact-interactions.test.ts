@@ -13,6 +13,7 @@ import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, deserializeCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { completeAction, run } from "../src/runtime/engine.js";
 import { execute, InterpreterCompilationError } from "../src/runtime/interpreter.js";
+import { createSerializableList } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 
 function compiled(source: string, options: Parameters<typeof compileSource>[1] = {}) {
@@ -80,6 +81,22 @@ test("all accepted compact forms parse and malformed forms recover at the next s
     const result = parse(`${source}\nsay "recovered"`);
     assert.ok(result.diagnostics.length > 0, source);
     assert.equal(result.program.statements.at(-1)?.kind, "sayStatement", source);
+  }
+});
+
+test("compact choices diagnose a missing separator at the next option and recover", () => {
+  const cases = [
+    { source: 'let result = choose "One" "Two"', span: [26, 31] },
+    { source: 'let result = choose first: "One" second: "Two"', span: [33, 39] },
+  ];
+  for (const scenario of cases) {
+    const parsed = parse(`${scenario.source}\nsay "recovered"`);
+    assert.deepEqual(parsed.diagnostics.map((diagnostic) => diagnostic.code), ["TSP031"]);
+    assert.deepEqual(
+      [parsed.diagnostics[0]!.span.start.offset, parsed.diagnostics[0]!.span.end.offset],
+      scenario.span,
+    );
+    assert.equal(parsed.program.statements.at(-1)?.kind, "sayStatement");
   }
 });
 
@@ -154,6 +171,76 @@ test("authored payloads evaluate once in source order before pending state", () 
   const completed = completePending(plan, pending.snapshot, "choice", { kind: "selectedText", selectedText: "Second" });
   assert.equal(completed.outcome.kind, "completed");
   assert.deepEqual(calls, ["First", "Second"]);
+});
+
+test("dynamic interaction UI uses the established visible-text conversion once before waiting", () => {
+  const numberPlan = compiled("showButton 12.5");
+  const numberPending = run(numberPlan, createFreshRuntimeSnapshot(numberPlan));
+  assert.equal(numberPending.snapshot.foregroundAction?.kind === "interaction" && numberPending.snapshot.foregroundAction.ui.kind === "button"
+    ? numberPending.snapshot.foregroundAction.ui.buttonLabel
+    : null, "12.5");
+
+  const listPlan = compiled("let result = choose [\"left\", 2], [\"right\", 3]");
+  const randomValues = [0.75, 0.75];
+  let randomCalls = 0;
+  const listPending = run(listPlan, createFreshRuntimeSnapshot(listPlan), {
+    random: {
+      next: () => {
+        const value = randomValues[randomCalls]!;
+        randomCalls += 1;
+        return value;
+      },
+    },
+  });
+  assert.equal(randomCalls, 2);
+  assert.deepEqual(listPending.snapshot.foregroundAction?.kind === "interaction" ? listPending.snapshot.foregroundAction.ui : null, {
+    kind: "choice",
+    labelType: "none",
+    options: [{ text: "2", label: null }, { text: "3", label: null }],
+    accessibleName: { kind: "localizedDefault", key: "chooseOption" },
+  });
+
+  const seededFirst = run(listPlan, createFreshRuntimeSnapshot(listPlan, { seed: 1591436852 }));
+  const seededSecond = run(listPlan, createFreshRuntimeSnapshot(listPlan, { seed: 1591436852 }));
+  assert.deepEqual(seededFirst.snapshot.foregroundAction, seededSecond.snapshot.foregroundAction);
+  assert.deepEqual(seededFirst.snapshot.rng, seededSecond.snapshot.rng);
+
+  const unsupportedPlan = compiled("showButton [true]");
+  let unsupportedRandomCalls = 0;
+  const unsupported = run(unsupportedPlan, createFreshRuntimeSnapshot(unsupportedPlan), {
+    random: { next: () => { unsupportedRandomCalls += 1; return 0; } },
+  });
+  assert.equal(unsupportedRandomCalls, 1);
+  assert.equal(unsupported.snapshot.failure?.code, "TSR021");
+  assert.equal(unsupported.snapshot.foregroundAction, null);
+  assert.equal(unsupported.snapshot.nextActionId, 1);
+});
+
+test("dynamic list payload selection is fixed before checkpoint restore and is never reevaluated", () => {
+  const plan = compiled("showButton values()", { builtins: ["values"] });
+  let calls = 0;
+  const pending = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1364229357 }), {
+    builtins: {
+      values: () => {
+        calls += 1;
+        return createSerializableList(["left", 2]);
+      },
+    },
+  });
+  assert.equal(calls, 1);
+  const label = pending.snapshot.foregroundAction?.kind === "interaction" && pending.snapshot.foregroundAction.ui.kind === "button"
+    ? pending.snapshot.foregroundAction.ui.buttonLabel
+    : null;
+  const savedRng = pending.snapshot.rng;
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, pending.snapshot)));
+  const resumed = run(restored.plan, restored.snapshot, {
+    builtins: { values: () => { calls += 1; return createSerializableList(["wrong"]); } },
+  });
+  assert.equal(calls, 1);
+  assert.equal(resumed.snapshot.foregroundAction?.kind === "interaction" && resumed.snapshot.foregroundAction.ui.kind === "button"
+    ? resumed.snapshot.foregroundAction.ui.buttonLabel
+    : null, label);
+  assert.deepEqual(resumed.snapshot.rng, savedRng);
 });
 
 test("requesting speaker is captured before payload side effects change the default speaker", () => {
@@ -266,6 +353,48 @@ test("function-owned interaction result survives checkpoint completion and expli
   assert.equal(done.events.find((event) => event.kind === "say")?.text, "150");
   assert.deepEqual(done.snapshot.temporaries, []);
   assert.deepEqual(done.snapshot.callFrames, []);
+});
+
+test("dynamic settlement retains canonical UI provenance before and after payload cleanup", () => {
+  const buttonPlan = compiled("showButton label", { globals: ["label"] });
+  const buttonPending = run(buttonPlan, createFreshRuntimeSnapshot(buttonPlan, { globals: { label: "Continue" } }));
+  const buttonCompleted = completePending(buttonPlan, buttonPending.snapshot, "button", { kind: "activate" });
+  assert.equal(validateRuntimeSnapshot(buttonCompleted.snapshot, buttonPlan).valid, true);
+  const wrongButton = structuredClone(buttonCompleted.snapshot) as any;
+  wrongButton.lastSettlement.transcriptText = "Wrong";
+  assert.equal(validateRuntimeSnapshot(wrongButton, buttonPlan).valid, false);
+  const buttonAfterCleanup = run(buttonPlan, buttonCompleted.snapshot).snapshot;
+  assert.equal(validateRuntimeSnapshot(buttonAfterCleanup, buttonPlan).valid, true);
+  const corruptedCheckpoint = structuredClone(createCheckpoint(buttonPlan, buttonAfterCleanup)) as any;
+  corruptedCheckpoint.snapshot.lastSettlement.ui.buttonLabel = "Wrong";
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(corruptedCheckpoint)));
+
+  const choicePlan = compiled("let result = choose first, second", { globals: ["first", "second"] });
+  const choicePending = run(choicePlan, createFreshRuntimeSnapshot(choicePlan, { globals: { first: "One", second: "Two" } }));
+  const choiceCompleted = completePending(choicePlan, choicePending.snapshot, "choice", { kind: "selectedText", selectedText: "One" });
+  const wrongChoice = structuredClone(choiceCompleted.snapshot) as any;
+  wrongChoice.lastSettlement.result = "Two";
+  wrongChoice.temporaries.find((temporary: any) => temporary.id === wrongChoice.lastSettlement.destinationTemporary).value = "Two";
+  assert.equal(validateRuntimeSnapshot(wrongChoice, choicePlan).valid, false);
+  const choiceAfterCleanup = run(choicePlan, choiceCompleted.snapshot).snapshot;
+  const missingOption = structuredClone(choiceAfterCleanup) as any;
+  missingOption.lastSettlement.transcriptText = "Missing";
+  missingOption.lastSettlement.result = "Missing";
+  assert.equal(validateRuntimeSnapshot(missingOption, choicePlan).valid, false);
+  const malformedCheckpoint = structuredClone(createCheckpoint(choicePlan, choiceAfterCleanup)) as any;
+  malformedCheckpoint.snapshot.lastSettlement.ui.options[0].text = "Corrupted";
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(malformedCheckpoint)));
+
+  const labelledPlan = compiled("let result = choose first: firstText, second: secondText", { globals: ["firstText", "secondText"] });
+  const labelledPending = run(labelledPlan, createFreshRuntimeSnapshot(labelledPlan, { globals: { firstText: "Same", secondText: "Same" } }));
+  const labelledCompleted = completePending(labelledPlan, labelledPending.snapshot, "choice", { kind: "selectedLabel", selectedLabel: "first" });
+  const labelledAfterCleanup = run(labelledPlan, labelledCompleted.snapshot).snapshot;
+  const mismatchedLabel = structuredClone(labelledAfterCleanup) as any;
+  mismatchedLabel.lastSettlement.result = "third";
+  assert.equal(validateRuntimeSnapshot(mismatchedLabel, labelledPlan).valid, false);
+  const mismatchedLabelCheckpoint = structuredClone(createCheckpoint(labelledPlan, labelledAfterCleanup)) as any;
+  mismatchedLabelCheckpoint.snapshot.lastSettlement.transcriptText = "Missing";
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(mismatchedLabelCheckpoint)));
 });
 
 test("exact dynamic string boundary is accepted and narrator fallback remains null", () => {

@@ -70,7 +70,17 @@ export function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): Ru
     completionEventSequence: settlement.completionEventSequence,
     result: settlement.result,
     transcriptText: settlement.transcriptText,
+    ui: cloneInteractionUi(settlement.ui),
   };
+}
+
+function cloneInteractionUi(ui: import("../../plan/model.js").InteractionUiPayload): import("../../plan/model.js").InteractionUiPayload {
+  const accessibleName = ui.accessibleName.kind === "text"
+    ? { kind: "text" as const, text: ui.accessibleName.text }
+    : { kind: "localizedDefault" as const, key: ui.accessibleName.key };
+  if (ui.kind === "choice") return { kind: "choice", labelType: ui.labelType, options: ui.options.map((option) => ({ text: option.text, label: option.label })), accessibleName };
+  if (ui.kind === "button") return { kind: "button", buttonLabel: ui.buttonLabel, accessibleName };
+  return { kind: ui.kind, hint: ui.hint, accessibleName };
 }
 
 export function assertCounterCanAdvance(value: number, field: string): void {

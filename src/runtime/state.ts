@@ -54,7 +54,7 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 6;
+export const RUNTIME_SNAPSHOT_VERSION = 7;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -439,6 +439,7 @@ function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeAc
     completionEventSequence: settlement.completionEventSequence,
     result: settlement.result,
     transcriptText: settlement.transcriptText,
+    ui: cloneInteractionUi(settlement.ui),
   };
 }
 
@@ -2132,9 +2133,9 @@ function validSettlementKindData(
     "owningInstruction", "continuationInstruction", "ownerCallFrameId",
     "destinationTemporary", "requestEventSequence",
     "transcriptEventSequence", "completionEventSequence", "result",
-    "transcriptText",
+    "transcriptText", "ui",
   ])) return false;
-  if (!["button", "text", "number", "choice"].includes(String(settlement.interactionKind)) || typeof settlement.transcriptText !== "string" || !interactionStringFits(settlement.transcriptText) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.transcriptEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.transcriptEventSequence || settlement.transcriptEventSequence >= settlement.completionEventSequence) return false;
+  if (!["button", "text", "number", "choice"].includes(String(settlement.interactionKind)) || typeof settlement.transcriptText !== "string" || !interactionStringFits(settlement.transcriptText) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.transcriptEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.transcriptEventSequence || settlement.transcriptEventSequence >= settlement.completionEventSequence || !validInteractionUiShape(settlement.interactionKind as "button" | "text" | "number" | "choice", settlement.ui)) return false;
   const settlementInstruction = plan !== undefined && nonNegativeSafeInteger(settlement.owningInstruction)
     ? plan.instructions[settlement.owningInstruction]
     : undefined;
@@ -2195,6 +2196,19 @@ function validSettlementKindData(
     ) return false;
   }
 
+  const settledUi = settlement.ui;
+  if (!isPlainRecord(settledUi)) return false;
+  const settlementMatchesUi = settledUi.kind === "button"
+    ? settlement.result === null && settlement.transcriptText === settledUi.buttonLabel
+    : settledUi.kind === "text"
+      ? settlement.result === settlement.transcriptText
+      : settledUi.kind === "number"
+        ? true
+        : settledUi.kind === "choice" && Array.isArray(settledUi.options) && settledUi.options.some((option) =>
+          isPlainRecord(option) && option.text === settlement.transcriptText && (option.label ?? option.text) === settlement.result
+        );
+  if (!settlementMatchesUi) return false;
+
   if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const instruction = plan.instructions[settlement.owningInstruction];
   if (instruction?.kind !== "interaction" || instruction.interactionKind !== settlement.interactionKind) return false;
@@ -2203,16 +2217,8 @@ function validSettlementKindData(
     !validInteractionSettlementOwner(settlement, snapshot, analysis) ||
     !validInteractionSettlementDestinationState(settlement, snapshot, analysis)
   ) return false;
-  if (instruction.preparedUi !== undefined) {
-    if (instruction.interactionKind === "button") return settlement.result === null;
-    if (instruction.interactionKind === "text") return settlement.result === settlement.transcriptText;
-    return true;
-  }
-  if (instruction.ui?.kind === "button") return settlement.transcriptText === instruction.ui.buttonLabel;
-  if (instruction.ui?.kind === "text") return settlement.result === settlement.transcriptText;
-  if (instruction.ui?.kind === "number") return true;
-  if (instruction.ui?.kind !== "choice") return false;
-  return instruction.ui.options.some((option) => option.text === settlement.transcriptText && (option.label ?? option.text) === settlement.result);
+  return instruction.preparedUi !== undefined ||
+    (instruction.ui !== null && interactionUiEqual(instruction.ui, settlement.ui));
 }
 
 function preparedInteractionUiEqual(

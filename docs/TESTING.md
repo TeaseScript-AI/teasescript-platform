@@ -30,7 +30,7 @@ specifier forms.
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
-ADR 0018 Slice A tests compile real compact interaction source through parser, semantic validation, versioned lowering, the generic interaction runtime, completion, transcript emission, checkpoint JSON restore, and call-frame resume. The property fixture catalog likewise reaches button, text, and labelled choice waiting states from real source rather than replacing unrelated instructions in a manually built plan.
+ADR 0018 Slice A tests compile real compact interaction source through parser, semantic validation, versioned lowering, the generic interaction runtime, completion, transcript emission, checkpoint JSON restore, and call-frame resume. Dynamic UI tests also cover deterministic visible-text list selection, one-time RNG consumption, and retained materialized settlement provenance after preparation temporaries clear. The property fixture catalog likewise reaches button, text, and labelled choice waiting states from real source rather than replacing unrelated instructions in a manually built plan.
 
 ## Test layers
 
