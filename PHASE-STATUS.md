@@ -2,7 +2,7 @@
 
 ## Evidence boundary
 
-- Current repository baseline for this status update: `e041b6c74ec422e0ec037c8e7fdf2d64c56cc69e` on `main`, the merge of PR #123.
+- Current repository baseline for this status update: `96737a19bcd85b559ead3cc0c1623efc3044e3c0` on `main`, the merge of PR #119 after PR #123.
 - The seven-item implemented-foundation hardening set tracked by issue #7 is complete, including the compiler/template work in PR #19, RNG-state work in PR #20, and the direct-AST non-finite-number boundary repair in PR #34.
 - PR #37 added sequenced `TSW002` developer warnings when `list.remove(value)` finds no matching value while preserving the unchanged list.
 - PR #48 completed the owner-selected reusable runtime resume-equivalence outcome tracked as `POC-ENGINE-002`, with a shared test-only helper and bounded corpus that checks every completed instruction boundary through a real JSON checkpoint round trip.
@@ -10,6 +10,7 @@
 - PR #45 rejects core and configured injected builtin identifiers when they are used as ordinary runtime values while preserving direct builtin calls.
 - PR #117 completed issue #110 by implementing the generic typed foreground-interaction runtime, shared version-1 interaction limits, canonical player transcript events, typed completion, and versioned checkpoint/restore behavior.
 - PR #122 documented the staged property/fuzz testing roadmap. PR #123 completed issue #120 and the selected `POC-ENGINE-003` adversarial runtime-data mutation-testing outcome with a deterministic repository-owned Phase 1 harness.
+- PR #119 recorded the owner-approved Option A source-layout proposal. It changes documentation only; issue #124 owns the behavior-neutral physical implementation from current `main`.
 - Final verification reported for PR #123 used Node `v24.18.0` and npm `11.16.0`; the complete configured check passed 505 tests with 0 failures.
 - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
