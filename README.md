@@ -41,12 +41,13 @@ The page offers fixed repository examples for core behavior, control flow, activ
 
 Fresh playground runs use the fixed unsigned seed `0x6d2b79f5` (`1831565813`) with the versioned `xorshift32-v1` runtime RNG. It is deterministic and serializable, not cryptographically secure and not a permanent syntax guarantee.
 
-The POC has two exactly pinned development dependencies:
+The POC has three exactly pinned top-level development dependencies:
 
-- `typescript` compiles and statically checks the TypeScript core;
-- `@types/node` supplies types for the Node.js test and development-server harness.
+- `@typescript/native@npm:typescript@7.0.2` provides the canonical TypeScript 7 compiler and public `tsc` command;
+- `typescript@npm:@typescript/typescript6@6.0.2` provides the TypeScript 6 programmable API used by repository metadata tooling and exposes `tsc6`;
+- `@types/node@24.13.3` supplies types for the Node.js test and development-server harness.
 
-Neither is a runtime package exposed to TeaseScript content.
+The build and typecheck scripts use the public TypeScript 7 `tsc` command. Repository tooling imports `typescript`, which is deliberately aliased to the TypeScript 6 compatibility package. The lockfile fixes its exact transitive TypeScript 6 implementation. None of these dependencies is a runtime package exposed to TeaseScript content.
 
 ## Documentation
 

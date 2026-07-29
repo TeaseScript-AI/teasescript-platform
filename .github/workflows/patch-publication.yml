@@ -16,22 +16,24 @@ jobs:
       pull-requests: read
     outputs:
       transfer_branch: ${{ steps.request.outputs.transfer_branch }}
+      expected_manifest_sha256: ${{ steps.request.outputs.expected_manifest_sha256 }}
       expected_target_branch: ${{ steps.request.outputs.expected_target_branch }}
       issue_number: ${{ steps.request.outputs.issue_number }}
     steps:
       - name: Validate publication command
         id: request
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const body = context.payload.comment.body.trim();
-            const match = /^\/publish-patch ([A-Za-z0-9][A-Za-z0-9._\/-]{0,239})$/.exec(body);
+            const match = /^\/publish-patch ([A-Za-z0-9][A-Za-z0-9._\/-]{0,239}) ([0-9a-f]{64})$/.exec(body);
             if (!match) {
-              core.setFailed('Use exactly: /publish-patch agent-patch-publication/<unique-id>');
+              core.setFailed('Use exactly: /publish-patch agent-patch-publication/<unique-id> <manifest-sha256>');
               return;
             }
 
             const transferBranch = match[1];
+            const expectedManifestSha256 = match[2];
             if (
               !transferBranch.startsWith('agent-patch-publication/') ||
               transferBranch === 'agent-patch-publication/' ||
@@ -40,6 +42,11 @@ jobs:
               transferBranch.endsWith('/')
             ) {
               core.setFailed('Invalid transfer branch name.');
+              return;
+            }
+
+            if (!context.payload.issue.pull_request) {
+              core.setFailed('Patch publication commands must be placed on a pull request.');
               return;
             }
 
@@ -53,22 +60,19 @@ jobs:
               return;
             }
 
-            let expectedTargetBranch = '';
-            if (context.payload.issue.pull_request) {
-              const pull = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number,
-              });
-              if (pull.data.head.repo?.full_name !== context.payload.repository.full_name) {
-                core.setFailed('Cross-repository pull-request heads are not supported.');
-                return;
-              }
-              expectedTargetBranch = pull.data.head.ref;
+            const pull = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            if (pull.data.head.repo?.full_name !== context.payload.repository.full_name) {
+              core.setFailed('Cross-repository pull-request heads are not supported.');
+              return;
             }
 
             core.setOutput('transfer_branch', transferBranch);
-            core.setOutput('expected_target_branch', expectedTargetBranch);
+            core.setOutput('expected_manifest_sha256', expectedManifestSha256);
+            core.setOutput('expected_target_branch', pull.data.head.ref);
             core.setOutput('issue_number', String(context.issue.number));
 
   prepare:
@@ -86,11 +90,12 @@ jobs:
       candidate_commit_sha: ${{ steps.prepare.outputs.candidate_commit_sha }}
     env:
       TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
+      EXPECTED_MANIFEST_SHA256: ${{ needs.request.outputs.expected_manifest_sha256 }}
       EXPECTED_TARGET_BRANCH: ${{ needs.request.outputs.expected_target_branch }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - name: Check out trusted workflow revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 0
@@ -111,6 +116,14 @@ jobs:
             "refs/remotes/origin/patch-transfer:.agent-patch-publication/change.patch" \
             > "$RUNNER_TEMP/change.patch"
 
+      - name: Verify authorized manifest digest
+        run: |
+          actual_manifest_sha256="$(sha256sum "$RUNNER_TEMP/manifest.json" | awk '{print $1}')"
+          if [[ "$actual_manifest_sha256" != "$EXPECTED_MANIFEST_SHA256" ]]; then
+            echo "Manifest SHA-256 mismatch: expected $EXPECTED_MANIFEST_SHA256, found $actual_manifest_sha256" >&2
+            exit 1
+          fi
+
       - name: Inspect request
         id: inspect
         run: |
@@ -120,12 +133,10 @@ jobs:
             --manifest "$RUNNER_TEMP/manifest.json"
             --patch "$RUNNER_TEMP/change.patch"
             --transfer-branch "$TRANSFER_BRANCH"
+            --expected-target-branch "$EXPECTED_TARGET_BRANCH"
             --default-branch "$DEFAULT_BRANCH"
             --github-output "$GITHUB_OUTPUT"
           )
-          if [[ -n "$EXPECTED_TARGET_BRANCH" ]]; then
-            args+=(--expected-target-branch "$EXPECTED_TARGET_BRANCH")
-          fi
           python3 -B "$RUNNER_TEMP/patch-publication.py" "${args[@]}"
 
       - name: Check out exact target base
@@ -151,13 +162,11 @@ jobs:
             --manifest "$RUNNER_TEMP/manifest.json"
             --patch "$RUNNER_TEMP/change.patch"
             --transfer-branch "$TRANSFER_BRANCH"
+            --expected-target-branch "$EXPECTED_TARGET_BRANCH"
             --default-branch "$DEFAULT_BRANCH"
             --output-directory "$RUNNER_TEMP/publication"
             --github-output "$GITHUB_OUTPUT"
           )
-          if [[ -n "$EXPECTED_TARGET_BRANCH" ]]; then
-            args+=(--expected-target-branch "$EXPECTED_TARGET_BRANCH")
-          fi
           python3 -B "$RUNNER_TEMP/patch-publication.py" "${args[@]}"
 
       - name: Name candidate artifact
@@ -165,7 +174,7 @@ jobs:
         run: echo "artifact_name=patch-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
       - name: Upload immutable candidate artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ steps.names.outputs.artifact_name }}
           path: ${{ runner.temp }}/publication/
@@ -181,7 +190,7 @@ jobs:
       contents: read
     steps:
       - name: Check out trusted workflow revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 0
@@ -189,7 +198,7 @@ jobs:
           show-progress: false
 
       - name: Download prepared candidate
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ needs.prepare.outputs.artifact_name }}
           path: ${{ runner.temp }}/publication
@@ -212,7 +221,7 @@ jobs:
           test "$(git show -s --format=%T HEAD)" = "$EXPECTED_RESULT_TREE_SHA"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -246,7 +255,7 @@ jobs:
       published_commit_sha: ${{ steps.verify.outputs.candidate_commit_sha }}
     steps:
       - name: Check out trusted workflow revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 0
@@ -257,7 +266,7 @@ jobs:
         run: install -m 0755 tools/local-agent/patch-publication.py "$RUNNER_TEMP/patch-publication.py"
 
       - name: Download tested candidate
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ needs.prepare.outputs.artifact_name }}
           path: ${{ runner.temp }}/publication
@@ -301,7 +310,7 @@ jobs:
       issues: write
     steps:
       - name: Delete transfer branch and report result
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
           ISSUE_NUMBER: ${{ needs.request.outputs.issue_number }}
