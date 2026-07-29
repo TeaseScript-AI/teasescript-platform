@@ -33,7 +33,7 @@ git -C "$repo" update-ref refs/heads/source-bundle "$first_sha"
 output="$temp_root/output"
 (
   cd "$repo"
-  "$helper" \
+  bash "$helper" \
       --output "$output" \
       --repository TeaseScript-AI/teasescript-platform \
       --source-sha "$second_sha" \
@@ -69,7 +69,7 @@ git -c init.defaultBranch=main clone -q "$output/repository.bundle" "$clone"
 # Refuse a source SHA that does not equal the checked-out HEAD.
 if (
   cd "$repo"
-  "$helper" \
+  bash "$helper" \
     --output "$temp_root/should-not-exist" \
     --repository TeaseScript-AI/teasescript-platform \
     --source-sha "$first_sha" \
@@ -84,7 +84,7 @@ fi
 mkdir "$temp_root/existing"
 if (
   cd "$repo"
-  "$helper" \
+  bash "$helper" \
     --output "$temp_root/existing" \
     --repository TeaseScript-AI/teasescript-platform \
     --source-sha "$second_sha" \
