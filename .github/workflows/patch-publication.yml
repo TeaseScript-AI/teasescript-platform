@@ -1,0 +1,336 @@
+name: Publish verified patch
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  request:
+    if: startsWith(github.event.comment.body, '/publish-patch ')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      transfer_branch: ${{ steps.request.outputs.transfer_branch }}
+      expected_target_branch: ${{ steps.request.outputs.expected_target_branch }}
+      issue_number: ${{ steps.request.outputs.issue_number }}
+    steps:
+      - name: Validate publication command
+        id: request
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const body = context.payload.comment.body.trim();
+            const match = /^\/publish-patch ([A-Za-z0-9][A-Za-z0-9._\/-]{0,239})$/.exec(body);
+            if (!match) {
+              core.setFailed('Use exactly: /publish-patch agent-patch-publication/<unique-id>');
+              return;
+            }
+
+            const transferBranch = match[1];
+            if (
+              !transferBranch.startsWith('agent-patch-publication/') ||
+              transferBranch === 'agent-patch-publication/' ||
+              transferBranch.includes('..') ||
+              transferBranch.includes('//') ||
+              transferBranch.endsWith('/')
+            ) {
+              core.setFailed('Invalid transfer branch name.');
+              return;
+            }
+
+            const permission = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.actor,
+            });
+            if (!['admin', 'maintain', 'write'].includes(permission.data.permission)) {
+              core.setFailed('Patch publication requires repository write permission.');
+              return;
+            }
+
+            let expectedTargetBranch = '';
+            if (context.payload.issue.pull_request) {
+              const pull = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+              });
+              if (pull.data.head.repo?.full_name !== context.payload.repository.full_name) {
+                core.setFailed('Cross-repository pull-request heads are not supported.');
+                return;
+              }
+              expectedTargetBranch = pull.data.head.ref;
+            }
+
+            core.setOutput('transfer_branch', transferBranch);
+            core.setOutput('expected_target_branch', expectedTargetBranch);
+            core.setOutput('issue_number', String(context.issue.number));
+
+  prepare:
+    needs: request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      artifact_name: ${{ steps.names.outputs.artifact_name }}
+      target_branch: ${{ steps.prepare.outputs.target_branch }}
+      transfer_branch: ${{ steps.prepare.outputs.transfer_branch }}
+      expected_base_sha: ${{ steps.prepare.outputs.expected_base_sha }}
+      expected_result_tree_sha: ${{ steps.prepare.outputs.expected_result_tree_sha }}
+      candidate_commit_sha: ${{ steps.prepare.outputs.candidate_commit_sha }}
+    env:
+      TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
+      EXPECTED_TARGET_BRANCH: ${{ needs.request.outputs.expected_target_branch }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Check out trusted workflow revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Preserve trusted publication tool
+        run: install -m 0755 tools/local-agent/patch-publication.py "$RUNNER_TEMP/patch-publication.py"
+
+      - name: Read transfer payload
+        run: |
+          git fetch --no-tags origin \
+            "refs/heads/$TRANSFER_BRANCH:refs/remotes/origin/patch-transfer"
+          git show \
+            "refs/remotes/origin/patch-transfer:.agent-patch-publication/manifest.json" \
+            > "$RUNNER_TEMP/manifest.json"
+          git show \
+            "refs/remotes/origin/patch-transfer:.agent-patch-publication/change.patch" \
+            > "$RUNNER_TEMP/change.patch"
+
+      - name: Inspect request
+        id: inspect
+        run: |
+          args=(
+            inspect-request
+            --repository "$GITHUB_WORKSPACE"
+            --manifest "$RUNNER_TEMP/manifest.json"
+            --patch "$RUNNER_TEMP/change.patch"
+            --transfer-branch "$TRANSFER_BRANCH"
+            --default-branch "$DEFAULT_BRANCH"
+            --github-output "$GITHUB_OUTPUT"
+          )
+          if [[ -n "$EXPECTED_TARGET_BRANCH" ]]; then
+            args+=(--expected-target-branch "$EXPECTED_TARGET_BRANCH")
+          fi
+          python3 -B "$RUNNER_TEMP/patch-publication.py" "${args[@]}"
+
+      - name: Check out exact target base
+        env:
+          TARGET_BRANCH: ${{ steps.inspect.outputs.target_branch }}
+          EXPECTED_BASE_SHA: ${{ steps.inspect.outputs.expected_base_sha }}
+        run: |
+          git fetch --no-tags origin \
+            "refs/heads/$TARGET_BRANCH:refs/remotes/origin/patch-target"
+          actual_base_sha="$(git rev-parse refs/remotes/origin/patch-target)"
+          if [[ "$actual_base_sha" != "$EXPECTED_BASE_SHA" ]]; then
+            echo "Target branch moved: expected $EXPECTED_BASE_SHA, found $actual_base_sha" >&2
+            exit 1
+          fi
+          git checkout --detach "$EXPECTED_BASE_SHA"
+
+      - name: Prepare exact candidate bundle
+        id: prepare
+        run: |
+          args=(
+            prepare
+            --repository "$GITHUB_WORKSPACE"
+            --manifest "$RUNNER_TEMP/manifest.json"
+            --patch "$RUNNER_TEMP/change.patch"
+            --transfer-branch "$TRANSFER_BRANCH"
+            --default-branch "$DEFAULT_BRANCH"
+            --output-directory "$RUNNER_TEMP/publication"
+            --github-output "$GITHUB_OUTPUT"
+          )
+          if [[ -n "$EXPECTED_TARGET_BRANCH" ]]; then
+            args+=(--expected-target-branch "$EXPECTED_TARGET_BRANCH")
+          fi
+          python3 -B "$RUNNER_TEMP/patch-publication.py" "${args[@]}"
+
+      - name: Name candidate artifact
+        id: names
+        run: echo "artifact_name=patch-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload immutable candidate artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.names.outputs.artifact_name }}
+          path: ${{ runner.temp }}/publication/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  test:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out trusted workflow revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Download prepared candidate
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare.outputs.artifact_name }}
+          path: ${{ runner.temp }}/publication
+
+      - name: Check out exact candidate
+        env:
+          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch }}
+          CANDIDATE_COMMIT_SHA: ${{ needs.prepare.outputs.candidate_commit_sha }}
+          EXPECTED_BASE_SHA: ${{ needs.prepare.outputs.expected_base_sha }}
+          EXPECTED_RESULT_TREE_SHA: ${{ needs.prepare.outputs.expected_result_tree_sha }}
+        run: |
+          git fetch --no-tags origin \
+            "refs/heads/$TARGET_BRANCH:refs/remotes/origin/patch-target"
+          test "$(git rev-parse refs/remotes/origin/patch-target)" = "$EXPECTED_BASE_SHA"
+          git fetch --no-tags "$RUNNER_TEMP/publication/publication.bundle" \
+            "refs/heads/patch-publication-candidate:refs/heads/test-candidate"
+          git checkout --detach refs/heads/test-candidate
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT_SHA"
+          test "$(git show -s --format=%P HEAD)" = "$EXPECTED_BASE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$EXPECTED_RESULT_TREE_SHA"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Validate repository tooling
+        run: |
+          bash -n tools/work-packages/integrate.sh
+          jq empty tools/work-packages/PACKAGE.schema.json
+          jq empty tools/work-packages/templates/PACKAGE.example.json
+          while IFS= read -r test_file; do
+            case "$test_file" in
+              *.py) python3 -B "$test_file" ;;
+              *.sh) bash "$test_file" ;;
+            esac
+          done < <(find tools/local-agent -maxdepth 1 -type f \
+            \( -name 'test-*.py' -o -name 'test-*.sh' \) -print | sort)
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check source
+        run: npm run check
+
+  publish:
+    needs: [prepare, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      published_commit_sha: ${{ steps.verify.outputs.candidate_commit_sha }}
+    steps:
+      - name: Check out trusted workflow revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+
+      - name: Preserve trusted publication tool
+        run: install -m 0755 tools/local-agent/patch-publication.py "$RUNNER_TEMP/patch-publication.py"
+
+      - name: Download tested candidate
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare.outputs.artifact_name }}
+          path: ${{ runner.temp }}/publication
+
+      - name: Fetch expected target base
+        env:
+          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch }}
+          EXPECTED_BASE_SHA: ${{ needs.prepare.outputs.expected_base_sha }}
+        run: |
+          git fetch --no-tags origin \
+            "refs/heads/$TARGET_BRANCH:refs/remotes/origin/patch-target"
+          actual_base_sha="$(git rev-parse refs/remotes/origin/patch-target)"
+          if [[ "$actual_base_sha" != "$EXPECTED_BASE_SHA" ]]; then
+            echo "Target branch moved: expected $EXPECTED_BASE_SHA, found $actual_base_sha" >&2
+            exit 1
+          fi
+
+      - name: Verify candidate without executing it
+        id: verify
+        run: |
+          python3 -B "$RUNNER_TEMP/patch-publication.py" verify-bundle \
+            --repository "$GITHUB_WORKSPACE" \
+            --metadata "$RUNNER_TEMP/publication/publication.json" \
+            --bundle "$RUNNER_TEMP/publication/publication.bundle" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Publish by non-force fast-forward
+        env:
+          TARGET_BRANCH: ${{ steps.verify.outputs.target_branch }}
+          CANDIDATE_COMMIT_SHA: ${{ steps.verify.outputs.candidate_commit_sha }}
+        run: |
+          git push --porcelain origin \
+            "$CANDIDATE_COMMIT_SHA:refs/heads/$TARGET_BRANCH"
+
+  cleanup:
+    if: ${{ always() && needs.request.result == 'success' }}
+    needs: [request, prepare, test, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: Delete transfer branch and report result
+        uses: actions/github-script@v9
+        env:
+          TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
+          ISSUE_NUMBER: ${{ needs.request.outputs.issue_number }}
+          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch }}
+          PUBLISHED_COMMIT_SHA: ${{ needs.publish.outputs.published_commit_sha }}
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        with:
+          script: |
+            try {
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${process.env.TRANSFER_BRANCH}`,
+              });
+            } catch (error) {
+              if (error.status !== 404 && error.status !== 422) {
+                throw error;
+              }
+            }
+
+            const succeeded = process.env.PUBLISH_RESULT === 'success';
+            const body = succeeded
+              ? `Published verified patch as ${process.env.PUBLISHED_COMMIT_SHA} on \`${process.env.TARGET_BRANCH}\`. The transfer branch was removed.`
+              : `Patch publication failed (prepare: ${process.env.PREPARE_RESULT}, test: ${process.env.TEST_RESULT}, publish: ${process.env.PUBLISH_RESULT}). The transfer branch was removed.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.ISSUE_NUMBER),
+              body,
+            });
