@@ -23,7 +23,7 @@ jobs:
 
       - name: Create verified source bundle
         run: |
-          tools/local-agent/create-source-bundle.sh \
+          bash tools/local-agent/create-source-bundle.sh \
             --output source-artifact \
             --repository "${{ github.repository }}" \
             --source-sha "$SOURCE_SHA" \
