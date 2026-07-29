@@ -23,7 +23,9 @@ refs = re.findall(r"^\s*uses:\s*([^\s#]+)", text, re.MULTILINE)
 assert refs and all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in refs)
 assert re.search(r"^  workflow_dispatch:\n    inputs:\n      source_ref:\n", text, re.MULTILINE)
 assert "Branch, tag, pull-request ref, or full commit SHA to bundle" in text
-assert "TOOLING_REF:" in text and "github.event.repository.default_branch" in text
+assert "github.event_name != 'workflow_dispatch'" in text
+assert "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)" in text
+assert "TOOLING_REF: ${{ github.workflow_sha }}" in text
 assert "REQUESTED_SOURCE:" in text and "inputs.source_ref" in text
 assert "SOURCE_REF:" in text and "github.head_ref" in text
 assert text.count("uses: actions/checkout@") == 2
@@ -115,7 +117,7 @@ if (
     --output "$temp_root/should-not-exist" \
     --repository TeaseScript-AI/teasescript-platform \
     --source-sha "$first_sha" \
-    --source-ref fixture-branch \
+     --source-ref fixture-branch \
     --event-name test
 ) >/dev/null 2>&1; then
   fail "helper accepted a source SHA different from HEAD"

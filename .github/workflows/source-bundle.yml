@@ -17,9 +17,12 @@ permissions:
 
 jobs:
   source-bundle:
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     env:
-      TOOLING_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.sha }}
+      TOOLING_REF: ${{ github.workflow_sha }}
       REQUESTED_SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || (github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha) }}
       SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || (github.event_name == 'pull_request' && github.head_ref || github.ref_name) }}
     steps:
