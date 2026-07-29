@@ -37,6 +37,10 @@ function formatFailure(data) {
   ].join("\n");
 }
 
+function isExpectedFailure(data) {
+  return data.todo !== undefined || data.skip !== undefined;
+}
+
 function formatSummary(data) {
   const counts = data.counts;
   const optionalCounts = [];
@@ -59,7 +63,10 @@ export default async function* summaryReporter(source) {
   let cumulativeSummary;
 
   for await (const event of source) {
-    if (event.type === "test:fail") {
+    if (
+      event.type === "test:fail"
+      && !isExpectedFailure(event.data)
+    ) {
       yield `${formatFailure(event.data)}\n`;
     } else if (event.type === "test:summary") {
       lastSummary = event.data;

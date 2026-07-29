@@ -66,3 +66,23 @@ test("summary reporter prints failure details and totals", () => {
   assert.doesNotMatch(result.stdout, /passing test stays hidden/);
   assert.equal(result.stderr, "");
 });
+
+test("summary reporter suppresses expected TODO failure details", () => {
+  const result = runFixture(`
+    import test from "node:test";
+    test("expected unfinished behavior", { todo: true }, () => {
+      throw new Error("TODO_FAILURE_SHOULD_BE_HIDDEN");
+    });
+  `);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    result.stdout,
+    /^tests 1 \| pass 0 \| fail 0 \| todo 1 \| duration \d+ ms\n$/,
+  );
+  assert.doesNotMatch(
+    result.stdout,
+    /FAIL|expected unfinished behavior|TODO_FAILURE_SHOULD_BE_HIDDEN/,
+  );
+  assert.equal(result.stderr, "");
+});
