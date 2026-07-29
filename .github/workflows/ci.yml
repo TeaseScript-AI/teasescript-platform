@@ -24,6 +24,10 @@ jobs:
           bash -n tools/work-packages/integrate.sh
           jq empty tools/work-packages/PACKAGE.schema.json
           jq empty tools/work-packages/templates/PACKAGE.example.json
+      - name: Validate local-agent tooling
+        run: |
+          python3 -B tools/local-agent/test-replace-exact.py
+          tools/local-agent/test-create-source-bundle.sh
       - name: Install dependencies
         run: npm ci
       - name: Check source
