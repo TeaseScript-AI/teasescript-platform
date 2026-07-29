@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag, pull-request ref, or full commit SHA to bundle
+        required: true
+        default: main
+        type: string
 
 permissions:
   contents: read
@@ -12,21 +19,43 @@ jobs:
   source-bundle:
     runs-on: ubuntu-latest
     env:
-      SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      SOURCE_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+      TOOLING_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.sha }}
+      REQUESTED_SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || (github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha) }}
+      SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || (github.event_name == 'pull_request' && github.head_ref || github.ref_name) }}
     steps:
-      - name: Check out exact source commit
+      - name: Check out trusted bundle tooling
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ env.SOURCE_SHA }}
+          ref: ${{ env.TOOLING_REF }}
+          path: tooling
+          persist-credentials: false
+          show-progress: false
+
+      - name: Check out selected source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ env.REQUESTED_SOURCE }}
+          path: source
           fetch-depth: 0
           persist-credentials: false
           show-progress: false
 
-      - name: Create verified source bundle
+      - name: Resolve exact source commit
+        id: source
+        shell: bash
+        working-directory: source
         run: |
-          bash tools/local-agent/create-source-bundle.sh \
-            --output source-artifact \
+          set -euo pipefail
+          source_sha=$(git rev-parse --verify HEAD)
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Create verified source bundle
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          cd source
+          bash ../tooling/tools/local-agent/create-source-bundle.sh \
+            --output ../source-artifact \
             --repository "${{ github.repository }}" \
             --source-sha "$SOURCE_SHA" \
             --source-ref "$SOURCE_REF" \
@@ -35,7 +64,7 @@ jobs:
       - name: Upload source artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: teasescript-source-${{ env.SOURCE_SHA }}
+          name: teasescript-source-${{ steps.source.outputs.sha }}
           path: source-artifact/
           if-no-files-found: error
           retention-days: 1
