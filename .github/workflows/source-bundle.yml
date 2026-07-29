@@ -1,0 +1,40 @@
+name: Source bundle
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  source-bundle:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      SOURCE_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+    steps:
+      - name: Check out exact source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+
+      - name: Create verified source bundle
+        run: |
+          tools/local-agent/create-source-bundle.sh \
+            --output source-artifact \
+            --repository "${{ github.repository }}" \
+            --source-sha "$SOURCE_SHA" \
+            --source-ref "$SOURCE_REF" \
+            --event-name "${{ github.event_name }}"
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: teasescript-source-${{ env.SOURCE_SHA }}
+          path: source-artifact/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
