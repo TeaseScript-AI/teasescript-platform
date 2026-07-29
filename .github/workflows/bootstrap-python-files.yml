@@ -1,0 +1,61 @@
+name: Bootstrap patch publication Python files
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/bootstrap-python-files.yml
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent-bootstrap/patch-publication-139'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out transfer branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent-bootstrap/patch-publication-139
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+
+      - name: Reconstruct and verify Python-only patch
+        env:
+          EXPECTED_PATCH_SHA256: cb9d1c615f565b15d1131d54586b69373bed47dcf6a8cfdee8d212a91e15f8ff
+          EXPECTED_GZIP_SHA256: 625395d2e41e7ee6c6b439be978c0c36e54248e76a781b4bd1fa752792cf6230
+        run: |
+          cat .agent-bootstrap/part-*.b64 > "$RUNNER_TEMP/python-files.patch.gz.b64"
+          base64 --decode "$RUNNER_TEMP/python-files.patch.gz.b64" > "$RUNNER_TEMP/python-files.patch.gz"
+          echo "$EXPECTED_GZIP_SHA256  $RUNNER_TEMP/python-files.patch.gz" | sha256sum --check --strict
+          gzip --decompress --stdout "$RUNNER_TEMP/python-files.patch.gz" > "$RUNNER_TEMP/python-files.patch"
+          echo "$EXPECTED_PATCH_SHA256  $RUNNER_TEMP/python-files.patch" | sha256sum --check --strict
+          test "$(wc -c < "$RUNNER_TEMP/python-files.patch")" = 33336
+
+      - name: Add verified Python files to the feature branch
+        env:
+          TARGET_BRANCH: feat/patch-publication-workflow
+          EXPECTED_BASE_SHA: 91b29d9992d810b6717050c0e2d628ba3378d14b
+          EXPECTED_RESULT_TREE_SHA: e79925f5d282248b06a3c0376019c03f0577e670
+        run: |
+          git fetch --no-tags origin \
+            "refs/heads/$TARGET_BRANCH:refs/remotes/origin/patch-publication-target"
+          actual_base_sha="$(git rev-parse refs/remotes/origin/patch-publication-target)"
+          test "$actual_base_sha" = "$EXPECTED_BASE_SHA"
+          git checkout --detach "$EXPECTED_BASE_SHA"
+          git apply --check --index --binary "$RUNNER_TEMP/python-files.patch"
+          git apply --index --binary "$RUNNER_TEMP/python-files.patch"
+          git diff --cached --check
+          actual_tree_sha="$(git write-tree)"
+          test "$actual_tree_sha" = "$EXPECTED_RESULT_TREE_SHA"
+          git config user.name "Patch Publication Bootstrap"
+          git config user.email "patch-publication-bootstrap@users.noreply.github.com"
+          git commit -m "Add patch publication validation tools"
+          test "$(git show -s --format=%P HEAD)" = "$EXPECTED_BASE_SHA"
+          test "$(git show -s --format=%T HEAD)" = "$EXPECTED_RESULT_TREE_SHA"
+          git push --porcelain origin "HEAD:refs/heads/$TARGET_BRANCH"
