@@ -1,4 +1,4 @@
-import ts from "typescript-api";
+import ts from "typescript";
 
 import { captureExternalData } from "../external-data-limits.js";
 import type { ExactLibraryIdentity, PublicLibraryDefinition } from "./catalog.js";

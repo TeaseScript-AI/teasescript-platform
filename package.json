@@ -7,8 +7,8 @@
     "node": "24.18.0"
   },
   "scripts": {
-    "build": "node ./node_modules/typescript/lib/tsc.js",
-    "typecheck": "node ./node_modules/typescript/lib/tsc.js --noEmit",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "test:compiled": "node --test dist/tests/*.test.js",
     "check:libraries": "npm run build && node --test dist/tests/library-catalog-metadata.test.js dist/tests/library-export-boundary.test.js dist/tests/library-validation-pipeline.test.js",
     "test": "npm run build && npm run test:compiled",
@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "24.13.3",
-    "typescript": "7.0.2",
-    "typescript-api": "npm:typescript@6.0.2"
+    "@typescript/native": "npm:typescript@7.0.2",
+    "typescript": "npm:@typescript/typescript6@6.0.2"
   }
 }
