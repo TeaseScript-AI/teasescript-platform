@@ -14,8 +14,15 @@ refs = re.findall(r"^\s*uses:\s*([^\s#]+)", text, re.MULTILINE)
 assert refs and all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in refs)
 assert "([0-9a-f]{64})$" in text
 assert "Patch publication commands must be placed on a pull request." in text
+assert "github.rest.git.getRef" in text
+assert "expected_transfer_sha" in text
+assert "Read exact transfer payload" in text
+assert 'actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"' in text
 assert "Verify authorized manifest digest" in text
 assert 'sha256sum "$RUNNER_TEMP/manifest.json"' in text
+assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in text
+assert "preserved_changed" in text
+assert "github.rest.git.deleteRef" not in text
 PY
 
 tmp="$(mktemp -d -t patch-publication-workflow-XXXXXX)"
@@ -73,6 +80,7 @@ git -C "$source_repo" push -q "$remote" \
   "$base:refs/heads/$target" \
   "$base:refs/heads/$transfer"
 
+expected_transfer_sha="$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")"
 git clone -q "$remote" "$tmp/publisher"
 python3 -B "$script" verify-bundle \
   --repository "$tmp/publisher" \
@@ -100,7 +108,27 @@ test "$(git --git-dir="$remote" rev-parse "refs/heads/$target")" = "$race"
 git --git-dir="$remote" update-ref "refs/heads/$target" "$base" "$race"
 git -C "$tmp/publisher" push -q origin "$candidate:refs/heads/$target"
 test "$(git --git-dir="$remote" rev-parse "refs/heads/$target")" = "$candidate"
-git -C "$tmp/publisher" push -q origin ":refs/heads/$transfer"
+
+git -C "$tmp/racer" checkout -q -B transfer-update "origin/$transfer"
+printf 'new transfer payload\n' > "$tmp/racer/transfer.txt"
+git -C "$tmp/racer" add transfer.txt
+git -C "$tmp/racer" commit -q -m 'replace transfer payload'
+changed_transfer_sha="$(git -C "$tmp/racer" rev-parse HEAD)"
+git -C "$tmp/racer" push -q origin "HEAD:refs/heads/$transfer"
+
+if git -C "$tmp/publisher" push --porcelain \
+  --force-with-lease="refs/heads/$transfer:$expected_transfer_sha" \
+  origin ":refs/heads/$transfer" >/dev/null 2>&1; then
+  echo 'stale cleanup unexpectedly deleted a changed transfer ref' >&2
+  exit 1
+fi
+test "$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")" = "$changed_transfer_sha"
+
+git --git-dir="$remote" update-ref "refs/heads/$transfer" \
+  "$expected_transfer_sha" "$changed_transfer_sha"
+git -C "$tmp/publisher" push -q \
+  --force-with-lease="refs/heads/$transfer:$expected_transfer_sha" \
+  origin ":refs/heads/$transfer"
 ! git --git-dir="$remote" show-ref --verify "refs/heads/$transfer" >/dev/null 2>&1
 
 echo 'patch-publication workflow checks passed'

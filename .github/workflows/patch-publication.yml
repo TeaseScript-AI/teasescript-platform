@@ -16,6 +16,7 @@ jobs:
       pull-requests: read
     outputs:
       transfer_branch: ${{ steps.request.outputs.transfer_branch }}
+      expected_transfer_sha: ${{ steps.request.outputs.expected_transfer_sha }}
       expected_manifest_sha256: ${{ steps.request.outputs.expected_manifest_sha256 }}
       expected_target_branch: ${{ steps.request.outputs.expected_target_branch }}
       issue_number: ${{ steps.request.outputs.issue_number }}
@@ -70,7 +71,22 @@ jobs:
               return;
             }
 
+            const transfer = await github.rest.git.getRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `heads/${transferBranch}`,
+            });
+            const expectedTransferSha = transfer.data.object.sha;
+            if (
+              transfer.data.object.type !== 'commit' ||
+              !/^[0-9a-f]{40}$/.test(expectedTransferSha)
+            ) {
+              core.setFailed('Transfer branch must resolve to a commit SHA.');
+              return;
+            }
+
             core.setOutput('transfer_branch', transferBranch);
+            core.setOutput('expected_transfer_sha', expectedTransferSha);
             core.setOutput('expected_manifest_sha256', expectedManifestSha256);
             core.setOutput('expected_target_branch', pull.data.head.ref);
             core.setOutput('issue_number', String(context.issue.number));
@@ -90,6 +106,7 @@ jobs:
       candidate_commit_sha: ${{ steps.prepare.outputs.candidate_commit_sha }}
     env:
       TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
+      EXPECTED_TRANSFER_SHA: ${{ needs.request.outputs.expected_transfer_sha }}
       EXPECTED_MANIFEST_SHA256: ${{ needs.request.outputs.expected_manifest_sha256 }}
       EXPECTED_TARGET_BRANCH: ${{ needs.request.outputs.expected_target_branch }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -105,10 +122,15 @@ jobs:
       - name: Preserve trusted publication tool
         run: install -m 0755 tools/local-agent/patch-publication.py "$RUNNER_TEMP/patch-publication.py"
 
-      - name: Read transfer payload
+      - name: Read exact transfer payload
         run: |
           git fetch --no-tags origin \
             "refs/heads/$TRANSFER_BRANCH:refs/remotes/origin/patch-transfer"
+          actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"
+          if [[ "$actual_transfer_sha" != "$EXPECTED_TRANSFER_SHA" ]]; then
+            echo "Transfer branch moved: expected $EXPECTED_TRANSFER_SHA, found $actual_transfer_sha" >&2
+            exit 1
+          fi
           git show \
             "refs/remotes/origin/patch-transfer:.agent-patch-publication/manifest.json" \
             > "$RUNNER_TEMP/manifest.json"
@@ -309,34 +331,87 @@ jobs:
       contents: write
       issues: write
     steps:
-      - name: Delete transfer branch and report result
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+      - name: Check out trusted workflow revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: true
+          show-progress: false
+
+      - name: Delete exact transfer ref
+        id: cleanup_transfer
         env:
           TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
+          EXPECTED_TRANSFER_SHA: ${{ needs.request.outputs.expected_transfer_sha }}
+        run: |
+          transfer_ref="refs/heads/$TRANSFER_BRANCH"
+          cleanup_status=failed
+          cleanup_failed=0
+
+          set +e
+          push_output="$(git push --porcelain \
+            --force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}" \
+            origin ":${transfer_ref}" 2>&1)"
+          push_result=$?
+          set -e
+
+          if [[ $push_result -eq 0 ]]; then
+            cleanup_status=removed
+          else
+            set +e
+            remote_output="$(git ls-remote --heads origin "$transfer_ref" 2>&1)"
+            remote_result=$?
+            set -e
+            if [[ $remote_result -ne 0 ]]; then
+              echo "$push_output" >&2
+              echo "$remote_output" >&2
+              cleanup_status=failed
+              cleanup_failed=1
+            elif [[ -z "$remote_output" ]]; then
+              cleanup_status=already_absent
+            else
+              current_transfer_sha="${remote_output%%$'\t'*}"
+              if [[ "$current_transfer_sha" != "$EXPECTED_TRANSFER_SHA" ]]; then
+                cleanup_status=preserved_changed
+              else
+                echo "$push_output" >&2
+                cleanup_status=failed
+                cleanup_failed=1
+              fi
+            fi
+          fi
+
+          echo "cleanup_status=$cleanup_status" >> "$GITHUB_OUTPUT"
+          if [[ $cleanup_failed -ne 0 ]]; then
+            exit 1
+          fi
+
+      - name: Report publication result
+        if: ${{ always() }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
           ISSUE_NUMBER: ${{ needs.request.outputs.issue_number }}
-          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch }}
+          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch || needs.request.outputs.expected_target_branch }}
           PUBLISHED_COMMIT_SHA: ${{ needs.publish.outputs.published_commit_sha }}
           PREPARE_RESULT: ${{ needs.prepare.result }}
           TEST_RESULT: ${{ needs.test.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
+          CLEANUP_STATUS: ${{ steps.cleanup_transfer.outputs.cleanup_status }}
         with:
           script: |
-            try {
-              await github.rest.git.deleteRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: `heads/${process.env.TRANSFER_BRANCH}`,
-              });
-            } catch (error) {
-              if (error.status !== 404 && error.status !== 422) {
-                throw error;
-              }
-            }
-
+            const cleanupMessages = {
+              removed: 'The exact authorized transfer ref was removed.',
+              already_absent: 'The transfer ref was already absent.',
+              preserved_changed: 'The transfer ref changed after authorization and was preserved.',
+              failed: 'Transfer-ref cleanup failed; inspect the cleanup job logs.',
+            };
+            const cleanupStatus = process.env.CLEANUP_STATUS || 'failed';
+            const cleanupMessage = cleanupMessages[cleanupStatus] || cleanupMessages.failed;
             const succeeded = process.env.PUBLISH_RESULT === 'success';
             const body = succeeded
-              ? `Published verified patch as ${process.env.PUBLISHED_COMMIT_SHA} on \`${process.env.TARGET_BRANCH}\`. The transfer branch was removed.`
-              : `Patch publication failed (prepare: ${process.env.PREPARE_RESULT}, test: ${process.env.TEST_RESULT}, publish: ${process.env.PUBLISH_RESULT}). The transfer branch was removed.`;
+              ? `Published verified patch as ${process.env.PUBLISHED_COMMIT_SHA} on \`${process.env.TARGET_BRANCH}\`. ${cleanupMessage}`
+              : `Patch publication failed (prepare: ${process.env.PREPARE_RESULT}, test: ${process.env.TEST_RESULT}, publish: ${process.env.PUBLISH_RESULT}). ${cleanupMessage}`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
