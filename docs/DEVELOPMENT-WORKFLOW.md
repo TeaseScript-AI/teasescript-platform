@@ -235,6 +235,8 @@ npm run check
 git diff --check
 ```
 
+The canonical compiler is the exact `typescript` package pinned in `package.json`; build and typecheck scripts invoke it directly. Repository tooling that uses the programmable compiler API imports the separately pinned `typescript-api` alias. Do not replace one with the other without an explicit dependency migration.
+
 Also inspect the complete combined diff and run any milestone-specific playground, browser, security, or migration checks.
 
 The final verifier reports:
