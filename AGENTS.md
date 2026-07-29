@@ -30,6 +30,26 @@ Do not treat planning documents, wishes, research files, historical audits, or s
 - Do not weaken tests to hide failures.
 - Do not implement deferred capabilities merely because they appear in planning or reference material.
 
+## Efficient editing and context use
+
+For localized changes, do not rewrite a complete existing file merely for
+convenience. Use the smallest suitable method: `tools/local-agent/replace-exact.py`
+for one exact replacement, a targeted patch for a small structural or multiline
+change, or a bounded codemod with explicit paths and expected match counts for
+repeated mechanical changes. Short text may use `--old-text` and `--new-text`;
+snippet files also work for multiline or byte-exact content.
+
+A complete rewrite is appropriate when replacing the complete contents is the
+intended change, or when a small file genuinely changes almost entirely. Stop
+when an expected match count differs. Read `tools/local-agent/README.md` only
+when basic usage is insufficient or an operation fails.
+
+Read and print only relevant file sections, diff hunks, test failures, and
+workflow logs. After each coherent edit batch, run `git diff --check`, inspect
+`git diff --stat`, and review only the relevant hunks. Do not print successful
+per-test output or complete large files, diffs, or logs without a concrete
+reason.
+
 ## Property-testable boundaries
 
 For parser, compiler, plan, runtime, action, state, checkpoint, and validated host-boundary changes, preserve deterministic public-boundary testing: every accepted plan and successful runtime transition must produce state accepted by the corresponding public validator. Use explicit time/RNG inputs, structured invalid-data handling, and reusable valid-state fixtures where practical. Follow `docs/TESTING.md` and the assigned issue for property or mutation testing; do not add unrelated fuzzing infrastructure, dependencies, or production hooks.
