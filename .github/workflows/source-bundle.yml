@@ -16,10 +16,12 @@ jobs:
       SOURCE_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
     steps:
       - name: Check out exact source commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
 
       - name: Create verified source bundle
         run: |
@@ -36,5 +38,5 @@ jobs:
           name: teasescript-source-${{ env.SOURCE_SHA }}
           path: source-artifact/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
           compression-level: 0
