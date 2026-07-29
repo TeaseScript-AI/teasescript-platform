@@ -8,21 +8,48 @@ target='feat/test-target'
 transfer='agent-patch-publication/integration-test'
 
 python3 - "$workflow" <<'PY'
-import pathlib, re, sys
+import pathlib, re, subprocess, sys, tempfile
 text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 refs = re.findall(r"^\s*uses:\s*([^\s#]+)", text, re.MULTILINE)
 assert refs and all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in refs)
 assert "([0-9a-f]{64})$" in text
 assert "Patch publication commands must be placed on a pull request." in text
 assert "github.rest.git.getRef" in text
+assert "github.rest.repos.getContent" in text
 assert "expected_transfer_sha" in text
-assert "Read exact transfer payload" in text
+assert "format_version" in text
+assert "Read exact transfer manifest" in text
 assert 'actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"' in text
 assert "Verify authorized manifest digest" in text
 assert 'sha256sum "$RUNNER_TEMP/manifest.json"' in text
+assert "materialize-patch" in text
+assert "refs/remotes/origin/patch-transfer" in text
+assert "preserved_retry" in text
+assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in text
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in text
 assert "preserved_changed" in text
 assert "github.rest.git.deleteRef" not in text
+assert 'patch-transfer:.agent-patch-publication/change.patch' not in text
+
+lines = text.splitlines()
+scripts = []
+for index, line in enumerate(lines):
+    if line.strip() != "script: |":
+        continue
+    indent = len(line) - len(line.lstrip())
+    body = []
+    for candidate in lines[index + 1:]:
+        candidate_indent = len(candidate) - len(candidate.lstrip())
+        if candidate.strip() and candidate_indent <= indent:
+            break
+        body.append(candidate[indent + 2:] if candidate.strip() else "")
+    scripts.append("\n".join(body))
+assert len(scripts) == 2
+with tempfile.TemporaryDirectory() as temporary:
+    for index, script in enumerate(scripts):
+        path = pathlib.Path(temporary, f"github-script-{index}.js")
+        path.write_text(f"(async function () {{\n{script}\n}});\n", encoding="utf-8")
+        subprocess.run(["node", "--check", str(path)], check=True)
 PY
 
 tmp="$(mktemp -d -t patch-publication-workflow-XXXXXX)"
