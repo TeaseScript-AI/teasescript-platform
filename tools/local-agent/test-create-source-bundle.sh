@@ -117,7 +117,7 @@ if (
     --output "$temp_root/should-not-exist" \
     --repository TeaseScript-AI/teasescript-platform \
     --source-sha "$first_sha" \
-     --source-ref fixture-branch \
+    --source-ref fixture-branch \
     --event-name test
 ) >/dev/null 2>&1; then
   fail "helper accepted a source SHA different from HEAD"
