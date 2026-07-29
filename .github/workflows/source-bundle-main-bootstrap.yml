@@ -1,0 +1,51 @@
+name: Temporary exact-main source bundle
+
+on:
+  push:
+    branches: [agent/source-bundle-main-bootstrap-20260729]
+
+permissions:
+  contents: read
+
+jobs:
+  source-bundle:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_SHA: b8d507abb9fecede328d18b189d522ecbb4a54d0
+    steps:
+      - name: Check out bootstrap helper
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          show-progress: false
+
+      - name: Preserve helper
+        run: install -m 0755 tools/local-agent/create-source-bundle.sh "$RUNNER_TEMP/create-source-bundle.sh"
+
+      - name: Check out exact main commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Create verified source bundle
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          bash "$RUNNER_TEMP/create-source-bundle.sh" \
+            --output source-artifact \
+            --repository "${{ github.repository }}" \
+            --source-sha "$SOURCE_SHA" \
+            --source-ref main \
+            --event-name bootstrap
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: teasescript-source-${{ env.SOURCE_SHA }}
+          path: source-artifact/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
