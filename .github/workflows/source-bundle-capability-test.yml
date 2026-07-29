@@ -1,0 +1,61 @@
+name: Source Bundle Capability Test
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  source-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact pull-request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Create exact Git source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          head_sha='${{ github.event.pull_request.head.sha }}'
+          head_ref='${{ github.head_ref }}'
+          tree_sha="$(git rev-parse "${head_sha}^{tree}")"
+
+          git update-ref refs/bundle/pr-head "${head_sha}"
+          git bundle create repository.bundle refs/bundle/pr-head
+          git bundle verify repository.bundle
+
+          bundle_sha256="$(sha256sum repository.bundle | awk '{print $1}')"
+
+          jq -n \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg commitSha "${head_sha}" \
+            --arg treeSha "${tree_sha}" \
+            --arg branch "${head_ref}" \
+            --arg bundleSha256 "${bundle_sha256}" \
+            '{
+              repository: $repository,
+              commitSha: $commitSha,
+              treeSha: $treeSha,
+              branch: $branch,
+              bundleSha256: $bundleSha256
+            }' > manifest.json
+
+          test "$(jq -r '.commitSha' manifest.json)" = "${head_sha}"
+          test "$(jq -r '.treeSha' manifest.json)" = "${tree_sha}"
+          echo "${bundle_sha256}  repository.bundle" | sha256sum --check --strict
+
+      - name: Upload exact source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: teasescript-source-${{ github.event.pull_request.head.sha }}
+          path: |
+            repository.bundle
+            manifest.json
+          if-no-files-found: error
+          retention-days: 1
