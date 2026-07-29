@@ -14,6 +14,7 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("patch-publication.py")
+PREPARE_SCRIPT = Path(__file__).with_name("prepare-patch-publication.py")
 TRANSFER_BRANCH = "agent-patch-publication/test-request"
 TARGET_BRANCH = "feat/test-target"
 
@@ -175,6 +176,144 @@ class PatchPublicationTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 1)
         self.assertIn("patch SHA-256 mismatch", completed.stderr)
+
+    def test_generator_reconstructs_exact_patch_at_64_128_and_256_kib(self) -> None:
+        repository = self.root / "generator-repo"
+        repository.mkdir()
+        git(repository, "init", "-q", "-b", "main")
+        git(repository, "config", "user.name", "Generator Test")
+        git(repository, "config", "user.email", "generator@example.invalid")
+        (repository / "base.txt").write_text("base\n", encoding="utf-8")
+        git(repository, "add", "base.txt")
+        git(repository, "commit", "-q", "-m", "Base")
+        base = git(repository, "rev-parse", "HEAD")
+
+        regular_lines = "".join(
+            f"line {index:05d} — deterministic multipart payload\n"
+            for index in range(9000)
+        )
+        long_line = "é" * 70000 + "\n"
+        (repository / "large.txt").write_text(
+            regular_lines + long_line, encoding="utf-8", newline="\n"
+        )
+        git(repository, "add", "large.txt")
+        git(repository, "commit", "-q", "-m", "Add large UTF-8 fixture")
+        tested_commit = git(repository, "rev-parse", "HEAD")
+        original_patch = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--binary",
+                "--full-index",
+                "--no-renames",
+                base,
+                tested_commit,
+            ],
+            cwd=repository,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        ).stdout
+        self.assertGreater(len(original_patch), 256 * 1024)
+
+        for part_size_kib in (64, 128, 256):
+            with self.subTest(part_size_kib=part_size_kib):
+                output = self.root / f"payload-{part_size_kib}"
+                completed = run(
+                    [
+                        sys.executable,
+                        str(PREPARE_SCRIPT),
+                        "--repository",
+                        str(repository),
+                        "--target-branch",
+                        TARGET_BRANCH,
+                        "--default-branch",
+                        "main",
+                        "--tested-commit",
+                        tested_commit,
+                        "--expected-base-sha",
+                        base,
+                        "--part-size-kib",
+                        str(part_size_kib),
+                        "--output-directory",
+                        str(output),
+                    ],
+                    cwd=repository,
+                )
+                self.assertIn("prepared multipart patch publication", completed.stdout)
+                transfer_root = output / ".agent-patch-publication"
+                manifest_path = transfer_root / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                self.assertEqual(manifest["formatVersion"], 2)
+                self.assertEqual(manifest["expectedBaseSha"], base)
+                self.assertEqual(manifest["patchSizeBytes"], len(original_patch))
+                self.assertEqual(
+                    manifest["patchSha256"], hashlib.sha256(original_patch).hexdigest()
+                )
+                reconstructed = bytearray()
+                for index, part in enumerate(manifest["parts"], start=1):
+                    expected_path = (
+                        ".agent-patch-publication/parts/change.patch.part-"
+                        f"{index:04d}-of-{len(manifest['parts']):04d}"
+                    )
+                    self.assertEqual(part["path"], expected_path)
+                    value = (output / expected_path).read_bytes()
+                    value.decode("utf-8")
+                    self.assertLessEqual(len(value), part_size_kib * 1024)
+                    self.assertEqual(part["sizeBytes"], len(value))
+                    self.assertEqual(part["sha256"], hashlib.sha256(value).hexdigest())
+                    reconstructed.extend(value)
+                self.assertEqual(bytes(reconstructed), original_patch)
+
+    def test_generator_rejects_dirty_repository_non_head_and_existing_output(self) -> None:
+        repository = self.root / "generator-errors"
+        repository.mkdir()
+        git(repository, "init", "-q", "-b", "main")
+        git(repository, "config", "user.name", "Generator Test")
+        git(repository, "config", "user.email", "generator@example.invalid")
+        (repository / "example.txt").write_text("base\n", encoding="utf-8")
+        git(repository, "add", "example.txt")
+        git(repository, "commit", "-q", "-m", "Base")
+        base = git(repository, "rev-parse", "HEAD")
+        (repository / "example.txt").write_text("changed\n", encoding="utf-8")
+        git(repository, "add", "example.txt")
+        git(repository, "commit", "-q", "-m", "Change")
+        head = git(repository, "rev-parse", "HEAD")
+
+        def generator(*extra: str) -> list[str]:
+            return [
+                sys.executable,
+                str(PREPARE_SCRIPT),
+                "--repository",
+                str(repository),
+                "--target-branch",
+                TARGET_BRANCH,
+                "--expected-base-sha",
+                base,
+                "--output-directory",
+                str(self.root / "generator-output"),
+                *extra,
+            ]
+
+        non_head = run(
+            generator("--tested-commit", base), cwd=repository, check=False
+        )
+        self.assertEqual(non_head.returncode, 1)
+        self.assertIn("must be the current HEAD", non_head.stderr)
+
+        (repository / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+        dirty = run(generator("--tested-commit", head), cwd=repository, check=False)
+        self.assertEqual(dirty.returncode, 1)
+        self.assertIn("must be clean", dirty.stderr)
+        (repository / "dirty.txt").unlink()
+
+        output = self.root / "generator-output"
+        output.mkdir()
+        existing = run(
+            generator("--tested-commit", head), cwd=repository, check=False
+        )
+        self.assertEqual(existing.returncode, 1)
+        self.assertIn("output path already exists", existing.stderr)
 
     def test_prepare_rejects_wrong_checked_out_base(self) -> None:
         (self.repo / "other.txt").write_text("other\n", encoding="utf-8")
