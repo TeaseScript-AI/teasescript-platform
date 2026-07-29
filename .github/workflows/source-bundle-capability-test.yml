@@ -26,9 +26,10 @@ jobs:
           head_ref='${{ github.head_ref }}'
           tree_sha="$(git rev-parse "${head_sha}^{tree}")"
 
-          # A refs/heads/* ref allows ordinary `git clone repository.bundle workspace`.
+          # Include both HEAD and a refs/heads/* ref so an ordinary clone
+          # checks out the exact pull-request head automatically.
           git update-ref refs/heads/source-bundle "${head_sha}"
-          git bundle create repository.bundle refs/heads/source-bundle
+          git bundle create repository.bundle HEAD refs/heads/source-bundle
 
           verify_repo="$(mktemp -d)"
           git -C "${verify_repo}" init --bare --quiet
