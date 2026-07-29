@@ -17,7 +17,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: Create exact Git source bundle
+      - name: Create and verify exact Git source bundle
         shell: bash
         run: |
           set -euo pipefail
@@ -26,9 +26,20 @@ jobs:
           head_ref='${{ github.head_ref }}'
           tree_sha="$(git rev-parse "${head_sha}^{tree}")"
 
-          git update-ref refs/bundle/pr-head "${head_sha}"
-          git bundle create repository.bundle refs/bundle/pr-head
-          git bundle verify repository.bundle
+          # A refs/heads/* ref allows ordinary `git clone repository.bundle workspace`.
+          git update-ref refs/heads/source-bundle "${head_sha}"
+          git bundle create repository.bundle refs/heads/source-bundle
+
+          verify_repo="$(mktemp -d)"
+          git -C "${verify_repo}" init --bare --quiet
+          git -C "${verify_repo}" bundle verify "${GITHUB_WORKSPACE}/repository.bundle"
+
+          clone_dir="$(mktemp -d)"
+          rmdir "${clone_dir}"
+          git clone --quiet repository.bundle "${clone_dir}"
+          test "$(git -C "${clone_dir}" rev-parse HEAD)" = "${head_sha}"
+          test "$(git -C "${clone_dir}" rev-parse 'HEAD^{tree}')" = "${tree_sha}"
+          test -z "$(git -C "${clone_dir}" status --short)"
 
           bundle_sha256="$(sha256sum repository.bundle | awk '{print $1}')"
 
@@ -37,12 +48,14 @@ jobs:
             --arg commitSha "${head_sha}" \
             --arg treeSha "${tree_sha}" \
             --arg branch "${head_ref}" \
+            --arg bundleRef "refs/heads/source-bundle" \
             --arg bundleSha256 "${bundle_sha256}" \
             '{
               repository: $repository,
               commitSha: $commitSha,
               treeSha: $treeSha,
               branch: $branch,
+              bundleRef: $bundleRef,
               bundleSha256: $bundleSha256
             }' > manifest.json
 
