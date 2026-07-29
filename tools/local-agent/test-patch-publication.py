@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Callable
 
 
 SCRIPT = Path(__file__).with_name("patch-publication.py")
@@ -121,6 +122,116 @@ class PatchPublicationTests(unittest.TestCase):
         args.extend(extra)
         return args
 
+    def create_transfer_payload(
+        self,
+        *,
+        format_version: int = 2,
+        manifest_overrides: dict[str, object] | None = None,
+        omit_part: int | None = None,
+        extra_file: bool = False,
+        invalid_utf8_part: int | None = None,
+    ) -> tuple[Path, str, list[Path]]:
+        worktree = self.root / f"transfer-{len(list(self.root.glob('transfer-*')))}"
+        branch = f"transfer-payload-{worktree.name}"
+        run(
+            [
+                "git",
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                branch,
+                str(worktree),
+                self.base_sha,
+            ],
+            cwd=self.repo,
+        )
+        transfer_root = worktree / ".agent-patch-publication"
+        transfer_root.mkdir()
+        patch = self.patch.read_bytes()
+        part_paths: list[Path] = []
+        if format_version == 1:
+            (transfer_root / "change.patch").write_bytes(patch)
+            manifest_value: dict[str, object] = {
+                "formatVersion": 1,
+                "targetBranch": TARGET_BRANCH,
+                "expectedBaseSha": self.base_sha,
+                "expectedResultTreeSha": self.result_tree,
+                "patchSha256": hashlib.sha256(patch).hexdigest(),
+                "commitMessage": "Apply tested local patch",
+            }
+        else:
+            midpoint = max(1, len(patch) // 2)
+            while midpoint < len(patch) and patch[midpoint] & 0xC0 == 0x80:
+                midpoint += 1
+            parts = [patch[:midpoint], patch[midpoint:]]
+            if invalid_utf8_part is not None:
+                parts[invalid_utf8_part - 1] = b"\xff\xfeinvalid\n"
+            parts_root = transfer_root / "parts"
+            parts_root.mkdir()
+            manifest_parts: list[dict[str, object]] = []
+            for index, value in enumerate(parts, start=1):
+                relative = (
+                    ".agent-patch-publication/parts/change.patch.part-"
+                    f"{index:04d}-of-{len(parts):04d}"
+                )
+                path = worktree / relative
+                part_paths.append(path)
+                if omit_part != index:
+                    path.write_bytes(value)
+                manifest_parts.append(
+                    {
+                        "path": relative,
+                        "sizeBytes": len(value),
+                        "sha256": hashlib.sha256(value).hexdigest(),
+                    }
+                )
+            reconstructed = b"".join(parts)
+            manifest_value = {
+                "formatVersion": 2,
+                "targetBranch": TARGET_BRANCH,
+                "expectedBaseSha": self.base_sha,
+                "expectedResultTreeSha": self.result_tree,
+                "patchSizeBytes": len(reconstructed),
+                "patchSha256": hashlib.sha256(reconstructed).hexdigest(),
+                "parts": manifest_parts,
+                "commitMessage": "Apply tested local patch",
+            }
+            if extra_file:
+                (parts_root / "unexpected.txt").write_text(
+                    "unexpected\n", encoding="utf-8"
+                )
+        if manifest_overrides:
+            manifest_value.update(manifest_overrides)
+        manifest_path = transfer_root / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(manifest_value, indent=2) + "\n", encoding="utf-8"
+        )
+        git(worktree, "add", ".agent-patch-publication")
+        git(worktree, "commit", "-q", "-m", "Add transfer payload")
+        return manifest_path, f"refs/heads/{branch}", part_paths
+
+    def materialize_command(
+        self, manifest: Path, transfer_ref: str, output: Path
+    ) -> list[str]:
+        return [
+            sys.executable,
+            str(SCRIPT),
+            "materialize-patch",
+            "--repository",
+            str(self.repo),
+            "--manifest",
+            str(manifest),
+            "--transfer-ref",
+            transfer_ref,
+            "--output-patch",
+            str(output),
+            "--default-branch",
+            "main",
+            "--expected-target-branch",
+            TARGET_BRANCH,
+        ]
+
     def test_prepare_and_verify_bundle_round_trip(self) -> None:
         env = os.environ.copy()
         env.update(
@@ -176,6 +287,213 @@ class PatchPublicationTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 1)
         self.assertIn("patch SHA-256 mismatch", completed.stderr)
+
+    def test_materializes_v1_transfer_payload_unchanged(self) -> None:
+        manifest, transfer_ref, _parts = self.create_transfer_payload(
+            format_version=1
+        )
+        output = self.root / "materialized-v1.patch"
+        completed = run(
+            self.materialize_command(manifest, transfer_ref, output), cwd=self.repo
+        )
+        self.assertIn("format=1", completed.stdout)
+        self.assertEqual(output.read_bytes(), self.patch.read_bytes())
+
+    def test_materializes_v2_parts_and_prepares_candidate(self) -> None:
+        manifest, transfer_ref, _parts = self.create_transfer_payload()
+        materialized = self.root / "materialized-v2.patch"
+        completed = run(
+            self.materialize_command(manifest, transfer_ref, materialized),
+            cwd=self.repo,
+        )
+        self.assertIn("format=2", completed.stdout)
+        self.assertEqual(materialized.read_bytes(), self.patch.read_bytes())
+        self.manifest = manifest
+        self.patch = materialized
+        run(
+            self.command("prepare", "--output-directory", str(self.output)),
+            cwd=self.repo,
+        )
+        self.assertTrue((self.output / "publication.bundle").is_file())
+
+    def test_v2_missing_and_extra_parts_fail_closed(self) -> None:
+        cases = (
+            ({"omit_part": 2}, "missing file(s)"),
+            ({"extra_file": True}, "unexpected file(s)"),
+        )
+        for kwargs, expected in cases:
+            with self.subTest(expected=expected):
+                manifest, transfer_ref, _parts = self.create_transfer_payload(**kwargs)
+                completed = run(
+                    self.materialize_command(
+                        manifest, transfer_ref, self.root / f"{expected}.patch"
+                    ),
+                    cwd=self.repo,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn(expected, completed.stderr)
+
+    def test_v2_part_size_hash_and_utf8_errors_name_the_part(self) -> None:
+        for kind in ("size", "hash", "utf8"):
+            with self.subTest(kind=kind):
+                if kind == "utf8":
+                    manifest, transfer_ref, parts = self.create_transfer_payload(
+                        invalid_utf8_part=2
+                    )
+                else:
+                    manifest, transfer_ref, parts = self.create_transfer_payload()
+                    value = json.loads(manifest.read_text(encoding="utf-8"))
+                    if kind == "size":
+                        value["parts"][1]["sizeBytes"] += 1
+                        value["patchSizeBytes"] += 1
+                    else:
+                        value["parts"][1]["sha256"] = "0" * 64
+                    manifest.write_text(
+                        json.dumps(value, indent=2) + "\n", encoding="utf-8"
+                    )
+                    git(manifest.parents[1], "add", str(manifest.relative_to(manifest.parents[1])))
+                    git(manifest.parents[1], "commit", "-q", "-m", f"Corrupt {kind}")
+                completed = run(
+                    self.materialize_command(
+                        manifest, transfer_ref, self.root / f"bad-{kind}.patch"
+                    ),
+                    cwd=self.repo,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn(
+                    parts[1].relative_to(manifest.parents[1]).as_posix(),
+                    completed.stderr,
+                )
+
+    def test_v2_final_digest_and_canonical_order_fail_closed(self) -> None:
+        manifest, transfer_ref, _parts = self.create_transfer_payload()
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+        value["patchSha256"] = "0" * 64
+        manifest.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+        worktree = manifest.parents[1]
+        git(worktree, "add", ".agent-patch-publication/manifest.json")
+        git(worktree, "commit", "-q", "-m", "Corrupt final digest")
+        completed = run(
+            self.materialize_command(
+                manifest, transfer_ref, self.root / "bad-final.patch"
+            ),
+            cwd=self.repo,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("reconstructed patch SHA-256 mismatch", completed.stderr)
+
+        manifest2, transfer_ref2, _parts2 = self.create_transfer_payload()
+        value2 = json.loads(manifest2.read_text(encoding="utf-8"))
+        value2["parts"].reverse()
+        manifest2.write_text(json.dumps(value2, indent=2) + "\n", encoding="utf-8")
+        worktree2 = manifest2.parents[1]
+        git(worktree2, "add", ".agent-patch-publication/manifest.json")
+        git(worktree2, "commit", "-q", "-m", "Reverse part order")
+        completed2 = run(
+            self.materialize_command(
+                manifest2, transfer_ref2, self.root / "bad-order.patch"
+            ),
+            cwd=self.repo,
+            check=False,
+        )
+        self.assertEqual(completed2.returncode, 1)
+        self.assertIn(".path must be exactly", completed2.stderr)
+
+        manifest3, transfer_ref3, _parts3 = self.create_transfer_payload()
+        value3 = json.loads(manifest3.read_text(encoding="utf-8"))
+        value3["parts"][1] = dict(value3["parts"][0])
+        manifest3.write_text(json.dumps(value3, indent=2) + "\n", encoding="utf-8")
+        worktree3 = manifest3.parents[1]
+        git(worktree3, "add", ".agent-patch-publication/manifest.json")
+        git(worktree3, "commit", "-q", "-m", "Duplicate first part")
+        completed3 = run(
+            self.materialize_command(
+                manifest3, transfer_ref3, self.root / "bad-duplicate.patch"
+            ),
+            cwd=self.repo,
+            check=False,
+        )
+        self.assertEqual(completed3.returncode, 1)
+        self.assertIn(".path must be exactly", completed3.stderr)
+
+    def test_v2_invalid_path_and_transport_limits_fail_closed(self) -> None:
+        cases: list[tuple[str, Callable[[dict[str, object]], None], str]] = []
+
+        def invalid_path(value: dict[str, object]) -> None:
+            value["parts"][0]["path"] = ".agent-patch-publication/parts/../escape"
+
+        def oversized_part(value: dict[str, object]) -> None:
+            old_size = value["parts"][0]["sizeBytes"]
+            value["parts"][0]["sizeBytes"] = 256 * 1024 + 1
+            value["patchSizeBytes"] += 256 * 1024 + 1 - old_size
+
+        def oversized_patch(value: dict[str, object]) -> None:
+            value["patchSizeBytes"] = 64 * 1024 * 1024 + 1
+
+        def too_many_parts(value: dict[str, object]) -> None:
+            value["parts"] = [dict(value["parts"][0]) for _ in range(1025)]
+            value["patchSizeBytes"] = 1025
+
+        cases.extend(
+            [
+                ("path", invalid_path, ".path must be exactly"),
+                ("part-size", oversized_part, ".sizeBytes must be between"),
+                ("patch-size", oversized_patch, "patchSizeBytes must be between"),
+                ("part-count", too_many_parts, "between 1 and 1024 entries"),
+            ]
+        )
+        for name, mutate, expected in cases:
+            with self.subTest(name=name):
+                manifest, transfer_ref, _parts = self.create_transfer_payload()
+                value = json.loads(manifest.read_text(encoding="utf-8"))
+                mutate(value)
+                manifest.write_text(
+                    json.dumps(value, indent=2) + "\n", encoding="utf-8"
+                )
+                worktree = manifest.parents[1]
+                git(worktree, "add", ".agent-patch-publication/manifest.json")
+                git(worktree, "commit", "-q", "-m", f"Invalidate {name}")
+                completed = run(
+                    self.materialize_command(
+                        manifest, transfer_ref, self.root / f"invalid-{name}.patch"
+                    ),
+                    cwd=self.repo,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn(expected, completed.stderr)
+
+    def test_v2_one_part_repair_succeeds_on_new_transfer_commit(self) -> None:
+        manifest, transfer_ref, parts = self.create_transfer_payload()
+        manifest_digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        correct_part = parts[1].read_bytes()
+        parts[1].write_text("wrong but valid UTF-8\n", encoding="utf-8")
+        worktree = manifest.parents[1]
+        git(worktree, "add", str(parts[1].relative_to(worktree)))
+        git(worktree, "commit", "-q", "-m", "Upload bad second part")
+        bad_transfer_sha = git(self.repo, "rev-parse", transfer_ref)
+        first_attempt = run(
+            self.materialize_command(
+                manifest, transfer_ref, self.root / "first-attempt.patch"
+            ),
+            cwd=self.repo,
+            check=False,
+        )
+        self.assertEqual(first_attempt.returncode, 1)
+        self.assertIn("part size mismatch", first_attempt.stderr)
+
+        parts[1].write_bytes(correct_part)
+        git(worktree, "add", str(parts[1].relative_to(worktree)))
+        git(worktree, "commit", "-q", "-m", "Repair only second part")
+        repaired_transfer_sha = git(self.repo, "rev-parse", transfer_ref)
+        self.assertNotEqual(repaired_transfer_sha, bad_transfer_sha)
+        self.assertEqual(hashlib.sha256(manifest.read_bytes()).hexdigest(), manifest_digest)
+        repaired = self.root / "repaired.patch"
+        run(self.materialize_command(manifest, transfer_ref, repaired), cwd=self.repo)
+        self.assertEqual(repaired.read_bytes(), self.patch.read_bytes())
 
     def test_generator_reconstructs_exact_patch_at_64_128_and_256_kib(self) -> None:
         repository = self.root / "generator-repo"
