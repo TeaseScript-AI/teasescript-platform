@@ -11,7 +11,7 @@ The protocol accepts one raw Git patch in either of two transport formats:
 - format version 1 stores the complete patch in one `change.patch` file;
 - format version 2 stores the same patch as ordered UTF-8 text parts.
 
-Neither format uses Base64. Format version 2 exists to keep each connector upload small, readable, independently verifiable, and replaceable without changing the intended complete patch.
+Neither format uses Base64. Format version 2 exists to keep each connector upload small, token-efficient, independently verifiable, and replaceable without changing the intended complete patch. The local preparation helper emits ordinary raw diff text and exposes only one pending upload at a time; agents must not pre-open every part into model context.
 
 ## Security boundary
 
@@ -116,38 +116,67 @@ Format version 2 rules:
 
 ## Preparing a request
 
-Start from a clean local tested commit whose only parent is the exact current head of the target pull-request branch.
+Start from a clean local worktree whose current `HEAD` is the fully tested result. Supply the exact current target-branch commit as `--expected-base-sha`. That base may be an earlier ancestor of the tested `HEAD`; the helper publishes the complete tree difference across one or more local commits. It never merges, rebases, squashes, commits, or pushes.
 
 ### Format version 2 (recommended)
 
-Use the repository helper:
+Use the repository helper. Keep the OpenAI vocabulary and the optional `tiktoken` Python package in the local offline toolchain, not in this repository:
 
 ```shell
 python3 -B tools/local-agent/prepare-patch-publication.py \
   --repository . \
+  --repository-full-name TeaseScript-AI/teasescript-platform \
   --target-branch feat/example \
-  --expected-base-sha "$(git rev-parse HEAD^)" \
+  --transfer-branch agent-patch-publication/example-attempt-1 \
+  --expected-base-sha <exact-current-target-head> \
   --tested-commit "$(git rev-parse HEAD)" \
+  --tokenizer /path/to/o200k_base.tiktoken \
+  --target-part-tokens 16000 \
   --part-size-kib 64 \
   --output-directory /tmp/patch-publication-payload
 ```
 
-The helper uses the tested commit's parent, result tree, and subject directly. It then:
+`TEASESCRIPT_O200K_TOKENIZER` may provide the tokenizer path instead of `--tokenizer`. The helper verifies the official vocabulary SHA-256 before use. Token-aware mode also requires the local `tiktoken` Python package; it is an optional offline-toolchain dependency and is not added to the project runtime or repository dependencies.
 
-1. generates the exact `git diff --binary --full-index --no-renames` patch;
-2. calculates the complete patch SHA-256 before splitting;
-3. splits only at valid UTF-8 boundaries, preferring diff, hunk, or newline boundaries;
-4. writes canonical ordinary-text part files and their sizes and SHA-256 values;
-5. writes the strict format-version-2 manifest;
-6. reconstructs the parts and proves byte identity before publishing the output directory.
+The helper:
 
-The default and recommended part size is 64 KiB. The helper also accepts 128 or 256 KiB for controlled transport tests. It refuses a dirty worktree, a tested commit other than current `HEAD`, a wrong expected parent, an empty patch, or an existing output path.
+1. verifies a clean worktree and that the tested commit is current `HEAD`;
+2. verifies that the exact supplied base is an ancestor of the tested result;
+3. generates `git diff --binary --full-index --no-renames <base> <tested>`;
+4. keeps normal source and documentation changes as ordinary readable unified diff text; `--binary` adds Git binary-patch text only for genuinely binary file changes that otherwise could not be reconstructed;
+5. calculates the complete patch SHA-256 before splitting;
+6. when the local tokenizer is available, limits each part to a default target of 16,000 `o200k_base` tokens measured over the JSON-serialized connector content string;
+7. always enforces the independent byte ceiling, using 64 KiB as the default fallback when token measurement is unavailable;
+8. writes canonical ordinary UTF-8 part files and their sizes and SHA-256 values;
+9. writes the strict format-version-2 manifest;
+10. reconstructs the parts and proves byte identity;
+11. writes local-only `upload-plan.json`, `upload-state.json`, and `UPLOAD-INSTRUCTIONS.md` with expected Git blob SHAs and the exact publication command.
 
-Upload the generated `.agent-patch-publication/manifest.json` and every generated part without editing them. Calculate the command digest from the final manifest bytes:
+The 16,000-token value is a configurable operational starting point, not a connector guarantee or protocol limit. It leaves each ordinary code-diff upload manageable while allowing tokenizer-hostile Base85 sections for genuinely binary files to be split much earlier than the same byte ceiling. The independent protocol maximum remains 256 KiB per part. Without the local tokenizer, the helper clearly reports byte-fallback mode rather than pretending it measured tokens.
+
+Do not transform the complete normal patch into Git binary-patch/Base85 or Base64 merely to reduce bytes. For source changes that often costs substantially more model tokens. Use the raw Git diff produced by the helper; `git diff --binary` does not binary-encode ordinary text files.
+
+### Sequential connector upload
+
+Do not print every part or use a command that emits all escaped chunks. Ask the helper for exactly one pending upload:
 
 ```shell
-MANIFEST_SHA256="$(python3 -c 'import hashlib, pathlib; print(hashlib.sha256(pathlib.Path("/tmp/patch-publication-payload/.agent-patch-publication/manifest.json").read_bytes()).hexdigest())')"
+python3 -B tools/local-agent/prepare-patch-publication.py \
+  --output-directory /tmp/patch-publication-payload \
+  --show-next-upload
 ```
+
+The command verifies the local file again and prints one connector-ready argument object for the GitHub action that creates a UTF-8 Git blob from text, currently `GitHub.create_blob`. Call that connector immediately. Compare its returned Git blob SHA with `expectedGitBlobSha`, then record the result:
+
+```shell
+python3 -B tools/local-agent/prepare-patch-publication.py \
+  --output-directory /tmp/patch-publication-payload \
+  --record-upload-sha <returned-git-blob-sha>
+```
+
+A mismatch fails without advancing the local state. A match records that file and identifies the next path, but does not open it. Repeat `--show-next-upload` only when ready to send the next file. Parts are listed first and the manifest last. This prevents earlier part contents from occupying context while later parts are being uploaded.
+
+Only files below `.agent-patch-publication/` belong in the transfer tree. The upload plan, state, and instruction file remain local. After recording all blobs, use the recorded SHAs to create the transfer tree and commit, create the planned transfer branch, and place the precomputed `/publish-patch` command in the pull request Conversation tab.
 
 ### Format version 1 compatibility
 
@@ -251,13 +280,13 @@ python3 -B tools/local-agent/test-patch-publication.py
 bash tools/local-agent/test-patch-publication-workflow.sh
 ```
 
-The first suite covers both formats, deterministic generation at 64, 128, and 256 KiB, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote to cover retry-preserving cleanup, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, and immutable Action pins. GitHub event identity, permissions, artifact transport, and token behavior remain canonical-CI concerns.
+The first suite covers both formats, deterministic byte-fallback generation at 64, 128, and 256 KiB, token-bounded splitting through an injected deterministic counter, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote to cover retry-preserving cleanup, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, and immutable Action pins. GitHub event identity, permissions, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
 
 ## Current limits and follow-ups
 
-Format version 1 remains the smallest transport for one manageable raw `change.patch`. Format version 2 is the normal multipart transport. Its recommended part size is 64 KiB. The 128 and 256 KiB settings are supported for controlled connector trials; 256 KiB is the current protocol ceiling, not the recommended default. Lower that ceiling in a follow-up when real connector evidence shows it is unreliable.
+Format version 1 remains the smallest transport for one manageable raw `change.patch`. Format version 2 is the normal multipart transport. Token-aware preparation targets 16,000 `o200k_base` tokens per connector content string and also caps parts at 64 KiB by default. Both values are configurable local preparation settings, not accepted connector guarantees. When the tokenizer is unavailable, the helper falls back explicitly to the byte ceiling.
 
-Neither format accepts Base64. The protocol limits format version 2 to 1,024 parts, 256 KiB per part, and a 64 MiB reconstructed patch as bounded publication-tooling guards rather than TeaseScript content limits.
+Neither format accepts Base64. The protocol limits format version 2 to 1,024 parts, 256 KiB per part, and a 64 MiB reconstructed patch as bounded publication-tooling guards rather than TeaseScript content limits. The local tokenizer vocabulary and `tiktoken` installation belong in the reusable offline agent-toolchain archive, not in Git or source artifacts.
 
 The publish job currently uses the repository `GITHUB_TOKEN`. GitHub may require manual approval before a subsequent pull-request workflow runs after that token updates the PR branch. Replacing only the isolated publish credential with a repository-scoped GitHub App installation token is a separate operational follow-up; prepare and test jobs must remain read-only and must not receive the App private key.
 
