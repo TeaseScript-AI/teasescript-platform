@@ -79,7 +79,8 @@ To regenerate an artifact for an older or expired source revision through the Gi
 1. Resolve the full lowercase 40-character source commit SHA and the exact current `main` SHA.
 2. Choose a nonce matching lowercase `[a-z0-9][a-z0-9-]{0,31}`; for example, `agent-149-1`.
 3. Create `source-bundle-request/<source-sha>/<nonce>` at that exact `main` SHA with the connector's `create_branch` action. Do not create an empty commit or add request files.
-4. Poll the requested source commit for context `source-bundle/request/<nonce>`.
+4. Wait 90 seconds before the first status lookup, then poll the requested source commit for context `source-bundle/request/<nonce>`.
+   If it is still absent, wait 30 seconds before each retry. These delays reduce unnecessary connector calls but are not completion guarantees because GitHub Actions queue time varies.
 5. On success, parse the status description `artifact <artifact-id> sha256:<artifact-digest>` and pass the numeric ID to `download_workflow_artifact`.
 6. Verify the downloaded artifact and confirm that the temporary request branch was removed.
 
