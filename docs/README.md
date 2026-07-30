@@ -30,8 +30,8 @@ These files provide concise current routing and must not duplicate or override a
 
 ## Development workflow
 
-- `DEVELOPMENT-WORKFLOW.md` defines the GitHub-native issue, agent, branch, pull-request, coordinated-work, automatic and manual verified source-artifact, documentation, and final-verification process.
-- `PATCH-PUBLICATION.md` defines the verified single-patch publication fallback for network-restricted agents, including its command, manifest, trust boundary, validation, retry, and current limits.
+- `DEVELOPMENT-WORKFLOW.md` defines the GitHub-native issue, agent, branch, pull-request, coordinated-work, automatic and connector-requested verified source-artifact, documentation, and final-verification process.
+- `PATCH-PUBLICATION.md` defines the verified single-patch publication fallback for network-restricted agents, including its command, manifest, trust boundary, validation, exact cleanup, retry, and current limits.
 - `../AGENTS.md` contains the mandatory task, coding, review, and Git rules for every agent.
 - `../tools/work-packages/README.md` defines the explicit fallback for agents that cannot complete the normal GitHub branch and pull-request flow.
 

@@ -20,6 +20,7 @@ jobs:
       expected_manifest_sha256: ${{ steps.request.outputs.expected_manifest_sha256 }}
       expected_target_branch: ${{ steps.request.outputs.expected_target_branch }}
       issue_number: ${{ steps.request.outputs.issue_number }}
+      comment_id: ${{ steps.request.outputs.comment_id }}
     steps:
       - name: Validate publication command
         id: request
@@ -90,6 +91,7 @@ jobs:
             core.setOutput('expected_manifest_sha256', expectedManifestSha256);
             core.setOutput('expected_target_branch', pull.data.head.ref);
             core.setOutput('issue_number', String(context.issue.number));
+            core.setOutput('comment_id', String(context.payload.comment.id));
 
   prepare:
     needs: request
@@ -323,36 +325,43 @@ jobs:
           git push --porcelain origin \
             "$CANDIDATE_COMMIT_SHA:refs/heads/$TARGET_BRANCH"
 
-  cleanup:
+  cleanup-transfer:
     if: ${{ always() && needs.request.result == 'success' }}
     needs: [request, prepare, test, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      issues: write
+    outputs:
+      cleanup_status: ${{ steps.cleanup_transfer.outputs.cleanup_status }}
     steps:
-      - name: Check out trusted workflow revision
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ github.workflow_sha }}
-          fetch-depth: 1
-          persist-credentials: true
-          show-progress: false
-
       - name: Delete exact transfer ref
         id: cleanup_transfer
         env:
+          GH_TOKEN: ${{ github.token }}
           TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
           EXPECTED_TRANSFER_SHA: ${{ needs.request.outputs.expected_transfer_sha }}
         run: |
+          set -euo pipefail
+          [[ "$TRANSFER_BRANCH" =~ ^agent-patch-publication/[A-Za-z0-9][A-Za-z0-9._/-]{0,215}$ ]]
+          [[ "$TRANSFER_BRANCH" != *".."* ]]
+          [[ "$TRANSFER_BRANCH" != *"//"* ]]
+          [[ "$TRANSFER_BRANCH" != */ ]]
+          [[ "$EXPECTED_TRANSFER_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          cleanup_repo="$RUNNER_TEMP/patch-publication-cleanup"
+          git init -q "$cleanup_repo"
+          cd "$cleanup_repo"
+          remote_url="https://github.com/${GITHUB_REPOSITORY}.git"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
           transfer_ref="refs/heads/$TRANSFER_BRANCH"
           cleanup_status=failed
           cleanup_failed=0
 
           set +e
-          push_output="$(git push --porcelain \
+          push_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
+            push --porcelain \
             --force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}" \
-            origin ":${transfer_ref}" 2>&1)"
+            "$remote_url" ":${transfer_ref}" 2>&1)"
           push_result=$?
           set -e
 
@@ -360,7 +369,8 @@ jobs:
             cleanup_status=removed
           else
             set +e
-            remote_output="$(git ls-remote --heads origin "$transfer_ref" 2>&1)"
+            remote_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
+              ls-remote --heads "$remote_url" "$transfer_ref" 2>&1)"
             remote_result=$?
             set -e
             if [[ $remote_result -ne 0 ]]; then
@@ -387,34 +397,75 @@ jobs:
             exit 1
           fi
 
-      - name: Report publication result
-        if: ${{ always() }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+  cleanup-comment:
+    if: ${{ always() && needs.request.result == 'success' }}
+    needs: [request, prepare, test, publish, cleanup-transfer]
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Record publication result
         env:
-          ISSUE_NUMBER: ${{ needs.request.outputs.issue_number }}
           TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch || needs.request.outputs.expected_target_branch }}
           PUBLISHED_COMMIT_SHA: ${{ needs.publish.outputs.published_commit_sha }}
           PREPARE_RESULT: ${{ needs.prepare.result }}
           TEST_RESULT: ${{ needs.test.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
-          CLEANUP_STATUS: ${{ steps.cleanup_transfer.outputs.cleanup_status }}
+          CLEANUP_STATUS: ${{ needs.cleanup-transfer.outputs.cleanup_status }}
+        run: |
+          {
+            printf '## Patch publication result\n\n'
+            printf -- '- target branch: `%s`\n' "$TARGET_BRANCH"
+            printf -- '- published commit: `%s`\n' "${PUBLISHED_COMMIT_SHA:-none}"
+            printf -- '- prepare: `%s`\n' "$PREPARE_RESULT"
+            printf -- '- test: `%s`\n' "$TEST_RESULT"
+            printf -- '- publish: `%s`\n' "$PUBLISH_RESULT"
+            printf -- '- transfer cleanup: `%s`\n' "${CLEANUP_STATUS:-failed}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete exact accepted publication command
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          COMMENT_ID: ${{ needs.request.outputs.comment_id }}
+          ISSUE_NUMBER: ${{ needs.request.outputs.issue_number }}
+          TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.request.outputs.expected_manifest_sha256 }}
         with:
           script: |
-            const cleanupMessages = {
-              removed: 'The exact authorized transfer ref was removed.',
-              already_absent: 'The transfer ref was already absent.',
-              preserved_changed: 'The transfer ref changed after authorization and was preserved.',
-              failed: 'Transfer-ref cleanup failed; inspect the cleanup job logs.',
-            };
-            const cleanupStatus = process.env.CLEANUP_STATUS || 'failed';
-            const cleanupMessage = cleanupMessages[cleanupStatus] || cleanupMessages.failed;
-            const succeeded = process.env.PUBLISH_RESULT === 'success';
-            const body = succeeded
-              ? `Published verified patch as ${process.env.PUBLISHED_COMMIT_SHA} on \`${process.env.TARGET_BRANCH}\`. ${cleanupMessage}`
-              : `Patch publication failed (prepare: ${process.env.PREPARE_RESULT}, test: ${process.env.TEST_RESULT}, publish: ${process.env.PUBLISH_RESULT}). ${cleanupMessage}`;
-            await github.rest.issues.createComment({
+            const commentId = Number(process.env.COMMENT_ID);
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            if (!Number.isSafeInteger(commentId) || !Number.isSafeInteger(issueNumber)) {
+              core.setFailed('Validated publication comment identity is missing.');
+              return;
+            }
+
+            const expectedCommand = `/publish-patch ${process.env.TRANSFER_BRANCH} ${process.env.EXPECTED_MANIFEST_SHA256}`;
+            let comment;
+            try {
+              comment = await github.rest.issues.getComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: commentId,
+              });
+            } catch (error) {
+              if (error.status === 404) {
+                core.notice('Publication command comment was already absent.');
+                return;
+              }
+              throw error;
+            }
+
+            const expectedIssueUrl = `${context.apiUrl}/repos/${context.repo.owner}/${context.repo.repo}/issues/${issueNumber}`;
+            if (
+              comment.data.issue_url !== expectedIssueUrl ||
+              comment.data.body.trim() !== expectedCommand
+            ) {
+              core.warning('Publication command comment changed after validation and was preserved.');
+              return;
+            }
+
+            await github.rest.issues.deleteComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: Number(process.env.ISSUE_NUMBER),
-              body,
+              comment_id: commentId,
             });

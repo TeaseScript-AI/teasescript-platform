@@ -67,21 +67,22 @@ Closes #123
 
 ## Verified source artifacts for review and handoff
 
-The `Source bundle` GitHub Actions workflow produces a short-lived, verifiable Git source artifact without creating another branch, pull request, or commit. Use it when a reviewer, verifier, or network-restricted agent needs an exact repository snapshot with Git history.
+The source-bundle workflows produce short-lived, verifiable Git artifacts when a reviewer, verifier, or network-restricted agent needs an exact repository snapshot with Git history.
 
-The workflow runs automatically for:
+`Source bundle` runs automatically for:
 
 - every pull-request update, using the exact pull-request head rather than GitHub's synthetic merge commit;
 - every push to `main`, using the exact pushed commit.
 
-An authorized repository user may also create a fresh artifact manually:
+To regenerate an artifact for an older or expired source revision through the GitHub connector:
 
-1. Open **Actions** in GitHub and select **Source bundle**.
-2. Select **Run workflow** and keep the workflow branch set to the repository default branch.
-3. Enter `source_ref` as an existing branch, tag, pull-request ref such as `refs/pull/135/head`, or a full 40-character commit SHA.
-4. Start the run, open the completed run, and download `teasescript-source-<resolved-commit-sha>`.
+1. Resolve the full lowercase 40-character source commit SHA and the exact current `main` SHA.
+2. Create `source-bundle-request/<source-sha>/<nonce>` at that exact `main` SHA with the connector's `create_branch` action. Do not create an empty commit or add request files.
+3. Poll the requested source commit for context `source-bundle/request/<nonce>`.
+4. On success, parse the status description `artifact <artifact-id> sha256:<artifact-digest>` and pass the numeric ID to `download_workflow_artifact`.
+5. Verify the downloaded artifact and confirm that the temporary request branch was removed.
 
-Manual runs selected from any workflow branch other than the repository default branch are skipped. The workflow implementation and bundle helper are loaded from the exact trusted workflow commit identified by `github.workflow_sha`; the selected source is checked out separately and treated as data. The resolved source `HEAD`, rather than the moving input name, determines the artifact name and manifest identity.
+The request branch runs only a permissionless gate. A separate `workflow_run` processor loaded from the default branch revalidates the strict branch name, unchanged request SHA, default-branch ancestry even if `main` advances after branch creation, and requested source commit. The source is checked out separately and treated only as data. Status publication has only `statuses: write`; cleanup has only `contents: write`, checks out no repository content, and deletes the request ref only through an exact-SHA `--force-with-lease` from an empty temporary Git directory. Creating the repository branch is the request authorization; GitHub continues to enforce repository and artifact access for private repositories.
 
 The downloaded ZIP contains:
 
@@ -106,9 +107,9 @@ git rev-parse 'HEAD^{tree}'
 git status --short
 ```
 
-Compare the cloned commit and tree with `commitSha` and `treeSha` in `manifest.json`. The worktree must be clean. GitHub's artifact digest, when available to the downloader, additionally verifies the outer ZIP; `SHA256SUMS` verifies `repository.bundle` and `manifest.json` after extraction.
+Compare the cloned commit and tree with `commitSha` and `treeSha` in `manifest.json`. The worktree must be clean. GitHub's artifact digest, when available to the downloader, verifies the outer ZIP; `SHA256SUMS` verifies `repository.bundle` and `manifest.json` after extraction.
 
-A source artifact contains committed repository files and reachable Git history for the selected commit. It does not contain issues, pull-request comments or reviews, Actions history, repository settings, secrets, credentials, `node_modules`, or uncommitted local changes. Artifacts expire after one day. Run the workflow again with the same branch, tag, pull-request ref, or commit SHA when a fresh copy is needed.
+A source artifact contains committed repository files and reachable Git history for the selected commit. It does not contain issues, pull-request comments or reviews, Actions history, repository settings, secrets, credentials, `node_modules`, or uncommitted local changes. Artifacts expire after one day; create a new request branch when a fresh copy is required.
 
 ## Coordinated multi-agent model
 
