@@ -116,7 +116,11 @@ Format version 2 rules:
 
 ## Preparing a request
 
-Start from a clean local tested commit whose only parent is the exact current head of the target pull-request branch. Use the repository helper for format version 2:
+Start from a clean local tested commit whose only parent is the exact current head of the target pull-request branch.
+
+### Format version 2 (recommended)
+
+Use the repository helper:
 
 ```shell
 python3 -B tools/local-agent/prepare-patch-publication.py \
@@ -145,7 +149,52 @@ Upload the generated `.agent-patch-publication/manifest.json` and every generate
 MANIFEST_SHA256="$(python3 -c 'import hashlib, pathlib; print(hashlib.sha256(pathlib.Path("/tmp/patch-publication-payload/.agent-patch-publication/manifest.json").read_bytes()).hexdigest())')"
 ```
 
-Format version 1 remains supported for a small single-file transfer. Its `change.patch` and manifest may still be generated using the original exact Git diff and SHA-256 procedure. Do not combine format-version-1 and format-version-2 payload files on one transfer branch.
+### Format version 1 compatibility
+
+Format version 1 remains supported for a small single-file transfer. Generate it from the same clean tested commit:
+
+```shell
+TARGET_BRANCH=feat/example
+EXPECTED_BASE_SHA="$(git rev-parse HEAD^)"
+TESTED_COMMIT="$(git rev-parse HEAD)"
+EXPECTED_RESULT_TREE_SHA="$(git show -s --format=%T "$TESTED_COMMIT")"
+COMMIT_MESSAGE="$(git show -s --format=%s "$TESTED_COMMIT")"
+
+git diff --binary --full-index --no-renames \
+  "$EXPECTED_BASE_SHA" "$TESTED_COMMIT" > change.patch
+
+PATCH_SHA256="$(python3 -c 'import hashlib, pathlib; print(hashlib.sha256(pathlib.Path("change.patch").read_bytes()).hexdigest())')"
+
+python3 - \
+  "$TARGET_BRANCH" \
+  "$EXPECTED_BASE_SHA" \
+  "$EXPECTED_RESULT_TREE_SHA" \
+  "$PATCH_SHA256" \
+  "$COMMIT_MESSAGE" \
+  > manifest.json <<'PY'
+import json
+import sys
+
+target, base, tree, patch_sha256, message = sys.argv[1:]
+json.dump(
+    {
+        "formatVersion": 1,
+        "targetBranch": target,
+        "expectedBaseSha": base,
+        "expectedResultTreeSha": tree,
+        "patchSha256": patch_sha256,
+        "commitMessage": message,
+    },
+    sys.stdout,
+    indent=2,
+)
+sys.stdout.write("\n")
+PY
+
+MANIFEST_SHA256="$(python3 -c 'import hashlib, pathlib; print(hashlib.sha256(pathlib.Path("manifest.json").read_bytes()).hexdigest())')"
+```
+
+Upload the unchanged files to `.agent-patch-publication/manifest.json` and `.agent-patch-publication/change.patch` on one new transfer branch. Do not combine format-version-1 and format-version-2 payload files on one branch.
 
 ## Starting publication
 

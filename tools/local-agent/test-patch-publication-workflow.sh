@@ -54,6 +54,36 @@ PY
 
 tmp="$(mktemp -d -t patch-publication-workflow-XXXXXX)"
 trap 'rm -rf "$tmp"' EXIT
+cleanup_script="$tmp/cleanup-transfer.sh"
+python3 - "$workflow" "$cleanup_script" <<'PYCLEANUP'
+import pathlib
+import sys
+
+workflow = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+output = pathlib.Path(sys.argv[2])
+step_index = next(
+    index
+    for index, line in enumerate(workflow)
+    if line.strip() == "- name: Clean up exact transfer ref"
+)
+run_index = next(
+    index
+    for index in range(step_index + 1, len(workflow))
+    if workflow[index].strip() == "run: |"
+)
+run_indent = len(workflow[run_index]) - len(workflow[run_index].lstrip())
+body = []
+for line in workflow[run_index + 1 :]:
+    indent = len(line) - len(line.lstrip())
+    if line.strip() and indent <= run_indent:
+        break
+    body.append(line[run_indent + 2 :] if line.strip() else "")
+assert body
+output.write_text(
+    "#!/usr/bin/env bash\nset -euo pipefail\n" + "\n".join(body) + "\n",
+    encoding="utf-8",
+)
+PYCLEANUP
 source_repo="$tmp/source"
 remote="$tmp/remote.git"
 output="$tmp/publication"
@@ -136,26 +166,47 @@ git --git-dir="$remote" update-ref "refs/heads/$target" "$base" "$race"
 git -C "$tmp/publisher" push -q origin "$candidate:refs/heads/$target"
 test "$(git --git-dir="$remote" rev-parse "refs/heads/$target")" = "$candidate"
 
+run_cleanup() {
+  local format_version="$1"
+  local publish_result="$2"
+  local output_file="$3"
+  : > "$output_file"
+  (
+    cd "$tmp/publisher"
+    TRANSFER_BRANCH="$transfer" \
+    EXPECTED_TRANSFER_SHA="$expected_transfer_sha" \
+    FORMAT_VERSION="$format_version" \
+    PUBLISH_RESULT="$publish_result" \
+    GITHUB_OUTPUT="$output_file" \
+      bash "$cleanup_script"
+  )
+}
+
+# A failed or skipped V2 publication preserves the unchanged exact transfer ref
+# so one bad part can be replaced without regenerating the manifest.
+retry_output="$tmp/cleanup-retry.out"
+run_cleanup 2 failure "$retry_output"
+test "$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")" = "$expected_transfer_sha"
+grep -qx 'cleanup_status=preserved_retry' "$retry_output"
+
+# A transfer ref that moved after authorization is preserved and reported as changed.
 git -C "$tmp/racer" checkout -q -B transfer-update "origin/$transfer"
 printf 'new transfer payload\n' > "$tmp/racer/transfer.txt"
 git -C "$tmp/racer" add transfer.txt
 git -C "$tmp/racer" commit -q -m 'replace transfer payload'
 changed_transfer_sha="$(git -C "$tmp/racer" rev-parse HEAD)"
 git -C "$tmp/racer" push -q origin "HEAD:refs/heads/$transfer"
-
-if git -C "$tmp/publisher" push --porcelain \
-  --force-with-lease="refs/heads/$transfer:$expected_transfer_sha" \
-  origin ":refs/heads/$transfer" >/dev/null 2>&1; then
-  echo 'stale cleanup unexpectedly deleted a changed transfer ref' >&2
-  exit 1
-fi
+changed_output="$tmp/cleanup-changed.out"
+run_cleanup 2 failure "$changed_output"
 test "$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")" = "$changed_transfer_sha"
+grep -qx 'cleanup_status=preserved_changed' "$changed_output"
 
+# Successful V2 publication removes only the exact authorized transfer ref.
 git --git-dir="$remote" update-ref "refs/heads/$transfer" \
   "$expected_transfer_sha" "$changed_transfer_sha"
-git -C "$tmp/publisher" push -q \
-  --force-with-lease="refs/heads/$transfer:$expected_transfer_sha" \
-  origin ":refs/heads/$transfer"
+removed_output="$tmp/cleanup-removed.out"
+run_cleanup 2 success "$removed_output"
 ! git --git-dir="$remote" show-ref --verify "refs/heads/$transfer" >/dev/null 2>&1
+grep -qx 'cleanup_status=removed' "$removed_output"
 
 echo 'patch-publication workflow checks passed'

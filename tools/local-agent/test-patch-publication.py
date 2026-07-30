@@ -316,6 +316,71 @@ class PatchPublicationTests(unittest.TestCase):
         )
         self.assertTrue((self.output / "publication.bundle").is_file())
 
+    def test_transfer_payload_modes_fail_closed(self) -> None:
+        cases = (
+            ("manifest-executable", "manifest", "executable"),
+            ("manifest-symlink", "manifest", "symlink"),
+            ("part-executable", "part", "executable"),
+            ("part-symlink", "part", "symlink"),
+        )
+        for name, entry_kind, mutation in cases:
+            with self.subTest(name=name):
+                manifest, transfer_ref, parts = self.create_transfer_payload()
+                worktree = manifest.parents[1]
+                selected = manifest if entry_kind == "manifest" else parts[0]
+                verified_manifest = manifest
+                if entry_kind == "manifest" and mutation == "symlink":
+                    verified_manifest = self.root / f"verified-{name}.json"
+                    verified_manifest.write_bytes(manifest.read_bytes())
+
+                if mutation == "executable":
+                    selected.chmod(0o755)
+                else:
+                    selected.unlink()
+                    target = (
+                        "parts/change.patch.part-0001-of-0002"
+                        if entry_kind == "manifest"
+                        else "../manifest.json"
+                    )
+                    selected.symlink_to(target)
+
+                git(worktree, "add", "-A", ".agent-patch-publication")
+                git(worktree, "commit", "-q", "-m", f"Make {name}")
+                output = self.root / f"{name}.patch"
+                completed = run(
+                    self.materialize_command(
+                        verified_manifest, transfer_ref, output
+                    ),
+                    cwd=self.repo,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn(
+                    "transfer payload path must be a regular non-executable file",
+                    completed.stderr,
+                )
+                self.assertIn(
+                    selected.relative_to(worktree).as_posix(), completed.stderr
+                )
+                self.assertFalse(output.exists())
+
+    def test_local_manifest_copy_must_match_exact_transfer_bytes(self) -> None:
+        manifest, transfer_ref, _parts = self.create_transfer_payload()
+        local_manifest = self.root / "verified-manifest-copy.json"
+        local_manifest.write_bytes(manifest.read_bytes() + b"\n")
+        output = self.root / "manifest-mismatch.patch"
+        completed = run(
+            self.materialize_command(local_manifest, transfer_ref, output),
+            cwd=self.repo,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn(
+            "transfer manifest bytes differ from the verified local manifest",
+            completed.stderr,
+        )
+        self.assertFalse(output.exists())
+
     def test_v2_missing_and_extra_parts_fail_closed(self) -> None:
         cases = (
             ({"omit_part": 2}, "missing file(s)"),
