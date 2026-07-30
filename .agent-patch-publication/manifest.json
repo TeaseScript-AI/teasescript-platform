@@ -1,0 +1,21 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "fix/issue-155-command-cleanup",
+  "expectedBaseSha": "5ee07fcd446abf1aeab0023929106dd0b53af931",
+  "expectedResultTreeSha": "1caa224afaa837db1b61d85e1222dda2ee7df2ea",
+  "patchSizeBytes": 20613,
+  "patchSha256": "1f4ea20414a3ab8715f0a0794f5261d825c9e7c0fa80f8572f1900c752dde03f",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0002",
+      "sizeBytes": 11859,
+      "sha256": "4c7f829e43ce8e80ee1a3ef2cba6b3feff50ce636e8c38a7087c57c4498d1a0a"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0002",
+      "sizeBytes": 8754,
+      "sha256": "097a96a014f443bd515990c22b448b6106ea53b239bc2de9d1657a41ced9127b"
+    }
+  ],
+  "commitMessage": "Fix patch command cleanup"
+}

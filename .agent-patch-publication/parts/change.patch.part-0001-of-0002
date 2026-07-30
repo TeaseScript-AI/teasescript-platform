@@ -1,0 +1,156 @@
+diff --git a/.agent-pr-bootstrap/issue-155.txt b/.agent-pr-bootstrap/issue-155.txt
+deleted file mode 100644
+index 6029974e3b8c77c18d68a868f026c03cf414037e..0000000000000000000000000000000000000000
+--- a/.agent-pr-bootstrap/issue-155.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-Temporary pull-request bootstrap marker. The verified V2 publication removes this file.
+diff --git a/.github/workflows/patch-publication.yml b/.github/workflows/patch-publication.yml
+index 3bf00736f55a93bd33792b81c2796f089613e313..1e3fb8dbbad2ee226c271aff70d84e7fa60dd431 100644
+--- a/.github/workflows/patch-publication.yml
++++ b/.github/workflows/patch-publication.yml
+@@ -481,28 +481,10 @@ jobs:
+     needs: [request, prepare, test, publish, cleanup-transfer]
+     runs-on: ubuntu-latest
+     permissions:
+-      issues: write
++      pull-requests: write
+     steps:
+-      - name: Record publication result
+-        env:
+-          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch || needs.request.outputs.expected_target_branch }}
+-          PUBLISHED_COMMIT_SHA: ${{ needs.publish.outputs.published_commit_sha }}
+-          PREPARE_RESULT: ${{ needs.prepare.result }}
+-          TEST_RESULT: ${{ needs.test.result }}
+-          PUBLISH_RESULT: ${{ needs.publish.result }}
+-          CLEANUP_STATUS: ${{ needs.cleanup-transfer.outputs.cleanup_status }}
+-        run: |
+-          {
+-            printf '## Patch publication result\n\n'
+-            printf -- '- target branch: `%s`\n' "$TARGET_BRANCH"
+-            printf -- '- published commit: `%s`\n' "${PUBLISHED_COMMIT_SHA:-none}"
+-            printf -- '- prepare: `%s`\n' "$PREPARE_RESULT"
+-            printf -- '- test: `%s`\n' "$TEST_RESULT"
+-            printf -- '- publish: `%s`\n' "$PUBLISH_RESULT"
+-            printf -- '- transfer cleanup: `%s`\n' "${CLEANUP_STATUS:-failed}"
+-          } >> "$GITHUB_STEP_SUMMARY"
+-
+       - name: Delete exact accepted publication command
++        id: cleanup_comment
+         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+         env:
+           COMMENT_ID: ${{ needs.request.outputs.comment_id }}
+@@ -513,12 +495,23 @@ jobs:
+           script: |
+             const commentId = Number(process.env.COMMENT_ID);
+             const issueNumber = Number(process.env.ISSUE_NUMBER);
++            const expectedCommand = `/publish-patch ${process.env.TRANSFER_BRANCH} ${process.env.EXPECTED_MANIFEST_SHA256}`;
+             if (!Number.isSafeInteger(commentId) || !Number.isSafeInteger(issueNumber)) {
++              core.setOutput('cleanup_status', 'failed_identity');
+               core.setFailed('Validated publication comment identity is missing.');
+               return;
+             }
++            if (
++              context.payload.issue?.number !== issueNumber ||
++              context.payload.comment?.id !== commentId ||
++              context.payload.comment?.body?.trim() !== expectedCommand ||
++              !context.payload.issue?.pull_request
++            ) {
++              core.setOutput('cleanup_status', 'failed_identity');
++              core.setFailed('Publication command event identity no longer matches the validated request.');
++              return;
++            }
+ 
+-            const expectedCommand = `/publish-patch ${process.env.TRANSFER_BRANCH} ${process.env.EXPECTED_MANIFEST_SHA256}`;
+             let comment;
+             try {
+               comment = await github.rest.issues.getComment({
+@@ -528,23 +521,54 @@ jobs:
+               });
+             } catch (error) {
+               if (error.status === 404) {
++                core.setOutput('cleanup_status', 'already_absent');
+                 core.notice('Publication command comment was already absent.');
+                 return;
+               }
+               throw error;
+             }
+ 
+-            const expectedIssueUrl = `${context.apiUrl}/repos/${context.repo.owner}/${context.repo.repo}/issues/${issueNumber}`;
+             if (
+-              comment.data.issue_url !== expectedIssueUrl ||
++              comment.data.id !== commentId ||
++              comment.data.issue_url !== context.payload.issue.url ||
+               comment.data.body.trim() !== expectedCommand
+             ) {
++              core.setOutput('cleanup_status', 'preserved_changed');
+               core.warning('Publication command comment changed after validation and was preserved.');
+               return;
+             }
+ 
+-            await github.rest.issues.deleteComment({
++            const deletion = await github.rest.issues.deleteComment({
+               owner: context.repo.owner,
+               repo: context.repo.repo,
+               comment_id: commentId,
+             });
++            if (deletion.status !== 204) {
++              core.setOutput('cleanup_status', 'failed');
++              core.setFailed(`Publication command deletion returned HTTP ${deletion.status}.`);
++              return;
++            }
++            core.setOutput('cleanup_status', 'removed');
++            core.notice('The exact accepted publication command was removed.');
++
++      - name: Record publication result
++        if: ${{ always() }}
++        env:
++          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch || needs.request.outputs.expected_target_branch }}
++          PUBLISHED_COMMIT_SHA: ${{ needs.publish.outputs.published_commit_sha }}
++          PREPARE_RESULT: ${{ needs.prepare.result }}
++          TEST_RESULT: ${{ needs.test.result }}
++          PUBLISH_RESULT: ${{ needs.publish.result }}
++          TRANSFER_CLEANUP_STATUS: ${{ needs.cleanup-transfer.outputs.cleanup_status }}
++          COMMENT_CLEANUP_STATUS: ${{ steps.cleanup_comment.outputs.cleanup_status }}
++        run: |
++          {
++            printf '## Patch publication result\n\n'
++            printf -- '- target branch: `%s`\n' "$TARGET_BRANCH"
++            printf -- '- published commit: `%s`\n' "${PUBLISHED_COMMIT_SHA:-none}"
++            printf -- '- prepare: `%s`\n' "$PREPARE_RESULT"
++            printf -- '- test: `%s`\n' "$TEST_RESULT"
++            printf -- '- publish: `%s`\n' "$PUBLISH_RESULT"
++            printf -- '- transfer cleanup: `%s`\n' "${TRANSFER_CLEANUP_STATUS:-failed}"
++            printf -- '- command cleanup: `%s`\n' "${COMMENT_CLEANUP_STATUS:-failed}"
++          } >> "$GITHUB_STEP_SUMMARY"
+diff --git a/docs/PATCH-PUBLICATION.md b/docs/PATCH-PUBLICATION.md
+index ee10e7b7b6a3fe6729f041c00c29bb4b78f6f871..fad1870b43314c2b5f22eca907580364b5f95d3a 100644
+--- a/docs/PATCH-PUBLICATION.md
++++ b/docs/PATCH-PUBLICATION.md
+@@ -22,7 +22,7 @@ The workflow separates untrusted candidate execution from repository write permi
+ 3. A separate read-only test job runs repository checks on that exact candidate.
+ 4. A write-capable publish job re-verifies the tested candidate without executing candidate-controlled code and performs a normal non-force push.
+ 5. A `contents: write` cleanup job checks out no repository content. It preserves the unchanged exact format-version-2 transfer ref after a failed publication for targeted repair; otherwise it deletes only the exact authorized transfer-ref revision with SHA-bound `--force-with-lease`. A ref that changed after authorization is always preserved.
+-6. A separate `issues: write` cleanup job records the publication outcome in the Actions summary, then verifies the exact accepted command comment by ID, pull request, and unchanged body before deleting it.
++6. A separate `pull-requests: write` cleanup job revalidates the original event identity and the current comment by exact ID, pull request, and unchanged body before deletion. It requires the delete API to return HTTP 204, checks out no repository content, and then records explicit transfer- and command-cleanup statuses in the Actions summary.
+ 
+ The command must be placed in the pull request's **Conversation** tab. Commands on ordinary issues are rejected. Normal pull-request comments, review summaries, inline review comments, malformed commands, and unauthorized commands remain unaffected. An accepted technical command is removed after the workflow no longer needs it; the Actions run summary remains the audit trail.
+ 
+@@ -281,7 +281,7 @@ Target-branch publication never force-pushes, rebases, or merges. Cleanup uses a
+ 
+ ## Failure, cleanup, and retry
+ 
+-After a successful publication, cleanup removes the transfer branch only when it still points to the exact commit authorized by the request job. A branch that was already removed is reported as absent. A branch that was updated or recreated is preserved so an older run cannot destroy a newer upload. The exact accepted technical command is deleted after the workflow no longer needs it; publication and cleanup results remain in the Actions summary.
++After a successful publication, cleanup removes the transfer branch only when it still points to the exact commit authorized by the request job. A branch that was already removed is reported as absent. A branch that was updated or recreated is preserved so an older run cannot destroy a newer upload. The exact accepted technical command is deleted after the workflow no longer needs it. The Actions summary records explicit command cleanup as `removed`, `already_absent`, `preserved_changed`, or `failed` so a publication result cannot be mistaken for successful comment cleanup.
+ 
+ Format version 1 treats a transfer branch as immutable after the command is placed. For a retry, start from the current target head, regenerate the patch, manifest, and both SHA-256 values, upload them on a new unique transfer branch, and place a new exact command.
+ 
+@@ -296,7 +296,7 @@ python3 -B tools/local-agent/test-patch-publication.py
+ bash tools/local-agent/test-patch-publication-workflow.sh
+ ```
+ 
+-The first suite covers both formats, deterministic byte-fallback generation at 64, 128, and 256 KiB, token-bounded splitting through an injected deterministic counter, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote to cover retry-preserving cleanup, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, separated cleanup permissions, exact-ID command cleanup, and immutable Action pins. GitHub event identity, actual comment deletion, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
++The first suite covers both formats, deterministic byte-fallback generation at 64, 128, and 256 KiB, token-bounded splitting through an injected deterministic counter, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote for transfer cleanup and executes the exact extracted command-cleanup script against mocked GitHub API responses. It covers retry preservation, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, separated permissions, successful HTTP-204 deletion, already-absent comments, changed or mismatched identities, visible deletion failures, and immutable Action pins. Live GitHub event permissions, actual comment deletion, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
+ 
+ ## Current limits and follow-ups
+ 

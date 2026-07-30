@@ -1,0 +1,201 @@
+diff --git a/tools/local-agent/test-patch-publication-workflow.sh b/tools/local-agent/test-patch-publication-workflow.sh
+index a35c6b185e844de7768cd1456ebd26a654187782..4cda18465ba2bbff377ef8e24496cc725ded4769 100755
+--- a/tools/local-agent/test-patch-publication-workflow.sh
++++ b/tools/local-agent/test-patch-publication-workflow.sh
+@@ -10,7 +10,7 @@ transfer='agent-patch-publication/integration-test'
+ python3 -B "$root/tools/local-agent/test-prepare-patch-publication.py"
+ 
+ python3 - "$workflow" <<'PY'
+-import pathlib, re, subprocess, sys, tempfile
++import pathlib, re, subprocess, sys, tempfile, textwrap
+ text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+ refs = re.findall(r"^\s*uses:\s*([^\s#]+)", text, re.MULTILINE)
+ assert refs and all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in refs)
+@@ -38,11 +38,16 @@ comment_cleanup = text.split("  cleanup-comment:\n", 1)[1]
+ assert "contents: write" in transfer_cleanup and "issues: write" not in transfer_cleanup
+ assert "uses: actions/checkout@" not in transfer_cleanup
+ assert "git init -q \"$cleanup_repo\"" in transfer_cleanup
+-assert "issues: write" in comment_cleanup and "contents: write" not in comment_cleanup
++assert "pull-requests: write" in comment_cleanup
++assert "issues: write" not in comment_cleanup and "contents: write" not in comment_cleanup
+ assert "github.rest.issues.getComment" in comment_cleanup
+ assert "github.rest.issues.deleteComment" in comment_cleanup
+ assert "github.rest.issues.createComment" not in text
++assert "context.payload.issue.url" in comment_cleanup
++assert "comment.data.id !== commentId" in comment_cleanup
+ assert "comment.data.body.trim() !== expectedCommand" in comment_cleanup
++assert "deletion.status !== 204" in comment_cleanup
++assert "command cleanup:" in comment_cleanup
+ assert "github.rest.git.deleteRef" not in text
+ assert 'patch-transfer:.agent-patch-publication/change.patch' not in text
+ 
+@@ -61,10 +66,168 @@ for index, line in enumerate(lines):
+     scripts.append("\n".join(body))
+ assert len(scripts) == 2
+ with tempfile.TemporaryDirectory() as temporary:
++    temporary_path = pathlib.Path(temporary)
+     for index, script in enumerate(scripts):
+-        path = pathlib.Path(temporary, f"github-script-{index}.js")
++        path = temporary_path / f"github-script-{index}.js"
+         path.write_text(f"(async function () {{\n{script}\n}});\n", encoding="utf-8")
+         subprocess.run(["node", "--check", str(path)], check=True)
++
++    cleanup_module = temporary_path / "cleanup-comment.cjs"
++    cleanup_module.write_text(
++        "module.exports = async function ({ github, context, core, process }) {\n"
++        + scripts[1]
++        + "\n};\n",
++        encoding="utf-8",
++    )
++    cleanup_test = temporary_path / "test-cleanup-comment.cjs"
++    cleanup_test.write_text(
++        textwrap.dedent(
++            r'''
++            const assert = require('node:assert/strict');
++            const cleanup = require(process.argv[2]);
++
++            const commentId = 5135720427;
++            const issueNumber = 154;
++            const transferBranch = 'agent-patch-publication/154-delaytest';
++            const manifestSha = 'a'.repeat(64);
++            const command = `/publish-patch ${transferBranch} ${manifestSha}`;
++            const issueUrl = 'https://api.github.test/repos/example/repository/issues/154';
++
++            function makeContext() {
++              return {
++                repo: { owner: 'example', repo: 'repository' },
++                payload: {
++                  issue: {
++                    number: issueNumber,
++                    url: issueUrl,
++                    pull_request: {},
++                  },
++                  comment: {
++                    id: commentId,
++                    body: command,
++                  },
++                },
++              };
++            }
++
++            async function runCase(options = {}) {
++              const outputs = {};
++              const failures = [];
++              const warnings = [];
++              const notices = [];
++              let deleteCalls = 0;
++              const context = makeContext();
++              if (options.mutateContext) {
++                options.mutateContext(context);
++              }
++              const github = {
++                rest: {
++                  issues: {
++                    getComment: options.getComment || (async () => ({
++                      data: {
++                        id: commentId,
++                        issue_url: issueUrl,
++                        body: command,
++                      },
++                    })),
++                    deleteComment: async (args) => {
++                      deleteCalls += 1;
++                      if (options.deleteComment) {
++                        return options.deleteComment(args);
++                      }
++                      return { status: 204 };
++                    },
++                  },
++                },
++              };
++              const core = {
++                setOutput: (name, value) => { outputs[name] = value; },
++                setFailed: (message) => { failures.push(message); },
++                warning: (message) => { warnings.push(message); },
++                notice: (message) => { notices.push(message); },
++              };
++              const processMock = {
++                env: {
++                  COMMENT_ID: String(commentId),
++                  ISSUE_NUMBER: String(issueNumber),
++                  TRANSFER_BRANCH: transferBranch,
++                  EXPECTED_MANIFEST_SHA256: manifestSha,
++                },
++              };
++              let thrown = null;
++              try {
++                await cleanup({ github, context, core, process: processMock });
++              } catch (error) {
++                thrown = error;
++              }
++              return { outputs, failures, warnings, notices, deleteCalls, thrown };
++            }
++
++            (async () => {
++              let result = await runCase();
++              assert.equal(result.outputs.cleanup_status, 'removed');
++              assert.equal(result.deleteCalls, 1);
++              assert.deepEqual(result.failures, []);
++              assert.equal(result.thrown, null);
++
++              result = await runCase({
++                getComment: async () => {
++                  const error = new Error('missing');
++                  error.status = 404;
++                  throw error;
++                },
++              });
++              assert.equal(result.outputs.cleanup_status, 'already_absent');
++              assert.equal(result.deleteCalls, 0);
++              assert.deepEqual(result.failures, []);
++
++              result = await runCase({
++                getComment: async () => ({
++                  data: { id: commentId, issue_url: issueUrl, body: `${command} edited` },
++                }),
++              });
++              assert.equal(result.outputs.cleanup_status, 'preserved_changed');
++              assert.equal(result.deleteCalls, 0);
++              assert.equal(result.warnings.length, 1);
++
++              result = await runCase({
++                getComment: async () => ({
++                  data: { id: commentId, issue_url: `${issueUrl}-other`, body: command },
++                }),
++              });
++              assert.equal(result.outputs.cleanup_status, 'preserved_changed');
++              assert.equal(result.deleteCalls, 0);
++
++              result = await runCase({
++                mutateContext: (context) => { context.payload.issue.number += 1; },
++              });
++              assert.equal(result.outputs.cleanup_status, 'failed_identity');
++              assert.equal(result.deleteCalls, 0);
++              assert.equal(result.failures.length, 1);
++
++              result = await runCase({ deleteComment: async () => ({ status: 202 }) });
++              assert.equal(result.outputs.cleanup_status, 'failed');
++              assert.equal(result.deleteCalls, 1);
++              assert.equal(result.failures.length, 1);
++
++              result = await runCase({
++                getComment: async () => {
++                  const error = new Error('server error');
++                  error.status = 500;
++                  throw error;
++                },
++              });
++              assert.equal(result.deleteCalls, 0);
++              assert.equal(result.thrown?.message, 'server error');
++            })().catch((error) => {
++              console.error(error);
++              process.exitCode = 1;
++            });
++            '''
++        ).lstrip(),
++        encoding="utf-8",
++    )
++    subprocess.run(["node", str(cleanup_test), str(cleanup_module)], check=True)
+ PY
+ 
+ tmp="$(mktemp -d -t patch-publication-workflow-XXXXXX)"

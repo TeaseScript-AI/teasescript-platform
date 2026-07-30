@@ -1,1 +1,0 @@
-Temporary pull-request bootstrap marker. The verified V2 publication removes this file.
