@@ -252,7 +252,7 @@ For example:
 /publish-patch agent-patch-publication/issue-123-attempt-1 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
-The request job resolves the transfer branch to one exact commit SHA and verifies the exact manifest digest before accepting the request. The prepare job must fetch that same transfer commit. The manifest then binds either the complete format-version-1 patch or every format-version-2 part plus the final reconstructed patch.
+The request job resolves the transfer branch to one exact commit SHA, records the exact command-comment identity, and verifies the exact manifest digest before accepting the request. The prepare job must fetch that same transfer commit. The manifest then binds either the complete format-version-1 patch or every format-version-2 part plus the final reconstructed patch. After the workflow finishes, a separately permissioned cleanup job deletes only that unchanged accepted command comment.
 
 The workflow rejects the request before publication when, among other checks:
 
@@ -276,13 +276,13 @@ Target-branch publication never force-pushes, rebases, or merges. Cleanup uses a
 
 ## Failure, cleanup, and retry
 
-After a successful publication, cleanup removes the transfer branch only when it still points to the exact commit authorized by the request job. A branch that was already removed is reported as absent. A branch that was updated or recreated is preserved so an older run cannot destroy a newer upload.
+After a successful publication, cleanup removes the transfer branch only when it still points to the exact commit authorized by the request job. A branch that was already removed is reported as absent. A branch that was updated or recreated is preserved so an older run cannot destroy a newer upload. The exact accepted technical command is deleted after the workflow no longer needs it; publication and cleanup results remain in the Actions summary.
 
-Format version 1 treats a transfer branch as immutable after the command is placed. For a retry, start from the current target head, regenerate the patch, manifest, and both SHA-256 values, upload them on a new unique transfer branch, and place a new exact command. Never reuse an old authorization comment.
+Format version 1 treats a transfer branch as immutable after the command is placed. For a retry, start from the current target head, regenerate the patch, manifest, and both SHA-256 values, upload them on a new unique transfer branch, and place a new exact command.
 
-Format version 2 preserves the exact transfer branch when publication fails. When the manifest already contains the intended size and SHA-256 for a part that was uploaded incorrectly, replace only that part, commit the corrected transfer branch, and place a new `/publish-patch` command. The manifest and its command digest remain unchanged. The new command binds the retry to the branch's new commit SHA, while any older run is unable to delete the changed ref. When the manifest itself is wrong, regenerate it and use its new digest in the new command.
+Format version 2 preserves the unchanged exact transfer branch when publication fails. When the manifest already contains the intended size and SHA-256 for a part that was uploaded incorrectly, replace only that part, commit the corrected transfer branch, and place a new `/publish-patch` command. The manifest and its command digest remain unchanged. The new command binds the retry to the branch's new commit SHA, while any older run is unable to delete the changed ref. When the manifest itself is wrong, regenerate it and use its new digest in the new command.
 
-A malformed or unauthorized command fails before accepting a transfer ref; remove that unused branch manually. Automatic expiry for abandoned or never-authorized transfer branches is not part of this protocol.
+A malformed or unauthorized command fails before accepting a transfer ref and is not deleted; remove that unused branch manually. Automatic expiry for abandoned or never-authorized transfer branches is not part of this protocol.
 
 ## Reproducible local verification
 
@@ -291,11 +291,11 @@ python3 -B tools/local-agent/test-patch-publication.py
 bash tools/local-agent/test-patch-publication-workflow.sh
 ```
 
-The first suite covers both formats, deterministic byte-fallback generation at 64, 128, and 256 KiB, token-bounded splitting through an injected deterministic counter, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote to cover retry-preserving cleanup, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, and immutable Action pins. GitHub event identity, permissions, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
+The first suite covers both formats, deterministic byte-fallback generation at 64, 128, and 256 KiB, token-bounded splitting through an injected deterministic counter, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote to cover retry-preserving cleanup, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, separated cleanup permissions, exact-ID command cleanup, and immutable Action pins. GitHub event identity, actual comment deletion, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
 
 ## Current limits and follow-ups
 
-Format version 1 remains the smallest transport for one manageable raw `change.patch`. Format version 2 is the normal multipart transport. Token-aware preparation targets 16,000 `o200k_base` tokens per connector content string and also caps parts at 64 KiB by default. Both values are configurable local preparation settings, not accepted connector guarantees. When the tokenizer is unavailable, the helper falls back explicitly to the byte ceiling.
+Format version 1 remains the smallest transport for one manageable raw `change.patch`. Format version 2 is the normal multipart transport. Token-aware preparation targets 3,000 `o200k_base` tokens per connector content string and also caps parts at 12 KiB by default. Both values are configurable local preparation settings, not accepted connector guarantees. When the tokenizer is unavailable, the helper falls back explicitly to the byte ceiling.
 
 Neither format accepts Base64. The protocol limits format version 2 to 1,024 parts, 256 KiB per part, and a 64 MiB reconstructed patch as bounded publication-tooling guards rather than TeaseScript content limits. The local tokenizer vocabulary and `tiktoken` installation belong in the reusable offline agent-toolchain archive, not in Git or source artifacts.
 
