@@ -1,6 +1,6 @@
 # Local Agent Exact-Editing Helper
 
-Requires Python 3.10 or newer. Uses only the Python standard library.
+Requires Python 3.10 or newer. The exact-editing helpers use only the Python standard library. Token-aware patch preparation optionally uses a local `tiktoken` Python installation and a separately stored `o200k_base.tiktoken` vocabulary; neither is a project runtime dependency.
 
 ## Rule
 
@@ -94,3 +94,11 @@ file size in available memory.
 ```bash
 python3 tools/local-agent/test-replace-exact.py
 ```
+
+## Prepare multipart patch publication
+
+`prepare-patch-publication.py` creates a verified raw Git patch between an exact base commit and the tested current `HEAD`, splits it into UTF-8 parts, writes the V2 manifest, proves reconstruction, and creates a local sequential upload plan. It never merges, rebases, squashes, commits, or pushes.
+
+For the token-efficient route, keep `tiktoken` and `o200k_base.tiktoken` in the reusable offline toolchain and pass the vocabulary with `--tokenizer` or `TEASESCRIPT_O200K_TOKENIZER`. The conservative default target is 3,000 estimated `o200k_base` tokens per JSON-serialized connector content string, with an independent 12 KiB byte ceiling and fallback.
+
+After preparation, use `--show-next-upload` and `--record-upload-sha` alternately. The first command exposes only one pending file and ready arguments for the GitHub UTF-8 blob action; the second verifies the returned Git blob SHA before allowing the next file. Use `--reset-upload-index` only when a later connector step proves that one recorded blob must be resent. Never print all parts in advance. See `docs/PATCH-PUBLICATION.md` for the complete protocol and examples.

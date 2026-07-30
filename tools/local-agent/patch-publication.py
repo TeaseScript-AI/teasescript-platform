@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, NoReturn
@@ -21,7 +22,11 @@ from typing import Any, Iterable, Mapping, NoReturn
 
 TRANSFER_PREFIX = "agent-patch-publication/"
 TRANSFER_DIRECTORY = ".agent-patch-publication"
+PART_DIRECTORY = f"{TRANSFER_DIRECTORY}/parts"
 CANDIDATE_REF = "refs/heads/patch-publication-candidate"
+MAX_PART_SIZE_BYTES = 256 * 1024
+MAX_PART_COUNT = 1024
+MAX_PATCH_SIZE_BYTES = 64 * 1024 * 1024
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -31,12 +36,22 @@ class PublicationError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class PatchPart:
+    path: str
+    size_bytes: int
+    sha256: str
+
+
+@dataclass(frozen=True)
 class Manifest:
+    format_version: int
     target_branch: str
     expected_base_sha: str
     expected_result_tree_sha: str
     patch_sha256: str
     commit_message: str
+    patch_size_bytes: int | None = None
+    parts: tuple[PatchPart, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -97,6 +112,20 @@ def require_string(value: Mapping[str, Any], key: str, *, label: str) -> str:
     return item
 
 
+def require_int(value: Mapping[str, Any], key: str, *, label: str) -> int:
+    item = value[key]
+    if type(item) is not int:
+        fail(f"{label}.{key} must be an integer")
+    return item
+
+
+def require_list(value: Mapping[str, Any], key: str, *, label: str) -> list[Any]:
+    item = value[key]
+    if not isinstance(item, list):
+        fail(f"{label}.{key} must be an array")
+    return item
+
+
 def require_sha1(value: str, *, label: str) -> str:
     if not SHA1_RE.fullmatch(value):
         fail(f"{label} must be a lowercase 40-character Git SHA-1")
@@ -151,6 +180,19 @@ def validate_transfer_branch(branch: str, *, repository: Path) -> str:
     return branch
 
 
+def validate_local_ref(ref: str, *, repository: Path) -> str:
+    if not ref.startswith("refs/"):
+        fail("transfer ref must be a fully qualified Git ref")
+    completed = run(
+        ["git", "check-ref-format", ref],
+        cwd=repository,
+        check=False,
+    )
+    if completed.returncode != 0:
+        fail("transfer ref is not a valid Git ref")
+    return ref
+
+
 def validate_commit_message(message: str) -> str:
     if not message or len(message.encode("utf-8")) > 240:
         fail("manifest.commitMessage must be between 1 and 240 UTF-8 bytes")
@@ -167,20 +209,37 @@ def parse_manifest(
     expected_target_branch: str | None,
 ) -> Manifest:
     value = load_json_object(path)
-    require_exact_fields(
-        value,
-        (
-            "formatVersion",
-            "targetBranch",
-            "expectedBaseSha",
-            "expectedResultTreeSha",
-            "patchSha256",
-            "commitMessage",
-        ),
-        label="manifest",
-    )
-    if type(value["formatVersion"]) is not int or value["formatVersion"] != 1:
-        fail("manifest.formatVersion must be the integer 1")
+    format_version = require_int(value, "formatVersion", label="manifest")
+    if format_version == 1:
+        require_exact_fields(
+            value,
+            (
+                "formatVersion",
+                "targetBranch",
+                "expectedBaseSha",
+                "expectedResultTreeSha",
+                "patchSha256",
+                "commitMessage",
+            ),
+            label="manifest",
+        )
+    elif format_version == 2:
+        require_exact_fields(
+            value,
+            (
+                "formatVersion",
+                "targetBranch",
+                "expectedBaseSha",
+                "expectedResultTreeSha",
+                "patchSizeBytes",
+                "patchSha256",
+                "parts",
+                "commitMessage",
+            ),
+            label="manifest",
+        )
+    else:
+        fail("manifest.formatVersion must be the integer 1 or 2")
 
     target_branch = validate_branch(
         require_string(value, "targetBranch", label="manifest"),
@@ -194,7 +253,57 @@ def parse_manifest(
     if expected_target_branch is not None and target_branch != expected_target_branch:
         fail("manifest target branch does not match the commented pull request")
 
+    patch_size_bytes: int | None = None
+    parts: tuple[PatchPart, ...] = ()
+    if format_version == 2:
+        patch_size_bytes = require_int(value, "patchSizeBytes", label="manifest")
+        if not 1 <= patch_size_bytes <= MAX_PATCH_SIZE_BYTES:
+            fail(
+                "manifest.patchSizeBytes must be between 1 and "
+                f"{MAX_PATCH_SIZE_BYTES}"
+            )
+        raw_parts = require_list(value, "parts", label="manifest")
+        if not 1 <= len(raw_parts) <= MAX_PART_COUNT:
+            fail(f"manifest.parts must contain between 1 and {MAX_PART_COUNT} entries")
+        parsed_parts: list[PatchPart] = []
+        for offset, raw_part in enumerate(raw_parts, start=1):
+            label = f"manifest.parts[{offset - 1}]"
+            if not isinstance(raw_part, dict):
+                fail(f"{label} must be an object")
+            require_exact_fields(
+                raw_part,
+                ("path", "sizeBytes", "sha256"),
+                label=label,
+            )
+            expected_path = (
+                f"{PART_DIRECTORY}/change.patch.part-"
+                f"{offset:04d}-of-{len(raw_parts):04d}"
+            )
+            part_path = require_string(raw_part, "path", label=label)
+            if part_path != expected_path:
+                fail(f"{label}.path must be exactly {expected_path}")
+            size_bytes = require_int(raw_part, "sizeBytes", label=label)
+            if not 1 <= size_bytes <= MAX_PART_SIZE_BYTES:
+                fail(
+                    f"{label}.sizeBytes must be between 1 and "
+                    f"{MAX_PART_SIZE_BYTES}"
+                )
+            parsed_parts.append(
+                PatchPart(
+                    path=part_path,
+                    size_bytes=size_bytes,
+                    sha256=require_sha256(
+                        require_string(raw_part, "sha256", label=label),
+                        label=f"{label}.sha256",
+                    ),
+                )
+            )
+        if sum(part.size_bytes for part in parsed_parts) != patch_size_bytes:
+            fail("manifest patch size does not equal the sum of part sizes")
+        parts = tuple(parsed_parts)
+
     return Manifest(
+        format_version=format_version,
         target_branch=target_branch,
         expected_base_sha=require_sha1(
             require_string(value, "expectedBaseSha", label="manifest"),
@@ -211,6 +320,8 @@ def parse_manifest(
         commit_message=validate_commit_message(
             require_string(value, "commitMessage", label="manifest")
         ),
+        patch_size_bytes=patch_size_bytes,
+        parts=parts,
     )
 
 
@@ -283,6 +394,189 @@ def verify_patch_digest(path: Path, expected: str) -> None:
         fail(f"patch SHA-256 mismatch: expected {expected}, found {actual}")
 
 
+def file_size(path: Path, *, label: str) -> int:
+    try:
+        return path.stat().st_size
+    except OSError as exc:
+        fail(f"cannot inspect {label} {path}: {exc}")
+
+
+def git_bytes(args: list[str], *, cwd: Path, label: str) -> bytes:
+    completed = subprocess.run(
+        args,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", "replace").strip()
+        if not detail:
+            detail = completed.stdout.decode("utf-8", "replace").strip()
+        fail(f"cannot read {label}: {detail or 'no output'}")
+    return completed.stdout
+
+
+def read_transfer_tree(repository: Path, transfer_ref: str) -> dict[str, str]:
+    raw = git_bytes(
+        [
+            "git",
+            "ls-tree",
+            "-r",
+            "-z",
+            "--full-tree",
+            transfer_ref,
+            "--",
+            TRANSFER_DIRECTORY,
+        ],
+        cwd=repository,
+        label="transfer payload tree",
+    )
+    entries: dict[str, str] = {}
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        try:
+            metadata, raw_path = record.split(b"\t", 1)
+            mode, object_type, _object_sha = metadata.decode("ascii").split(" ")
+            path = raw_path.decode("utf-8")
+        except (ValueError, UnicodeError):
+            fail("transfer payload tree contains an invalid entry")
+        if path in entries:
+            fail(f"transfer payload tree contains duplicate path: {path}")
+        if mode != "100644" or object_type != "blob":
+            fail(f"transfer payload path must be a regular non-executable file: {path}")
+        entries[path] = mode
+    return entries
+
+
+def read_transfer_file(repository: Path, transfer_ref: str, path: str) -> bytes:
+    return git_bytes(
+        ["git", "show", f"{transfer_ref}:{path}"],
+        cwd=repository,
+        label=f"transfer payload file {path}",
+    )
+
+
+def require_utf8_part(part: bytes, *, path: str) -> None:
+    try:
+        part.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        fail(f"patch part is not UTF-8: {path} (byte offset {exc.start})")
+
+
+def materialize_patch(args: argparse.Namespace) -> None:
+    repository = args.repository.resolve()
+    transfer_ref = validate_local_ref(args.transfer_ref, repository=repository)
+    resolved_ref = run(
+        ["git", "rev-parse", "--verify", f"{transfer_ref}^{{commit}}"],
+        cwd=repository,
+    ).stdout.strip()
+    require_sha1(resolved_ref, label="transfer ref commit")
+
+    manifest = parse_manifest(
+        args.manifest,
+        repository=repository,
+        default_branch=args.default_branch,
+        expected_target_branch=args.expected_target_branch,
+    )
+    manifest_path = f"{TRANSFER_DIRECTORY}/manifest.json"
+    payload_paths = (
+        [f"{TRANSFER_DIRECTORY}/change.patch"]
+        if manifest.format_version == 1
+        else [part.path for part in manifest.parts]
+    )
+    expected_paths = {manifest_path, *payload_paths}
+    actual_paths = set(read_transfer_tree(repository, transfer_ref))
+    missing = sorted(expected_paths - actual_paths)
+    unexpected = sorted(actual_paths - expected_paths)
+    if missing:
+        fail(f"transfer payload is missing file(s): {', '.join(missing)}")
+    if unexpected:
+        fail(f"transfer payload contains unexpected file(s): {', '.join(unexpected)}")
+
+    try:
+        local_manifest = args.manifest.read_bytes()
+    except OSError as exc:
+        fail(f"cannot read manifest {args.manifest}: {exc}")
+    transfer_manifest = read_transfer_file(repository, transfer_ref, manifest_path)
+    if transfer_manifest != local_manifest:
+        fail("transfer manifest bytes differ from the verified local manifest")
+
+    output_patch = args.output_patch.resolve()
+    if output_patch.exists():
+        fail(f"output patch already exists: {output_patch}")
+    output_patch.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output_patch.name}.", dir=str(output_patch.parent)
+    )
+    temporary_path = Path(temporary_name)
+    complete_digest = hashlib.sha256()
+    complete_size = 0
+    published = False
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            if manifest.format_version == 1:
+                patch = read_transfer_file(repository, transfer_ref, payload_paths[0])
+                handle.write(patch)
+                complete_digest.update(patch)
+                complete_size = len(patch)
+            else:
+                for part in manifest.parts:
+                    value = read_transfer_file(repository, transfer_ref, part.path)
+                    actual_size = len(value)
+                    if actual_size != part.size_bytes:
+                        fail(
+                            f"patch part size mismatch for {part.path}: "
+                            f"expected {part.size_bytes}, found {actual_size}"
+                        )
+                    actual_digest = hashlib.sha256(value).hexdigest()
+                    if actual_digest != part.sha256:
+                        fail(
+                            f"patch part SHA-256 mismatch for {part.path}: "
+                            f"expected {part.sha256}, found {actual_digest}"
+                        )
+                    require_utf8_part(value, path=part.path)
+                    handle.write(value)
+                    complete_digest.update(value)
+                    complete_size += actual_size
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        if (
+            manifest.patch_size_bytes is not None
+            and complete_size != manifest.patch_size_bytes
+        ):
+            fail(
+                "reconstructed patch size mismatch: "
+                f"expected {manifest.patch_size_bytes}, found {complete_size}"
+            )
+        actual_patch_digest = complete_digest.hexdigest()
+        if actual_patch_digest != manifest.patch_sha256:
+            fail(
+                "reconstructed patch SHA-256 mismatch: "
+                f"expected {manifest.patch_sha256}, found {actual_patch_digest}"
+            )
+        os.replace(temporary_path, output_patch)
+        published = True
+    finally:
+        if not published:
+            temporary_path.unlink(missing_ok=True)
+
+    write_github_outputs(
+        args.github_output,
+        {
+            "format_version": str(manifest.format_version),
+            "patch_sha256": manifest.patch_sha256,
+        },
+    )
+    print(
+        "materialized patch publication payload "
+        f"format={manifest.format_version} size={complete_size} "
+        f"sha256={manifest.patch_sha256}"
+    )
+
+
 def write_github_outputs(path: Path | None, values: Mapping[str, str]) -> None:
     if path is None:
         return
@@ -310,6 +604,13 @@ def inspect_request(args: argparse.Namespace) -> None:
     )
     if transfer_branch == manifest.target_branch:
         fail("transfer branch and target branch must differ")
+    if manifest.patch_size_bytes is not None:
+        actual_patch_size = file_size(args.patch, label="patch")
+        if actual_patch_size != manifest.patch_size_bytes:
+            fail(
+                "patch size mismatch: "
+                f"expected {manifest.patch_size_bytes}, found {actual_patch_size}"
+            )
     verify_patch_digest(args.patch, manifest.patch_sha256)
     write_github_outputs(
         args.github_output,
@@ -375,6 +676,13 @@ def create_candidate_bundle(
             "checked-out base mismatch: "
             f"expected {manifest.expected_base_sha}, found {head}"
         )
+    if manifest.patch_size_bytes is not None:
+        actual_patch_size = file_size(patch, label="patch")
+        if actual_patch_size != manifest.patch_size_bytes:
+            fail(
+                "patch size mismatch: "
+                f"expected {manifest.patch_size_bytes}, found {actual_patch_size}"
+            )
     verify_patch_digest(patch, manifest.patch_sha256)
 
     run(
@@ -601,6 +909,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_request_arguments(inspect_parser)
     inspect_parser.set_defaults(handler=inspect_request)
+
+    materialize_parser = subparsers.add_parser(
+        "materialize-patch",
+        help="read and verify one exact transfer payload into a raw patch",
+    )
+    materialize_parser.add_argument("--repository", type=Path, required=True)
+    materialize_parser.add_argument("--manifest", type=Path, required=True)
+    materialize_parser.add_argument("--transfer-ref", required=True)
+    materialize_parser.add_argument("--output-patch", type=Path, required=True)
+    materialize_parser.add_argument("--default-branch", default="main")
+    materialize_parser.add_argument("--expected-target-branch")
+    materialize_parser.add_argument("--github-output", type=Path)
+    materialize_parser.set_defaults(handler=materialize_patch)
 
     prepare_parser = subparsers.add_parser(
         "prepare", help="apply an exact patch and create a candidate Git bundle"

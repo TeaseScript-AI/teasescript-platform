@@ -19,6 +19,7 @@ jobs:
       expected_transfer_sha: ${{ steps.request.outputs.expected_transfer_sha }}
       expected_manifest_sha256: ${{ steps.request.outputs.expected_manifest_sha256 }}
       expected_target_branch: ${{ steps.request.outputs.expected_target_branch }}
+      format_version: ${{ steps.request.outputs.format_version }}
       issue_number: ${{ steps.request.outputs.issue_number }}
       comment_id: ${{ steps.request.outputs.comment_id }}
     steps:
@@ -86,10 +87,55 @@ jobs:
               return;
             }
 
+            const manifestResponse = await github.rest.repos.getContent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path: '.agent-patch-publication/manifest.json',
+              ref: expectedTransferSha,
+            });
+            if (
+              Array.isArray(manifestResponse.data) ||
+              manifestResponse.data.type !== 'file' ||
+              manifestResponse.data.encoding !== 'base64'
+            ) {
+              core.setFailed('Transfer manifest must be one regular file.');
+              return;
+            }
+            const manifestBytes = Buffer.from(
+              manifestResponse.data.content.replace(/\n/g, ''),
+              'base64',
+            );
+            const actualManifestSha256 = require('crypto')
+              .createHash('sha256')
+              .update(manifestBytes)
+              .digest('hex');
+            if (actualManifestSha256 !== expectedManifestSha256) {
+              core.setFailed(
+                `Manifest SHA-256 mismatch: expected ${expectedManifestSha256}, found ${actualManifestSha256}`,
+              );
+              return;
+            }
+            let formatVersion;
+            try {
+              const manifestText = new (require('util').TextDecoder)(
+                'utf-8',
+                { fatal: true },
+              ).decode(manifestBytes);
+              formatVersion = JSON.parse(manifestText).formatVersion;
+            } catch (error) {
+              core.setFailed(`Transfer manifest is not valid UTF-8 JSON: ${error.message}`);
+              return;
+            }
+            if (formatVersion !== 1 && formatVersion !== 2) {
+              core.setFailed('Transfer manifest formatVersion must be the integer 1 or 2.');
+              return;
+            }
+
             core.setOutput('transfer_branch', transferBranch);
             core.setOutput('expected_transfer_sha', expectedTransferSha);
             core.setOutput('expected_manifest_sha256', expectedManifestSha256);
             core.setOutput('expected_target_branch', pull.data.head.ref);
+            core.setOutput('format_version', String(formatVersion));
             core.setOutput('issue_number', String(context.issue.number));
             core.setOutput('comment_id', String(context.payload.comment.id));
 
@@ -124,7 +170,7 @@ jobs:
       - name: Preserve trusted publication tool
         run: install -m 0755 tools/local-agent/patch-publication.py "$RUNNER_TEMP/patch-publication.py"
 
-      - name: Read exact transfer payload
+      - name: Read exact transfer manifest
         run: |
           git fetch --no-tags origin \
             "refs/heads/$TRANSFER_BRANCH:refs/remotes/origin/patch-transfer"
@@ -136,9 +182,6 @@ jobs:
           git show \
             "refs/remotes/origin/patch-transfer:.agent-patch-publication/manifest.json" \
             > "$RUNNER_TEMP/manifest.json"
-          git show \
-            "refs/remotes/origin/patch-transfer:.agent-patch-publication/change.patch" \
-            > "$RUNNER_TEMP/change.patch"
 
       - name: Verify authorized manifest digest
         run: |
@@ -147,6 +190,18 @@ jobs:
             echo "Manifest SHA-256 mismatch: expected $EXPECTED_MANIFEST_SHA256, found $actual_manifest_sha256" >&2
             exit 1
           fi
+
+      - name: Materialize exact patch payload
+        id: materialize
+        run: |
+          python3 -B "$RUNNER_TEMP/patch-publication.py" materialize-patch \
+            --repository "$GITHUB_WORKSPACE" \
+            --manifest "$RUNNER_TEMP/manifest.json" \
+            --transfer-ref refs/remotes/origin/patch-transfer \
+            --output-patch "$RUNNER_TEMP/change.patch" \
+            --expected-target-branch "$EXPECTED_TARGET_BRANCH" \
+            --default-branch "$DEFAULT_BRANCH" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Inspect request
         id: inspect
@@ -334,12 +389,14 @@ jobs:
     outputs:
       cleanup_status: ${{ steps.cleanup_transfer.outputs.cleanup_status }}
     steps:
-      - name: Delete exact transfer ref
+      - name: Clean up exact transfer ref
         id: cleanup_transfer
         env:
           GH_TOKEN: ${{ github.token }}
           TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
           EXPECTED_TRANSFER_SHA: ${{ needs.request.outputs.expected_transfer_sha }}
+          FORMAT_VERSION: ${{ needs.request.outputs.format_version }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
         run: |
           set -euo pipefail
           [[ "$TRANSFER_BRANCH" =~ ^agent-patch-publication/[A-Za-z0-9][A-Za-z0-9._/-]{0,215}$ ]]
@@ -357,24 +414,13 @@ jobs:
           cleanup_status=failed
           cleanup_failed=0
 
-          set +e
-          push_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
-            push --porcelain \
-            --force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}" \
-            "$remote_url" ":${transfer_ref}" 2>&1)"
-          push_result=$?
-          set -e
-
-          if [[ $push_result -eq 0 ]]; then
-            cleanup_status=removed
-          else
+          if [[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]; then
             set +e
             remote_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
               ls-remote --heads "$remote_url" "$transfer_ref" 2>&1)"
             remote_result=$?
             set -e
             if [[ $remote_result -ne 0 ]]; then
-              echo "$push_output" >&2
               echo "$remote_output" >&2
               cleanup_status=failed
               cleanup_failed=1
@@ -382,12 +428,45 @@ jobs:
               cleanup_status=already_absent
             else
               current_transfer_sha="${remote_output%%$'\t'*}"
-              if [[ "$current_transfer_sha" != "$EXPECTED_TRANSFER_SHA" ]]; then
-                cleanup_status=preserved_changed
+              if [[ "$current_transfer_sha" == "$EXPECTED_TRANSFER_SHA" ]]; then
+                cleanup_status=preserved_retry
               else
+                cleanup_status=preserved_changed
+              fi
+            fi
+          else
+            set +e
+            push_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
+              push --porcelain \
+              --force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}" \
+              "$remote_url" ":${transfer_ref}" 2>&1)"
+            push_result=$?
+            set -e
+
+            if [[ $push_result -eq 0 ]]; then
+              cleanup_status=removed
+            else
+              set +e
+              remote_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
+                ls-remote --heads "$remote_url" "$transfer_ref" 2>&1)"
+              remote_result=$?
+              set -e
+              if [[ $remote_result -ne 0 ]]; then
                 echo "$push_output" >&2
+                echo "$remote_output" >&2
                 cleanup_status=failed
                 cleanup_failed=1
+              elif [[ -z "$remote_output" ]]; then
+                cleanup_status=already_absent
+              else
+                current_transfer_sha="${remote_output%%$'\t'*}"
+                if [[ "$current_transfer_sha" != "$EXPECTED_TRANSFER_SHA" ]]; then
+                  cleanup_status=preserved_changed
+                else
+                  echo "$push_output" >&2
+                  cleanup_status=failed
+                  cleanup_failed=1
+                fi
               fi
             fi
           fi
