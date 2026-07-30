@@ -18,6 +18,8 @@ assert "github.rest.git.getRef" in text
 assert "github.rest.repos.getContent" in text
 assert "expected_transfer_sha" in text
 assert "format_version" in text
+assert "comment_id: ${{ steps.request.outputs.comment_id }}" in text
+assert "context.payload.comment.id" in text
 assert "Read exact transfer manifest" in text
 assert 'actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"' in text
 assert "Verify authorized manifest digest" in text
@@ -28,6 +30,17 @@ assert "preserved_retry" in text
 assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in text
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in text
 assert "preserved_changed" in text
+assert "cleanup-transfer:" in text and "cleanup-comment:" in text
+transfer_cleanup = text.split("  cleanup-transfer:\n", 1)[1].split("  cleanup-comment:\n", 1)[0]
+comment_cleanup = text.split("  cleanup-comment:\n", 1)[1]
+assert "contents: write" in transfer_cleanup and "issues: write" not in transfer_cleanup
+assert "uses: actions/checkout@" not in transfer_cleanup
+assert "git init -q \"$cleanup_repo\"" in transfer_cleanup
+assert "issues: write" in comment_cleanup and "contents: write" not in comment_cleanup
+assert "github.rest.issues.getComment" in comment_cleanup
+assert "github.rest.issues.deleteComment" in comment_cleanup
+assert "github.rest.issues.createComment" not in text
+assert "comment.data.body.trim() !== expectedCommand" in comment_cleanup
 assert "github.rest.git.deleteRef" not in text
 assert 'patch-transfer:.agent-patch-publication/change.patch' not in text
 
@@ -79,8 +92,13 @@ for line in workflow[run_index + 1 :]:
         break
     body.append(line[run_indent + 2 :] if line.strip() else "")
 assert body
+script = "\n".join(body) + "\n"
+old_remote = 'remote_url="https://github.com/${GITHUB_REPOSITORY}.git"'
+new_remote = 'remote_url="${PATCH_PUBLICATION_TEST_REMOTE_URL:?}"'
+assert script.count(old_remote) == 1
+script = script.replace(old_remote, new_remote)
 output.write_text(
-    "#!/usr/bin/env bash\nset -euo pipefail\n" + "\n".join(body) + "\n",
+    "#!/usr/bin/env bash\nset -euo pipefail\n" + script,
     encoding="utf-8",
 )
 PYCLEANUP
@@ -173,6 +191,10 @@ run_cleanup() {
   : > "$output_file"
   (
     cd "$tmp/publisher"
+    GH_TOKEN=test-token \
+    GITHUB_REPOSITORY=example/repository \
+    RUNNER_TEMP="$tmp" \
+    PATCH_PUBLICATION_TEST_REMOTE_URL="$remote" \
     TRANSFER_BRANCH="$transfer" \
     EXPECTED_TRANSFER_SHA="$expected_transfer_sha" \
     FORMAT_VERSION="$format_version" \
