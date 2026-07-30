@@ -10,7 +10,7 @@ The connector is the GitHub control plane: use it for exact repository metadata,
 
 For substantial implementation, review, debugging, or verification:
 
-1. use `get_pr_info` or an exact commit lookup to resolve the current head and base;
+1. use `get_pr_info` for a pull request, or another narrow metadata/status action when an exact commit SHA is already known, to resolve the current head and base;
 2. locate an unexpired source-bundle artifact bound to that exact head;
 3. download the artifact once;
 4. run `tools/local-agent/prepare-source-review.py` against the downloaded ZIP;
@@ -112,6 +112,8 @@ For review and CI state:
 
 These operations are valid, but can return large amounts of text and should not be discovery defaults:
 
+- `fetch_commit`: commit metadata together with the complete commit diff; do not use it merely to confirm a known SHA or read a commit message;
+- `fetch_pr`: pull-request data together with its diff; prefer `get_pr_info` when metadata is sufficient;
 - `fetch_pr_patch` and `get_pr_diff`: complete patch;
 - `fetch_pr_comments`: combined issue comments, reviews, and inline comments;
 - `fetch_workflow_job_logs`: complete decoded job log;
