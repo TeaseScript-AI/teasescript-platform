@@ -481,28 +481,10 @@ jobs:
     needs: [request, prepare, test, publish, cleanup-transfer]
     runs-on: ubuntu-latest
     permissions:
-      issues: write
+      pull-requests: write
     steps:
-      - name: Record publication result
-        env:
-          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch || needs.request.outputs.expected_target_branch }}
-          PUBLISHED_COMMIT_SHA: ${{ needs.publish.outputs.published_commit_sha }}
-          PREPARE_RESULT: ${{ needs.prepare.result }}
-          TEST_RESULT: ${{ needs.test.result }}
-          PUBLISH_RESULT: ${{ needs.publish.result }}
-          CLEANUP_STATUS: ${{ needs.cleanup-transfer.outputs.cleanup_status }}
-        run: |
-          {
-            printf '## Patch publication result\n\n'
-            printf -- '- target branch: `%s`\n' "$TARGET_BRANCH"
-            printf -- '- published commit: `%s`\n' "${PUBLISHED_COMMIT_SHA:-none}"
-            printf -- '- prepare: `%s`\n' "$PREPARE_RESULT"
-            printf -- '- test: `%s`\n' "$TEST_RESULT"
-            printf -- '- publish: `%s`\n' "$PUBLISH_RESULT"
-            printf -- '- transfer cleanup: `%s`\n' "${CLEANUP_STATUS:-failed}"
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Delete exact accepted publication command
+        id: cleanup_comment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           COMMENT_ID: ${{ needs.request.outputs.comment_id }}
@@ -513,12 +495,23 @@ jobs:
           script: |
             const commentId = Number(process.env.COMMENT_ID);
             const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const expectedCommand = `/publish-patch ${process.env.TRANSFER_BRANCH} ${process.env.EXPECTED_MANIFEST_SHA256}`;
             if (!Number.isSafeInteger(commentId) || !Number.isSafeInteger(issueNumber)) {
+              core.setOutput('cleanup_status', 'failed_identity');
               core.setFailed('Validated publication comment identity is missing.');
               return;
             }
+            if (
+              context.payload.issue?.number !== issueNumber ||
+              context.payload.comment?.id !== commentId ||
+              context.payload.comment?.body?.trim() !== expectedCommand ||
+              !context.payload.issue?.pull_request
+            ) {
+              core.setOutput('cleanup_status', 'failed_identity');
+              core.setFailed('Publication command event identity no longer matches the validated request.');
+              return;
+            }
 
-            const expectedCommand = `/publish-patch ${process.env.TRANSFER_BRANCH} ${process.env.EXPECTED_MANIFEST_SHA256}`;
             let comment;
             try {
               comment = await github.rest.issues.getComment({
@@ -528,23 +521,54 @@ jobs:
               });
             } catch (error) {
               if (error.status === 404) {
+                core.setOutput('cleanup_status', 'already_absent');
                 core.notice('Publication command comment was already absent.');
                 return;
               }
               throw error;
             }
 
-            const expectedIssueUrl = `${context.apiUrl}/repos/${context.repo.owner}/${context.repo.repo}/issues/${issueNumber}`;
             if (
-              comment.data.issue_url !== expectedIssueUrl ||
+              comment.data.id !== commentId ||
+              comment.data.issue_url !== context.payload.issue.url ||
               comment.data.body.trim() !== expectedCommand
             ) {
+              core.setOutput('cleanup_status', 'preserved_changed');
               core.warning('Publication command comment changed after validation and was preserved.');
               return;
             }
 
-            await github.rest.issues.deleteComment({
+            const deletion = await github.rest.issues.deleteComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               comment_id: commentId,
             });
+            if (deletion.status !== 204) {
+              core.setOutput('cleanup_status', 'failed');
+              core.setFailed(`Publication command deletion returned HTTP ${deletion.status}.`);
+              return;
+            }
+            core.setOutput('cleanup_status', 'removed');
+            core.notice('The exact accepted publication command was removed.');
+
+      - name: Record publication result
+        if: ${{ always() }}
+        env:
+          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch || needs.request.outputs.expected_target_branch }}
+          PUBLISHED_COMMIT_SHA: ${{ needs.publish.outputs.published_commit_sha }}
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          TRANSFER_CLEANUP_STATUS: ${{ needs.cleanup-transfer.outputs.cleanup_status }}
+          COMMENT_CLEANUP_STATUS: ${{ steps.cleanup_comment.outputs.cleanup_status }}
+        run: |
+          {
+            printf '## Patch publication result\n\n'
+            printf -- '- target branch: `%s`\n' "$TARGET_BRANCH"
+            printf -- '- published commit: `%s`\n' "${PUBLISHED_COMMIT_SHA:-none}"
+            printf -- '- prepare: `%s`\n' "$PREPARE_RESULT"
+            printf -- '- test: `%s`\n' "$TEST_RESULT"
+            printf -- '- publish: `%s`\n' "$PUBLISH_RESULT"
+            printf -- '- transfer cleanup: `%s`\n' "${TRANSFER_CLEANUP_STATUS:-failed}"
+            printf -- '- command cleanup: `%s`\n' "${COMMENT_CLEANUP_STATUS:-failed}"
+          } >> "$GITHUB_STEP_SUMMARY"
