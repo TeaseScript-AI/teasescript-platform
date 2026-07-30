@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "feat/issue-147-artifact-first-reviews",
+  "expectedBaseSha": "0a2654348f4ca1d4f0a55975d95550c148938256",
+  "expectedResultTreeSha": "a77283e5c81fbba0b53a3c1014f0c77112b2cc9a",
+  "patchSizeBytes": 57432,
+  "patchSha256": "f29494c6f87edbe33a0e35d1a86be7b3e81c68496e226848fecfd1ef4461478f",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0006",
+      "sizeBytes": 12050,
+      "sha256": "73aeccab14c0a5531861cf02cb43ff9b754c1f227c36fcb3ea72fc1a654bc928"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0006",
+      "sizeBytes": 6844,
+      "sha256": "2fb9912711a98c3249b9e9aa1d8b1971af7ae07ecd570c45e04efc6af14a015c"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0006",
+      "sizeBytes": 13295,
+      "sha256": "669da80cbb5f0013ecb821f42a2b46e1b5eb77ec422e5fed36d07ca0299b2ff1"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0006",
+      "sizeBytes": 9324,
+      "sha256": "aed10eb42628993f1435b18b84b599d4a238e439f0f979e75574a6a2a342da4d"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0006",
+      "sizeBytes": 13283,
+      "sha256": "a12830a3a8a24d8e61df9d338f5888c5cd635de6331e5f0b55742af372b01d92"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0006-of-0006",
+      "sizeBytes": 2636,
+      "sha256": "6c55f20096905d423927e2dc02e40414706aebbe0e3b7cec54a5e848179e5b77"
+    }
+  ],
+  "commitMessage": "Reduce connector review output"
+}

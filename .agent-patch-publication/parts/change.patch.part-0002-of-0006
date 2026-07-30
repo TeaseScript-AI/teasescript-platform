@@ -1,0 +1,120 @@
+diff --git a/docs/README.md b/docs/README.md
+index 331ca89322b4233eb73bd2890e6f658b5d55275d..f15f3b45f34dfd78dbf55f4400e1416bc3b5690b 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -31,6 +31,7 @@ These files provide concise current routing and must not duplicate or override a
+ ## Development workflow
+ 
+ - `DEVELOPMENT-WORKFLOW.md` defines the GitHub-native issue, agent, branch, pull-request, coordinated-work, automatic and connector-requested verified source-artifact, documentation, and final-verification process.
++- `CHATGPT-GITHUB-WORKFLOW.md` defines the connector-specific local-first route: obtain one exact source artifact, prepare a verified local checkout, work with local tools, and reserve connector reads and writes for live GitHub state or operations that must happen on GitHub.
+ - `PATCH-PUBLICATION.md` defines the verified raw-patch publication fallback for network-restricted agents, including token-aware sequential multipart preparation, single-file compatibility, connector upload guidance, its command, manifest, trust boundary, validation, exact cleanup, retry, and current limits.
+ - `../AGENTS.md` contains the mandatory task, coding, review, and Git rules for every agent.
+ - `../tools/work-packages/README.md` defines the explicit fallback for agents that cannot complete the normal GitHub branch and pull-request flow.
+diff --git a/tools/local-agent/README.md b/tools/local-agent/README.md
+index 6159700f3b52f5173b1c235e871c00f8e174ec63..69a0e4612c2f8438329cd63ba9bdad83a3ef6b45 100644
+--- a/tools/local-agent/README.md
++++ b/tools/local-agent/README.md
+@@ -1,6 +1,6 @@
+-# Local Agent Exact-Editing Helper
++# Local Agent Tools
+ 
+-Requires Python 3.10 or newer. The exact-editing helpers use only the Python standard library. Token-aware patch preparation optionally uses a local `tiktoken` Python installation and a separately stored `o200k_base.tiktoken` vocabulary; neither is a project runtime dependency.
++Requires Python 3.10 or newer. The source-review, exact-editing, and compact-test helpers use only the Python standard library and ordinary shell/Git tools. Token-aware patch preparation optionally uses a local `tiktoken` Python installation and a separately stored `o200k_base.tiktoken` vocabulary; neither is a project runtime dependency.
+ 
+ ## Rule
+ 
+@@ -95,6 +95,46 @@ file size in available memory.
+ python3 tools/local-agent/test-replace-exact.py
+ ```
+ 
++## Compact test and shell output
++
++`compact_unittest.py` suppresses per-test success chatter and prints one suite result. On failure it emits the normal verbose unittest identity, traceback, assertion details, and nonzero exit status.
++
++`run-compact.sh` captures routine shell command output. On success it deletes the temporary log and prints one PASS line. On failure it prints the command and exit status, emits the complete diagnostic when it is small, or prints a bounded first/last excerpt while retaining the complete log for CI artifact upload.
++
++```bash
++python3 -B tools/local-agent/test-compact-unittest.py
++bash tools/local-agent/test-run-compact.sh
++
++bash tools/local-agent/run-compact.sh \
++  --label source-bundle-workflow \
++  --log /tmp/source-bundle-workflow.log \
++  -- bash tools/local-agent/test-create-source-bundle.sh
++```
++
++Do not redirect failures to `/dev/null` merely to reduce output. Compact successful output and retain actionable failures.
++
++## Prepare a verified source review checkout
++
++`prepare-source-review.py` converts one already downloaded source-bundle ZIP into an exact clean local checkout. It verifies the GitHub artifact digest, ZIP safety and payload shape, internal checksums, manifest repository/head/tree identities, complete bundle history, optional expected base, `git fsck`, and clean worktree. The requested output is exposed atomically only after every check succeeds.
++
++```bash
++python3 tools/local-agent/prepare-source-review.py \
++  --artifact /mnt/data/pr-144-source-bundle.zip \
++  --artifact-sha256 6ad5e5af7fd2f9858dd10473fc8ce092a7dc4723e428daba2f2d302b2e1a1bf0 \
++  --expected-repository TeaseScript-AI/teasescript-platform \
++  --expected-head 1eef336ff0acdfae9913295890ef92828b9ba95b \
++  --expected-base 371bbaaba6d4773c292b69598c521591afcf4330 \
++  --output /mnt/data/review-pr-144
++```
++
++The resulting checkout has no `origin` remote. Connector-based agents should use this artifact route instead of trying network `git clone` or reading the repository file by file through the connector. The extractor rejects artifacts above 128 MiB uncompressed and metadata files above 1 MiB. See `docs/CHATGPT-GITHUB-WORKFLOW.md`.
++
++Tests:
++
++```bash
++python3 -B tools/local-agent/test-prepare-source-review.py
++```
++
+ ## Prepare multipart patch publication
+ 
+ `prepare-patch-publication.py` creates a verified raw Git patch between an exact base commit and the tested current `HEAD`, splits it into UTF-8 parts, writes the V2 manifest, proves reconstruction, and creates a local sequential upload plan. It never merges, rebases, squashes, commits, or pushes.
+diff --git a/tools/local-agent/compact_unittest.py b/tools/local-agent/compact_unittest.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..8c19e44d154276f77a1c9f294b2d5e317de9aa61
+--- /dev/null
++++ b/tools/local-agent/compact_unittest.py
+@@ -0,0 +1,42 @@
++#!/usr/bin/env python3
++"""Run unittest suites with compact success output and full failure diagnostics."""
++
++from __future__ import annotations
++
++import io
++import sys
++import unittest
++
++
++class CompactTextTestRunner(unittest.TextTestRunner):
++    """Capture normal unittest chatter and emit it only when the suite fails."""
++
++    def __init__(self, *args: object, label: str, **kwargs: object) -> None:
++        self._label = label
++        self._captured = io.StringIO()
++        kwargs.pop("stream", None)
++        kwargs["verbosity"] = 2
++        super().__init__(*args, stream=self._captured, **kwargs)
++
++    def run(self, test: unittest.suite.TestSuite) -> unittest.result.TestResult:
++        result = super().run(test)
++        captured = self._captured.getvalue()
++        if result.wasSuccessful():
++            skipped = len(getattr(result, "skipped", ()))
++            suffix = f", {skipped} skipped" if skipped else ""
++            print(f"{self._label}: PASS ({result.testsRun} tests{suffix})")
++        else:
++            sys.stderr.write(captured)
++            if captured and not captured.endswith("\n"):
++                sys.stderr.write("\n")
++        return result
++
++
++def run_compact_unittest(label: str) -> None:
++    """Discover tests in __main__ and exit with unittest's normal status."""
++
++    class Runner(CompactTextTestRunner):
++        def __init__(self, *args: object, **kwargs: object) -> None:
++            super().__init__(*args, label=label, **kwargs)
++
++    unittest.main(testRunner=Runner)
