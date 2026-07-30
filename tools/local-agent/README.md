@@ -16,6 +16,9 @@ Preferred order:
 3. bounded codemod for repeated mechanical edits;
 4. complete rewrite only when intentional.
 
+For symbol-aware TypeScript changes, see [`../ts-morph/README.md`](../ts-morph/README.md).
+The repository-owned ts-morph commands are preferred over ad-hoc AST scripts when a supported codemod fits the task.
+
 ## Replace an exact block
 
 For a short, simple UTF-8 edit, pass text directly:
