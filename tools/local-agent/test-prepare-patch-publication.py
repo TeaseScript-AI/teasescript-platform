@@ -10,7 +10,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
 from pathlib import Path
+
+from compact_unittest import run_compact_unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS = ROOT / "tools/local-agent"
@@ -348,4 +351,4 @@ class PreparePatchPublicationTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    run_compact_unittest("prepare-patch-publication")
