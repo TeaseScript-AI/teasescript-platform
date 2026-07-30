@@ -16,9 +16,10 @@ The workflow separates untrusted candidate execution from repository write permi
 2. A read-only prepare job verifies that exact transfer revision, validates the payload, and creates one deterministic candidate commit.
 3. A separate read-only test job runs repository checks on that exact candidate.
 4. A write-capable publish job re-verifies the tested candidate without executing candidate-controlled code and performs a normal non-force push.
-5. A cleanup job atomically deletes only the exact authorized transfer-ref revision and reports whether it was removed, already absent, or preserved because it changed.
+5. A `contents: write` cleanup job checks out no repository content, atomically deletes only the exact authorized transfer-ref revision, and records the result in the Actions summary.
+6. A separate `issues: write` cleanup job verifies the exact accepted command comment by ID, issue, and unchanged body before deleting it.
 
-The command must be placed in the pull request's **Conversation** tab. Commands on ordinary issues are rejected. Normal pull-request comments, review summaries, and inline review comments remain unaffected because only a comment matching the exact command syntax starts publication.
+The command must be placed in the pull request's **Conversation** tab. Commands on ordinary issues are rejected. Normal pull-request comments, review summaries, inline review comments, malformed commands, and unauthorized commands remain unaffected. An accepted technical command is removed after the workflow no longer needs it; the Actions run remains the audit trail.
 
 ## Transfer payload
 
@@ -144,15 +145,17 @@ The workflow rejects the request before publication when, among other checks:
 - repository checks fail;
 - the final target update is not a normal fast-forward.
 
-Target-branch publication never force-pushes, rebases, or merges. Cleanup uses an exact-SHA `--force-with-lease` only to delete the temporary transfer ref; it cannot update or delete a changed transfer ref.
+Target-branch publication never force-pushes, rebases, or merges. Transfer cleanup uses an exact-SHA `--force-with-lease`; it cannot update or delete a changed transfer ref. Comment cleanup uses only the validated `github.event.comment.id` and deletes the comment only when its issue identity and exact accepted command body are unchanged.
 
 ## Failure, cleanup, and retry
 
-After an accepted command, cleanup attempts to remove the transfer branch only when it still points to the exact commit authorized by the request job. A branch that was already removed is reported as absent. A branch that was updated or recreated is preserved so an older run cannot destroy a newer upload.
+After an accepted command, transfer cleanup removes the branch only when it still points to the exact commit authorized by the request job. A branch that was already removed is reported as absent. A branch that was updated or recreated is preserved so an older run cannot destroy a newer upload. Publication and cleanup results are retained in the Actions run summary instead of adding another pull-request comment.
 
-Format version 1 treats a transfer branch as immutable after the command is placed. For a retry, start from the current target head, regenerate the patch, manifest, and both SHA-256 values, upload them on a new unique transfer branch, and place a new exact command. Never reuse an old authorization comment.
+The accepted command comment is removed after the workflow no longer needs it, including controlled failures after request validation. If that comment was edited or already removed, cleanup preserves or accepts that state rather than deleting another comment.
 
-A malformed or unauthorized command fails before accepting a transfer ref; remove that unused branch manually. Automatic expiry for abandoned or never-authorized transfer branches is not part of format version 1.
+Format version 1 treats a transfer branch as immutable after the command is placed. For a retry, start from the current target head, regenerate the patch, manifest, and both SHA-256 values, upload them on a new unique transfer branch, and place a new exact command.
+
+A malformed or unauthorized command fails before accepting a transfer ref and is not deleted; remove its unused branch manually. Automatic expiry for abandoned or never-authorized transfer branches is not part of format version 1.
 
 ## Reproducible local verification
 
@@ -161,7 +164,7 @@ python3 -B tools/local-agent/test-patch-publication.py
 bash tools/local-agent/test-patch-publication-workflow.sh
 ```
 
-The first suite covers strict manifests, patch and tree validation, forbidden paths, and bundle tampering. The second uses a real bare remote to prove that a moved target rejects publication, an exact-base candidate fast-forwards, stale cleanup preserves a changed transfer ref, exact-SHA cleanup deletes the intended transfer ref, the command is PR-bound, and external Actions are immutable-SHA pinned. GitHub event identity, permissions, artifact transport, and token behavior remain canonical-CI concerns.
+The first suite covers strict manifests, patch and tree validation, forbidden paths, and bundle tampering. The second uses a real bare remote to prove that a moved target rejects publication, an exact-base candidate fast-forwards, stale cleanup preserves a changed transfer ref, exact-SHA cleanup deletes the intended transfer ref, the command is PR-bound, write permissions remain separated, accepted commands use exact-ID cleanup, and external Actions are immutable-SHA pinned. GitHub event identity, artifact transport, token behavior, and actual comment deletion remain canonical-CI concerns.
 
 ## Current limits and follow-ups
 

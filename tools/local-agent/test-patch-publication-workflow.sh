@@ -16,12 +16,25 @@ assert "([0-9a-f]{64})$" in text
 assert "Patch publication commands must be placed on a pull request." in text
 assert "github.rest.git.getRef" in text
 assert "expected_transfer_sha" in text
+assert "comment_id: ${{ steps.request.outputs.comment_id }}" in text
+assert "context.payload.comment.id" in text
 assert "Read exact transfer payload" in text
 assert 'actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"' in text
 assert "Verify authorized manifest digest" in text
 assert 'sha256sum "$RUNNER_TEMP/manifest.json"' in text
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in text
 assert "preserved_changed" in text
+assert "cleanup-transfer:" in text and "cleanup-comment:" in text
+transfer_cleanup = text.split("  cleanup-transfer:\n", 1)[1].split("  cleanup-comment:\n", 1)[0]
+comment_cleanup = text.split("  cleanup-comment:\n", 1)[1]
+assert "contents: write" in transfer_cleanup and "issues: write" not in transfer_cleanup
+assert "uses: actions/checkout@" not in transfer_cleanup
+assert "git init -q \"$cleanup_repo\"" in transfer_cleanup
+assert "issues: write" in comment_cleanup and "contents: write" not in comment_cleanup
+assert "github.rest.issues.getComment" in comment_cleanup
+assert "github.rest.issues.deleteComment" in comment_cleanup
+assert "github.rest.issues.createComment" not in text
+assert "comment.data.body.trim() !== expectedCommand" in comment_cleanup
 assert "github.rest.git.deleteRef" not in text
 PY
 
