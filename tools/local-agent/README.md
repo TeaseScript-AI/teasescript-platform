@@ -2,22 +2,15 @@
 
 Requires Python 3.10 or newer. The exact-editing helpers use only the Python standard library. Token-aware patch preparation optionally uses a local `tiktoken` Python installation and a separately stored `o200k_base.tiktoken` vocabulary; neither is a project runtime dependency.
 
-## Rule
+## Choose an edit method
 
-Never regenerate or replace an entire existing file for a localized change.
-Use a targeted unified diff or an exact replacement. Replace a complete file
-only when a complete rewrite is intentional and the entire result will be
-reviewed.
+- Localized text change: checked unified diff.
+- One exact or byte-sensitive replacement: `replace-exact.py`.
+- Symbol-aware TypeScript rename across declarations, imports, re-exports, or references: the repository ts-morph codemod.
+- Other repeated mechanical changes: a bounded purpose-built codemod.
+- Whole-file rewrite: only when intentional and fully reviewed.
 
-Preferred order:
-
-1. checked unified diff;
-2. `replace-exact.py` for one exact replacement;
-3. bounded codemod for repeated mechanical edits;
-4. complete rewrite only when intentional.
-
-For symbol-aware TypeScript changes, see [`../ts-morph/README.md`](../ts-morph/README.md).
-The repository-owned ts-morph commands are preferred over ad-hoc AST scripts when a supported codemod fits the task.
+Never regenerate an entire existing file for a localized change. Review the resulting diff and run the relevant checks after every write. For the TypeScript codemod, see [`../ts-morph/README.md`](../ts-morph/README.md).
 
 ## Replace an exact block
 
