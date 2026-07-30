@@ -70,9 +70,13 @@ assert "artifact_url: ${{ steps.upload.outputs.artifact-url }}" in processor
 assert "artifact_digest: ${{ steps.upload.outputs.artifact-digest }}" in processor
 assert "statuses: write" in processor
 assert "github.rest.repos.createCommitStatus" in processor
-assert "`artifact ${artifactId} ${artifactDigest}`" in processor
-status_description = "artifact 8758008910 sha256:" + "a" * 64
-status_match = re.fullmatch(r"artifact ([0-9]+) (sha256:[0-9a-f]{64})", status_description)
+assert "/^[0-9a-f]{64}$/.test(artifactDigest)" in processor
+assert "/^sha256:[0-9a-f]{64}$/.test(artifactDigest)" not in processor
+assert "`artifact ${artifactId} sha256:${artifactDigest}`" in processor
+artifact_digest = "a" * 64
+assert re.fullmatch(r"[0-9a-f]{64}", artifact_digest)
+status_description = f"artifact 8758008910 sha256:{artifact_digest}"
+status_match = re.fullmatch(r"artifact ([0-9]+) sha256:([0-9a-f]{64})", status_description)
 assert status_match and len(status_description) <= 140
 assert "needs.publish-result.result == 'success'" in processor
 assert "contents: write" in processor

@@ -175,11 +175,11 @@ jobs:
             const succeeded =
               process.env.BUNDLE_RESULT === 'success' &&
               /^[0-9]+$/.test(artifactId) &&
-              /^sha256:[0-9a-f]{64}$/.test(artifactDigest) &&
+              /^[0-9a-f]{64}$/.test(artifactDigest) &&
               artifactUrl.startsWith(`${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/`);
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const description = succeeded
-              ? `artifact ${artifactId} ${artifactDigest}`
+              ? `artifact ${artifactId} sha256:${artifactDigest}`
               : `source bundle failed; run ${context.runId}`;
 
             await github.rest.repos.createCommitStatus({
