@@ -21,9 +21,10 @@ The workflow separates untrusted candidate execution from repository write permi
 2. A read-only prepare job verifies that exact transfer revision, validates the payload, and creates one deterministic candidate commit.
 3. A separate read-only test job runs repository checks on that exact candidate.
 4. A write-capable publish job re-verifies the tested candidate without executing candidate-controlled code and performs a normal non-force push.
-5. A cleanup job conditionally deletes only the exact authorized transfer-ref revision after success or a format-version-1 failure. After a format-version-2 failure, it preserves the exact ref for targeted repair; a ref that changed after authorization is always preserved.
+5. A `contents: write` cleanup job checks out no repository content. It preserves the unchanged exact format-version-2 transfer ref after a failed publication for targeted repair; otherwise it deletes only the exact authorized transfer-ref revision with SHA-bound `--force-with-lease`. A ref that changed after authorization is always preserved.
+6. A separate `issues: write` cleanup job records the publication outcome in the Actions summary, then verifies the exact accepted command comment by ID, pull request, and unchanged body before deleting it.
 
-The command must be placed in the pull request's **Conversation** tab. Commands on ordinary issues are rejected. Normal pull-request comments, review summaries, and inline review comments remain unaffected because only a comment matching the exact command syntax starts publication.
+The command must be placed in the pull request's **Conversation** tab. Commands on ordinary issues are rejected. Normal pull-request comments, review summaries, inline review comments, malformed commands, and unauthorized commands remain unaffected. An accepted technical command is removed after the workflow no longer needs it; the Actions run summary remains the audit trail.
 
 ## Transfer payload
 
@@ -131,8 +132,8 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --expected-base-sha <exact-current-target-head> \
   --tested-commit "$(git rev-parse HEAD)" \
   --tokenizer /path/to/o200k_base.tiktoken \
-  --target-part-tokens 16000 \
-  --part-size-kib 64 \
+  --target-part-tokens 3000 \
+  --part-size-kib 12 \
   --output-directory /tmp/patch-publication-payload
 ```
 
@@ -145,14 +146,14 @@ The helper:
 3. generates `git diff --binary --full-index --no-renames <base> <tested>`;
 4. keeps normal source and documentation changes as ordinary readable unified diff text; `--binary` adds Git binary-patch text only for genuinely binary file changes that otherwise could not be reconstructed;
 5. calculates the complete patch SHA-256 before splitting;
-6. when the local tokenizer is available, limits each part to a default target of 16,000 `o200k_base` tokens measured over the JSON-serialized connector content string;
-7. always enforces the independent byte ceiling, using 64 KiB as the default fallback when token measurement is unavailable;
+6. when the local tokenizer is available, limits each part to a default target of 3,000 `o200k_base` tokens measured over the JSON-serialized connector content string;
+7. always enforces the independent byte ceiling, using 12 KiB as the default fallback when token measurement is unavailable;
 8. writes canonical ordinary UTF-8 part files and their sizes and SHA-256 values;
 9. writes the strict format-version-2 manifest;
 10. reconstructs the parts and proves byte identity;
 11. writes local-only `upload-plan.json`, `upload-state.json`, and `UPLOAD-INSTRUCTIONS.md` with expected Git blob SHAs and the exact publication command.
 
-The 16,000-token value is a configurable operational starting point, not a connector guarantee or protocol limit. It leaves each ordinary code-diff upload manageable while allowing tokenizer-hostile Base85 sections for genuinely binary files to be split much earlier than the same byte ceiling. The independent protocol maximum remains 256 KiB per part. Without the local tokenizer, the helper clearly reports byte-fallback mode rather than pretending it measured tokens.
+The 3,000-token target and 12 KiB byte ceiling are conservative operational starting points, not connector guarantees or protocol limits. During the first real sequential connector trial for this pull request, an ordinary UTF-8 blob of 14,317 bytes remained retrievable while a 16,204-byte call returned the expected blob SHA but the blob was subsequently unavailable to both `fetch_blob` and `create_tree`. That single observation does not establish a universal hard limit; it justifies leaving margin below the observed failure. Token-aware sizing also splits tokenizer-hostile Base85 sections for genuinely binary files earlier than ordinary source diffs. The independent protocol maximum remains 256 KiB per part. Without the local tokenizer, the helper clearly reports byte-fallback mode rather than pretending it measured tokens.
 
 Do not transform the complete normal patch into Git binary-patch/Base85 or Base64 merely to reduce bytes. For source changes that often costs substantially more model tokens. Use the raw Git diff produced by the helper; `git diff --binary` does not binary-encode ordinary text files.
 
@@ -174,9 +175,19 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --record-upload-sha <returned-git-blob-sha>
 ```
 
-A mismatch fails without advancing the local state. A match records that file and identifies the next path, but does not open it. Repeat `--show-next-upload` only when ready to send the next file. Parts are listed first and the manifest last. This prevents earlier part contents from occupying context while later parts are being uploaded.
+A mismatch fails without advancing the local state. A match records that file and identifies the next path, but does not open it. Repeat `--show-next-upload` only when ready to send the next file. Parts are listed first and the manifest last. Previously transmitted content remains in the conversation and tool history; sequential exposure avoids preloading future parts and avoids a separate all-parts dump.
 
-Only files below `.agent-patch-publication/` belong in the transfer tree. The upload plan, state, and instruction file remain local. After recording all blobs, use the recorded SHAs to create the transfer tree and commit, create the planned transfer branch, and place the precomputed `/publish-patch` command in the pull request Conversation tab.
+If a later connector step reports that one recorded blob is unavailable or invalid, reset only that upload index and resend the exact same local file:
+
+```shell
+python3 -B tools/local-agent/prepare-patch-publication.py \
+  --output-directory /tmp/patch-publication-payload \
+  --reset-upload-index <index>
+```
+
+The reset removes only the verified local progress record. It does not regenerate, edit, or open the part. The next `--show-next-upload` exposes the earliest missing upload again.
+
+Only files below `.agent-patch-publication/` belong in the transfer tree. The upload plan, state, and instruction file remain local. After recording all blobs, run `--show-next-upload` once more. It prints connector-ready argument objects for creating the payload-only transfer tree, creating its commit with the exact expected base as parent, creating the planned transfer branch, and finally placing the precomputed `/publish-patch` command in the pull request Conversation tab.
 
 ### Format version 1 compatibility
 
