@@ -1,0 +1,276 @@
++                f"expected {args.artifact_sha256}, got {outer_digest}"
++            )
++        with tempfile.TemporaryDirectory(
++            prefix="source-review-artifact-", dir=output.parent
++        ) as temporary_name:
++            extracted = Path(temporary_name)
++            extracted.rmdir()
++            extract_artifact(artifact, extracted)
++            bundle_digest = verify_internal_checksums(extracted)
++            head, tree = verify_manifest(
++                extracted / "manifest.json",
++                expected_repository=args.expected_repository,
++                expected_head=args.expected_head,
++                bundle_sha256=bundle_digest,
++            )
++            verify_and_expose_checkout(
++                extracted,
++                output,
++                expected_head=head,
++                expected_tree=tree,
++                expected_base=args.expected_base,
++            )
++        base = args.expected_base or "none"
++        print(
++            f"prepare-source-review: PASS output={output} head={head} "
++            f"tree={tree} base={base}"
++        )
++        return 0
++    except PreparationError as exc:
++        print(f"prepare-source-review: FAIL: {exc}", file=sys.stderr)
++        return 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tools/local-agent/run-compact.sh b/tools/local-agent/run-compact.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..f39292d1bb82fa7049da0588bdfbaad5fc20d633
+--- /dev/null
++++ b/tools/local-agent/run-compact.sh
+@@ -0,0 +1,71 @@
++#!/usr/bin/env bash
++set -u
++
++usage() {
++  cat >&2 <<'EOF'
++Usage: run-compact.sh --label LABEL --log PATH [--max-output-bytes N] -- command [args...]
++EOF
++  exit 2
++}
++
++label=
++log=
++max_output_bytes=65536
++while (($#)); do
++  case "$1" in
++    --label)
++      (($# >= 2)) || usage
++      label=$2
++      shift 2
++      ;;
++    --log)
++      (($# >= 2)) || usage
++      log=$2
++      shift 2
++      ;;
++    --max-output-bytes)
++      (($# >= 2)) || usage
++      max_output_bytes=$2
++      shift 2
++      ;;
++    --)
++      shift
++      break
++      ;;
++    *)
++      usage
++      ;;
++  esac
++done
++
++[[ -n "$label" && -n "$log" && $# -gt 0 ]] || usage
++[[ "$max_output_bytes" =~ ^[1-9][0-9]*$ ]] || usage
++
++mkdir -p "$(dirname "$log")"
++: > "$log"
++
++"$@" >"$log" 2>&1
++status=$?
++if ((status == 0)); then
++  rm -f "$log"
++  printf '%s: PASS\n' "$label"
++  exit 0
++fi
++
++printf '%s: FAIL (exit %d)\n' "$label" "$status" >&2
++printf 'command:' >&2
++printf ' %q' "$@" >&2
++printf '\n' >&2
++
++bytes=$(wc -c <"$log")
++if ((bytes <= max_output_bytes)); then
++  cat "$log" >&2
++else
++  half=$((max_output_bytes / 2))
++  printf '%s\n' "--- output truncated: showing first and last ${half} bytes of ${bytes}; complete log: $log ---" >&2
++  head -c "$half" "$log" >&2
++  printf '\n%s\n' '--- omitted middle ---' >&2
++  tail -c "$half" "$log" >&2
++  printf '\n%s\n' '--- end bounded excerpt ---' >&2
++fi
++exit "$status"
+diff --git a/tools/local-agent/test-compact-unittest.py b/tools/local-agent/test-compact-unittest.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..c5e1ee571bd58d5e80816cb54445c795f2f4b1e6
+--- /dev/null
++++ b/tools/local-agent/test-compact-unittest.py
+@@ -0,0 +1,72 @@
++#!/usr/bin/env python3
++"""Regression tests for compact unittest output."""
++
++from __future__ import annotations
++
++import os
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++import unittest
++
++from compact_unittest import run_compact_unittest
++
++TOOLS = Path(__file__).resolve().parent
++
++
++class CompactUnittestTests(unittest.TestCase):
++    def setUp(self) -> None:
++        self.temporary = tempfile.TemporaryDirectory(prefix="compact-unittest-")
++        self.root = Path(self.temporary.name)
++
++    def tearDown(self) -> None:
++        self.temporary.cleanup()
++
++    def run_fixture(self, source: str) -> subprocess.CompletedProcess[str]:
++        fixture = self.root / "fixture.py"
++        fixture.write_text(source, encoding="utf-8")
++        environment = os.environ.copy()
++        environment["PYTHONPATH"] = str(TOOLS)
++        return subprocess.run(
++            [sys.executable, "-B", str(fixture)],
++            text=True,
++            capture_output=True,
++            env=environment,
++            check=False,
++        )
++
++    def test_success_is_one_line(self) -> None:
++        completed = self.run_fixture(
++            "import unittest\n"
++            "from compact_unittest import run_compact_unittest\n\n"
++            "class Example(unittest.TestCase):\n"
++            "    def test_ok(self):\n"
++            "        self.assertTrue(True)\n\n"
++            "if __name__ == '__main__':\n"
++            "    run_compact_unittest('fixture-suite')\n"
++        )
++        self.assertEqual(completed.returncode, 0)
++        self.assertEqual(completed.stdout, "fixture-suite: PASS (1 tests)\n")
++        self.assertEqual(completed.stderr, "")
++
++    def test_failure_keeps_identity_traceback_and_assertion(self) -> None:
++        completed = self.run_fixture(
++            "import unittest\n"
++            "from compact_unittest import run_compact_unittest\n\n"
++            "class Example(unittest.TestCase):\n"
++            "    def test_failure(self):\n"
++            "        self.assertEqual(1, 2)\n\n"
++            "if __name__ == '__main__':\n"
++            "    run_compact_unittest('fixture-suite')\n"
++        )
++        self.assertEqual(completed.returncode, 1)
++        self.assertEqual(completed.stdout, "")
++        self.assertIn("test_failure", completed.stderr)
++        self.assertIn("Traceback", completed.stderr)
++        self.assertIn("AssertionError: 1 != 2", completed.stderr)
++        self.assertIn("FAILED", completed.stderr)
++
++
++if __name__ == "__main__":
++    run_compact_unittest("compact-unittest")
+diff --git a/tools/local-agent/test-create-source-bundle.sh b/tools/local-agent/test-create-source-bundle.sh
+index ddc504153f464f763efb87fde614cd1042eb736d..e5766592107ee9b5be500d796891ad7b39df9247 100644
+--- a/tools/local-agent/test-create-source-bundle.sh
++++ b/tools/local-agent/test-create-source-bundle.sh
+@@ -2,6 +2,14 @@
+ set -euo pipefail
+ 
+ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
++if [[ ${TEASESCRIPT_COMPACT_TEST_INNER:-0} != 1 ]]; then
++  log=$(mktemp -t source-bundle-workflow-XXXXXX.log)
++  rm -f "$log"
++  exec "$script_dir/run-compact.sh" \
++    --label source-bundle-workflow \
++    --log "$log" \
++    -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash "$0" "$@"
++fi
+ root=$(cd -- "$script_dir/../.." && pwd)
+ helper="$script_dir/create-source-bundle.sh"
+ workflow="$root/.github/workflows/source-bundle.yml"
+diff --git a/tools/local-agent/test-patch-publication-workflow.sh b/tools/local-agent/test-patch-publication-workflow.sh
+index a35c6b185e844de7768cd1456ebd26a654187782..cc269072669f53c3feaa44b4ac8ebe900dfe9048 100755
+--- a/tools/local-agent/test-patch-publication-workflow.sh
++++ b/tools/local-agent/test-patch-publication-workflow.sh
+@@ -1,7 +1,16 @@
+ #!/usr/bin/env bash
+ set -euo pipefail
+ 
+-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
++script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
++if [[ ${TEASESCRIPT_COMPACT_TEST_INNER:-0} != 1 ]]; then
++  log=$(mktemp -t patch-publication-workflow-XXXXXX.log)
++  rm -f "$log"
++  exec "$script_dir/run-compact.sh" \
++    --label patch-publication-workflow \
++    --log "$log" \
++    -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash "$0" "$@"
++fi
++root="$(cd "$script_dir/../.." && pwd)"
+ workflow="$root/.github/workflows/patch-publication.yml"
+ script="$root/tools/local-agent/patch-publication.py"
+ target='feat/test-target'
+diff --git a/tools/local-agent/test-patch-publication.py b/tools/local-agent/test-patch-publication.py
+index aa2f772d3c9d7b219a4d4c49cd398e68651bd7e9..dd18ba2ee5fec39b01706ddca356ad8c5d6747df 100755
+--- a/tools/local-agent/test-patch-publication.py
++++ b/tools/local-agent/test-patch-publication.py
+@@ -10,9 +10,12 @@ import subprocess
+ import sys
+ import tempfile
+ import unittest
++
+ from pathlib import Path
+ from typing import Callable
+ 
++from compact_unittest import run_compact_unittest
++
+ 
+ SCRIPT = Path(__file__).with_name("patch-publication.py")
+ PREPARE_SCRIPT = Path(__file__).with_name("prepare-patch-publication.py")
+@@ -811,4 +814,4 @@ class PatchPublicationTests(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main(verbosity=2)
++    run_compact_unittest("patch-publication")
+diff --git a/tools/local-agent/test-prepare-patch-publication.py b/tools/local-agent/test-prepare-patch-publication.py
+index 9c1f489bcfaa428beb0a4e94499f5483802c5b70..1862510332bbc7cd194390286130dc928750298e 100755
+--- a/tools/local-agent/test-prepare-patch-publication.py
++++ b/tools/local-agent/test-prepare-patch-publication.py
+@@ -10,8 +10,11 @@ import subprocess
+ import sys
+ import tempfile
+ import unittest
++
+ from pathlib import Path
+ 
++from compact_unittest import run_compact_unittest
++
+ ROOT = Path(__file__).resolve().parents[2]
+ TOOLS = ROOT / "tools/local-agent"
+ PREPARE = TOOLS / "prepare-patch-publication.py"
+@@ -348,4 +351,4 @@ class PreparePatchPublicationTests(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main(verbosity=2)
++    run_compact_unittest("prepare-patch-publication")
