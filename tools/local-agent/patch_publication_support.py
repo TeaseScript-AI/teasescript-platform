@@ -26,6 +26,7 @@ MAX_PART_COUNT = 1024
 MAX_PATCH_SIZE_BYTES = 64 * 1024 * 1024
 O200K_BASE_SHA256 = "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d"
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+TRANSFER_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$")
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 O200K_PATTERN = "|".join(
     [
@@ -106,8 +107,22 @@ def validate_branch(branch: str, *, repository: Path, default_branch: str) -> st
 
 
 def validate_transfer_branch(branch: str, *, repository: Path) -> str:
-    if not branch.startswith(TRANSFER_PREFIX):
-        fail(f"transfer branch must start with {TRANSFER_PREFIX}")
+    if not TRANSFER_BRANCH_RE.fullmatch(branch):
+        fail(
+            "transfer branch must be 1 to 240 ASCII characters using only "
+            "letters, digits, dot, underscore, slash, or hyphen"
+        )
+    if (
+        not branch.startswith(TRANSFER_PREFIX)
+        or branch == TRANSFER_PREFIX
+        or ".." in branch
+        or "//" in branch
+        or branch.endswith("/")
+    ):
+        fail(
+            f"transfer branch must start with {TRANSFER_PREFIX} and must not "
+            "contain '..', contain '//', or end with '/'"
+        )
     completed = subprocess.run(
         ["git", "check-ref-format", "--branch", branch],
         cwd=repository,
