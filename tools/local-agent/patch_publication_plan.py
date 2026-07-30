@@ -12,10 +12,45 @@ from patch_publication_support import (
     UPLOAD_PLAN_NAME,
     UPLOAD_STATE_NAME,
     TokenEstimator,
+    fail,
     git_blob_sha,
     sha256_bytes,
     write_json_atomic,
 )
+
+
+def require_connector_upload_budget(
+    *,
+    label: str,
+    value: bytes,
+    token_count: int | None,
+    maximum_bytes: int,
+    target_tokens: int | None,
+) -> None:
+    if len(value) > maximum_bytes:
+        suffix = (
+            "; format-version-2 manifests cannot be split into multiple uploads"
+            if label == "manifest"
+            else ""
+        )
+        fail(
+            f"{label} connector upload is {len(value)} bytes, exceeding the "
+            f"configured {maximum_bytes}-byte upload ceiling{suffix}"
+        )
+    if target_tokens is not None:
+        if token_count is None:
+            fail("internal error: connector token budget has no token count")
+        if token_count > target_tokens:
+            suffix = (
+                "; format-version-2 manifests cannot be split into multiple uploads"
+                if label == "manifest"
+                else ""
+            )
+            fail(
+                f"{label} connector upload is estimated at {token_count} tokens, "
+                f"exceeding the configured {target_tokens}-token target{suffix}"
+            )
+
 
 def upload_files_for_plan(
     *,
@@ -24,6 +59,8 @@ def upload_files_for_plan(
     manifest_parts: list[dict[str, object]],
     token_counts: list[int | None],
     count_tokens: Callable[[bytes], int] | None,
+    maximum_upload_size_bytes: int,
+    target_upload_tokens: int | None,
 ) -> list[dict[str, object]]:
     files: list[dict[str, object]] = []
     for index, (entry, token_count) in enumerate(
@@ -31,6 +68,13 @@ def upload_files_for_plan(
     ):
         relative_path = str(entry["path"])
         value = (temp_root / relative_path).read_bytes()
+        require_connector_upload_budget(
+            label=f"part {index}",
+            value=value,
+            token_count=token_count,
+            maximum_bytes=maximum_upload_size_bytes,
+            target_tokens=target_upload_tokens,
+        )
         files.append(
             {
                 "index": index,
@@ -46,6 +90,13 @@ def upload_files_for_plan(
     manifest_value = manifest_path.read_bytes()
     manifest_token_count = (
         count_tokens(manifest_value) if count_tokens is not None else None
+    )
+    require_connector_upload_budget(
+        label="manifest",
+        value=manifest_value,
+        token_count=manifest_token_count,
+        maximum_bytes=maximum_upload_size_bytes,
+        target_tokens=target_upload_tokens,
     )
     files.append(
         {
@@ -170,6 +221,8 @@ def write_upload_handoff(
         manifest_parts=manifest_parts,
         token_counts=token_counts,
         count_tokens=estimator.count_bytes if estimator else None,
+        maximum_upload_size_bytes=part_size_bytes,
+        target_upload_tokens=target_part_tokens if estimator else None,
     )
     tree_elements = [
         {

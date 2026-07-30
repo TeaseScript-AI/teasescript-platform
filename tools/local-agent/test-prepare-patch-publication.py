@@ -17,6 +17,9 @@ TOOLS = ROOT / "tools/local-agent"
 PREPARE = TOOLS / "prepare-patch-publication.py"
 sys.path.insert(0, str(TOOLS))
 
+import patch_publication_plan as PLAN
+import patch_publication_support as SUPPORT
+
 SPEC = importlib.util.spec_from_file_location("prepare_patch_publication", PREPARE)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -78,6 +81,126 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertTrue(all(len(part) <= 512 for part in parts))
         self.assertTrue(all(count is not None and count <= 180 for count in counts))
 
+    def test_transfer_branch_matches_workflow_contract(self) -> None:
+        repository = self.root / "branch-repository"
+        repository.mkdir()
+        git(repository, "init", "-q", "-b", "main")
+
+        valid = SUPPORT.TRANSFER_PREFIX + (
+            "a" * (240 - len(SUPPORT.TRANSFER_PREFIX))
+        )
+        self.assertEqual(len(valid), 240)
+        self.assertEqual(
+            SUPPORT.validate_transfer_branch(valid, repository=repository), valid
+        )
+
+        invalid = {
+            "too long": SUPPORT.TRANSFER_PREFIX
+            + ("a" * (241 - len(SUPPORT.TRANSFER_PREFIX))),
+            "unicode": SUPPORT.TRANSFER_PREFIX + "caf\u00e9",
+            "prefix only": SUPPORT.TRANSFER_PREFIX,
+            "double dot": SUPPORT.TRANSFER_PREFIX + "a..b",
+            "double slash": SUPPORT.TRANSFER_PREFIX + "a//b",
+            "trailing slash": SUPPORT.TRANSFER_PREFIX + "a/",
+        }
+        for label, branch in invalid.items():
+            with self.subTest(label=label), self.assertRaises(
+                SUPPORT.PreparationError
+            ):
+                SUPPORT.validate_transfer_branch(branch, repository=repository)
+
+    def test_manifest_token_budget_is_enforced(self) -> None:
+        temp_root = self.root / "token-budget"
+        part_path = (
+            temp_root
+            / SUPPORT.PART_DIRECTORY
+            / "change.patch.part-0001-of-0001"
+        )
+        part_path.parent.mkdir(parents=True)
+        part_value = b"part\n"
+        part_path.write_bytes(part_value)
+        manifest_path = temp_root / SUPPORT.TRANSFER_DIRECTORY / "manifest.json"
+        manifest_value = b'{"formatVersion": 2}\n'
+        manifest_path.write_bytes(manifest_value)
+
+        def count_tokens(value: bytes) -> int:
+            return 101 if value == manifest_value else 1
+
+        with self.assertRaisesRegex(
+            SUPPORT.PreparationError,
+            "manifest connector upload is estimated at 101 tokens",
+        ):
+            PLAN.upload_files_for_plan(
+                temp_root=temp_root,
+                manifest_path=manifest_path,
+                manifest_parts=[{"path": str(part_path.relative_to(temp_root))}],
+                token_counts=[1],
+                count_tokens=count_tokens,
+                maximum_upload_size_bytes=1024,
+                target_upload_tokens=100,
+            )
+
+    def test_many_part_manifest_exceeding_byte_budget_fails(self) -> None:
+        repository = self.root / "many-parts"
+        repository.mkdir()
+        git(repository, "init", "-q", "-b", "main")
+        git(repository, "config", "user.name", "Test")
+        git(repository, "config", "user.email", "test@example.invalid")
+        (repository / "base.txt").write_text("base\n")
+        git(repository, "add", "base.txt")
+        git(repository, "commit", "-q", "-m", "Base")
+        base = git(repository, "rev-parse", "HEAD")
+
+        (repository / "large.txt").write_text("ordinary text line\n" * 70_000)
+        git(repository, "add", "large.txt")
+        git(repository, "commit", "-q", "-m", "Add large text file")
+
+        output = self.root / "oversized-manifest"
+        prepared = run(
+            [
+                sys.executable,
+                str(PREPARE),
+                "--repository",
+                str(repository),
+                "--repository-full-name",
+                "TeaseScript-AI/teasescript-platform",
+                "--target-branch",
+                "feat/test-target",
+                "--expected-base-sha",
+                base,
+                "--output-directory",
+                str(output),
+            ],
+            cwd=repository,
+            check=False,
+        )
+        self.assertEqual(prepared.returncode, 1)
+        self.assertIn("manifest connector upload is", prepared.stderr)
+        self.assertIn("configured 12288-byte upload ceiling", prepared.stderr)
+        self.assertFalse(output.exists())
+
+    def test_real_o200k_estimator_when_available(self) -> None:
+        configured = os.environ.get("TEASESCRIPT_O200K_TOKENIZER")
+        if configured is None or importlib.util.find_spec("tiktoken") is None:
+            self.skipTest(
+                "requires local TEASESCRIPT_O200K_TOKENIZER and importable tiktoken"
+            )
+        estimator = SUPPORT.load_token_estimator(Path(configured))
+        patch = (
+            "diff --git a/example.txt b/example.txt\n"
+            + "ordinary source line with punctuation and identifiers\n" * 400
+        ).encode()
+        parts, counts = SUPPORT.split_utf8_patch(
+            patch,
+            maximum_bytes=4096,
+            target_tokens=600,
+            count_tokens=estimator.count_bytes,
+        )
+        self.assertEqual(b"".join(parts), patch)
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(all(count is not None and count <= 600 for count in counts))
+        self.assertEqual(estimator.vocabulary_sha256, SUPPORT.O200K_BASE_SHA256)
+
     def test_multi_commit_range_and_one_file_at_a_time_upload(self) -> None:
         repository = self.root / "repository"
         repository.mkdir()
@@ -111,7 +234,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
                 "--tested-commit",
                 tested,
                 "--part-size-kib",
-                "1",
+                "4",
                 "--output-directory",
                 str(output),
             ],
