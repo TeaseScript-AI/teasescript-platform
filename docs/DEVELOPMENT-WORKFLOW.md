@@ -65,6 +65,51 @@ A single-agent pull request that completes its issue may use:
 Closes #123
 ```
 
+## Verified source artifacts for review and handoff
+
+The `Source bundle` GitHub Actions workflow produces a short-lived, verifiable Git source artifact without creating another branch, pull request, or commit. Use it when a reviewer, verifier, or network-restricted agent needs an exact repository snapshot with Git history.
+
+The workflow runs automatically for:
+
+- every pull-request update, using the exact pull-request head rather than GitHub's synthetic merge commit;
+- every push to `main`, using the exact pushed commit.
+
+An authorized repository user may also create a fresh artifact manually:
+
+1. Open **Actions** in GitHub and select **Source bundle**.
+2. Select **Run workflow** and keep the workflow branch set to the repository default branch.
+3. Enter `source_ref` as an existing branch, tag, pull-request ref such as `refs/pull/135/head`, or a full 40-character commit SHA.
+4. Start the run, open the completed run, and download `teasescript-source-<resolved-commit-sha>`.
+
+Manual runs selected from any workflow branch other than the repository default branch are skipped. The workflow implementation and bundle helper are loaded from the exact trusted workflow commit identified by `github.workflow_sha`; the selected source is checked out separately and treated as data. The resolved source `HEAD`, rather than the moving input name, determines the artifact name and manifest identity.
+
+The downloaded ZIP contains:
+
+```text
+repository.bundle
+manifest.json
+SHA256SUMS
+```
+
+Verify and clone it from a temporary directory:
+
+```shell
+sha256sum --check SHA256SUMS
+
+git init --bare verifier.git
+git -C verifier.git bundle verify "$PWD/repository.bundle"
+
+git clone repository.bundle source-review
+cd source-review
+git rev-parse HEAD
+git rev-parse 'HEAD^{tree}'
+git status --short
+```
+
+Compare the cloned commit and tree with `commitSha` and `treeSha` in `manifest.json`. The worktree must be clean. GitHub's artifact digest, when available to the downloader, additionally verifies the outer ZIP; `SHA256SUMS` verifies `repository.bundle` and `manifest.json` after extraction.
+
+A source artifact contains committed repository files and reachable Git history for the selected commit. It does not contain issues, pull-request comments or reviews, Actions history, repository settings, secrets, credentials, `node_modules`, or uncommitted local changes. Artifacts expire after one day. Run the workflow again with the same branch, tag, pull-request ref, or commit SHA when a fresh copy is needed.
+
 ## Coordinated multi-agent model
 
 Use this model only after it has been explicitly selected for a complex issue or coordinated milestone:
