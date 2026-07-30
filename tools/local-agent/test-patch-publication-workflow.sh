@@ -7,6 +7,8 @@ script="$root/tools/local-agent/patch-publication.py"
 target='feat/test-target'
 transfer='agent-patch-publication/integration-test'
 
+python3 -B "$root/tools/local-agent/test-prepare-patch-publication.py"
+
 python3 - "$workflow" <<'PY'
 import pathlib, re, subprocess, sys, tempfile
 text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
