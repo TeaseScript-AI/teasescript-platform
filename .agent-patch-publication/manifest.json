@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "chore/agent-safe-ts-morph",
+  "expectedBaseSha": "d1989846dd25f1bc5afdbe60e6204dfe3d3d4f06",
+  "expectedResultTreeSha": "81b233868928a9a1849e9d9e9a2c1fadb4969fba",
+  "patchSizeBytes": 10029,
+  "patchSha256": "48c852ce4c3e9ad20a36053398e40083f2cf8db0be0a4d520c3b3843c2fc328b",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0001",
+      "sizeBytes": 10029,
+      "sha256": "48c852ce4c3e9ad20a36053398e40083f2cf8db0be0a4d520c3b3843c2fc328b"
+    }
+  ],
+  "commitMessage": "Harden codemod namespace and hard-link safety"
+}
