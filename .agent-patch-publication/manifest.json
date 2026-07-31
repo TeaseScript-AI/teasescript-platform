@@ -1,0 +1,21 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "chore/agent-safe-ts-morph",
+  "expectedBaseSha": "736c7cc0216fd58b05343c446b51cf9cb993378b",
+  "expectedResultTreeSha": "043ba1276d29042c54697c5919421417c796bf83",
+  "patchSizeBytes": 18578,
+  "patchSha256": "ddf3da3ff3aeaf63df8a6b1f99d6e80ba76d03501cf476a38cfd53dd6af5e609",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0002",
+      "sizeBytes": 12191,
+      "sha256": "68766d739348edac481585f91ef20ed23a920116f8cde4761bb74f7262fed72a"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0002",
+      "sizeBytes": 6387,
+      "sha256": "110fa058cddd1d0f624e4da819928817df88b51562702055c3baab676225cfdf"
+    }
+  ],
+  "commitMessage": "Fix ts-morph codemod safety review findings"
+}
