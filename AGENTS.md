@@ -39,6 +39,8 @@ concrete reason.
 
 Choose the smallest suitable edit method based on the shape of the change:
 
+- use `tools/local-agent/extract-exact-context.py` when one bounded section of
+  a large file is needed before selecting or preparing an edit;
 - use `tools/local-agent/replace-exact.py` for one exact or byte-sensitive
   replacement;
 - use a checked unified diff for another small local or structural change;

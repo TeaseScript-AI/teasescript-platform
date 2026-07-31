@@ -16,6 +16,35 @@ Preferred order:
 3. bounded codemod for repeated mechanical edits;
 4. complete rewrite only when intentional.
 
+## Extract one exact bounded section
+
+Use `extract-exact-context.py` when a needed section of a large file cannot be
+obtained with a small targeted read:
+
+```bash
+python3 tools/local-agent/extract-exact-context.py \
+  --file tools/local-agent/prepare-patch-publication.py \
+  --start-text 'def render_upload_instructions(' \
+  --end-text 'def print_next_steps(' \
+  > /tmp/old-snippet.py
+```
+
+The start and end anchors are inclusive and must not overlap. Each anchor must
+occur exactly once; missing, repeated, reversed, symlinked, unstable, or
+oversized input fails without emitting context. `--start-file` and
+`--end-file` accept byte-exact anchors; direct text is UTF-8.
+
+Success writes only the selected bytes to stdout and nothing to stderr. The
+fixed limits are a 16 MiB target, 16 KiB selected output, 200 LF-delimited
+lines, and 768 diagnostic bytes. Errors report at most three exact locations
+and never guess an approximate boundary.
+
+Tests:
+
+```bash
+python3 -B tools/local-agent/test-extract-exact-context.py
+```
+
 ## Replace an exact block
 
 For a short, simple UTF-8 edit, pass text directly:

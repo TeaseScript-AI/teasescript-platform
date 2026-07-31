@@ -34,6 +34,7 @@ jobs:
           mkdir -p "$log_dir"
 
           python3 -B tools/local-agent/test-compact-unittest.py
+          python3 -B tools/local-agent/test-extract-exact-context.py
           python3 -B tools/local-agent/test-replace-exact.py
           bash tools/local-agent/test-run-compact.sh
           bash tools/local-agent/run-compact.sh \
