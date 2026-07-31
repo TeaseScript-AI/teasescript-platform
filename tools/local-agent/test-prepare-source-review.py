@@ -134,6 +134,18 @@ class PrepareSourceReviewTests(unittest.TestCase):
         entries = self.valid_entries(**overrides)
         self.write_zip(path, [(name, value, None) for name, value in entries.items()])
 
+    def set_unsupported_compression(self, path: Path, method: int = 99) -> None:
+        value = bytearray(path.read_bytes())
+        for signature, offset in ((b"PK\x03\x04", 8), (b"PK\x01\x02", 10)):
+            start = 0
+            while True:
+                index = value.find(signature, start)
+                if index < 0:
+                    break
+                value[index + offset : index + offset + 2] = method.to_bytes(2, "little")
+                start = index + len(signature)
+        path.write_bytes(value)
+
     def invoke(
         self,
         artifact: Path | None = None,
@@ -142,7 +154,7 @@ class PrepareSourceReviewTests(unittest.TestCase):
         digest: str | None = None,
         repository: str = REPOSITORY,
         head: str | None = None,
-        base: str | None = None,
+        merge_base: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         actual_artifact = artifact or self.artifact
         actual_output = output or (self.root / "review")
@@ -158,8 +170,8 @@ class PrepareSourceReviewTests(unittest.TestCase):
             repository,
             "--expected-head",
             head or self.head,
-            "--expected-base",
-            base or self.base,
+            "--expected-merge-base",
+            merge_base or self.base,
             "--output",
             str(actual_output),
         ]
@@ -232,6 +244,15 @@ class PrepareSourceReviewTests(unittest.TestCase):
         )
         self.assert_failure(self.invoke(path), "unexpected artifact payload")
 
+    def test_unsupported_zip_compression_is_compact_failure(self) -> None:
+        path = self.root / "unsupported-compression.zip"
+        self.write_valid_artifact(path)
+        self.set_unsupported_compression(path)
+        completed = self.invoke(path)
+        self.assert_failure(completed, "cannot extract ZIP archive")
+        self.assertNotIn("Traceback", completed.stderr)
+        self.assertEqual(len(completed.stderr.splitlines()), 1)
+
     def test_internal_checksum_mismatch(self) -> None:
         path = self.root / "checksum.zip"
         entries = self.valid_entries()
@@ -252,9 +273,66 @@ class PrepareSourceReviewTests(unittest.TestCase):
         completed = self.invoke(head="1" * 40)
         self.assert_failure(completed, "head mismatch")
 
-    def test_base_absent_from_bundle_history(self) -> None:
-        completed = self.invoke(base="2" * 40)
-        self.assert_failure(completed, "expected base is absent from bundle history")
+    def test_merge_base_absent_from_bundle_history(self) -> None:
+        completed = self.invoke(merge_base="2" * 40)
+        self.assert_failure(completed, "expected merge base is absent from bundle history")
+
+    def test_advanced_base_tip_uses_merge_base_from_compare(self) -> None:
+        advanced_tip = run(
+            [
+                "git",
+                "commit-tree",
+                self.tree,
+                "-p",
+                self.base,
+                "-m",
+                "Advanced base tip",
+            ],
+            cwd=self.repository,
+        )
+        failed = self.invoke(merge_base=advanced_tip)
+        self.assert_failure(failed, "expected merge base is absent from bundle history")
+
+        output = self.root / "advanced-base-review"
+        completed = self.invoke(output=output, merge_base=self.base)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_unrelated_bundled_commit_is_not_accepted_as_merge_base(self) -> None:
+        unrelated = run(
+            ["git", "commit-tree", self.tree, "-m", "Unrelated history"],
+            cwd=self.repository,
+        )
+        run(
+            ["git", "update-ref", "refs/heads/unrelated", unrelated],
+            cwd=self.repository,
+        )
+        bundle_path = self.root / "unrelated.bundle"
+        run(
+            [
+                "git",
+                "bundle",
+                "create",
+                str(bundle_path),
+                "HEAD",
+                "refs/heads/source-bundle",
+                "refs/heads/unrelated",
+            ],
+            cwd=self.repository,
+        )
+        bundle = bundle_path.read_bytes()
+        manifest = dict(self.manifest)
+        manifest["bundleSha256"] = sha256(bundle)
+        artifact = self.root / "unrelated.zip"
+        self.write_valid_artifact(
+            artifact,
+            manifest=self.manifest_bytes(manifest),
+            bundle=bundle,
+        )
+        completed = self.invoke(artifact, merge_base=unrelated)
+        self.assert_failure(
+            completed,
+            "expected merge base is not an ancestor of head",
+        )
 
     def test_bundle_verification_failure(self) -> None:
         path = self.root / "bad-bundle.zip"

@@ -94,7 +94,7 @@ manifest.json
 SHA256SUMS
 ```
 
-Turn the downloaded ZIP into a verified local checkout with the repository-owned helper:
+Turn the downloaded ZIP into a verified local checkout with a trusted preinstalled copy of the repository-owned helper. For pull-request review, obtain `<review-merge-base-sha>` from `compare_commits.merge_base_commit.sha`, not from the current base-branch tip:
 
 ```shell
 python3 tools/local-agent/prepare-source-review.py \
@@ -102,11 +102,11 @@ python3 tools/local-agent/prepare-source-review.py \
   --artifact-sha256 <github-artifact-sha256> \
   --expected-repository TeaseScript-AI/teasescript-platform \
   --expected-head <source-sha> \
-  --expected-base <review-base-sha> \
+  --expected-merge-base <review-merge-base-sha> \
   --output /mnt/data/source-review
 ```
 
-The helper validates the outer digest, ZIP paths and exact payload, internal checksums, manifest identities, complete bundle, expected head and optional base, checked-out tree, `git fsck`, and clean worktree. It exposes the output path only after every check succeeds and removes the temporary `origin` remote so the result cannot be mistaken for a network clone.
+The helper validates the outer digest, ZIP paths and exact payload, internal checksums, manifest identities, complete bundle, expected head and optional merge-base ancestry, checked-out tree, `git fsck`, and clean worktree. It exposes the output path only after every check succeeds and removes the temporary `origin` remote so the result cannot be mistaken for a network clone.
 
 Connector-based ChatGPT agents must use the local-first route in `CHATGPT-GITHUB-WORKFLOW.md`. In that environment, do not try `git clone` or repeated connector file reads as the normal repository acquisition path; download one exact source artifact, prepare it locally, and reserve the connector for live GitHub state and writes.
 

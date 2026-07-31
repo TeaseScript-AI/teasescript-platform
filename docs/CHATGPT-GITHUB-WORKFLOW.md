@@ -19,6 +19,8 @@ For substantial implementation, review, debugging, or verification:
 
 Do not try `git clone`, `git fetch`, or another network Git workaround from a connector-based restricted agent environment. Network Git is not the supported repository acquisition route there. Use the verified source-bundle artifact and the preparation script.
 
+The preparation helper must already be available from a trusted shared project folder or separately distributed local tool bundle, outside the downloaded artifact and `repository.bundle`. The repository copy is the canonical maintained source, but do not bootstrap trust by manually extracting and executing the candidate copy from the artifact under review.
+
 After local preparation, code reading should normally use local commands such as:
 
 ```shell
@@ -35,12 +37,13 @@ This is both simpler and more context-efficient than requesting complete files o
 
 ### Current pull-request head
 
-1. Call `get_pr_info` and record the exact head and base SHA.
-2. Call `fetch_commit_workflow_runs` for the exact head.
-3. Select a successful `Source bundle` run for that head.
-4. Call `fetch_workflow_run_artifacts` and require an unexpired artifact named `teasescript-source-<head-sha>` whose workflow metadata has the same head SHA.
-5. Call `download_workflow_artifact` once.
-6. Pass the returned local ZIP path and GitHub artifact digest to `prepare-source-review.py`.
+1. Call `get_pr_info` and record the exact head SHA and exact current base-tip SHA.
+2. Call `compare_commits` with those two exact SHAs and record `merge_base_commit.sha`. This merge base is stable in the head history even when the base branch later advances.
+3. Call `fetch_commit_workflow_runs` for the exact head.
+4. Select a successful `Source bundle` run for that head.
+5. Call `fetch_workflow_run_artifacts` and require an unexpired artifact named `teasescript-source-<head-sha>` whose workflow metadata has the same head SHA.
+6. Call `download_workflow_artifact` once.
+7. Pass the returned local ZIP path, GitHub artifact digest, and expected merge base to the trusted preparation helper.
 
 ### Implementation from `main`, older source, or missing/expired artifact
 
@@ -66,11 +69,11 @@ python3 tools/local-agent/prepare-source-review.py \
   --artifact-sha256 6ad5e5af7fd2f9858dd10473fc8ce092a7dc4723e428daba2f2d302b2e1a1bf0 \
   --expected-repository TeaseScript-AI/teasescript-platform \
   --expected-head 1eef336ff0acdfae9913295890ef92828b9ba95b \
-  --expected-base 371bbaaba6d4773c292b69598c521591afcf4330 \
+  --expected-merge-base 371bbaaba6d4773c292b69598c521591afcf4330 \
   --output /mnt/data/review-pr-144
 ```
 
-The script verifies the outer digest, ZIP safety and exact payload, internal checksums, manifest identities, complete Git bundle, expected head and base, checked-out tree, `git fsck`, and clean worktree. It exposes the requested output path only after every check succeeds.
+The script verifies the outer digest, ZIP safety and exact payload, internal checksums, manifest identities, complete Git bundle, expected head and merge-base ancestry, checked-out tree, `git fsck`, and clean worktree. It exposes the requested output path only after every check succeeds.
 
 The resulting checkout deliberately has no `origin` remote. It is a verified local review snapshot, not a network Git clone.
 

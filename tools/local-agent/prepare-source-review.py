@@ -45,7 +45,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--artifact-sha256", required=True)
     parser.add_argument("--expected-repository", required=True)
     parser.add_argument("--expected-head", required=True)
-    parser.add_argument("--expected-base")
+    parser.add_argument(
+        "--expected-merge-base",
+        help=(
+            "optional merge-base commit from compare_commits; must be present "
+            "in the bundle and an ancestor of --expected-head"
+        ),
+    )
     parser.add_argument("--output", required=True, type=Path)
     return parser.parse_args()
 
@@ -98,8 +104,12 @@ def validate_arguments(args: argparse.Namespace) -> tuple[Path, Path]:
         raise fail("--expected-repository must use OWNER/REPOSITORY format")
     if not SHA1_RE.fullmatch(args.expected_head):
         raise fail("--expected-head must be a full lowercase 40-character Git SHA-1")
-    if args.expected_base is not None and not SHA1_RE.fullmatch(args.expected_base):
-        raise fail("--expected-base must be a full lowercase 40-character Git SHA-1")
+    if args.expected_merge_base is not None and not SHA1_RE.fullmatch(
+        args.expected_merge_base
+    ):
+        raise fail(
+            "--expected-merge-base must be a full lowercase 40-character Git SHA-1"
+        )
 
     output_input = args.output.expanduser()
     if output_input.exists() or output_input.is_symlink():
@@ -162,8 +172,17 @@ def extract_artifact(artifact: Path, destination: Path) -> None:
                 target = destination / info.filename
                 with archive.open(info) as source, target.open("xb") as sink:
                     shutil.copyfileobj(source, sink, length=1024 * 1024)
-    except zipfile.BadZipFile as exc:
-        raise fail(f"invalid ZIP archive: {exc}") from exc
+    except PreparationError:
+        raise
+    except (
+        zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+        NotImplementedError,
+        OSError,
+        EOFError,
+        RuntimeError,
+    ) as exc:
+        raise fail(f"cannot extract ZIP archive: {exc}") from exc
 
 
 def parse_checksums(path: Path) -> dict[str, str]:
@@ -263,7 +282,7 @@ def verify_and_expose_checkout(
     *,
     expected_head: str,
     expected_tree: str,
-    expected_base: str | None,
+    expected_merge_base: str | None,
 ) -> None:
     bundle = artifact_directory / "repository.bundle"
     verify_bundle_heads(bundle, expected_head)
@@ -285,15 +304,53 @@ def verify_and_expose_checkout(
             raise fail(f"cloned HEAD mismatch: expected {expected_head}, got {actual_head}")
         if actual_tree != expected_tree:
             raise fail(f"cloned tree mismatch: expected {expected_tree}, got {actual_tree}")
-        if expected_base is not None:
-            base_check = subprocess.run(
-                ["git", "-C", str(temporary), "cat-file", "-e", f"{expected_base}^{{commit}}"],
+        if expected_merge_base is not None:
+            merge_base_check = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(temporary),
+                    "cat-file",
+                    "-e",
+                    f"{expected_merge_base}^{{commit}}",
+                ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
-            if base_check.returncode != 0:
-                raise fail(f"expected base is absent from bundle history: {expected_base}")
+            if merge_base_check.returncode != 0:
+                raise fail(
+                    "expected merge base is absent from bundle history: "
+                    f"{expected_merge_base}"
+                )
+            relationship = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(temporary),
+                    "merge-base",
+                    "--is-ancestor",
+                    expected_merge_base,
+                    expected_head,
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            if relationship.returncode == 1:
+                raise fail(
+                    "expected merge base is not an ancestor of head: "
+                    f"merge_base={expected_merge_base}, head={expected_head}"
+                )
+            if relationship.returncode != 0:
+                detail = relationship.stdout.strip()
+                suffix = f": {detail}" if detail else ""
+                raise fail(
+                    "cannot verify expected merge-base relationship" + suffix
+                )
         run(["git", "-C", str(temporary), "fsck", "--full", "--strict"])
         status = run(
             [
@@ -342,12 +399,12 @@ def main() -> int:
                 output,
                 expected_head=head,
                 expected_tree=tree,
-                expected_base=args.expected_base,
+                expected_merge_base=args.expected_merge_base,
             )
-        base = args.expected_base or "none"
+        merge_base = args.expected_merge_base or "none"
         print(
             f"prepare-source-review: PASS output={output} head={head} "
-            f"tree={tree} base={base}"
+            f"tree={tree} merge_base={merge_base}"
         )
         return 0
     except PreparationError as exc:
