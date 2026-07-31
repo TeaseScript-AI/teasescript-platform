@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "feat/issue-147-artifact-first-reviews",
+  "expectedBaseSha": "5b786a5002473d0dec6065c8f9acd55a03803710",
+  "expectedResultTreeSha": "de27d8e24dcba5066b9aaa4a643ae2bd134ff16f",
+  "patchSizeBytes": 4286,
+  "patchSha256": "374e5bd6d296534139436cb295c9acb9ec177183f73f2bc3f11ac746ea370886",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0001",
+      "sizeBytes": 4286,
+      "sha256": "374e5bd6d296534139436cb295c9acb9ec177183f73f2bc3f11ac746ea370886"
+    }
+  ],
+  "commitMessage": "Normalize remaining source review filesystem failures"
+}

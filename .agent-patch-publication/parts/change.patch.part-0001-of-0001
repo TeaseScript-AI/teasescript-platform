@@ -1,0 +1,90 @@
+diff --git a/tools/local-agent/prepare-source-review.py b/tools/local-agent/prepare-source-review.py
+index aecb894fc46a215958593b30f1e02861a8af004f..2b1066ef92cc742be2129f4a65ce79985718dfa1 100755
+--- a/tools/local-agent/prepare-source-review.py
++++ b/tools/local-agent/prepare-source-review.py
+@@ -56,11 +56,14 @@ def parse_args() -> argparse.Namespace:
+     return parser.parse_args()
+ 
+ 
+-def sha256_file(path: Path) -> str:
++def sha256_file(path: Path, *, description: str) -> str:
+     digest = hashlib.sha256()
+-    with path.open("rb") as stream:
+-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+-            digest.update(chunk)
++    try:
++        with path.open("rb") as stream:
++            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++                digest.update(chunk)
++    except OSError as exc:
++        raise fail(f"cannot read {description}: {path}: {exc}") from exc
+     return digest.hexdigest()
+ 
+ 
+@@ -217,7 +220,7 @@ def parse_checksums(path: Path) -> dict[str, str]:
+ def verify_internal_checksums(directory: Path) -> str:
+     checksums = parse_checksums(directory / "SHA256SUMS")
+     for name, expected in checksums.items():
+-        actual = sha256_file(directory / name)
++        actual = sha256_file(directory / name, description=name)
+         if not hmac.compare_digest(actual, expected):
+             raise fail(f"SHA-256 mismatch for {name}: expected {expected}, got {actual}")
+     return checksums["repository.bundle"]
+@@ -385,7 +388,7 @@ def main() -> int:
+     args = parse_args()
+     try:
+         artifact, output = validate_arguments(args)
+-        outer_digest = sha256_file(artifact)
++        outer_digest = sha256_file(artifact, description="artifact")
+         if not hmac.compare_digest(outer_digest, args.artifact_sha256):
+             raise fail(
+                 "outer artifact SHA-256 mismatch: "
+@@ -420,6 +423,10 @@ def main() -> int:
+     except PreparationError as exc:
+         print(f"prepare-source-review: FAIL: {exc}", file=sys.stderr)
+         return 1
++    except OSError as exc:
++        error = fail(f"filesystem operation failed: {exc}")
++        print(f"prepare-source-review: FAIL: {error}", file=sys.stderr)
++        return 1
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tools/local-agent/test-prepare-source-review.py b/tools/local-agent/test-prepare-source-review.py
+index 5b491de3b95d231f2893b0d110b0724fb441bf77..71c09ab28d0e5b0c18f590cd24aad2b5a77064ac 100755
+--- a/tools/local-agent/test-prepare-source-review.py
++++ b/tools/local-agent/test-prepare-source-review.py
+@@ -391,6 +391,33 @@ class PrepareSourceReviewTests(unittest.TestCase):
+         self.assertEqual(len(completed.stderr.splitlines()), 1)
+         self.assertNotIn("Traceback", completed.stderr)
+ 
++    def test_artifact_read_failure_is_compact_without_traceback(self) -> None:
++        artifact = Path("/proc/self/mem")
++        if not artifact.exists():
++            self.skipTest("/proc/self/mem is unavailable on this platform")
++        completed = self.invoke(
++            artifact,
++            output=self.root / "read-failure-review",
++            digest="0" * 64,
++        )
++        self.assert_failure(completed, "cannot read artifact")
++        self.assertEqual(len(completed.stderr.splitlines()), 1)
++        self.assertNotIn("Traceback", completed.stderr)
++
++    def test_read_only_output_parent_is_compact_without_traceback(self) -> None:
++        parent = Path("/sys")
++        try:
++            read_only = bool(os.statvfs(parent).f_flag & os.ST_RDONLY)
++        except (AttributeError, OSError):
++            self.skipTest("read-only /sys filesystem is unavailable")
++        if not read_only:
++            self.skipTest("/sys is not read-only on this platform")
++        output = parent / f"prepare-source-review-{os.getpid()}-{self._testMethodName}"
++        completed = self.invoke(output=output)
++        self.assert_failure(completed, "filesystem operation failed")
++        self.assertEqual(len(completed.stderr.splitlines()), 1)
++        self.assertNotIn("Traceback", completed.stderr)
++
+     def test_failure_does_not_expose_output_or_leave_temporary_checkout(self) -> None:
+         output = self.root / "atomic-review"
+         completed = self.invoke(output=output, digest="0" * 64)
