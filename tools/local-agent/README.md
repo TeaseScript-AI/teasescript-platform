@@ -23,9 +23,9 @@ obtained with a small targeted read:
 
 ```bash
 python3 tools/local-agent/extract-exact-context.py \
-  --file tools/local-agent/prepare-patch-publication.py \
+  --file tools/local-agent/patch_publication_plan.py \
   --start-text 'def render_upload_instructions(' \
-  --end-text 'def print_next_steps(' \
+  --end-text 'def write_upload_handoff(' \
   > /tmp/old-snippet.py
 ```
 
