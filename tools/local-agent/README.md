@@ -16,6 +16,23 @@ Preferred order:
 3. bounded codemod for repeated mechanical edits;
 4. complete rewrite only when intentional.
 
+## Task-specific TypeScript codemods
+
+The repository includes `ts-morph` as development-only agent tooling. Use it
+when one concrete change requires repeated AST- or symbol-aware edits across
+enough TypeScript locations that ordinary checked patches become less clear or
+more error-prone.
+
+Do not create a permanent generic runner, rename command, transaction layer,
+or codemod framework by default. Write the smallest task-specific script,
+normally keep it uncommitted, and run it only from a clean Git checkout with an
+explicit expected scope. Then inspect the complete diff and run the normal
+build, typecheck, and relevant tests. If the result is wrong, discard or reset
+the checkout and correct the task script.
+
+Use ordinary patches for small edits. Commit a codemod only when demonstrated
+future reuse justifies its own maintenance, tests, and documentation.
+
 ## Replace an exact block
 
 For a short, simple UTF-8 edit, pass text directly:
