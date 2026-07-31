@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "fix/issue-155-cleanup-checkout-permission",
+  "expectedBaseSha": "4708b3d69df0c887cdfef4ccbedcaf8fc54490ff",
+  "expectedResultTreeSha": "0dbbf03e8723a69727f64e751d527e81dd5bdf56",
+  "patchSizeBytes": 2545,
+  "patchSha256": "ae042ebd3bbb863bb1ab5726d68fe792fbb3bd2bc0cc514be83a751f6b351128",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0001",
+      "sizeBytes": 2545,
+      "sha256": "ae042ebd3bbb863bb1ab5726d68fe792fbb3bd2bc0cc514be83a751f6b351128"
+    }
+  ],
+  "commitMessage": "Reject normalized action path aliases"
+}
