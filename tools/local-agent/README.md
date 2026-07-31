@@ -88,9 +88,11 @@ python3 tools/local-agent/replace-exact-batch.py \
 
 Remove `--dry-run` to apply it. Relative paths use the current working
 directory. Operations run in listed order. The batch validates every operation
-before writing and writes each changed file once. Multi-file writes are not one
-filesystem transaction; exit code `2` means earlier files may have changed and
-must be inspected.
+before writing and writes each changed file once. Distinct target paths that
+refer to the same underlying file, including hard links or aliases through a
+symlinked parent directory, are rejected before any write. Multi-file writes
+are not one filesystem transaction; exit code `2` means earlier files may have
+changed and must be inspected.
 
 ## Delete an exact block
 

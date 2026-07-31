@@ -12,6 +12,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from compact_unittest import run_compact_unittest
+
 
 SCRIPT = Path(__file__).with_name("replace-exact-batch.py")
 SPEC = importlib.util.spec_from_file_location("replace_exact_batch", SCRIPT)
@@ -68,6 +70,34 @@ class BatchTests(unittest.TestCase):
 
         self.assertEqual(self.first.read_text(encoding="utf-8"), "OLD one\n")
         self.assertEqual(self.second.read_text(encoding="utf-8"), "OLD two\n")
+
+    def test_target_aliases_are_rejected_before_writing(self) -> None:
+        real_directory = self.root / "real"
+        real_directory.mkdir()
+        target = real_directory / "target.bin"
+        target.write_text("OLD value", encoding="utf-8")
+        alias_directory = self.root / "alias"
+        try:
+            alias_directory.symlink_to(real_directory, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"directory symlinks unavailable: {exc}")
+
+        self.write_plan([
+            {"file": str(target), "oldText": "OLD", "newText": "NEW"},
+            {
+                "file": str(alias_directory / "target.bin"),
+                "oldText": "OLD",
+                "newText": "OTHER",
+            },
+        ])
+
+        with self.assertRaisesRegex(
+            MODULE.CORE.ReplaceExactError,
+            r"operations\[1\]\.file aliases operations\[0\]\.file",
+        ):
+            MODULE.run_plan(self.plan, dry_run=False)
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "OLD value")
 
     def test_dry_run_changes_nothing(self) -> None:
         self.first.write_text("OLD", encoding="utf-8")
@@ -144,6 +174,44 @@ class BatchTests(unittest.TestCase):
             MODULE.run_plan(self.plan, dry_run=False)
 
         self.assertEqual(self.first.read_text(encoding="utf-8"), "OLD")
+
+    def test_invalid_utf8_text_is_a_compact_cli_error(self) -> None:
+        self.first.write_text("OLD", encoding="utf-8")
+        self.write_plan([
+            {"file": str(self.first), "oldText": "\ud800", "newText": "NEW"}
+        ])
+
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPT), "--plan", str(self.plan)],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(completed.stdout, "")
+        self.assertEqual(len(completed.stderr.strip().splitlines()), 1)
+        self.assertIn("oldText must be valid UTF-8 text", completed.stderr)
+        self.assertNotIn("Traceback", completed.stderr)
+        self.assertEqual(self.first.read_text(encoding="utf-8"), "OLD")
+
+    def test_nul_target_path_is_a_compact_cli_error(self) -> None:
+        self.write_plan([
+            {"file": "bad\0path", "oldText": "OLD", "newText": "NEW"}
+        ])
+
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPT), "--plan", str(self.plan)],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(completed.stdout, "")
+        self.assertEqual(len(completed.stderr.strip().splitlines()), 1)
+        self.assertIn("file must not contain a NUL byte", completed.stderr)
+        self.assertNotIn("Traceback", completed.stderr)
 
     def test_later_write_failure_reports_partial_application(self) -> None:
         self.first.write_text("OLD one", encoding="utf-8")
@@ -259,4 +327,4 @@ class BatchTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    run_compact_unittest("replace-exact-batch")

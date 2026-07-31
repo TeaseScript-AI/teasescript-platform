@@ -41,6 +41,8 @@ Choose the smallest suitable edit method based on the shape of the change:
 
 - use `tools/local-agent/replace-exact.py` for one exact or byte-sensitive
   replacement;
+- use `tools/local-agent/replace-exact-batch.py` for several ordered exact
+  replacements that are known in advance;
 - use a checked unified diff for another small local or structural change;
 - use a bounded task-specific codemod with explicit paths, preconditions, and
   expected scope for repeated mechanical or symbol-aware changes;

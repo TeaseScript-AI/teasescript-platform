@@ -88,6 +88,20 @@ def require_nonempty_string(value: Any, label: str) -> str:
     return value
 
 
+def require_path_string(value: Any, label: str) -> str:
+    """Require a non-empty path that the local filesystem can represent."""
+    path = require_nonempty_string(value, label)
+    if "\0" in path:
+        raise CORE.ReplaceExactError(f"{label} must not contain a NUL byte")
+    try:
+        os.fsencode(path)
+    except UnicodeEncodeError as exc:
+        raise CORE.ReplaceExactError(
+            f"{label} must be encodable for the local filesystem"
+        ) from exc
+    return path
+
+
 def operation_bytes(
     operation: dict[str, Any],
     *,
@@ -108,9 +122,14 @@ def operation_bytes(
             raise CORE.ReplaceExactError(
                 f"operations[{index}].{text_key} must be a string"
             )
-        data = value.encode("utf-8")
+        try:
+            data = value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise CORE.ReplaceExactError(
+                f"operations[{index}].{text_key} must be valid UTF-8 text"
+            ) from exc
     else:
-        file_value = require_nonempty_string(
+        file_value = require_path_string(
             operation[file_key],
             f"operations[{index}].{file_key}",
         )
@@ -131,7 +150,7 @@ def load_plan(path: Path) -> list[Operation]:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
         raise CORE.ReplaceExactError(f"Plan must be UTF-8 text: {path}") from exc
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         raise CORE.ReplaceExactError(f"Unable to read plan {path}: {exc}") from exc
 
     try:
@@ -178,7 +197,7 @@ def load_plan(path: Path) -> list[Operation]:
             raise CORE.ReplaceExactError(f"operations[{index}] is missing file")
 
         target = absolute_path(
-            require_nonempty_string(operation["file"], f"operations[{index}].file")
+            require_path_string(operation["file"], f"operations[{index}].file")
         )
         expected_count = operation.get("expectedCount", 1)
         if type(expected_count) is not int or expected_count < 1:
@@ -213,10 +232,21 @@ def load_plan(path: Path) -> list[Operation]:
 def prepare(operations: list[Operation]) -> list[PreparedTarget]:
     """Read each target once and simulate operations in listed order."""
     targets: dict[Path, PreparedTarget] = {}
+    identities: dict[tuple[int, int], tuple[Path, int]] = {}
     for operation in operations:
         target = targets.get(operation.target)
         if target is None:
             original, target_stat, fingerprint = CORE.read_stable_target(operation.target)
+            identity = (target_stat.st_dev, target_stat.st_ino)
+            existing = identities.get(identity)
+            if existing is not None:
+                existing_path, existing_index = existing
+                raise CORE.ReplaceExactError(
+                    f"operations[{operation.index}].file aliases "
+                    f"operations[{existing_index}].file: {operation.target} and "
+                    f"{existing_path} refer to the same file; "
+                    "no batch target was modified"
+                )
             target = PreparedTarget(
                 path=operation.target,
                 original=original,
@@ -225,6 +255,7 @@ def prepare(operations: list[Operation]) -> list[PreparedTarget]:
                 fingerprint=fingerprint,
             )
             targets[operation.target] = target
+            identities[identity] = (operation.target, operation.index)
 
         count = target.updated.count(operation.old)
         if count != operation.expected_count:
