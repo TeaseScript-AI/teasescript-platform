@@ -243,6 +243,7 @@ jobs:
     needs: [request, prepare, test, publish, cleanup-transfer]
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
     steps:
       - name: Check out trusted workflow revision
