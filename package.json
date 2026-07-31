@@ -9,14 +9,17 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test:compiled": "node --test dist/tests/*.test.js",
-    "check:libraries": "npm run build && node --test dist/tests/library-catalog-metadata.test.js dist/tests/library-export-boundary.test.js dist/tests/library-validation-pipeline.test.js",
+    "test:compiled": "node --test --test-reporter=./tools/test-summary-reporter.mjs dist/tests/*.test.js",
+    "check:libraries": "npm run build && node --test --test-reporter=./tools/test-summary-reporter.mjs dist/tests/library-catalog-metadata.test.js dist/tests/library-export-boundary.test.js dist/tests/library-validation-pipeline.test.js",
     "test": "npm run build && npm run test:compiled",
     "check:legacy-imports": "node tools/check-legacy-imports.mjs",
     "check": "npm run check:legacy-imports && npm test",
     "playground": "npm run build && node dist/playground/server.js",
     "test:property": "npm run build && node dist/tests/property/replay.js",
-    "test:property:extended": "npm run build && node dist/tests/property/replay.js --profile extended"
+    "test:property:extended": "npm run build && node dist/tests/property/replay.js --profile extended",
+    "test:compiled:full-output": "node --test --test-reporter=spec dist/tests/*.test.js",
+    "test:full-output": "npm run build && npm run test:compiled:full-output",
+    "check:full-output": "npm run check:legacy-imports && npm run test:full-output"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
