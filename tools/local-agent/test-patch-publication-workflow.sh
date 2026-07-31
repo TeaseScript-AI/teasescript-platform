@@ -218,6 +218,24 @@ def collect_action_refs(job_lines, job_name, properties):
     return refs
 
 
+def collect_job_level_refs(job_lines, job_name, properties):
+    uses_headers = [
+        (index, scalar)
+        for index, key, scalar in properties
+        if key == "uses"
+    ]
+    assert len(uses_headers) <= 1, (
+        f"workflow job {job_name} must have at most one job-level uses field"
+    )
+    if not uses_headers:
+        return []
+    assert not any(key == "steps" for _, key, _ in properties), (
+        f"workflow job {job_name} cannot combine job-level uses with steps"
+    )
+    index, scalar = uses_headers[0]
+    return [parse_uses_scalar(scalar, job_name, job_lines[index])]
+
+
 def assert_job_contents_access(job_lines, job_name, properties):
     permission_headers = [
         (index, scalar)
@@ -344,9 +362,14 @@ def assert_checkout_jobs_have_contents_access(workflow_text):
         end = job_headers[position + 1][0] if position + 1 < len(job_headers) else jobs_end
         job_lines = lines[start:end]
         properties = parse_job_properties(job_lines, job_name)
-        refs = collect_action_refs(job_lines, job_name, properties)
+        job_level_refs = collect_job_level_refs(job_lines, job_name, properties)
+        step_refs = collect_action_refs(job_lines, job_name, properties)
+        refs = job_level_refs + step_refs
         all_refs.extend(refs)
-        if any(ref.rsplit("@", 1)[0].lower() == "actions/checkout" for ref in refs):
+        if any(
+            ref.rsplit("@", 1)[0].lower() == "actions/checkout"
+            for ref in step_refs
+        ):
             assert_job_contents_access(job_lines, job_name, properties)
     return all_refs
 
@@ -392,6 +415,33 @@ for uses_lines in [
 assert_rejected(
     make_checkout_job([f"- uses:  actions/checkout@{checkout_sha}"]),
     "lacks exactly one contents read/write permission",
+)
+reusable_sha = "1" * 40
+reusable_ref = f"example/repository/.github/workflows/reusable.yml@{reusable_sha}"
+reusable_job = "\n".join(
+    [
+        "jobs:",
+        "  reusable:",
+        f"    uses: {reusable_ref}",
+        "",
+    ]
+)
+assert assert_checkout_jobs_have_contents_access(reusable_job) == [reusable_ref]
+for unpinned_reusable_ref in [
+    "example/repository/.github/workflows/reusable.yml@main",
+    "./.github/workflows/reusable.yml",
+]:
+    assert_rejected(
+        reusable_job.replace(reusable_ref, unpinned_reusable_ref),
+        "one immutable 40-hex pin",
+    )
+assert_rejected(
+    reusable_job.replace(
+        f"    uses: {reusable_ref}",
+        "    steps:\n      - run: echo invalid\n"
+        f"    uses: {reusable_ref}",
+    ),
+    "cannot combine job-level uses with steps",
 )
 for hidden_jobs_key in [
     '"jobs":',
