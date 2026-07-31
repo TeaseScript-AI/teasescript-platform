@@ -57,6 +57,8 @@ assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in transfe
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
+# This guard intentionally accepts one canonical block-style YAML subset.
+# Any alternative structure must fail closed rather than bypass action scanning.
 def line_indentation(line):
     return len(line) - len(line.lstrip(" "))
 
@@ -267,21 +269,53 @@ def assert_job_contents_access(job_lines, job_name, properties):
     ), f"checkout job {job_name} lacks exactly one contents read/write permission"
 
 
+def parse_top_level_properties(lines):
+    properties = []
+    seen = set()
+    for index, line in enumerate(lines):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indentation = line_indentation(line)
+        if indentation > 0:
+            continue
+        match = re.fullmatch(
+            r"(?P<key>[A-Za-z_][A-Za-z0-9_-]*|<<)[ \t]*:[ \t]*(?P<value>.*)",
+            line,
+        )
+        assert match, (
+            "workflow top-level keys must use unquoted plain mapping syntax: "
+            f"{line.strip()}"
+        )
+        key = match.group("key")
+        scalar = match.group("value")
+        assert key != "<<" and not re.match(r"[&*!]", scalar.lstrip()), (
+            "workflow top-level anchors, aliases, tags, and merge keys are unsupported: "
+            f"{line.strip()}"
+        )
+        assert key not in seen, f"workflow top-level key {key} must be unique"
+        seen.add(key)
+        properties.append((index, key, scalar))
+    return properties
+
+
 def assert_checkout_jobs_have_contents_access(workflow_text):
     lines = workflow_text.splitlines()
+    top_level = parse_top_level_properties(lines)
     jobs_headers = [
-        index
-        for index, line in enumerate(lines)
-        if re.fullmatch(r"jobs:[ \t]*(?:#.*)?", line)
+        (index, scalar)
+        for index, key, scalar in top_level
+        if key == "jobs"
     ]
     assert len(jobs_headers) == 1, "workflow must contain exactly one jobs mapping"
-    jobs_start = jobs_headers[0] + 1
-    jobs_end = len(lines)
-    for index in range(jobs_start, len(lines)):
-        line = lines[index]
-        if line.strip() and not line[0].isspace() and not line.lstrip().startswith("#"):
-            jobs_end = index
-            break
+    jobs_header, jobs_scalar = jobs_headers[0]
+    assert is_comment_or_empty(jobs_scalar), (
+        "workflow jobs must use canonical block mapping syntax"
+    )
+    jobs_start = jobs_header + 1
+    jobs_end = next(
+        (index for index, _, _ in top_level if index > jobs_header),
+        len(lines),
+    )
 
     job_headers = []
     pattern = re.compile(
@@ -359,6 +393,32 @@ assert_rejected(
     make_checkout_job([f"- uses:  actions/checkout@{checkout_sha}"]),
     "lacks exactly one contents read/write permission",
 )
+for hidden_jobs_key in [
+    '"jobs":',
+    r'"jo\u0062s":',
+    '? jobs\n: null',
+    '<<: *workflow',
+]:
+    duplicate_jobs = "\n".join(
+        [
+            make_checkout_job([f"- uses: example/action@{checkout_sha}"]).rstrip(),
+            hidden_jobs_key,
+            "  hidden_checkout:",
+            "    runs-on: ubuntu-latest",
+            "    permissions:",
+            "      issues: write",
+            "    steps:",
+            f"      - uses: actions/checkout@{checkout_sha}",
+            "",
+        ]
+    )
+    assert_rejected(duplicate_jobs, "top-level")
+
+assert_rejected(
+    make_checkout_job([f"- uses: example/action@{checkout_sha}"])
+    + "\njobs:\n  duplicate: {}\n",
+    "top-level key jobs must be unique",
+)
 for noncanonical_lines in [
     [f" - uses: actions/checkout@{checkout_sha}"],
     ["-    name: Hidden checkout", f"     uses: actions/checkout@{checkout_sha}"],
@@ -380,7 +440,7 @@ for hidden_uses_lines in [
     ["- uses: *checkout"],
     [f'- "uses": "actions/checkout@{checkout_sha}"'],
     ["- ? uses", f"  : actions/checkout@{checkout_sha}"],
-    [f'- "u\u0073es": actions/checkout@{checkout_sha}'],
+    [f'- "u\\u0073es": actions/checkout@{checkout_sha}'],
     [f"- !!str uses: actions/checkout@{checkout_sha}"],
     [f"- {{ uses: actions/checkout@{checkout_sha} }}"],
 ]:
