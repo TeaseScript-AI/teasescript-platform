@@ -29,7 +29,7 @@ MAX_OPERATIONS = 1_000
 
 
 class BatchPartiallyAppliedError(CORE.ReplaceExactError):
-    """A write failed after an earlier target was already replaced."""
+    """One or more targets may have changed before a batch error."""
 
 
 @dataclass(frozen=True)
@@ -70,6 +70,16 @@ def require_object(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
         raise CORE.ReplaceExactError(f"{label} must be a JSON object")
     return value
+
+
+def reject_duplicate_object_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject duplicate fields in every JSON object instead of keeping the last."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise CORE.ReplaceExactError(f"Duplicate JSON field: {key}")
+        result[key] = value
+    return result
 
 
 def require_nonempty_string(value: Any, label: str) -> str:
@@ -125,7 +135,7 @@ def load_plan(path: Path) -> list[Operation]:
         raise CORE.ReplaceExactError(f"Unable to read plan {path}: {exc}") from exc
 
     try:
-        raw = json.loads(text)
+        raw = json.loads(text, object_pairs_hook=reject_duplicate_object_keys)
     except json.JSONDecodeError as exc:
         raise CORE.ReplaceExactError(
             f"Invalid JSON in {path} at {exc.lineno}:{exc.colno}: {exc.msg}"
@@ -241,6 +251,16 @@ def apply(targets: list[PreparedTarget]) -> int:
                 target.mode,
                 target.fingerprint,
             )
+        except CORE.ReplacementAppliedButUnsyncedError as exc:
+            possibly_applied = [*applied, target.path]
+            possibly_applied_text = ", ".join(
+                str(path) for path in possibly_applied
+            )
+            raise BatchPartiallyAppliedError(
+                f"Batch synchronization failed at {target.path}; "
+                f"{len(possibly_applied)} file(s) may have changed: "
+                f"{possibly_applied_text}; inspect all targets before retrying"
+            ) from exc
         except CORE.ReplaceExactError as exc:
             if applied:
                 applied_text = ", ".join(str(path) for path in applied)

@@ -128,6 +128,23 @@ class BatchTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.CORE.ReplaceExactError, "positive integer"):
             MODULE.run_plan(self.plan, dry_run=False)
 
+    def test_duplicate_operation_field_is_rejected(self) -> None:
+        self.first.write_text("OLD", encoding="utf-8")
+        self.plan.write_text(
+            '{"formatVersion":1,"operations":[{"file":'
+            + json.dumps(str(self.first))
+            + ',"oldText":"OLD","oldText":"OTHER","newText":"NEW"}]}',
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(
+            MODULE.CORE.ReplaceExactError,
+            "Duplicate JSON field: oldText",
+        ):
+            MODULE.run_plan(self.plan, dry_run=False)
+
+        self.assertEqual(self.first.read_text(encoding="utf-8"), "OLD")
+
     def test_later_write_failure_reports_partial_application(self) -> None:
         self.first.write_text("OLD one", encoding="utf-8")
         self.second.write_text("OLD two", encoding="utf-8")
@@ -155,6 +172,68 @@ class BatchTests(unittest.TestCase):
 
         self.assertEqual(self.first.read_text(encoding="utf-8"), "NEW one")
         self.assertEqual(self.second.read_text(encoding="utf-8"), "OLD two")
+
+    def test_first_unsynced_write_reports_current_target(self) -> None:
+        self.first.write_text("OLD one", encoding="utf-8")
+        self.write_plan([
+            {"file": str(self.first), "oldText": "OLD", "newText": "NEW"}
+        ])
+
+        real_write = MODULE.CORE.atomic_write
+
+        def replace_then_fail(*args, **kwargs):
+            real_write(*args, **kwargs)
+            raise MODULE.CORE.ReplacementAppliedButUnsyncedError(
+                "simulated directory synchronization failure"
+            )
+
+        with mock.patch.object(
+            MODULE.CORE,
+            "atomic_write",
+            side_effect=replace_then_fail,
+        ):
+            with self.assertRaises(MODULE.BatchPartiallyAppliedError) as raised:
+                MODULE.run_plan(self.plan, dry_run=False)
+
+        message = str(raised.exception)
+        self.assertIn("1 file(s) may have changed", message)
+        self.assertIn(str(self.first), message)
+        self.assertEqual(self.first.read_text(encoding="utf-8"), "NEW one")
+
+    def test_later_unsynced_write_reports_all_possible_targets(self) -> None:
+        self.first.write_text("OLD one", encoding="utf-8")
+        self.second.write_text("OLD two", encoding="utf-8")
+        self.write_plan([
+            {"file": str(self.first), "oldText": "OLD", "newText": "NEW"},
+            {"file": str(self.second), "oldText": "OLD", "newText": "NEW"},
+        ])
+
+        real_write = MODULE.CORE.atomic_write
+        calls = 0
+
+        def fail_second_after_replace(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            real_write(*args, **kwargs)
+            if calls == 2:
+                raise MODULE.CORE.ReplacementAppliedButUnsyncedError(
+                    "simulated directory synchronization failure"
+                )
+
+        with mock.patch.object(
+            MODULE.CORE,
+            "atomic_write",
+            side_effect=fail_second_after_replace,
+        ):
+            with self.assertRaises(MODULE.BatchPartiallyAppliedError) as raised:
+                MODULE.run_plan(self.plan, dry_run=False)
+
+        message = str(raised.exception)
+        self.assertIn("2 file(s) may have changed", message)
+        self.assertIn(str(self.first), message)
+        self.assertIn(str(self.second), message)
+        self.assertEqual(self.first.read_text(encoding="utf-8"), "NEW one")
+        self.assertEqual(self.second.read_text(encoding="utf-8"), "NEW two")
 
     def test_cli_success_output_is_one_line(self) -> None:
         self.first.write_text("OLD OLD", encoding="utf-8")
