@@ -1,0 +1,134 @@
+diff --git a/tools/local-agent/test-patch-publication-workflow.sh b/tools/local-agent/test-patch-publication-workflow.sh
+index 843baf59ede32dece211fe9cc3633098722446a0..bb7d7a7cc0ecb11916ae3731345e31f740b2c3fe 100755
+--- a/tools/local-agent/test-patch-publication-workflow.sh
++++ b/tools/local-agent/test-patch-publication-workflow.sh
+@@ -32,8 +32,6 @@ cleanup_text = cleanup_path.read_text(encoding="utf-8")
+ transfer_text = transfer_path.read_text(encoding="utf-8")
+ prepare_text = prepare_path.read_text(encoding="utf-8")
+ summary_text = summary_path.read_text(encoding="utf-8")
+-refs = re.findall(r"^\s*uses:\s*([^\s#]+)", text, re.MULTILINE)
+-assert refs and all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in refs)
+ assert len(text.encode("utf-8")) <= 12 * 1024
+ assert "patch-publication-request.cjs" in text
+ assert "patch-publication-cleanup-comment.cjs" in text
+@@ -59,6 +57,38 @@ assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in transfe
+ assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
+ assert "preserved_changed" in transfer_text
+ assert "cleanup-transfer:" in text and "cleanup-comment:" in text
++def parse_uses_ref(line, job_name):
++    if re.match(r'^(?:      -[ \t]+|        )["\']uses["\'][ \t]*:', line):
++        raise AssertionError(
++            f"workflow uses keys must be unquoted in job {job_name}: {line.strip()}"
++        )
++    match = re.fullmatch(
++        r"^(?:      -[ \t]+|        )uses[ \t]*:[ \t]*(?P<scalar>.*)",
++        line,
++    )
++    if not match:
++        return None
++
++    scalar = match.group("scalar")
++    scalar_patterns = [
++        r"(?P<ref>[^\s#'\"|>]+)(?:[ \t]+#.*)?",
++        r"'(?P<ref>[^']+)'(?:[ \t]+#.*)?",
++        r'"(?P<ref>[^"]+)"(?:[ \t]+#.*)?',
++    ]
++    for pattern in scalar_patterns:
++        scalar_match = re.fullmatch(pattern, scalar)
++        if scalar_match:
++            ref = scalar_match.group("ref")
++            assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", ref), (
++                f"workflow action refs must use one immutable 40-hex pin in job "
++                f"{job_name}: {line.strip()}"
++            )
++            return ref
++    raise AssertionError(
++        f"unsupported workflow uses scalar in job {job_name}: {line.strip()}"
++    )
++
++
+ def assert_checkout_jobs_have_contents_access(workflow_text):
+     lines = workflow_text.splitlines()
+     jobs_headers = [
+@@ -93,6 +123,7 @@ def assert_checkout_jobs_have_contents_access(workflow_text):
+         job_headers.append((index, match.group("name")))
+ 
+     assert job_headers, "workflow jobs mapping has no job definitions"
++    all_refs = []
+     for position, (start, job_name) in enumerate(job_headers):
+         end = (
+             job_headers[position + 1][0]
+@@ -100,8 +131,13 @@ def assert_checkout_jobs_have_contents_access(workflow_text):
+             else jobs_end
+         )
+         job_lines = lines[start:end]
+-        job_text = "\n".join(job_lines)
+-        if "actions/checkout@" not in job_text:
++        refs = [
++            ref
++            for line in job_lines
++            if (ref := parse_uses_ref(line, job_name)) is not None
++        ]
++        all_refs.extend(refs)
++        if not any(ref.rsplit("@", 1)[0].lower() == "actions/checkout" for ref in refs):
+             continue
+ 
+         permission_headers = [
+@@ -135,6 +171,7 @@ def assert_checkout_jobs_have_contents_access(workflow_text):
+         assert len(contents_entries) == 1, (
+             f"checkout job {job_name} lacks exactly one contents read/write permission"
+         )
++    return all_refs
+ 
+ 
+ def make_checkout_job(uses_lines):
+@@ -163,17 +200,47 @@ def assert_missing_contents_rejected(workflow_text):
+         raise AssertionError("checkout job without contents access was not rejected")
+ 
+ 
+-assert_checkout_jobs_have_contents_access(text)
++def assert_unsupported_uses_rejected(workflow_text, expected_fragment):
++    try:
++        assert_checkout_jobs_have_contents_access(workflow_text)
++    except AssertionError as error:
++        assert expected_fragment in str(error)
++    else:
++        raise AssertionError("unsupported workflow uses syntax was not rejected")
++
++
++refs = assert_checkout_jobs_have_contents_access(text)
++assert refs
+ checkout_sha = "0" * 40
+ for uses_lines in [
+     [f"- uses: actions/checkout@{checkout_sha}"],
+     [f"- uses:  actions/checkout@{checkout_sha}"],
+     [f'- uses: "actions/checkout@{checkout_sha}"'],
+     [f"- uses: 'actions/checkout@{checkout_sha}'"],
+-    ["- uses: >-", f"    actions/checkout@{checkout_sha}"],
++    [f"- uses: Actions/Checkout@{checkout_sha}"],
+ ]:
+     assert_missing_contents_rejected(make_checkout_job(uses_lines))
+ 
++assert_unsupported_uses_rejected(
++    make_checkout_job(["- uses: >-", f"    actions/checkout@{checkout_sha}"]),
++    "unsupported workflow uses scalar",
++)
++assert_unsupported_uses_rejected(
++    make_checkout_job(["- uses: *checkout"]),
++    "workflow action refs must use one immutable 40-hex pin",
++)
++assert_unsupported_uses_rejected(
++    make_checkout_job([f'- "uses": "actions/checkout@{checkout_sha}"']),
++    "workflow uses keys must be unquoted",
++)
++run_text_only_job = make_checkout_job(
++    [f"- run: echo actions/checkout@{checkout_sha}"]
++)
++assert assert_checkout_jobs_have_contents_access(run_text_only_job) == []
++multiline_run_text_job = make_checkout_job(
++    ["- run: |", f"    uses: actions/checkout@{checkout_sha}"]
++)
++assert assert_checkout_jobs_have_contents_access(multiline_run_text_job) == []
+ quoted_checkout_job = make_checkout_job(
+     [f"- uses: actions/checkout@{checkout_sha}"]
+ ).replace(

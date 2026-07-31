@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "fix/issue-155-cleanup-checkout-permission",
+  "expectedBaseSha": "ab8cb6577f731c66320d0fd8dc7d5ca08439005a",
+  "expectedResultTreeSha": "054ac066913fb0da781d4b6384357950b4b47e03",
+  "patchSizeBytes": 5635,
+  "patchSha256": "a66fa4381e95f45794696a40d32fee092a8ea44f9a0245b3c8b2eb1c99b0b33d",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0001",
+      "sizeBytes": 5635,
+      "sha256": "a66fa4381e95f45794696a40d32fee092a8ea44f9a0245b3c8b2eb1c99b0b33d"
+    }
+  ],
+  "commitMessage": "Restrict workflow uses parsing to steps"
+}
