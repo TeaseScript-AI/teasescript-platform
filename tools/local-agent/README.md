@@ -13,8 +13,27 @@ Preferred order:
 1. `replace-exact.py` for one exact replacement;
 2. `replace-exact-batch.py` for several exact known replacements;
 3. a targeted patch for a small structural change;
-4. a bounded codemod for repeated mechanical changes;
-5. a complete rewrite when it is genuinely intended.
+4. a temporary task-specific `ts-morph` script for repeated TypeScript AST- or
+   symbol-aware changes;
+5. another bounded task-specific codemod for other repeated mechanical changes;
+6. a complete rewrite when it is genuinely intended.
+
+## Task-specific TypeScript codemods
+
+The repository includes `ts-morph` as development-only agent tooling. Use it
+when one concrete change requires repeated AST- or symbol-aware edits across
+enough TypeScript locations that ordinary checked patches become less clear or
+more error-prone.
+
+Do not create a permanent generic runner, rename command, transaction layer,
+or codemod framework by default. Write the smallest task-specific script,
+normally keep it uncommitted, and run it only from a clean Git checkout with an
+explicit expected scope. Then inspect the complete diff and run the normal
+build, typecheck, and relevant tests. If the result is wrong, discard or reset
+the checkout and correct the task script.
+
+Use ordinary patches for small edits. Commit a codemod only when demonstrated
+future reuse justifies its own maintenance, tests, and documentation.
 
 ## Replace an exact block
 

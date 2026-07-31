@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -213,7 +215,7 @@ class BatchTests(unittest.TestCase):
         self.assertIn("file must not contain a NUL byte", completed.stderr)
         self.assertNotIn("Traceback", completed.stderr)
 
-    def test_later_write_failure_reports_partial_application(self) -> None:
+    def test_later_write_failure_cli_retains_root_diagnostic(self) -> None:
         self.first.write_text("OLD one", encoding="utf-8")
         self.second.write_text("OLD two", encoding="utf-8")
         self.write_plan([
@@ -228,20 +230,24 @@ class BatchTests(unittest.TestCase):
             nonlocal calls
             calls += 1
             if calls == 2:
-                raise MODULE.CORE.ReplaceExactError("simulated write failure")
+                raise MODULE.CORE.ReplaceExactError("SENTINEL ROOT CAUSE")
             return real_write(*args, **kwargs)
 
-        with mock.patch.object(MODULE.CORE, "atomic_write", side_effect=fail_second):
-            with self.assertRaisesRegex(
-                MODULE.BatchPartiallyAppliedError,
-                "after replacing 1 file",
-            ):
-                MODULE.run_plan(self.plan, dry_run=False)
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(MODULE.CORE, "atomic_write", side_effect=fail_second),
+            mock.patch.object(sys, "argv", [str(SCRIPT), "--plan", str(self.plan)]),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = MODULE.main()
 
+        self.assertEqual(exit_code, 2)
+        self.assertIn("after replacing 1 file", stderr.getvalue())
+        self.assertIn("SENTINEL ROOT CAUSE", stderr.getvalue())
         self.assertEqual(self.first.read_text(encoding="utf-8"), "NEW one")
         self.assertEqual(self.second.read_text(encoding="utf-8"), "OLD two")
 
-    def test_first_unsynced_write_reports_current_target(self) -> None:
+    def test_first_unsynced_write_cli_retains_root_diagnostic(self) -> None:
         self.first.write_text("OLD one", encoding="utf-8")
         self.write_plan([
             {"file": str(self.first), "oldText": "OLD", "newText": "NEW"}
@@ -252,20 +258,25 @@ class BatchTests(unittest.TestCase):
         def replace_then_fail(*args, **kwargs):
             real_write(*args, **kwargs)
             raise MODULE.CORE.ReplacementAppliedButUnsyncedError(
-                "simulated directory synchronization failure"
+                "SENTINEL SYNC CAUSE"
             )
 
-        with mock.patch.object(
-            MODULE.CORE,
-            "atomic_write",
-            side_effect=replace_then_fail,
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                MODULE.CORE,
+                "atomic_write",
+                side_effect=replace_then_fail,
+            ),
+            mock.patch.object(sys, "argv", [str(SCRIPT), "--plan", str(self.plan)]),
+            contextlib.redirect_stderr(stderr),
         ):
-            with self.assertRaises(MODULE.BatchPartiallyAppliedError) as raised:
-                MODULE.run_plan(self.plan, dry_run=False)
+            exit_code = MODULE.main()
 
-        message = str(raised.exception)
-        self.assertIn("1 file(s) may have changed", message)
-        self.assertIn(str(self.first), message)
+        self.assertEqual(exit_code, 2)
+        self.assertIn("1 file(s) may have changed", stderr.getvalue())
+        self.assertIn(str(self.first), stderr.getvalue())
+        self.assertIn("SENTINEL SYNC CAUSE", stderr.getvalue())
         self.assertEqual(self.first.read_text(encoding="utf-8"), "NEW one")
 
     def test_later_unsynced_write_reports_all_possible_targets(self) -> None:

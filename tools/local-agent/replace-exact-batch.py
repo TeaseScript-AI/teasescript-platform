@@ -290,14 +290,15 @@ def apply(targets: list[PreparedTarget]) -> int:
             raise BatchPartiallyAppliedError(
                 f"Batch synchronization failed at {target.path}; "
                 f"{len(possibly_applied)} file(s) may have changed: "
-                f"{possibly_applied_text}; inspect all targets before retrying"
+                f"{possibly_applied_text}; cause: {exc}; "
+                "inspect all targets before retrying"
             ) from exc
         except CORE.ReplaceExactError as exc:
             if applied:
                 applied_text = ", ".join(str(path) for path in applied)
                 raise BatchPartiallyAppliedError(
                     f"Batch failed at {target.path} after replacing "
-                    f"{len(applied)} file(s): {applied_text}; "
+                    f"{len(applied)} file(s): {applied_text}; cause: {exc}; "
                     "inspect all targets before retrying"
                 ) from exc
             raise

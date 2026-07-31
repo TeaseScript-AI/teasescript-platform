@@ -21,8 +21,8 @@ The workflow separates untrusted candidate execution from repository write permi
 2. A read-only prepare job verifies that exact transfer revision, validates the payload, and creates one deterministic candidate commit.
 3. A separate read-only test job runs repository checks on that exact candidate.
 4. A write-capable publish job re-verifies the tested candidate without executing candidate-controlled code and performs a normal non-force push.
-5. A `contents: write` cleanup job checks out no repository content. It preserves the unchanged exact format-version-2 transfer ref after a failed publication for targeted repair; otherwise it deletes only the exact authorized transfer-ref revision with SHA-bound `--force-with-lease`. A ref that changed after authorization is always preserved.
-6. A separate `issues: write` cleanup job revalidates the original event identity and then reads the current comment by exact ID, pull request, and unchanged body immediately before deletion. It treats an already-absent comment as a successful no-op, requires any completed delete call to return HTTP 204, checks out no repository content, and records explicit transfer- and command-cleanup statuses in the Actions summary.
+5. A `contents: write` cleanup job checks out only the exact trusted workflow revision and runs the trusted cleanup script without executing candidate-controlled code. It preserves the unchanged exact format-version-2 transfer ref after a failed publication for targeted repair; otherwise it deletes only the exact authorized transfer-ref revision with SHA-bound `--force-with-lease`. A ref that changed after authorization is always preserved.
+6. A separate cleanup job with `contents: read` and `issues: write` checks out only the exact trusted workflow revision, revalidates the original event identity, and then reads the current comment by exact ID, pull request, and unchanged body immediately before deletion. It treats an already-absent comment as a successful no-op, requires any completed delete call to return HTTP 204, and records explicit transfer- and command-cleanup statuses in the Actions summary.
 
 The command must be placed in the pull request's **Conversation** tab. Commands on ordinary issues are rejected. Normal pull-request comments, review summaries, inline review comments, malformed commands, and unauthorized commands remain unaffected. An accepted technical command is removed after the workflow no longer needs it; the Actions run summary remains the audit trail.
 
@@ -256,6 +256,8 @@ For example:
 ```text
 /publish-patch agent-patch-publication/issue-123-attempt-1 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
+
+After placing the command, wait 90 seconds before the first target pull request head lookup. If the head is still unchanged, wait 30 seconds before each retry. These delays reduce unnecessary connector calls; they are not completion guarantees because GitHub Actions queue time and the full repository test duration vary.
 
 The request job resolves the transfer branch to one exact commit SHA, records the exact command-comment identity, and verifies the exact manifest digest before accepting the request. The prepare job must fetch that same transfer commit. The manifest then binds either the complete format-version-1 patch or every format-version-2 part plus the final reconstructed patch. After the workflow finishes, a separately permissioned cleanup job deletes only that unchanged accepted command comment.
 
