@@ -123,8 +123,10 @@ The helper preserves untouched bytes and Unix permission bits. It refuses the
 replacement if the target changes after validation. It does not preserve every
 filesystem metadata type or hard-link identity.
 
-The helper is not streaming and may need roughly two to three times the target
-file size in available memory.
+The helpers are not streaming. The single-operation helper may retain several
+copies of one target and its replacement data. Batch peak memory depends on the
+combined size of all retained original and updated targets, snippet data, and
+replacement growth.
 
 ## Tests
 
