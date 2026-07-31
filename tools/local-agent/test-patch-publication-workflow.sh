@@ -9,101 +9,249 @@ transfer='agent-patch-publication/integration-test'
 
 python3 -B "$root/tools/local-agent/test-prepare-patch-publication.py"
 
-python3 - "$workflow" <<'PY'
-import pathlib, re, subprocess, sys, tempfile
-text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+python3 - "$workflow" \
+  "$root/tools/local-agent/patch-publication-request.cjs" \
+  "$root/tools/local-agent/patch-publication-cleanup-comment.cjs" \
+  "$root/tools/local-agent/patch-publication-cleanup-transfer.sh" \
+  "$root/tools/local-agent/patch-publication-prepare-steps.sh" \
+  "$root/tools/local-agent/patch-publication-summary.sh" <<'PY'
+import pathlib, re, subprocess, sys, tempfile, textwrap
+workflow_path, request_path, cleanup_path, transfer_path, prepare_path, summary_path = map(pathlib.Path, sys.argv[1:])
+text = workflow_path.read_text(encoding="utf-8")
+request_text = request_path.read_text(encoding="utf-8")
+cleanup_text = cleanup_path.read_text(encoding="utf-8")
+transfer_text = transfer_path.read_text(encoding="utf-8")
+prepare_text = prepare_path.read_text(encoding="utf-8")
+summary_text = summary_path.read_text(encoding="utf-8")
 refs = re.findall(r"^\s*uses:\s*([^\s#]+)", text, re.MULTILINE)
 assert refs and all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in refs)
-assert "([0-9a-f]{64})$" in text
-assert "Patch publication commands must be placed on a pull request." in text
-assert "github.rest.git.getRef" in text
-assert "github.rest.repos.getContent" in text
+assert len(text.encode("utf-8")) <= 12 * 1024
+assert "patch-publication-request.cjs" in text
+assert "patch-publication-cleanup-comment.cjs" in text
+assert "patch-publication-cleanup-transfer.sh" in text
+assert "patch-publication-prepare-steps.sh" in text
+assert "patch-publication-summary.sh" in text
+assert text.count("ref: ${{ github.workflow_sha }}") >= 6
+assert "([0-9a-f]{64})$" in request_text
+assert "Patch publication commands must be placed on a pull request." in request_text
+assert "github.rest.git.getRef" in request_text
+assert "github.rest.repos.getContent" in request_text
+assert "context.payload.comment.id" in request_text
 assert "expected_transfer_sha" in text
 assert "format_version" in text
 assert "comment_id: ${{ steps.request.outputs.comment_id }}" in text
-assert "context.payload.comment.id" in text
 assert "Read exact transfer manifest" in text
-assert 'actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"' in text
-assert "Verify authorized manifest digest" in text
-assert 'sha256sum "$RUNNER_TEMP/manifest.json"' in text
-assert "materialize-patch" in text
-assert "refs/remotes/origin/patch-transfer" in text
-assert "preserved_retry" in text
-assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in text
-assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in text
-assert "preserved_changed" in text
+assert 'actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"' in prepare_text
+assert 'sha256sum "$RUNNER_TEMP/manifest.json"' in prepare_text
+assert "materialize-patch" in prepare_text
+assert "refs/remotes/origin/patch-transfer" in prepare_text
+assert "preserved_retry" in transfer_text
+assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in transfer_text
+assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
+assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
 transfer_cleanup = text.split("  cleanup-transfer:\n", 1)[1].split("  cleanup-comment:\n", 1)[0]
 comment_cleanup = text.split("  cleanup-comment:\n", 1)[1]
 assert "contents: write" in transfer_cleanup and "issues: write" not in transfer_cleanup
-assert "uses: actions/checkout@" not in transfer_cleanup
-assert "git init -q \"$cleanup_repo\"" in transfer_cleanup
-assert "issues: write" in comment_cleanup and "contents: write" not in comment_cleanup
-assert "github.rest.issues.getComment" in comment_cleanup
-assert "github.rest.issues.deleteComment" in comment_cleanup
-assert "github.rest.issues.createComment" not in text
-assert "comment.data.body.trim() !== expectedCommand" in comment_cleanup
-assert "github.rest.git.deleteRef" not in text
-assert 'patch-transfer:.agent-patch-publication/change.patch' not in text
+assert "issues: write" in comment_cleanup
+assert "pull-requests: write" not in comment_cleanup and "contents: write" not in comment_cleanup
+assert "github.rest.issues.getComment" in cleanup_text
+assert "github.rest.issues.deleteComment" in cleanup_text
+assert "github.rest.issues.createComment" not in request_text + cleanup_text
+assert "context.payload.issue.url" in cleanup_text
+assert "comment.data.id !== commentId" in cleanup_text
+assert "comment.data.body.trim() !== expectedCommand" in cleanup_text
+assert "deletion.status !== 204" in cleanup_text
+assert "failed_identity" not in cleanup_text
+assert "command cleanup:" in summary_text
+assert "github.rest.git.deleteRef" not in request_text + cleanup_text
+assert 'patch-transfer:.agent-patch-publication/change.patch' not in prepare_text
+subprocess.run(["node", "--check", str(request_path)], check=True)
+subprocess.run(["node", "--check", str(cleanup_path)], check=True)
+subprocess.run(["bash", "-n", str(transfer_path)], check=True)
+subprocess.run(["bash", "-n", str(prepare_path)], check=True)
+subprocess.run(["bash", "-n", str(summary_path)], check=True)
 
-lines = text.splitlines()
-scripts = []
-for index, line in enumerate(lines):
-    if line.strip() != "script: |":
-        continue
-    indent = len(line) - len(line.lstrip())
-    body = []
-    for candidate in lines[index + 1:]:
-        candidate_indent = len(candidate) - len(candidate.lstrip())
-        if candidate.strip() and candidate_indent <= indent:
-            break
-        body.append(candidate[indent + 2:] if candidate.strip() else "")
-    scripts.append("\n".join(body))
-assert len(scripts) == 2
 with tempfile.TemporaryDirectory() as temporary:
-    for index, script in enumerate(scripts):
-        path = pathlib.Path(temporary, f"github-script-{index}.js")
-        path.write_text(f"(async function () {{\n{script}\n}});\n", encoding="utf-8")
-        subprocess.run(["node", "--check", str(path)], check=True)
+    temporary_path = pathlib.Path(temporary)
+    cleanup_test = temporary_path / "test-cleanup-comment.cjs"
+    cleanup_test.write_text(
+        textwrap.dedent(
+            r'''
+            const assert = require('node:assert/strict');
+            const cleanup = require(process.argv[2]);
+
+            const commentId = 5135720427;
+            const issueNumber = 154;
+            const transferBranch = 'agent-patch-publication/154-delaytest';
+            const manifestSha = 'a'.repeat(64);
+            const command = `/publish-patch ${transferBranch} ${manifestSha}`;
+            const issueUrl = 'https://api.github.test/repos/example/repository/issues/154';
+
+            function makeContext() {
+              return {
+                repo: { owner: 'example', repo: 'repository' },
+                payload: {
+                  issue: {
+                    number: issueNumber,
+                    url: issueUrl,
+                    pull_request: {},
+                  },
+                  comment: {
+                    id: commentId,
+                    body: command,
+                  },
+                },
+              };
+            }
+
+            async function runCase(options = {}) {
+              const outputs = {};
+              const failures = [];
+              const warnings = [];
+              const notices = [];
+              let deleteCalls = 0;
+              const context = makeContext();
+              if (options.mutateContext) {
+                options.mutateContext(context);
+              }
+              const github = {
+                rest: {
+                  issues: {
+                    getComment: options.getComment || (async () => ({
+                      data: {
+                        id: commentId,
+                        issue_url: issueUrl,
+                        body: command,
+                      },
+                    })),
+                    deleteComment: async (args) => {
+                      deleteCalls += 1;
+                      if (options.deleteComment) {
+                        return options.deleteComment(args);
+                      }
+                      return { status: 204 };
+                    },
+                  },
+                },
+              };
+              const core = {
+                setOutput: (name, value) => { outputs[name] = value; },
+                setFailed: (message) => { failures.push(message); },
+                warning: (message) => { warnings.push(message); },
+                notice: (message) => { notices.push(message); },
+              };
+              const processMock = {
+                env: {
+                  COMMENT_ID: String(commentId),
+                  ISSUE_NUMBER: String(issueNumber),
+                  TRANSFER_BRANCH: transferBranch,
+                  EXPECTED_MANIFEST_SHA256: manifestSha,
+                },
+              };
+              let thrown = null;
+              try {
+                await cleanup({ github, context, core, process: processMock });
+              } catch (error) {
+                thrown = error;
+              }
+              return { outputs, failures, warnings, notices, deleteCalls, thrown };
+            }
+
+            (async () => {
+              let result = await runCase();
+              assert.equal(result.outputs.cleanup_status, 'removed');
+              assert.equal(result.deleteCalls, 1);
+              assert.deepEqual(result.failures, []);
+              assert.equal(result.thrown, null);
+
+              result = await runCase({
+                getComment: async () => {
+                  const error = new Error('missing');
+                  error.status = 404;
+                  throw error;
+                },
+              });
+              assert.equal(result.outputs.cleanup_status, 'already_absent');
+              assert.equal(result.deleteCalls, 0);
+              assert.deepEqual(result.failures, []);
+
+              result = await runCase({
+                getComment: async () => ({
+                  data: { id: commentId, issue_url: issueUrl, body: `${command} edited` },
+                }),
+              });
+              assert.equal(result.outputs.cleanup_status, 'preserved_changed');
+              assert.equal(result.deleteCalls, 0);
+              assert.equal(result.warnings.length, 1);
+
+              result = await runCase({
+                getComment: async () => ({
+                  data: { id: commentId, issue_url: `${issueUrl}-other`, body: command },
+                }),
+              });
+              assert.equal(result.outputs.cleanup_status, 'preserved_changed');
+              assert.equal(result.deleteCalls, 0);
+
+              result = await runCase({
+                mutateContext: (context) => { context.payload.issue.number += 1; },
+              });
+              assert.equal(result.outputs.cleanup_status, 'failed');
+              assert.equal(result.deleteCalls, 0);
+              assert.equal(result.failures.length, 1);
+
+              result = await runCase({
+                deleteComment: async () => {
+                  const error = new Error('missing during delete');
+                  error.status = 404;
+                  throw error;
+                },
+              });
+              assert.equal(result.outputs.cleanup_status, 'already_absent');
+              assert.equal(result.deleteCalls, 1);
+              assert.deepEqual(result.failures, []);
+              assert.equal(result.thrown, null);
+
+              result = await runCase({ deleteComment: async () => ({ status: 202 }) });
+              assert.equal(result.outputs.cleanup_status, 'failed');
+              assert.equal(result.deleteCalls, 1);
+              assert.equal(result.failures.length, 1);
+
+              result = await runCase({
+                getComment: async () => {
+                  const error = new Error('server error');
+                  error.status = 500;
+                  throw error;
+                },
+              });
+              assert.equal(result.outputs.cleanup_status, 'failed');
+              assert.equal(result.deleteCalls, 0);
+              assert.equal(result.thrown?.message, 'server error');
+
+              result = await runCase({
+                deleteComment: async () => {
+                  const error = new Error('delete server error');
+                  error.status = 500;
+                  throw error;
+                },
+              });
+              assert.equal(result.outputs.cleanup_status, 'failed');
+              assert.equal(result.deleteCalls, 1);
+              assert.equal(result.thrown?.message, 'delete server error');
+            })().catch((error) => {
+              console.error(error);
+              process.exitCode = 1;
+            });
+            '''
+        ).lstrip(),
+        encoding="utf-8",
+    )
+    subprocess.run(["node", str(cleanup_test), str(cleanup_path)], check=True)
 PY
 
 tmp="$(mktemp -d -t patch-publication-workflow-XXXXXX)"
 trap 'rm -rf "$tmp"' EXIT
-cleanup_script="$tmp/cleanup-transfer.sh"
-python3 - "$workflow" "$cleanup_script" <<'PYCLEANUP'
-import pathlib
-import sys
-
-workflow = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
-output = pathlib.Path(sys.argv[2])
-step_index = next(
-    index
-    for index, line in enumerate(workflow)
-    if line.strip() == "- name: Clean up exact transfer ref"
-)
-run_index = next(
-    index
-    for index in range(step_index + 1, len(workflow))
-    if workflow[index].strip() == "run: |"
-)
-run_indent = len(workflow[run_index]) - len(workflow[run_index].lstrip())
-body = []
-for line in workflow[run_index + 1 :]:
-    indent = len(line) - len(line.lstrip())
-    if line.strip() and indent <= run_indent:
-        break
-    body.append(line[run_indent + 2 :] if line.strip() else "")
-assert body
-script = "\n".join(body) + "\n"
-old_remote = 'remote_url="https://github.com/${GITHUB_REPOSITORY}.git"'
-new_remote = 'remote_url="${PATCH_PUBLICATION_TEST_REMOTE_URL:?}"'
-assert script.count(old_remote) == 1
-script = script.replace(old_remote, new_remote)
-output.write_text(
-    "#!/usr/bin/env bash\nset -euo pipefail\n" + script,
-    encoding="utf-8",
-)
-PYCLEANUP
+cleanup_script="$root/tools/local-agent/patch-publication-cleanup-transfer.sh"
 source_repo="$tmp/source"
 remote="$tmp/remote.git"
 output="$tmp/publication"
