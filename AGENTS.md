@@ -32,23 +32,32 @@ Do not treat planning documents, wishes, research files, historical audits, or s
 
 ## Efficient editing and context use
 
-For localized changes, do not rewrite a complete existing file merely for
-convenience. Use the smallest suitable method: `tools/local-agent/replace-exact.py`
-for one exact replacement, a targeted patch for a small structural or multiline
-change, or a bounded codemod with explicit paths and expected match counts for
-repeated mechanical changes. Short text may use `--old-text` and `--new-text`;
-snippet files also work for multiline or byte-exact content.
+Complete the mandatory authority reads above. For supporting context, prefer
+search and bounded or ranged reads when the complete file is not required. Do
+not print or quote complete large files, diffs, or workflow logs without a
+concrete reason.
 
-A complete rewrite is appropriate when replacing the complete contents is the
-intended change, or when a small file genuinely changes almost entirely. Stop
-when an expected match count differs. Read `tools/local-agent/README.md` only
-when basic usage is insufficient or an operation fails.
+Choose the smallest suitable edit method based on the shape of the change:
 
-Read and print only relevant file sections, diff hunks, test failures, and
-workflow logs. After each coherent edit batch, run `git diff --check`, inspect
-`git diff --stat`, and review only the relevant hunks. Do not print successful
-per-test output or complete large files, diffs, or logs without a concrete
-reason.
+- use `tools/local-agent/replace-exact.py` for one exact or byte-sensitive
+  replacement;
+- use a checked unified diff for another small local or structural change;
+- use a bounded task-specific codemod with explicit paths, preconditions, and
+  expected scope for repeated mechanical or symbol-aware changes;
+- rewrite a complete file only when complete replacement is intended or most of
+  the file genuinely changes, and review the complete result.
+
+When the change is naturally “replace exactly these bytes with these bytes,”
+use the exact-replacement helper; when it is naturally additions and deletions
+around code, use a checked unified diff. Read `tools/local-agent/README.md` when
+the selected helper needs detailed operation, limits, or failure diagnostics.
+Stop when an expected match count or scope differs.
+
+After each coherent edit batch, inspect the relevant hunks, run
+`git diff --check`, and run focused checks. Summarize successful test runs
+compactly, but retain warnings, failures, and relevant diagnostics. Before a
+commit, handoff, or merge, review the complete diff for unexpected collateral
+changes.
 
 ## Property-testable boundaries
 

@@ -65,6 +65,53 @@ A single-agent pull request that completes its issue may use:
 Closes #123
 ```
 
+## Verified source artifacts for review and handoff
+
+The source-bundle workflows produce short-lived, verifiable Git artifacts when a reviewer, verifier, or network-restricted agent needs an exact repository snapshot with Git history.
+
+`Source bundle` runs automatically for:
+
+- every pull-request update, using the exact pull-request head rather than GitHub's synthetic merge commit;
+- every push to `main`, using the exact pushed commit.
+
+To regenerate an artifact for an older or expired source revision through the GitHub connector:
+
+1. Resolve the full lowercase 40-character source commit SHA and the exact current `main` SHA.
+2. Choose a nonce matching lowercase `[a-z0-9][a-z0-9-]{0,31}`; for example, `agent-149-1`.
+3. Create `source-bundle-request/<source-sha>/<nonce>` at that exact `main` SHA with the connector's `create_branch` action. Do not create an empty commit or add request files.
+4. Wait 90 seconds before the first status lookup, then poll the requested source commit for context `source-bundle/request/<nonce>`.
+   If it is still absent, wait 30 seconds before each retry. These delays reduce unnecessary connector calls but are not completion guarantees because GitHub Actions queue time varies.
+5. On success, parse the status description `artifact <artifact-id> sha256:<artifact-digest>` and pass the numeric ID to `download_workflow_artifact`.
+6. Verify the downloaded artifact and confirm that the temporary request branch was removed.
+
+The request branch runs only a permissionless gate. A separate `workflow_run` processor loaded from the default branch revalidates the strict branch name, unchanged request SHA, default-branch ancestry even if `main` advances after branch creation, and requested source commit. The source is checked out separately and treated only as data. Status publication has only `statuses: write`; cleanup has only `contents: write`, checks out no repository content, and deletes the request ref only through an exact-SHA `--force-with-lease` from an empty temporary Git directory. Creating the repository branch is the request authorization; GitHub continues to enforce repository and artifact access for private repositories.
+
+The downloaded ZIP contains:
+
+```text
+repository.bundle
+manifest.json
+SHA256SUMS
+```
+
+Turn the downloaded ZIP into a verified local checkout with a trusted preinstalled copy of the repository-owned helper. For pull-request review, obtain `<review-merge-base-sha>` from `compare_commits.merge_base_commit.sha`, not from the current base-branch tip:
+
+```shell
+python3 tools/local-agent/prepare-source-review.py \
+  --artifact /mnt/data/source-bundle.zip \
+  --artifact-sha256 <github-artifact-sha256> \
+  --expected-repository TeaseScript-AI/teasescript-platform \
+  --expected-head <source-sha> \
+  --expected-merge-base <review-merge-base-sha> \
+  --output /mnt/data/source-review
+```
+
+The helper validates the outer digest, ZIP paths and exact payload, internal checksums, manifest identities, complete bundle, expected head and optional merge-base ancestry, checked-out tree, `git fsck`, and clean worktree. It exposes the output path only after every check succeeds and removes the temporary `origin` remote so the result cannot be mistaken for a network clone.
+
+Connector-based ChatGPT agents must use the local-first route in `CHATGPT-GITHUB-WORKFLOW.md`. In that environment, do not try `git clone` or repeated connector file reads as the normal repository acquisition path; download one exact source artifact, prepare it locally, and reserve the connector for live GitHub state and writes.
+
+A source artifact contains committed repository files and reachable Git history for the selected commit. It does not contain issues, pull-request comments or reviews, Actions history, repository settings, secrets, credentials, `node_modules`, or uncommitted local changes. Artifacts expire after one day; create a new request branch when a fresh copy is required.
+
 ## Coordinated multi-agent model
 
 Use this model only after it has been explicitly selected for a complex issue or coordinated milestone:
@@ -234,6 +281,8 @@ npm ci
 npm run check
 git diff --check
 ```
+
+The canonical compiler is the `@typescript/native` npm alias pinned in `package.json`; build and typecheck use its public `tsc` command. Repository tooling imports the separately pinned `typescript` compatibility package for the TypeScript 6 programmable API, which exposes `tsc6` rather than competing for `tsc`. Do not replace or collapse these packages without an explicit dependency migration.
 
 Also inspect the complete combined diff and run any milestone-specific playground, browser, security, or migration checks.
 
