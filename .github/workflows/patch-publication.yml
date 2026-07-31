@@ -23,122 +23,18 @@ jobs:
       issue_number: ${{ steps.request.outputs.issue_number }}
       comment_id: ${{ steps.request.outputs.comment_id }}
     steps:
+      - name: Check out trusted workflow revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       - name: Validate publication command
         id: request
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
-            const body = context.payload.comment.body.trim();
-            const match = /^\/publish-patch ([A-Za-z0-9][A-Za-z0-9._\/-]{0,239}) ([0-9a-f]{64})$/.exec(body);
-            if (!match) {
-              core.setFailed('Use exactly: /publish-patch agent-patch-publication/<unique-id> <manifest-sha256>');
-              return;
-            }
-
-            const transferBranch = match[1];
-            const expectedManifestSha256 = match[2];
-            if (
-              !transferBranch.startsWith('agent-patch-publication/') ||
-              transferBranch === 'agent-patch-publication/' ||
-              transferBranch.includes('..') ||
-              transferBranch.includes('//') ||
-              transferBranch.endsWith('/')
-            ) {
-              core.setFailed('Invalid transfer branch name.');
-              return;
-            }
-
-            if (!context.payload.issue.pull_request) {
-              core.setFailed('Patch publication commands must be placed on a pull request.');
-              return;
-            }
-
-            const permission = await github.rest.repos.getCollaboratorPermissionLevel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              username: context.actor,
-            });
-            if (!['admin', 'maintain', 'write'].includes(permission.data.permission)) {
-              core.setFailed('Patch publication requires repository write permission.');
-              return;
-            }
-
-            const pull = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-            });
-            if (pull.data.head.repo?.full_name !== context.payload.repository.full_name) {
-              core.setFailed('Cross-repository pull-request heads are not supported.');
-              return;
-            }
-
-            const transfer = await github.rest.git.getRef({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: `heads/${transferBranch}`,
-            });
-            const expectedTransferSha = transfer.data.object.sha;
-            if (
-              transfer.data.object.type !== 'commit' ||
-              !/^[0-9a-f]{40}$/.test(expectedTransferSha)
-            ) {
-              core.setFailed('Transfer branch must resolve to a commit SHA.');
-              return;
-            }
-
-            const manifestResponse = await github.rest.repos.getContent({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              path: '.agent-patch-publication/manifest.json',
-              ref: expectedTransferSha,
-            });
-            if (
-              Array.isArray(manifestResponse.data) ||
-              manifestResponse.data.type !== 'file' ||
-              manifestResponse.data.encoding !== 'base64'
-            ) {
-              core.setFailed('Transfer manifest must be one regular file.');
-              return;
-            }
-            const manifestBytes = Buffer.from(
-              manifestResponse.data.content.replace(/\n/g, ''),
-              'base64',
-            );
-            const actualManifestSha256 = require('crypto')
-              .createHash('sha256')
-              .update(manifestBytes)
-              .digest('hex');
-            if (actualManifestSha256 !== expectedManifestSha256) {
-              core.setFailed(
-                `Manifest SHA-256 mismatch: expected ${expectedManifestSha256}, found ${actualManifestSha256}`,
-              );
-              return;
-            }
-            let formatVersion;
-            try {
-              const manifestText = new (require('util').TextDecoder)(
-                'utf-8',
-                { fatal: true },
-              ).decode(manifestBytes);
-              formatVersion = JSON.parse(manifestText).formatVersion;
-            } catch (error) {
-              core.setFailed(`Transfer manifest is not valid UTF-8 JSON: ${error.message}`);
-              return;
-            }
-            if (formatVersion !== 1 && formatVersion !== 2) {
-              core.setFailed('Transfer manifest formatVersion must be the integer 1 or 2.');
-              return;
-            }
-
-            core.setOutput('transfer_branch', transferBranch);
-            core.setOutput('expected_transfer_sha', expectedTransferSha);
-            core.setOutput('expected_manifest_sha256', expectedManifestSha256);
-            core.setOutput('expected_target_branch', pull.data.head.ref);
-            core.setOutput('format_version', String(formatVersion));
-            core.setOutput('issue_number', String(context.issue.number));
-            core.setOutput('comment_id', String(context.payload.comment.id));
-
+            const request = require('./tools/local-agent/patch-publication-request.cjs');
+            await request({ github, context, core });
   prepare:
     needs: request
     runs-on: ubuntu-latest
@@ -166,88 +62,27 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           show-progress: false
-
       - name: Preserve trusted publication tool
         run: install -m 0755 tools/local-agent/patch-publication.py "$RUNNER_TEMP/patch-publication.py"
 
       - name: Read exact transfer manifest
-        run: |
-          git fetch --no-tags origin \
-            "refs/heads/$TRANSFER_BRANCH:refs/remotes/origin/patch-transfer"
-          actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"
-          if [[ "$actual_transfer_sha" != "$EXPECTED_TRANSFER_SHA" ]]; then
-            echo "Transfer branch moved: expected $EXPECTED_TRANSFER_SHA, found $actual_transfer_sha" >&2
-            exit 1
-          fi
-          git show \
-            "refs/remotes/origin/patch-transfer:.agent-patch-publication/manifest.json" \
-            > "$RUNNER_TEMP/manifest.json"
-
+        run: bash tools/local-agent/patch-publication-prepare-steps.sh read-manifest
       - name: Verify authorized manifest digest
-        run: |
-          actual_manifest_sha256="$(sha256sum "$RUNNER_TEMP/manifest.json" | awk '{print $1}')"
-          if [[ "$actual_manifest_sha256" != "$EXPECTED_MANIFEST_SHA256" ]]; then
-            echo "Manifest SHA-256 mismatch: expected $EXPECTED_MANIFEST_SHA256, found $actual_manifest_sha256" >&2
-            exit 1
-          fi
-
+        run: bash tools/local-agent/patch-publication-prepare-steps.sh verify-manifest
       - name: Materialize exact patch payload
         id: materialize
-        run: |
-          python3 -B "$RUNNER_TEMP/patch-publication.py" materialize-patch \
-            --repository "$GITHUB_WORKSPACE" \
-            --manifest "$RUNNER_TEMP/manifest.json" \
-            --transfer-ref refs/remotes/origin/patch-transfer \
-            --output-patch "$RUNNER_TEMP/change.patch" \
-            --expected-target-branch "$EXPECTED_TARGET_BRANCH" \
-            --default-branch "$DEFAULT_BRANCH" \
-            --github-output "$GITHUB_OUTPUT"
-
+        run: bash tools/local-agent/patch-publication-prepare-steps.sh materialize
       - name: Inspect request
         id: inspect
-        run: |
-          args=(
-            inspect-request
-            --repository "$GITHUB_WORKSPACE"
-            --manifest "$RUNNER_TEMP/manifest.json"
-            --patch "$RUNNER_TEMP/change.patch"
-            --transfer-branch "$TRANSFER_BRANCH"
-            --expected-target-branch "$EXPECTED_TARGET_BRANCH"
-            --default-branch "$DEFAULT_BRANCH"
-            --github-output "$GITHUB_OUTPUT"
-          )
-          python3 -B "$RUNNER_TEMP/patch-publication.py" "${args[@]}"
-
+        run: bash tools/local-agent/patch-publication-prepare-steps.sh inspect
       - name: Check out exact target base
         env:
           TARGET_BRANCH: ${{ steps.inspect.outputs.target_branch }}
           EXPECTED_BASE_SHA: ${{ steps.inspect.outputs.expected_base_sha }}
-        run: |
-          git fetch --no-tags origin \
-            "refs/heads/$TARGET_BRANCH:refs/remotes/origin/patch-target"
-          actual_base_sha="$(git rev-parse refs/remotes/origin/patch-target)"
-          if [[ "$actual_base_sha" != "$EXPECTED_BASE_SHA" ]]; then
-            echo "Target branch moved: expected $EXPECTED_BASE_SHA, found $actual_base_sha" >&2
-            exit 1
-          fi
-          git checkout --detach "$EXPECTED_BASE_SHA"
-
+        run: bash tools/local-agent/patch-publication-prepare-steps.sh checkout-base
       - name: Prepare exact candidate bundle
         id: prepare
-        run: |
-          args=(
-            prepare
-            --repository "$GITHUB_WORKSPACE"
-            --manifest "$RUNNER_TEMP/manifest.json"
-            --patch "$RUNNER_TEMP/change.patch"
-            --transfer-branch "$TRANSFER_BRANCH"
-            --expected-target-branch "$EXPECTED_TARGET_BRANCH"
-            --default-branch "$DEFAULT_BRANCH"
-            --output-directory "$RUNNER_TEMP/publication"
-            --github-output "$GITHUB_OUTPUT"
-          )
-          python3 -B "$RUNNER_TEMP/patch-publication.py" "${args[@]}"
-
+        run: bash tools/local-agent/patch-publication-prepare-steps.sh prepare
       - name: Name candidate artifact
         id: names
         run: echo "artifact_name=patch-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
@@ -389,6 +224,11 @@ jobs:
     outputs:
       cleanup_status: ${{ steps.cleanup_transfer.outputs.cleanup_status }}
     steps:
+      - name: Check out trusted workflow revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       - name: Clean up exact transfer ref
         id: cleanup_transfer
         env:
@@ -397,92 +237,19 @@ jobs:
           EXPECTED_TRANSFER_SHA: ${{ needs.request.outputs.expected_transfer_sha }}
           FORMAT_VERSION: ${{ needs.request.outputs.format_version }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
-        run: |
-          set -euo pipefail
-          [[ "$TRANSFER_BRANCH" =~ ^agent-patch-publication/[A-Za-z0-9][A-Za-z0-9._/-]{0,215}$ ]]
-          [[ "$TRANSFER_BRANCH" != *".."* ]]
-          [[ "$TRANSFER_BRANCH" != *"//"* ]]
-          [[ "$TRANSFER_BRANCH" != */ ]]
-          [[ "$EXPECTED_TRANSFER_SHA" =~ ^[0-9a-f]{40}$ ]]
-
-          cleanup_repo="$RUNNER_TEMP/patch-publication-cleanup"
-          git init -q "$cleanup_repo"
-          cd "$cleanup_repo"
-          remote_url="https://github.com/${GITHUB_REPOSITORY}.git"
-          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
-          transfer_ref="refs/heads/$TRANSFER_BRANCH"
-          cleanup_status=failed
-          cleanup_failed=0
-
-          if [[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]; then
-            set +e
-            remote_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
-              ls-remote --heads "$remote_url" "$transfer_ref" 2>&1)"
-            remote_result=$?
-            set -e
-            if [[ $remote_result -ne 0 ]]; then
-              echo "$remote_output" >&2
-              cleanup_status=failed
-              cleanup_failed=1
-            elif [[ -z "$remote_output" ]]; then
-              cleanup_status=already_absent
-            else
-              current_transfer_sha="${remote_output%%$'\t'*}"
-              if [[ "$current_transfer_sha" == "$EXPECTED_TRANSFER_SHA" ]]; then
-                cleanup_status=preserved_retry
-              else
-                cleanup_status=preserved_changed
-              fi
-            fi
-          else
-            set +e
-            push_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
-              push --porcelain \
-              --force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}" \
-              "$remote_url" ":${transfer_ref}" 2>&1)"
-            push_result=$?
-            set -e
-
-            if [[ $push_result -eq 0 ]]; then
-              cleanup_status=removed
-            else
-              set +e
-              remote_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
-                ls-remote --heads "$remote_url" "$transfer_ref" 2>&1)"
-              remote_result=$?
-              set -e
-              if [[ $remote_result -ne 0 ]]; then
-                echo "$push_output" >&2
-                echo "$remote_output" >&2
-                cleanup_status=failed
-                cleanup_failed=1
-              elif [[ -z "$remote_output" ]]; then
-                cleanup_status=already_absent
-              else
-                current_transfer_sha="${remote_output%%$'\t'*}"
-                if [[ "$current_transfer_sha" != "$EXPECTED_TRANSFER_SHA" ]]; then
-                  cleanup_status=preserved_changed
-                else
-                  echo "$push_output" >&2
-                  cleanup_status=failed
-                  cleanup_failed=1
-                fi
-              fi
-            fi
-          fi
-
-          echo "cleanup_status=$cleanup_status" >> "$GITHUB_OUTPUT"
-          if [[ $cleanup_failed -ne 0 ]]; then
-            exit 1
-          fi
-
+        run: bash tools/local-agent/patch-publication-cleanup-transfer.sh
   cleanup-comment:
     if: ${{ always() && needs.request.result == 'success' }}
     needs: [request, prepare, test, publish, cleanup-transfer]
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: write
+      issues: write
     steps:
+      - name: Check out trusted workflow revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       - name: Delete exact accepted publication command
         id: cleanup_comment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -493,64 +260,8 @@ jobs:
           EXPECTED_MANIFEST_SHA256: ${{ needs.request.outputs.expected_manifest_sha256 }}
         with:
           script: |
-            const commentId = Number(process.env.COMMENT_ID);
-            const issueNumber = Number(process.env.ISSUE_NUMBER);
-            const expectedCommand = `/publish-patch ${process.env.TRANSFER_BRANCH} ${process.env.EXPECTED_MANIFEST_SHA256}`;
-            if (!Number.isSafeInteger(commentId) || !Number.isSafeInteger(issueNumber)) {
-              core.setOutput('cleanup_status', 'failed_identity');
-              core.setFailed('Validated publication comment identity is missing.');
-              return;
-            }
-            if (
-              context.payload.issue?.number !== issueNumber ||
-              context.payload.comment?.id !== commentId ||
-              context.payload.comment?.body?.trim() !== expectedCommand ||
-              !context.payload.issue?.pull_request
-            ) {
-              core.setOutput('cleanup_status', 'failed_identity');
-              core.setFailed('Publication command event identity no longer matches the validated request.');
-              return;
-            }
-
-            let comment;
-            try {
-              comment = await github.rest.issues.getComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: commentId,
-              });
-            } catch (error) {
-              if (error.status === 404) {
-                core.setOutput('cleanup_status', 'already_absent');
-                core.notice('Publication command comment was already absent.');
-                return;
-              }
-              throw error;
-            }
-
-            if (
-              comment.data.id !== commentId ||
-              comment.data.issue_url !== context.payload.issue.url ||
-              comment.data.body.trim() !== expectedCommand
-            ) {
-              core.setOutput('cleanup_status', 'preserved_changed');
-              core.warning('Publication command comment changed after validation and was preserved.');
-              return;
-            }
-
-            const deletion = await github.rest.issues.deleteComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: commentId,
-            });
-            if (deletion.status !== 204) {
-              core.setOutput('cleanup_status', 'failed');
-              core.setFailed(`Publication command deletion returned HTTP ${deletion.status}.`);
-              return;
-            }
-            core.setOutput('cleanup_status', 'removed');
-            core.notice('The exact accepted publication command was removed.');
-
+            const cleanup = require('./tools/local-agent/patch-publication-cleanup-comment.cjs');
+            await cleanup({ github, context, core, process });
       - name: Record publication result
         if: ${{ always() }}
         env:
@@ -561,14 +272,4 @@ jobs:
           PUBLISH_RESULT: ${{ needs.publish.result }}
           TRANSFER_CLEANUP_STATUS: ${{ needs.cleanup-transfer.outputs.cleanup_status }}
           COMMENT_CLEANUP_STATUS: ${{ steps.cleanup_comment.outputs.cleanup_status }}
-        run: |
-          {
-            printf '## Patch publication result\n\n'
-            printf -- '- target branch: `%s`\n' "$TARGET_BRANCH"
-            printf -- '- published commit: `%s`\n' "${PUBLISHED_COMMIT_SHA:-none}"
-            printf -- '- prepare: `%s`\n' "$PREPARE_RESULT"
-            printf -- '- test: `%s`\n' "$TEST_RESULT"
-            printf -- '- publish: `%s`\n' "$PUBLISH_RESULT"
-            printf -- '- transfer cleanup: `%s`\n' "${TRANSFER_CLEANUP_STATUS:-failed}"
-            printf -- '- command cleanup: `%s`\n' "${COMMENT_CLEANUP_STATUS:-failed}"
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: bash tools/local-agent/patch-publication-summary.sh
