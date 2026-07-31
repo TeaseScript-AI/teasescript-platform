@@ -257,6 +257,8 @@ For example:
 /publish-patch agent-patch-publication/issue-123-attempt-1 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
+After placing the command, wait 90 seconds before the first target pull request head lookup. If the head is still unchanged, wait 30 seconds before each retry. These delays reduce unnecessary connector calls; they are not completion guarantees because GitHub Actions queue time and the full repository test duration vary.
+
 The request job resolves the transfer branch to one exact commit SHA, records the exact command-comment identity, and verifies the exact manifest digest before accepting the request. The prepare job must fetch that same transfer commit. The manifest then binds either the complete format-version-1 patch or every format-version-2 part plus the final reconstructed patch. After the workflow finishes, a separately permissioned cleanup job deletes only that unchanged accepted command comment.
 
 The workflow rejects the request before publication when, among other checks:
