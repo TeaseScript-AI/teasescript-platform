@@ -391,6 +391,33 @@ class PrepareSourceReviewTests(unittest.TestCase):
         self.assertEqual(len(completed.stderr.splitlines()), 1)
         self.assertNotIn("Traceback", completed.stderr)
 
+    def test_artifact_read_failure_is_compact_without_traceback(self) -> None:
+        artifact = Path("/proc/self/mem")
+        if not artifact.exists():
+            self.skipTest("/proc/self/mem is unavailable on this platform")
+        completed = self.invoke(
+            artifact,
+            output=self.root / "read-failure-review",
+            digest="0" * 64,
+        )
+        self.assert_failure(completed, "cannot read artifact")
+        self.assertEqual(len(completed.stderr.splitlines()), 1)
+        self.assertNotIn("Traceback", completed.stderr)
+
+    def test_read_only_output_parent_is_compact_without_traceback(self) -> None:
+        parent = Path("/sys")
+        try:
+            read_only = bool(os.statvfs(parent).f_flag & os.ST_RDONLY)
+        except (AttributeError, OSError):
+            self.skipTest("read-only /sys filesystem is unavailable")
+        if not read_only:
+            self.skipTest("/sys is not read-only on this platform")
+        output = parent / f"prepare-source-review-{os.getpid()}-{self._testMethodName}"
+        completed = self.invoke(output=output)
+        self.assert_failure(completed, "filesystem operation failed")
+        self.assertEqual(len(completed.stderr.splitlines()), 1)
+        self.assertNotIn("Traceback", completed.stderr)
+
     def test_failure_does_not_expose_output_or_leave_temporary_checkout(self) -> None:
         output = self.root / "atomic-review"
         completed = self.invoke(output=output, digest="0" * 64)
