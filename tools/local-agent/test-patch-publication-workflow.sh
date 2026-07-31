@@ -59,10 +59,28 @@ assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in transfe
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
+job_matches = list(re.finditer(r"^  ([a-z0-9-]+):\n", text, re.MULTILINE))
+for index, match in enumerate(job_matches):
+    job_name = match.group(1)
+    end = job_matches[index + 1].start() if index + 1 < len(job_matches) else len(text)
+    job_text = text[match.start():end]
+    if "uses: actions/checkout@" not in job_text:
+        continue
+    permissions_match = re.search(
+        r"^    permissions:\n(?P<body>(?:^      [^\n]+\n)+)",
+        job_text,
+        re.MULTILINE,
+    )
+    assert permissions_match, f"checkout job {job_name} has no explicit permissions"
+    assert re.search(
+        r"^      contents: (?:read|write)$",
+        permissions_match.group("body"),
+        re.MULTILINE,
+    ), f"checkout job {job_name} lacks contents read access"
 transfer_cleanup = text.split("  cleanup-transfer:\n", 1)[1].split("  cleanup-comment:\n", 1)[0]
 comment_cleanup = text.split("  cleanup-comment:\n", 1)[1]
 assert "contents: write" in transfer_cleanup and "issues: write" not in transfer_cleanup
-assert "issues: write" in comment_cleanup
+assert "contents: read" in comment_cleanup and "issues: write" in comment_cleanup
 assert "pull-requests: write" not in comment_cleanup and "contents: write" not in comment_cleanup
 assert "github.rest.issues.getComment" in cleanup_text
 assert "github.rest.issues.deleteComment" in cleanup_text
