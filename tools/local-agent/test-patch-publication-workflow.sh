@@ -60,13 +60,46 @@ assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transf
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
 def assert_checkout_jobs_have_contents_access(workflow_text):
-    job_matches = list(
-        re.finditer(r"^  ([A-Za-z_][A-Za-z0-9_-]*):\n", workflow_text, re.MULTILINE)
+    lines = workflow_text.splitlines(keepends=True)
+    jobs_headers = [
+        index
+        for index, line in enumerate(lines)
+        if re.fullmatch(r"jobs:[ \t]*(?:#.*)?(?:\r?\n)?", line)
+    ]
+    assert len(jobs_headers) == 1, "workflow must contain exactly one jobs mapping"
+    jobs_start = jobs_headers[0] + 1
+    jobs_end = len(lines)
+    for index in range(jobs_start, len(lines)):
+        line = lines[index]
+        if line.strip() and not line[0].isspace() and not line.lstrip().startswith("#"):
+            jobs_end = index
+            break
+
+    job_headers = []
+    job_header_pattern = re.compile(
+        r"^  (?P<name>[A-Za-z_][A-Za-z0-9_-]*):[ \t]*(?:#.*)?$"
     )
-    for index, match in enumerate(job_matches):
-        job_name = match.group(1)
-        end = job_matches[index + 1].start() if index + 1 < len(job_matches) else len(workflow_text)
-        job_text = workflow_text[match.start():end]
+    for index in range(jobs_start, jobs_end):
+        line = lines[index].rstrip("\r\n")
+        if not line.startswith("  ") or line.startswith("    "):
+            continue
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = job_header_pattern.fullmatch(line)
+        assert match, (
+            "workflow job keys must be unquoted valid GitHub job IDs: "
+            f"{line.strip()}"
+        )
+        job_headers.append((index, match.group("name")))
+
+    assert job_headers, "workflow jobs mapping has no job definitions"
+    for position, (start, job_name) in enumerate(job_headers):
+        end = (
+            job_headers[position + 1][0]
+            if position + 1 < len(job_headers)
+            else jobs_end
+        )
+        job_text = "".join(lines[start:end])
         if "uses: actions/checkout@" not in job_text:
             continue
         permissions_match = re.search(
@@ -86,7 +119,7 @@ assert_checkout_jobs_have_contents_access(text)
 invalid_checkout_job = textwrap.dedent(
     """\
     jobs:
-      cleanup_comment:
+      cleanup_comment: # trusted cleanup
         runs-on: ubuntu-latest
         permissions:
           issues: write
@@ -99,7 +132,19 @@ try:
 except AssertionError as error:
     assert str(error) == "checkout job cleanup_comment lacks contents read access"
 else:
-    raise AssertionError("underscore checkout job without contents access was not rejected")
+    raise AssertionError("commented checkout job without contents access was not rejected")
+quoted_checkout_job = invalid_checkout_job.replace(
+    "cleanup_comment: # trusted cleanup",
+    '"cleanup_comment":',
+)
+try:
+    assert_checkout_jobs_have_contents_access(quoted_checkout_job)
+except AssertionError as error:
+    assert str(error) == (
+        'workflow job keys must be unquoted valid GitHub job IDs: "cleanup_comment":'
+    )
+else:
+    raise AssertionError("quoted workflow job key was not rejected")
 transfer_cleanup = text.split("  cleanup-transfer:\n", 1)[1].split("  cleanup-comment:\n", 1)[0]
 comment_cleanup = text.split("  cleanup-comment:\n", 1)[1]
 assert "contents: write" in transfer_cleanup and "issues: write" not in transfer_cleanup
