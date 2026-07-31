@@ -1,0 +1,3 @@
+Temporary V1 publication result for the post-merge live verification of issue #155.
+Successful publication must delete the exact accepted command comment.
+This branch and pull request must not be merged.
