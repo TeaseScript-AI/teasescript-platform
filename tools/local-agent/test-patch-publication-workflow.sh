@@ -98,9 +98,27 @@ def parse_uses_scalar(scalar, job_name, source_line):
         if not match:
             continue
         ref = match.group("ref")
-        assert re.fullmatch(r"[^@\\\s]+@[0-9a-f]{40}", ref), (
+        ref_match = re.fullmatch(
+            r"(?P<path>[^@\s]+)@(?P<pin>[0-9a-f]{40})",
+            ref,
+        )
+        assert ref_match, (
             f"workflow action refs must use one immutable 40-hex pin in job "
             f"{job_name}: {source_line.strip()}"
+        )
+        action_path = ref_match.group("path")
+        path_segments = action_path.split("/")
+        assert (
+            "\\" not in action_path
+            and len(path_segments) >= 2
+            and all(
+                segment and segment not in {".", ".."}
+                for segment in path_segments
+            )
+        ), (
+            "workflow action refs must use canonical non-empty "
+            f"owner/repository[/subpath] segments in job {job_name}: "
+            f"{source_line.strip()}"
         )
         return ref
     raise AssertionError(
@@ -410,6 +428,19 @@ for uses_lines in [
     assert_rejected(
         make_checkout_job(uses_lines),
         "lacks exactly one contents read/write permission",
+    )
+
+for normalized_checkout_alias in [
+    f"actions//checkout@{checkout_sha}",
+    f"/actions/checkout@{checkout_sha}",
+    f"actions/checkout/@{checkout_sha}",
+    f"actions/./checkout@{checkout_sha}",
+    f"actions/subpath/../checkout@{checkout_sha}",
+    f"actions\\checkout@{checkout_sha}",
+]:
+    assert_rejected(
+        make_checkout_job([f"- uses: '{normalized_checkout_alias}'"]),
+        "canonical non-empty owner/repository[/subpath] segments",
     )
 
 assert_rejected(
