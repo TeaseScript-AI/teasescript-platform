@@ -1,4 +1,4 @@
-import { relative } from "node:path";
+import { relative, resolve } from "node:path";
 import { inspect } from "node:util";
 
 const MAX_STDERR_BYTES = 16 * 1024;
@@ -45,10 +45,15 @@ function isGenericFileFailure(data) {
   const error = data.details?.error;
   return (
     typeof data.file === "string"
-    && data.name === data.file
+    && typeof data.name === "string"
+    && resolve(data.name) === resolve(data.file)
     && error?.failureType === "testCodeFailure"
     && error?.message === "test failed"
   );
+}
+
+function fileKey(file) {
+  return typeof file === "string" ? resolve(file) : undefined;
 }
 
 function truncateBufferStart(buffer, maximumBytes) {
@@ -62,10 +67,11 @@ function truncateBufferEnd(buffer, maximumBytes) {
 }
 
 function appendStderr(captures, file, message) {
-  if (typeof file !== "string" || typeof message !== "string") return;
+  const key = fileKey(file);
+  if (key === undefined || typeof message !== "string") return;
 
   const bytes = Buffer.from(message, "utf8");
-  const previous = captures.get(file) ?? {
+  const previous = captures.get(key) ?? {
     totalBytes: 0,
     complete: Buffer.alloc(0),
     head: Buffer.alloc(0),
@@ -91,7 +97,7 @@ function appendStderr(captures, file, message) {
     );
   }
 
-  captures.set(file, previous);
+  captures.set(key, previous);
 }
 
 function formatCapturedStderr(capture) {
@@ -157,7 +163,7 @@ export default async function* summaryReporter(source) {
   }
 
   for (const failure of failures) {
-    yield `${formatFailure(failure, stderrCaptures.get(failure.file))}\n`;
+    yield `${formatFailure(failure, stderrCaptures.get(fileKey(failure.file)))}\n`;
   }
 
   const summary = cumulativeSummary ?? lastSummary;

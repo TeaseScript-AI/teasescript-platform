@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import test from "node:test";
 
 const reporterPath = resolve(process.cwd(), "tools/test-summary-reporter.mjs");
 
-function runFixtures(fixtures: Record<string, string>) {
+function runFixtures(
+  fixtures: Record<string, string>,
+  options: { relativePaths?: boolean } = {},
+) {
   const directory = mkdtempSync(resolve(tmpdir(), "test-summary-reporter-"));
   const environment = { ...process.env };
   delete environment.NODE_TEST_CONTEXT;
@@ -18,9 +21,12 @@ function runFixtures(fixtures: Record<string, string>) {
   });
 
   try {
+    const testPaths = options.relativePaths
+      ? fixturePaths.map((fixturePath) => relative(process.cwd(), fixturePath))
+      : fixturePaths;
     return spawnSync(
       process.execPath,
-      ["--test", `--test-reporter=${reporterPath}`, ...fixturePaths],
+      ["--test", `--test-reporter=${reporterPath}`, ...testPaths],
       {
         encoding: "utf8",
         env: environment,
@@ -94,7 +100,7 @@ test("summary reporter suppresses expected TODO failure details", () => {
   assert.equal(result.stderr, "");
 });
 
-test("summary reporter preserves bounded file-load stderr only for failed files", () => {
+test("summary reporter preserves file-load stderr for relative failed paths only", () => {
   const result = runFixtures({
     "passing.test.mjs": `
       import test from "node:test";
@@ -105,7 +111,7 @@ test("summary reporter preserves bounded file-load stderr only for failed files"
       process.stderr.write("FILE_LOAD_PREFIX\\n");
       throw new Error("TOP_LEVEL_SENTINEL");
     `,
-  });
+  }, { relativePaths: true });
 
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stdout, /FAIL .*failing\.test\.mjs/);
