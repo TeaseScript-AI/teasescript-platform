@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+if [[ ${TEASESCRIPT_COMPACT_TEST_INNER:-0} != 1 ]]; then
+  log=$(mktemp -t patch-publication-workflow-XXXXXX.log)
+  rm -f "$log"
+  exec "$script_dir/run-compact.sh" \
+    --label patch-publication-workflow \
+    --log "$log" \
+    -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash "$0" "$@"
+fi
+root="$(cd "$script_dir/../.." && pwd)"
 workflow="$root/.github/workflows/patch-publication.yml"
 script="$root/tools/local-agent/patch-publication.py"
 target='feat/test-target'

@@ -2,6 +2,14 @@
 set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+if [[ ${TEASESCRIPT_COMPACT_TEST_INNER:-0} != 1 ]]; then
+  log=$(mktemp -t source-bundle-workflow-XXXXXX.log)
+  rm -f "$log"
+  exec "$script_dir/run-compact.sh" \
+    --label source-bundle-workflow \
+    --log "$log" \
+    -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash "$0" "$@"
+fi
 root=$(cd -- "$script_dir/../.." && pwd)
 helper="$script_dir/create-source-bundle.sh"
 workflow="$root/.github/workflows/source-bundle.yml"

@@ -10,8 +10,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
 from pathlib import Path
 from typing import Callable
+
+from compact_unittest import run_compact_unittest
 
 
 SCRIPT = Path(__file__).with_name("patch-publication.py")
@@ -811,4 +814,4 @@ class PatchPublicationTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    run_compact_unittest("patch-publication")
