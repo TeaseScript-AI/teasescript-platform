@@ -135,6 +135,18 @@ function sameSymbol(left, right) {
     && left.compilerSymbol === right.compilerSymbol;
 }
 
+function resolvedSymbol(symbol) {
+  let current = symbol;
+  const seen = new Set();
+  while (current !== undefined && !seen.has(current.compilerSymbol)) {
+    seen.add(current.compilerSymbol);
+    const aliased = current.getAliasedSymbol();
+    if (aliased === undefined) return current;
+    current = aliased;
+  }
+  return current;
+}
+
 function supportedDeclarations(sourceFile, name) {
   const matches = [];
   for (const statement of sourceFile.getStatements()) {
@@ -302,13 +314,35 @@ function formatDiagnostics(root, diagnostics) {
     .join("; ");
 }
 
-function staleTargetBindings(project, target, oldName) {
-  const targetPath = target.getFilePath();
+function targetForwardingFiles(project, target, newName) {
+  const matches = supportedDeclarations(target, newName);
+  if (matches.length !== 1) {
+    fail(`Cannot identify the completed declaration named ${newName} for no-op verification.`);
+  }
+  const targetSymbol = resolvedSymbol(declarationNameNode(matches[0]).getSymbol());
+  if (targetSymbol === undefined) {
+    fail(`Cannot resolve the completed declaration symbol ${newName} for no-op verification.`);
+  }
+
+  const forwarding = new Set();
+  for (const sourceFile of project.getSourceFiles()) {
+    const forwardsTarget = sourceFile.getExportSymbols().some((symbol) => (
+      symbol.getName() === newName
+      && sameSymbol(resolvedSymbol(symbol), targetSymbol)
+    ));
+    if (forwardsTarget) forwarding.add(sourceFile.getFilePath());
+  }
+  return forwarding;
+}
+
+function staleTargetBindings(project, target, oldName, newName) {
+  const forwardingFiles = targetForwardingFiles(project, target, newName);
   const stale = [];
 
   for (const sourceFile of project.getSourceFiles()) {
     for (const declaration of sourceFile.getImportDeclarations()) {
-      if (declaration.getModuleSpecifierSourceFile()?.getFilePath() !== targetPath) continue;
+      const modulePath = declaration.getModuleSpecifierSourceFile()?.getFilePath();
+      if (modulePath === undefined || !forwardingFiles.has(modulePath)) continue;
       for (const specifier of declaration.getNamedImports()) {
         if (specifier.getName() === oldName) {
           stale.push({ filePath: sourceFile.getFilePath(), description: `import ${oldName}` });
@@ -333,7 +367,8 @@ function staleTargetBindings(project, target, oldName) {
     }
 
     for (const declaration of sourceFile.getExportDeclarations()) {
-      if (declaration.getModuleSpecifierSourceFile()?.getFilePath() !== targetPath) continue;
+      const modulePath = declaration.getModuleSpecifierSourceFile()?.getFilePath();
+      if (modulePath === undefined || !forwardingFiles.has(modulePath)) continue;
       for (const specifier of declaration.getNamedExports()) {
         if (specifier.getName() === oldName) {
           stale.push({ filePath: sourceFile.getFilePath(), description: `export ${oldName}` });
@@ -346,7 +381,7 @@ function staleTargetBindings(project, target, oldName) {
 }
 
 function assertVerifiableNoOp(root, project, target, oldName, newName) {
-  const stale = staleTargetBindings(project, target, oldName);
+  const stale = staleTargetBindings(project, target, oldName, newName);
   if (stale.length > 0) {
     fail(
       `Cannot verify idempotent no-op for ${oldName} -> ${newName}; stale target bindings remain: `
