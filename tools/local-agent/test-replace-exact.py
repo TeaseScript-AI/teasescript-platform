@@ -10,8 +10,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
 from pathlib import Path
 from unittest import mock
+
+from compact_unittest import run_compact_unittest
 
 
 SCRIPT = Path(__file__).with_name("replace-exact.py")
@@ -293,4 +296,4 @@ class ReplaceExactTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    run_compact_unittest("replace-exact")
