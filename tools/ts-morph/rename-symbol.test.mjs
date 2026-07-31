@@ -22,7 +22,7 @@ function createFixture(files) {
         moduleResolution: "NodeNext",
         strict: true,
       },
-      include: ["src/**/*.ts"],
+      include: ["src/**/*"],
     }, null, 2)}\n`,
   );
   for (const [relative, content] of Object.entries(files)) {
@@ -56,6 +56,16 @@ function renameArguments(mode, oldName = "oldName", newName = "newName") {
 
 function removeFixture(root) {
   fs.rmSync(root, { recursive: true, force: true });
+}
+
+function snapshotFixture(root, files) {
+  return new Map(files.map((relative) => [relative, fs.readFileSync(path.join(root, relative), "utf8")]));
+}
+
+function assertFixtureUnchanged(root, snapshot) {
+  for (const [relative, content] of snapshot) {
+    assert.equal(fs.readFileSync(path.join(root, relative), "utf8"), content, relative);
+  }
 }
 
 test("reference-aware rename has check, write, exact changed files, and idempotent no-op behavior", () => {
@@ -133,7 +143,12 @@ test("rename rejects missing, ambiguous, unsupported, colliding, invalid, and es
     {
       files: { "src/declaration.ts": "export function oldName(): void {}\n" },
       args: renameArguments("write", "oldName", "class"),
-      message: /Invalid TypeScript identifier/u,
+      message: /Invalid TypeScript module binding identifier/u,
+    },
+    {
+      files: { "src/declaration.ts": "export function oldName(): void {}\n" },
+      args: renameArguments("write", "oldName", "await"),
+      message: /Invalid TypeScript module binding identifier/u,
     },
   ];
 
@@ -161,6 +176,87 @@ test("rename rejects missing, ambiguous, unsupported, colliding, invalid, and es
   } finally {
     fs.rmSync(outside, { force: true });
     removeFixture(root);
+  }
+});
+
+test("idempotent no-op fails closed for a partially applied rename", () => {
+  const root = createFixture({
+    "src/declaration.ts": "export function newName(): number { return 1; }\n",
+    "src/consumer.ts": "import { oldName } from \"./declaration.js\";\nexport const value = oldName();\n",
+  });
+  try {
+    const snapshot = snapshotFixture(root, ["src/declaration.ts", "src/consumer.ts"]);
+    const result = run(root, renameArguments("write"));
+    assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+    assert.match(result.stderr, /Cannot verify idempotent no-op/u);
+    assert.match(result.stderr, /stale target bindings remain/u);
+    assertFixtureUnchanged(root, snapshot);
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test("rename rejects target-import and consumer-local destination collisions before writing", () => {
+  const fixtures = [
+    {
+      files: {
+        "src/helper.ts": "export function newName(): number { return 2; }\n",
+        "src/declaration.ts": "import { newName } from \"./helper.js\";\nexport function oldName(): number { return newName(); }\n",
+      },
+      tracked: ["src/helper.ts", "src/declaration.ts"],
+    },
+    {
+      files: {
+        "src/declaration.ts": "export function oldName(): number { return 1; }\n",
+        "src/consumer.ts": "import { oldName } from \"./declaration.js\";\nconst newName = 2;\nexport const value = oldName();\n",
+      },
+      tracked: ["src/declaration.ts", "src/consumer.ts"],
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const root = createFixture(fixture.files);
+    try {
+      const snapshot = snapshotFixture(root, fixture.tracked);
+      const result = run(root, renameArguments("write"));
+      assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+      assert.match(result.stderr, /Rename would introduce TypeScript errors and was not written/u);
+      assertFixtureUnchanged(root, snapshot);
+    } finally {
+      removeFixture(root);
+    }
+  }
+});
+
+test("rename refuses declaration-file targets and changed declaration artifacts", () => {
+  for (const extension of ["d.ts", "d.mts", "d.cts"]) {
+    const relative = `src/declaration.${extension}`;
+    const root = createFixture({ [relative]: "export function oldName(): void {}\n" });
+    try {
+      const result = run(root, ["--write", "--file", relative, "--old", "oldName", "--new", "newName"]);
+      assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+      assert.match(result.stderr, /TypeScript declaration artifact/u);
+      assert.equal(fs.readFileSync(path.join(root, relative), "utf8"), "export function oldName(): void {}\n");
+    } finally {
+      removeFixture(root);
+    }
+  }
+
+  for (const extension of ["d.ts", "d.mts", "d.cts"]) {
+    const consumer = `src/consumer.${extension}`;
+    const root = createFixture({
+      "src/declaration.ts": "export interface oldName { value: number; }\n",
+      [consumer]: "import type { oldName } from \"./declaration.js\";\nexport type Value = oldName;\n",
+    });
+    try {
+      const snapshot = snapshotFixture(root, ["src/declaration.ts", consumer]);
+      const result = run(root, renameArguments("write"));
+      assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+      assert.match(result.stderr, /Rename would modify a TypeScript declaration artifact/u);
+      assertFixtureUnchanged(root, snapshot);
+    } finally {
+      removeFixture(root);
+    }
   }
 });
 

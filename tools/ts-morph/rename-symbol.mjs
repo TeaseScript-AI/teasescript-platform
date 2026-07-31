@@ -90,18 +90,37 @@ function resolveRepositoryFile(root, input, label, extensions) {
   return absolute;
 }
 
-function isValidIdentifier(name) {
-  const source = ts.createSourceFile(
-    "identifier-check.ts",
-    `const ${name} = 0;`,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const statement = source.statements[0];
-  if (source.parseDiagnostics.length > 0 || statement === undefined || !ts.isVariableStatement(statement)) return false;
-  const declaration = statement.declarationList.declarations[0];
-  return declaration !== undefined && ts.isIdentifier(declaration.name) && declaration.name.text === name;
+function isValidModuleBindingIdentifier(name) {
+  const fileName = "identifier-check.ts";
+  const text = `export const ${name} = 0;`;
+  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const options = {
+    module: ts.ModuleKind.ESNext,
+    noEmit: true,
+    noLib: true,
+    noResolve: true,
+    strict: true,
+    target: ts.ScriptTarget.ESNext,
+  };
+  const host = {
+    ...ts.createCompilerHost(options),
+    fileExists: (candidate) => candidate === fileName,
+    getCanonicalFileName: (candidate) => candidate,
+    getCurrentDirectory: () => "",
+    getDefaultLibFileName: () => "",
+    getNewLine: () => "\n",
+    getSourceFile: (candidate) => candidate === fileName ? source : undefined,
+    readFile: (candidate) => candidate === fileName ? text : undefined,
+    useCaseSensitiveFileNames: () => true,
+    writeFile: () => {},
+  };
+  const program = ts.createProgram([fileName], options, host);
+  return program.getSyntacticDiagnostics(source).length === 0
+    && program.getSemanticDiagnostics(source).length === 0;
+}
+
+function isTypeScriptDeclarationFile(filePath) {
+  return /\.d\.(?:ts|mts|cts)$/u.test(filePath);
 }
 
 function supportedDeclarations(sourceFile, name) {
@@ -130,10 +149,119 @@ function repositoryRelative(root, absolute) {
   return path.relative(root, absolute).split(path.sep).join("/");
 }
 
+function diagnosticMessage(diagnostic) {
+  return ts.flattenDiagnosticMessageText(diagnostic.compilerObject.messageText, "\n");
+}
+
+function diagnosticFile(root, diagnostic) {
+  const sourceFile = diagnostic.getSourceFile();
+  if (sourceFile === undefined) return "<global>";
+  const filePath = sourceFile.getFilePath();
+  return isWithin(root, filePath) ? repositoryRelative(root, filePath) : filePath;
+}
+
+function errorDiagnostics(project) {
+  return project
+    .getPreEmitDiagnostics()
+    .filter((diagnostic) => diagnostic.getCategory() === ts.DiagnosticCategory.Error);
+}
+
+function diagnosticKey(root, diagnostic) {
+  return JSON.stringify([
+    diagnosticFile(root, diagnostic),
+    diagnostic.getCode(),
+    diagnosticMessage(diagnostic),
+  ]);
+}
+
+function introducedDiagnostics(root, before, after) {
+  const remaining = new Map();
+  for (const diagnostic of before) {
+    const key = diagnosticKey(root, diagnostic);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+
+  const introduced = [];
+  for (const diagnostic of after) {
+    const key = diagnosticKey(root, diagnostic);
+    const count = remaining.get(key) ?? 0;
+    if (count === 0) introduced.push(diagnostic);
+    else remaining.set(key, count - 1);
+  }
+  return introduced;
+}
+
+function formatDiagnostics(root, diagnostics) {
+  return diagnostics
+    .slice(0, 5)
+    .map((diagnostic) => `${diagnosticFile(root, diagnostic)} TS${diagnostic.getCode()}: ${diagnosticMessage(diagnostic)}`)
+    .join("; ");
+}
+
+function staleTargetBindings(project, target, oldName) {
+  const targetPath = target.getFilePath();
+  const stale = [];
+
+  for (const sourceFile of project.getSourceFiles()) {
+    for (const declaration of sourceFile.getImportDeclarations()) {
+      if (declaration.getModuleSpecifierSourceFile()?.getFilePath() !== targetPath) continue;
+      for (const specifier of declaration.getNamedImports()) {
+        if (specifier.getName() === oldName) {
+          stale.push({ filePath: sourceFile.getFilePath(), description: `import ${oldName}` });
+        }
+      }
+
+      const namespaceImport = declaration.getNamespaceImport();
+      if (namespaceImport === undefined) continue;
+      const namespaceName = namespaceImport.getText();
+      for (const access of sourceFile.getDescendantsOfKind(ts.SyntaxKind.PropertyAccessExpression)) {
+        if (access.getExpression().getText() === namespaceName && access.getName() === oldName) {
+          stale.push({ filePath: sourceFile.getFilePath(), description: `${namespaceName}.${oldName}` });
+        }
+      }
+    }
+
+    for (const declaration of sourceFile.getExportDeclarations()) {
+      if (declaration.getModuleSpecifierSourceFile()?.getFilePath() !== targetPath) continue;
+      for (const specifier of declaration.getNamedExports()) {
+        if (specifier.getName() === oldName) {
+          stale.push({ filePath: sourceFile.getFilePath(), description: `export ${oldName}` });
+        }
+      }
+    }
+  }
+
+  return stale;
+}
+
+function assertVerifiableNoOp(root, project, target, oldName, newName) {
+  const stale = staleTargetBindings(project, target, oldName);
+  if (stale.length > 0) {
+    fail(
+      `Cannot verify idempotent no-op for ${oldName} -> ${newName}; stale target bindings remain: `
+      + stale
+        .slice(0, 5)
+        .map((entry) => `${repositoryRelative(root, entry.filePath)}: ${entry.description}`)
+        .join("; "),
+    );
+  }
+
+  const diagnostics = errorDiagnostics(project);
+  if (diagnostics.length > 0) {
+    fail(
+      `Cannot verify idempotent no-op for ${oldName} -> ${newName} while the project has TypeScript errors: `
+      + formatDiagnostics(root, diagnostics),
+    );
+  }
+}
+
 function assertWritableChangedFiles(root, sourceFiles) {
   for (const sourceFile of sourceFiles) {
     const absolute = sourceFile.getFilePath();
     if (!isWithin(root, absolute)) fail(`Rename would modify a file outside the repository: ${absolute}`);
+    if (isTypeScriptDeclarationFile(absolute)) {
+      fail(`Rename would modify a TypeScript declaration artifact: ${repositoryRelative(root, absolute)}`);
+    }
     const stat = fs.lstatSync(absolute);
     if (stat.isSymbolicLink() || !stat.isFile() || fs.realpathSync(absolute) !== absolute) {
       fail(`Rename would modify an unsupported file path: ${repositoryRelative(root, absolute)}`);
@@ -146,9 +274,11 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
   const root = fs.realpathSync(workingDirectory);
   const projectPath = resolveRepositoryFile(root, options.project, "Project config", [".json"]);
   const targetPath = resolveRepositoryFile(root, options.file, "Declaration file", [".ts", ".tsx", ".mts", ".cts"]);
-  if (targetPath.endsWith(".d.ts")) fail("Declaration file may not be a generated .d.ts file.");
-  if (!isValidIdentifier(options.oldName)) fail(`Invalid TypeScript identifier for --old: ${options.oldName}`);
-  if (!isValidIdentifier(options.newName)) fail(`Invalid TypeScript identifier for --new: ${options.newName}`);
+  if (isTypeScriptDeclarationFile(targetPath)) {
+    fail("Declaration file may not be a TypeScript declaration artifact (.d.ts, .d.mts, or .d.cts).");
+  }
+  if (!isValidModuleBindingIdentifier(options.oldName)) fail(`Invalid TypeScript module binding identifier for --old: ${options.oldName}`);
+  if (!isValidModuleBindingIdentifier(options.newName)) fail(`Invalid TypeScript module binding identifier for --new: ${options.newName}`);
 
   const project = createCodemodProject(projectPath);
   const target = project.getSourceFile(targetPath);
@@ -160,6 +290,7 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
   const newMatches = supportedDeclarations(target, options.newName);
   if (oldMatches.length === 0) {
     if (newMatches.length === 1) {
+      assertVerifiableNoOp(root, project, target, options.oldName, options.newName);
       return {
         mode: options.mode,
         status: "unchanged",
@@ -184,6 +315,7 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
   const declaration = oldMatches[0];
   if (typeof declaration.rename !== "function") fail(`Declaration ${options.oldName} does not support reference-aware rename.`);
 
+  const diagnosticsBefore = errorDiagnostics(project);
   const before = new Map(project.getSourceFiles().map((sourceFile) => [sourceFile.getFilePath(), sourceFile.getFullText()]));
   declaration.rename(options.newName, { renameInComments: false, renameInStrings: false });
   const changedSourceFiles = project
@@ -192,6 +324,11 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
     .sort((left, right) => left.getFilePath().localeCompare(right.getFilePath()));
   if (changedSourceFiles.length === 0) fail("ts-morph reported no changed files for the requested rename.");
   assertWritableChangedFiles(root, changedSourceFiles);
+
+  const newDiagnostics = introducedDiagnostics(root, diagnosticsBefore, errorDiagnostics(project));
+  if (newDiagnostics.length > 0) {
+    fail(`Rename would introduce TypeScript errors and was not written: ${formatDiagnostics(root, newDiagnostics)}`);
+  }
 
   const changedFiles = changedSourceFiles.map((sourceFile) => repositoryRelative(root, sourceFile.getFilePath()));
   if (options.mode === "write") {

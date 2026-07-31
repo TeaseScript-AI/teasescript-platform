@@ -4,8 +4,8 @@ Requires Python 3.10 or newer. The exact-editing helpers use only the Python sta
 
 ## Choose an edit method
 
-- Localized text change: checked unified diff.
-- One exact or byte-sensitive replacement: `replace-exact.py`.
+- Ordinary small source edit: checked unified diff (default).
+- Exact-preimage or byte-sensitive replacement, or no checked patch mechanism: `replace-exact.py`.
 - Symbol-aware TypeScript rename across declarations, imports, re-exports, or references: the repository ts-morph codemod.
 - Other repeated mechanical changes: a bounded purpose-built codemod.
 - Whole-file rewrite: only when intentional and fully reviewed.
