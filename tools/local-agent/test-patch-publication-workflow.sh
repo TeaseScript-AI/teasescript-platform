@@ -98,9 +98,13 @@ def parse_uses_scalar(scalar, job_name, source_line):
         if not match:
             continue
         ref = match.group("ref")
-        assert re.fullmatch(r"[^@\\\s]+@[0-9a-f]{40}", ref), (
-            f"workflow action refs must use one immutable 40-hex pin in job "
-            f"{job_name}: {source_line.strip()}"
+        assert re.fullmatch(
+            r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+@[0-9a-f]{40}",
+            ref,
+        ), (
+            f"workflow action refs must use a canonical repository path with "
+            f"one immutable 40-hex pin in job {job_name}: "
+            f"{source_line.strip()}"
         )
         return ref
     raise AssertionError(
@@ -236,6 +240,12 @@ def collect_job_level_refs(job_lines, job_name, properties):
     return [parse_uses_scalar(scalar, job_name, job_lines[index])]
 
 
+def action_repository(ref):
+    path = ref.rsplit("@", 1)[0]
+    owner, repository, *_ = path.split("/")
+    return f"{owner}/{repository}".lower()
+
+
 def assert_job_contents_access(job_lines, job_name, properties):
     permission_headers = [
         (index, scalar)
@@ -366,10 +376,7 @@ def assert_checkout_jobs_have_contents_access(workflow_text):
         step_refs = collect_action_refs(job_lines, job_name, properties)
         refs = job_level_refs + step_refs
         all_refs.extend(refs)
-        if any(
-            ref.rsplit("@", 1)[0].lower() == "actions/checkout"
-            for ref in step_refs
-        ):
+        if any(action_repository(ref) == "actions/checkout" for ref in step_refs):
             assert_job_contents_access(job_lines, job_name, properties)
     return all_refs
 
@@ -416,6 +423,30 @@ assert_rejected(
     make_checkout_job([f"- uses:  actions/checkout@{checkout_sha}"]),
     "lacks exactly one contents read/write permission",
 )
+for noncanonical_action_ref in [
+    f"actions//checkout@{checkout_sha}",
+    f"/actions/checkout@{checkout_sha}",
+    f"actions/checkout/@{checkout_sha}",
+]:
+    assert_rejected(
+        make_checkout_job([f"- uses: {noncanonical_action_ref}"]),
+        "canonical repository path",
+    )
+assert_rejected(
+    make_checkout_job([f"- uses: actions\\checkout@{checkout_sha}"]),
+    "unsupported workflow uses scalar",
+)
+for checkout_subpath in [".", "subdirectory"]:
+    assert_rejected(
+        make_checkout_job(
+            [f"- uses: actions/checkout/{checkout_subpath}@{checkout_sha}"]
+        ),
+        "lacks exactly one contents read/write permission",
+    )
+subdirectory_ref = f"example/action/subdirectory@{checkout_sha}"
+assert assert_checkout_jobs_have_contents_access(
+    make_checkout_job([f"- uses: {subdirectory_ref}"])
+) == [subdirectory_ref]
 reusable_sha = "1" * 40
 reusable_ref = f"example/repository/.github/workflows/reusable.yml@{reusable_sha}"
 reusable_job = "\n".join(
