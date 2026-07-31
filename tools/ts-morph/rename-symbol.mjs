@@ -70,7 +70,7 @@ function isWithin(root, candidate) {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== "..");
 }
 
-function resolveRepositoryFile(root, input, label, extensions) {
+function resolveRepositoryFile(root, input, label, extensions, rejectHardLinks = false) {
   if (path.isAbsolute(input)) fail(`${label} must be repository-relative.`);
   const absolute = path.resolve(root, input);
   if (!isWithin(root, absolute)) fail(`${label} resolves outside the repository: ${input}`);
@@ -86,6 +86,7 @@ function resolveRepositoryFile(root, input, label, extensions) {
   }
   if (stat.isSymbolicLink()) fail(`${label} may not be a symbolic link: ${input}`);
   if (!stat.isFile()) fail(`${label} must be a regular file: ${input}`);
+  if (rejectHardLinks && stat.nlink !== 1) fail(`${label} may not be hard-linked: ${input}`);
 
   const real = fs.realpathSync(absolute);
   if (!isWithin(root, real) || real !== absolute) fail(`${label} must not traverse symbolic links: ${input}`);
@@ -126,6 +127,12 @@ function isValidModuleBindingIdentifier(name) {
 
 function isTypeScriptDeclarationFile(filePath) {
   return /\.d\.(?:ts|mts|cts)$/u.test(filePath);
+}
+
+function sameSymbol(left, right) {
+  return left !== undefined
+    && right !== undefined
+    && left.compilerSymbol === right.compilerSymbol;
 }
 
 function supportedDeclarations(sourceFile, name) {
@@ -311,8 +318,15 @@ function staleTargetBindings(project, target, oldName) {
       const namespaceImport = declaration.getNamespaceImport();
       if (namespaceImport === undefined) continue;
       const namespaceName = namespaceImport.getText();
+      const namespaceSymbol = namespaceImport.getSymbol();
+      if (namespaceSymbol === undefined) {
+        fail(`Cannot verify namespace import symbol ${namespaceName} in ${sourceFile.getFilePath()}.`);
+      }
       for (const access of sourceFile.getDescendantsOfKind(ts.SyntaxKind.PropertyAccessExpression)) {
-        if (access.getExpression().getText() === namespaceName && access.getName() === oldName) {
+        if (
+          access.getName() === oldName
+          && sameSymbol(access.getExpression().getSymbol(), namespaceSymbol)
+        ) {
           stale.push({ filePath: sourceFile.getFilePath(), description: `${namespaceName}.${oldName}` });
         }
       }
@@ -363,6 +377,9 @@ function assertWritableChangedFiles(root, sourceFiles) {
     if (stat.isSymbolicLink() || !stat.isFile() || fs.realpathSync(absolute) !== absolute) {
       fail(`Rename would modify an unsupported file path: ${repositoryRelative(root, absolute)}`);
     }
+    if (stat.nlink !== 1) {
+      fail(`Rename would modify a hard-linked file: ${repositoryRelative(root, absolute)}`);
+    }
   }
 }
 
@@ -370,7 +387,7 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
   const options = parseArguments(argv);
   const root = fs.realpathSync(workingDirectory);
   const projectPath = resolveRepositoryFile(root, options.project, "Project config", [".json"]);
-  const targetPath = resolveRepositoryFile(root, options.file, "Declaration file", [".ts", ".tsx", ".mts", ".cts"]);
+  const targetPath = resolveRepositoryFile(root, options.file, "Declaration file", [".ts", ".tsx", ".mts", ".cts"], true);
   if (isTypeScriptDeclarationFile(targetPath)) {
     fail("Declaration file may not be a TypeScript declaration artifact (.d.ts, .d.mts, or .d.cts).");
   }

@@ -197,6 +197,28 @@ test("idempotent no-op fails closed for a partially applied rename", () => {
   }
 });
 
+test("idempotent no-op ignores a shadowed local with the namespace import name", () => {
+  const root = createFixture({
+    "src/declaration.ts": "export function oldName(): number { return 1; }\n",
+    "src/consumer.ts": "import * as ns from \"./declaration.js\";\nexport const value = ns.oldName();\nexport function use(ns: { oldName(): number }): number {\n  return ns.oldName();\n}\n",
+  });
+  try {
+    const written = run(root, renameArguments("write"));
+    assert.equal(written.status, 0, written.stderr);
+    assert.equal(
+      fs.readFileSync(path.join(root, "src/consumer.ts"), "utf8"),
+      "import * as ns from \"./declaration.js\";\nexport const value = ns.newName();\nexport function use(ns: { oldName(): number }): number {\n  return ns.oldName();\n}\n",
+    );
+
+    const repeated = run(root, renameArguments("write"));
+    assert.equal(repeated.status, 0, repeated.stderr);
+    assert.equal(JSON.parse(repeated.stdout).status, "unchanged");
+    assert.deepEqual(JSON.parse(repeated.stdout).changedFiles, []);
+  } finally {
+    removeFixture(root);
+  }
+});
+
 test("rename rejects target-import and consumer-local destination collisions before writing", () => {
   const fixtures = [
     {
@@ -273,6 +295,53 @@ test("rename refuses declaration-file targets and changed declaration artifacts"
       assert.match(result.stderr, /Rename would modify a TypeScript declaration artifact/u);
       assertFixtureUnchanged(root, snapshot);
     } finally {
+      removeFixture(root);
+    }
+  }
+});
+
+test("rename refuses hard-linked targets and changed files without modifying outside aliases", () => {
+  {
+    const root = createFixture({ "src/declaration.ts": "placeholder\n" });
+    const target = path.join(root, "src/declaration.ts");
+    const outside = path.join(path.dirname(root), `${path.basename(root)}-outside-target.ts`);
+    const content = "export function oldName(): number { return 1; }\n";
+    fs.writeFileSync(outside, content);
+    fs.rmSync(target);
+    fs.linkSync(outside, target);
+    try {
+      const result = run(root, renameArguments("write"));
+      assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+      assert.match(result.stderr, /Declaration file may not be hard-linked/u);
+      assert.equal(fs.readFileSync(outside, "utf8"), content);
+      assert.equal(fs.readFileSync(target, "utf8"), content);
+    } finally {
+      fs.rmSync(outside, { force: true });
+      removeFixture(root);
+    }
+  }
+
+  {
+    const root = createFixture({
+      "src/declaration.ts": "export function oldName(): number { return 1; }\n",
+      "src/consumer.ts": "placeholder\n",
+    });
+    const consumer = path.join(root, "src/consumer.ts");
+    const outside = path.join(path.dirname(root), `${path.basename(root)}-outside-consumer.ts`);
+    const declarationBefore = fs.readFileSync(path.join(root, "src/declaration.ts"), "utf8");
+    const content = "import { oldName } from \"./declaration.js\";\nexport const value = oldName();\n";
+    fs.writeFileSync(outside, content);
+    fs.rmSync(consumer);
+    fs.linkSync(outside, consumer);
+    try {
+      const result = run(root, renameArguments("write"));
+      assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+      assert.match(result.stderr, /Rename would modify a hard-linked file/u);
+      assert.equal(fs.readFileSync(outside, "utf8"), content);
+      assert.equal(fs.readFileSync(consumer, "utf8"), content);
+      assert.equal(fs.readFileSync(path.join(root, "src/declaration.ts"), "utf8"), declarationBefore);
+    } finally {
+      fs.rmSync(outside, { force: true });
       removeFixture(root);
     }
   }
