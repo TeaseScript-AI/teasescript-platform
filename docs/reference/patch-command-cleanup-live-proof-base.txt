@@ -1,0 +1,2 @@
+Temporary baseline for the post-merge live verification of issue #155.
+This branch and pull request must not be merged.
