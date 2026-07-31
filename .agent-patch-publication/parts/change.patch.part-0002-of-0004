@@ -1,0 +1,162 @@
+@@ -238,19 +260,15 @@ function assertRenameReferenceIdentity(root, project, target, newName, expectedL
+   const remainingActual = new Map();
+   for (const location of actualLocations) {
+     const key = locationKey(location);
+-    const entries = remainingActual.get(key) ?? [];
+-    entries.push(location);
+-    remainingActual.set(key, entries);
++    if (!remainingActual.has(key)) remainingActual.set(key, location);
+   }
+ 
+   const missing = [];
+   for (const location of expectedLocations) {
+     const key = locationKey(location);
+-    const entries = remainingActual.get(key);
+-    if (entries === undefined || entries.length === 0) missing.push(location);
+-    else entries.pop();
++    if (!remainingActual.delete(key)) missing.push(location);
+   }
+-  const unexpected = [...remainingActual.values()].flat();
++  const unexpected = [...remainingActual.values()];
+ 
+   if (missing.length > 0 || unexpected.length > 0) {
+     const details = [
+@@ -314,89 +332,63 @@ function formatDiagnostics(root, diagnostics) {
+     .join("; ");
+ }
+ 
+-function targetForwardingFiles(project, target, newName) {
+-  const matches = supportedDeclarations(target, newName);
+-  if (matches.length !== 1) {
+-    fail(`Cannot identify the completed declaration named ${newName} for no-op verification.`);
+-  }
+-  const targetSymbol = resolvedSymbol(declarationNameNode(matches[0]).getSymbol());
+-  if (targetSymbol === undefined) {
+-    fail(`Cannot resolve the completed declaration symbol ${newName} for no-op verification.`);
+-  }
+-
+-  const forwarding = new Set();
+-  for (const sourceFile of project.getSourceFiles()) {
+-    const forwardsTarget = sourceFile.getExportSymbols().some((symbol) => (
+-      symbol.getName() === newName
+-      && sameSymbol(resolvedSymbol(symbol), targetSymbol)
+-    ));
+-    if (forwardsTarget) forwarding.add(sourceFile.getFilePath());
++function assertVerifiableNoOp(root, project, targetPath, oldName, newName) {
++  const diagnosticsBefore = errorDiagnostics(project);
++  if (diagnosticsBefore.length > 0) {
++    fail(
++      `Cannot verify idempotent no-op for ${oldName} -> ${newName}; `
++      + `stale target bindings remain or project errors prevent verification: `
++      + formatDiagnostics(root, diagnosticsBefore),
++    );
+   }
+-  return forwarding;
+-}
+-
+-function staleTargetBindings(project, target, oldName, newName) {
+-  const forwardingFiles = targetForwardingFiles(project, target, newName);
+-  const stale = [];
+-
+-  for (const sourceFile of project.getSourceFiles()) {
+-    for (const declaration of sourceFile.getImportDeclarations()) {
+-      const modulePath = declaration.getModuleSpecifierSourceFile()?.getFilePath();
+-      if (modulePath === undefined || !forwardingFiles.has(modulePath)) continue;
+-      for (const specifier of declaration.getNamedImports()) {
+-        if (specifier.getName() === oldName) {
+-          stale.push({ filePath: sourceFile.getFilePath(), description: `import ${oldName}` });
+-        }
+-      }
+ 
+-      const namespaceImport = declaration.getNamespaceImport();
+-      if (namespaceImport === undefined) continue;
+-      const namespaceName = namespaceImport.getText();
+-      const namespaceSymbol = namespaceImport.getSymbol();
+-      if (namespaceSymbol === undefined) {
+-        fail(`Cannot verify namespace import symbol ${namespaceName} in ${sourceFile.getFilePath()}.`);
+-      }
+-      for (const access of sourceFile.getDescendantsOfKind(ts.SyntaxKind.PropertyAccessExpression)) {
+-        if (
+-          access.getName() === oldName
+-          && sameSymbol(access.getExpression().getSymbol(), namespaceSymbol)
+-        ) {
+-          stale.push({ filePath: sourceFile.getFilePath(), description: `${namespaceName}.${oldName}` });
+-        }
+-      }
++  const before = new Map(project.getSourceFiles().map((sourceFile) => [sourceFile.getFilePath(), sourceFile.getFullText()]));
++  try {
++    const target = project.getSourceFile(targetPath);
++    if (target === undefined) fail(`Completed declaration file disappeared from the configured project: ${targetPath}`);
++    const completedMatches = supportedDeclarations(target, newName);
++    if (completedMatches.length !== 1) {
++      fail(`Expected exactly one completed declaration named ${newName}; found ${completedMatches.length}.`);
+     }
+ 
+-    for (const declaration of sourceFile.getExportDeclarations()) {
+-      const modulePath = declaration.getModuleSpecifierSourceFile()?.getFilePath();
+-      if (modulePath === undefined || !forwardingFiles.has(modulePath)) continue;
+-      for (const specifier of declaration.getNamedExports()) {
+-        if (specifier.getName() === oldName) {
+-          stale.push({ filePath: sourceFile.getFilePath(), description: `export ${oldName}` });
+-        }
+-      }
++    const reversePlan = renamePlan(project, completedMatches[0], oldName);
++    applyRenamePlan(project, reversePlan, oldName);
++    const reverseDiagnostics = errorDiagnostics(project);
++    const introducedReverseDiagnostics = introducedDiagnostics(root, diagnosticsBefore, reverseDiagnostics);
++    if (introducedReverseDiagnostics.length > 0) {
++      fail(`Reverse semantic rename introduces TypeScript errors: ${formatDiagnostics(root, introducedReverseDiagnostics)}`);
+     }
+-  }
++    assertRenameReferenceIdentity(root, project, targetPath, oldName, reversePlan.expected);
+ 
+-  return stale;
+-}
+-
+-function assertVerifiableNoOp(root, project, target, oldName, newName) {
+-  const stale = staleTargetBindings(project, target, oldName, newName);
+-  if (stale.length > 0) {
+-    fail(
+-      `Cannot verify idempotent no-op for ${oldName} -> ${newName}; stale target bindings remain: `
+-      + stale
+-        .slice(0, 5)
+-        .map((entry) => `${repositoryRelative(root, entry.filePath)}: ${entry.description}`)
+-        .join("; "),
+-    );
+-  }
++    const reversedTarget = project.getSourceFile(targetPath);
++    if (reversedTarget === undefined) fail(`Reversed declaration file disappeared from the configured project: ${targetPath}`);
++    const reversedMatches = supportedDeclarations(reversedTarget, oldName);
++    if (reversedMatches.length !== 1) {
++      fail(`Expected exactly one reversed declaration named ${oldName}; found ${reversedMatches.length}.`);
++    }
+ 
+-  const diagnostics = errorDiagnostics(project);
+-  if (diagnostics.length > 0) {
++    const forwardPlan = renamePlan(project, reversedMatches[0], newName);
++    applyRenamePlan(project, forwardPlan, newName);
++    const forwardDiagnostics = errorDiagnostics(project);
++    const introducedForwardDiagnostics = introducedDiagnostics(root, reverseDiagnostics, forwardDiagnostics);
++    if (introducedForwardDiagnostics.length > 0) {
++      fail(`Forward semantic rename introduces TypeScript errors: ${formatDiagnostics(root, introducedForwardDiagnostics)}`);
++    }
++    assertRenameReferenceIdentity(root, project, targetPath, newName, forwardPlan.expected);
++
++    const changedFiles = project
++      .getSourceFiles()
++      .filter((sourceFile) => sourceFile.getFullText() !== before.get(sourceFile.getFilePath()))
++      .map((sourceFile) => repositoryRelative(root, sourceFile.getFilePath()))
++      .sort();
++    if (changedFiles.length > 0) {
++      fail(`Semantic rename roundtrip changed project text: ${changedFiles.slice(0, 5).join(", ")}`);
++    }
++  } catch (error) {
++    const message = error instanceof Error ? error.message : String(error);
+     fail(
+-      `Cannot verify idempotent no-op for ${oldName} -> ${newName} while the project has TypeScript errors: `
+-      + formatDiagnostics(root, diagnostics),
++      `Cannot verify idempotent no-op for ${oldName} -> ${newName}; `
++      + `stale target bindings remain or the semantic rename roundtrip is unsafe: ${message}`,
+     );
+   }
+ }

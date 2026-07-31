@@ -1,0 +1,30 @@
+@@ -296,6 +403,29 @@ test("rename rejects diagnostic-free nested destination shadowing before writing
+   }
+ });
+ 
++test("rename deduplicates repeated compiler locations without corrupting identifiers", () => {
++  const root = createFixture({
++    "src/declaration.ts": "export class oldName {}\n",
++    "src/consumer.ts": "export type Imported = import(\"./declaration.js\").oldName;\nexport async function use(): Promise<unknown> {\n  return (await import(\"./declaration.js\")).oldName;\n}\n",
++  });
++  try {
++    const result = run(root, renameArguments("write"));
++    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
++    assert.equal(JSON.parse(result.stdout).status, "written");
++    assert.equal(fs.readFileSync(path.join(root, "src/declaration.ts"), "utf8"), "export class newName {}\n");
++    assert.equal(
++      fs.readFileSync(path.join(root, "src/consumer.ts"), "utf8"),
++      "export type Imported = import(\"./declaration.js\").newName;\nexport async function use(): Promise<unknown> {\n  return (await import(\"./declaration.js\")).newName;\n}\n",
++    );
++
++    const repeated = run(root, renameArguments("write"));
++    assert.equal(repeated.status, 0, repeated.stderr);
++    assert.equal(JSON.parse(repeated.stdout).status, "unchanged");
++  } finally {
++    removeFixture(root);
++  }
++});
++
+ test("rename refuses declaration-file targets and changed declaration artifacts", () => {
+   for (const extension of ["d.ts", "d.mts", "d.cts"]) {
+     const relative = `src/declaration.${extension}`;

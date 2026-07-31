@@ -1,0 +1,160 @@
+@@ -439,7 +431,7 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
+   const newMatches = supportedDeclarations(target, options.newName);
+   if (oldMatches.length === 0) {
+     if (newMatches.length === 1) {
+-      assertVerifiableNoOp(root, project, target, options.oldName, options.newName);
++      assertVerifiableNoOp(root, project, targetPath, options.oldName, options.newName);
+       return {
+         mode: options.mode,
+         status: "unchanged",
+@@ -462,12 +454,10 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
+   }
+ 
+   const declaration = oldMatches[0];
+-  if (typeof declaration.rename !== "function") fail(`Declaration ${options.oldName} does not support reference-aware rename.`);
+-
+   const diagnosticsBefore = errorDiagnostics(project);
+-  const expectedLocations = expectedPostRenameLocations(project, declaration, options.newName);
++  const plan = renamePlan(project, declaration, options.newName);
+   const before = new Map(project.getSourceFiles().map((sourceFile) => [sourceFile.getFilePath(), sourceFile.getFullText()]));
+-  declaration.rename(options.newName, RENAME_OPTIONS);
++  applyRenamePlan(project, plan, options.newName);
+   const changedSourceFiles = project
+     .getSourceFiles()
+     .filter((sourceFile) => sourceFile.getFullText() !== before.get(sourceFile.getFilePath()))
+@@ -479,7 +469,7 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
+   if (newDiagnostics.length > 0) {
+     fail(`Rename would introduce TypeScript errors and was not written: ${formatDiagnostics(root, newDiagnostics)}`);
+   }
+-  assertRenameReferenceIdentity(root, project, target, options.newName, expectedLocations);
++  assertRenameReferenceIdentity(root, project, targetPath, options.newName, plan.expected);
+ 
+   const changedFiles = changedSourceFiles.map((sourceFile) => repositoryRelative(root, sourceFile.getFilePath()));
+   if (options.mode === "write") {
+diff --git a/tools/ts-morph/rename-symbol.test.mjs b/tools/ts-morph/rename-symbol.test.mjs
+index b593181a8369717cbe9c144592781ec6979dbefd..5b56a42623c3aa9e8b85791479b092ab0aab7338 100644
+--- a/tools/ts-morph/rename-symbol.test.mjs
++++ b/tools/ts-morph/rename-symbol.test.mjs
+@@ -197,6 +197,22 @@ test("idempotent no-op fails closed for a partially applied rename", () => {
+   }
+ });
+ 
++test("idempotent no-op rejects a suppressed stale unqualified reference", () => {
++  const root = createFixture({
++    "src/declaration.ts": "export function newName(): number { return 1; }\n// @ts-ignore simulated interrupted same-file reference\nexport const value = oldName();\n",
++  });
++  try {
++    const snapshot = snapshotFixture(root, ["src/declaration.ts"]);
++    const result = run(root, renameArguments("write"));
++    assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
++    assert.match(result.stderr, /Cannot verify idempotent no-op/u);
++    assert.match(result.stderr, /stale target bindings remain/u);
++    assertFixtureUnchanged(root, snapshot);
++  } finally {
++    removeFixture(root);
++  }
++});
++
+ test("idempotent no-op follows barrel chains and rejects indirect stale imports", () => {
+   const root = createFixture({
+     "src/a-declaration.ts": "export function newName(): number { return 1; }\n",
+@@ -218,7 +234,98 @@ test("idempotent no-op follows barrel chains and rejects indirect stale imports"
+     ]);
+     assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+     assert.match(result.stderr, /Cannot verify idempotent no-op/u);
+-    assert.match(result.stderr, /src\/d-consumer\.ts: import oldName/u);
++    assert.match(result.stderr, /src\/d-consumer\.ts/u);
++    assert.match(result.stderr, /unexpected/u);
++    assertFixtureUnchanged(root, snapshot);
++  } finally {
++    removeFixture(root);
++  }
++});
++
++test("idempotent no-op rejects stale dynamic module access", () => {
++  const root = createFixture({
++    "src/declaration.ts": "export function newName(): number { return 1; }\n",
++    "src/consumer.ts": "// @ts-ignore simulated interrupted rename\nexport const value = (await import(\"./declaration.js\")).oldName();\n",
++  });
++  try {
++    const snapshot = snapshotFixture(root, ["src/declaration.ts", "src/consumer.ts"]);
++    const result = run(root, renameArguments("write"));
++    assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
++    assert.match(result.stderr, /Cannot verify idempotent no-op/u);
++    assert.match(result.stderr, /stale target bindings remain/u);
++    assert.match(result.stderr, /oldName/u);
++    assertFixtureUnchanged(root, snapshot);
++  } finally {
++    removeFixture(root);
++  }
++});
++
++test("idempotent no-op rejects stale import-type references", () => {
++  const root = createFixture({
++    "src/declaration.ts": "export interface newName { value: number; }\n",
++    "src/consumer.ts": "// @ts-ignore simulated interrupted rename\nexport type Imported = import(\"./declaration.js\").oldName;\n",
++  });
++  try {
++    const snapshot = snapshotFixture(root, ["src/declaration.ts", "src/consumer.ts"]);
++    const result = run(root, renameArguments("write"));
++    assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
++    assert.match(result.stderr, /Cannot verify idempotent no-op/u);
++    assert.match(result.stderr, /src\/consumer\.ts/u);
++    assert.match(result.stderr, /unexpected/u);
++    assertFixtureUnchanged(root, snapshot);
++  } finally {
++    removeFixture(root);
++  }
++});
++
++test("idempotent no-op rejects stale namespace type references", () => {
++  const root = createFixture({
++    "src/declaration.ts": "export interface newName { value: number; }\n",
++    "src/consumer.ts": "import type * as ns from \"./declaration.js\";\n// @ts-ignore simulated interrupted rename\nexport type Imported = ns.oldName;\n",
++  });
++  try {
++    const snapshot = snapshotFixture(root, ["src/declaration.ts", "src/consumer.ts"]);
++    const result = run(root, renameArguments("write"));
++    assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
++    assert.match(result.stderr, /Cannot verify idempotent no-op/u);
++    assert.match(result.stderr, /src\/consumer\.ts/u);
++    assert.match(result.stderr, /unexpected/u);
++    assertFixtureUnchanged(root, snapshot);
++  } finally {
++    removeFixture(root);
++  }
++});
++
++test("idempotent no-op rejects stale dynamic destructuring", () => {
++  const root = createFixture({
++    "src/declaration.ts": "export function newName(): number { return 1; }\n",
++    "src/consumer.ts": "// @ts-ignore simulated interrupted rename\nconst { oldName: alias } = await import(\"./declaration.js\");\nexport const value = alias();\n",
++  });
++  try {
++    const snapshot = snapshotFixture(root, ["src/declaration.ts", "src/consumer.ts"]);
++    const result = run(root, renameArguments("write"));
++    assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
++    assert.match(result.stderr, /Cannot verify idempotent no-op/u);
++    assert.match(result.stderr, /src\/consumer\.ts/u);
++    assert.match(result.stderr, /unexpected/u);
++    assertFixtureUnchanged(root, snapshot);
++  } finally {
++    removeFixture(root);
++  }
++});
++
++test("idempotent no-op rejects stale dynamic destructuring assignment", () => {
++  const root = createFixture({
++    "src/declaration.ts": "export function newName(): number { return 1; }\n",
++    "src/consumer.ts": "let alias: () => number;\n// @ts-ignore simulated interrupted rename\n({ oldName: alias } = await import(\"./declaration.js\"));\nexport const value = alias();\n",
++  });
++  try {
++    const snapshot = snapshotFixture(root, ["src/declaration.ts", "src/consumer.ts"]);
++    const result = run(root, renameArguments("write"));
++    assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
++    assert.match(result.stderr, /Cannot verify idempotent no-op/u);
++    assert.match(result.stderr, /src\/consumer\.ts/u);
++    assert.match(result.stderr, /unexpected/u);
+     assertFixtureUnchanged(root, snapshot);
+   } finally {
+     removeFixture(root);

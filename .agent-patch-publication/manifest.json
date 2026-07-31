@@ -1,0 +1,31 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "chore/agent-safe-ts-morph",
+  "expectedBaseSha": "792211c3da619133310a8ef5b4ad4c9b0d9cbb94",
+  "expectedResultTreeSha": "c0866c9b786b39a8439b60c20cfb9aea7f773437",
+  "patchSizeBytes": 25299,
+  "patchSha256": "9bdd8815332b829ae1425f9ec6eea4638eabf95a15f39f71fed68708e5b2b794",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0004",
+      "sizeBytes": 7962,
+      "sha256": "85e33c26b73515db9db464268f9f2eade44fcc34b1c2ee399facb8e348dc9eb6"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0004",
+      "sizeBytes": 7752,
+      "sha256": "7ea88152d282a4bd99a7c7464e9893b60b03af56da88fe3746d50989d103fe5d"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0004",
+      "sizeBytes": 8051,
+      "sha256": "605936557273a8cf5882e088a7c48f72b2736d7add828b8c0838b3e5f844c253"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0004",
+      "sizeBytes": 1534,
+      "sha256": "185773d4b05a54d505fc5f96990c775b87beb83dfdf0da53abcc1946f95a5bc6"
+    }
+  ],
+  "commitMessage": "Harden semantic rename verification"
+}
