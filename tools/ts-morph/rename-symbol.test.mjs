@@ -197,6 +197,34 @@ test("idempotent no-op fails closed for a partially applied rename", () => {
   }
 });
 
+test("idempotent no-op follows barrel chains and rejects indirect stale imports", () => {
+  const root = createFixture({
+    "src/a-declaration.ts": "export function newName(): number { return 1; }\n",
+    "src/b-barrel.ts": "export { newName } from \"./a-declaration.js\";\n",
+    "src/c-barrel.ts": "export * from \"./b-barrel.js\";\n",
+    "src/d-consumer.ts": "// @ts-ignore simulated interrupted rename\nimport { oldName } from \"./c-barrel.js\";\nexport const value = oldName();\n",
+  });
+  try {
+    const tracked = ["src/a-declaration.ts", "src/b-barrel.ts", "src/c-barrel.ts", "src/d-consumer.ts"];
+    const snapshot = snapshotFixture(root, tracked);
+    const result = run(root, [
+      "--write",
+      "--file",
+      "src/a-declaration.ts",
+      "--old",
+      "oldName",
+      "--new",
+      "newName",
+    ]);
+    assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+    assert.match(result.stderr, /Cannot verify idempotent no-op/u);
+    assert.match(result.stderr, /src\/d-consumer\.ts: import oldName/u);
+    assertFixtureUnchanged(root, snapshot);
+  } finally {
+    removeFixture(root);
+  }
+});
+
 test("idempotent no-op ignores a shadowed local with the namespace import name", () => {
   const root = createFixture({
     "src/declaration.ts": "export function oldName(): number { return 1; }\n",
