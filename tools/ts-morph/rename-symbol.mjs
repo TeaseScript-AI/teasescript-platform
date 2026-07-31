@@ -12,6 +12,11 @@ const USAGE = `Usage:
   npm run codemod:rename-symbol -- --check --file <path> --old <name> --new <name> [--project <path>]
   npm run codemod:rename-symbol -- --write --file <path> --old <name> --new <name> [--project <path>]`;
 
+const RENAME_OPTIONS = Object.freeze({
+  renameInComments: false,
+  renameInStrings: false,
+});
+
 function fail(message) {
   throw new Error(message);
 }
@@ -143,6 +148,98 @@ function supportedDeclarations(sourceFile, name) {
     }
   }
   return matches;
+}
+
+function declarationNameNode(declaration) {
+  const nameNode = declaration.getNameNode?.();
+  if (nameNode === undefined || !Node.isIdentifier(nameNode)) {
+    fail(`Declaration ${declaration.getKindName()} does not have a supported identifier name node.`);
+  }
+  return nameNode;
+}
+
+function expectedPostRenameLocations(project, declaration, newName) {
+  const locations = project
+    .getLanguageService()
+    .findRenameLocations(declarationNameNode(declaration), RENAME_OPTIONS);
+  if (locations.length === 0) fail("TypeScript reported no rename locations for the selected declaration.");
+
+  const byFile = new Map();
+  for (const location of locations) {
+    const filePath = location.getSourceFile().getFilePath();
+    const fileLocations = byFile.get(filePath) ?? [];
+    fileLocations.push(location);
+    byFile.set(filePath, fileLocations);
+  }
+
+  const expected = [];
+  for (const [filePath, fileLocations] of byFile) {
+    let offset = 0;
+    for (const location of fileLocations.sort((left, right) => left.getTextSpan().getStart() - right.getTextSpan().getStart())) {
+      const span = location.getTextSpan();
+      const prefix = location.getPrefixText() ?? "";
+      const suffix = location.getSuffixText() ?? "";
+      expected.push({
+        filePath,
+        start: span.getStart() + offset + prefix.length,
+        length: newName.length,
+      });
+      offset += prefix.length + newName.length + suffix.length - span.getLength();
+    }
+  }
+  return expected;
+}
+
+function locationKey(location) {
+  return JSON.stringify([location.filePath, location.start, location.length]);
+}
+
+function formatLocation(root, location) {
+  const filePath = isWithin(root, location.filePath)
+    ? repositoryRelative(root, location.filePath)
+    : location.filePath;
+  return `${filePath}:${location.start}`;
+}
+
+function assertRenameReferenceIdentity(root, project, target, newName, expectedLocations) {
+  const renamedMatches = supportedDeclarations(target, newName);
+  if (renamedMatches.length !== 1) {
+    fail(`Expected exactly one renamed declaration named ${newName}; found ${renamedMatches.length}.`);
+  }
+
+  const actualLocations = project
+    .getLanguageService()
+    .findRenameLocations(declarationNameNode(renamedMatches[0]), RENAME_OPTIONS)
+    .map((location) => ({
+      filePath: location.getSourceFile().getFilePath(),
+      start: location.getTextSpan().getStart(),
+      length: location.getTextSpan().getLength(),
+    }));
+
+  const remainingActual = new Map();
+  for (const location of actualLocations) {
+    const key = locationKey(location);
+    const entries = remainingActual.get(key) ?? [];
+    entries.push(location);
+    remainingActual.set(key, entries);
+  }
+
+  const missing = [];
+  for (const location of expectedLocations) {
+    const key = locationKey(location);
+    const entries = remainingActual.get(key);
+    if (entries === undefined || entries.length === 0) missing.push(location);
+    else entries.pop();
+  }
+  const unexpected = [...remainingActual.values()].flat();
+
+  if (missing.length > 0 || unexpected.length > 0) {
+    const details = [
+      ...missing.slice(0, 5).map((location) => `lost ${formatLocation(root, location)}`),
+      ...unexpected.slice(0, 5).map((location) => `unexpected ${formatLocation(root, location)}`),
+    ].join("; ");
+    fail(`Rename would change symbol identity and was not written: ${details}`);
+  }
 }
 
 function repositoryRelative(root, absolute) {
@@ -316,8 +413,9 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
   if (typeof declaration.rename !== "function") fail(`Declaration ${options.oldName} does not support reference-aware rename.`);
 
   const diagnosticsBefore = errorDiagnostics(project);
+  const expectedLocations = expectedPostRenameLocations(project, declaration, options.newName);
   const before = new Map(project.getSourceFiles().map((sourceFile) => [sourceFile.getFilePath(), sourceFile.getFullText()]));
-  declaration.rename(options.newName, { renameInComments: false, renameInStrings: false });
+  declaration.rename(options.newName, RENAME_OPTIONS);
   const changedSourceFiles = project
     .getSourceFiles()
     .filter((sourceFile) => sourceFile.getFullText() !== before.get(sourceFile.getFilePath()))
@@ -329,6 +427,7 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
   if (newDiagnostics.length > 0) {
     fail(`Rename would introduce TypeScript errors and was not written: ${formatDiagnostics(root, newDiagnostics)}`);
   }
+  assertRenameReferenceIdentity(root, project, target, options.newName, expectedLocations);
 
   const changedFiles = changedSourceFiles.map((sourceFile) => repositoryRelative(root, sourceFile.getFilePath()));
   if (options.mode === "write") {

@@ -69,6 +69,7 @@ function assertFixtureUnchanged(root, snapshot) {
 }
 
 test("reference-aware rename has check, write, exact changed files, and idempotent no-op behavior", () => {
+  const newName = "replacementName";
   const untouched = "export  const   untouched = { spacing:  true };\n";
   const root = createFixture({
     "src/declaration.ts": "export function oldName(value: number): number {\n  return value + 1;\n}\n",
@@ -83,33 +84,33 @@ test("reference-aware rename has check, write, exact changed files, and idempote
       ["src/reexport.ts", fs.readFileSync(path.join(root, "src/reexport.ts"), "utf8")],
     ]);
 
-    const checked = run(root, renameArguments("check"));
+    const checked = run(root, renameArguments("check", "oldName", newName));
     assert.equal(checked.status, 1, checked.stderr);
     assert.deepEqual(JSON.parse(checked.stdout), {
       mode: "check",
       status: "changes-required",
       target: "src/declaration.ts",
       oldName: "oldName",
-      newName: "newName",
+      newName,
       changedFiles: ["src/consumer.ts", "src/declaration.ts", "src/reexport.ts"],
     });
     for (const [relative, content] of before) assert.equal(fs.readFileSync(path.join(root, relative), "utf8"), content);
 
-    const written = run(root, renameArguments("write"));
+    const written = run(root, renameArguments("write", "oldName", newName));
     assert.equal(written.status, 0, written.stderr);
     assert.equal(JSON.parse(written.stdout).status, "written");
     assert.equal(
       fs.readFileSync(path.join(root, "src/declaration.ts"), "utf8"),
-      "export function newName(value: number): number {\n  return value + 1;\n}\n",
+      "export function replacementName(value: number): number {\n  return value + 1;\n}\n",
     );
     assert.equal(
       fs.readFileSync(path.join(root, "src/consumer.ts"), "utf8"),
-      "import { newName } from \"./declaration.js\";\n\nexport const result = newName(2);\n",
+      "import { replacementName } from \"./declaration.js\";\n\nexport const result = replacementName(2);\n",
     );
-    assert.equal(fs.readFileSync(path.join(root, "src/reexport.ts"), "utf8"), "export { newName } from \"./declaration.js\";\n");
+    assert.equal(fs.readFileSync(path.join(root, "src/reexport.ts"), "utf8"), "export { replacementName } from \"./declaration.js\";\n");
     assert.equal(fs.readFileSync(path.join(root, "src/untouched.ts"), "utf8"), untouched);
 
-    const repeated = run(root, renameArguments("write"));
+    const repeated = run(root, renameArguments("write", "oldName", newName));
     assert.equal(repeated.status, 0, repeated.stderr);
     assert.deepEqual(JSON.parse(repeated.stdout).changedFiles, []);
     assert.equal(JSON.parse(repeated.stdout).status, "unchanged");
@@ -225,6 +226,23 @@ test("rename rejects target-import and consumer-local destination collisions bef
     } finally {
       removeFixture(root);
     }
+  }
+});
+
+test("rename rejects diagnostic-free nested destination shadowing before writing", () => {
+  const root = createFixture({
+    "src/declaration.ts": "export function oldName(): number { return 1; }\n",
+    "src/consumer.ts": "import { oldName } from \"./declaration.js\";\nexport function use(): number {\n  const replacementName = (): number => 2;\n  return oldName();\n}\n",
+  });
+  try {
+    const snapshot = snapshotFixture(root, ["src/declaration.ts", "src/consumer.ts"]);
+    const result = run(root, renameArguments("write", "oldName", "replacementName"));
+    assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+    assert.match(result.stderr, /Rename would change symbol identity and was not written/u);
+    assert.match(result.stderr, /lost src\/consumer\.ts:/u);
+    assertFixtureUnchanged(root, snapshot);
+  } finally {
+    removeFixture(root);
   }
 });
 
