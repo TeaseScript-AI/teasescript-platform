@@ -383,6 +383,14 @@ class PrepareSourceReviewTests(unittest.TestCase):
         output.mkdir()
         self.assert_failure(self.invoke(output=output), "output path already exists")
 
+    def test_output_parent_file_is_rejected_without_traceback(self) -> None:
+        parent = self.root / "existing-file"
+        parent.write_text("not a directory\n", encoding="utf-8")
+        completed = self.invoke(output=parent / "review")
+        self.assert_failure(completed, "cannot create output parent")
+        self.assertEqual(len(completed.stderr.splitlines()), 1)
+        self.assertNotIn("Traceback", completed.stderr)
+
     def test_failure_does_not_expose_output_or_leave_temporary_checkout(self) -> None:
         output = self.root / "atomic-review"
         completed = self.invoke(output=output, digest="0" * 64)

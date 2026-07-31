@@ -112,12 +112,22 @@ def validate_arguments(args: argparse.Namespace) -> tuple[Path, Path]:
         )
 
     output_input = args.output.expanduser()
-    if output_input.exists() or output_input.is_symlink():
+    try:
+        output_exists = output_input.exists() or output_input.is_symlink()
+    except OSError as exc:
+        raise fail(f"output path is not accessible: {output_input}: {exc}") from exc
+    if output_exists:
         raise fail(f"output path already exists: {output_input}")
-    output = output_input.resolve()
+    try:
+        output = output_input.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise fail(f"output path cannot be resolved: {output_input}: {exc}") from exc
     if output == artifact:
         raise fail("--output must not equal --artifact")
-    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise fail(f"cannot create output parent: {output.parent}: {exc}") from exc
     if not output.parent.is_dir():
         raise fail(f"output parent is not a directory: {output.parent}")
     return artifact, output
