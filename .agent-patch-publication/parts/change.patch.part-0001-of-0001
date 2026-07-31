@@ -1,0 +1,139 @@
+diff --git a/tools/ts-morph/README.md b/tools/ts-morph/README.md
+index fe745a0885a22eab940332823d60fd0bf5a3d1cf..472659c24e905fd34e0c06da19c4cb799d353aa7 100644
+--- a/tools/ts-morph/README.md
++++ b/tools/ts-morph/README.md
+@@ -16,7 +16,7 @@ npm run codemod:rename-symbol -- \
+   --new newName
+ ```
+ 
+-`--check` performs the complete rename in memory, prints stable JSON containing the exact changed-file set, writes nothing, and exits with status 1 when changes are required. Replace `--check` with `--write` to save those files. A repeated `--write` is an explicit no-op only after the tool verifies that the complete project is already in a consistent post-rename state; partial or unverifiable renames fail closed.
++`--check` performs the complete rename in memory, prints stable JSON containing the exact changed-file set, writes nothing, and exits with status 1 when changes are required. Replace `--check` with `--write` to save those files. A repeated `--write` is an explicit no-op only after the tool verifies that the complete project is already in a consistent post-rename state, including a semantic reverse-and-reapply comparison that catches stale references hidden by suppressed diagnostics; partial or unverifiable renames fail closed.
+ 
+ The target must be one repository-relative TypeScript file included by `tsconfig.json`. Supported top-level declarations are functions, classes, interfaces, type aliases, enums, and identifier variable declarations. The tool refuses missing or ambiguous targets, invalid module binding identifiers, destination collisions, silent reference rebinding, TypeScript declaration artifacts (`.d.ts`, `.d.mts`, and `.d.cts`) as targets or changed files, symbolic links, hard links, and paths outside the repository. It compares both project diagnostics and the complete semantic rename-location set before any file is written.
+ 
+diff --git a/tools/ts-morph/rename-symbol.mjs b/tools/ts-morph/rename-symbol.mjs
+index 4b418a7eb8b84bf209b430f36b8af79598351c20..bcab485ad082fc9af538252e6783a81ef82cbef4 100755
+--- a/tools/ts-morph/rename-symbol.mjs
++++ b/tools/ts-morph/rename-symbol.mjs
+@@ -380,6 +380,38 @@ function staleTargetBindings(project, target, oldName, newName) {
+   return stale;
+ }
+ 
++function assertSemanticRoundTripNoOp(root, project, target, oldName, newName) {
++  const before = new Map(
++    project.getSourceFiles().map((sourceFile) => [sourceFile.getFilePath(), sourceFile.getFullText()]),
++  );
++  const completedMatches = supportedDeclarations(target, newName);
++  if (completedMatches.length !== 1 || typeof completedMatches[0].rename !== "function") {
++    fail(`Cannot prepare semantic no-op verification for the completed declaration ${newName}.`);
++  }
++
++  completedMatches[0].rename(oldName, RENAME_OPTIONS);
++  const restoredMatches = supportedDeclarations(target, oldName);
++  if (restoredMatches.length !== 1 || typeof restoredMatches[0].rename !== "function") {
++    fail(`Cannot restore the pre-rename declaration ${oldName} for semantic no-op verification.`);
++  }
++
++  const expectedLocations = expectedPostRenameLocations(project, restoredMatches[0], newName);
++  restoredMatches[0].rename(newName, RENAME_OPTIONS);
++  assertRenameReferenceIdentity(root, project, target, newName, expectedLocations);
++
++  const changedFiles = project
++    .getSourceFiles()
++    .filter((sourceFile) => sourceFile.getFullText() !== before.get(sourceFile.getFilePath()))
++    .map((sourceFile) => repositoryRelative(root, sourceFile.getFilePath()))
++    .sort((left, right) => left.localeCompare(right));
++  if (changedFiles.length > 0) {
++    fail(
++      `Cannot verify idempotent no-op for ${oldName} -> ${newName}; a semantic reverse-and-reapply pass would still change: `
++      + changedFiles.slice(0, 5).join(", "),
++    );
++  }
++}
++
+ function assertVerifiableNoOp(root, project, target, oldName, newName) {
+   const stale = staleTargetBindings(project, target, oldName, newName);
+   if (stale.length > 0) {
+@@ -399,6 +431,8 @@ function assertVerifiableNoOp(root, project, target, oldName, newName) {
+       + formatDiagnostics(root, diagnostics),
+     );
+   }
++
++  assertSemanticRoundTripNoOp(root, project, target, oldName, newName);
+ }
+ 
+ function assertWritableChangedFiles(root, sourceFiles) {
+diff --git a/tools/ts-morph/rename-symbol.test.mjs b/tools/ts-morph/rename-symbol.test.mjs
+index b593181a8369717cbe9c144592781ec6979dbefd..0c16e0787232132885bc0efc02dfb83e926aa922 100644
+--- a/tools/ts-morph/rename-symbol.test.mjs
++++ b/tools/ts-morph/rename-symbol.test.mjs
+@@ -74,6 +74,7 @@ test("reference-aware rename has check, write, exact changed files, and idempote
+   const root = createFixture({
+     "src/declaration.ts": "export function oldName(value: number): number {\n  return value + 1;\n}\n",
+     "src/consumer.ts": "import { oldName } from \"./declaration.js\";\n\nexport const result = oldName(2);\n",
++    "src/dynamic.ts": "export async function dynamicResult(): Promise<number> {\n  return (await import(\"./declaration.js\")).oldName(2);\n}\n",
+     "src/reexport.ts": "export { oldName } from \"./declaration.js\";\n",
+     "src/untouched.ts": untouched,
+   });
+@@ -81,6 +82,7 @@ test("reference-aware rename has check, write, exact changed files, and idempote
+     const before = new Map([
+       ["src/declaration.ts", fs.readFileSync(path.join(root, "src/declaration.ts"), "utf8")],
+       ["src/consumer.ts", fs.readFileSync(path.join(root, "src/consumer.ts"), "utf8")],
++      ["src/dynamic.ts", fs.readFileSync(path.join(root, "src/dynamic.ts"), "utf8")],
+       ["src/reexport.ts", fs.readFileSync(path.join(root, "src/reexport.ts"), "utf8")],
+     ]);
+ 
+@@ -92,7 +94,7 @@ test("reference-aware rename has check, write, exact changed files, and idempote
+       target: "src/declaration.ts",
+       oldName: "oldName",
+       newName,
+-      changedFiles: ["src/consumer.ts", "src/declaration.ts", "src/reexport.ts"],
++      changedFiles: ["src/consumer.ts", "src/declaration.ts", "src/dynamic.ts", "src/reexport.ts"],
+     });
+     for (const [relative, content] of before) assert.equal(fs.readFileSync(path.join(root, relative), "utf8"), content);
+ 
+@@ -107,6 +109,10 @@ test("reference-aware rename has check, write, exact changed files, and idempote
+       fs.readFileSync(path.join(root, "src/consumer.ts"), "utf8"),
+       "import { replacementName } from \"./declaration.js\";\n\nexport const result = replacementName(2);\n",
+     );
++    assert.equal(
++      fs.readFileSync(path.join(root, "src/dynamic.ts"), "utf8"),
++      "export async function dynamicResult(): Promise<number> {\n  return (await import(\"./declaration.js\")).replacementName(2);\n}\n",
++    );
+     assert.equal(fs.readFileSync(path.join(root, "src/reexport.ts"), "utf8"), "export { replacementName } from \"./declaration.js\";\n");
+     assert.equal(fs.readFileSync(path.join(root, "src/untouched.ts"), "utf8"), untouched);
+ 
+@@ -225,6 +231,33 @@ test("idempotent no-op follows barrel chains and rejects indirect stale imports"
+   }
+ });
+ 
++test("idempotent no-op rejects stale dynamic-import references", () => {
++  const consumers = [
++    "export async function use(): Promise<number> {\n  // @ts-ignore simulated interrupted rename\n  return (await import(\"./declaration.js\")).oldName();\n}\n",
++    "export async function use(): Promise<number> {\n  const module = await import(\"./declaration.js\");\n  // @ts-ignore simulated interrupted rename\n  return module.oldName();\n}\n",
++    "export async function use(): Promise<number> {\n  // @ts-ignore simulated interrupted rename\n  const { oldName } = await import(\"./declaration.js\");\n  return oldName();\n}\n",
++    "// @ts-ignore simulated interrupted rename\nexport type Value = import(\"./declaration.js\").oldName;\n",
++  ];
++
++  for (const consumer of consumers) {
++    const root = createFixture({
++      "src/declaration.ts": "export function newName(): number { return 1; }\n",
++      "src/consumer.ts": consumer,
++    });
++    try {
++      const snapshot = snapshotFixture(root, ["src/declaration.ts", "src/consumer.ts"]);
++      const result = run(root, renameArguments("write"));
++      assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
++      assert.match(result.stderr, /Cannot verify idempotent no-op/u);
++      assert.match(result.stderr, /semantic reverse-and-reapply pass would still change/u);
++      assert.match(result.stderr, /src\/consumer\.ts/u);
++      assertFixtureUnchanged(root, snapshot);
++    } finally {
++      removeFixture(root);
++    }
++  }
++});
++
+ test("idempotent no-op ignores a shadowed local with the namespace import name", () => {
+   const root = createFixture({
+     "src/declaration.ts": "export function oldName(): number { return 1; }\n",

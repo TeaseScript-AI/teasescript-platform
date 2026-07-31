@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "chore/agent-safe-ts-morph",
+  "expectedBaseSha": "792211c3da619133310a8ef5b4ad4c9b0d9cbb94",
+  "expectedResultTreeSha": "cacadb9bbfe918e57d124f72b5597f3bce919725",
+  "patchSizeBytes": 8748,
+  "patchSha256": "6cb63f886d1f70c8213fa8a8bb2d41c7bd004b13513d3e2457b831251f96788f",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0001",
+      "sizeBytes": 8748,
+      "sha256": "6cb63f886d1f70c8213fa8a8bb2d41c7bd004b13513d3e2457b831251f96788f"
+    }
+  ],
+  "commitMessage": "Harden repeated rename verification"
+}
