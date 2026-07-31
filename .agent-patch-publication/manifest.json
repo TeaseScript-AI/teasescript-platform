@@ -1,0 +1,31 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "chore/agent-safe-ts-morph",
+  "expectedBaseSha": "792211c3da619133310a8ef5b4ad4c9b0d9cbb94",
+  "expectedResultTreeSha": "3e720672807fbe960f7e39e4a316ae1b78d727a7",
+  "patchSizeBytes": 31332,
+  "patchSha256": "893e23017eb84c0b1e6a52a8606f1960a83769f39f2b6b8ab9c2614174bffcbd",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0004",
+      "sizeBytes": 8091,
+      "sha256": "9467052c0f599985d176ed83fca6e71d843aa5e976bc8f987808e8ea25233ba0"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0004",
+      "sizeBytes": 10023,
+      "sha256": "8e1cc5b8b041478b2d650c8218f4cd65fba400a1d6315a7f4dafaed225c03e2e"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0004",
+      "sizeBytes": 10200,
+      "sha256": "e4a00dc5f4ea9edb58f075704fdf24397632d20c961da0b59a827b82794c33b7"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0004",
+      "sizeBytes": 3018,
+      "sha256": "1d9a33027261a1e6271be68341262751e09f4294f2d65b9e92b01d703f17879b"
+    }
+  ],
+  "commitMessage": "Harden codemod rename completion checks"
+}

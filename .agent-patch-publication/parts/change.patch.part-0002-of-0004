@@ -1,0 +1,249 @@
+@@ -324,19 +373,69 @@ function targetForwardingFiles(project, target, newName) {
+     fail(`Cannot resolve the completed declaration symbol ${newName} for no-op verification.`);
+   }
+ 
+-  const forwarding = new Set();
++  const forwarding = new Set([target.getFilePath()]);
+   for (const sourceFile of project.getSourceFiles()) {
+     const forwardsTarget = sourceFile.getExportSymbols().some((symbol) => (
+-      symbol.getName() === newName
+-      && sameSymbol(resolvedSymbol(symbol), targetSymbol)
++      sameSymbol(resolvedSymbol(symbol), targetSymbol)
+     ));
+     if (forwardsTarget) forwarding.add(sourceFile.getFilePath());
+   }
+-  return forwarding;
++  return { forwardingFiles: forwarding, targetSymbol };
++}
++
++function dynamicImportSourceFile(expression, seenSymbols = new Set()) {
++  let current = expression;
++  while (
++    Node.isAwaitExpression(current)
++    || Node.isParenthesizedExpression(current)
++    || Node.isAsExpression(current)
++    || Node.isTypeAssertion(current)
++    || Node.isNonNullExpression(current)
++    || Node.isSatisfiesExpression(current)
++  ) {
++    current = current.getExpression();
++  }
++
++  if (
++    Node.isCallExpression(current)
++    && current.getExpression().getKind() === ts.SyntaxKind.ImportKeyword
++  ) {
++    const [moduleSpecifier] = current.getArguments();
++    if (moduleSpecifier === undefined || !Node.isStringLiteral(moduleSpecifier)) return undefined;
++    return moduleSpecifier
++      .getSymbol()
++      ?.getDeclarations()
++      .find((declaration) => Node.isSourceFile(declaration));
++  }
++
++  if (!Node.isIdentifier(current)) return undefined;
++  const symbol = current.getSymbol();
++  if (symbol === undefined || seenSymbols.has(symbol.compilerSymbol)) return undefined;
++  seenSymbols.add(symbol.compilerSymbol);
++  for (const declaration of symbol.getDeclarations()) {
++    if (!Node.isVariableDeclaration(declaration)) continue;
++    const initializer = declaration.getInitializer();
++    if (initializer === undefined) continue;
++    const sourceFile = dynamicImportSourceFile(initializer, seenSymbols);
++    if (sourceFile !== undefined) return sourceFile;
++  }
++  return undefined;
++}
++
++function bindingElementDynamicImportSource(bindingElement) {
++  const bindingPattern = bindingElement.getParentIfKind(ts.SyntaxKind.ObjectBindingPattern);
++  const declaration = bindingPattern?.getParentIfKind(ts.SyntaxKind.VariableDeclaration);
++  const initializer = declaration?.getInitializer();
++  return initializer === undefined ? undefined : dynamicImportSourceFile(initializer);
++}
++
++function resolvesToTargetOrMissing(symbol, targetSymbol) {
++  const resolved = resolvedSymbol(symbol);
++  return resolved === undefined || sameSymbol(resolved, targetSymbol);
+ }
+ 
+ function staleTargetBindings(project, target, oldName, newName) {
+-  const forwardingFiles = targetForwardingFiles(project, target, newName);
++  const { forwardingFiles, targetSymbol } = targetForwardingState(project, target, newName);
+   const stale = [];
+ 
+   for (const sourceFile of project.getSourceFiles()) {
+@@ -344,7 +443,10 @@ function staleTargetBindings(project, target, oldName, newName) {
+       const modulePath = declaration.getModuleSpecifierSourceFile()?.getFilePath();
+       if (modulePath === undefined || !forwardingFiles.has(modulePath)) continue;
+       for (const specifier of declaration.getNamedImports()) {
+-        if (specifier.getName() === oldName) {
++        if (
++          specifier.getName() === oldName
++          && resolvesToTargetOrMissing(specifier.getSymbol(), targetSymbol)
++        ) {
+           stale.push({ filePath: sourceFile.getFilePath(), description: `import ${oldName}` });
+         }
+       }
+@@ -360,6 +462,7 @@ function staleTargetBindings(project, target, oldName, newName) {
+         if (
+           access.getName() === oldName
+           && sameSymbol(access.getExpression().getSymbol(), namespaceSymbol)
++          && resolvesToTargetOrMissing(access.getNameNode().getSymbol(), targetSymbol)
+         ) {
+           stale.push({ filePath: sourceFile.getFilePath(), description: `${namespaceName}.${oldName}` });
+         }
+@@ -370,16 +473,143 @@ function staleTargetBindings(project, target, oldName, newName) {
+       const modulePath = declaration.getModuleSpecifierSourceFile()?.getFilePath();
+       if (modulePath === undefined || !forwardingFiles.has(modulePath)) continue;
+       for (const specifier of declaration.getNamedExports()) {
+-        if (specifier.getName() === oldName) {
++        if (
++          specifier.getName() === oldName
++          && resolvesToTargetOrMissing(specifier.getSymbol(), targetSymbol)
++        ) {
+           stale.push({ filePath: sourceFile.getFilePath(), description: `export ${oldName}` });
+         }
+       }
+     }
++
++    for (const bindingElement of sourceFile.getDescendantsOfKind(ts.SyntaxKind.BindingElement)) {
++      const propertyName = bindingElement.getPropertyNameNode()?.getText()
++        ?? bindingElement.getNameNode().getText();
++      if (propertyName !== oldName) continue;
++      const bindingPattern = bindingElement.getParentIfKind(ts.SyntaxKind.ObjectBindingPattern);
++      const initializer = bindingPattern
++        ?.getParentIfKind(ts.SyntaxKind.VariableDeclaration)
++        ?.getInitializer();
++      const modulePath = bindingElementDynamicImportSource(bindingElement)?.getFilePath();
++      const propertySymbol = initializer?.getType().getProperty(oldName);
++      if (
++        modulePath !== undefined
++        && forwardingFiles.has(modulePath)
++        && resolvesToTargetOrMissing(propertySymbol, targetSymbol)
++      ) {
++        stale.push({ filePath: sourceFile.getFilePath(), description: `dynamic import binding ${oldName}` });
++      }
++    }
+   }
+ 
+   return stale;
+ }
+ 
++function mappedLocationAfterEdits(location, edits, replacementName) {
++  let offset = 0;
++  for (const edit of edits) {
++    if (edit.start + edit.length <= location.start) {
++      offset += edit.prefix.length + replacementName.length + edit.suffix.length - edit.length;
++      continue;
++    }
++    if (edit.start < location.start + location.length) {
++      fail(`Semantic no-op verification found overlapping existing and export-surface locations in ${location.filePath}.`);
++    }
++    break;
++  }
++  return {
++    filePath: location.filePath,
++    start: location.start + offset,
++    length: location.length,
++  };
++}
++
++function existingSemanticNameLocations(
++  project,
++  forwardingFiles,
++  targetSymbol,
++  name,
++  edits,
++  replacementName,
++) {
++  const editsByFile = new Map();
++  for (const edit of edits) {
++    const fileEdits = editsByFile.get(edit.filePath) ?? [];
++    fileEdits.push(edit);
++    editsByFile.set(edit.filePath, fileEdits);
++  }
++
++  const locations = new Set();
++  for (const sourceFile of project.getSourceFiles()) {
++    if (!forwardingFiles.has(sourceFile.getFilePath())) continue;
++    const fileEdits = editsByFile.get(sourceFile.getFilePath()) ?? [];
++    for (const identifier of sourceFile.getDescendantsOfKind(ts.SyntaxKind.Identifier)) {
++      if (identifier.getText() !== name) continue;
++      const identifierSymbol = resolvedSymbol(identifier.getSymbol());
++      if (identifierSymbol === undefined || sameSymbol(identifierSymbol, targetSymbol)) continue;
++      const mapped = mappedLocationAfterEdits({
++        filePath: sourceFile.getFilePath(),
++        start: identifier.getStart(),
++        length: identifier.getWidth(),
++      }, fileEdits, replacementName);
++      locations.add(locationKey(mapped));
++    }
++  }
++  return locations;
++}
++
++function assertNoStaleSemanticReferences(root, project, target, oldName, newName) {
++  const { forwardingFiles, targetSymbol } = targetForwardingState(project, target, newName);
++  const completedMatches = supportedDeclarations(target, newName);
++  if (completedMatches.length !== 1) {
++    fail(`Cannot prepare semantic no-op verification for the completed declaration ${newName}.`);
++  }
++
++  const exportSurfaceEdits = semanticRenameEdits(project, completedMatches[0])
++    .filter((edit) => forwardingFiles.has(edit.filePath));
++  const existingOldNameLocations = existingSemanticNameLocations(
++    project,
++    forwardingFiles,
++    targetSymbol,
++    oldName,
++    exportSurfaceEdits,
++    oldName,
++  );
++  const expectedLocations = expectedPostRenameLocations(exportSurfaceEdits, oldName);
++  applySemanticRename(exportSurfaceEdits, oldName);
++
++  const restoredMatches = supportedDeclarations(target, oldName);
++  if (restoredMatches.length !== 1) {
++    fail(`Cannot restore the pre-rename declaration ${oldName} for semantic no-op verification.`);
++  }
++
++  const remainingExpected = new Map();
++  for (const location of expectedLocations) {
++    const key = locationKey(location);
++    remainingExpected.set(key, (remainingExpected.get(key) ?? 0) + 1);
++  }
++
++  const unexpected = [];
++  for (const edit of semanticRenameEdits(project, restoredMatches[0])) {
++    const location = {
++      filePath: edit.filePath,
++      start: edit.start,
++      length: edit.length,
++    };
++    const key = locationKey(location);
++    const count = remainingExpected.get(key) ?? 0;
++    if (count > 0) remainingExpected.set(key, count - 1);
++    else if (!existingOldNameLocations.has(key)) unexpected.push(location);
++  }
++
++  if (unexpected.length > 0) {
++    fail(
++      `Cannot verify idempotent no-op for ${oldName} -> ${newName}; stale semantic references remain: `
++      + unexpected.slice(0, 5).map((location) => formatLocation(root, location)).join(", "),
++    );
++  }
++}
++
+ function assertVerifiableNoOp(root, project, target, oldName, newName) {
+   const stale = staleTargetBindings(project, target, oldName, newName);
+   if (stale.length > 0) {
+@@ -399,6 +629,8 @@ function assertVerifiableNoOp(root, project, target, oldName, newName) {
+       + formatDiagnostics(root, diagnostics),
+     );
+   }
++
++  assertNoStaleSemanticReferences(root, project, target, oldName, newName);
+ }
+ 
+ function assertWritableChangedFiles(root, sourceFiles) {

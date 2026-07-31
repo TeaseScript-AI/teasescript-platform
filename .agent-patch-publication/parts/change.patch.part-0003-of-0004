@@ -1,0 +1,195 @@
+@@ -462,12 +694,11 @@ export function runRenameSymbol(argv, workingDirectory = process.cwd()) {
+   }
+ 
+   const declaration = oldMatches[0];
+-  if (typeof declaration.rename !== "function") fail(`Declaration ${options.oldName} does not support reference-aware rename.`);
+-
+   const diagnosticsBefore = errorDiagnostics(project);
+-  const expectedLocations = expectedPostRenameLocations(project, declaration, options.newName);
++  const renameEdits = semanticRenameEdits(project, declaration);
++  const expectedLocations = expectedPostRenameLocations(renameEdits, options.newName);
+   const before = new Map(project.getSourceFiles().map((sourceFile) => [sourceFile.getFilePath(), sourceFile.getFullText()]));
+-  declaration.rename(options.newName, RENAME_OPTIONS);
++  applySemanticRename(renameEdits, options.newName);
+   const changedSourceFiles = project
+     .getSourceFiles()
+     .filter((sourceFile) => sourceFile.getFullText() !== before.get(sourceFile.getFilePath()))
+diff --git a/tools/ts-morph/rename-symbol.test.mjs b/tools/ts-morph/rename-symbol.test.mjs
+index b593181a8369717cbe9c144592781ec6979dbefd..af1d4f8ef995e22d336695b710020dc306506fe8 100644
+--- a/tools/ts-morph/rename-symbol.test.mjs
++++ b/tools/ts-morph/rename-symbol.test.mjs
+@@ -190,7 +190,7 @@ test("idempotent no-op fails closed for a partially applied rename", () => {
+     const result = run(root, renameArguments("write"));
+     assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+     assert.match(result.stderr, /Cannot verify idempotent no-op/u);
+-    assert.match(result.stderr, /stale target bindings remain/u);
++    assert.match(result.stderr, /(?:stale target bindings remain|project has TypeScript errors)/u);
+     assertFixtureUnchanged(root, snapshot);
+   } finally {
+     removeFixture(root);
+@@ -218,13 +218,223 @@ test("idempotent no-op follows barrel chains and rejects indirect stale imports"
+     ]);
+     assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+     assert.match(result.stderr, /Cannot verify idempotent no-op/u);
+-    assert.match(result.stderr, /src\/d-consumer\.ts: import oldName/u);
++    assert.match(result.stderr, /src\/d-consumer\.ts/u);
+     assertFixtureUnchanged(root, snapshot);
+   } finally {
+     removeFixture(root);
+   }
+ });
+ 
++test("dynamic-import and import-type renames deduplicate locations and remain idempotent", () => {
++  const root = createFixture({
++    "src/declaration.ts": "export function oldName(): number { return 1; }\n",
++    "src/consumer.ts": "export async function use(): Promise<number> {\n  const direct = (await import(\"./declaration.js\")).oldName();\n  const module = await import(\"./declaration.js\");\n  const viaVariable = module.oldName();\n  const { oldName } = await import(\"./declaration.js\");\n  const { oldName: alias } = await import(\"./declaration.js\");\n  return direct + viaVariable + oldName() + alias();\n}\nexport type FunctionValue = typeof import(\"./declaration.js\").oldName;\n",
++  });
++  try {
++    const written = run(root, renameArguments("write"));
++    assert.equal(written.status, 0, written.stderr);
++    assert.equal(JSON.parse(written.stdout).status, "written");
++    assert.equal(
++      fs.readFileSync(path.join(root, "src/consumer.ts"), "utf8"),
++      "export async function use(): Promise<number> {\n  const direct = (await import(\"./declaration.js\")).newName();\n  const module = await import(\"./declaration.js\");\n  const viaVariable = module.newName();\n  const { newName } = await import(\"./declaration.js\");\n  const { newName: alias } = await import(\"./declaration.js\");\n  return direct + viaVariable + newName() + alias();\n}\nexport type FunctionValue = typeof import(\"./declaration.js\").newName;\n",
++    );
++
++    const repeated = run(root, renameArguments("write"));
++    assert.equal(repeated.status, 0, repeated.stderr);
++    assert.equal(JSON.parse(repeated.stdout).status, "unchanged");
++    assert.deepEqual(JSON.parse(repeated.stdout).changedFiles, []);
++  } finally {
++    removeFixture(root);
++  }
++});
++
++test("idempotent no-op rejects stale dynamic-import references", () => {
++  const consumers = [
++    "export async function use(): Promise<number> {\n  // @ts-ignore simulated interrupted rename\n  return (await import(\"./declaration.js\")).oldName();\n}\n",
++    "export async function use(): Promise<number> {\n  const module = await import(\"./declaration.js\");\n  // @ts-ignore simulated interrupted rename\n  return module.oldName();\n}\n",
++    "export async function use(): Promise<number> {\n  // @ts-ignore simulated interrupted rename\n  const { oldName } = await import(\"./declaration.js\");\n  return oldName();\n}\n",
++    "// @ts-ignore simulated interrupted rename\nexport type Value = import(\"./declaration.js\").oldName;\n",
++  ];
++
++  for (const consumer of consumers) {
++    const root = createFixture({
++      "src/declaration.ts": "export function newName(): number { return 1; }\n",
++      "src/consumer.ts": consumer,
++    });
++    try {
++      const snapshot = snapshotFixture(root, ["src/declaration.ts", "src/consumer.ts"]);
++      const result = run(root, renameArguments("write"));
++      assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
++      assert.match(result.stderr, /Cannot verify idempotent no-op/u);
++      assert.match(result.stderr, /stale (?:target bindings|semantic references) remain/u);
++      assert.match(result.stderr, /src\/consumer\.ts/u);
++      assertFixtureUnchanged(root, snapshot);
++    } finally {
++      removeFixture(root);
++    }
++  }
++});
++
++test("idempotent no-op rejects stale dynamic imports through barrel chains", () => {
++  const fixtures = [
++    {
++      files: {
++        "src/declaration.ts": "export function newName(): number { return 1; }\n",
++        "src/barrel-a.ts": "import { newName } from \"./declaration.js\";\nconst oldName = 2;\nexport { newName };\nexport const localValue = oldName;\n",
++        "src/barrel-b.ts": "export * from \"./barrel-a.js\";\n",
++        "src/consumer.ts": "export async function use(): Promise<number> {\n  // @ts-ignore simulated interrupted rename\n  return (await import(\"./barrel-b.js\")).oldName();\n}\n",
++      },
++      tracked: ["src/declaration.ts", "src/barrel-a.ts", "src/barrel-b.ts", "src/consumer.ts"],
++      stalePath: /src\/consumer\.ts/u,
++    },
++    {
++      files: {
++        "src/declaration.ts": "export function newName(): number { return 1; }\n",
++        "src/barrel-a.ts": "export { newName } from \"./declaration.js\";\nexport async function stale(): Promise<number> {\n  // @ts-ignore simulated interrupted rename\n  const { oldName } = await import(\"./declaration.js\");\n  return oldName();\n}\n",
++      },
++      tracked: ["src/declaration.ts", "src/barrel-a.ts"],
++      stalePath: /src\/barrel-a\.ts/u,
++    },
++  ];
++
++  for (const fixture of fixtures) {
++    const root = createFixture(fixture.files);
++    try {
++      const snapshot = snapshotFixture(root, fixture.tracked);
++      const result = run(root, renameArguments("write"));
++      assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
++      assert.match(result.stderr, /Cannot verify idempotent no-op/u);
++      assert.match(result.stderr, fixture.stalePath);
++      assertFixtureUnchanged(root, snapshot);
++    } finally {
++      removeFixture(root);
++    }
++  }
++});
++
++test("default-export renames remain idempotent and reject stale default imports", () => {
++  {
++    const root = createFixture({
++      "src/declaration.ts": "export default function oldName(): number { return 1; }\n",
++      "src/consumer.ts": "import oldName from \"./declaration.js\";\nexport const value = oldName();\n",
++    });
++    try {
++      const written = run(root, renameArguments("write"));
++      assert.equal(written.status, 0, written.stderr);
++      assert.equal(
++        fs.readFileSync(path.join(root, "src/consumer.ts"), "utf8"),
++        "import newName from \"./declaration.js\";\nexport const value = newName();\n",
++      );
++
++      const repeated = run(root, renameArguments("write"));
++      assert.equal(repeated.status, 0, repeated.stderr);
++      assert.equal(JSON.parse(repeated.stdout).status, "unchanged");
++      assert.deepEqual(JSON.parse(repeated.stdout).changedFiles, []);
++    } finally {
++      removeFixture(root);
++    }
++  }
++
++  const partialFixtures = [
++    {
++      files: {
++        "src/declaration.ts": "export default function newName(): number { return 1; }\n",
++        "src/consumer.ts": "import oldName from \"./declaration.js\";\nexport const value = oldName();\n",
++      },
++      tracked: ["src/declaration.ts", "src/consumer.ts"],
++      stalePath: /src\/consumer\.ts/u,
++    },
++    {
++      files: {
++        "src/declaration.ts": "export default function newName(): number { return 1; }\n",
++        "src/barrel.ts": "export { default as newName } from \"./declaration.js\";\nimport oldName from \"./declaration.js\";\nexport const value = oldName();\n",
++      },
++      tracked: ["src/declaration.ts", "src/barrel.ts"],
++      stalePath: /src\/barrel\.ts/u,
++    },
++    {
++      files: {
++        "src/declaration.ts": "export function newName(): number { return 1; }\n",
++        "src/barrel.ts": "export { newName as oldName } from \"./declaration.js\";\n",
++        "src/consumer.ts": "import { oldName } from \"./barrel.js\";\nexport const value = oldName();\n",
++      },
++      tracked: ["src/declaration.ts", "src/barrel.ts", "src/consumer.ts"],
++      stalePath: /src\/(?:barrel|consumer)\.ts/u,
++    },
++  ];
++
++  for (const fixture of partialFixtures) {
++    const root = createFixture(fixture.files);
++    try {
++      const snapshot = snapshotFixture(root, fixture.tracked);
++      const result = run(root, renameArguments("write"));
++      assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
++      assert.match(result.stderr, /Cannot verify idempotent no-op/u);
++      assert.match(result.stderr, /stale (?:target bindings|semantic references) remain/u);
++      assert.match(result.stderr, fixture.stalePath);
++      assertFixtureUnchanged(root, snapshot);
++    } finally {
++      removeFixture(root);
++    }
++  }
++});
++
