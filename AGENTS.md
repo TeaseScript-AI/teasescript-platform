@@ -30,6 +30,35 @@ Do not treat planning documents, wishes, research files, historical audits, or s
 - Do not weaken tests to hide failures.
 - Do not implement deferred capabilities merely because they appear in planning or reference material.
 
+## Efficient editing and context use
+
+Complete the mandatory authority reads above. For supporting context, prefer
+search and bounded or ranged reads when the complete file is not required. Do
+not print or quote complete large files, diffs, or workflow logs without a
+concrete reason.
+
+Choose the smallest suitable edit method based on the shape of the change:
+
+- use `tools/local-agent/replace-exact.py` for one exact or byte-sensitive
+  replacement;
+- use a checked unified diff for another small local or structural change;
+- use a bounded task-specific codemod with explicit paths, preconditions, and
+  expected scope for repeated mechanical or symbol-aware changes;
+- rewrite a complete file only when complete replacement is intended or most of
+  the file genuinely changes, and review the complete result.
+
+When the change is naturally “replace exactly these bytes with these bytes,”
+use the exact-replacement helper; when it is naturally additions and deletions
+around code, use a checked unified diff. Read `tools/local-agent/README.md` when
+the selected helper needs detailed operation, limits, or failure diagnostics.
+Stop when an expected match count or scope differs.
+
+After each coherent edit batch, inspect the relevant hunks, run
+`git diff --check`, and run focused checks. Summarize successful test runs
+compactly, but retain warnings, failures, and relevant diagnostics. Before a
+commit, handoff, or merge, review the complete diff for unexpected collateral
+changes.
+
 ## Property-testable boundaries
 
 For parser, compiler, plan, runtime, action, state, checkpoint, and validated host-boundary changes, preserve deterministic public-boundary testing: every accepted plan and successful runtime transition must produce state accepted by the corresponding public validator. Use explicit time/RNG inputs, structured invalid-data handling, and reusable valid-state fixtures where practical. Follow `docs/TESTING.md` and the assigned issue for property or mutation testing; do not add unrelated fuzzing infrastructure, dependencies, or production hooks.

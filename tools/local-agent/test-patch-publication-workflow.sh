@@ -60,11 +60,11 @@ assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transf
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
 def assert_checkout_jobs_have_contents_access(workflow_text):
-    lines = workflow_text.splitlines(keepends=True)
+    lines = workflow_text.splitlines()
     jobs_headers = [
         index
         for index, line in enumerate(lines)
-        if re.fullmatch(r"jobs:[ \t]*(?:#.*)?(?:\r?\n)?", line)
+        if re.fullmatch(r"jobs:[ \t]*(?:#.*)?", line)
     ]
     assert len(jobs_headers) == 1, "workflow must contain exactly one jobs mapping"
     jobs_start = jobs_headers[0] + 1
@@ -80,7 +80,7 @@ def assert_checkout_jobs_have_contents_access(workflow_text):
         r"^  (?P<name>[A-Za-z_][A-Za-z0-9_-]*):[ \t]*(?:#.*)?$"
     )
     for index in range(jobs_start, jobs_end):
-        line = lines[index].rstrip("\r\n")
+        line = lines[index]
         if not line.startswith("  ") or line.startswith("    "):
             continue
         if not line.strip() or line.lstrip().startswith("#"):
@@ -99,41 +99,84 @@ def assert_checkout_jobs_have_contents_access(workflow_text):
             if position + 1 < len(job_headers)
             else jobs_end
         )
-        job_text = "".join(lines[start:end])
-        if "uses: actions/checkout@" not in job_text:
+        job_lines = lines[start:end]
+        job_text = "\n".join(job_lines)
+        if "actions/checkout@" not in job_text:
             continue
-        permissions_match = re.search(
-            r"^    permissions:\n(?P<body>(?:^      [^\n]+\n)+)",
-            job_text,
-            re.MULTILINE,
+
+        permission_headers = [
+            index
+            for index, line in enumerate(job_lines)
+            if re.fullmatch(r"    permissions:[ \t]*(?:#.*)?", line)
+        ]
+        assert len(permission_headers) == 1, (
+            f"checkout job {job_name} must have one explicit permissions mapping"
         )
-        assert permissions_match, f"checkout job {job_name} has no explicit permissions"
-        assert re.search(
-            r"^      contents: (?:read|write)$",
-            permissions_match.group("body"),
-            re.MULTILINE,
-        ), f"checkout job {job_name} lacks contents read access"
+        permissions_start = permission_headers[0] + 1
+        permissions_end = len(job_lines)
+        for index in range(permissions_start, len(job_lines)):
+            line = job_lines[index]
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            indentation = len(line) - len(line.lstrip())
+            if indentation <= 4:
+                permissions_end = index
+                break
+
+        permissions_lines = job_lines[permissions_start:permissions_end]
+        contents_entries = [
+            line
+            for line in permissions_lines
+            if re.fullmatch(
+                r"      contents:[ \t]*(?:read|write)[ \t]*(?:#.*)?",
+                line,
+            )
+        ]
+        assert len(contents_entries) == 1, (
+            f"checkout job {job_name} lacks exactly one contents read/write permission"
+        )
+
+
+def make_checkout_job(uses_lines):
+    return "\n".join(
+        [
+            "jobs:",
+            "  cleanup_comment: # trusted cleanup",
+            "    runs-on: ubuntu-latest",
+            "    permissions:",
+            "      issues: write",
+            "    steps:",
+            *[f"      {line}" for line in uses_lines],
+            "",
+        ]
+    )
+
+
+def assert_missing_contents_rejected(workflow_text):
+    try:
+        assert_checkout_jobs_have_contents_access(workflow_text)
+    except AssertionError as error:
+        assert str(error) == (
+            "checkout job cleanup_comment lacks exactly one contents read/write permission"
+        )
+    else:
+        raise AssertionError("checkout job without contents access was not rejected")
 
 
 assert_checkout_jobs_have_contents_access(text)
-invalid_checkout_job = textwrap.dedent(
-    """\
-    jobs:
-      cleanup_comment: # trusted cleanup
-        runs-on: ubuntu-latest
-        permissions:
-          issues: write
-        steps:
-          - uses: actions/checkout@0000000000000000000000000000000000000000
-    """
-)
-try:
-    assert_checkout_jobs_have_contents_access(invalid_checkout_job)
-except AssertionError as error:
-    assert str(error) == "checkout job cleanup_comment lacks contents read access"
-else:
-    raise AssertionError("commented checkout job without contents access was not rejected")
-quoted_checkout_job = invalid_checkout_job.replace(
+checkout_sha = "0" * 40
+for uses_lines in [
+    [f"- uses: actions/checkout@{checkout_sha}"],
+    [f"- uses:  actions/checkout@{checkout_sha}"],
+    [f'- uses: "actions/checkout@{checkout_sha}"'],
+    [f"- uses: 'actions/checkout@{checkout_sha}'"],
+    ["- uses: >-", f"    actions/checkout@{checkout_sha}"],
+]:
+    assert_missing_contents_rejected(make_checkout_job(uses_lines))
+
+quoted_checkout_job = make_checkout_job(
+    [f"- uses: actions/checkout@{checkout_sha}"]
+).replace(
     "cleanup_comment: # trusted cleanup",
     '"cleanup_comment":',
 )
