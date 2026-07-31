@@ -49,6 +49,8 @@ function isGenericFileFailure(data) {
     && resolve(data.name) === resolve(data.file)
     && error?.failureType === "testCodeFailure"
     && error?.message === "test failed"
+    && "exitCode" in error
+    && "signal" in error
   );
 }
 

@@ -80,6 +80,31 @@ test("summary reporter prints failure details and totals", () => {
   assert.equal(result.stderr, "");
 });
 
+test("summary reporter does not mistake a path-named test for a file wrapper", () => {
+  const result = runFixture(`
+    import test from "node:test";
+    import { fileURLToPath } from "node:url";
+    function bodyFailureStackSentinel() {
+      throw new Error("test failed");
+    }
+    test(fileURLToPath(import.meta.url), () => {
+      process.stderr.write("BODY_STDERR_SHOULD_STAY_HIDDEN\\n");
+      bodyFailureStackSentinel();
+    });
+  `);
+
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /FAIL .*fixture\.test\.mjs/);
+  assert.match(result.stdout, /Error: test failed/);
+  assert.match(result.stdout, /bodyFailureStackSentinel/);
+  assert.doesNotMatch(result.stdout, /BODY_STDERR_SHOULD_STAY_HIDDEN/);
+  assert.match(
+    result.stdout,
+    /tests 1 \| pass 0 \| fail 1 \| duration \d+ ms\n$/,
+  );
+  assert.equal(result.stderr, "");
+});
+
 test("summary reporter suppresses expected TODO failure details", () => {
   const result = runFixture(`
     import test from "node:test";
