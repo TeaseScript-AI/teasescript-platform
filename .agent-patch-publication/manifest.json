@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "fix/issue-155-cleanup-checkout-permission",
+  "expectedBaseSha": "43c196715d55192b50feda7bdb6224b6a2e33535",
+  "expectedResultTreeSha": "e8cdf2b9a301ff27df035816f1da7c8cb032f855",
+  "patchSizeBytes": 2297,
+  "patchSha256": "83c5d71a0b74ed99aab43f3f5f40e15b8b4cfacccde647960de92bf4d0fd6917",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0001",
+      "sizeBytes": 2297,
+      "sha256": "83c5d71a0b74ed99aab43f3f5f40e15b8b4cfacccde647960de92bf4d0fd6917"
+    }
+  ],
+  "commitMessage": "Reject normalized checkout action aliases"
+}

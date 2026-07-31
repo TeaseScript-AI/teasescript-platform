@@ -1,0 +1,54 @@
+diff --git a/tools/local-agent/test-patch-publication-workflow.sh b/tools/local-agent/test-patch-publication-workflow.sh
+index 9611f3eb8e3ac8175dab3162ffd475f2c55ac0b2..7d5bd0ae274c58cd3ef61d17cf8d75a9a97f45c1 100755
+--- a/tools/local-agent/test-patch-publication-workflow.sh
++++ b/tools/local-agent/test-patch-publication-workflow.sh
+@@ -98,10 +98,26 @@ def parse_uses_scalar(scalar, job_name, source_line):
+         if not match:
+             continue
+         ref = match.group("ref")
+-        assert re.fullmatch(r"[^@\\\s]+@[0-9a-f]{40}", ref), (
++        action_match = re.fullmatch(
++            r"(?P<path>[^@\\\s]+)@(?P<pin>[0-9a-f]{40})",
++            ref,
++        )
++        assert action_match, (
+             f"workflow action refs must use one immutable 40-hex pin in job "
+             f"{job_name}: {source_line.strip()}"
+         )
++        path_segments = action_match.group("path").split("/")
++        assert (
++            len(path_segments) >= 2
++            and all(
++                segment not in {"", ".", ".."}
++                and re.fullmatch(r"[A-Za-z0-9_.-]+", segment)
++                for segment in path_segments
++            )
++        ), (
++            f"workflow action refs must use canonical owner/repository[/path] "
++            f"syntax in job {job_name}: {source_line.strip()}"
++        )
+         return ref
+     raise AssertionError(
+         f"unsupported workflow uses scalar in job {job_name}: {source_line.strip()}"
+@@ -393,6 +409,21 @@ assert_rejected(
+     make_checkout_job([f"- uses:  actions/checkout@{checkout_sha}"]),
+     "lacks exactly one contents read/write permission",
+ )
++subdirectory_ref = f"example/action/subdirectory@{checkout_sha}"
++assert assert_checkout_jobs_have_contents_access(
++    make_checkout_job([f"- uses: {subdirectory_ref}"])
++) == [subdirectory_ref]
++for noncanonical_action_ref in [
++    f"actions//checkout@{checkout_sha}",
++    f"/actions/checkout@{checkout_sha}",
++    f"actions/checkout/@{checkout_sha}",
++    f"actions/checkout/.@{checkout_sha}",
++    f"actions/checkout/..@{checkout_sha}",
++]:
++    assert_rejected(
++        make_checkout_job([f"- uses: {noncanonical_action_ref}"]),
++        "canonical owner/repository[/path] syntax",
++    )
+ for hidden_jobs_key in [
+     '"jobs":',
+     r'"jo\u0062s":',
