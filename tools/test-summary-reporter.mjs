@@ -17,7 +17,7 @@ const IGNORED_SUCCESS_EVENT_TYPES = new Set([
   "test:watch:drained",
 ]);
 
-const SUMMARY_DIAGNOSTIC_PATTERN = /^(?:tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)\s/;
+const SUMMARY_DIAGNOSTIC_PATTERN = /^(?:(?:tests|suites|pass|fail|cancelled|skipped|todo) \d+|duration_ms \d+(?:\.\d+)?)$/;
 
 function formatLocation(data) {
   if (typeof data.file !== "string" || data.file.length === 0) {

@@ -174,6 +174,38 @@ test("summary reporter retains unfamiliar events when a run fails", () => {
   assert.equal(result.stderr, "");
 });
 
+test("summary reporter retains non-summary diagnostics without a file", () => {
+  const result = runSyntheticEvents([
+    {
+      type: "test:diagnostic",
+      data: { message: "fail useful context", level: "info" },
+    },
+    {
+      type: "test:summary",
+      data: {
+        success: false,
+        counts: {
+          tests: 1,
+          failed: 1,
+          passed: 0,
+          cancelled: 0,
+          skipped: 0,
+          todo: 0,
+        },
+        duration_ms: 1,
+      },
+    },
+  ]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /DIAGNOSTIC\nfail useful context/);
+  assert.match(
+    result.stdout,
+    /tests 1 \| pass 0 \| fail 1 \| duration 1 ms\n$/,
+  );
+  assert.equal(result.stderr, "");
+});
+
 test("summary reporter bounds retained failure context", () => {
   const result = runSyntheticEvents([
     {
