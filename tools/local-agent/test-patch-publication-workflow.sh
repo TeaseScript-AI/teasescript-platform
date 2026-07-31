@@ -57,36 +57,214 @@ assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in transfe
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
-def parse_uses_ref(line, job_name):
-    if re.match(r'^(?:      -[ \t]+|        )["\']uses["\'][ \t]*:', line):
-        raise AssertionError(
-            f"workflow uses keys must be unquoted in job {job_name}: {line.strip()}"
-        )
+def line_indentation(line):
+    return len(line) - len(line.lstrip(" "))
+
+
+def is_comment_or_empty(value):
+    return re.fullmatch(r"[ \t]*(?:#.*)?", value) is not None
+
+
+def parse_plain_mapping_entry(value, scope, job_name, source_line):
     match = re.fullmatch(
-        r"^(?:      -[ \t]+|        )uses[ \t]*:[ \t]*(?P<scalar>.*)",
-        line,
+        r"(?P<key>[A-Za-z_][A-Za-z0-9_-]*|<<)[ \t]*:[ \t]*(?P<value>.*)",
+        value,
     )
     if not match:
-        return None
+        raise AssertionError(
+            f"workflow {scope} must use unquoted plain mapping keys in job "
+            f"{job_name}: {source_line.strip()}"
+        )
+    key = match.group("key")
+    scalar = match.group("value")
+    if key == "<<" or re.match(r"[&*!]", scalar.lstrip()):
+        raise AssertionError(
+            f"workflow YAML anchors, aliases, tags, and merge keys are unsupported "
+            f"in job {job_name}: {source_line.strip()}"
+        )
+    return key, scalar
 
-    scalar = match.group("scalar")
+
+def parse_uses_scalar(scalar, job_name, source_line):
     scalar_patterns = [
-        r"(?P<ref>[^\s#'\"|>]+)(?:[ \t]+#.*)?",
+        r"(?P<ref>[^\\\s#'\"|>\[\]{},]+)(?:[ \t]+#.*)?",
         r"'(?P<ref>[^']+)'(?:[ \t]+#.*)?",
-        r'"(?P<ref>[^"]+)"(?:[ \t]+#.*)?',
+        r'"(?P<ref>[^"\\]+)"(?:[ \t]+#.*)?',
     ]
     for pattern in scalar_patterns:
-        scalar_match = re.fullmatch(pattern, scalar)
-        if scalar_match:
-            ref = scalar_match.group("ref")
-            assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", ref), (
-                f"workflow action refs must use one immutable 40-hex pin in job "
+        match = re.fullmatch(pattern, scalar)
+        if not match:
+            continue
+        ref = match.group("ref")
+        assert re.fullmatch(r"[^@\\\s]+@[0-9a-f]{40}", ref), (
+            f"workflow action refs must use one immutable 40-hex pin in job "
+            f"{job_name}: {source_line.strip()}"
+        )
+        return ref
+    raise AssertionError(
+        f"unsupported workflow uses scalar in job {job_name}: {source_line.strip()}"
+    )
+
+
+def parse_job_properties(job_lines, job_name):
+    significant = [
+        (index, line, line_indentation(line))
+        for index, line in enumerate(job_lines[1:], start=1)
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert significant, f"workflow job {job_name} has no properties"
+    property_indent = min(indentation for _, _, indentation in significant)
+    assert property_indent == 4, (
+        f"workflow job properties must use four-space indentation in job {job_name}"
+    )
+
+    properties = []
+    for index, line, indentation in significant:
+        if indentation > property_indent:
+            continue
+        assert indentation == property_indent, (
+            f"workflow job properties must use four-space indentation in job "
+            f"{job_name}: {line.strip()}"
+        )
+        key, scalar = parse_plain_mapping_entry(
+            line[4:],
+            "job properties",
+            job_name,
+            line,
+        )
+        properties.append((index, key, scalar))
+    return properties
+
+
+def collect_action_refs(job_lines, job_name, properties):
+    steps_headers = [
+        (index, scalar)
+        for index, key, scalar in properties
+        if key == "steps"
+    ]
+    assert len(steps_headers) <= 1, (
+        f"workflow job {job_name} must have at most one steps mapping"
+    )
+    if not steps_headers:
+        return []
+    steps_start, steps_scalar = steps_headers[0]
+    assert is_comment_or_empty(steps_scalar), (
+        f"workflow steps must use canonical block sequence syntax in job {job_name}"
+    )
+    steps_start += 1
+    steps_end = len(job_lines)
+    for index in range(steps_start, len(job_lines)):
+        line = job_lines[index]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line_indentation(line) <= 4:
+            steps_end = index
+            break
+
+    body = job_lines[steps_start:steps_end]
+    significant = [
+        (index, line, line_indentation(line))
+        for index, line in enumerate(body)
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not significant:
+        return []
+
+    step_starts = []
+    for index, line, indentation in significant:
+        if indentation > 6:
+            continue
+        assert indentation == 6, (
+            f"workflow steps must use six-space sequence indentation in job "
+            f"{job_name}: {line.strip()}"
+        )
+        match = re.fullmatch(r"      -(?: (?P<body>.*))?", line)
+        assert match, (
+            f"workflow step entries must use one space after '-' in job "
+            f"{job_name}: {line.strip()}"
+        )
+        step_starts.append((index, match.group("body") or ""))
+    assert step_starts, f"workflow job {job_name} has no canonical step definitions"
+
+    refs = []
+    for position, (start, first_body) in enumerate(step_starts):
+        end = step_starts[position + 1][0] if position + 1 < len(step_starts) else len(body)
+        fields = []
+        if first_body:
+            fields.append((first_body, body[start]))
+        for line in body[start + 1:end]:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            indentation = line_indentation(line)
+            if indentation > 8:
+                continue
+            assert indentation == 8, (
+                f"workflow step fields must use eight-space indentation in job "
                 f"{job_name}: {line.strip()}"
             )
-            return ref
-    raise AssertionError(
-        f"unsupported workflow uses scalar in job {job_name}: {line.strip()}"
+            fields.append((line[8:], line))
+        assert fields, f"workflow job {job_name} contains an empty step"
+        for field, source_line in fields:
+            key, scalar = parse_plain_mapping_entry(
+                field,
+                "step fields",
+                job_name,
+                source_line,
+            )
+            if key == "uses":
+                refs.append(parse_uses_scalar(scalar, job_name, source_line))
+    return refs
+
+
+def assert_job_contents_access(job_lines, job_name, properties):
+    permission_headers = [
+        (index, scalar)
+        for index, key, scalar in properties
+        if key == "permissions"
+    ]
+    assert len(permission_headers) == 1, (
+        f"checkout job {job_name} must have one explicit permissions mapping"
     )
+    permissions_start, permissions_scalar = permission_headers[0]
+    assert is_comment_or_empty(permissions_scalar), (
+        f"checkout job {job_name} permissions must use canonical block mapping syntax"
+    )
+    permissions_start += 1
+    permissions_end = len(job_lines)
+    for index in range(permissions_start, len(job_lines)):
+        line = job_lines[index]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line_indentation(line) <= 4:
+            permissions_end = index
+            break
+
+    entries = []
+    for line in job_lines[permissions_start:permissions_end]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indentation = line_indentation(line)
+        assert indentation == 6, (
+            f"workflow permission entries must use six-space indentation in job "
+            f"{job_name}: {line.strip()}"
+        )
+        entries.append(
+            parse_plain_mapping_entry(
+                line[6:],
+                "permission entries",
+                job_name,
+                line,
+            )
+        )
+    assert entries, f"checkout job {job_name} has an empty permissions mapping"
+    contents_entries = [scalar for key, scalar in entries if key == "contents"]
+    assert len(contents_entries) == 1, (
+        f"checkout job {job_name} lacks exactly one contents read/write permission"
+    )
+    assert re.fullmatch(
+        r"(?:read|write)[ \t]*(?:#.*)?",
+        contents_entries[0],
+    ), f"checkout job {job_name} lacks exactly one contents read/write permission"
 
 
 def assert_checkout_jobs_have_contents_access(workflow_text):
@@ -106,71 +284,36 @@ def assert_checkout_jobs_have_contents_access(workflow_text):
             break
 
     job_headers = []
-    job_header_pattern = re.compile(
+    pattern = re.compile(
         r"^  (?P<name>[A-Za-z_][A-Za-z0-9_-]*):[ \t]*(?:#.*)?$"
     )
     for index in range(jobs_start, jobs_end):
         line = lines[index]
-        if not line.startswith("  ") or line.startswith("    "):
-            continue
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        match = job_header_pattern.fullmatch(line)
+        indentation = line_indentation(line)
+        if indentation > 2:
+            continue
+        assert indentation == 2, (
+            f"workflow job keys must use two-space indentation: {line.strip()}"
+        )
+        match = pattern.fullmatch(line)
         assert match, (
             "workflow job keys must be unquoted valid GitHub job IDs: "
             f"{line.strip()}"
         )
         job_headers.append((index, match.group("name")))
-
     assert job_headers, "workflow jobs mapping has no job definitions"
+
     all_refs = []
     for position, (start, job_name) in enumerate(job_headers):
-        end = (
-            job_headers[position + 1][0]
-            if position + 1 < len(job_headers)
-            else jobs_end
-        )
+        end = job_headers[position + 1][0] if position + 1 < len(job_headers) else jobs_end
         job_lines = lines[start:end]
-        refs = [
-            ref
-            for line in job_lines
-            if (ref := parse_uses_ref(line, job_name)) is not None
-        ]
+        properties = parse_job_properties(job_lines, job_name)
+        refs = collect_action_refs(job_lines, job_name, properties)
         all_refs.extend(refs)
-        if not any(ref.rsplit("@", 1)[0].lower() == "actions/checkout" for ref in refs):
-            continue
-
-        permission_headers = [
-            index
-            for index, line in enumerate(job_lines)
-            if re.fullmatch(r"    permissions:[ \t]*(?:#.*)?", line)
-        ]
-        assert len(permission_headers) == 1, (
-            f"checkout job {job_name} must have one explicit permissions mapping"
-        )
-        permissions_start = permission_headers[0] + 1
-        permissions_end = len(job_lines)
-        for index in range(permissions_start, len(job_lines)):
-            line = job_lines[index]
-            if not line.strip() or line.lstrip().startswith("#"):
-                continue
-            indentation = len(line) - len(line.lstrip())
-            if indentation <= 4:
-                permissions_end = index
-                break
-
-        permissions_lines = job_lines[permissions_start:permissions_end]
-        contents_entries = [
-            line
-            for line in permissions_lines
-            if re.fullmatch(
-                r"      contents:[ \t]*(?:read|write)[ \t]*(?:#.*)?",
-                line,
-            )
-        ]
-        assert len(contents_entries) == 1, (
-            f"checkout job {job_name} lacks exactly one contents read/write permission"
-        )
+        if any(ref.rsplit("@", 1)[0].lower() == "actions/checkout" for ref in refs):
+            assert_job_contents_access(job_lines, job_name, properties)
     return all_refs
 
 
@@ -189,24 +332,13 @@ def make_checkout_job(uses_lines):
     )
 
 
-def assert_missing_contents_rejected(workflow_text):
+def assert_rejected(workflow_text, expected_fragment):
     try:
         assert_checkout_jobs_have_contents_access(workflow_text)
     except AssertionError as error:
-        assert str(error) == (
-            "checkout job cleanup_comment lacks exactly one contents read/write permission"
-        )
+        assert expected_fragment in str(error), str(error)
     else:
-        raise AssertionError("checkout job without contents access was not rejected")
-
-
-def assert_unsupported_uses_rejected(workflow_text, expected_fragment):
-    try:
-        assert_checkout_jobs_have_contents_access(workflow_text)
-    except AssertionError as error:
-        assert expected_fragment in str(error)
-    else:
-        raise AssertionError("unsupported workflow uses syntax was not rejected")
+        raise AssertionError("unsafe or unsupported workflow syntax was not rejected")
 
 
 refs = assert_checkout_jobs_have_contents_access(text)
@@ -214,47 +346,103 @@ assert refs
 checkout_sha = "0" * 40
 for uses_lines in [
     [f"- uses: actions/checkout@{checkout_sha}"],
-    [f"- uses:  actions/checkout@{checkout_sha}"],
     [f'- uses: "actions/checkout@{checkout_sha}"'],
     [f"- uses: 'actions/checkout@{checkout_sha}'"],
     [f"- uses: Actions/Checkout@{checkout_sha}"],
 ]:
-    assert_missing_contents_rejected(make_checkout_job(uses_lines))
+    assert_rejected(
+        make_checkout_job(uses_lines),
+        "lacks exactly one contents read/write permission",
+    )
 
-assert_unsupported_uses_rejected(
-    make_checkout_job(["- uses: >-", f"    actions/checkout@{checkout_sha}"]),
-    "unsupported workflow uses scalar",
+assert_rejected(
+    make_checkout_job([f"- uses:  actions/checkout@{checkout_sha}"]),
+    "lacks exactly one contents read/write permission",
 )
-assert_unsupported_uses_rejected(
-    make_checkout_job(["- uses: *checkout"]),
-    "workflow action refs must use one immutable 40-hex pin",
+for noncanonical_lines in [
+    [f" - uses: actions/checkout@{checkout_sha}"],
+    ["-    name: Hidden checkout", f"     uses: actions/checkout@{checkout_sha}"],
+]:
+    assert_rejected(make_checkout_job(noncanonical_lines), "workflow")
+
+for escaped_checkout in (
+    r"actions\/checkout",
+    r"actions\x2fcheckout",
+    r"actions\u002fcheckout",
+):
+    assert_rejected(
+        make_checkout_job([f'- uses: "{escaped_checkout}@{checkout_sha}"']),
+        "unsupported workflow uses scalar",
+    )
+
+for hidden_uses_lines in [
+    ["- uses: >-", f"    actions/checkout@{checkout_sha}"],
+    ["- uses: *checkout"],
+    [f'- "uses": "actions/checkout@{checkout_sha}"'],
+    ["- ? uses", f"  : actions/checkout@{checkout_sha}"],
+    [f'- "u\u0073es": actions/checkout@{checkout_sha}'],
+    [f"- !!str uses: actions/checkout@{checkout_sha}"],
+    [f"- {{ uses: actions/checkout@{checkout_sha} }}"],
+]:
+    assert_rejected(make_checkout_job(hidden_uses_lines), "workflow")
+
+aliased_checkout_jobs = "\n".join(
+    [
+        "jobs:",
+        "  anchor_source:",
+        "    runs-on: ubuntu-latest",
+        "    permissions:",
+        "      contents: read",
+        "    steps: &checkout_steps",
+        f"      - uses: actions/checkout@{checkout_sha}",
+        "  anchor_target:",
+        "    runs-on: ubuntu-latest",
+        "    permissions:",
+        "      issues: write",
+        "    steps: *checkout_steps",
+        "",
+    ]
 )
-assert_unsupported_uses_rejected(
-    make_checkout_job([f'- "uses": "actions/checkout@{checkout_sha}"']),
-    "workflow uses keys must be unquoted",
+assert_rejected(aliased_checkout_jobs, "anchors, aliases")
+assert_rejected(
+    make_checkout_job(["- &checkout_step", f"  uses: actions/checkout@{checkout_sha}"]),
+    "workflow",
 )
-run_text_only_job = make_checkout_job(
-    [f"- run: echo actions/checkout@{checkout_sha}"]
+
+for permissions in [
+    "      contents: read\n      contents: none",
+    '      "contents": none',
+    "      contents: *permission",
+]:
+    permission_job = make_checkout_job(
+        [f"- uses: actions/checkout@{checkout_sha}"]
+    ).replace("      issues: write", permissions)
+    assert_rejected(permission_job, "permission")
+
+nested_uses_input_job = "\n".join(
+    [
+        "jobs:",
+        "  nested_uses_input:",
+        "    runs-on: ubuntu-latest",
+        "    permissions:",
+        "      contents: read",
+        "    steps:",
+        f"      - uses: example/action@{checkout_sha}",
+        "        with:",
+        "          uses: candidate-controlled-input",
+        "",
+    ]
 )
+assert assert_checkout_jobs_have_contents_access(nested_uses_input_job) == [
+    f"example/action@{checkout_sha}"
+]
+run_text_only_job = make_checkout_job([f"- run: echo actions/checkout@{checkout_sha}"])
 assert assert_checkout_jobs_have_contents_access(run_text_only_job) == []
 multiline_run_text_job = make_checkout_job(
     ["- run: |", f"    uses: actions/checkout@{checkout_sha}"]
 )
 assert assert_checkout_jobs_have_contents_access(multiline_run_text_job) == []
-quoted_checkout_job = make_checkout_job(
-    [f"- uses: actions/checkout@{checkout_sha}"]
-).replace(
-    "cleanup_comment: # trusted cleanup",
-    '"cleanup_comment":',
-)
-try:
-    assert_checkout_jobs_have_contents_access(quoted_checkout_job)
-except AssertionError as error:
-    assert str(error) == (
-        'workflow job keys must be unquoted valid GitHub job IDs: "cleanup_comment":'
-    )
-else:
-    raise AssertionError("quoted workflow job key was not rejected")
+
 transfer_cleanup = text.split("  cleanup-transfer:\n", 1)[1].split("  cleanup-comment:\n", 1)[0]
 comment_cleanup = text.split("  cleanup-comment:\n", 1)[1]
 assert "contents: write" in transfer_cleanup and "issues: write" not in transfer_cleanup
