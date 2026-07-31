@@ -106,6 +106,11 @@ def parse_uses_scalar(scalar, job_name, source_line):
             f"one immutable 40-hex pin in job {job_name}: "
             f"{source_line.strip()}"
         )
+        path = ref.rsplit("@", 1)[0]
+        assert all(segment not in {".", ".."} for segment in path.split("/")), (
+            f"workflow action refs must not contain dot path segments in job "
+            f"{job_name}: {source_line.strip()}"
+        )
         return ref
     raise AssertionError(
         f"unsupported workflow uses scalar in job {job_name}: {source_line.strip()}"
@@ -436,13 +441,20 @@ assert_rejected(
     make_checkout_job([f"- uses: actions\\checkout@{checkout_sha}"]),
     "unsupported workflow uses scalar",
 )
-for checkout_subpath in [".", "subdirectory"]:
+for dot_segment_ref in [
+    f"actions/checkout/.@{checkout_sha}",
+    f"actions/checkout/..@{checkout_sha}",
+    f"example/action/./subdirectory@{checkout_sha}",
+    f"example/action/../subdirectory@{checkout_sha}",
+]:
     assert_rejected(
-        make_checkout_job(
-            [f"- uses: actions/checkout/{checkout_subpath}@{checkout_sha}"]
-        ),
-        "lacks exactly one contents read/write permission",
+        make_checkout_job([f"- uses: {dot_segment_ref}"]),
+        "must not contain dot path segments",
     )
+assert_rejected(
+    make_checkout_job([f"- uses: actions/checkout/subdirectory@{checkout_sha}"]),
+    "lacks exactly one contents read/write permission",
+)
 subdirectory_ref = f"example/action/subdirectory@{checkout_sha}"
 assert assert_checkout_jobs_have_contents_access(
     make_checkout_job([f"- uses: {subdirectory_ref}"])
