@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "fix/issue-155-cleanup-checkout-permission",
+  "expectedBaseSha": "5d03d93c344ab4a77e65a682ec490762cbee4dee",
+  "expectedResultTreeSha": "f1c1cdcd67eb8141ce4540e48d8f718ce3bcbadb",
+  "patchSizeBytes": 18627,
+  "patchSha256": "6763fb7acd62739835b971c4d3ec4712c8b0ef6b2cd95b28eb245f2cbec47e4c",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0006",
+      "sizeBytes": 2989,
+      "sha256": "267ca755e50df12e44d2caca42d4e03603cb81495f2e98f1cdb88ac9e7db9d7e"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0006",
+      "sizeBytes": 3492,
+      "sha256": "d90af9c10bd88e4c7c9de5568e2ed3b81ad558b1cdece581653d066e8b0824d5"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0006",
+      "sizeBytes": 2930,
+      "sha256": "545569b7500421efd58d740e21a8bbc6175e3f73ff18ac076d07527b191c47cf"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0006",
+      "sizeBytes": 3312,
+      "sha256": "7c3a030cb3f28d74c22d235a1ab0110f70b8beb9edc6f639e72c76d71432276d"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0006",
+      "sizeBytes": 3287,
+      "sha256": "c9c816e00aafa0c015af706318b96fa5c6f76a175b3b814fe684c6975861e2b5"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0006-of-0006",
+      "sizeBytes": 2617,
+      "sha256": "b8665f47d622c8cda0c518ee760c1799a9bc90cf2ab23d8a5c3757d87ba27cf1"
+    }
+  ],
+  "commitMessage": "Harden checkout permission workflow guard"
+}

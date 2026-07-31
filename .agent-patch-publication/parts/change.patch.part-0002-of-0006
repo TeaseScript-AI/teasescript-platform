@@ -1,0 +1,97 @@
++            f"{job_name}: {source_line.strip()}"
++        )
++        return ref
++    raise AssertionError(
++        f"unsupported workflow uses scalar in job {job_name}: {source_line.strip()}"
++    )
++
++
++def parse_job_properties(job_lines, job_name):
++    significant = [
++        (index, line, line_indentation(line))
++        for index, line in enumerate(job_lines[1:], start=1)
++        if line.strip() and not line.lstrip().startswith("#")
++    ]
++    assert significant, f"workflow job {job_name} has no properties"
++    property_indent = min(indentation for _, _, indentation in significant)
++    assert property_indent == 4, (
++        f"workflow job properties must use four-space indentation in job {job_name}"
++    )
++
++    properties = []
++    for index, line, indentation in significant:
++        if indentation > property_indent:
++            continue
++        assert indentation == property_indent, (
++            f"workflow job properties must use four-space indentation in job "
++            f"{job_name}: {line.strip()}"
++        )
++        key, scalar = parse_plain_mapping_entry(
++            line[4:],
++            "job properties",
++            job_name,
++            line,
++        )
++        properties.append((index, key, scalar))
++    return properties
++
++
++def collect_action_refs(job_lines, job_name, properties):
++    steps_headers = [
++        (index, scalar)
++        for index, key, scalar in properties
++        if key == "steps"
++    ]
++    assert len(steps_headers) <= 1, (
++        f"workflow job {job_name} must have at most one steps mapping"
++    )
++    if not steps_headers:
++        return []
++    steps_start, steps_scalar = steps_headers[0]
++    assert is_comment_or_empty(steps_scalar), (
++        f"workflow steps must use canonical block sequence syntax in job {job_name}"
++    )
++    steps_start += 1
++    steps_end = len(job_lines)
++    for index in range(steps_start, len(job_lines)):
++        line = job_lines[index]
++        if not line.strip() or line.lstrip().startswith("#"):
++            continue
++        if line_indentation(line) <= 4:
++            steps_end = index
++            break
++
++    body = job_lines[steps_start:steps_end]
++    significant = [
++        (index, line, line_indentation(line))
++        for index, line in enumerate(body)
++        if line.strip() and not line.lstrip().startswith("#")
++    ]
++    if not significant:
++        return []
++
++    step_starts = []
++    for index, line, indentation in significant:
++        if indentation > 6:
++            continue
++        assert indentation == 6, (
++            f"workflow steps must use six-space sequence indentation in job "
++            f"{job_name}: {line.strip()}"
++        )
++        match = re.fullmatch(r"      -(?: (?P<body>.*))?", line)
++        assert match, (
++            f"workflow step entries must use one space after '-' in job "
++            f"{job_name}: {line.strip()}"
++        )
++        step_starts.append((index, match.group("body") or ""))
++    assert step_starts, f"workflow job {job_name} has no canonical step definitions"
++
++    refs = []
++    for position, (start, first_body) in enumerate(step_starts):
++        end = step_starts[position + 1][0] if position + 1 < len(step_starts) else len(body)
++        fields = []
++        if first_body:
++            fields.append((first_body, body[start]))
++        for line in body[start + 1:end]:
++            if not line.strip() or line.lstrip().startswith("#"):
++                continue

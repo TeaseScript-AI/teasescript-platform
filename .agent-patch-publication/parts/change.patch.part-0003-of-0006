@@ -1,0 +1,76 @@
++            indentation = line_indentation(line)
++            if indentation > 8:
++                continue
++            assert indentation == 8, (
++                f"workflow step fields must use eight-space indentation in job "
+                 f"{job_name}: {line.strip()}"
+             )
+-            return ref
+-    raise AssertionError(
+-        f"unsupported workflow uses scalar in job {job_name}: {line.strip()}"
++            fields.append((line[8:], line))
++        assert fields, f"workflow job {job_name} contains an empty step"
++        for field, source_line in fields:
++            key, scalar = parse_plain_mapping_entry(
++                field,
++                "step fields",
++                job_name,
++                source_line,
++            )
++            if key == "uses":
++                refs.append(parse_uses_scalar(scalar, job_name, source_line))
++    return refs
++
++
++def assert_job_contents_access(job_lines, job_name, properties):
++    permission_headers = [
++        (index, scalar)
++        for index, key, scalar in properties
++        if key == "permissions"
++    ]
++    assert len(permission_headers) == 1, (
++        f"checkout job {job_name} must have one explicit permissions mapping"
++    )
++    permissions_start, permissions_scalar = permission_headers[0]
++    assert is_comment_or_empty(permissions_scalar), (
++        f"checkout job {job_name} permissions must use canonical block mapping syntax"
+     )
++    permissions_start += 1
++    permissions_end = len(job_lines)
++    for index in range(permissions_start, len(job_lines)):
++        line = job_lines[index]
++        if not line.strip() or line.lstrip().startswith("#"):
++            continue
++        if line_indentation(line) <= 4:
++            permissions_end = index
++            break
++
++    entries = []
++    for line in job_lines[permissions_start:permissions_end]:
++        if not line.strip() or line.lstrip().startswith("#"):
++            continue
++        indentation = line_indentation(line)
++        assert indentation == 6, (
++            f"workflow permission entries must use six-space indentation in job "
++            f"{job_name}: {line.strip()}"
++        )
++        entries.append(
++            parse_plain_mapping_entry(
++                line[6:],
++                "permission entries",
++                job_name,
++                line,
++            )
++        )
++    assert entries, f"checkout job {job_name} has an empty permissions mapping"
++    contents_entries = [scalar for key, scalar in entries if key == "contents"]
++    assert len(contents_entries) == 1, (
++        f"checkout job {job_name} lacks exactly one contents read/write permission"
++    )
++    assert re.fullmatch(
++        r"(?:read|write)[ \t]*(?:#.*)?",
++        contents_entries[0],
++    ), f"checkout job {job_name} lacks exactly one contents read/write permission"
+ 
+ 
+ def assert_checkout_jobs_have_contents_access(workflow_text):

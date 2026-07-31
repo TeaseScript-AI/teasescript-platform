@@ -1,0 +1,67 @@
+diff --git a/tools/local-agent/test-patch-publication-workflow.sh b/tools/local-agent/test-patch-publication-workflow.sh
+index bb7d7a7cc0ecb11916ae3731345e31f740b2c3fe..e8b9c53c924db249607c34d10f99f98b0dedadc3 100755
+--- a/tools/local-agent/test-patch-publication-workflow.sh
++++ b/tools/local-agent/test-patch-publication-workflow.sh
+@@ -57,36 +57,216 @@ assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in transfe
+ assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
+ assert "preserved_changed" in transfer_text
+ assert "cleanup-transfer:" in text and "cleanup-comment:" in text
+-def parse_uses_ref(line, job_name):
+-    if re.match(r'^(?:      -[ \t]+|        )["\']uses["\'][ \t]*:', line):
+-        raise AssertionError(
+-            f"workflow uses keys must be unquoted in job {job_name}: {line.strip()}"
+-        )
++# This guard intentionally accepts one canonical block-style YAML subset.
++# Any alternative structure must fail closed rather than bypass action scanning.
++def line_indentation(line):
++    return len(line) - len(line.lstrip(" "))
++
++
++def is_comment_or_empty(value):
++    return re.fullmatch(r"[ \t]*(?:#.*)?", value) is not None
++
++
++def parse_plain_mapping_entry(value, scope, job_name, source_line):
+     match = re.fullmatch(
+-        r"^(?:      -[ \t]+|        )uses[ \t]*:[ \t]*(?P<scalar>.*)",
+-        line,
++        r"(?P<key>[A-Za-z_][A-Za-z0-9_-]*|<<)[ \t]*:[ \t]*(?P<value>.*)",
++        value,
+     )
+     if not match:
+-        return None
++        raise AssertionError(
++            f"workflow {scope} must use unquoted plain mapping keys in job "
++            f"{job_name}: {source_line.strip()}"
++        )
++    key = match.group("key")
++    scalar = match.group("value")
++    if key == "<<" or re.match(r"[&*!]", scalar.lstrip()):
++        raise AssertionError(
++            f"workflow YAML anchors, aliases, tags, and merge keys are unsupported "
++            f"in job {job_name}: {source_line.strip()}"
++        )
++    return key, scalar
++
+ 
+-    scalar = match.group("scalar")
++def parse_uses_scalar(scalar, job_name, source_line):
+     scalar_patterns = [
+-        r"(?P<ref>[^\s#'\"|>]+)(?:[ \t]+#.*)?",
++        r"(?P<ref>[^\\\s#'\"|>\[\]{},]+)(?:[ \t]+#.*)?",
+         r"'(?P<ref>[^']+)'(?:[ \t]+#.*)?",
+-        r'"(?P<ref>[^"]+)"(?:[ \t]+#.*)?',
++        r'"(?P<ref>[^"\\]+)"(?:[ \t]+#.*)?',
+     ]
+     for pattern in scalar_patterns:
+-        scalar_match = re.fullmatch(pattern, scalar)
+-        if scalar_match:
+-            ref = scalar_match.group("ref")
+-            assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", ref), (
+-                f"workflow action refs must use one immutable 40-hex pin in job "
++        match = re.fullmatch(pattern, scalar)
++        if not match:
++            continue
++        ref = match.group("ref")
++        assert re.fullmatch(r"[^@\\\s]+@[0-9a-f]{40}", ref), (
++            f"workflow action refs must use one immutable 40-hex pin in job "

@@ -1,0 +1,71 @@
++        f"      - uses: actions/checkout@{checkout_sha}",
++        "  anchor_target:",
++        "    runs-on: ubuntu-latest",
++        "    permissions:",
++        "      issues: write",
++        "    steps: *checkout_steps",
++        "",
++    ]
+ )
+-assert_unsupported_uses_rejected(
+-    make_checkout_job([f'- "uses": "actions/checkout@{checkout_sha}"']),
+-    "workflow uses keys must be unquoted",
++assert_rejected(aliased_checkout_jobs, "anchors, aliases")
++assert_rejected(
++    make_checkout_job(["- &checkout_step", f"  uses: actions/checkout@{checkout_sha}"]),
++    "workflow",
+ )
+-run_text_only_job = make_checkout_job(
+-    [f"- run: echo actions/checkout@{checkout_sha}"]
++
++for permissions in [
++    "      contents: read\n      contents: none",
++    '      "contents": none',
++    "      contents: *permission",
++]:
++    permission_job = make_checkout_job(
++        [f"- uses: actions/checkout@{checkout_sha}"]
++    ).replace("      issues: write", permissions)
++    assert_rejected(permission_job, "permission")
++
++nested_uses_input_job = "\n".join(
++    [
++        "jobs:",
++        "  nested_uses_input:",
++        "    runs-on: ubuntu-latest",
++        "    permissions:",
++        "      contents: read",
++        "    steps:",
++        f"      - uses: example/action@{checkout_sha}",
++        "        with:",
++        "          uses: candidate-controlled-input",
++        "",
++    ]
+ )
++assert assert_checkout_jobs_have_contents_access(nested_uses_input_job) == [
++    f"example/action@{checkout_sha}"
++]
++run_text_only_job = make_checkout_job([f"- run: echo actions/checkout@{checkout_sha}"])
+ assert assert_checkout_jobs_have_contents_access(run_text_only_job) == []
+ multiline_run_text_job = make_checkout_job(
+     ["- run: |", f"    uses: actions/checkout@{checkout_sha}"]
+ )
+ assert assert_checkout_jobs_have_contents_access(multiline_run_text_job) == []
+-quoted_checkout_job = make_checkout_job(
+-    [f"- uses: actions/checkout@{checkout_sha}"]
+-).replace(
+-    "cleanup_comment: # trusted cleanup",
+-    '"cleanup_comment":',
+-)
+-try:
+-    assert_checkout_jobs_have_contents_access(quoted_checkout_job)
+-except AssertionError as error:
+-    assert str(error) == (
+-        'workflow job keys must be unquoted valid GitHub job IDs: "cleanup_comment":'
+-    )
+-else:
+-    raise AssertionError("quoted workflow job key was not rejected")
++
+ transfer_cleanup = text.split("  cleanup-transfer:\n", 1)[1].split("  cleanup-comment:\n", 1)[0]
+ comment_cleanup = text.split("  cleanup-comment:\n", 1)[1]
+ assert "contents: write" in transfer_cleanup and "issues: write" not in transfer_cleanup

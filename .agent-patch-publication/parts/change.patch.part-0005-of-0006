@@ -1,0 +1,88 @@
+@@ -189,24 +334,13 @@ def make_checkout_job(uses_lines):
+     )
+ 
+ 
+-def assert_missing_contents_rejected(workflow_text):
+-    try:
+-        assert_checkout_jobs_have_contents_access(workflow_text)
+-    except AssertionError as error:
+-        assert str(error) == (
+-            "checkout job cleanup_comment lacks exactly one contents read/write permission"
+-        )
+-    else:
+-        raise AssertionError("checkout job without contents access was not rejected")
+-
+-
+-def assert_unsupported_uses_rejected(workflow_text, expected_fragment):
++def assert_rejected(workflow_text, expected_fragment):
+     try:
+         assert_checkout_jobs_have_contents_access(workflow_text)
+     except AssertionError as error:
+-        assert expected_fragment in str(error)
++        assert expected_fragment in str(error), str(error)
+     else:
+-        raise AssertionError("unsupported workflow uses syntax was not rejected")
++        raise AssertionError("unsafe or unsupported workflow syntax was not rejected")
+ 
+ 
+ refs = assert_checkout_jobs_have_contents_access(text)
+@@ -214,47 +348,103 @@ assert refs
+ checkout_sha = "0" * 40
+ for uses_lines in [
+     [f"- uses: actions/checkout@{checkout_sha}"],
+-    [f"- uses:  actions/checkout@{checkout_sha}"],
+     [f'- uses: "actions/checkout@{checkout_sha}"'],
+     [f"- uses: 'actions/checkout@{checkout_sha}'"],
+     [f"- uses: Actions/Checkout@{checkout_sha}"],
+ ]:
+-    assert_missing_contents_rejected(make_checkout_job(uses_lines))
++    assert_rejected(
++        make_checkout_job(uses_lines),
++        "lacks exactly one contents read/write permission",
++    )
+ 
+-assert_unsupported_uses_rejected(
+-    make_checkout_job(["- uses: >-", f"    actions/checkout@{checkout_sha}"]),
+-    "unsupported workflow uses scalar",
++assert_rejected(
++    make_checkout_job([f"- uses:  actions/checkout@{checkout_sha}"]),
++    "lacks exactly one contents read/write permission",
+ )
+-assert_unsupported_uses_rejected(
+-    make_checkout_job(["- uses: *checkout"]),
+-    "workflow action refs must use one immutable 40-hex pin",
++for noncanonical_lines in [
++    [f" - uses: actions/checkout@{checkout_sha}"],
++    ["-    name: Hidden checkout", f"     uses: actions/checkout@{checkout_sha}"],
++]:
++    assert_rejected(make_checkout_job(noncanonical_lines), "workflow")
++
++for escaped_checkout in (
++    r"actions\/checkout",
++    r"actions\x2fcheckout",
++    r"actions\u002fcheckout",
++):
++    assert_rejected(
++        make_checkout_job([f'- uses: "{escaped_checkout}@{checkout_sha}"']),
++        "unsupported workflow uses scalar",
++    )
++
++for hidden_uses_lines in [
++    ["- uses: >-", f"    actions/checkout@{checkout_sha}"],
++    ["- uses: *checkout"],
++    [f'- "uses": "actions/checkout@{checkout_sha}"'],
++    ["- ? uses", f"  : actions/checkout@{checkout_sha}"],
++    [f'- "u\\u0073es": actions/checkout@{checkout_sha}'],
++    [f"- !!str uses: actions/checkout@{checkout_sha}"],
++    [f"- {{ uses: actions/checkout@{checkout_sha} }}"],
++]:
++    assert_rejected(make_checkout_job(hidden_uses_lines), "workflow")
++
++aliased_checkout_jobs = "\n".join(
++    [
++        "jobs:",
++        "  anchor_source:",
++        "    runs-on: ubuntu-latest",
++        "    permissions:",
++        "      contents: read",
++        "    steps: &checkout_steps",

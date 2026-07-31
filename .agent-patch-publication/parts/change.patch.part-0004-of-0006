@@ -1,0 +1,86 @@
+@@ -106,71 +286,36 @@ def assert_checkout_jobs_have_contents_access(workflow_text):
+             break
+ 
+     job_headers = []
+-    job_header_pattern = re.compile(
++    pattern = re.compile(
+         r"^  (?P<name>[A-Za-z_][A-Za-z0-9_-]*):[ \t]*(?:#.*)?$"
+     )
+     for index in range(jobs_start, jobs_end):
+         line = lines[index]
+-        if not line.startswith("  ") or line.startswith("    "):
+-            continue
+         if not line.strip() or line.lstrip().startswith("#"):
+             continue
+-        match = job_header_pattern.fullmatch(line)
++        indentation = line_indentation(line)
++        if indentation > 2:
++            continue
++        assert indentation == 2, (
++            f"workflow job keys must use two-space indentation: {line.strip()}"
++        )
++        match = pattern.fullmatch(line)
+         assert match, (
+             "workflow job keys must be unquoted valid GitHub job IDs: "
+             f"{line.strip()}"
+         )
+         job_headers.append((index, match.group("name")))
+-
+     assert job_headers, "workflow jobs mapping has no job definitions"
++
+     all_refs = []
+     for position, (start, job_name) in enumerate(job_headers):
+-        end = (
+-            job_headers[position + 1][0]
+-            if position + 1 < len(job_headers)
+-            else jobs_end
+-        )
++        end = job_headers[position + 1][0] if position + 1 < len(job_headers) else jobs_end
+         job_lines = lines[start:end]
+-        refs = [
+-            ref
+-            for line in job_lines
+-            if (ref := parse_uses_ref(line, job_name)) is not None
+-        ]
++        properties = parse_job_properties(job_lines, job_name)
++        refs = collect_action_refs(job_lines, job_name, properties)
+         all_refs.extend(refs)
+-        if not any(ref.rsplit("@", 1)[0].lower() == "actions/checkout" for ref in refs):
+-            continue
+-
+-        permission_headers = [
+-            index
+-            for index, line in enumerate(job_lines)
+-            if re.fullmatch(r"    permissions:[ \t]*(?:#.*)?", line)
+-        ]
+-        assert len(permission_headers) == 1, (
+-            f"checkout job {job_name} must have one explicit permissions mapping"
+-        )
+-        permissions_start = permission_headers[0] + 1
+-        permissions_end = len(job_lines)
+-        for index in range(permissions_start, len(job_lines)):
+-            line = job_lines[index]
+-            if not line.strip() or line.lstrip().startswith("#"):
+-                continue
+-            indentation = len(line) - len(line.lstrip())
+-            if indentation <= 4:
+-                permissions_end = index
+-                break
+-
+-        permissions_lines = job_lines[permissions_start:permissions_end]
+-        contents_entries = [
+-            line
+-            for line in permissions_lines
+-            if re.fullmatch(
+-                r"      contents:[ \t]*(?:read|write)[ \t]*(?:#.*)?",
+-                line,
+-            )
+-        ]
+-        assert len(contents_entries) == 1, (
+-            f"checkout job {job_name} lacks exactly one contents read/write permission"
+-        )
++        if any(ref.rsplit("@", 1)[0].lower() == "actions/checkout" for ref in refs):
++            assert_job_contents_access(job_lines, job_name, properties)
+     return all_refs
+ 
+ 
