@@ -56,11 +56,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def sha256_file(path: Path) -> str:
+def sha256_file(path: Path, *, description: str) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
+    try:
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise fail(f"cannot read {description}: {path}: {exc}") from exc
     return digest.hexdigest()
 
 
@@ -217,7 +220,7 @@ def parse_checksums(path: Path) -> dict[str, str]:
 def verify_internal_checksums(directory: Path) -> str:
     checksums = parse_checksums(directory / "SHA256SUMS")
     for name, expected in checksums.items():
-        actual = sha256_file(directory / name)
+        actual = sha256_file(directory / name, description=name)
         if not hmac.compare_digest(actual, expected):
             raise fail(f"SHA-256 mismatch for {name}: expected {expected}, got {actual}")
     return checksums["repository.bundle"]
@@ -385,7 +388,7 @@ def main() -> int:
     args = parse_args()
     try:
         artifact, output = validate_arguments(args)
-        outer_digest = sha256_file(artifact)
+        outer_digest = sha256_file(artifact, description="artifact")
         if not hmac.compare_digest(outer_digest, args.artifact_sha256):
             raise fail(
                 "outer artifact SHA-256 mismatch: "
@@ -419,6 +422,10 @@ def main() -> int:
         return 0
     except PreparationError as exc:
         print(f"prepare-source-review: FAIL: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        error = fail(f"filesystem operation failed: {exc}")
+        print(f"prepare-source-review: FAIL: {error}", file=sys.stderr)
         return 1
 
 
