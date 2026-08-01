@@ -1,0 +1,66 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "sol/issue-178-short-interaction-handoff",
+  "expectedBaseSha": "5461ceabf13b4c54ea080ab522668d203018ae4a",
+  "expectedResultTreeSha": "d5147aadcf8943c37b74d10dfe27ee48a43771a4",
+  "patchSizeBytes": 133166,
+  "patchSha256": "d06148821324adf844356ce71a56e7359db4b46eda13dcf34a924183dff0b61e",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0011",
+      "sizeBytes": 11480,
+      "sha256": "3cbfcac7a62fc5fbe3ff254736924e608398d3e2c04a91b7570119a027b77a2a"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0011",
+      "sizeBytes": 11938,
+      "sha256": "b723ddb6b429e11f5dc7387d45805b70fc7157a978341c250974906ffc27f504"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0011",
+      "sizeBytes": 12277,
+      "sha256": "a002b65598c16b52fd0517e4bc05de0a3327b48423d41293cd8ff0d3972a1d31"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0011",
+      "sizeBytes": 12267,
+      "sha256": "ef413884622c17375c60b16c8a726fe5a0d861cf8d0f72ecb0572922c0dbbbbd"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0011",
+      "sizeBytes": 12262,
+      "sha256": "da0c1382989d07b730c9e24ee35ddfaba33d75b47ec96d1cf8512b8c58b2cafb"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0006-of-0011",
+      "sizeBytes": 12282,
+      "sha256": "7dc59cbc11a9b2628797ba323423502aa10d20abac80c4cb165b94648780c906"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0007-of-0011",
+      "sizeBytes": 12256,
+      "sha256": "fcf80491c3f82f88e3452bc59a96f5499346e767a8df55192c574361eb96c636"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0008-of-0011",
+      "sizeBytes": 12253,
+      "sha256": "116152abf11e40d5c5fd37a1d41dc546ed2f5bbbedc56981b2eb11b7b0778ac0"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0009-of-0011",
+      "sizeBytes": 12269,
+      "sha256": "27041fa9cb898411aad774e61adc974ed33e15f0280613bbfb24766040c7400d"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0010-of-0011",
+      "sizeBytes": 11696,
+      "sha256": "6bcc29854c5e46eba7433a49492c34e5590d4196bcbc9894d09fb7667a3e2278"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0011-of-0011",
+      "sizeBytes": 12186,
+      "sha256": "f304c387d9ed78d4fa298c0ebcfdc49ad696613da7f7b8c17f3ab4aac6b268e3"
+    }
+  ],
+  "commitMessage": "Simplify interaction result handoff"
+}

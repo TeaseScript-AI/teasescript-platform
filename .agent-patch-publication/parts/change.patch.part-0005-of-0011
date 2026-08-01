@@ -1,0 +1,323 @@
+-    case "loopControl":
+-      candidates.push(instruction.target);
+-      break;
+     case "jumpIfFalse":
+-    case "loopStart":
++    case "loopControl":
+     case "prepareParameterDefault":
+-      candidates.push(instruction.target);
+-      if (next !== null) candidates.push(next);
+-      break;
++      return [instruction.target];
++    case "loopStart":
++      return [instruction.continueTarget, instruction.target];
+     case "callFunction":
+-      if (
+-        returningFunctions === undefined ||
+-        (Number.isSafeInteger(instruction.functionId) &&
+-          returningFunctions.has(instruction.functionId as number))
+-      ) {
+-        candidates.push(instruction.returnInstruction);
+-      }
+-      break;
+-    case "returnValue":
+-    case "returnVoid":
+-    case "exit":
+-      break;
++      return [instruction.returnInstruction];
+     default:
+-      if (next !== null) candidates.push(next);
+-      break;
+-  }
+-  return candidates.filter(
+-    (candidate): candidate is number =>
+-      Number.isSafeInteger(candidate) &&
+-      (candidate as number) >= region.startInstruction &&
+-      (candidate as number) < region.endInstruction,
+-  );
+-}
+-
+-function interactionDestinationMayBeLiveBefore(
+-  instructions: readonly unknown[],
+-  interactionIndex: number,
+-  destinationTemporary: number,
+-  region: InstructionExecutionRegion,
+-  predecessors: readonly (readonly number[])[],
+-  reachable: readonly boolean[],
+-  budget: InteractionControlFlowBudget,
+-): boolean | null {
+-  const pending = [...(predecessors[interactionIndex] ?? [])];
+-  const visited = new Set<number>();
+-  while (pending.length > 0) {
+-    if (!consumeInteractionControlFlowWork(budget)) return null;
+-    const index = pending.pop()!;
+-    if (index < region.startInstruction || index >= region.endInstruction) continue;
+-    if (reachable[index] !== true) continue;
+-    if (visited.has(index)) continue;
+-    visited.add(index);
+-    const instruction = instructions[index];
+-    if (!isRecord(instruction)) continue;
+-    if (instruction.kind === "clearTemporary" && instruction.temporaryId === destinationTemporary) {
+-      continue;
+-    }
+-    if (instructionProducesTemporary(instruction, destinationTemporary)) {
+-      return true;
+-    }
+-    for (const predecessor of predecessors[index] ?? []) pending.push(predecessor);
++      return [];
+   }
+-  return false;
+ }
+ 
+-function instructionProducesTemporary(
++function canonicalHandoffConsumesTemporary(
+   instruction: Record<string, unknown>,
+   temporaryId: number,
+ ): boolean {
+-  return (
+-    (instruction.kind === "storeTemporary" && instruction.temporaryId === temporaryId) ||
+-    (instruction.kind === "prepareReference" && instruction.destinationTemporary === temporaryId) ||
+-    (instruction.kind === "callFunction" && instruction.destinationTemporary === temporaryId) ||
+-    (instruction.kind === "interaction" && instruction.destinationTemporary === temporaryId)
+-  );
++  const expression = instruction.kind === "prepareReference"
++    ? instruction.target
++    : [
++        "declareBinding",
++        "assign",
++        "evaluate",
++        "storeTemporary",
++        "say",
++        "setDeclaredSpeakerProperty",
++        "bindDefaultParameter",
++        "returnValue",
++      ].includes(String(instruction.kind))
++      ? instruction.value
++      : undefined;
++  return expressionContainsTemporary(expression, temporaryId);
+ }
+ 
+-function interactionDestinationIsDiscarded(
+-  instructions: readonly unknown[],
+-  startInstruction: number,
+-  destinationTemporary: number,
+-  region: InstructionExecutionRegion,
+-  foregroundFunctions: ReadonlySet<number>,
+-  returningFunctions: ReadonlySet<number>,
+-  budget: InteractionControlFlowBudget,
+-): boolean | null {
+-  const pending: Array<{ readonly index: number; readonly live: boolean }> = [
+-    { index: startInstruction, live: true },
+-  ];
+-  const entryState = new Map<number, boolean>();
+-  while (pending.length > 0) {
+-    if (!consumeInteractionControlFlowWork(budget)) return null;
+-    const current = pending.pop()!;
+-    if (current.index < region.startInstruction || current.index >= region.endInstruction) {
+-      return current.live ? false : true;
+-    }
+-    const existing = entryState.get(current.index);
+-    if (existing !== undefined) {
+-      if (existing !== current.live) return false;
+-      continue;
+-    }
+-    entryState.set(current.index, current.live);
+-    const instruction = instructions[current.index];
+-    if (!isRecord(instruction)) return false;
+-
+-    if (
+-      current.live &&
+-      (instructionMayRequestForeground(instruction) ||
+-        (instruction.kind === "callFunction" &&
+-          Number.isSafeInteger(instruction.functionId) &&
+-          foregroundFunctions.has(instruction.functionId as number)))
+-    ) return false;
+-
+-    let live = current.live;
+-    if (
+-      instruction.kind === "clearTemporary" &&
+-      instruction.temporaryId === destinationTemporary
+-    ) {
+-      live = false;
+-    } else if (instructionProducesTemporary(instruction, destinationTemporary)) {
+-      if (live) return false;
+-      if (instruction.kind === "interaction") continue;
+-      live = false;
+-    }
+-
+-    if (
+-      instruction.kind === "returnValue" ||
+-      instruction.kind === "returnVoid" ||
+-      instruction.kind === "exit"
+-    ) continue;
+-    if (
+-      instruction.kind === "callFunction" &&
+-      Number.isSafeInteger(instruction.functionId) &&
+-      !returningFunctions.has(instruction.functionId as number)
+-    ) continue;
+-    const successors = instructionRegionSuccessors(
+-      instructions,
+-      current.index,
+-      region,
+-      returningFunctions,
+-    );
+-    if (successors.length === 0) {
+-      if (live) return false;
+-      continue;
+-    }
+-    for (const successor of successors) pending.push({ index: successor, live });
++function expressionContainsTemporary(value: unknown, temporaryId: number): boolean {
++  if (Array.isArray(value)) {
++    return value.some((item) => expressionContainsTemporary(item, temporaryId));
+   }
+-  return true;
++  if (!isRecord(value)) return false;
++  if (value.kind === "temporary") return value.temporaryId === temporaryId;
++  return Object.values(value).some((nested) =>
++    expressionContainsTemporary(nested, temporaryId)
++  );
+ }
+ 
+ function validateInstructionRegionTarget(
+diff --git a/src/runtime/checkpoint.ts b/src/runtime/checkpoint.ts
+index 42e5b33ffbf207d4e12222d528629d3f0014318b..e48bcf4480ec5bfadc3cb05a0da9f29762e9ac70 100644
+--- a/src/runtime/checkpoint.ts
++++ b/src/runtime/checkpoint.ts
+@@ -19,7 +19,7 @@ import {
+ } from "./state.js";
+ 
+ export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
+-export const CHECKPOINT_VERSION = 6;
++export const CHECKPOINT_VERSION = 7;
+ 
+ export interface RuntimeCheckpoint {
+   readonly format: typeof CHECKPOINT_FORMAT;
+@@ -75,6 +75,13 @@ export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {
+   if (!isPlainRecord(stable)) {
+     throw checkpointError("TSK002", "Checkpoint must be a JSON object.", "$.");
+   }
++  if (!hasExactKeys(stable, ["format", "version", "plan", "snapshot"])) {
++    throw checkpointError(
++      "TSK002",
++      "Checkpoint contains unsupported fields or omits required fields.",
++      "$.",
++    );
++  }
+   if (stable.format !== CHECKPOINT_FORMAT) {
+     throw checkpointError("TSK001", "Unsupported checkpoint format.", "$.format");
+   }
+@@ -198,6 +205,11 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
+   return prototype === Object.prototype || prototype === null;
+ }
+ 
++function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
++  const keys = Object.keys(value);
++  return keys.length === expected.length && expected.every((key) => keys.includes(key));
++}
++
+ function deepFreeze<T>(value: T): T {
+   if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
+   for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
+diff --git a/src/runtime/engine.ts b/src/runtime/engine.ts
+index ba0f7f64959db94ae4ead53009822ff42f650fe9..8962061868a034036d8663c8e344da5034c888b0 100644
+--- a/src/runtime/engine.ts
++++ b/src/runtime/engine.ts
+@@ -370,14 +370,7 @@ function executePlannedInstruction(
+       const index = snapshot.temporaries.findIndex(
+         (temporary) => temporary.id === instruction.temporaryId,
+       );
+-      if (index >= 0) {
+-        releaseInteractionSettlementDestination(
+-          snapshot,
+-          currentCallFrameId(snapshot),
+-          instruction.temporaryId,
+-        );
+-        snapshot.temporaries.splice(index, 1);
+-      }
++      if (index >= 0) snapshot.temporaries.splice(index, 1);
+       advance(snapshot);
+       return;
+     }
+@@ -438,7 +431,6 @@ function executePlannedInstruction(
+         throw fault("TSR050", "Wait duration cannot produce a representable future deadline.", instruction.duration.span);
+       }
+       if (durationMs === 0) { advance(snapshot); return; }
+-      assertNoLiveInteractionSettlement(snapshot, instruction.span);
+       if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+       assertEventSequenceCapacity(snapshot, 2, instruction.span);
+       const sequence = takeSequence(snapshot);
+@@ -450,7 +442,6 @@ function executePlannedInstruction(
+       return;
+     }
+     case "interaction": {
+-      assertNoLiveInteractionSettlement(snapshot, instruction.span);
+       if (
+         instruction.destinationTemporary !== null &&
+         snapshot.temporaries.some((temporary) =>
+@@ -494,7 +485,6 @@ function executePlannedInstruction(
+       return;
+     }
+     case "exit":
+-      releaseInteractionSettlementDestination(snapshot, undefined);
+       snapshot.defaultSpeaker = null;
+       snapshot.contextualSpeaker = null;
+       snapshot.frames.splice(1);
+@@ -700,7 +690,6 @@ function returnFromFunction(
+ ): void {
+   const { frame } = activeFunction(plan, snapshot, span);
+   const returned = cloneSerializableValue(value);
+-  releaseInteractionSettlementDestination(snapshot, frame.id);
+   snapshot.frames.splice(frame.scopeBaseDepth);
+   snapshot.loopFrames.splice(frame.loopBaseDepth);
+   snapshot.callFrames.pop();
+@@ -2299,38 +2288,6 @@ function cloneInteractionAction(action: RuntimeInteractionActionSnapshot): Runti
+ 
+ 
+ 
+-function assertNoLiveInteractionSettlement(
+-  snapshot: RuntimeSnapshot,
+-  span: SourceSpan,
+-): void {
+-  if (
+-    snapshot.lastSettlement?.actionKind === "interaction" &&
+-    snapshot.lastSettlementResultState === "live"
+-  ) {
+-    throw fault(
+-      "TSR050",
+-      "Interaction result must be consumed or cleared before another foreground action.",
+-      span,
+-    );
+-  }
+-}
+-
+-function releaseInteractionSettlementDestination(
+-  snapshot: RuntimeSnapshot,
+-  ownerCallFrameId: number | null | undefined,
+-  destinationTemporary?: number,
+-): void {
+-  const settlement = snapshot.lastSettlement;
+-  if (
+-    settlement?.actionKind !== "interaction" ||
+-    snapshot.lastSettlementResultState !== "live" ||
+-    (ownerCallFrameId !== undefined && settlement.ownerCallFrameId !== ownerCallFrameId) ||
+-    (destinationTemporary !== undefined &&
+-      settlement.destinationTemporary !== destinationTemporary)
+-  ) return;
+-  snapshot.lastSettlementResultState = "released";
+-}
+-
+ function currentCallFrameId(snapshot: RuntimeSnapshot): number | null {
+   return snapshot.callFrames.at(-1)?.id ?? null;
+ }
+diff --git a/src/runtime/operations/complete-action.ts b/src/runtime/operations/complete-action.ts
+index a85591c81033f67e899cdfadc70ffb441f1488e4..f10b5a21b8f7804f0f56d86ff0a78b92f8473a59 100644
+--- a/src/runtime/operations/complete-action.ts
++++ b/src/runtime/operations/complete-action.ts
+@@ -79,7 +79,6 @@ function completeInteraction(
+   });
+   current.foregroundAction = null;
+   current.lastSettlement = settlement;
+-  current.lastSettlementResultState = action.destinationTemporary === null ? "none" : "live";
+   current.status = "running";
+   current.nextInstruction = action.continuationInstruction;
+   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;

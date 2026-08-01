@@ -1,0 +1,264 @@
++      : undefined;
++  if (ownerFunctionId === null || (ownerFunctionId === undefined && settlement.ownerCallFrameId === null)) {
++    if (settlement.ownerCallFrameId !== null || callFrames.length !== 0) return false;
++  } else {
++    if (
++      !positiveSafeInteger(settlement.ownerCallFrameId) ||
++      !isPlainRecord(activeOwner) ||
++      activeOwner.id !== settlement.ownerCallFrameId ||
++      (ownerFunctionId !== undefined && activeOwner.functionId !== ownerFunctionId)
++    ) return false;
+   }
+-  if (!positiveSafeInteger(settlement.ownerCallFrameId)) return null;
+-  const ownerIndex = callFrames.findIndex((frame) =>
+-    isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId
++  const temporaries = snapshot.temporaries;
++  if (!Array.isArray(temporaries)) return false;
++  const destination = temporaries.find((temporary) =>
++    isPlainRecord(temporary) && temporary.id === settlement.destinationTemporary
+   );
+-  if (ownerIndex < 0) return null;
+-  if (ownerIndex === callFrames.length - 1) {
+-    return nonNegativeSafeInteger(snapshot.nextInstruction)
+-      ? { currentInstruction: snapshot.nextInstruction }
+-      : null;
+-  }
+-  const child = callFrames[ownerIndex + 1];
+-  return isPlainRecord(child) && nonNegativeSafeInteger(child.returnInstruction)
+-    ? { currentInstruction: child.returnInstruction - 1 }
+-    : null;
+-}
+-
+-function interactionSettlementDestinationStatesAtCurrent(
+-  owningInstruction: number,
+-  continuationInstruction: number,
+-  currentInstruction: number,
+-  destinationTemporary: number,
+-  analysis: SnapshotValidationAnalysis,
+-): { readonly live: boolean; readonly released: boolean } | null {
+-  const ownerFunctionId = analysis.functionIdsByInstruction[owningInstruction] ?? null;
+-  const regionEnd = analysis.regionEnds[owningInstruction];
+-  if (
+-    regionEnd === undefined ||
+-    continuationInstruction > regionEnd ||
+-    currentInstruction < 0 ||
+-    currentInstruction > regionEnd
+-  ) return null;
+-
+-  const pending: Array<{ readonly instruction: number; readonly live: boolean }> = [
+-    { instruction: continuationInstruction, live: true },
+-  ];
+-  const visited = new Set<string>();
+-  let mayLive = false;
+-  let mayReleased = false;
+-  while (pending.length > 0) {
+-    if (!consumeDetailedValidationWork(analysis)) return null;
+-    const current = pending.pop()!;
+-    const key = `${current.instruction}:${current.live ? 1 : 0}`;
+-    if (visited.has(key)) continue;
+-    visited.add(key);
+-    if (current.instruction === currentInstruction) {
+-      if (current.live) mayLive = true;
+-      else mayReleased = true;
+-      continue;
+-    }
+-    if (
+-      current.instruction < 0 ||
+-      current.instruction >= regionEnd ||
+-      analysis.functionIdsByInstruction[current.instruction] !== ownerFunctionId
+-    ) continue;
+-    const instruction = analysis.plan.instructions[current.instruction];
+-    if (instruction === undefined) continue;
+-    const live = current.live &&
+-      !instructionKilledTemporaries(instruction).has(destinationTemporary);
+-    for (const successor of instructionSuccessors(analysis, current.instruction)) {
+-      pending.push({ instruction: successor, live });
+-    }
+-  }
+-  return mayLive || mayReleased
+-    ? { live: mayLive, released: mayReleased }
+-    : null;
++  return isPlainRecord(destination) &&
++    sameCanonicalSettlementResult(destination.value, settlement.result);
+ }
+ 
+ function validSettlementChronology(
+diff --git a/src/validation-testing.ts b/src/validation-testing.ts
+index e8ebb6f239fa3ea8aeb1c4a66cd17ae740cbfee2..43766281317d12220908bd297cfffeb7d9263e8b 100644
+--- a/src/validation-testing.ts
++++ b/src/validation-testing.ts
+@@ -5,7 +5,6 @@ export interface ValidationTestStatistics {
+ 
+ let active: Record<string, number> | null = null;
+ let detailedValidationWorkLimit: number | null = null;
+-let interactionControlFlowWorkLimit: number | null = null;
+ 
+ export function beginValidationTestStatistics(): () => ValidationTestStatistics {
+   if (active !== null) {
+@@ -57,29 +56,6 @@ export function detailedValidationWorkLimitForTesting(): number | null {
+   return detailedValidationWorkLimit;
+ }
+ 
+-/** Test-only override for instruction-plan interaction CFG validation. */
+-export function withInteractionControlFlowWorkLimitForTesting<T>(
+-  limit: number,
+-  callback: () => T,
+-): T {
+-  if (!Number.isSafeInteger(limit) || limit < 0) {
+-    throw new Error("The interaction control-flow test work limit must be a non-negative safe integer.");
+-  }
+-  if (interactionControlFlowWorkLimit !== null) {
+-    throw new Error("An interaction control-flow test work limit is already active.");
+-  }
+-  interactionControlFlowWorkLimit = limit;
+-  try {
+-    return callback();
+-  } finally {
+-    interactionControlFlowWorkLimit = null;
+-  }
+-}
+-
+-export function interactionControlFlowWorkLimitForTesting(): number | null {
+-  return interactionControlFlowWorkLimit;
+-}
+-
+ export function recordValidationTestWork(name: string, amount = 1): void {
+   if (active !== null) active[name] = (active[name] ?? 0) + amount;
+ }
+diff --git a/tests/foreground-interactions-runtime.test.ts b/tests/foreground-interactions-runtime.test.ts
+index 967f0cc162a10059bdc91826393bd0108400a8b7..fee019ad4d5c8e7d0cada9725d480c17511c28df 100644
+--- a/tests/foreground-interactions-runtime.test.ts
++++ b/tests/foreground-interactions-runtime.test.ts
+@@ -11,12 +11,9 @@ import {
+ import type { InstructionPlan, InteractionInstruction, InteractionUiPayload } from "../src/plan/model.js";
+ import { validateInstructionPlan } from "../src/plan/validation.js";
+ import { createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
+-import { completeAction, observeTime, run, stepToEvent } from "../src/runtime/engine.js";
++import { completeAction, executeInstruction, observeTime, run } from "../src/runtime/engine.js";
+ import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+-import {
+-  withInteractionControlFlowWorkLimitForTesting,
+-  withValidationTestStatistics,
+-} from "../src/validation-testing.js";
++import { withValidationTestStatistics } from "../src/validation-testing.js";
+ 
+ function interactionPlan(interactionKind: InteractionInstruction["interactionKind"], ui: InteractionUiPayload, options: { speaker?: string | null } = {}): InstructionPlan {
+   const source = options.speaker === undefined ? "wait 1\nexit" : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;
+@@ -727,68 +724,6 @@ test("numeric settlement destinations distinguish canonical zero from negative z
+   }
+ });
+ 
+-test("result interactions require clear or discarding control flow on every path", () => {
+-  for (const [kind, ui] of [
+-    ["text", { kind: "text", hint: null, accessibleName: defaults.text }],
+-    ["number", { kind: "number", hint: null, accessibleName: defaults.number }],
+-    ["choice", { kind: "choice", labelType: "none", options: [{ text: "One", label: null }], accessibleName: defaults.choice }],
+-  ] as const) {
+-    const base = interactionPlan(kind, ui);
+-    const unrelated = structuredClone(base) as any;
+-    unrelated.instructions[1] = {
+-      kind: "say",
+-      speaker: null,
+-      value: { kind: "literal", value: "done", span: unrelated.instructions[1].span },
+-      span: unrelated.instructions[1].span,
+-    };
+-    assert.equal(validateInstructionPlan(unrelated).valid, false, kind);
+-
+-    const valid = structuredClone(base) as any;
+-    const span = valid.instructions[0].span;
+-    valid.instructions = [
+-      valid.instructions[0],
+-      { kind: "evaluate", expression: { kind: "temporary", temporaryId: 1, span }, span },
+-      { kind: "clearTemporary", temporaryId: 1, span },
+-    ];
+-    valid.rootEndInstruction = 3;
+-    assert.equal(validateInstructionPlan(valid).valid, true, kind);
+-  }
+-
+-  const branch = structuredClone(interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text })) as any;
+-  const span = branch.instructions[0].span;
+-  branch.instructions = [
+-    branch.instructions[0],
+-    { kind: "jumpIfFalse", condition: { kind: "literal", value: true, span }, target: 4, span },
+-    { kind: "clearTemporary", temporaryId: 1, span },
+-    { kind: "jump", target: 6, span },
+-    { kind: "say", speaker: null, value: { kind: "literal", value: "uncleared", span }, span },
+-    { kind: "jump", target: 6, span },
+-  ];
+-  branch.rootEndInstruction = 6;
+-  assert.equal(validateInstructionPlan(branch).valid, false);
+-  branch.instructions[4] = { kind: "clearTemporary", temporaryId: 1, span };
+-  assert.equal(validateInstructionPlan(branch).valid, true);
+-
+-  const compiledLoop = compileSource("repeat 2 { wait 1 }\nexit").plan!;
+-  const waitIndex = compiledLoop.instructions.findIndex((instruction) => instruction.kind === "wait");
+-  const loopInteraction = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text }).instructions[0] as InteractionInstruction;
+-  const loopPlan = structuredClone(compiledLoop) as any;
+-  loopPlan.temporaryCount = 1;
+-  loopPlan.instructions[waitIndex] = { ...loopInteraction, span: loopPlan.instructions[waitIndex].span };
+-  loopPlan.instructions.splice(waitIndex + 1, 0, { kind: "clearTemporary", temporaryId: 1, span: loopPlan.instructions[waitIndex].span });
+-  loopPlan.rootEndInstruction += 1;
+-  loopPlan.instructions[0].target += 1;
+-  assert.equal(validateInstructionPlan(loopPlan).valid, true, JSON.stringify(validateInstructionPlan(loopPlan).errors));
+-  let loopState = waiting(loopPlan).snapshot;
+-  for (let iteration = 0; iteration < 2; iteration += 1) {
+-    const completed = completeAction(loopPlan, loopState, { actionId: loopState.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: `answer${iteration}` } });
+-    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(loopPlan, completed.snapshot)));
+-    loopState = run(restored.plan, restored.snapshot).snapshot;
+-  }
+-  assert.equal(loopState.status, "halted");
+-  assert.equal(validateRuntimeSnapshot(loopState, loopPlan).valid, true);
+-});
+-
+ test("completed text settlements retain only canonical non-whitespace LF text", () => {
+   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
+   const completed = complete(plan, { kind: "submittedText", submittedText: "value" }, "text").snapshot;
+@@ -956,7 +891,6 @@ test("accepted text completions perform one bounded UTF-8 measurement before nor
+   }
+ });
+ 
+-
+ test("result interactions reject occupied destinations before pending-action creation", () => {
+   const base = interactionPlan("text", {
+     kind: "text",
+@@ -983,7 +917,7 @@ test("result interactions reject occupied destinations before pending-action cre
+   const planValidation = validateInstructionPlan(occupiedPlan);
+   assert.equal(planValidation.valid, false);
+   assert.ok(planValidation.errors.some((error) =>
+-    error.message.includes("may already be live")
++    error.message.includes("produced only by their owning interaction")
+   ));
+ 
+   const hostileSnapshot = createFreshRuntimeSnapshot(base);
+@@ -997,403 +931,591 @@ test("result interactions reject occupied destinations before pending-action cre
+   assert.equal(hostileSnapshot.nextEventSequence, before.nextEventSequence);
+ });
+ 
+-test("interaction settlement provenance survives unrelated instructions until clear or overwrite", () => {
+-  const base = interactionPlan("text", {
+-    kind: "text",
+-    hint: null,
+-    accessibleName: defaults.text,
+-  });
+-  const interaction = base.instructions[0]!;
+-  const exit = base.instructions[1]!;
+-  const span = interaction.span;
+-  const preservingPlan: InstructionPlan = {
+-    ...base,
+-    rootEndInstruction: 5,
+-    instructions: [
+-      interaction,
+-      {
+-        kind: "say",
+-        speaker: null,
+-        value: { kind: "literal", value: "between", span },
+-        span,
+-      },
+-      {
+-        kind: "evaluate",
+-        expression: { kind: "temporary", temporaryId: 1, span },
+-        span,
+-      },
+-      { kind: "clearTemporary", temporaryId: 1, span },
+-      exit,
+-    ],

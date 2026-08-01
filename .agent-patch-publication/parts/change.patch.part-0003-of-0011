@@ -1,0 +1,143 @@
+-- Detailed instruction-plan validation builds one local instruction-owner/function index. Detailed snapshot validation builds one local function/region index, call-frame argument and temporary maps, and reuses continuation-liveness results for each validated active-loop variant. These are operation-local only; no untrusted plan or snapshot data enters a global cache. The remaining fixed-point liveness work, its table allocation, and every cached loop-state variant share a deterministic 1,000,000-unit per-validation allowance. Exhaustion is rejected through runtime-snapshot validation before execution, mutation, event emission, or RNG advancement.
++- Detailed instruction-plan validation builds one local instruction-owner/function index. Detailed snapshot validation builds one local function/region index, call-frame argument and temporary maps, and reuses suspended-continuation liveness results for each validated active-loop variant. These are operation-local only; no untrusted plan or snapshot data enters a global cache. That independently required fixed-point work, its table allocation, and every cached loop-state variant share a deterministic 1,000,000-unit per-validation allowance. Exhaustion is rejected through runtime-snapshot validation before execution, mutation, event emission, or RNG advancement.
++- Interaction-result handoff validation is a fixed local structural check and does not add another control-flow fixed point, future-writer scan, or settlement-provenance cache.
+ - Package code has no unrestricted external network access; published media uses platform-managed storage/CDN.
+ - Future external APIs use platform-managed typed integrations.
+ - LLM output is untrusted input and may not directly rewrite canonical state or bypass deterministic rules.
+@@ -36,7 +37,7 @@ ADR 0016 adds these requirements:
+ 
+ The implemented foreground-interaction boundary captures each completion request through the shared stable external-data graph before inspecting it. Version-1 interaction limits permit at most `65,536` UTF-8 bytes per string, `65,536` UTF-8 bytes across retained strings in one action, and `4,096` choice entries. Plan and snapshot validation stop UTF-8 encoding after the first per-string or aggregate failure, use set-based duplicate checks and bounded linear matching, and reject unknown persisted interaction fields so hidden data cannot bypass the byte budget. Over-limit definitions and completions are rejected without truncation or partial mutation. These technical ceilings are not UI length recommendations.
+ 
+-The engine, not the caller, normalizes text, parses numbers, resolves choice labels/text, and derives player transcript content. Successful completion emits `playerTranscript` before `actionCompleted`; invalid or duplicate attempts emit neither event. Interaction result destinations, speaker IDs, target, ownership, options, settlement results, and transcript text are validated against the immutable plan and current snapshot.
++The engine, not the caller, normalizes text, parses numbers, resolves choice labels/text, and derives player transcript content. Successful completion emits `playerTranscript` before `actionCompleted`; invalid or duplicate attempts emit neither event. Interaction result destinations, speaker IDs, target, ownership, options, settlement results, and transcript text are validated against the immutable plan and current snapshot. A result is atomically committed into a prepared ordinary runtime destination; `lastSettlement` remains bounded replay data and is not an authority for later destination liveness.
+ 
+ Camera permission, long-lived stream ownership, device switching, captured-media retention, encryption, persistent collections, and player-visible privacy indicators require a separate accepted camera/media design. Selected direction and open questions are recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
+ 
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index 4f417fab28ef2ddf18d35b48e907b1a8338af78c..a1cba0b22171cd59b887eb1140fdc43b27617436 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -339,7 +339,7 @@ Timed actions must use an injected fake clock or equivalent deterministic time s
+ 
+ ADR 0016 defines the shared contract; action-specific tests remain required for each later API and UI behavior.
+ 
+-The implemented ADR 0018 runtime foundation adds manual validated-plan coverage for button, text, number, unlabelled choice, identifier-labelled choice, and numeric-labelled choice. Tests cover exact normalization/parsing, ambiguous typed choices, canonical transcript ordering and requesting-speaker provenance, duplicate/stale/unknown/wrong-kind classification, checkpoint JSON round trips, destination absence before action creation, immutable settlement replay plus separate live/released result lifecycle after intervening instructions and across suspended caller temporaries, destination liveness through branches/loops/returns/exits, rejection of ambiguous lifecycle merges and newer foreground actions while a result is live, bounded interaction control-flow work, exact event-capacity boundaries, exact UTF-8 and option boundaries with measurement instrumentation, unknown persisted fields, malformed actions/settlements, and hostile completion capture. Every rejected completion compares the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot change unnoticed. Parser/compiler syntax and browser UI coverage remain assigned to their later implementation slices.
++The implemented ADR 0018 runtime foundation adds manual validated-plan coverage for button, text, number, unlabelled choice, identifier-labelled choice, and numeric-labelled choice. Tests cover exact normalization/parsing, ambiguous typed choices, canonical transcript ordering and requesting-speaker provenance, duplicate/stale/unknown/wrong-kind classification, pending and post-completion checkpoint JSON round trips, destination absence before action creation, direct atomic result commit, one local consume/transfer-and-clear boundary, exact-once transfer, result independence from a newer settlement, and source-shaped bindings, assignments, function arguments, nested functions, suspended caller arguments, and source-order-sensitive expressions through private test-only plan injection. Non-canonical branches, loops, second actions, unrelated writers, duplicate producers, and independent targets inside the handoff are rejected locally rather than supported through global interaction-result liveness. Tests also retain exact event-capacity boundaries, exact UTF-8 and option boundaries with measurement instrumentation, unknown persisted fields, malformed actions/settlements, and hostile completion capture. Every rejected completion compares the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot change unnoticed. Parser/compiler syntax and browser UI coverage remain assigned to their later implementation slices.
+ 
+ ## Browser E2E gate
+ 
+diff --git a/docs/decisions/0018-first-standard-library-poc-contract.md b/docs/decisions/0018-first-standard-library-poc-contract.md
+index 059af774ae130bf4caa8cea6fc3ebb8730a5e971..d98930dfe515c6296c944331c0d47dba32ded6a3 100644
+--- a/docs/decisions/0018-first-standard-library-poc-contract.md
++++ b/docs/decisions/0018-first-standard-library-poc-contract.md
+@@ -11,7 +11,7 @@ The next POC needs one implementation contract for ordinary chat output and basi
+ 
+ The owner explicitly extended the issue discussion to decide that the normal Player application has no player-facing pause control. This does not decide browser-unavailability, reload, reconnect, device-sleep, or server-authoritative time policy.
+ 
+-This ADR is documentation and design only. It does not implement parser, compiler, runtime, Player application, editor, or Standard Library code.
++This ADR was accepted as documentation and design. Its generic foreground-interaction runtime is now partially implemented. The implementation uses an owner-approved short canonical result handoff: completion atomically commits a typed result into prepared ordinary runtime state, normal execution consumes or transfers it through one local boundary, and bounded `lastSettlement` remains replay data only. This implementation choice preserves the ADR's typed completion, event ordering, checkpoint, restore, and later-normal-entry requirements without adding a second lifecycle.
+ 
+ ## Decision summary
+ 
+diff --git a/src/plan/model.ts b/src/plan/model.ts
+index 2886d5a88d27a0108a316496890a87a4513fa123..0a7b954d5a27340c7ac6ab74d89ba78ac14a3a67 100644
+--- a/src/plan/model.ts
++++ b/src/plan/model.ts
+@@ -1,7 +1,7 @@
+ import type { SourceSpan } from "../source.js";
+ 
+ export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
+-export const INSTRUCTION_PLAN_VERSION = 5;
++export const INSTRUCTION_PLAN_VERSION = 6;
+ 
+ export interface InstructionPlan {
+   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
+diff --git a/src/plan/validation.ts b/src/plan/validation.ts
+index b6879e08d3d69eff6b027bf1c2baee01afa79e63..029daa9fc644e105b5bce52467da1e8539ffb3c5 100644
+--- a/src/plan/validation.ts
++++ b/src/plan/validation.ts
+@@ -5,11 +5,7 @@ import {
+   MAX_INTERACTION_OPTION_ENTRIES,
+   MAX_INTERACTION_STRING_UTF8_BYTES,
+ } from "../interaction-limits.js";
+-import { MAX_EXTERNAL_RUNTIME_DATA_WORK } from "../external-data-limits.js";
+-import {
+-  interactionControlFlowWorkLimitForTesting,
+-  recordValidationTestWork,
+-} from "../validation-testing.js";
++import { recordValidationTestWork } from "../validation-testing.js";
+ import {
+   INSTRUCTION_PLAN_FORMAT,
+   INSTRUCTION_PLAN_VERSION,
+@@ -791,118 +787,6 @@ function createPlanValidationIndex(
+   return { owners, functionsById };
+ }
+ 
+-function instructionMayRequestForeground(
+-  instruction: Record<string, unknown>,
+-): boolean {
+-  if (instruction.kind === "interaction") return true;
+-  if (instruction.kind !== "wait") return false;
+-  return !(
+-    isRecord(instruction.duration) &&
+-    instruction.duration.kind === "literal" &&
+-    instruction.duration.value === 0
+-  );
+-}
+-
+-function collectReturningFunctions(
+-  instructions: readonly unknown[],
+-  functions: readonly ValidatedFunctionRange[],
+-  budget: InteractionControlFlowBudget,
+-): ReadonlySet<number> {
+-  const returning = new Set<number>();
+-  let changed = true;
+-  while (changed && !budget.exceeded) {
+-    changed = false;
+-    for (const definition of functions) {
+-      if (returning.has(definition.id)) continue;
+-      const region: InstructionExecutionRegion = {
+-        kind: "function",
+-        functionId: definition.id,
+-        startInstruction: definition.entryInstruction,
+-        endInstruction: definition.endInstruction,
+-      };
+-      const pending = [definition.entryInstruction];
+-      const visited = new Set<number>();
+-      while (pending.length > 0) {
+-        if (!consumeInteractionControlFlowWork(budget)) break;
+-        const instructionIndex = pending.pop()!;
+-        if (visited.has(instructionIndex)) continue;
+-        visited.add(instructionIndex);
+-        const instruction = instructions[instructionIndex];
+-        if (!isRecord(instruction)) continue;
+-        if (instruction.kind === "returnValue" || instruction.kind === "returnVoid") {
+-          returning.add(definition.id);
+-          changed = true;
+-          break;
+-        }
+-        for (const successor of instructionRegionSuccessors(
+-          instructions,
+-          instructionIndex,
+-          region,
+-          returning,
+-        )) {
+-          if (!consumeInteractionControlFlowWork(budget)) break;
+-          if (!visited.has(successor)) pending.push(successor);
+-        }
+-      }
+-      if (budget.exceeded) break;
+-    }
+-  }
+-  return returning;
+-}
+-
+-function collectForegroundFunctions(
+-  instructions: readonly unknown[],
+-  functions: readonly ValidatedFunctionRange[],
+-  returningFunctions: ReadonlySet<number>,
+-  budget: InteractionControlFlowBudget,
+-): ReadonlySet<number> {
+-  const foreground = new Set<number>();
+-  let changed = true;
+-  while (changed && !budget.exceeded) {

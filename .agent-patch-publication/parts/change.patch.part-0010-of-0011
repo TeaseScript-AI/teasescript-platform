@@ -1,0 +1,333 @@
++    assert.equal(validateRuntimeSnapshot(final.snapshot, injected.plan).valid, true, entry.name);
++  }
++
++  const complex = injectTextInteraction([
++    'function foo { say "foo"\nreturn "first" }',
++    'function bar { say "bar"\nreturn "third" }',
++    'function send(first, answer, third) { say `${first}:${answer}:${third}`\nreturn }',
++    'send(foo(), "__interaction_result__", bar())',
++    'exit',
++  ].join("\n"));
++  const beforeInteraction = run(complex.plan, createFreshRuntimeSnapshot(complex.plan));
++  assert.equal(beforeInteraction.snapshot.status, "waiting");
++  assert.deepEqual(
++    beforeInteraction.events.filter((event) => event.kind === "say").map((event) => event.text),
++    ["foo"],
++  );
++  const completed = completeAction(complex.plan, beforeInteraction.snapshot, {
++    actionId: beforeInteraction.snapshot.foregroundAction!.actionId,
++    actionKind: "interaction",
++    interactionKind: "text",
++    payload: { kind: "submittedText", submittedText: "middle" },
+   });
+-  const span = base.instructions[0]!.span;
+-  const plan: InstructionPlan = {
+-    ...base,
+-    temporaryCount: 1,
+-    rootEndInstruction: 5,
+-    instructions: [
+-      { kind: "jump", target: 2, span },
+-      {
+-        kind: "storeTemporary",
+-        temporaryId: 1,
+-        value: { kind: "literal", value: "unreachable", span },
+-        expectBoolean: false,
+-        span,
+-      },
+-      base.instructions[0]!,
+-      { kind: "clearTemporary", temporaryId: 1, span },
+-      base.instructions[1]!,
+-    ],
+-  };
+   assert.equal(
+-    validateInstructionPlan(plan).valid,
++    completed.events.some((event) => event.kind === "say" && event.text === "bar"),
++    false,
++  );
++  const final = run(complex.plan, completed.snapshot);
++  assert.deepEqual(
++    final.events.filter((event) => event.kind === "say").map((event) => event.text),
++    ["bar", "first:middle:third"],
++  );
++
++  const suspendedCaller = injectTextInteraction([
++    'function first { return "first" }',
++    'function prompt { return "__interaction_result__" }',
++    'function send(before, answer) { say `${before}:${answer}`\nreturn }',
++    'send(first(), prompt())',
++    'exit',
++  ].join("\n"));
++  const suspendedPending = waiting(suspendedCaller.plan);
++  assert.equal(suspendedPending.snapshot.callFrames.length, 1);
++  assert.ok(
++    suspendedPending.snapshot.callFrames[0]!.callerTemporaries.some(
++      (temporary) => temporary.value === "first",
++    ),
++  );
++  const suspendedCompleted = completeAction(
++    suspendedCaller.plan,
++    suspendedPending.snapshot,
++    {
++      actionId: suspendedPending.snapshot.foregroundAction!.actionId,
++      actionKind: "interaction",
++      interactionKind: "text",
++      payload: { kind: "submittedText", submittedText: "middle" },
++    },
++  );
++  const suspendedFinal = run(suspendedCaller.plan, suspendedCompleted.snapshot);
++  assert.ok(
++    suspendedFinal.events.some(
++      (event) => event.kind === "say" && event.text === "first:middle",
++    ),
++  );
++  assert.equal(
++    validateRuntimeSnapshot(suspendedFinal.snapshot, suspendedCaller.plan).valid,
+     true,
+-    JSON.stringify(validateInstructionPlan(plan).errors),
+   );
+-  const pending = run(plan, createFreshRuntimeSnapshot(plan));
+-  assert.equal(pending.snapshot.status, "waiting");
+-  assert.equal(pending.snapshot.foregroundAction?.kind, "interaction");
+-  assert.deepEqual(pending.snapshot.temporaries, []);
+ });
+ 
+-test("interaction result provenance cannot become ambiguous at a control-flow merge", () => {
+-  const base = interactionPlan("text", {
+-    kind: "text",
+-    hint: null,
+-    accessibleName: defaults.text,
++test("a later foreground settlement replaces replay data without changing the ordinary result", () => {
++  const injected = injectTextInteraction(
++    'let answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit',
++  );
++  const pending = waiting(injected.plan);
++  const completed = completeAction(injected.plan, pending.snapshot, {
++    actionId: pending.snapshot.foregroundAction!.actionId,
++    actionKind: "interaction",
++    interactionKind: "text",
++    payload: { kind: "submittedText", submittedText: "kept" },
+   });
+-  const interaction = base.instructions[0]!;
+-  const exit = base.instructions[1]!;
+-  const span = interaction.span;
+-  const ambiguous: InstructionPlan = {
+-    ...base,
+-    rootEndInstruction: 10,
+-    instructions: [
+-      interaction,
+-      {
+-        kind: "jumpIfFalse",
+-        condition: { kind: "literal", value: true, span },
+-        target: 4,
+-        span,
+-      },
+-      {
+-        kind: "say",
+-        speaker: null,
+-        value: { kind: "literal", value: "preserve", span },
+-        span,
+-      },
+-      { kind: "jump", target: 6, span },
+-      { kind: "clearTemporary", temporaryId: 1, span },
+-      {
+-        kind: "storeTemporary",
+-        temporaryId: 1,
+-        value: { kind: "literal", value: "replacement", span },
+-        expectBoolean: false,
+-        span,
+-      },
+-      {
+-        kind: "say",
+-        speaker: null,
+-        value: { kind: "literal", value: "join", span },
+-        span,
+-      },
+-      {
+-        kind: "evaluate",
+-        expression: { kind: "temporary", temporaryId: 1, span },
+-        span,
+-      },
+-      { kind: "clearTemporary", temporaryId: 1, span },
+-      exit,
+-    ],
++  const cleared = executeInstruction(
++    injected.plan,
++    executeInstruction(injected.plan, completed.snapshot).snapshot,
++  );
++  const delayPending = run(injected.plan, cleared.snapshot);
++  assert.equal(delayPending.snapshot.foregroundAction?.kind, "delay");
++  const delayCompleted = observeTime(injected.plan, delayPending.snapshot, 1);
++  assert.equal(delayCompleted.snapshot.lastSettlement?.actionKind, "delay");
++  assert.equal(
++    delayCompleted.snapshot.frames[0]!.bindings.find((binding) => binding.name === "answer")?.value,
++    "kept",
++  );
++  const restored = deserializeCheckpoint(
++    serializeCheckpoint(createCheckpoint(injected.plan, delayCompleted.snapshot)),
++  );
++  const final = run(restored.plan, restored.snapshot);
++  assert.ok(final.events.some((event) => event.kind === "say" && event.text === "kept"));
++});
++
++interface InjectedInteractionPlan {
++  readonly plan: InstructionPlan;
++  readonly destinationTemporary: number;
++  readonly interactionInstruction: number;
++  readonly handoffInstruction: number;
++  readonly clearInstruction: number;
++}
++
++function injectTextInteraction(source: string): InjectedInteractionPlan {
++  return injectInteraction(
++    source,
++    "text",
++    { kind: "text", hint: null, accessibleName: defaults.text },
++  );
++}
++
++function injectInteraction(
++  source: string,
++  interactionKind: "text" | "number" | "choice",
++  ui: InteractionUiPayload,
++): InjectedInteractionPlan {
++  const compiled = compileSource(source);
++  assert.deepEqual(compiled.diagnostics, []);
++  assert.notEqual(compiled.plan, null);
++  const plan = structuredClone(compiled.plan!) as any;
++  const marker = "__interaction_result__";
++  const targetIndex = plan.instructions.findIndex((instruction: unknown) =>
++    containsLiteralMarker(instruction, marker)
++  );
++  assert.notEqual(targetIndex, -1, source);
++  assert.equal(
++    plan.instructions.filter((instruction: unknown) =>
++      containsLiteralMarker(instruction, marker)
++    ).length,
++    1,
++    source,
++  );
++
++  const destinationTemporary = plan.temporaryCount + 1;
++  plan.temporaryCount = destinationTemporary;
++  plan.rootEndInstruction = shiftBoundary(plan.rootEndInstruction, targetIndex);
++  for (const definition of plan.functions) {
++    definition.entryInstruction = shiftBoundary(definition.entryInstruction, targetIndex);
++    definition.bodyEntryInstruction = shiftBoundary(definition.bodyEntryInstruction, targetIndex);
++    definition.implicitReturnInstruction = shiftBoundary(definition.implicitReturnInstruction, targetIndex);
++    definition.endInstruction = shiftBoundary(definition.endInstruction, targetIndex);
++  }
++  for (const instruction of plan.instructions) shiftInstructionTargets(instruction, targetIndex);
++
++  const original = replaceLiteralMarker(
++    plan.instructions[targetIndex],
++    marker,
++    destinationTemporary,
++  );
++  const span = original.span;
++  const expectedResult = interactionKind === "number" ||
++    (ui.kind === "choice" && ui.labelType === "number")
++    ? "number"
++    : "string";
++  const interaction: InteractionInstruction = {
++    kind: "interaction",
++    interactionKind,
++    target: "standardChat",
++    speaker: null,
++    destinationTemporary,
++    expectedResult,
++    ui,
++    span,
+   };
+-  const ambiguousValidation = validateInstructionPlan(ambiguous);
+-  assert.equal(ambiguousValidation.valid, false);
+-  assert.ok(ambiguousValidation.errors.some((error) =>
+-    error.message.includes("clear its destination")
+-  ));
++  plan.instructions.splice(targetIndex, 1,
++    interaction,
++    original,
++    { kind: "clearTemporary", temporaryId: destinationTemporary, span },
++  );
+ 
+-  const uniform: InstructionPlan = {
+-    ...base,
+-    rootEndInstruction: 7,
+-    instructions: [
+-      interaction,
+-      {
+-        kind: "jumpIfFalse",
+-        condition: { kind: "literal", value: true, span },
+-        target: 4,
+-        span,
+-      },
+-      { kind: "clearTemporary", temporaryId: 1, span },
+-      { kind: "jump", target: 5, span },
+-      { kind: "clearTemporary", temporaryId: 1, span },
+-      {
+-        kind: "say",
+-        speaker: null,
+-        value: { kind: "literal", value: "join", span },
+-        span,
+-      },
+-      exit,
+-    ],
++  const validation = validateInstructionPlan(plan);
++  assert.equal(validation.valid, true, JSON.stringify(validation.errors));
++  return {
++    plan,
++    destinationTemporary,
++    interactionInstruction: targetIndex,
++    handoffInstruction: targetIndex + 1,
++    clearInstruction: targetIndex + 2,
+   };
+-  assert.equal(
+-    validateInstructionPlan(uniform).valid,
+-    true,
+-    JSON.stringify(validateInstructionPlan(uniform).errors),
++}
++
++function shiftBoundary(value: number, insertionIndex: number): number {
++  return value > insertionIndex ? value + 2 : value;
++}
++
++function shiftInstructionTargets(instruction: any, insertionIndex: number): void {
++  for (const field of ["target", "continueTarget", "returnInstruction"] as const) {
++    if (Number.isSafeInteger(instruction[field])) {
++      instruction[field] = shiftBoundary(instruction[field], insertionIndex);
++    }
++  }
++}
++
++function containsLiteralMarker(value: unknown, marker: string): boolean {
++  if (Array.isArray(value)) return value.some((item) => containsLiteralMarker(item, marker));
++  if (typeof value !== "object" || value === null) return false;
++  const record = value as Record<string, unknown>;
++  if (record.kind === "literal" && record.value === marker) return true;
++  return Object.values(record).some((nested) => containsLiteralMarker(nested, marker));
++}
++
++function replaceLiteralMarker(
++  value: unknown,
++  marker: string,
++  destinationTemporary: number,
++): any {
++  if (Array.isArray(value)) {
++    return value.map((item) => replaceLiteralMarker(item, marker, destinationTemporary));
++  }
++  if (typeof value !== "object" || value === null) return value;
++  const record = value as Record<string, unknown>;
++  if (record.kind === "literal" && record.value === marker) {
++    return {
++      kind: "temporary",
++      temporaryId: destinationTemporary,
++      span: structuredClone(record.span),
++    };
++  }
++  return Object.fromEntries(
++    Object.entries(record).map(([key, nested]) => [
++      key,
++      replaceLiteralMarker(nested, marker, destinationTemporary),
++    ]),
+   );
+-});
++}

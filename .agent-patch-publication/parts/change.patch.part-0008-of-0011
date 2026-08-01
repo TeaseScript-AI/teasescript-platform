@@ -1,0 +1,282 @@
++test("result interactions use one bounded local handoff instead of future-path liveness", () => {
++  const injected = injectTextInteraction(
++    'let answer = "__interaction_result__"\nsay answer\nexit',
++  );
++  assert.equal(
++    validateInstructionPlan(injected.plan).valid,
++    true,
++    JSON.stringify(validateInstructionPlan(injected.plan).errors),
++  );
++
++  const branch = structuredClone(injected.plan) as any;
++  branch.instructions[injected.handoffInstruction] = {
++    kind: "jump",
++    target: injected.clearInstruction,
++    span: branch.instructions[injected.handoffInstruction].span,
++  };
++  assert.equal(validateInstructionPlan(branch).valid, false);
++
++  const secondBlockingAction = structuredClone(injected.plan) as any;
++  secondBlockingAction.instructions[injected.handoffInstruction] = {
++    kind: "wait",
++    duration: {
++      kind: "literal",
++      value: 1,
++      span: secondBlockingAction.instructions[injected.handoffInstruction].span,
++    },
++    unit: "ms",
++    span: secondBlockingAction.instructions[injected.handoffInstruction].span,
++  };
++  assert.equal(validateInstructionPlan(secondBlockingAction).valid, false);
++
++  const missingClear = structuredClone(injected.plan) as any;
++  missingClear.instructions[injected.clearInstruction] = {
++    kind: "say",
++    speaker: null,
++    value: {
++      kind: "literal",
++      value: "not a clear",
++      span: missingClear.instructions[injected.clearInstruction].span,
++    },
++    span: missingClear.instructions[injected.clearInstruction].span,
++  };
++  assert.equal(validateInstructionPlan(missingClear).valid, false);
++
++  const duplicateProducer = structuredClone(injected.plan) as any;
++  duplicateProducer.instructions[injected.clearInstruction] = {
++    kind: "storeTemporary",
++    temporaryId: injected.destinationTemporary,
++    value: {
++      kind: "literal",
++      value: "replacement",
++      span: duplicateProducer.instructions[injected.clearInstruction].span,
++    },
++    expectBoolean: false,
++    span: duplicateProducer.instructions[injected.clearInstruction].span,
++  };
++  assert.equal(validateInstructionPlan(duplicateProducer).valid, false);
++
++  const targeted = injectTextInteraction([
++    'function first { return "first" }',
++    'let ignored = first()',
++    'let answer = "__interaction_result__"',
++    'say answer',
++    'exit',
++  ].join("\n"));
++  const arbitraryUserCall = structuredClone(targeted.plan) as any;
++  const existingCall = arbitraryUserCall.instructions.find(
++    (instruction: any) => instruction.kind === "callFunction",
++  );
++  assert.notEqual(existingCall, undefined);
++  arbitraryUserCall.instructions[targeted.handoffInstruction] = {
++    ...structuredClone(existingCall),
++    returnInstruction: targeted.clearInstruction,
++    span: arbitraryUserCall.instructions[targeted.handoffInstruction].span,
+   };
+-  assert.equal(validateInstructionPlan(preservingPlan).valid, true);
+-  const pending = waiting(preservingPlan);
+-  const completed = completeAction(preservingPlan, pending.snapshot, {
++  assert.equal(validateInstructionPlan(arbitraryUserCall).valid, false);
++
++  const targetedEntry = structuredClone(targeted.plan) as any;
++  const call = targetedEntry.instructions.find(
++    (instruction: any) => instruction.kind === "callFunction",
++  );
++  assert.notEqual(call, undefined);
++  call.returnInstruction = targeted.handoffInstruction;
++  assert.equal(validateInstructionPlan(targetedEntry).valid, false);
++
++  const targetedCleanup = structuredClone(targeted.plan) as any;
++  const cleanupCall = targetedCleanup.instructions.find(
++    (instruction: any) => instruction.kind === "callFunction",
++  );
++  assert.notEqual(cleanupCall, undefined);
++  cleanupCall.returnInstruction = targeted.clearInstruction;
++  assert.equal(validateInstructionPlan(targetedCleanup).valid, false);
++});
++
++test("completion commits atomically and every short handoff checkpoint boundary validates", () => {
++  const injected = injectTextInteraction(
++    'let answer = "__interaction_result__"\nsay answer\nexit',
++  );
++  const pending = waiting(injected.plan);
++  const pendingBefore = structuredClone(pending.snapshot);
++  const completed = completeAction(injected.plan, pending.snapshot, {
+     actionId: pending.snapshot.foregroundAction!.actionId,
+     actionKind: "interaction",
+     interactionKind: "text",
+-    payload: { kind: "submittedText", submittedText: "answer" },
++    payload: { kind: "submittedText", submittedText: "committed" },
+   });
+-  const afterSay = stepToEvent(preservingPlan, completed.snapshot);
+-  assert.deepEqual(afterSay.events.map((event) => event.kind), ["say"]);
+-  assert.equal(afterSay.snapshot.nextInstruction, 2);
+-  assert.equal(validateRuntimeSnapshot(afterSay.snapshot, preservingPlan).valid, true);
+-
+-  const forged = structuredClone(afterSay.snapshot);
+-  forged.temporaries[0]!.value = "forged";
+-  assert.equal(validateRuntimeSnapshot(forged, preservingPlan).valid, false);
+-  assert.throws(() => createCheckpoint(preservingPlan, forged));
+-  assert.throws(() => run(preservingPlan, forged));
+-
+-  const functionBase = buttonPlanFromSource(
+-    "function prompt { wait 1\nsay \"between\"\nreturn }\nprompt()\nexit",
++
++  assert.deepEqual(pending.snapshot, pendingBefore);
++  assert.equal(completed.outcome.kind, "completed");
++  assert.deepEqual(
++    completed.events.map((event) => event.kind),
++    ["playerTranscript", "actionCompleted"],
+   );
+-  const functionInteractionIndex = functionBase.instructions.findIndex(
+-    (instruction) => instruction.kind === "interaction",
++  assert.equal(completed.snapshot.nextInstruction, injected.handoffInstruction);
++  assert.equal(completed.snapshot.frames[0]!.bindings.some((binding) => binding.name === "answer"), false);
++  assert.equal(
++    completed.snapshot.temporaries.find((temporary) =>
++      temporary.id === injected.destinationTemporary
++    )?.value,
++    "committed",
+   );
+-  const functionDestination = functionBase.temporaryCount + 1;
+-  const functionPlan: InstructionPlan = {
+-    ...functionBase,
+-    temporaryCount: functionDestination,
+-    instructions: functionBase.instructions.map((instruction, index) =>
+-      index === functionInteractionIndex
+-        ? {
+-            ...interaction,
+-            destinationTemporary: functionDestination,
+-            span: instruction.span,
+-          }
+-        : instruction
+-    ),
+-  };
++  assert.doesNotThrow(() => createCheckpoint(injected.plan, completed.snapshot));
++
++  const forgedAtCommit = structuredClone(completed.snapshot);
++  forgedAtCommit.temporaries.find((temporary) =>
++    temporary.id === injected.destinationTemporary
++  )!.value = "forged";
++  assert.equal(validateRuntimeSnapshot(forgedAtCommit, injected.plan).valid, false);
++  assert.throws(() => createCheckpoint(injected.plan, forgedAtCommit));
++
++  const forgedOwnerAtCommit = structuredClone(completed.snapshot) as any;
++  forgedOwnerAtCommit.lastSettlement.ownerCallFrameId = 1;
++  forgedOwnerAtCommit.nextCallFrameId = 2;
++  assert.equal(validateRuntimeSnapshot(forgedOwnerAtCommit, injected.plan).valid, false);
++
++  const transferred = executeInstruction(injected.plan, completed.snapshot);
++  assert.equal(transferred.snapshot.nextInstruction, injected.clearInstruction);
+   assert.equal(
+-    validateInstructionPlan(functionPlan).valid,
+-    true,
+-    JSON.stringify(validateInstructionPlan(functionPlan).errors),
++    transferred.snapshot.frames[0]!.bindings.find((binding) => binding.name === "answer")?.value,
++    "committed",
+   );
+-  const functionPending = waiting(functionPlan);
+-  const functionCompleted = completeAction(functionPlan, functionPending.snapshot, {
+-    actionId: functionPending.snapshot.foregroundAction!.actionId,
+-    actionKind: "interaction",
+-    interactionKind: "text",
+-    payload: { kind: "submittedText", submittedText: "function answer" },
+-  });
+-  const functionAfterSay = stepToEvent(functionPlan, functionCompleted.snapshot);
+-  assert.deepEqual(functionAfterSay.events.map((event) => event.kind), ["say"]);
+-  const forgedFunction = structuredClone(functionAfterSay.snapshot);
+-  forgedFunction.temporaries[0]!.value = "forged function answer";
+-  assert.equal(validateRuntimeSnapshot(forgedFunction, functionPlan).valid, false);
+-  assert.throws(() => createCheckpoint(functionPlan, forgedFunction));
+-
+-  const suspendedBase = compileSource(
+-    "function nested { say \"nested\"\nreturn }\nwait 1\nnested()\nexit",
+-  ).plan!;
+-  const suspendedDestination = suspendedBase.temporaryCount + 1;
+-  const suspendedPlan: InstructionPlan = {
+-    ...suspendedBase,
+-    temporaryCount: suspendedDestination,
+-    instructions: suspendedBase.instructions.map((candidate, index) =>
+-      index === 0
+-        ? {
+-            ...interaction,
+-            destinationTemporary: suspendedDestination,
+-            span: candidate.span,
+-          }
+-        : candidate
+-    ),
+-  };
++  assert.doesNotThrow(() => createCheckpoint(injected.plan, transferred.snapshot));
++
++  const forgedBeforeClear = structuredClone(transferred.snapshot);
++  forgedBeforeClear.temporaries.find((temporary) =>
++    temporary.id === injected.destinationTemporary
++  )!.value = "forged";
++  assert.equal(validateRuntimeSnapshot(forgedBeforeClear, injected.plan).valid, false);
++
++  const cleared = executeInstruction(injected.plan, transferred.snapshot);
+   assert.equal(
+-    validateInstructionPlan(suspendedPlan).valid,
+-    true,
+-    JSON.stringify(validateInstructionPlan(suspendedPlan).errors),
++    cleared.snapshot.temporaries.some((temporary) =>
++      temporary.id === injected.destinationTemporary
++    ),
++    false,
+   );
+-  const suspendedPending = waiting(suspendedPlan);
+-  const suspendedCompleted = completeAction(suspendedPlan, suspendedPending.snapshot, {
+-    actionId: suspendedPending.snapshot.foregroundAction!.actionId,
++  assert.doesNotThrow(() => createCheckpoint(injected.plan, cleared.snapshot));
++
++  const ordinaryMutation = structuredClone(cleared.snapshot);
++  ordinaryMutation.frames[0]!.bindings.find((binding) => binding.name === "answer")!.value = "ordinary replacement";
++  assert.equal(validateRuntimeSnapshot(ordinaryMutation, injected.plan).valid, true);
++  assert.doesNotThrow(() => createCheckpoint(injected.plan, ordinaryMutation));
++});
++
++test("removed lifecycle fields and previous persisted versions are rejected structurally", () => {
++  const plan = interactionPlan("text", {
++    kind: "text",
++    hint: null,
++    accessibleName: defaults.text,
++  });
++  const snapshot = createFreshRuntimeSnapshot(plan);
++
++  const oldLifecycle = structuredClone(snapshot) as any;
++  oldLifecycle.lastSettlementResultState = "none";
++  assert.equal(validateRuntimeSnapshot(oldLifecycle, plan).valid, false);
++  assert.throws(() => createCheckpoint(plan, oldLifecycle));
++
++  const oldPlan = structuredClone(plan) as any;
++  oldPlan.version -= 1;
++  assert.equal(validateInstructionPlan(oldPlan).valid, false);
++
++  const oldSnapshot = structuredClone(snapshot) as any;
++  oldSnapshot.version -= 1;
++  assert.equal(validateRuntimeSnapshot(oldSnapshot, plan).valid, false);
++
++  const oldCheckpoint = structuredClone(createCheckpoint(plan, snapshot)) as any;
++  oldCheckpoint.version -= 1;
++  assert.throws(() => restoreCheckpoint(oldCheckpoint));
++});
++
++test("a newer settlement cannot corrupt or orphan an unconsumed interaction handoff", () => {
++  const injected = injectTextInteraction(
++    'let answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit',
++  );
++  const waitIndex = injected.plan.instructions.findIndex(
++    (instruction, index) => index > injected.clearInstruction && instruction.kind === "wait",
++  );
++  assert.notEqual(waitIndex, -1);
++
++  const pending = waiting(injected.plan);
++  const completed = completeAction(injected.plan, pending.snapshot, {
++    actionId: pending.snapshot.foregroundAction!.actionId,
+     actionKind: "interaction",
+     interactionKind: "text",
+-    payload: { kind: "submittedText", submittedText: "caller answer" },
++    payload: { kind: "submittedText", submittedText: "survives" },
+   });
+-  const nestedEvent = stepToEvent(suspendedPlan, suspendedCompleted.snapshot);
+-  assert.equal(nestedEvent.snapshot.status, "running");

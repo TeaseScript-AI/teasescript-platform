@@ -1,0 +1,85 @@
+diff --git a/CURRENT-DESIGN.md b/CURRENT-DESIGN.md
+index 97cb7a5f0601c8ec82dd7e1944bfe311a06e5665..03d77f1c1cc7d706ef5609d6c2e2b01cd82eb82c 100644
+--- a/CURRENT-DESIGN.md
++++ b/CURRENT-DESIGN.md
+@@ -135,7 +135,7 @@ The current implementation also:
+ - restricts automatic visible-list text selection to strings and finite numbers after one item is selected;
+ - rejects malformed zero `xorshift32-v1` seed, direct state, runtime snapshot state, and restored checkpoint state.
+ 
+-Instruction plans use version 5; runtime snapshots and checkpoints use version 6. The pending-action runtime provides compiler-owned blocking `wait` delays plus ADR 0018's generic foreground-interaction foundation, with explicit typed completion, JSON-safe checkpoint/restore, canonical player transcript events, and bounded last-settlement replay. Author-facing interaction syntax and Player UI remain unimplemented. Complete static typing and the wider V30 runtime/API surface remain out of scope.
++Instruction plans use version 6; runtime snapshots and checkpoints use version 7. The pending-action runtime provides compiler-owned blocking `wait` delays plus ADR 0018's generic foreground-interaction foundation, with explicit typed completion, JSON-safe checkpoint/restore, canonical player transcript events, and bounded last-settlement replay. Result-bearing interaction completion commits directly into the prepared ordinary runtime destination; the canonical plan then consumes or transfers that value locally and removes the interaction temporary before unrelated control flow. `lastSettlement` is replay data only and carries no live-result lifecycle. Author-facing interaction syntax and Player UI remain unimplemented. Complete static typing and the wider V30 runtime/API surface remain out of scope.
+ 
+ ## Accepted pending-action direction
+ 
+diff --git a/PHASE-STATUS.md b/PHASE-STATUS.md
+index f1ae95f970b5a6dca0bc661c7bf54c62bf01ee6d..1cbcf8e4e6e9e72dbc6651c17d291eebe40194e8 100644
+--- a/PHASE-STATUS.md
++++ b/PHASE-STATUS.md
+@@ -41,7 +41,7 @@
+ - One-instruction and event-boundary stepping with instruction budgets.
+ - Standalone repository-backed browser playground and constrained development server.
+ - Reusable deterministic resume-equivalence coverage that compares uninterrupted execution with execution restored from a JSON-roundtripped checkpoint after every completed instruction boundary across a small bounded runtime-state corpus.
+-- The approved Option A source-layout seams and compatibility facades are implemented without changing plan v5, runtime-snapshot v6, or checkpoint v6.
++- The approved Option A source-layout seams and compatibility facades were implemented without a format change at that time; later runtime work now uses plan v6, runtime-snapshot v7, and checkpoint v7.
+ - One generic typed foreground-interaction instruction/action/settlement family for runtime-created button, text, number, and choice actions.
+ - Engine-owned text normalization, number parsing, exact choice matching, requesting-speaker provenance, canonical player transcript derivation, mandatory retry behavior, and bounded duplicate settlement replay.
+ - Shared version-1 interaction limits of 65,536 UTF-8 bytes for one retained string, 65,536 aggregate UTF-8 bytes per interaction definition, and 4,096 choice options.
+@@ -72,7 +72,7 @@
+ - Own-property-only runtime builtin registration and prototype-free named builtin arguments.
+ - Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
+ 
+-The current plan format is version 5 and the runtime-snapshot/checkpoint formats are version 6 POC formats. The implemented pending-action foundation supports compiler-owned blocking `wait` delays and one generic typed foreground-interaction action family. Author-facing interaction syntax, smart-autoplay pacing, and Player UI remain unimplemented; background actions remain intentionally empty.
++The current plan format is version 6 and the runtime-snapshot/checkpoint formats are version 7 POC formats. The implemented pending-action foundation supports compiler-owned blocking `wait` delays and one generic typed foreground-interaction action family. Result-bearing completion uses a short atomic commit into an ordinary runtime destination followed by one locally validated consume/transfer-and-clear boundary; no settlement-result live/released state or whole-plan interaction liveness analysis remains. Author-facing interaction syntax, smart-autoplay pacing, and Player UI remain unimplemented; background actions remain intentionally empty.
+ 
+ The implemented ADR 0017 infrastructure slice provides a tooling-only exact-identity in-memory library catalog and deterministic static metadata for the documented narrow TypeScript export subset. Its external boundaries use stable capture, a bounded source-text limit before parsing, and bounded retained metadata text before canonicalization. These internal POC identities and metadata shapes are not final package manifests, import syntax, library bindings, or checkpoint data; neither the tooling surface nor privileged adapter internals are exported from the runtime root entry point.
+ 
+diff --git a/docs/CODE-EDITOR.md b/docs/CODE-EDITOR.md
+index 0ff10326e37a86484a573878a4aab374a39e1077..d3af508b65804488448751e85aab2df44c5439d4 100644
+--- a/docs/CODE-EDITOR.md
++++ b/docs/CODE-EDITOR.md
+@@ -10,7 +10,7 @@ temporary compatibility facade; browser and server entrypoints use the
+ canonical controller directly. This refactor does not create Player modules
+ or claim editor functionality that is not implemented.
+ 
+-The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are separate from version-6 runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the draft and never overwrites repository examples. A local `.tease` file may be imported or exported without repository or server writes.
++The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are separate from version-7 runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the draft and never overwrites repository examples. A local `.tease` file may be imported or exported without repository or server writes.
+ 
+ Every edit increments a source revision and invalidates the plan, snapshot, transcript, events, counters, and checkpoint controls. Run, step, checkpoint save, and checkpoint restore require a successfully compiled runtime at the current revision. Reset recompiles the textarea contents; no plan migration occurs. Restore accepts only a validated self-contained checkpoint whose plan exactly matches the current runtime, so source text is never checkpoint identity.
+ 
+diff --git a/docs/DATA-AND-API.md b/docs/DATA-AND-API.md
+index cc30210a715cf8f322a44051171d1d18675c3dd7..1fd8f153d73623ccb789fe009ef8bd10f3fec172 100644
+--- a/docs/DATA-AND-API.md
++++ b/docs/DATA-AND-API.md
+@@ -94,8 +94,8 @@ Camera and file APIs continue to return engine-managed references rather than br
+ 
+ ## Stability and future contracts
+ 
+-The current TypeScript exports, version-5 instruction plans, and version-6 runtime-snapshot/checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
++The current TypeScript exports, version-6 instruction plans, and version-7 runtime-snapshot/checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
+ 
+-Implementation of ADR 0016 introduced version-4 instruction plans and pending-action state. The current version-5 plans and version-6 runtime snapshots/checkpoints add the generic interaction instruction/action/settlement family and canonical player-transcript event data while retaining delay-settlement provenance. These remain internal POC format revisions, not product release numbers.
++Implementation of ADR 0016 introduced version-4 instruction plans and pending-action state. Version-5 plans and version-6 runtime snapshots/checkpoints added the generic interaction instruction/action/settlement family and canonical player-transcript event data. Current version-6 plans restrict result-bearing interactions to one local canonical consume/transfer boundary, and version-7 runtime snapshots/checkpoints remove the separate live/released settlement-result lifecycle. Completion commits the typed result directly into ordinary runtime state; `lastSettlement` remains bounded replay data only. These remain internal POC format revisions, not product release numbers.
+ 
+ Exact account, toy, history, global-data, checkpoint storage, host-message, media-persistence, time-integrity, and integration payloads remain open and must be defined as typed contracts before implementation. This document does not resolve their long-term versioning and migration policy.
+diff --git a/docs/OPEN-DECISIONS.md b/docs/OPEN-DECISIONS.md
+index 532cafaeefb91aeaaa16c773e4c85fe930836609..f8792efbe41fc31c5888fd5e2b2a9c42964a8cf9 100644
+--- a/docs/OPEN-DECISIONS.md
++++ b/docs/OPEN-DECISIONS.md
+@@ -27,7 +27,7 @@ ADR 0018 is partially implemented. PR #117 implemented and versioned the generic
+ 
+ Default checkpoint restore should resume the exact validated saved state. Author-defined rollback or restart points are a separate advanced recovery feature and must not silently duplicate irreversible external effects.
+ 
+-The current plan version 5 and runtime/checkpoint version 6 schemas are POC implementation details, not a promise of permanent wire-format compatibility.
++The current plan version 6 and runtime/checkpoint version 7 schemas are POC implementation details, not a promise of permanent wire-format compatibility.
+ 
+ ## Remaining language and library work
+ 
+diff --git a/docs/RUNTIME.md b/docs/RUNTIME.md
+index e39e0c5eb8d253e7d376e1d8ba411f8f89697cf6..d42d1a4a830a56b12ea6101535515608d364cd1c 100644
+--- a/docs/RUNTIME.md
++++ b/docs/RUNTIME.md
+@@ -69,7 +69,7 @@ The engine owns action identity, active state, completion validation, transcript
+ 
+ The selected interactions are mandatory and non-cancellable. Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice, and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or continuation.
+ 
+-Result-bearing text, number, and choice instructions require the destination temporary to be absent on every path that reaches the interaction. Every reachable continuation path must then clear that temporary before natural root completion or discard the active temporary set through `return` or `exit`. While the result remains live, the plan may execute ordinary deterministic instructions and pure function calls, but it may not request another foreground action or overwrite the destination. A literal `wait 0` remains immediate and does not create that conflict. Branches may not merge incompatible live/released states. The plan validator charges this interaction control-flow analysis against a fixed work budget. A result-free button may be the terminal root instruction and uses the existing canonical settled root-end transition.
