@@ -213,16 +213,19 @@ def utf8_boundary_at_or_before(value: bytes, offset: int, *, floor: int) -> int:
     return offset
 
 
-def preferred_boundary(value: bytes, *, start: int, end: int) -> int:
+def preferred_boundaries(value: bytes, *, start: int, end: int) -> list[int]:
     preferred_start = start + (end - start) // 2
+    boundaries: list[int] = []
     for marker in (b"\ndiff --git ", b"\n@@ "):
         marker_at = value.rfind(marker, preferred_start, end)
         if marker_at >= start:
-            return marker_at + 1
+            boundaries.append(marker_at + 1)
     newline = value.rfind(b"\n", preferred_start, end)
     if newline >= start:
-        return newline + 1
-    return end
+        newline_end = newline + 1
+        if newline_end not in boundaries:
+            boundaries.append(newline_end)
+    return boundaries
 
 
 def largest_token_bounded_end(
@@ -260,6 +263,86 @@ def largest_token_bounded_end(
     return best
 
 
+def largest_bounded_end(
+    patch: bytes,
+    *,
+    start: int,
+    maximum_bytes: int,
+    target_tokens: int | None,
+    count_tokens: Callable[[bytes], int] | None,
+) -> int:
+    hard_end = utf8_boundary_at_or_before(
+        patch, min(start + maximum_bytes, len(patch)), floor=start
+    )
+    if hard_end <= start:
+        fail("part byte ceiling is too small to preserve a UTF-8 code point")
+    if target_tokens is None or count_tokens is None:
+        return hard_end
+    return largest_token_bounded_end(
+        patch,
+        start=start,
+        hard_end=hard_end,
+        target_tokens=target_tokens,
+        count_tokens=count_tokens,
+    )
+
+
+def suffix_fits_in_parts(
+    patch: bytes,
+    *,
+    start: int,
+    maximum_parts: int,
+    maximum_bytes: int,
+    target_tokens: int | None,
+    count_tokens: Callable[[bytes], int] | None,
+) -> bool:
+    if start >= len(patch):
+        return True
+    if maximum_parts < 1:
+        return False
+    if len(patch) - start > maximum_parts * maximum_bytes:
+        return False
+
+    offset = start
+    for _ in range(maximum_parts):
+        try:
+            offset = largest_bounded_end(
+                patch,
+                start=offset,
+                maximum_bytes=maximum_bytes,
+                target_tokens=target_tokens,
+                count_tokens=count_tokens,
+            )
+        except PreparationError:
+            return False
+        if offset >= len(patch):
+            return True
+    return False
+
+
+def minimum_part_count(
+    patch: bytes,
+    *,
+    maximum_bytes: int,
+    target_tokens: int | None,
+    count_tokens: Callable[[bytes], int] | None,
+) -> int:
+    count = 0
+    offset = 0
+    while offset < len(patch):
+        offset = largest_bounded_end(
+            patch,
+            start=offset,
+            maximum_bytes=maximum_bytes,
+            target_tokens=target_tokens,
+            count_tokens=count_tokens,
+        )
+        count += 1
+        if count > MAX_PART_COUNT:
+            fail(f"patch requires more than {MAX_PART_COUNT} parts")
+    return count
+
+
 def split_utf8_patch(
     patch: bytes,
     *,
@@ -273,26 +356,35 @@ def split_utf8_patch(
     if target_tokens is not None and count_tokens is None:
         fail("internal error: token target supplied without a token counter")
 
+    remaining_parts = minimum_part_count(
+        patch,
+        maximum_bytes=maximum_bytes,
+        target_tokens=target_tokens,
+        count_tokens=count_tokens,
+    )
     parts: list[bytes] = []
     token_counts: list[int | None] = []
     offset = 0
     while offset < len(patch):
-        hard_end = utf8_boundary_at_or_before(
-            patch, min(offset + maximum_bytes, len(patch)), floor=offset
+        end = largest_bounded_end(
+            patch,
+            start=offset,
+            maximum_bytes=maximum_bytes,
+            target_tokens=target_tokens,
+            count_tokens=count_tokens,
         )
-        if hard_end <= offset:
-            fail("part byte ceiling is too small to preserve a UTF-8 code point")
-        end = hard_end
-        if target_tokens is not None and count_tokens is not None:
-            end = largest_token_bounded_end(
-                patch,
-                start=offset,
-                hard_end=hard_end,
-                target_tokens=target_tokens,
-                count_tokens=count_tokens,
-            )
         if end < len(patch):
-            end = preferred_boundary(patch, start=offset, end=end)
+            for candidate in preferred_boundaries(patch, start=offset, end=end):
+                if suffix_fits_in_parts(
+                    patch,
+                    start=candidate,
+                    maximum_parts=remaining_parts - 1,
+                    maximum_bytes=maximum_bytes,
+                    target_tokens=target_tokens,
+                    count_tokens=count_tokens,
+                ):
+                    end = candidate
+                    break
         part = patch[offset:end]
         ensure_utf8(part, label="generated part")
         token_count = count_tokens(part) if count_tokens is not None else None
@@ -303,6 +395,9 @@ def split_utf8_patch(
         if len(parts) > MAX_PART_COUNT:
             fail(f"patch requires more than {MAX_PART_COUNT} parts")
         offset = end
+        remaining_parts -= 1
+    if remaining_parts != 0:
+        fail("internal error: generated part count differs from minimum part count")
     return parts, token_counts
 
 

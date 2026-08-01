@@ -30,6 +30,8 @@ def run(
     check: bool = True,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy() if env is None else env.copy()
+    environment.pop("TEASESCRIPT_O200K_TOKENIZER", None)
     completed = subprocess.run(
         args,
         cwd=cwd,
@@ -37,7 +39,7 @@ def run(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
-        env=env,
+        env=environment,
     )
     if check and completed.returncode != 0:
         raise AssertionError(
@@ -551,94 +553,6 @@ class PatchPublicationTests(unittest.TestCase):
         repaired = self.root / "repaired.patch"
         run(self.materialize_command(manifest, transfer_ref, repaired), cwd=self.repo)
         self.assertEqual(repaired.read_bytes(), self.patch.read_bytes())
-
-    def test_generator_reconstructs_exact_patch_at_64_128_and_256_kib(self) -> None:
-        repository = self.root / "generator-repo"
-        repository.mkdir()
-        git(repository, "init", "-q", "-b", "main")
-        git(repository, "config", "user.name", "Generator Test")
-        git(repository, "config", "user.email", "generator@example.invalid")
-        (repository / "base.txt").write_text("base\n", encoding="utf-8")
-        git(repository, "add", "base.txt")
-        git(repository, "commit", "-q", "-m", "Base")
-        base = git(repository, "rev-parse", "HEAD")
-
-        regular_lines = "".join(
-            f"line {index:05d} — deterministic multipart payload\n"
-            for index in range(9000)
-        )
-        long_line = "é" * 70000 + "\n"
-        (repository / "large.txt").write_text(
-            regular_lines + long_line, encoding="utf-8", newline="\n"
-        )
-        git(repository, "add", "large.txt")
-        git(repository, "commit", "-q", "-m", "Add large UTF-8 fixture")
-        tested_commit = git(repository, "rev-parse", "HEAD")
-        original_patch = subprocess.run(
-            [
-                "git",
-                "diff",
-                "--binary",
-                "--full-index",
-                "--no-renames",
-                base,
-                tested_commit,
-            ],
-            cwd=repository,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
-        ).stdout
-        self.assertGreater(len(original_patch), 256 * 1024)
-
-        for part_size_kib in (64, 128, 256):
-            with self.subTest(part_size_kib=part_size_kib):
-                output = self.root / f"payload-{part_size_kib}"
-                completed = run(
-                    [
-                        sys.executable,
-                        str(PREPARE_SCRIPT),
-                        "--repository",
-                        str(repository),
-                        "--target-branch",
-                        TARGET_BRANCH,
-                        "--default-branch",
-                        "main",
-                        "--tested-commit",
-                        tested_commit,
-                        "--expected-base-sha",
-                        base,
-                        "--part-size-kib",
-                        str(part_size_kib),
-                        "--output-directory",
-                        str(output),
-                    ],
-                    cwd=repository,
-                )
-                self.assertIn("prepared multipart patch publication", completed.stdout)
-                transfer_root = output / ".agent-patch-publication"
-                manifest_path = transfer_root / "manifest.json"
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                self.assertEqual(manifest["formatVersion"], 2)
-                self.assertEqual(manifest["expectedBaseSha"], base)
-                self.assertEqual(manifest["patchSizeBytes"], len(original_patch))
-                self.assertEqual(
-                    manifest["patchSha256"], hashlib.sha256(original_patch).hexdigest()
-                )
-                reconstructed = bytearray()
-                for index, part in enumerate(manifest["parts"], start=1):
-                    expected_path = (
-                        ".agent-patch-publication/parts/change.patch.part-"
-                        f"{index:04d}-of-{len(manifest['parts']):04d}"
-                    )
-                    self.assertEqual(part["path"], expected_path)
-                    value = (output / expected_path).read_bytes()
-                    value.decode("utf-8")
-                    self.assertLessEqual(len(value), part_size_kib * 1024)
-                    self.assertEqual(part["sizeBytes"], len(value))
-                    self.assertEqual(part["sha256"], hashlib.sha256(value).hexdigest())
-                    reconstructed.extend(value)
-                self.assertEqual(bytes(reconstructed), original_patch)
 
     def test_generator_rejects_dirty_repository_non_head_and_existing_output(self) -> None:
         repository = self.root / "generator-errors"
