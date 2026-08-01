@@ -10,11 +10,8 @@ import {
 } from "../src/index.js";
 import {
   addSerializableSetValue,
-  fromHostRuntimeValue,
-  toHostRuntimeValue,
   validateSerializableValue,
 } from "../src/runtime/serializable-values.js";
-import { createRuntimeSet } from "../src/runtime/values.js";
 
 function countArraySomeCalls(operation: () => void): number {
   const original = Array.prototype.some;
@@ -116,34 +113,4 @@ test("serializable set mutation uses native membership without changing array or
 
   assert.equal(someCalls, 0);
   assert.deepEqual(set.items, [1, 2, 3]);
-});
-
-test("host and runtime set conversion paths rebuild sets without array scans", () => {
-  const values = Array.from({ length: 4096 }, (_, index) => index);
-
-  const hostToSerializableSomeCalls = countArraySomeCalls(() => {
-    const converted = fromHostRuntimeValue({ kind: "set", items: values });
-    assert.equal(
-      typeof converted === "object" && converted !== null && converted.kind === "set"
-        ? converted.items.length
-        : -1,
-      values.length,
-    );
-  });
-  const serializableToHostSomeCalls = countArraySomeCalls(() => {
-    const converted = toHostRuntimeValue({ kind: "set", items: values });
-    assert.equal(
-      typeof converted === "object" && converted !== null && converted.kind === "set"
-        ? converted.items.length
-        : -1,
-      values.length,
-    );
-  });
-  const runtimeConstructionSomeCalls = countArraySomeCalls(() => {
-    assert.equal(createRuntimeSet(values).items.length, values.length);
-  });
-
-  assert.equal(hostToSerializableSomeCalls, 0);
-  assert.equal(serializableToHostSomeCalls, 0);
-  assert.equal(runtimeConstructionSomeCalls, 0);
 });

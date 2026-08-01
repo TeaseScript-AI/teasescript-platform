@@ -27,12 +27,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { captureExternalData } from "../src/external-data-limits.js";
-import {
-  SerializableValueError,
-  fromHostRuntimeValue,
-  toHostRuntimeValue,
-} from "../src/runtime/serializable-values.js";
-import type { RuntimeValue } from "../src/runtime/values.js";
+import { SerializableValueError } from "../src/runtime/serializable-values.js";
 
 const FAILING_BEFORE_DEPTH = 20_000;
 
@@ -354,28 +349,6 @@ test("serializable cloning accepts the depth boundary and rejects the next level
   );
 });
 
-test("host/runtime conversion is bounded before recursive conversion", () => {
-  let accepted: RuntimeValue = "leaf";
-  for (let depth = 0; depth < MAX_EXTERNAL_RUNTIME_DATA_DEPTH; depth += 1) {
-    accepted = { kind: "list", items: [accepted] };
-  }
-  assert.doesNotThrow(() => fromHostRuntimeValue(accepted));
-
-  const rejected: RuntimeValue = { kind: "list", items: [accepted] };
-  assert.throws(
-    () => fromHostRuntimeValue(rejected),
-    (error: unknown) =>
-      error instanceof SerializableValueError &&
-      error.message === EXTERNAL_DATA_DEPTH_MESSAGE,
-  );
-
-  assert.throws(
-    () => toHostRuntimeValue(deepList(65)),
-    (error: unknown) =>
-      error instanceof SerializableValueError &&
-      error.message === EXTERNAL_DATA_DEPTH_MESSAGE,
-  );
-});
 
 test("external capture bounds sparse array length before detailed validation", () => {
   const accepted: unknown[] = [];

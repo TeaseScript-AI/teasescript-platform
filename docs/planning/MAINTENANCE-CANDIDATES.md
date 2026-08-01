@@ -16,13 +16,16 @@ A candidate becomes implementation work only after the owner or coordinator sele
 
 ### Candidate scope
 
-Consider mechanically splitting these large implementation modules while preserving their existing public facades and behavior:
+Consider mechanically splitting these large implementation modules while preserving their supported exports and behavior:
 
 ```text
-src/instructions.ts
 src/runtime/state.ts
 src/runtime/engine.ts
 ```
+
+`src/instructions.ts` is no longer a large implementation module. It is a small
+temporary plan-model/capture/validation facade whose retirement is tracked by
+issue #180.
 
 `src/parser.ts` is also large, but its cursor, recovery, diagnostics, and AST construction are tightly coupled. Do not split it merely because of line count; require a concrete maintenance problem and a coherent boundary first.
 
@@ -46,11 +49,10 @@ A split also creates costs:
 - temporary merge conflicts with active runtime hardening;
 - additional files and imports that can become indirection when boundaries are too fine;
 - premature module boundaries that may need to move again;
-- churn around the host-value compatibility layer before its lifecycle is decided.
 
 Any implementation must therefore:
 
-- preserve current public exports and compatibility facades;
+- preserve current supported public exports;
 - preserve runtime, diagnostic, event, checkpoint, and serialization behavior;
 - avoid combining file movement with semantic changes or performance optimization;
 - avoid generic plugin, visitor, service-container, or dependency-injection frameworks;
@@ -58,20 +60,13 @@ Any implementation must therefore:
 - keep each pull request focused on one coherent module group;
 - run the full relevant verification after every split.
 
-### Compatibility dependency
-
-The broad organization of `runtime/interpreter.ts`, the host `RuntimeValue` model, conversion code, and the serializable runtime depends on the open compatibility-API lifecycle decision in [`../OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
-
-Purely mechanical splits that keep compatibility facades intact do not need to wait for every API detail. Refactors that consolidate, remove, or redesign the two value models should wait for an explicit owner decision.
-
 ### Possible starting direction
 
 The following is a candidate sequence, not an accepted module architecture:
 
-1. `src/instructions.ts`: separate plan types, compilation/lowering, validation, and derived analysis behind the existing `instructions.ts` facade.
-2. `src/runtime/state.ts`: separate snapshot types, creation, cloning, and focused validation areas behind the existing `state.ts` facade.
-3. `src/runtime/engine.ts`: separate public execution boundaries, instruction dispatch, expression evaluation, calls, prepared references, and event construction behind the existing `engine.ts` facade.
-4. Reassess `src/parser.ts` only after concrete evidence shows that a split would improve rather than obscure its shared parser state.
+1. `src/runtime/state.ts`: separate snapshot types, creation, cloning, and focused validation areas behind the existing `state.ts` module.
+2. `src/runtime/engine.ts`: separate public execution boundaries, instruction dispatch, expression evaluation, calls, prepared references, and event construction behind the existing `engine.ts` module.
+3. Reassess `src/parser.ts` only after concrete evidence shows that a split would improve rather than obscure its shared parser state.
 
 Exact filenames and boundaries must be derived from the repository state at implementation time. This list does not authorize a broad rewrite.
 
@@ -79,8 +74,7 @@ Exact filenames and boundaries must be derived from the repository state at impl
 
 Consider creating focused implementation issues after:
 
-- current overlapping runtime hardening and cleanup work has landed;
-- the compatibility-API direction is sufficiently clear for the affected module group;
+- current overlapping runtime hardening, facade-retirement, and cleanup work has landed;
 - an import/export and test-ownership inventory identifies stable boundaries;
 - the proposed split can be reviewed as a mechanical change without bundled semantic work.
 

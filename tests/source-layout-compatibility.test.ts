@@ -45,17 +45,17 @@ type ActionTypeCompatibility = [
 const actionTypeCompatibility: ActionTypeCompatibility = [true, true, true, true];
 void actionTypeCompatibility;
 
-test("legacy instruction facade preserves the canonical plan and compiler exports", () => {
-  assert.equal(legacyPlan.compileProgram, canonicalCompiler.compileProgram);
-  assert.equal(legacyPlan.InstructionCompilationError, canonicalCompiler.InstructionCompilationError);
+test("legacy instruction facade preserves canonical plan exports", () => {
   assert.equal(canonicalCompiler.InstructionCompilationError, canonicalCompilerErrors.InstructionCompilationError);
   assert.equal(legacyPlan.captureInstructionPlan, canonicalCapture.captureInstructionPlan);
   assert.equal(legacyPlan.validateInstructionPlan, canonicalValidation.validateInstructionPlan);
   assert.equal(legacyPlan.INSTRUCTION_PLAN_VERSION, canonicalPlan.INSTRUCTION_PLAN_VERSION);
+  assert.equal("compileProgram" in legacyPlan, false);
+  assert.equal("InstructionCompilationError" in legacyPlan, false);
 });
 
 test("root exports preserve the supported canonical surface", () => {
-  assert.equal(root.compileProgram, canonicalCompiler.compileProgram);
+  assert.equal("compileProgram" in root, false);
   assert.equal(root.validateInstructionPlan, canonicalValidation.validateInstructionPlan);
   assert.equal(root.completeAction, canonicalCompleteAction.completeAction);
   assert.equal(root.observeTime, canonicalObserveTime.observeTime);

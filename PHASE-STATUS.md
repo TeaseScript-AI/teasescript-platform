@@ -3,7 +3,7 @@
 ## Evidence boundary
 
 - Current repository baseline for this status update: `926f4a4bb2583103b7379251e88bc0b7b7472e62` on `main`, including the synchronized status update before issue #124.
-- The seven-item implemented-foundation hardening set tracked by issue #7 is complete, including the compiler/template work in PR #19, RNG-state work in PR #20, and the direct-AST non-finite-number boundary repair in PR #34.
+- The seven-item implemented-foundation hardening set tracked by issue #7 is complete, including the compiler/template work in PR #19, RNG-state work in PR #20, and non-finite-number source-compiler diagnostics in PR #34.
 - PR #37 added sequenced `TSW002` developer warnings when `list.remove(value)` finds no matching value while preserving the unchanged list.
 - PR #48 completed the owner-selected reusable runtime resume-equivalence outcome tracked as `POC-ENGINE-002`, with a shared test-only helper and bounded corpus that checks every completed instruction boundary through a real JSON checkpoint round trip.
 - PR #46 rejects ordinary instruction-plan control-flow targets that cross between root and function execution regions before execution or checkpoint restore.
@@ -67,9 +67,8 @@
 - Complete suspended-caller temporary liveness validation.
 - Strict function prologue/region, checkpoint-progress, and prepared-reference validation.
 - Central V30 protected-name enforcement.
-- Shared non-finite-literal AST validation and semantic validation before direct `Program` compatibility execution.
-- Defensive direct lowering with `TSC001` for non-finite numeric literals and `TSC003` for excess positional arguments.
-- Explicit rejection of host `RuntimeSpeaker` values at the compatibility boundary.
+- Source compilation rejects non-finite numeric literals before producing a plan.
+- Internal compiler lowering retains focused `TSC003` diagnostics for malformed compiler inputs.
 - Own-property-only runtime builtin registration and prototype-free named builtin arguments.
 - Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
 

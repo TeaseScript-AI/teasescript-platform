@@ -9,7 +9,6 @@ import {
   createCheckpoint,
   createFreshRuntimeSnapshot,
   createSerializableList,
-  execute,
   restoreCheckpoint,
   run,
   validateInstructionPlan,
@@ -22,11 +21,8 @@ import {
 } from "../src/index.js";
 import {
   SerializableValueError,
-  fromHostRuntimeValue,
-  toHostRuntimeValue,
   validateSerializableValue,
 } from "../src/runtime/serializable-values.js";
-import type { RuntimeValue } from "../src/runtime/values.js";
 
 function plan(
   source = "exit",
@@ -291,10 +287,6 @@ test("serializable-value APIs reject accessors and consume stable proxy arrays",
     () => cloneSerializableValue(unstable as never),
     (error: unknown) => error instanceof SerializableValueError,
   );
-  assert.throws(
-    () => toHostRuntimeValue(unstable as never),
-    (error: unknown) => error instanceof SerializableValueError,
-  );
   assert.equal(reads, 0);
 
   const counts = zeroCounts();
@@ -308,34 +300,6 @@ test("serializable-value APIs reject accessors and consume stable proxy arrays",
   assert.equal(counts.ownKeys, 1);
 });
 
-test("host conversion rejects accessors without invocation and captures proxy data", () => {
-  let reads = 0;
-  const unstable = { kind: "list" } as Record<string, unknown>;
-  Object.defineProperty(unstable, "items", {
-    enumerable: true,
-    get() {
-      reads += 1;
-      return [0];
-    },
-  });
-  assert.throws(
-    () => fromHostRuntimeValue(unstable as unknown as RuntimeValue),
-    (error: unknown) => error instanceof SerializableValueError,
-  );
-  assert.equal(reads, 0);
-
-  const counts = zeroCounts();
-  const target = { kind: "list" as const, items: [0] };
-  const proxied = stableProxy(target, counts, (key) =>
-    key === "items" ? [deepList(20_000)] : Reflect.get(target, key),
-  );
-  assert.deepEqual(fromHostRuntimeValue(proxied), {
-    kind: "list",
-    items: [0],
-  });
-  assert.equal(counts.gets, 0);
-  assert.equal(counts.ownKeys, 1);
-});
 
 test("low-level builtin results are captured once and invalid accessors fail as TSR013", () => {
   const compiled = plan("let value = unstable()\nexit", ["unstable"]);
@@ -380,29 +344,4 @@ test("low-level builtin proxy results execute only the captured descriptor graph
   );
   assert.equal(counts.gets, 0);
   assert.equal(counts.ownKeys, 1);
-});
-
-test("compatibility builtin host accessors become structured runtime failures", () => {
-  const compiled = compileSource("let value = unstable()\nexit", {
-    builtins: ["unstable"],
-  });
-  assert.deepEqual(compiled.diagnostics, []);
-  let reads = 0;
-  const returned = { kind: "list" } as Record<string, unknown>;
-  Object.defineProperty(returned, "items", {
-    enumerable: true,
-    get() {
-      reads += 1;
-      return [0];
-    },
-  });
-
-  const result = execute(compiled.program, {
-    random: { next: () => 0.5 },
-    builtins: { unstable: () => returned as unknown as RuntimeValue },
-  });
-
-  assert.equal(reads, 0);
-  assert.deepEqual(result.errors.map((error) => error.code), ["TSR013"]);
-  assert.deepEqual(result.events, []);
 });
