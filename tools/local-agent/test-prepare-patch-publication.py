@@ -129,7 +129,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         files = plan["files"]
         assert isinstance(files, list)
         state = {
-            "stateVersion": 2,
+            "stateVersion": 3,
             "completedUploads": [
                 {
                     "index": item["index"],
@@ -518,20 +518,57 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertNotIn("<returned-commit-sha>", branch_action.stdout)
         self.assertNotIn("publicationCommand=", branch_action.stdout)
 
-        wrong_branch = run_cli(
+        wrong_branch_name = run_cli(
             "--output-directory",
             str(output),
-            "--record-branch-sha",
-            "2" * 40,
+            "--record-branch-created",
+            "wrong-transfer-branch",
         )
-        self.assertEqual(wrong_branch.returncode, 1)
-        self.assertIn("do not publish", wrong_branch.stderr)
+        self.assertEqual(wrong_branch_name.returncode, 1)
+        self.assertIn("do not advance", wrong_branch_name.stderr)
+
+        recorded_branch_creation = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-branch-created",
+            str(plan["transferBranch"]),
+        )
+        self.assertEqual(recorded_branch_creation.returncode, 0)
+        verify_branch = run_cli(
+            "--output-directory", str(output), "--show-next-upload"
+        )
+        self.assertEqual(verify_branch.returncode, 0)
+        self.assertIn("stage=verify-transfer-branch", verify_branch.stdout)
+        self.assertIn("connector=GitHub.compare_commits", verify_branch.stdout)
+        self.assertIn(f'"base": "{commit_sha}"', verify_branch.stdout)
+        self.assertIn(
+            f'"head": "{plan["transferBranch"]}"', verify_branch.stdout
+        )
+        self.assertNotIn("stage=create-transfer-branch", verify_branch.stdout)
+
+        resumed_verification = run_cli(
+            "--output-directory", str(output), "--show-next-upload"
+        )
+        self.assertEqual(resumed_verification.returncode, 0)
+        self.assertIn("stage=verify-transfer-branch", resumed_verification.stdout)
+        self.assertNotIn(
+            "stage=create-transfer-branch", resumed_verification.stdout
+        )
+
+        wrong_branch_status = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-branch-status",
+            "ahead",
+        )
+        self.assertEqual(wrong_branch_status.returncode, 1)
+        self.assertIn("not identical", wrong_branch_status.stderr)
 
         recorded_branch = run_cli(
             "--output-directory",
             str(output),
-            "--record-branch-sha",
-            commit_sha,
+            "--record-branch-status",
+            "identical",
         )
         self.assertEqual(recorded_branch.returncode, 0)
         ready = run_cli("--output-directory", str(output), "--show-next-upload")
@@ -552,7 +589,91 @@ class PreparePatchPublicationTests(unittest.TestCase):
         reset_state = json.loads((output / "upload-state.json").read_text())
         self.assertNotIn("transferTreeSha", reset_state)
         self.assertNotIn("transferCommitSha", reset_state)
+        self.assertNotIn("transferBranchCreated", reset_state)
         self.assertNotIn("transferBranchSha", reset_state)
+
+    def test_post_upload_stage_reset_preserves_verified_blobs(self) -> None:
+        _, output, plan = self.prepare_small_payload("stage-reset")
+        self.write_completed_upload_state(output, plan)
+        completed_uploads = json.loads(
+            (output / "upload-state.json").read_text()
+        )["completedUploads"]
+
+        tree_sha = str(plan["expectedTransferTreeSha"])
+        first_commit_sha = "1" * 40
+        second_commit_sha = "2" * 40
+        run_cli(
+            "--output-directory", str(output), "--record-tree-sha", tree_sha
+        )
+        run_cli(
+            "--output-directory",
+            str(output),
+            "--record-commit-sha",
+            first_commit_sha,
+        )
+
+        replacement_without_reset = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-commit-sha",
+            second_commit_sha,
+        )
+        self.assertEqual(replacement_without_reset.returncode, 1)
+        self.assertIn("already recorded", replacement_without_reset.stderr)
+
+        reset_commit = run_cli(
+            "--output-directory",
+            str(output),
+            "--reset-publication-stage",
+            "commit",
+        )
+        self.assertEqual(reset_commit.returncode, 0)
+        self.assertIn("preservedVerifiedBlobs=true", reset_commit.stdout)
+        state = json.loads((output / "upload-state.json").read_text())
+        self.assertEqual(state["completedUploads"], completed_uploads)
+        self.assertEqual(state["transferTreeSha"], tree_sha)
+        self.assertNotIn("transferCommitSha", state)
+
+        run_cli(
+            "--output-directory",
+            str(output),
+            "--record-commit-sha",
+            second_commit_sha,
+        )
+        run_cli(
+            "--output-directory",
+            str(output),
+            "--record-branch-created",
+            str(plan["transferBranch"]),
+        )
+
+        reset_branch = run_cli(
+            "--output-directory",
+            str(output),
+            "--reset-publication-stage",
+            "branch",
+        )
+        self.assertEqual(reset_branch.returncode, 0)
+        state = json.loads((output / "upload-state.json").read_text())
+        self.assertEqual(state["completedUploads"], completed_uploads)
+        self.assertEqual(state["transferTreeSha"], tree_sha)
+        self.assertEqual(state["transferCommitSha"], second_commit_sha)
+        self.assertNotIn("transferBranchCreated", state)
+        self.assertNotIn("transferBranchSha", state)
+
+        reset_tree = run_cli(
+            "--output-directory",
+            str(output),
+            "--reset-publication-stage",
+            "tree",
+        )
+        self.assertEqual(reset_tree.returncode, 0)
+        state = json.loads((output / "upload-state.json").read_text())
+        self.assertEqual(state["completedUploads"], completed_uploads)
+        self.assertNotIn("transferTreeSha", state)
+        self.assertNotIn("transferCommitSha", state)
+        self.assertNotIn("transferBranchCreated", state)
+        self.assertNotIn("transferBranchSha", state)
 
     def test_post_upload_actions_reject_out_of_order_and_malformed_state(self) -> None:
         _, output, plan = self.prepare_small_payload("ordering")
@@ -578,11 +699,20 @@ class PreparePatchPublicationTests(unittest.TestCase):
         early_branch = run_cli(
             "--output-directory",
             str(output),
-            "--record-branch-sha",
-            "1" * 40,
+            "--record-branch-created",
+            "agent-patch-publication/early",
         )
         self.assertEqual(early_branch.returncode, 1)
         self.assertIn("before the commit SHA", early_branch.stderr)
+
+        early_branch_status = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-branch-status",
+            "identical",
+        )
+        self.assertEqual(early_branch_status.returncode, 1)
+        self.assertIn("before branch creation", early_branch_status.stderr)
 
         malformed = json.loads((output / "upload-state.json").read_text())
         malformed["unexpected"] = True
@@ -597,7 +727,12 @@ class PreparePatchPublicationTests(unittest.TestCase):
         _, output, _ = self.prepare_small_payload("instructions")
         instructions = (output / "UPLOAD-INSTRUCTIONS.md").read_text()
         self.assertIn("exactly one next action at a time", instructions)
-        self.assertIn("Record each\nreturned SHA", instructions)
+        self.assertIn(
+            "Record each returned SHA, branch name, or\ncomparison status",
+            instructions,
+        )
+        self.assertIn("read-only exact branch comparison", instructions)
+        self.assertIn("--reset-publication-stage", instructions)
         self.assertIn("never requires manual placeholder substitution", instructions)
         self.assertIn("Do not Base64-encode", instructions)
 

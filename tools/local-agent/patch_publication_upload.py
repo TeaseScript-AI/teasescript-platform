@@ -24,6 +24,7 @@ CLI_PATH = Path(__file__).with_name("prepare-patch-publication.py")
 PUBLICATION_STATE_FIELDS = (
     "transferTreeSha",
     "transferCommitSha",
+    "transferBranchCreated",
     "transferBranchSha",
 )
 
@@ -34,7 +35,7 @@ def load_plan_and_state(output: Path) -> tuple[dict[str, object], dict[str, obje
     state = load_json_object(resolved / UPLOAD_STATE_NAME, label="upload state")
     if plan.get("planVersion") != 2:
         fail("upload plan version is incompatible; prepare a new publication payload")
-    if state.get("stateVersion") != 2:
+    if state.get("stateVersion") != 3:
         fail("upload state version is incompatible; prepare a new publication payload")
 
     allowed_state_fields = {
@@ -98,14 +99,14 @@ def validated_completed_uploads(
 
 def validated_publication_state(
     plan: dict[str, object], state: dict[str, object]
-) -> tuple[str | None, str | None, str | None]:
+) -> tuple[str | None, str | None, str | None, str | None]:
     completed = validated_completed_uploads(plan, state)
     files = plan["files"]
     assert isinstance(files, list)
     all_uploads_recorded = len(completed) == len(files)
 
     values: list[str | None] = []
-    for field in PUBLICATION_STATE_FIELDS:
+    for field in ("transferTreeSha", "transferCommitSha", "transferBranchSha"):
         value = state.get(field)
         if value is not None:
             if not isinstance(value, str) or not SHA1_RE.fullmatch(value):
@@ -116,15 +117,32 @@ def validated_publication_state(
         values.append(value)
     tree_sha, commit_sha, branch_sha = values
 
-    if any(value is not None for value in values) and not all_uploads_recorded:
+    branch_created = state.get("transferBranchCreated")
+    if branch_created is not None:
+        if not isinstance(branch_created, str):
+            fail("upload state transferBranchCreated must be a string")
+        transfer_branch = required_plan_string(plan, "transferBranch")
+        if branch_created != transfer_branch:
+            fail(
+                "upload state transferBranchCreated does not match the upload plan"
+            )
+
+    if (
+        any(value is not None for value in values) or branch_created is not None
+    ) and not all_uploads_recorded:
         fail(
             "upload state cannot contain publication SHAs before every blob "
             "is recorded"
         )
     if commit_sha is not None and tree_sha is None:
         fail("upload state cannot contain a commit SHA before the tree SHA")
-    if branch_sha is not None and commit_sha is None:
-        fail("upload state cannot contain a branch SHA before the commit SHA")
+    if branch_created is not None and commit_sha is None:
+        fail("upload state cannot contain a created branch before the commit SHA")
+    if branch_sha is not None and (commit_sha is None or branch_created is None):
+        fail(
+            "upload state cannot contain a branch SHA before branch creation "
+            "and the commit SHA"
+        )
 
     expected_tree_sha = plan.get("expectedTransferTreeSha")
     if not isinstance(expected_tree_sha, str) or not SHA1_RE.fullmatch(
@@ -135,7 +153,7 @@ def validated_publication_state(
         fail("upload state transfer tree SHA does not match the upload plan")
     if branch_sha is not None and branch_sha != commit_sha:
         fail("upload state transfer branch SHA does not match the recorded commit SHA")
-    return tree_sha, commit_sha, branch_sha
+    return tree_sha, commit_sha, branch_created, branch_sha
 
 
 def next_pending_file(
@@ -224,7 +242,9 @@ def show_next_upload(output: Path) -> None:
         print(command_for(output, "--record-upload-sha", "<returned-git-blob-sha>"))
         return
 
-    tree_sha, commit_sha, branch_sha = validated_publication_state(plan, state)
+    tree_sha, commit_sha, branch_created, branch_sha = validated_publication_state(
+        plan, state
+    )
     transfer_branch = required_plan_string(plan, "transferBranch")
     if tree_sha is None:
         tree_elements = plan.get("transferTreeElements")
@@ -282,12 +302,12 @@ def show_next_upload(output: Path) -> None:
         print(command_for(output, "--record-commit-sha", "<returned-commit-sha>"))
         return
 
-    if branch_sha is None:
+    if branch_created is None:
         print("stage=create-transfer-branch")
         print(
             "required=create only the planned transfer branch at the exact "
-            "recorded commit, resolve its target, and record that SHA before "
-            "publishing"
+            "recorded commit and record the returned branch name before "
+            "another repository action"
         )
         print("connector=GitHub action that creates the transfer branch at a commit")
         print("connectorArguments=")
@@ -305,8 +325,38 @@ def show_next_upload(output: Path) -> None:
         print(
             command_for(
                 output,
-                "--record-branch-sha",
-                "<resolved-transfer-branch-sha>",
+                "--record-branch-created",
+                "<returned-branch-name>",
+            )
+        )
+        return
+
+
+    if branch_sha is None:
+        print("stage=verify-transfer-branch")
+        print(
+            "required=use the exact read-only comparison arguments; continue "
+            "only when status is identical with ahead_by=0 and behind_by=0, "
+            "then record that returned status"
+        )
+        print("connector=GitHub.compare_commits")
+        print("connectorArguments=")
+        print(
+            json.dumps(
+                {
+                    "repo_full_name": repository_full_name,
+                    "base": commit_sha,
+                    "head": transfer_branch,
+                },
+                ensure_ascii=False,
+            )
+        )
+        print("afterSuccess=")
+        print(
+            command_for(
+                output,
+                "--record-branch-status",
+                "<returned-status>",
             )
         )
         return
@@ -368,8 +418,15 @@ def record_tree_sha(output: Path, returned_sha: str) -> None:
     plan, state = load_plan_and_state(output)
     if next_pending_file(plan, state) is not None:
         fail("cannot record the transfer tree before every blob is recorded")
-    tree_sha, commit_sha, branch_sha = validated_publication_state(plan, state)
-    if tree_sha is not None or commit_sha is not None or branch_sha is not None:
+    tree_sha, commit_sha, branch_created, branch_sha = validated_publication_state(
+        plan, state
+    )
+    if (
+        tree_sha is not None
+        or commit_sha is not None
+        or branch_created is not None
+        or branch_sha is not None
+    ):
         fail("transfer tree SHA is already recorded")
     expected = required_plan_string(plan, "expectedTransferTreeSha")
     if returned_sha != expected:
@@ -386,10 +443,12 @@ def record_tree_sha(output: Path, returned_sha: str) -> None:
 def record_commit_sha(output: Path, returned_sha: str) -> None:
     returned_sha = require_sha1(returned_sha, label="returned transfer commit SHA")
     plan, state = load_plan_and_state(output)
-    tree_sha, commit_sha, branch_sha = validated_publication_state(plan, state)
+    tree_sha, commit_sha, branch_created, branch_sha = validated_publication_state(
+        plan, state
+    )
     if tree_sha is None:
         fail("cannot record the transfer commit before the tree SHA")
-    if commit_sha is not None or branch_sha is not None:
+    if commit_sha is not None or branch_created is not None or branch_sha is not None:
         fail("transfer commit SHA is already recorded")
     state["transferCommitSha"] = returned_sha
     write_json_atomic(output.resolve() / UPLOAD_STATE_NAME, state)
@@ -397,24 +456,80 @@ def record_commit_sha(output: Path, returned_sha: str) -> None:
     print("next=run --show-next-upload for exact branch arguments")
 
 
-def record_branch_sha(output: Path, returned_sha: str) -> None:
-    returned_sha = require_sha1(returned_sha, label="resolved transfer branch SHA")
+def record_branch_created(output: Path, returned_branch: str) -> None:
     plan, state = load_plan_and_state(output)
-    tree_sha, commit_sha, branch_sha = validated_publication_state(plan, state)
+    tree_sha, commit_sha, branch_created, branch_sha = validated_publication_state(
+        plan, state
+    )
     if tree_sha is None or commit_sha is None:
-        fail("cannot record the transfer branch before the commit SHA")
-    if branch_sha is not None:
-        fail("transfer branch SHA is already recorded")
-    if returned_sha != commit_sha:
+        fail("cannot record transfer-branch creation before the commit SHA")
+    if branch_created is not None or branch_sha is not None:
+        fail("transfer-branch creation is already recorded")
+    transfer_branch = required_plan_string(plan, "transferBranch")
+    if returned_branch != transfer_branch:
         fail(
-            "transfer branch target mismatch: "
-            f"expected {commit_sha}, found {returned_sha}; do not publish"
+            "returned transfer branch mismatch: "
+            f"expected {transfer_branch}, found {returned_branch}; do not advance"
         )
-    state["transferBranchSha"] = returned_sha
+    state["transferBranchCreated"] = returned_branch
     write_json_atomic(output.resolve() / UPLOAD_STATE_NAME, state)
-    print(f"recordedTransferBranchSha={returned_sha}")
+    print(f"recordedTransferBranchCreated={returned_branch}")
+    print("next=run --show-next-upload for the exact branch-verification action")
+
+
+def record_branch_status(output: Path, returned_status: str) -> None:
+    plan, state = load_plan_and_state(output)
+    tree_sha, commit_sha, branch_created, branch_sha = validated_publication_state(
+        plan, state
+    )
+    if tree_sha is None or commit_sha is None or branch_created is None:
+        fail("cannot record branch verification before branch creation")
+    if branch_sha is not None:
+        fail("transfer branch is already verified")
+    if returned_status != "identical":
+        fail(
+            "transfer branch comparison is not identical: "
+            f"found {returned_status}; reset the branch stage before another write"
+        )
+    state["transferBranchSha"] = commit_sha
+    write_json_atomic(output.resolve() / UPLOAD_STATE_NAME, state)
+    print(f"recordedTransferBranchSha={commit_sha}")
     print("readyToPublish=true")
     print("next=run --show-next-upload for the exact publication command")
+
+
+def reset_publication_stage(output: Path, stage: str) -> None:
+    plan, state = load_plan_and_state(output)
+    tree_sha, commit_sha, branch_created, branch_sha = validated_publication_state(
+        plan, state
+    )
+    fields_by_stage = {
+        "tree": PUBLICATION_STATE_FIELDS,
+        "commit": (
+            "transferCommitSha",
+            "transferBranchCreated",
+            "transferBranchSha",
+        ),
+        "branch": ("transferBranchCreated", "transferBranchSha"),
+    }
+    present_by_stage = {
+        "tree": tree_sha is not None,
+        "commit": commit_sha is not None,
+        "branch": branch_created is not None or branch_sha is not None,
+    }
+    if stage not in fields_by_stage:
+        fail("publication reset stage must be tree, commit, or branch")
+    if not present_by_stage[stage]:
+        fail(f"publication stage {stage} is not currently recorded")
+
+    cleared = [field for field in fields_by_stage[stage] if field in state]
+    for field in cleared:
+        state.pop(field)
+    write_json_atomic(output.resolve() / UPLOAD_STATE_NAME, state)
+    print(f"resetPublicationStage={stage}")
+    print(f"clearedFields={','.join(cleared)}")
+    print("preservedVerifiedBlobs=true")
+    print("next=run --show-next-upload for the exact next action")
 
 
 def reset_upload_index(output: Path, index: int) -> None:

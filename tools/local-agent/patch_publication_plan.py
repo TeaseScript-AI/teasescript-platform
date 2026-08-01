@@ -176,8 +176,6 @@ def render_upload_instructions(
     output: Path,
     repository_full_name: str | None,
     transfer_branch: str,
-    manifest_sha256: str,
-    expected_base_sha: str,
     target_tokens: int | None,
     fallback_bytes: int,
 ) -> str:
@@ -232,12 +230,24 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
 The reset removes only the local progress record. It does not regenerate,
 modify, or open the part.
 
+If a recorded tree, commit, or branch stage must be corrected, reset only that
+post-upload stage and its dependent later values while preserving every
+verified blob:
+
+```shell
+python3 -B tools/local-agent/prepare-patch-publication.py \
+  --output-directory {output} \
+  --reset-publication-stage <tree|commit|branch>
+```
+
 After the manifest upload is recorded, continue using `--show-next-upload`.
 The helper exposes exactly one next action at a time: transfer tree, transfer
-commit, transfer branch, and finally the publication command. Record each
-returned SHA with the command printed for that step before performing another
-repository write. The helper verifies the payload-only tree SHA and the final
-branch target and never requires manual placeholder substitution.
+commit, transfer-branch creation, a read-only exact branch comparison, and
+finally the publication command. Record each returned SHA, branch name, or
+comparison status with the command printed for that step before continuing.
+After branch creation, an interruption resumes at the comparison read rather
+than repeating the branch write. The helper verifies the payload-only tree SHA
+and the final branch target and never requires manual placeholder substitution.
 
 The current connector action names may change; follow the printed action
 direction and argument shape rather than relying only on a hard-coded name.
@@ -337,15 +347,13 @@ def write_upload_handoff(
     write_json_atomic(temp_root / UPLOAD_PLAN_NAME, plan)
     write_json_atomic(
         temp_root / UPLOAD_STATE_NAME,
-        {"stateVersion": 2, "completedUploads": []},
+        {"stateVersion": 3, "completedUploads": []},
     )
     (temp_root / UPLOAD_INSTRUCTIONS_NAME).write_text(
         render_upload_instructions(
             output=output,
             repository_full_name=repository_full_name,
             transfer_branch=transfer_branch,
-            manifest_sha256=manifest_sha256,
-            expected_base_sha=expected_base_sha,
             target_tokens=target_part_tokens if estimator else None,
             fallback_bytes=part_size_bytes,
         ),

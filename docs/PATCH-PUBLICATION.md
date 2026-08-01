@@ -160,6 +160,20 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
 
 The reset removes only the verified local progress record. It does not regenerate, edit, or open the part. The next `--show-next-upload` exposes the earliest missing upload again.
 
+If a recorded post-upload object later proves stale or unavailable, reset only
+that stage and its dependent later state while preserving every verified blob:
+
+```shell
+python3 -B tools/local-agent/prepare-patch-publication.py \
+  --output-directory /tmp/patch-publication-payload \
+  --reset-publication-stage <tree|commit|branch>
+```
+
+Resetting `tree` also clears commit and branch progress. Resetting `commit`
+preserves the verified tree and clears branch progress. Resetting `branch`
+preserves the verified tree and commit. No post-upload correction requires an
+unrelated blob re-upload or manual JSON editing.
+
 Only files below `.agent-patch-publication/` belong in the transfer tree. The upload plan, state, and instruction file remain local. After recording all blobs, continue running `--show-next-upload`. It exposes only the next action and never prints later write actions early.
 
 First create the payload-only transfer tree with the exact printed arguments and no base tree. Record its returned SHA:
@@ -178,15 +192,34 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --record-commit-sha <returned-commit-sha>
 ```
 
-The next action creates the planned transfer branch at that recorded commit. Resolve the created branch target and record it:
+The next action creates or updates the planned transfer branch at that recorded
+commit. The connector returns the branch name rather than its resolved commit,
+so record that exact returned name first:
 
 ```shell
 python3 -B tools/local-agent/prepare-patch-publication.py \
   --output-directory /tmp/patch-publication-payload \
-  --record-branch-sha <resolved-transfer-branch-sha>
+  --record-branch-created <returned-branch-name>
 ```
 
-The branch target must equal the recorded commit. Only then does `--show-next-upload` reveal the exact `/publish-patch` command, the target branch, expected base, expected final project tree, and the post-publication verification checklist. Resetting any recorded blob clears the dependent tree, commit, and branch state. Prepared upload plans from the older local state format must be regenerated rather than migrated.
+The next `--show-next-upload` now exposes one read-only
+`GitHub.compare_commits` action with the recorded commit as `base` and the
+transfer branch as `head`. Record the returned comparison status only when it
+is `identical` with `ahead_by=0` and `behind_by=0`:
+
+```shell
+python3 -B tools/local-agent/prepare-patch-publication.py \
+  --output-directory /tmp/patch-publication-payload \
+  --record-branch-status identical
+```
+
+An interruption after branch creation resumes at this comparison read rather
+than repeating the repository write. Only after the exact comparison is
+recorded does `--show-next-upload` reveal the `/publish-patch` command, target
+branch, expected base, expected final project tree, and post-publication
+verification checklist. Resetting any recorded blob clears dependent tree,
+commit, and branch state. Prepared upload plans from an older local state
+format must be regenerated rather than migrated.
 
 ## Starting publication
 

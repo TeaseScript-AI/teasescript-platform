@@ -20,10 +20,12 @@ from patch_publication_support import (
     split_utf8_patch,
 )
 from patch_publication_upload import (
-    record_branch_sha,
+    record_branch_created,
+    record_branch_status,
     record_commit_sha,
     record_tree_sha,
     record_upload_sha,
+    reset_publication_stage,
     reset_upload_index,
     show_next_upload,
 )
@@ -78,13 +80,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="record the returned transfer-commit SHA",
     )
     mode.add_argument(
-        "--record-branch-sha",
-        help="record and verify the resolved transfer-branch target SHA",
+        "--record-branch-created",
+        help="record the branch name returned by the transfer-branch write",
+    )
+    mode.add_argument(
+        "--record-branch-status",
+        help="record the status returned by the exact branch comparison",
     )
     mode.add_argument(
         "--reset-upload-index",
         type=int,
         help="reset one blob upload and clear dependent later-stage state",
+    )
+    mode.add_argument(
+        "--reset-publication-stage",
+        choices=("tree", "commit", "branch"),
+        help=(
+            "reset one post-upload stage and its dependents while preserving "
+            "verified blobs"
+        ),
     )
     return parser
 
@@ -100,10 +114,18 @@ def main() -> int:
             record_tree_sha(args.output_directory, args.record_tree_sha)
         elif args.record_commit_sha is not None:
             record_commit_sha(args.output_directory, args.record_commit_sha)
-        elif args.record_branch_sha is not None:
-            record_branch_sha(args.output_directory, args.record_branch_sha)
+        elif args.record_branch_created is not None:
+            record_branch_created(
+                args.output_directory, args.record_branch_created
+            )
+        elif args.record_branch_status is not None:
+            record_branch_status(args.output_directory, args.record_branch_status)
         elif args.reset_upload_index is not None:
             reset_upload_index(args.output_directory, args.reset_upload_index)
+        elif args.reset_publication_stage is not None:
+            reset_publication_stage(
+                args.output_directory, args.reset_publication_stage
+            )
         else:
             prepare(args)
     except (OSError, PreparationError) as exc:
