@@ -46,7 +46,7 @@ Candidate Standard Library responsibilities include `say` policy, standard outpu
 
 ## Accepted first Standard Library runtime contract
 
-ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`, followed by a separate `say` smart-autoplay slice. The generic runtime family is implemented for manually constructed validated plans; author-facing syntax, Standard Library lowering, Player UI, and smart autoplay remain separate work.
+ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`, followed by a separate `say` smart-autoplay slice. Slice A implements author-facing compact syntax and compiler lowering through that existing family. Player UI and smart autoplay remain separate work.
 
 ### Generic foreground interactions
 
@@ -81,7 +81,7 @@ Completion semantics are:
 
 A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
-Interaction limits version 1 uses three shared technical ceilings: `65,536` UTF-8 bytes for any one string, `65,536` UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion text uses the same per-string ceiling. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field once, and stops encoding further fields after either a per-string or aggregate failure. Text completion measures the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. These values align interaction messages with the existing bounded playground source/message scale while remaining below the `100,000`-value external-data work boundary. They are transport, storage, rendering, and validation safety ceilings, not recommended UI lengths. Over-limit data is rejected without truncation, clamping, or partial state mutation.
+Interaction limits version 1 uses three shared technical ceilings: `65,536` UTF-8 bytes for any one string, `65,536` UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion text uses the same per-string ceiling. `4,096` is the provisional generic runtime-payload ceiling, not a demonstrated maximum for every compact-source choice representation: static and dynamic choices have different lowering expansion. Deriving and proving source/compiler/plan/snapshot/checkpoint capacity is owned by #129. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field once, and stops encoding further fields after either a per-string or aggregate failure. Text completion measures the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. These values align interaction messages with the existing bounded playground source/message scale while remaining below the `100,000`-value external-data work boundary. They are transport, storage, rendering, and validation safety ceilings, not recommended UI lengths. Over-limit data is rejected without truncation, clamping, or partial state mutation.
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 
@@ -295,9 +295,9 @@ The implementation includes:
 - defensive validation of function regions, parameter progress, call stacks, and prepared-reference state;
 - standalone playground and constrained development server.
 
-Instruction plans use version 5; runtime snapshots and checkpoints use version 6. They are POC formats rather than permanent public wire-format guarantees.
+Instruction plans use version 6; runtime snapshots and checkpoints use version 7. They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation contains compiler-owned blocking `wait` and one generic foreground `interaction` instruction/action family for button, text, number, and choice. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, author-facing interaction syntax, Player controls, and background pacing remain out of scope.
+The current implementation contains compiler-owned blocking `wait` and one generic foreground `interaction` instruction/action family for button, text, number, and choice. Compact source payloads are prepared in source order into explicit temporaries before the action becomes pending; requesting-speaker provenance is prepared first, payload references to contextual `speaker` lower through that captured speaker temporary, and result destinations remain owned by the current root or call frame. Prepared interaction speaker, destination, and independently materialized text positions must use pairwise-distinct temporary IDs. Dynamic visible-text conversion stages selected list values and serialized RNG advancement locally, validates the complete interaction payload, then commits the canonical strings and RNG together immediately before the existing action creation path. A structured preparation failure emits only the ordinary runtime failure and leaves no partial interaction action or canonical preparation commit. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, Player controls, and background pacing remain out of scope.
 
 ## Accepted resumable pending-action model
 
@@ -323,7 +323,7 @@ lastSettlement:
     ActionSettlement | null
 ```
 
-A valid current `waiting` snapshot contains exactly one foreground delay or interaction action. Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity, destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request sequence. A waiting result destination must still be absent. A completed interaction settlement keeps immutable destination and owner identity for duplicate replay, while the separate bounded `lastSettlementResultState` field records whether that result is `live`, `released`, or not applicable. Validation binds a live result to the exact owner temporary even after unrelated instructions or while its caller temporaries are suspended by a pure nested function call. Clearing the destination, returning from its owner function, or exiting marks the lifecycle released without rewriting the recorded settlement. Every persisted interaction instruction, UI/accessibility/option shape, action, settlement, and lifecycle value has an exact supported shape. Non-waiting states contain no foreground action. The background collection remains present but must be empty until the separately scoped pacing implementation versions that schema.
+A valid current `waiting` snapshot contains exactly one foreground delay or interaction action. Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity, destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request sequence. A waiting result destination must still be absent. For prepared interactions, validation compares plan-static accessible-name, label-domain, label, and option-count provenance exactly; while preparation temporaries remain live it also compares every dynamic materialized string. After cleanup, the retained settlement UI is the canonical dynamic-text record and remains subject to its exact static provenance and result/transcript consistency. A completed interaction settlement keeps immutable destination and owner identity for duplicate replay, while the separate bounded `lastSettlementResultState` field records whether that result is `live`, `released`, or not applicable. Validation binds a live result to the exact owner temporary even after unrelated instructions or while its caller temporaries are suspended by a pure nested function call. Clearing the destination, returning from its owner function, or exiting marks the lifecycle released without rewriting the recorded settlement. Interaction settlements and their nested UI, accessible-name, option-array, and option records are deeply frozen before one canonical settlement is exposed through the snapshot, event, and operation outcome; duplicate replay returns an independent deeply frozen clone. Every persisted interaction instruction, UI/accessibility/option shape, action, settlement, and lifecycle value has an exact supported shape. Non-waiting states contain no foreground action. The background collection remains present but must be empty until the separately scoped pacing implementation versions that schema.
 
 `currentSessionTimeMs` is canonical runtime state. It preserves the nondecreasing session coordinate across checkpoint and restore. A fresh snapshot receives a validated initial coordinate; deterministic tests may use `0`.
 
@@ -347,7 +347,7 @@ settle actions due at effectiveNow
 
 No checkpoint may contain due-action processing performed against a newer observation while retaining the older session-time value.
 
-Blocking `wait` remains the first source-to-runtime slice. The generic interaction runtime is now the second foreground use of ADR 0016, exercised through manual validated plans until its separate parser/compiler issue lands. Smart-autoplay and `chatPacingGate` remain unimplemented.
+Blocking `wait` remains the first source-to-runtime slice. ADR 0018 Slice A is the second foreground use of ADR 0016 and reaches the generic interaction runtime from compact source through explicit versioned lowering. Smart-autoplay and `chatPacingGate` remain unimplemented.
 
 ## Compiler and execution entry points
 
@@ -477,12 +477,12 @@ Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preser
 
 ## Format evolution
 
-The current formats use version 5 instruction plans and version 6 runtime snapshots/checkpoints. These versions add the generic interaction instruction/action/settlement family and canonical player-transcript event data while retaining delay provenance:
+The current formats use version 6 instruction plans and version 7 runtime snapshots/checkpoints. Plan version 6 adds compiler-prepared compact-interaction payload and speaker references. Snapshot/checkpoint version 7 retains the canonical materialized interaction UI in each interaction settlement so restored validation remains able to prove transcript and result provenance after preparation temporaries clear:
 
 ```text
-instruction plan version: 5
-runtime snapshot version: 6
-checkpoint version: 6
+instruction plan version: 6
+runtime snapshot version: 7
+checkpoint version: 7
 ```
 
 These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field.

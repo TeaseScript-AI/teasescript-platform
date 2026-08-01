@@ -63,6 +63,8 @@ export interface RuntimeInteractionActionSettlementSnapshot {
   readonly completionEventSequence: number;
   readonly result: string | number | null;
   readonly transcriptText: string;
+  /** Canonical action definition retained after prepared payload temporaries clear. */
+  readonly ui: InteractionUiPayload;
 }
 
 export type RuntimeActionSettlementSnapshot = RuntimeDelayActionSettlementSnapshot | RuntimeInteractionActionSettlementSnapshot;

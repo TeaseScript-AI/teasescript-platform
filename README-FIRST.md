@@ -24,9 +24,10 @@ The current repository implementation includes:
 - versioned JSON-safe instruction plans, runtime snapshots, checkpoints, deterministic RNG state, typed sequenced events, and explicit loop frames;
 - top-level user-defined functions, required/default parameters, positional/named calls, returns, recursion, and explicit serializable call frames;
 - source-order-preserving expression and assignment lowering, checkpoint-safe prepared references, complete suspended-caller temporary validation, and centralized V30 protected-name enforcement;
+- ADR 0018 Slice A compact `showButton`, `askText`, `askNumber`, and `choose` syntax lowered through the single generic foreground-interaction runtime family;
 - a standalone fixed-example browser playground.
 
-Instruction plans use version 5; runtime snapshots and checkpoints use version 6. These are POC formats, not permanent public wire-format promises.
+Instruction plans use version 6; runtime snapshots and checkpoints use version 7. These are POC formats, not permanent public wire-format promises.
 
 This does not mean that the complete V30 language, static type system, timers, input, media, cross-origin player host, Laravel persistence, accounts, publishing, or continuous personalities are implemented.
 

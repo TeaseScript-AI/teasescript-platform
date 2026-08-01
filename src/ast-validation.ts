@@ -197,9 +197,16 @@ export function findNonFiniteNumericLiteralDiagnostics(
     return Object.freeze([capture.diagnostic!]);
   }
 
+  return findNonFiniteNumericLiteralDiagnosticsInCapturedProgram(capture.program);
+}
+
+/** Internal traversal for parser-owned or already captured AST data. */
+export function findNonFiniteNumericLiteralDiagnosticsInCapturedProgram(
+  program: Program,
+): readonly Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const work = createCapturedArray(0) as unknown[];
-  work.push(capture.program);
+  work.push(program);
   while (work.length > 0) {
     const value = work.pop();
     if (value === null || typeof value !== "object") continue;
@@ -325,7 +332,181 @@ function isProgramRoot(value: unknown): value is Program {
   return isPlainRecord(value) &&
     value.kind === "program" &&
     Array.isArray(value.statements) &&
+    isSourceSpan(value.span) &&
+    validInteractionAstShapes(value);
+}
+
+function validInteractionAstShapes(root: Record<string, unknown>): boolean {
+  const work = createCapturedArray(1);
+  Reflect.defineProperty(work, "0", { value: root, writable: true, enumerable: true, configurable: true });
+  while (work.length > 0) {
+    const value = work.pop();
+    if (value === null || typeof value !== "object") continue;
+    if (Array.isArray(value)) {
+      for (const item of value) work.push(item);
+      continue;
+    }
+    if (!isPlainRecord(value)) return false;
+    if (value.kind === "showButtonStatement") {
+      if (
+        !isSourceSpan(value.commandSpan) ||
+        !(value.asSpan === null || isSourceSpan(value.asSpan)) ||
+        !(value.speaker === null || isIdentifierNode(value.speaker)) ||
+        ((value.asSpan === null) !== (value.speaker === null)) ||
+        !isSupportedExpressionNode(value.label) ||
+        !isSourceSpan(value.span)
+      ) return false;
+      continue;
+    }
+    if (value.kind === "interactionExpression") {
+      if (!isSupportedExpressionNode(value)) return false;
+      continue;
+    }
+    if (value.kind === "interactionChoiceOption") {
+      if (!isInteractionChoiceOptionNode(value)) return false;
+      continue;
+    }
+    for (const nested of Object.values(value)) work.push(nested);
+  }
+  return true;
+}
+
+function isInteractionChoiceOptionNode(value: unknown): boolean {
+  return isInteractionChoiceOptionMetadata(value) && isSupportedExpressionNode(value.value);
+}
+
+function isInteractionChoiceOptionMetadata(value: unknown): value is Record<string, unknown> {
+  return isPlainRecord(value) &&
+    value.kind === "interactionChoiceOption" &&
+    (value.label === null || isIdentifierNode(value.label) || isNumberLiteralNode(value.label)) &&
+    (value.colonSpan === null || isSourceSpan(value.colonSpan)) &&
+    ((value.label === null) === (value.colonSpan === null)) &&
+    (value.separatorSpan === null || isSourceSpan(value.separatorSpan)) &&
     isSourceSpan(value.span);
+}
+
+function isIdentifierNode(value: unknown): boolean {
+  return isPlainRecord(value) && value.kind === "identifier" && typeof value.name === "string" && isSourceSpan(value.span);
+}
+
+function isNumberLiteralNode(value: unknown): boolean {
+  return isPlainRecord(value) && value.kind === "numberLiteral" && typeof value.raw === "string" && typeof value.value === "number" && (value.numericType === "integer" || value.numericType === "number") && isSourceSpan(value.span);
+}
+
+function validInteractionChoiceSeparators(options: readonly unknown[]): boolean {
+  return options.every((option, index) =>
+    isPlainRecord(option) &&
+    (index === options.length - 1
+      ? option.separatorSpan === null
+      : isSourceSpan(option.separatorSpan))
+  );
+}
+
+function isSupportedExpressionNode(root: unknown): boolean {
+  const work = createCapturedArray(1);
+  Reflect.defineProperty(work, "0", { value: root, writable: true, enumerable: true, configurable: true });
+  while (work.length > 0) {
+    const value = work.pop();
+    if (!isPlainRecord(value) || !isSourceSpan(value.span)) return false;
+    switch (value.kind) {
+      case "identifier":
+        if (typeof value.name !== "string") return false;
+        break;
+      case "booleanLiteral":
+        if (typeof value.value !== "boolean") return false;
+        break;
+      case "nullLiteral":
+        if (value.value !== null) return false;
+        break;
+      case "numberLiteral":
+        if (!isNumberLiteralNode(value)) return false;
+        break;
+      case "stringLiteral":
+        if (typeof value.raw !== "string" || typeof value.value !== "string") return false;
+        break;
+      case "templateLiteral":
+        if (!Array.isArray(value.parts)) return false;
+        for (const part of value.parts) {
+          if (!isPlainRecord(part) || !isSourceSpan(part.span)) return false;
+          if (part.kind === "templateText") {
+            if (typeof part.raw !== "string" || typeof part.value !== "string") return false;
+          } else if (part.kind === "templateInterpolation") {
+            work.push(part.expression);
+          } else return false;
+        }
+        break;
+      case "listLiteral":
+      case "setLiteral":
+        if (!Array.isArray(value.elements)) return false;
+        for (const element of value.elements) work.push(element);
+        break;
+      case "objectLiteral":
+        if (!Array.isArray(value.properties)) return false;
+        for (const property of value.properties) {
+          if (!isPlainRecord(property) || property.kind !== "objectProperty" ||
+              !isIdentifierNode(property.name) || !isSourceSpan(property.span)) return false;
+          work.push(property.value);
+        }
+        break;
+      case "parenthesizedExpression":
+        work.push(value.expression);
+        break;
+      case "propertyAccessExpression":
+        if (!isIdentifierNode(value.property)) return false;
+        work.push(value.object);
+        break;
+      case "indexExpression":
+        work.push(value.index);
+        work.push(value.object);
+        break;
+      case "callExpression": {
+        if (!Array.isArray(value.arguments) || !["none", "positional", "named"].includes(String(value.argumentStyle))) return false;
+        if (value.argumentStyle === "none" && value.arguments.length !== 0) return false;
+        work.push(value.callee);
+        for (const argument of value.arguments) {
+          if (!isPlainRecord(argument) || !isSourceSpan(argument.span)) return false;
+          if (argument.kind === "positionalArgument" && value.argumentStyle === "positional") {
+            work.push(argument.value);
+          } else if (argument.kind === "namedArgument" && value.argumentStyle === "named" && isIdentifierNode(argument.name)) {
+            work.push(argument.value);
+          } else return false;
+        }
+        break;
+      }
+      case "unaryExpression":
+        if (!["+", "-", "not"].includes(String(value.operator))) return false;
+        work.push(value.operand);
+        break;
+      case "binaryExpression":
+        if (!["*", "/", "%", "+", "-", "==", "!=", "<", "<=", ">", ">=", "and", "or"].includes(String(value.operator))) return false;
+        work.push(value.right);
+        work.push(value.left);
+        break;
+      case "rangeExpression":
+        if (typeof value.inclusive !== "boolean") return false;
+        work.push(value.end);
+        work.push(value.start);
+        break;
+      case "interactionExpression":
+        if (!["text", "number", "choice"].includes(String(value.interactionKind)) ||
+            !isSourceSpan(value.commandSpan) ||
+            !(value.asSpan === null || isSourceSpan(value.asSpan)) ||
+            !(value.speaker === null || isIdentifierNode(value.speaker)) ||
+            ((value.asSpan === null) !== (value.speaker === null)) ||
+            !Array.isArray(value.options) ||
+            !value.options.every(isInteractionChoiceOptionMetadata) ||
+            !validInteractionChoiceSeparators(value.options) ||
+            (value.interactionKind === "choice"
+              ? value.hint !== null || value.options.length === 0
+              : value.options.length !== 0)) return false;
+        if (value.hint !== null) work.push(value.hint);
+        for (const option of value.options) work.push(option.value);
+        break;
+      default:
+        return false;
+    }
+  }
+  return true;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

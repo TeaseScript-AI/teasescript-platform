@@ -54,7 +54,7 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 6;
+export const RUNTIME_SNAPSHOT_VERSION = 7;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -439,6 +439,7 @@ function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeAc
     completionEventSequence: settlement.completionEventSequence,
     result: settlement.result,
     transcriptText: settlement.transcriptText,
+    ui: cloneInteractionUi(settlement.ui),
   };
 }
 
@@ -1757,6 +1758,8 @@ function instructionKilledTemporaries(
       return new Set([instruction.temporaryId]);
     case "prepareReference":
       return new Set([instruction.destinationTemporary]);
+    case "prepareInteractionSpeaker":
+      return new Set([instruction.destinationTemporary]);
     case "clearTemporary":
       return new Set([instruction.temporaryId]);
     case "callFunction":
@@ -1986,7 +1989,24 @@ function validInteractionAction(action: Record<string, unknown>, snapshot: Recor
   if (!validInteractionUiShape(action.interactionKind as "button" | "text" | "number" | "choice", action.ui)) return false;
   if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
   const instruction = plan.instructions[action.owningInstruction];
-  if (instruction?.kind !== "interaction" || instruction.interactionKind !== action.interactionKind || instruction.expectedResult !== action.expectedResult || instruction.destinationTemporary !== action.destinationTemporary || instruction.target !== action.target || !interactionUiEqual(instruction.ui, action.ui)) return false;
+  if (
+    instruction?.kind !== "interaction" ||
+    instruction.interactionKind !== action.interactionKind ||
+    instruction.expectedResult !== action.expectedResult ||
+    instruction.destinationTemporary !== action.destinationTemporary ||
+    instruction.target !== action.target ||
+    !(instruction.preparedUi === undefined
+      ? instruction.ui !== null && interactionUiEqual(instruction.ui, action.ui)
+      : preparedInteractionUiEqual(instruction.preparedUi, action.ui, snapshot.temporaries))
+  ) return false;
+  if (instruction.speakerTemporary !== undefined) {
+    const temporaries = Array.isArray(snapshot.temporaries) ? snapshot.temporaries : [];
+    const prepared = temporaries.find((temporary) => isPlainRecord(temporary) && temporary.id === instruction.speakerTemporary);
+    if (!isPlainRecord(prepared)) return false;
+    if (prepared.value === null) return action.speakerId === null;
+    if (!isPlainRecord(prepared.value) || prepared.value.kind !== "speakerReference" || !positiveSafeInteger(prepared.value.speakerId)) return false;
+    return action.speakerId === prepared.value.speakerId;
+  }
   if (instruction.speaker === null) return action.speakerId === snapshot.defaultSpeaker;
   const explicitSpeaker = visibleRuntimeBindingValue(snapshot, instruction.speaker);
   if (
@@ -2113,13 +2133,16 @@ function validSettlementKindData(
     "owningInstruction", "continuationInstruction", "ownerCallFrameId",
     "destinationTemporary", "requestEventSequence",
     "transcriptEventSequence", "completionEventSequence", "result",
-    "transcriptText",
+    "transcriptText", "ui",
   ])) return false;
-  if (!["button", "text", "number", "choice"].includes(String(settlement.interactionKind)) || typeof settlement.transcriptText !== "string" || !interactionStringFits(settlement.transcriptText) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.transcriptEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.transcriptEventSequence || settlement.transcriptEventSequence >= settlement.completionEventSequence) return false;
+  if (!["button", "text", "number", "choice"].includes(String(settlement.interactionKind)) || typeof settlement.transcriptText !== "string" || !interactionStringFits(settlement.transcriptText) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.transcriptEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.transcriptEventSequence || settlement.transcriptEventSequence >= settlement.completionEventSequence || !validInteractionUiShape(settlement.interactionKind as "button" | "text" | "number" | "choice", settlement.ui)) return false;
   const settlementInstruction = plan !== undefined && nonNegativeSafeInteger(settlement.owningInstruction)
     ? plan.instructions[settlement.owningInstruction]
     : undefined;
-  const numericChoice = settlementInstruction?.kind === "interaction" && settlementInstruction.ui.kind === "choice" && settlementInstruction.ui.labelType === "number";
+  const numericChoice = settlementInstruction?.kind === "interaction" && (
+    (settlementInstruction.ui?.kind === "choice" && settlementInstruction.ui.labelType === "number") ||
+    (settlementInstruction.preparedUi?.kind === "choice" && settlementInstruction.preparedUi.labelType === "number")
+  );
   const validNumberResult = typeof settlement.result === "number" && Number.isFinite(settlement.result) && !Object.is(settlement.result, -0);
   let resultValid: boolean;
   if (settlement.interactionKind === "button") resultValid = settlement.result === null;
@@ -2173,6 +2196,19 @@ function validSettlementKindData(
     ) return false;
   }
 
+  const settledUi = settlement.ui;
+  if (!isPlainRecord(settledUi)) return false;
+  const settlementMatchesUi = settledUi.kind === "button"
+    ? settlement.result === null && settlement.transcriptText === settledUi.buttonLabel
+    : settledUi.kind === "text"
+      ? settlement.result === settlement.transcriptText
+      : settledUi.kind === "number"
+        ? true
+        : settledUi.kind === "choice" && Array.isArray(settledUi.options) && settledUi.options.some((option) =>
+          isPlainRecord(option) && option.text === settlement.transcriptText && (option.label ?? option.text) === settlement.result
+        );
+  if (!settlementMatchesUi) return false;
+
   if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const instruction = plan.instructions[settlement.owningInstruction];
   if (instruction?.kind !== "interaction" || instruction.interactionKind !== settlement.interactionKind) return false;
@@ -2181,11 +2217,73 @@ function validSettlementKindData(
     !validInteractionSettlementOwner(settlement, snapshot, analysis) ||
     !validInteractionSettlementDestinationState(settlement, snapshot, analysis)
   ) return false;
-  if (instruction.ui.kind === "button") return settlement.transcriptText === instruction.ui.buttonLabel;
-  if (instruction.ui.kind === "text") return settlement.result === settlement.transcriptText;
-  if (instruction.ui.kind === "number") return true;
-  if (instruction.ui.kind !== "choice") return false;
-  return instruction.ui.options.some((option) => option.text === settlement.transcriptText && (option.label ?? option.text) === settlement.result);
+  return instruction.preparedUi !== undefined
+    ? retainedPreparedInteractionUiEqual(instruction.preparedUi, settlement.ui, snapshot.temporaries)
+    : instruction.ui !== null && interactionUiEqual(instruction.ui, settlement.ui);
+}
+
+function preparedInteractionUiEqual(
+  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
+  actual: unknown,
+  temporariesValue: unknown,
+): boolean {
+  return preparedInteractionUiMatches(prepared, actual, temporariesValue, false);
+}
+
+function retainedPreparedInteractionUiEqual(
+  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
+  actual: unknown,
+  temporariesValue: unknown,
+): boolean {
+  return preparedInteractionUiMatches(prepared, actual, temporariesValue, true);
+}
+
+function preparedInteractionUiMatches(
+  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
+  actual: unknown,
+  temporariesValue: unknown,
+  allowMissingTextTemporaries: boolean,
+): boolean {
+  if (!isPlainRecord(actual) || !Array.isArray(temporariesValue)) return false;
+  if (!interactionAccessibleNameEqual(prepared.accessibleName, actual.accessibleName)) return false;
+  const temporaryText = (id: number): { readonly found: boolean; readonly value: string | null } => {
+    const temporary = temporariesValue.find((item) => isPlainRecord(item) && item.id === id);
+    if (!isPlainRecord(temporary)) return { found: false, value: null };
+    return typeof temporary.value === "string"
+      ? { found: true, value: temporary.value }
+      : { found: true, value: null };
+  };
+  const textMatches = (id: number, candidate: unknown): boolean => {
+    const temporary = temporaryText(id);
+    if (!temporary.found) return allowMissingTextTemporaries && typeof candidate === "string";
+    return temporary.value !== null && candidate === temporary.value;
+  };
+  if (prepared.kind === "button") {
+    return actual.kind === "button" && textMatches(prepared.buttonLabelTemporary, actual.buttonLabel);
+  }
+  if (prepared.kind !== "choice") {
+    if (actual.kind !== prepared.kind) return false;
+    if (prepared.hintTemporary === null) return actual.hint === null;
+    return textMatches(prepared.hintTemporary, actual.hint);
+  }
+  if (actual.kind !== "choice" || actual.labelType !== prepared.labelType || !Array.isArray(actual.options) || actual.options.length !== prepared.options.length) return false;
+  const actualOptions = actual.options;
+  return prepared.options.every((option, index) => {
+    const candidate = actualOptions[index];
+    return isPlainRecord(candidate) &&
+      candidate.label === option.label &&
+      textMatches(option.textTemporary, candidate.text);
+  });
+}
+
+function interactionAccessibleNameEqual(
+  expected: import("../plan/model.js").InteractionAccessibleName,
+  actual: unknown,
+): boolean {
+  if (!isPlainRecord(actual) || actual.kind !== expected.kind) return false;
+  return expected.kind === "text"
+    ? actual.text === expected.text
+    : actual.key === expected.key;
 }
 
 function validInteractionSettlementOwner(
@@ -2504,6 +2602,8 @@ function requiredInstructionTemporaries(
     case "prepareReference":
       collect(instruction.expression);
       break;
+    case "prepareInteractionSpeaker":
+      break;
     case "validateAssignmentTarget":
       collect(instruction.target);
       break;
@@ -2561,6 +2661,13 @@ function requiredInstructionTemporaries(
       collect(instruction.duration);
       break;
     case "interaction":
+      if (instruction.speakerTemporary !== undefined) output.add(instruction.speakerTemporary);
+      if (instruction.preparedUi?.kind === "button") output.add(instruction.preparedUi.buttonLabelTemporary);
+      else if (instruction.preparedUi?.kind === "text" || instruction.preparedUi?.kind === "number") {
+        if (instruction.preparedUi.hintTemporary !== null) output.add(instruction.preparedUi.hintTemporary);
+      } else if (instruction.preparedUi?.kind === "choice") {
+        instruction.preparedUi.options.forEach((option) => output.add(option.textTemporary));
+      }
       break;
   }
   return output;

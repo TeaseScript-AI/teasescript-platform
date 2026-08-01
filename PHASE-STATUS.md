@@ -44,7 +44,7 @@
 - The approved Option A source-layout seams and compatibility facades are implemented without changing plan v5, runtime-snapshot v6, or checkpoint v6.
 - One generic typed foreground-interaction instruction/action/settlement family for runtime-created button, text, number, and choice actions.
 - Engine-owned text normalization, number parsing, exact choice matching, requesting-speaker provenance, canonical player transcript derivation, mandatory retry behavior, and bounded duplicate settlement replay.
-- Shared version-1 interaction limits of 65,536 UTF-8 bytes for one retained string, 65,536 aggregate UTF-8 bytes per interaction definition, and 4,096 choice options.
+- Shared version-1 interaction limits of 65,536 UTF-8 bytes for one retained string, 65,536 aggregate UTF-8 bytes per interaction definition, and a provisional generic runtime-payload ceiling of 4,096 choice options. Static and dynamic compact choices lower differently; #129 owns derivation of their end-to-end source/compiler/plan/snapshot/checkpoint capacity.
 
 ### Deterministic mutation and property testing
 
@@ -73,7 +73,7 @@
 - Own-property-only runtime builtin registration and prototype-free named builtin arguments.
 - Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
 
-The current plan format is version 5 and the runtime-snapshot/checkpoint formats are version 6 POC formats. The implemented pending-action foundation supports compiler-owned blocking `wait` delays and one generic typed foreground-interaction action family. Author-facing interaction syntax, smart-autoplay pacing, and Player UI remain unimplemented; background actions remain intentionally empty.
+The current plan format is version 6 and the runtime-snapshot/checkpoint formats are version 7 POC formats. ADR 0018 Slice A implements parser-owned compact `showButton`, `askText`, `askNumber`, and `choose` forms through the existing generic typed foreground-interaction family, with captured contextual-speaker payload lowering, linear direct-AST interaction validation, pairwise-distinct prepared temporaries, established deterministic visible-text conversion, narrow result-domain validation, result temporaries, call-frame ownership, checkpoint restore, exact static UI provenance, retained dynamic settlement provenance, deeply immutable completion and replay aliases, and atomic dynamic validation. Smart-autoplay pacing and Player UI remain unimplemented; background actions remain intentionally empty.
 
 The implemented ADR 0017 infrastructure slice provides a tooling-only exact-identity in-memory library catalog and deterministic static metadata for the documented narrow TypeScript export subset. Its external boundaries use stable capture, a bounded source-text limit before parsing, and bounded retained metadata text before canonicalization. These internal POC identities and metadata shapes are not final package manifests, import syntax, library bindings, or checkpoint data; neither the tooling surface nor privileged adapter internals are exported from the runtime root entry point.
 
@@ -95,7 +95,6 @@ Also inspect the complete diff and verify the playground route/security matrix. 
 
 - complete V30 syntax/runtime coverage and static typing;
 - units, date/time/datetime/duration;
-- author-facing `showButton`, `askText`, `askNumber`, and `choose` syntax and lowering;
 - `say` smart autoplay, `chatPacingGate`, populated background actions, visible/background timers, and Player interaction controls;
 - cross-origin iframe host protocol;
 - media lifecycle and custom views;

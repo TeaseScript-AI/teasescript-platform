@@ -2,7 +2,7 @@ import type { FunctionDeclaration, Program } from "../ast.js";
 import {
   AST_VALIDATION_CODES,
   captureProgramAst,
-  findNonFiniteNumericLiteralDiagnostics,
+  findNonFiniteNumericLiteralDiagnosticsInCapturedProgram,
 } from "../ast-validation.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
@@ -25,8 +25,12 @@ export function compileProgram(program: Program): InstructionPlan {
       capture.diagnostic!.span,
     );
   }
-  const capturedProgram = capture.program;
-  const nonFiniteDiagnostic = findNonFiniteNumericLiteralDiagnostics(capturedProgram)[0];
+  return compileParserOwnedProgram(capture.program);
+}
+
+/** Internal source pipeline entry after parser-owned AST validation. */
+export function compileParserOwnedProgram(capturedProgram: Program): InstructionPlan {
+  const nonFiniteDiagnostic = findNonFiniteNumericLiteralDiagnosticsInCapturedProgram(capturedProgram)[0];
   if (nonFiniteDiagnostic !== undefined) {
     throw new InstructionCompilationError(
       AST_VALIDATION_CODES.nonFiniteNumericLiteral,

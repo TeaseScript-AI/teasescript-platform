@@ -45,7 +45,7 @@ export function setTemporary(
 }
 
 export function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeActionSettlementSnapshot {
-  if (settlement.actionKind === "delay") return {
+  if (settlement.actionKind === "delay") return Object.freeze({
     actionId: settlement.actionId,
     actionKind: "delay",
     settlementKind: "completed",
@@ -55,8 +55,8 @@ export function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): Ru
     completionEventSequence: settlement.completionEventSequence,
     deadlineMs: settlement.deadlineMs,
     completedAtMs: settlement.completedAtMs,
-  };
-  return {
+  });
+  return Object.freeze({
     actionId: settlement.actionId,
     actionKind: "interaction",
     interactionKind: settlement.interactionKind,
@@ -70,7 +70,36 @@ export function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): Ru
     completionEventSequence: settlement.completionEventSequence,
     result: settlement.result,
     transcriptText: settlement.transcriptText,
-  };
+    ui: cloneFrozenInteractionUi(settlement.ui),
+  });
+}
+
+export function cloneFrozenInteractionUi(
+  ui: import("../../plan/model.js").InteractionUiPayload,
+): import("../../plan/model.js").InteractionUiPayload {
+  const accessibleName = Object.freeze(ui.accessibleName.kind === "text"
+    ? { kind: "text" as const, text: ui.accessibleName.text }
+    : { kind: "localizedDefault" as const, key: ui.accessibleName.key });
+  if (ui.kind === "choice") {
+    const options = Object.freeze(ui.options.map((option) => Object.freeze({
+      text: option.text,
+      label: option.label,
+    })));
+    return Object.freeze({
+      kind: "choice",
+      labelType: ui.labelType,
+      options,
+      accessibleName,
+    });
+  }
+  if (ui.kind === "button") {
+    return Object.freeze({
+      kind: "button",
+      buttonLabel: ui.buttonLabel,
+      accessibleName,
+    });
+  }
+  return Object.freeze({ kind: ui.kind, hint: ui.hint, accessibleName });
 }
 
 export function assertCounterCanAdvance(value: number, field: string): void {

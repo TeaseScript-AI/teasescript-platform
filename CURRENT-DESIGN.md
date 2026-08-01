@@ -84,7 +84,7 @@ Smart autoplay captures non-negative safe-integer millisecond account settings a
 
 The normal Player application has no player-facing pause control or author-facing session-pause command. Developer mode may provide Run, Step, Pause, checkpoint, restore, and debugger controls. Browser unavailability and reconnect time integrity remain separate work.
 
-ADR 0018 is partially implemented. The generic foreground-interaction runtime and concrete version-1 technical limits are implemented and versioned; author-facing interaction syntax, smart-autoplay pacing, Standard Player controls, editor support, and final vertical acceptance remain separate work.
+ADR 0018 is partially implemented. The generic foreground-interaction runtime, concrete version-1 technical limits, protected Slice A prelude, and compact interaction syntax/lowering are implemented and versioned; smart-autoplay pacing, Standard Player controls, rich editor support, and final vertical acceptance remain separate work.
 
 ## Implemented POC milestones
 
@@ -135,7 +135,7 @@ The current implementation also:
 - restricts automatic visible-list text selection to strings and finite numbers after one item is selected;
 - rejects malformed zero `xorshift32-v1` seed, direct state, runtime snapshot state, and restored checkpoint state.
 
-Instruction plans use version 5; runtime snapshots and checkpoints use version 6. The pending-action runtime provides compiler-owned blocking `wait` delays plus ADR 0018's generic foreground-interaction foundation, with explicit typed completion, JSON-safe checkpoint/restore, canonical player transcript events, and bounded last-settlement replay. Author-facing interaction syntax and Player UI remain unimplemented. Complete static typing and the wider V30 runtime/API surface remain out of scope.
+Instruction plans use version 6; runtime snapshots and checkpoints use version 7. The pending-action runtime provides compiler-owned blocking `wait` delays plus ADR 0018 Slice A's compact interaction syntax and generic foreground-interaction family, with explicit payload preparation, typed completion, JSON-safe checkpoint/restore, retained canonical interaction-settlement provenance, canonical player transcript events, and bounded last-settlement replay. Player UI and smart-autoplay pacing remain unimplemented. Complete static typing and the wider V30 runtime/API surface remain out of scope.
 
 ## Accepted pending-action direction
 
@@ -171,7 +171,7 @@ POC implementation choices such as full snapshot cloning may later be optimized,
 
 ## Major remaining groups
 
-- implementation of ADR 0018's protected prelude and compact interaction syntax, smart-autoplay pacing action, dynamic Standard UI, editor/simulator support, and final vertical acceptance;
+- implementation of ADR 0018's smart-autoplay pacing action, dynamic Standard UI, editor/simulator support, and final vertical acceptance beyond the completed protected-prelude and compact-interaction Slice A;
 - units, date, time, datetime, and duration values;
 - timer, media, and other pending-action kinds beyond blocking `wait` and the accepted first interaction/pacing contract;
 - cross-origin iframe host protocol and validated messaging;

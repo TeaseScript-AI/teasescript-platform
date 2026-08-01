@@ -11,6 +11,7 @@ import {
   RuntimeDataError,
   assertEventSequenceCapacity,
   captureExecutableData,
+  cloneFrozenInteractionUi,
   cloneSettlement,
   copySpan,
   isPlainRecord,
@@ -76,6 +77,7 @@ function completeInteraction(
     completionEventSequence: completionSequence,
     result: resolved.result,
     transcriptText: resolved.transcriptText,
+    ui: cloneFrozenInteractionUi(action.ui),
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;

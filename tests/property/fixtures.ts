@@ -139,7 +139,7 @@ export function createOverLimitButtonPlan(): InstructionPlan {
     (candidate): candidate is InteractionInstruction =>
       candidate.kind === "interaction",
   );
-  assert.ok(instruction !== undefined && instruction.ui.kind === "button");
+  assert.ok(instruction !== undefined && instruction.ui?.kind === "button");
   (instruction.ui as { buttonLabel: string }).buttonLabel = exactUtf8String(
     MAX_INTERACTION_STRING_UTF8_BYTES + 1,
   );
@@ -171,7 +171,7 @@ export function createOverLimitChoicePlan(): InstructionPlan {
     (candidate): candidate is InteractionInstruction =>
       candidate.kind === "interaction",
   );
-  assert.ok(instruction !== undefined && instruction.ui.kind === "choice");
+  assert.ok(instruction !== undefined && instruction.ui?.kind === "choice");
   (instruction.ui as unknown as { options: Array<{ text: string; label: number }> }).options =
     Array.from({ length: MAX_INTERACTION_OPTION_ENTRIES + 1 }, (_, index) => ({
       text: "",
@@ -192,7 +192,7 @@ export function createOverAggregateStringPlan(): InstructionPlan {
     (candidate): candidate is InteractionInstruction =>
       candidate.kind === "interaction",
   );
-  assert.ok(instruction !== undefined && instruction.ui.kind === "button");
+  assert.ok(instruction !== undefined && instruction.ui?.kind === "button");
   const ui = instruction.ui as unknown as {
     buttonLabel: string;
     accessibleName: { kind: "text"; text: string };
@@ -238,11 +238,7 @@ export function createPropertyFixtureCatalog(): PropertyFixtureCatalog {
   );
   assert.equal(delayCompletion.outcome.kind, "observed");
 
-  const textPlan = createInteractionPlan("text", {
-    kind: "text",
-    hint: "Answer",
-    accessibleName: DEFAULT_ACCESSIBLE_NAMES.text,
-  });
+  const textPlan = compileValidPlan('let answer = askText "Answer"\nexit');
   const waitingTextResult = run(
     textPlan,
     createFreshRuntimeSnapshot(textPlan, { seed: 12345 }),
@@ -267,25 +263,13 @@ export function createPropertyFixtureCatalog(): PropertyFixtureCatalog {
     payload: Object.freeze({ kind: "submittedText", submittedText: "different" }),
   });
 
-  const buttonPlan = createInteractionPlan("button", {
-    kind: "button",
-    buttonLabel: "Continue",
-    accessibleName: DEFAULT_ACCESSIBLE_NAMES.button,
-  });
+  const buttonPlan = compileValidPlan('showButton "Continue"\nexit');
   const waitingButtonResult = run(
     buttonPlan,
     createFreshRuntimeSnapshot(buttonPlan, { seed: 12345 }),
   );
 
-  const choicePlan = createInteractionPlan("choice", {
-    kind: "choice",
-    labelType: "identifier",
-    options: Object.freeze([
-      Object.freeze({ text: "One", label: "one" }),
-      Object.freeze({ text: "Two", label: "two" }),
-    ]),
-    accessibleName: DEFAULT_ACCESSIBLE_NAMES.choice,
-  });
+  const choicePlan = compileValidPlan('let choice = choose one: "One", two: "Two"\nexit');
   const waitingChoiceResult = run(
     choicePlan,
     createFreshRuntimeSnapshot(choicePlan, { seed: 12345 }),

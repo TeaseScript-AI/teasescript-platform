@@ -169,7 +169,7 @@ test("choice completion snapshots validate without a plan for every result domai
   const wrongForExactPlan = structuredClone(identifier.snapshot) as any;
   wrongForExactPlan.lastSettlement.result = 1;
   wrongForExactPlan.temporaries[0].value = 1;
-  assert.equal(validateRuntimeSnapshot(wrongForExactPlan).valid, true);
+  assert.equal(validateRuntimeSnapshot(wrongForExactPlan).valid, false);
   assert.equal(validateRuntimeSnapshot(wrongForExactPlan, cases[1]).valid, false);
   const wrongChoiceDestination = structuredClone(identifier.snapshot) as any;
   wrongChoiceDestination.temporaries[0].value = "other";
