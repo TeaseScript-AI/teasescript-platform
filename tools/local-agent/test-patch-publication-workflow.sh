@@ -555,8 +555,9 @@ assert assert_checkout_jobs_have_contents_access(multiline_run_text_job) == []
 transfer_cleanup = text.split("  cleanup-transfer:\n", 1)[1].split("  cleanup-comment:\n", 1)[0]
 comment_cleanup = text.split("  cleanup-comment:\n", 1)[1]
 assert "contents: write" in transfer_cleanup and "issues: write" not in transfer_cleanup
-assert "contents: read" in comment_cleanup and "issues: write" in comment_cleanup
-assert "pull-requests: write" not in comment_cleanup and "contents: write" not in comment_cleanup
+assert "contents: read" in comment_cleanup
+assert "pull-requests: write" in comment_cleanup
+assert "issues: write" not in comment_cleanup and "contents: write" not in comment_cleanup
 assert "github.rest.issues.getComment" in cleanup_text
 assert "github.rest.issues.deleteComment" in cleanup_text
 assert "github.rest.issues.createComment" not in request_text + cleanup_text
