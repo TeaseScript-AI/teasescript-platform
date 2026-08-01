@@ -99,8 +99,8 @@ module.exports = async function runPatchPublicationRequest({ github, context, co
     core.setFailed(`Transfer manifest is not valid UTF-8 JSON: ${error.message}`);
     return;
   }
-  if (formatVersion !== 2) {
-    core.setFailed('Transfer manifest formatVersion must be the integer 2.');
+  if (formatVersion !== 1 && formatVersion !== 2) {
+    core.setFailed('Transfer manifest formatVersion must be the integer 1 or 2.');
     return;
   }
 
@@ -108,6 +108,7 @@ module.exports = async function runPatchPublicationRequest({ github, context, co
   core.setOutput('expected_transfer_sha', expectedTransferSha);
   core.setOutput('expected_manifest_sha256', expectedManifestSha256);
   core.setOutput('expected_target_branch', pull.data.head.ref);
+  core.setOutput('format_version', String(formatVersion));
   core.setOutput('issue_number', String(context.issue.number));
   core.setOutput('comment_id', String(context.payload.comment.id));
 

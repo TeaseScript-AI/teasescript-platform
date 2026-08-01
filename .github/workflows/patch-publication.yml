@@ -19,6 +19,7 @@ jobs:
       expected_transfer_sha: ${{ steps.request.outputs.expected_transfer_sha }}
       expected_manifest_sha256: ${{ steps.request.outputs.expected_manifest_sha256 }}
       expected_target_branch: ${{ steps.request.outputs.expected_target_branch }}
+      format_version: ${{ steps.request.outputs.format_version }}
       issue_number: ${{ steps.request.outputs.issue_number }}
       comment_id: ${{ steps.request.outputs.comment_id }}
     steps:
@@ -234,6 +235,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
           EXPECTED_TRANSFER_SHA: ${{ needs.request.outputs.expected_transfer_sha }}
+          FORMAT_VERSION: ${{ needs.request.outputs.format_version }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
         run: bash tools/local-agent/patch-publication-cleanup-transfer.sh
   cleanup-comment:

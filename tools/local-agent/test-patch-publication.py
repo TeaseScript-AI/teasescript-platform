@@ -88,24 +88,12 @@ class PatchPublicationTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def write_manifest(self, **overrides: object) -> None:
-        patch = self.patch.read_bytes()
         value: dict[str, object] = {
-            "formatVersion": 2,
+            "formatVersion": 1,
             "targetBranch": TARGET_BRANCH,
             "expectedBaseSha": self.base_sha,
             "expectedResultTreeSha": self.result_tree,
-            "patchSizeBytes": len(patch),
-            "patchSha256": hashlib.sha256(patch).hexdigest(),
-            "parts": [
-                {
-                    "path": (
-                        ".agent-patch-publication/parts/"
-                        "change.patch.part-0001-of-0001"
-                    ),
-                    "sizeBytes": len(patch),
-                    "sha256": hashlib.sha256(patch).hexdigest(),
-                }
-            ],
+            "patchSha256": hashlib.sha256(self.patch.read_bytes()).hexdigest(),
             "commitMessage": "Apply tested local patch",
         }
         value.update(overrides)
@@ -140,6 +128,7 @@ class PatchPublicationTests(unittest.TestCase):
     def create_transfer_payload(
         self,
         *,
+        format_version: int = 2,
         manifest_overrides: dict[str, object] | None = None,
         omit_part: int | None = None,
         extra_file: bool = False,
@@ -164,46 +153,57 @@ class PatchPublicationTests(unittest.TestCase):
         transfer_root.mkdir()
         patch = self.patch.read_bytes()
         part_paths: list[Path] = []
-        midpoint = max(1, len(patch) // 2)
-        while midpoint < len(patch) and patch[midpoint] & 0xC0 == 0x80:
-            midpoint += 1
-        parts = [patch[:midpoint], patch[midpoint:]]
-        if invalid_utf8_part is not None:
-            parts[invalid_utf8_part - 1] = b"\xff\xfeinvalid\n"
-        parts_root = transfer_root / "parts"
-        parts_root.mkdir()
-        manifest_parts: list[dict[str, object]] = []
-        for index, value in enumerate(parts, start=1):
-            relative = (
-                ".agent-patch-publication/parts/change.patch.part-"
-                f"{index:04d}-of-{len(parts):04d}"
-            )
-            path = worktree / relative
-            part_paths.append(path)
-            if omit_part != index:
-                path.write_bytes(value)
-            manifest_parts.append(
-                {
-                    "path": relative,
-                    "sizeBytes": len(value),
-                    "sha256": hashlib.sha256(value).hexdigest(),
-                }
-            )
-        reconstructed = b"".join(parts)
-        manifest_value = {
-            "formatVersion": 2,
-            "targetBranch": TARGET_BRANCH,
-            "expectedBaseSha": self.base_sha,
-            "expectedResultTreeSha": self.result_tree,
-            "patchSizeBytes": len(reconstructed),
-            "patchSha256": hashlib.sha256(reconstructed).hexdigest(),
-            "parts": manifest_parts,
-            "commitMessage": "Apply tested local patch",
-        }
-        if extra_file:
-            (parts_root / "unexpected.txt").write_text(
-                "unexpected\n", encoding="utf-8"
-            )
+        if format_version == 1:
+            (transfer_root / "change.patch").write_bytes(patch)
+            manifest_value: dict[str, object] = {
+                "formatVersion": 1,
+                "targetBranch": TARGET_BRANCH,
+                "expectedBaseSha": self.base_sha,
+                "expectedResultTreeSha": self.result_tree,
+                "patchSha256": hashlib.sha256(patch).hexdigest(),
+                "commitMessage": "Apply tested local patch",
+            }
+        else:
+            midpoint = max(1, len(patch) // 2)
+            while midpoint < len(patch) and patch[midpoint] & 0xC0 == 0x80:
+                midpoint += 1
+            parts = [patch[:midpoint], patch[midpoint:]]
+            if invalid_utf8_part is not None:
+                parts[invalid_utf8_part - 1] = b"\xff\xfeinvalid\n"
+            parts_root = transfer_root / "parts"
+            parts_root.mkdir()
+            manifest_parts: list[dict[str, object]] = []
+            for index, value in enumerate(parts, start=1):
+                relative = (
+                    ".agent-patch-publication/parts/change.patch.part-"
+                    f"{index:04d}-of-{len(parts):04d}"
+                )
+                path = worktree / relative
+                part_paths.append(path)
+                if omit_part != index:
+                    path.write_bytes(value)
+                manifest_parts.append(
+                    {
+                        "path": relative,
+                        "sizeBytes": len(value),
+                        "sha256": hashlib.sha256(value).hexdigest(),
+                    }
+                )
+            reconstructed = b"".join(parts)
+            manifest_value = {
+                "formatVersion": 2,
+                "targetBranch": TARGET_BRANCH,
+                "expectedBaseSha": self.base_sha,
+                "expectedResultTreeSha": self.result_tree,
+                "patchSizeBytes": len(reconstructed),
+                "patchSha256": hashlib.sha256(reconstructed).hexdigest(),
+                "parts": manifest_parts,
+                "commitMessage": "Apply tested local patch",
+            }
+            if extra_file:
+                (parts_root / "unexpected.txt").write_text(
+                    "unexpected\n", encoding="utf-8"
+                )
         if manifest_overrides:
             manifest_value.update(manifest_overrides)
         manifest_path = transfer_root / "manifest.json"
@@ -291,7 +291,18 @@ class PatchPublicationTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 1)
         self.assertIn("patch SHA-256 mismatch", completed.stderr)
 
-    def test_materializes_parts_and_prepares_candidate(self) -> None:
+    def test_materializes_v1_transfer_payload_unchanged(self) -> None:
+        manifest, transfer_ref, _parts = self.create_transfer_payload(
+            format_version=1
+        )
+        output = self.root / "materialized-v1.patch"
+        completed = run(
+            self.materialize_command(manifest, transfer_ref, output), cwd=self.repo
+        )
+        self.assertIn("format=1", completed.stdout)
+        self.assertEqual(output.read_bytes(), self.patch.read_bytes())
+
+    def test_materializes_v2_parts_and_prepares_candidate(self) -> None:
         manifest, transfer_ref, _parts = self.create_transfer_payload()
         materialized = self.root / "materialized-v2.patch"
         completed = run(
@@ -373,7 +384,7 @@ class PatchPublicationTests(unittest.TestCase):
         )
         self.assertFalse(output.exists())
 
-    def test_missing_and_extra_parts_fail_closed(self) -> None:
+    def test_v2_missing_and_extra_parts_fail_closed(self) -> None:
         cases = (
             ({"omit_part": 2}, "missing file(s)"),
             ({"extra_file": True}, "unexpected file(s)"),
@@ -391,7 +402,7 @@ class PatchPublicationTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 1)
                 self.assertIn(expected, completed.stderr)
 
-    def test_part_size_hash_and_utf8_errors_name_the_part(self) -> None:
+    def test_v2_part_size_hash_and_utf8_errors_name_the_part(self) -> None:
         for kind in ("size", "hash", "utf8"):
             with self.subTest(kind=kind):
                 if kind == "utf8":
@@ -424,7 +435,7 @@ class PatchPublicationTests(unittest.TestCase):
                     completed.stderr,
                 )
 
-    def test_final_digest_and_canonical_order_fail_closed(self) -> None:
+    def test_v2_final_digest_and_canonical_order_fail_closed(self) -> None:
         manifest, transfer_ref, _parts = self.create_transfer_payload()
         value = json.loads(manifest.read_text(encoding="utf-8"))
         value["patchSha256"] = "0" * 64
@@ -476,7 +487,7 @@ class PatchPublicationTests(unittest.TestCase):
         self.assertEqual(completed3.returncode, 1)
         self.assertIn(".path must be exactly", completed3.stderr)
 
-    def test_invalid_path_and_transport_limits_fail_closed(self) -> None:
+    def test_v2_invalid_path_and_transport_limits_fail_closed(self) -> None:
         cases: list[tuple[str, Callable[[dict[str, object]], None], str]] = []
 
         def invalid_path(value: dict[str, object]) -> None:
@@ -523,7 +534,7 @@ class PatchPublicationTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 1)
                 self.assertIn(expected, completed.stderr)
 
-    def test_one_part_repair_succeeds_on_new_transfer_commit(self) -> None:
+    def test_v2_one_part_repair_succeeds_on_new_transfer_commit(self) -> None:
         manifest, transfer_ref, parts = self.create_transfer_payload()
         manifest_digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
         correct_part = parts[1].read_bytes()
