@@ -1,5 +1,7 @@
 # Local Agent Tools
 
+Requires Python 3.10 or newer.
+
 The source-review and compact-test helpers use the Python standard library and
 ordinary shell/Git tools. Token-aware patch preparation optionally uses a local
 `tiktoken` Python installation and a separately stored `o200k_base.tiktoken`
