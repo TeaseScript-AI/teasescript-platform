@@ -137,8 +137,12 @@ Do not print every part or use a command that emits all escaped chunks. Ask the 
 ```shell
 python3 -B tools/local-agent/prepare-patch-publication.py \
   --output-directory /tmp/patch-publication-payload \
-  --show-next-upload
+  --show-next-action
 ```
+
+`--show-next-upload` remains an exact compatibility alias for the canonical
+`--show-next-action`; both names invoke the same implementation and print the
+same next action.
 
 The command verifies the local file again and prints one connector-ready argument object for the GitHub action that creates a UTF-8 Git blob from text, currently `GitHub.create_blob`. Call that connector immediately. Compare its returned Git blob SHA with `expectedGitBlobSha`, then record the result:
 
@@ -148,7 +152,7 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --record-upload-sha <returned-git-blob-sha>
 ```
 
-A mismatch fails without advancing the local state. A match records that file and identifies the next path, but does not open it. Repeat `--show-next-upload` only when ready to send the next file. Parts are listed first and the manifest last. Previously transmitted content remains in the conversation and tool history; sequential exposure avoids preloading future parts and avoids a separate all-parts dump.
+A mismatch fails without advancing the local state. A match records that file and identifies the next path, but does not open it. Repeat `--show-next-action` only when ready to send the next file. Parts are listed first and the manifest last. Previously transmitted content remains in the conversation and tool history; sequential exposure avoids preloading future parts and avoids a separate all-parts dump.
 
 If a later connector step reports that one recorded blob is unavailable or invalid, reset only that upload index and resend the exact same local file:
 
@@ -158,7 +162,7 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --reset-upload-index <index>
 ```
 
-The reset removes only the verified local progress record. It does not regenerate, edit, or open the part. The next `--show-next-upload` exposes the earliest missing upload again.
+The reset removes only the verified local progress record. It does not regenerate, edit, or open the part. The next `--show-next-action` exposes the earliest missing upload again.
 
 If a recorded post-upload object later proves stale or unavailable, reset only
 that stage and its dependent later state while preserving every verified blob:
@@ -174,7 +178,7 @@ preserves the verified tree and clears branch progress. Resetting `branch`
 preserves the verified tree and commit. No post-upload correction requires an
 unrelated blob re-upload or manual JSON editing.
 
-Only files below `.agent-patch-publication/` belong in the transfer tree. The upload plan, state, and instruction file remain local. After recording all blobs, continue running `--show-next-upload`. It exposes only the next action and never prints later write actions early.
+Only files below `.agent-patch-publication/` belong in the transfer tree. The upload plan, state, and instruction file remain local. After recording all blobs, continue running `--show-next-action`. It exposes only the next action and never prints later write actions early.
 
 First create the payload-only transfer tree with the exact printed arguments and no base tree. Record its returned SHA:
 
@@ -184,7 +188,7 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --record-tree-sha <returned-tree-sha>
 ```
 
-The helper compares that SHA with the locally computed expected transfer-tree SHA. A mismatch fails without advancing. On success, the next `--show-next-upload` prints complete commit arguments containing the recorded tree SHA and the exact target-branch head as parent. Record the returned commit SHA:
+The helper compares that SHA with the locally computed expected transfer-tree SHA. A mismatch fails without advancing. On success, the next `--show-next-action` prints complete commit arguments containing the recorded tree SHA and the exact target-branch head as parent. Record the returned commit SHA:
 
 ```shell
 python3 -B tools/local-agent/prepare-patch-publication.py \
@@ -202,7 +206,7 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --record-branch-created <returned-branch-name>
 ```
 
-The next `--show-next-upload` now exposes one read-only
+The next `--show-next-action` now exposes one read-only
 `GitHub.compare_commits` action with the recorded commit as `base` and the
 transfer branch as `head`. Record the returned comparison status only when it
 is `identical` with `ahead_by=0` and `behind_by=0`:
@@ -215,7 +219,7 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
 
 An interruption after branch creation resumes at this comparison read rather
 than repeating the repository write. Only after the exact comparison is
-recorded does `--show-next-upload` reveal the `/publish-patch` command, target
+recorded does `--show-next-action` reveal the `/publish-patch` command, target
 branch, expected base, expected final project tree, and post-publication
 verification checklist. Resetting any recorded blob clears dependent tree,
 commit, and branch state. Prepared upload plans from an older local state

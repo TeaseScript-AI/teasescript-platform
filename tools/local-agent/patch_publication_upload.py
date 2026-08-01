@@ -405,12 +405,12 @@ def record_upload_sha(output: Path, returned_sha: str) -> None:
     print(f"gitBlobSha={returned_sha}")
     if next_item is None:
         print("allUploadsRecorded=true")
-        print("next=run --show-next-upload for the exact transfer-tree action")
+        print("next=run --show-next-action for the exact transfer-tree action")
         print(f"transferBranch={plan['transferBranch']}")
     else:
         print(f"nextUploadIndex={next_item['index']}")
         print(f"nextPath={next_item['path']}")
-        print("next=run --show-next-upload; no later part has been opened")
+        print("next=run --show-next-action; no later part has been opened")
 
 
 def record_tree_sha(output: Path, returned_sha: str) -> None:
@@ -437,7 +437,7 @@ def record_tree_sha(output: Path, returned_sha: str) -> None:
     state["transferTreeSha"] = returned_sha
     write_json_atomic(output.resolve() / UPLOAD_STATE_NAME, state)
     print(f"recordedTransferTreeSha={returned_sha}")
-    print("next=run --show-next-upload for exact commit arguments")
+    print("next=run --show-next-action for exact commit arguments")
 
 
 def record_commit_sha(output: Path, returned_sha: str) -> None:
@@ -453,7 +453,7 @@ def record_commit_sha(output: Path, returned_sha: str) -> None:
     state["transferCommitSha"] = returned_sha
     write_json_atomic(output.resolve() / UPLOAD_STATE_NAME, state)
     print(f"recordedTransferCommitSha={returned_sha}")
-    print("next=run --show-next-upload for exact branch arguments")
+    print("next=run --show-next-action for exact branch arguments")
 
 
 def record_branch_created(output: Path, returned_branch: str) -> None:
@@ -474,7 +474,7 @@ def record_branch_created(output: Path, returned_branch: str) -> None:
     state["transferBranchCreated"] = returned_branch
     write_json_atomic(output.resolve() / UPLOAD_STATE_NAME, state)
     print(f"recordedTransferBranchCreated={returned_branch}")
-    print("next=run --show-next-upload for the exact branch-verification action")
+    print("next=run --show-next-action for the exact branch-verification action")
 
 
 def record_branch_status(output: Path, returned_status: str) -> None:
@@ -495,7 +495,7 @@ def record_branch_status(output: Path, returned_status: str) -> None:
     write_json_atomic(output.resolve() / UPLOAD_STATE_NAME, state)
     print(f"recordedTransferBranchSha={commit_sha}")
     print("readyToPublish=true")
-    print("next=run --show-next-upload for the exact publication command")
+    print("next=run --show-next-action for the exact publication command")
 
 
 def reset_publication_stage(output: Path, stage: str) -> None:
@@ -529,7 +529,7 @@ def reset_publication_stage(output: Path, stage: str) -> None:
     print(f"resetPublicationStage={stage}")
     print(f"clearedFields={','.join(cleared)}")
     print("preservedVerifiedBlobs=true")
-    print("next=run --show-next-upload for the exact next action")
+    print("next=run --show-next-action for the exact next action")
 
 
 def reset_upload_index(output: Path, index: int) -> None:
@@ -572,4 +572,4 @@ def reset_upload_index(output: Path, index: int) -> None:
     if earliest is not None:
         print(f"nextUploadIndex={earliest['index']}")
         print(f"nextPath={earliest['path']}")
-    print("next=run --show-next-upload; the file has not been opened")
+    print("next=run --show-next-action; the file has not been opened")

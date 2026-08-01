@@ -400,8 +400,13 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertGreater(len(plan["files"]), 2)
         first, second = plan["files"][:2]
 
-        shown = run_cli("--output-directory", str(output), "--show-next-upload")
+        shown = run_cli("--output-directory", str(output), "--show-next-action")
+        shown_alias = run_cli(
+            "--output-directory", str(output), "--show-next-upload"
+        )
         self.assertEqual(shown.returncode, 0)
+        self.assertEqual(shown_alias.returncode, 0)
+        self.assertEqual(shown_alias.stdout, shown.stdout)
         self.assertIn(first["path"], shown.stdout)
         self.assertNotIn(second["path"], shown.stdout)
         self.assertIn('"encoding": "utf-8"', shown.stdout)
@@ -471,9 +476,14 @@ class PreparePatchPublicationTests(unittest.TestCase):
 
         self.write_completed_upload_state(output, plan)
         tree_action = run_cli(
+            "--output-directory", str(output), "--show-next-action"
+        )
+        tree_action_alias = run_cli(
             "--output-directory", str(output), "--show-next-upload"
         )
         self.assertEqual(tree_action.returncode, 0)
+        self.assertEqual(tree_action_alias.returncode, 0)
+        self.assertEqual(tree_action_alias.stdout, tree_action.stdout)
         self.assertIn("stage=create-transfer-tree", tree_action.stdout)
         self.assertIn('"tree_elements":', tree_action.stdout)
         self.assertNotIn("publicationCommand=", tree_action.stdout)
@@ -727,6 +737,8 @@ class PreparePatchPublicationTests(unittest.TestCase):
         _, output, _ = self.prepare_small_payload("instructions")
         instructions = (output / "UPLOAD-INSTRUCTIONS.md").read_text()
         self.assertIn("exactly one next action at a time", instructions)
+        self.assertIn("canonical `--show-next-action`", instructions)
+        self.assertIn("`--show-next-upload` remains an exact compatibility alias", instructions)
         self.assertIn(
             "Record each returned SHA, branch name, or\ncomparison status",
             instructions,

@@ -63,9 +63,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-directory", type=Path, required=True)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
+        "--show-next-action",
         "--show-next-upload",
+        dest="show_next_action",
         action="store_true",
-        help="show the exact next blob, tree, commit, branch, or publication action",
+        help=(
+            "show the exact next blob, tree, commit, branch, or publication "
+            "action; --show-next-upload is a compatibility alias"
+        ),
     )
     mode.add_argument(
         "--record-upload-sha",
@@ -106,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     try:
-        if args.show_next_upload:
+        if args.show_next_action:
             show_next_upload(args.output_directory)
         elif args.record_upload_sha is not None:
             record_upload_sha(args.output_directory, args.record_upload_sha)

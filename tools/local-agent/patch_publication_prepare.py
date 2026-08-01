@@ -271,5 +271,5 @@ def prepare(args: argparse.Namespace) -> None:
     print("next=run this command; it opens only one pending upload:")
     print(
         f"python3 -B {Path(__file__).with_name('prepare-patch-publication.py').as_posix()} --output-directory "
-        f"{output.as_posix()} --show-next-upload"
+        f"{output.as_posix()} --show-next-action"
     )
