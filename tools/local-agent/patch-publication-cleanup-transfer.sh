@@ -15,7 +15,7 @@ transfer_ref="refs/heads/$TRANSFER_BRANCH"
 cleanup_status=failed
 cleanup_failed=0
 
-if [[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]; then
+if [[ "$PUBLISH_RESULT" != success ]]; then
   set +e
   remote_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
     ls-remote --heads "$remote_url" "$transfer_ref" 2>&1)"
