@@ -19,7 +19,7 @@ The selected backlog, temporary coordination, and implementation status have dif
 
 - `docs/planning/POC-TO-ALPHA-BACKLOG.md` records owner-selected obligations that remain open before a target gate;
 - a deliberately maintained repository issue or phase-scope document may record scheduled scope when the owner or coordinator chooses to keep that planning in GitHub;
-- temporary coordinator work breakdowns, executor assignments, integration order, work-package files, package ZIPs, and commit tracking remain outside the repository and are non-canonical;
+- temporary coordinator work breakdowns, executor assignments, integration order, and commit tracking remain outside the repository and are non-canonical;
 - accepted decisions and implemented results from temporary coordination are synchronized back into the relevant ADRs, specifications, current topic documents, and `PHASE-STATUS.md`.
 
 Do not keep completed items in the open backlog merely as history; Git already preserves their earlier state.
@@ -44,7 +44,7 @@ Do not add the following merely to make the repository self-contained:
 - large third-party source ZIP files;
 - copied legacy engine/script archives;
 - chat scratchpads or temporary research notes;
-- temporary coordinator work breakdowns, executor assignments, integration logs, or work-package transport files;
+- temporary coordinator work breakdowns, executor assignments, or integration logs;
 - generated package manifests/checksum lists for shared-project ZIPs;
 - duplicate historical versions of canonical documents;
 - PR-specific audit reports after their relevant conclusions are incorporated into current docs and tests.
