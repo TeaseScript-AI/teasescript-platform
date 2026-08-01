@@ -67,9 +67,8 @@
 - Complete suspended-caller temporary liveness validation.
 - Strict function prologue/region, checkpoint-progress, and prepared-reference validation.
 - Central V30 protected-name enforcement.
-- Shared non-finite-literal AST validation and semantic validation before direct `Program` compatibility execution.
-- Defensive direct lowering with `TSC001` for non-finite numeric literals and `TSC003` for excess positional arguments.
-- Explicit rejection of host `RuntimeSpeaker` values at the compatibility boundary.
+- Source compilation rejects non-finite numeric literals before producing a plan.
+- Internal compiler lowering retains focused `TSC003` diagnostics for malformed compiler inputs.
 - Own-property-only runtime builtin registration and prototype-free named builtin arguments.
 - Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
 

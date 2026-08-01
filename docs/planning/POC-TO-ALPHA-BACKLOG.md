@@ -232,14 +232,14 @@ Add fixed-seed, bounded, reproducible generation and property coverage for sourc
 - malformed and unusual source input;
 - malformed plans and checkpoints;
 - bounded deeply nested valid source structures;
-- equivalent bounded direct-AST structures that bypass parsing;
+- bounded deeply nested source structures;
 - termination, JSON-safety, determinism, and structured-boundary properties;
 - failing source, seed, generated input, and first failing boundary in assertion output;
 - explicit depth, input-size, and total-work limits.
 
 #### Boundaries
 
-- This item does not document deeply nested valid source or direct AST input as a confirmed current defect; a bug issue requires a repository reproduction.
+- This item does not document deeply nested valid source as a confirmed current defect; a bug issue requires a repository reproduction.
 - A valid generated input may succeed or reach a documented bounded rejection, but must not fail through an incidental native stack overflow.
 - Do not select `fast-check` or another dependency until implementation demonstrates the need and documents alternatives, maintenance impact, and security impact.
 

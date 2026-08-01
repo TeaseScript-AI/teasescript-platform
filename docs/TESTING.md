@@ -282,7 +282,7 @@ Useful generated inputs include:
 - Unicode and unusual identifiers;
 - incomplete strings, comments, and blocks;
 - deeply nested but otherwise valid source structures, including parentheses, unary expressions, lists, templates, and interpolations;
-- equivalent bounded direct-AST structures that bypass parsing.
+- bounded deeply nested source structures that exercise parser and compiler limits.
 
 Required properties include:
 
@@ -293,9 +293,9 @@ Required properties include:
 - the same seed reproduces the same input and result;
 - failing input, seed, and first failing boundary are reported;
 - generated depth, input size, and total work are bounded;
-- deeply nested valid source and direct AST input either succeeds or reaches a documented bounded rejection rather than an incidental native stack overflow.
+- deeply nested valid source either succeeds or reaches a documented bounded rejection rather than an incidental native stack overflow.
 
-This strategy does not assert that deeply nested valid source or direct AST input currently has a confirmed defect. A bug issue requires a repository reproduction that identifies the first failing public boundary.
+This strategy does not assert that deeply nested valid source currently has a confirmed defect. A bug issue requires a repository reproduction that identifies the first failing public boundary.
 
 Phase 1 does not select `fast-check` or another dependency. Phase 2 may propose one only after concrete implementation evidence and the normal dependency review.
 

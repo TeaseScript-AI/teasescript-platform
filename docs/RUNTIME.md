@@ -402,7 +402,6 @@ The current boundaries are:
 - low-level named builtin arguments use an immutable prototype-free record and duplicate detection uses own properties;
 - values entering globals or returning from builtins are copied and validated as serializable runtime values;
 - invalid builtin return values become structured runtime failures, including `TSR013` for invalid values;
-- host `RuntimeSpeaker` values are currently unsupported and are rejected rather than converted into temporary or dangling speaker references;
 - normally declared TeaseScript speakers remain runtime-managed state and continue to use stable serialized speaker IDs.
 
 The low-level `RuntimeCapabilities.random` hook is a compatibility/testing override. Without it, execution advances the serialized `xorshift32-v1` state. An injected random source must return a finite number in the half-open range `[0, 1)`.

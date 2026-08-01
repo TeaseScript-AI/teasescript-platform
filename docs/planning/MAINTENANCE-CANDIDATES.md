@@ -46,7 +46,6 @@ A split also creates costs:
 - temporary merge conflicts with active runtime hardening;
 - additional files and imports that can become indirection when boundaries are too fine;
 - premature module boundaries that may need to move again;
-- churn around the host-value compatibility layer before its lifecycle is decided.
 
 Any implementation must therefore:
 
