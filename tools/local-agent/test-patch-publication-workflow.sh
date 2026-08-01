@@ -45,7 +45,6 @@ assert "github.rest.git.getRef" in request_text
 assert "github.rest.repos.getContent" in request_text
 assert "context.payload.comment.id" in request_text
 assert "expected_transfer_sha" in text
-assert "format_version" in text
 assert "comment_id: ${{ steps.request.outputs.comment_id }}" in text
 assert "Read exact transfer manifest" in text
 assert 'actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"' in prepare_text
@@ -53,7 +52,7 @@ assert 'sha256sum "$RUNNER_TEMP/manifest.json"' in prepare_text
 assert "materialize-patch" in prepare_text
 assert "refs/remotes/origin/patch-transfer" in prepare_text
 assert "preserved_retry" in transfer_text
-assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in transfer_text
+assert '[[ "$PUBLISH_RESULT" != success ]]' in transfer_text
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
@@ -780,12 +779,21 @@ git -C "$source_repo" reset -q --hard "$base"
 python3 - "$manifest" "$target" "$base" "$tree" "$patch" <<'PY'
 import hashlib, json, pathlib, sys
 out, target, base, tree, patch = sys.argv[1:]
+patch_path = pathlib.Path(patch)
+patch_bytes = patch_path.read_bytes()
+part_path = ".agent-patch-publication/parts/change.patch.part-0001-of-0001"
 data = {
-    "formatVersion": 1,
+    "formatVersion": 2,
     "targetBranch": target,
     "expectedBaseSha": base,
     "expectedResultTreeSha": tree,
-    "patchSha256": hashlib.sha256(pathlib.Path(patch).read_bytes()).hexdigest(),
+    "patchSizeBytes": len(patch_bytes),
+    "patchSha256": hashlib.sha256(patch_bytes).hexdigest(),
+    "parts": [{
+        "path": part_path,
+        "sizeBytes": len(patch_bytes),
+        "sha256": hashlib.sha256(patch_bytes).hexdigest(),
+    }],
     "commitMessage": "candidate",
 }
 pathlib.Path(out).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -838,9 +846,8 @@ git -C "$tmp/publisher" push -q origin "$candidate:refs/heads/$target"
 test "$(git --git-dir="$remote" rev-parse "refs/heads/$target")" = "$candidate"
 
 run_cleanup() {
-  local format_version="$1"
-  local publish_result="$2"
-  local output_file="$3"
+  local publish_result="$1"
+  local output_file="$2"
   : > "$output_file"
   (
     cd "$tmp/publisher"
@@ -850,7 +857,6 @@ run_cleanup() {
     PATCH_PUBLICATION_TEST_REMOTE_URL="$remote" \
     TRANSFER_BRANCH="$transfer" \
     EXPECTED_TRANSFER_SHA="$expected_transfer_sha" \
-    FORMAT_VERSION="$format_version" \
     PUBLISH_RESULT="$publish_result" \
     GITHUB_OUTPUT="$output_file" \
       bash "$cleanup_script"
@@ -860,7 +866,7 @@ run_cleanup() {
 # A failed or skipped V2 publication preserves the unchanged exact transfer ref
 # so one bad part can be replaced without regenerating the manifest.
 retry_output="$tmp/cleanup-retry.out"
-run_cleanup 2 failure "$retry_output"
+run_cleanup failure "$retry_output"
 test "$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")" = "$expected_transfer_sha"
 grep -qx 'cleanup_status=preserved_retry' "$retry_output"
 
@@ -872,7 +878,7 @@ git -C "$tmp/racer" commit -q -m 'replace transfer payload'
 changed_transfer_sha="$(git -C "$tmp/racer" rev-parse HEAD)"
 git -C "$tmp/racer" push -q origin "HEAD:refs/heads/$transfer"
 changed_output="$tmp/cleanup-changed.out"
-run_cleanup 2 failure "$changed_output"
+run_cleanup failure "$changed_output"
 test "$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")" = "$changed_transfer_sha"
 grep -qx 'cleanup_status=preserved_changed' "$changed_output"
 
@@ -880,7 +886,7 @@ grep -qx 'cleanup_status=preserved_changed' "$changed_output"
 git --git-dir="$remote" update-ref "refs/heads/$transfer" \
   "$expected_transfer_sha" "$changed_transfer_sha"
 removed_output="$tmp/cleanup-removed.out"
-run_cleanup 2 success "$removed_output"
+run_cleanup success "$removed_output"
 ! git --git-dir="$remote" show-ref --verify "refs/heads/$transfer" >/dev/null 2>&1
 grep -qx 'cleanup_status=removed' "$removed_output"
 
