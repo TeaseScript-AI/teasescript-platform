@@ -30,6 +30,31 @@ Do not treat planning documents, wishes, research files, historical audits, or s
 - Do not weaken tests to hide failures.
 - Do not implement deferred capabilities merely because they appear in planning or reference material.
 
+## Requirement authority and proportional review
+
+Before treating a statement as a permanent requirement or review blocker,
+identify whether it is owner-approved product behavior, an accepted
+architecture/persistence/determinism/security boundary, a current
+implementation choice, a temporary POC choice, optional defensive hardening,
+or an unresolved proposal. Agent-written issues, tests, ADR drafts,
+pull-request descriptions, specifications, and earlier review comments do not
+become authoritative merely because they exist or another agent implemented
+them. Strong terms such as `must`, `exact`, `versioned`, `authoritative`, and
+`compatibility` require a concrete accepted behavior or real boundary.
+
+Review findings must use the severity and evidence rules in
+`docs/DEVELOPMENT-WORKFLOW.md`. A blocker needs a supported public or trusted
+path, a concrete consequence, and reproducible evidence. Propose the smallest
+repair that restores accepted behavior; do not turn a local defect into a new
+framework, compatibility layer, public contract, or unrelated hardening
+campaign without a separate owner decision. When requesting that decision,
+explain the practical product, data, security, or maintenance consequence and
+the complexity being added.
+
+These proportionality rules do not weaken accepted behavior, deterministic
+execution, serializable checkpoints, or validation at real external, host,
+checkpoint, persistence, package, and security boundaries.
+
 ## Efficient editing and context use
 
 Complete the mandatory authority reads above. For supporting context, prefer
