@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -84,6 +85,61 @@ class PreparePatchPublicationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def prepare_small_payload(
+        self, name: str
+    ) -> tuple[Path, Path, dict[str, object]]:
+        repository = self.root / f"{name}-repository"
+        repository.mkdir()
+        git(repository, "init", "-q", "-b", "main")
+        git(repository, "config", "user.name", "Test")
+        git(repository, "config", "user.email", "test@example.invalid")
+        (repository / "base.txt").write_text("base\n")
+        git(repository, "add", "base.txt")
+        git(repository, "commit", "-q", "-m", "Base")
+        base = git(repository, "rev-parse", "HEAD")
+        (repository / "change.txt").write_text("change\n")
+        git(repository, "add", "change.txt")
+        git(repository, "commit", "-q", "-m", "Add change")
+
+        output = self.root / f"{name}-payload"
+        run(
+            [
+                sys.executable,
+                str(PREPARE),
+                "--repository",
+                str(repository),
+                "--repository-full-name",
+                "TeaseScript-AI/teasescript-platform",
+                "--target-branch",
+                "feat/test-target",
+                "--expected-base-sha",
+                base,
+                "--output-directory",
+                str(output),
+            ],
+            cwd=repository,
+        )
+        plan = json.loads((output / "upload-plan.json").read_text())
+        return repository, output, plan
+
+    def write_completed_upload_state(
+        self, output: Path, plan: dict[str, object]
+    ) -> None:
+        files = plan["files"]
+        assert isinstance(files, list)
+        state = {
+            "stateVersion": 2,
+            "completedUploads": [
+                {
+                    "index": item["index"],
+                    "path": item["path"],
+                    "gitBlobSha": item["expectedGitBlobSha"],
+                }
+                for item in files
+            ],
+        }
+        (output / "upload-state.json").write_text(json.dumps(state) + "\n")
 
     def test_token_bounded_split_reconstructs_exact_patch(self) -> None:
         patch = (
@@ -400,24 +456,150 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(rerecorded.returncode, 0)
         self.assertIn("nextUploadIndex=2", rerecorded.stdout)
 
-        completed = {
-            "stateVersion": 1,
-            "completedUploads": [
-                {
-                    "index": item["index"],
-                    "path": item["path"],
-                    "gitBlobSha": item["expectedGitBlobSha"],
-                }
-                for item in plan["files"]
-            ],
-        }
-        (output / "upload-state.json").write_text(json.dumps(completed) + "\n")
-        final = run_cli("--output-directory", str(output), "--show-next-upload")
-        self.assertEqual(final.returncode, 0)
-        self.assertIn("createTreeArguments=", final.stdout)
-        self.assertIn('"tree_elements":', final.stdout)
-        self.assertIn(f'"parent_sha": "{base}"', final.stdout)
-        self.assertIn(plan["publicationCommand"], final.stdout)
+        payload_repository = self.root / "payload-tree"
+        payload_repository.mkdir()
+        git(payload_repository, "init", "-q", "-b", "main")
+        shutil.copytree(
+            output / SUPPORT.TRANSFER_DIRECTORY,
+            payload_repository / SUPPORT.TRANSFER_DIRECTORY,
+        )
+        git(payload_repository, "add", SUPPORT.TRANSFER_DIRECTORY)
+        self.assertEqual(
+            plan["expectedTransferTreeSha"],
+            git(payload_repository, "write-tree"),
+        )
+
+        self.write_completed_upload_state(output, plan)
+        tree_action = run_cli(
+            "--output-directory", str(output), "--show-next-upload"
+        )
+        self.assertEqual(tree_action.returncode, 0)
+        self.assertIn("stage=create-transfer-tree", tree_action.stdout)
+        self.assertIn('"tree_elements":', tree_action.stdout)
+        self.assertNotIn("publicationCommand=", tree_action.stdout)
+
+        wrong_tree = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-tree-sha",
+            "0" * 40,
+        )
+        self.assertEqual(wrong_tree.returncode, 1)
+        self.assertIn("do not advance", wrong_tree.stderr)
+        state = json.loads((output / "upload-state.json").read_text())
+        self.assertNotIn("transferTreeSha", state)
+
+        tree_sha = str(plan["expectedTransferTreeSha"])
+        recorded_tree = run_cli(
+            "--output-directory", str(output), "--record-tree-sha", tree_sha
+        )
+        self.assertEqual(recorded_tree.returncode, 0)
+        commit_action = run_cli(
+            "--output-directory", str(output), "--show-next-upload"
+        )
+        self.assertIn("stage=create-transfer-commit", commit_action.stdout)
+        self.assertIn(f'"tree_sha": "{tree_sha}"', commit_action.stdout)
+        self.assertIn(f'"parent_sha": "{base}"', commit_action.stdout)
+        self.assertNotIn("<returned-tree-sha>", commit_action.stdout)
+
+        commit_sha = "1" * 40
+        recorded_commit = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-commit-sha",
+            commit_sha,
+        )
+        self.assertEqual(recorded_commit.returncode, 0)
+        branch_action = run_cli(
+            "--output-directory", str(output), "--show-next-upload"
+        )
+        self.assertIn("stage=create-transfer-branch", branch_action.stdout)
+        self.assertIn(f'"sha": "{commit_sha}"', branch_action.stdout)
+        self.assertNotIn("<returned-commit-sha>", branch_action.stdout)
+        self.assertNotIn("publicationCommand=", branch_action.stdout)
+
+        wrong_branch = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-branch-sha",
+            "2" * 40,
+        )
+        self.assertEqual(wrong_branch.returncode, 1)
+        self.assertIn("do not publish", wrong_branch.stderr)
+
+        recorded_branch = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-branch-sha",
+            commit_sha,
+        )
+        self.assertEqual(recorded_branch.returncode, 0)
+        ready = run_cli("--output-directory", str(output), "--show-next-upload")
+        self.assertEqual(ready.returncode, 0)
+        self.assertIn("stage=ready-to-publish", ready.stdout)
+        self.assertIn(str(plan["publicationCommand"]), ready.stdout)
+        self.assertIn(str(plan["expectedResultTreeSha"]), ready.stdout)
+        self.assertIn("postPublicationChecklist=", ready.stdout)
+
+        reset_after_ready = run_cli(
+            "--output-directory",
+            str(output),
+            "--reset-upload-index",
+            str(first["index"]),
+        )
+        self.assertEqual(reset_after_ready.returncode, 0)
+        self.assertIn("clearedPublicationState=true", reset_after_ready.stdout)
+        reset_state = json.loads((output / "upload-state.json").read_text())
+        self.assertNotIn("transferTreeSha", reset_state)
+        self.assertNotIn("transferCommitSha", reset_state)
+        self.assertNotIn("transferBranchSha", reset_state)
+
+    def test_post_upload_actions_reject_out_of_order_and_malformed_state(self) -> None:
+        _, output, plan = self.prepare_small_payload("ordering")
+
+        early_tree = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-tree-sha",
+            str(plan["expectedTransferTreeSha"]),
+        )
+        self.assertEqual(early_tree.returncode, 1)
+        self.assertIn("before every blob is recorded", early_tree.stderr)
+
+        self.write_completed_upload_state(output, plan)
+        early_commit = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-commit-sha",
+            "1" * 40,
+        )
+        self.assertEqual(early_commit.returncode, 1)
+        self.assertIn("before the tree SHA", early_commit.stderr)
+        early_branch = run_cli(
+            "--output-directory",
+            str(output),
+            "--record-branch-sha",
+            "1" * 40,
+        )
+        self.assertEqual(early_branch.returncode, 1)
+        self.assertIn("before the commit SHA", early_branch.stderr)
+
+        malformed = json.loads((output / "upload-state.json").read_text())
+        malformed["unexpected"] = True
+        (output / "upload-state.json").write_text(json.dumps(malformed) + "\n")
+        rejected = run_cli(
+            "--output-directory", str(output), "--show-next-upload"
+        )
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn("unknown fields", rejected.stderr)
+
+    def test_generated_instructions_cover_complete_stateful_handoff(self) -> None:
+        _, output, _ = self.prepare_small_payload("instructions")
+        instructions = (output / "UPLOAD-INSTRUCTIONS.md").read_text()
+        self.assertIn("exactly one next action at a time", instructions)
+        self.assertIn("Record each\nreturned SHA", instructions)
+        self.assertIn("never requires manual placeholder substitution", instructions)
+        self.assertIn("Do not Base64-encode", instructions)
 
 
 if __name__ == "__main__":

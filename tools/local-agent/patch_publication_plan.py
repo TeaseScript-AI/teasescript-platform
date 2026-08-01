@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -14,6 +17,7 @@ from patch_publication_support import (
     TokenEstimator,
     fail,
     git_blob_sha,
+    require_sha1,
     sha256_bytes,
     write_json_atomic,
 )
@@ -113,6 +117,60 @@ def upload_files_for_plan(
     return files
 
 
+def compute_transfer_tree_sha(
+    *, repository: Path, tree_elements: list[dict[str, str]]
+) -> str:
+    """Compute the payload-only Git tree SHA without uploaded blob objects."""
+
+    with tempfile.TemporaryDirectory(prefix="patch-publication-index-") as temporary:
+        environment = os.environ.copy()
+        environment["GIT_INDEX_FILE"] = str(Path(temporary) / "index")
+        index_input = "".join(
+            f"{element['mode']} {element['sha']}\t{element['path']}\n"
+            for element in tree_elements
+        )
+
+        for args, input_text in (
+            (["git", "read-tree", "--empty"], None),
+            (["git", "update-index", "--index-info"], index_input),
+        ):
+            completed = subprocess.run(
+                args,
+                cwd=repository,
+                env=environment,
+                input=input_text,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            if completed.returncode != 0:
+                detail = (
+                    completed.stderr.strip()
+                    or completed.stdout.strip()
+                    or "no output"
+                )
+                fail(f"command failed ({' '.join(args)}): {detail}")
+
+        completed = subprocess.run(
+            ["git", "write-tree", "--missing-ok"],
+            cwd=repository,
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = (
+                completed.stderr.strip() or completed.stdout.strip() or "no output"
+            )
+            fail(f"command failed (git write-tree --missing-ok): {detail}")
+        return require_sha1(
+            completed.stdout.strip(), label="computed transfer tree SHA"
+        )
+
+
 def render_upload_instructions(
     *,
     output: Path,
@@ -174,17 +232,12 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
 The reset removes only the local progress record. It does not regenerate,
 modify, or open the part.
 
-When all files are recorded, `--show-next-upload` prints the exact
-`tree_elements` argument for the GitHub action that creates a tree. Use no base
-tree. Then:
-
-1. create a commit for the returned tree using parent `{expected_base_sha}`;
-2. create `{transfer_branch}` at the returned commit;
-3. place this exact pull-request Conversation command:
-
-```text
-/publish-patch {transfer_branch} {manifest_sha256}
-```
+After the manifest upload is recorded, continue using `--show-next-upload`.
+The helper exposes exactly one next action at a time: transfer tree, transfer
+commit, transfer branch, and finally the publication command. Record each
+returned SHA with the command printed for that step before performing another
+repository write. The helper verifies the payload-only tree SHA and the final
+branch target and never requires manual placeholder substitution.
 
 The current connector action names may change; follow the printed action
 direction and argument shape rather than relying only on a hard-coded name.
@@ -198,6 +251,7 @@ guidance only. Never upload them. Upload only files below
 
 def write_upload_handoff(
     *,
+    repository: Path,
     temp_root: Path,
     output: Path,
     manifest_path: Path,
@@ -233,9 +287,13 @@ def write_upload_handoff(
         }
         for item in upload_files
     ]
+    expected_transfer_tree_sha = compute_transfer_tree_sha(
+        repository=repository,
+        tree_elements=tree_elements,
+    )
     publication_command = f"/publish-patch {transfer_branch} {manifest_sha256}"
     plan = {
-        "planVersion": 1,
+        "planVersion": 2,
         "repositoryFullName": repository_full_name,
         "targetBranch": target_branch,
         "transferBranch": transfer_branch,
@@ -245,6 +303,7 @@ def write_upload_handoff(
         "expectedResultTreeSha": expected_result_tree_sha,
         "manifestSha256": manifest_sha256,
         "publicationCommand": publication_command,
+        "expectedTransferTreeSha": expected_transfer_tree_sha,
         "connector": {
             "provider": "GitHub",
             "blobActionHint": "create one UTF-8 Git blob from text (currently create_blob)",
@@ -278,7 +337,7 @@ def write_upload_handoff(
     write_json_atomic(temp_root / UPLOAD_PLAN_NAME, plan)
     write_json_atomic(
         temp_root / UPLOAD_STATE_NAME,
-        {"stateVersion": 1, "completedUploads": []},
+        {"stateVersion": 2, "completedUploads": []},
     )
     (temp_root / UPLOAD_INSTRUCTIONS_NAME).write_text(
         render_upload_instructions(

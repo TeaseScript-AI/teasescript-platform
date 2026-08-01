@@ -225,6 +225,7 @@ def prepare(args: argparse.Namespace) -> None:
             fail("reconstructed patch SHA-256 differs from the original patch")
 
         manifest_sha256 = write_upload_handoff(
+            repository=repository,
             temp_root=temp_root,
             output=output,
             manifest_path=manifest_path,
