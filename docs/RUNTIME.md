@@ -422,9 +422,9 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
 
 Current POC defaults and validation limits are:
 
-- instruction-plan format version: `4`;
-- runtime-snapshot format version: `5`;
-- checkpoint format version: `5`;
+- instruction-plan format version: `5`;
+- runtime-snapshot format version: `6`;
+- checkpoint format version: `6`;
 - default maximum call depth: `256`;
 - accepted maximum call depth range: `1` through `4096`;
 - maximum external runtime-data nesting depth: `128` (`MAX_EXTERNAL_RUNTIME_DATA_DEPTH`);
@@ -481,7 +481,7 @@ No migration is provided; older incompatible objects are rejected through the ex
 
 ## API stability boundary
 
-The exported TypeScript compiler, compatibility wrapper, low-level runtime, snapshot, checkpoint, and RNG functions are current POC surfaces used by the repository and tests. Their presence in `src/index.ts` does not by itself establish a permanent third-party API or wire-format compatibility promise. Long-term package API stability and migration policy remain open.
+The exported TypeScript source frontend, source compiler, low-level runtime, snapshot, checkpoint, and RNG functions are current POC surfaces used by the repository and tests. Their presence in `src/index.ts` does not by itself establish a permanent third-party API or wire-format compatibility promise. Long-term package API stability and migration policy remain open.
 
 ## Remaining runtime work
 

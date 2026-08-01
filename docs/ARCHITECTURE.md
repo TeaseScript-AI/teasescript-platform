@@ -116,13 +116,14 @@ added.
 
 | Old path | Canonical path | Exposed symbols or responsibility | Known repository consumers | External-support status | Owner | Removal condition |
 | --- | --- | --- | --- | --- | --- | --- |
-| `src/instructions.ts` | `src/plan/*`, `src/compiler/*` | Plan, validation, and compilation symbols | Compatibility test only | Temporarily supported; external status unknown | Compiler/runtime owners | Later cleanup after dependent branches migrate and external direct-import status is decided |
-| `src/libraries/public.ts` | `src/library-tooling/public.ts` | Catalog and metadata tooling | Compatibility test only | Temporarily supported; external status unknown | Library tooling owner | Evidence-based cleanup after repository and dependent consumers migrate |
-| `playground/workspace.ts` | `playground/workspace/controller.ts` | Technical workspace compile/run/decode controller | Compatibility test only; browser/server use canonical path | Repository compatibility only | Workspace owner | Remove after consumers and external-support status are accounted for |
-| `src/runtime/validation-testing.ts` | `src/validation-testing.ts` | Test-only validation instrumentation | Compatibility test only; production and ordinary tests use the canonical path | Repository compatibility only; not a root public export | Runtime validation owner | Remove after direct-import compatibility is no longer required and external-support status is decided |
+| `src/instructions.ts` | `src/plan/*` | Plan model, capture, and validation symbols; compiler/lowering exports were removed by issue #176 | Compatibility test and legacy-import checker only | Repository migration only; old deep imports are not a public compatibility contract | Compiler/runtime owners | Remove under issue #180 after current consumers use canonical paths |
+| `src/libraries/public.ts` | `src/library-tooling/public.ts` | Catalog and metadata tooling | Compatibility test and legacy-import checker only | Repository migration only; old deep imports are not a public compatibility contract | Library tooling owner | Remove consistently with issues #179 and #180 |
+| `playground/workspace.ts` | `playground/workspace/controller.ts` | Technical workspace compile/run/decode controller | Compatibility tests and legacy-import checker only; browser/server use canonical path | Repository migration only; old deep imports are not a public compatibility contract | Workspace owner | Remove under issue #180 after current consumers use the canonical controller |
+| `src/runtime/validation-testing.ts` | `src/validation-testing.ts` | Test-only validation instrumentation | Compatibility test and legacy-import checker only; production and ordinary tests use the canonical path | Repository migration only; not a root public export or public compatibility contract | Runtime validation owner | Remove under issue #180 after current tests use the canonical path |
 
 `tools/check-legacy-imports.mjs` resolves static import/export specifiers to
 repository paths before rejecting legacy paths, including local and deep
-relative forms. Facades, the dedicated compatibility test, and its isolated
-invalid-import fixtures are the narrow documented exceptions; the facades
-remain intentionally retained in this issue.
+relative forms. The listed facades, the dedicated compatibility test, and its
+isolated invalid-import fixtures are the narrow temporary exceptions. Issue
+#180 owns their final retirement and the removal of this enforcement once no
+legacy path remains.

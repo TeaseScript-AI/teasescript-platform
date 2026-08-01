@@ -6,7 +6,7 @@ The player receives only selected validated data across the parent/player and se
 
 ## Current TypeScript POC surfaces
 
-The repository currently exports several TypeScript layers through `src/index.ts`. These support the POC, repository tests, the playground, and compatibility callers; they do not create a second public backend.
+The repository currently exports several TypeScript layers through `src/index.ts`. These support the POC, repository tests, and the playground; they do not create a second public backend.
 
 ### Source frontend
 
@@ -41,7 +41,7 @@ source
     -> executeInstruction, stepToEvent, or run
 ```
 
-Ordinary TeaseScript source is compiled through `compileSource(...)`; the resulting validated instruction plan runs with explicit serializable runtime state. Parser AST data and `compileProgram(...)` remain internal compiler/tooling implementation details rather than product execution APIs. `validateInstructionPlan(...)` independently rejects non-JSON-safe plan data.
+Ordinary TeaseScript source is compiled through `compileSource(...)`; the resulting validated instruction plan runs with explicit serializable runtime state. Parser AST data remains available to compiler and authoring tooling, while `compileProgram(...)` is an internal compiler implementation detail rather than a product execution API. `validateInstructionPlan(...)` independently rejects non-JSON-safe plan data.
 
 The explicit plan/snapshot/runtime API is the canonical resumable route for waits, including pending actions, checkpoints, completion, and resumption.
 
@@ -94,8 +94,8 @@ Camera and file APIs continue to return engine-managed references rather than br
 
 ## Stability and future contracts
 
-The current TypeScript exports, version-4 instruction plans, and version-5 runtime-snapshot/checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
+The current TypeScript exports, version-5 instruction plans, and version-6 runtime-snapshot/checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
 
-Implementation of ADR 0016 introduced version-4 instruction plans and pending-action state. Version 5 runtime snapshots and checkpoints add delay-settlement provenance. These remain internal POC format revisions, not product release numbers.
+Implementation of ADR 0016 introduced version-4 instruction plans and pending-action state. The current version-5 plans and version-6 runtime snapshots/checkpoints add the generic interaction instruction/action/settlement family and canonical player-transcript event data while retaining delay-settlement provenance. These remain internal POC format revisions, not product release numbers.
 
 Exact account, toy, history, global-data, checkpoint storage, host-message, media-persistence, time-integrity, and integration payloads remain open and must be defined as typed contracts before implementation. This document does not resolve their long-term versioning and migration policy.

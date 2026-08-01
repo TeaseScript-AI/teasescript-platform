@@ -15,9 +15,11 @@ The current source layout uses shared plan contracts under `src/plan/`,
 compiler seams under `src/compiler/`, pure runtime action helpers under
 `src/runtime/actions/`, runtime operation entrypoints under
 `src/runtime/operations/`, tooling under `src/library-tooling/`, and
-privileged adapters under `src/platform-internal/`. Compatibility facades are
-retained during migration; this layout refactor does not change format
-versions.
+privileged adapters under `src/platform-internal/`. Temporary source-layout
+facades remain during migration, but they are not public compatibility
+contracts. `src/instructions.ts` now re-exports only plan model, capture, and
+validation symbols; AST lowering remains internal to the compiler. This layout
+refactor does not change format versions.
 
 ## TeaseScript authority
 
@@ -90,7 +92,7 @@ ADR 0018 is partially implemented. The generic foreground-interaction runtime an
 
 ### Parser and core language
 
-The implementation includes lexer/parser/AST/diagnostics, semantic validation, literals, expressions, variables, assignments, speakers, output, collections, and accepted copy/error behavior. Template interpolation supports nested template literals and recursive interpolation with exact source spans and structured recovery diagnostics. Shared AST-level validation rejects non-finite numeric literals through the normal `compileSource(...)` boundary and the direct `Program` compatibility boundary before an instruction plan is returned or executed.
+The implementation includes lexer/parser/AST/diagnostics, semantic validation, literals, expressions, variables, assignments, speakers, output, collections, and accepted copy/error behavior. Template interpolation supports nested template literals and recursive interpolation with exact source spans and structured recovery diagnostics. Shared AST-level validation rejects non-finite numeric literals through the normal `compileSource(...)` boundary before an instruction plan is returned. AST data remains available to parser, compiler, editor, and diagnostic tooling; direct AST lowering or execution is not a supported product API.
 
 ### Serializable runtime and playground
 
