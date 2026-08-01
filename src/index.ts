@@ -26,10 +26,6 @@ export {
   type CompileOptions,
 } from "./compiler.js";
 export {
-  compileProgram,
-  InstructionCompilationError,
-} from "./compiler/compile-program.js";
-export {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
   type ArgumentPlan,
@@ -63,16 +59,6 @@ export {
   type SemanticValidationOptions,
   type SemanticValidationResult,
 } from "./semantic.js";
-export {
-  execute,
-  Interpreter,
-  InterpreterCompilationError,
-  type BuiltinCall,
-  type BuiltinFunction,
-  type ExecutionResult,
-  type InterpreterOptions,
-  type RandomSource,
-} from "./runtime/interpreter.js";
 export type { RuntimeErrorInfo } from "./runtime/errors.js";
 export type { RuntimeWarningInfo } from "./runtime/warnings.js";
 export type {
@@ -170,18 +156,6 @@ export {
   type SerializableRuntimeValue,
   type SerializableSpeakerReference,
 } from "./runtime/serializable-values.js";
-export {
-  createRuntimeList,
-  createRuntimeObject,
-  createRuntimeSet,
-  createRuntimeSpeaker,
-  type RuntimeList,
-  type RuntimeObject,
-  type RuntimeScalar,
-  type RuntimeSet,
-  type RuntimeSpeaker,
-  type RuntimeValue,
-} from "./runtime/values.js";
 export {
   combineSourceSpans,
   createSourcePosition,

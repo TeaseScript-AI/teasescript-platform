@@ -10,7 +10,3 @@ export {
   type PlanValidationError,
   type PlanValidationResult,
 } from "./plan/validation.js";
-export {
-  compileProgram,
-  InstructionCompilationError,
-} from "./compiler/compile-program.js";

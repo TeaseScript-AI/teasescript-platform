@@ -60,7 +60,6 @@ Any implementation must therefore:
 
 ### Compatibility dependency
 
-The broad organization of `runtime/interpreter.ts`, the host `RuntimeValue` model, conversion code, and the serializable runtime depends on the open compatibility-API lifecycle decision in [`../OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
 Purely mechanical splits that keep compatibility facades intact do not need to wait for every API detail. Refactors that consolidate, remove, or redesign the two value models should wait for an explicit owner decision.
 

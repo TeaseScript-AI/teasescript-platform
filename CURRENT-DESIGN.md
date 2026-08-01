@@ -128,9 +128,7 @@ The implementation includes:
 
 The current implementation also:
 
-- validates direct `Program` compatibility execution before lowering, including shared `TSC001` rejection of non-finite numeric literal values;
-- applies a narrow defensive `compileProgram(...)` guard so direct lowering cannot return a plan containing `NaN`, `Infinity`, or `-Infinity`;
-- rejects host `RuntimeSpeaker` values at the current compatibility boundary rather than creating dangling references;
+- rejects non-finite numeric literals through source compilation before producing an instruction plan;
 - requires explicit own-property builtin registration and stores low-level named builtin arguments in a prototype-free record;
 - restricts automatic visible-list text selection to strings and finite numbers after one item is selected;
 - rejects malformed zero `xorshift32-v1` seed, direct state, runtime snapshot state, and restored checkpoint state.

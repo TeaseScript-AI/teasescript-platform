@@ -27,18 +27,6 @@ ADR 0018 is partially implemented. PR #117 implemented and versioned the generic
 
 Default checkpoint restore should resume the exact validated saved state. Author-defined rollback or restart points are a separate advanced recovery feature and must not silently duplicate irreversible external effects.
 
-### Compatibility API lifecycle
-
-The current TypeScript surface exposes both the instruction-plan runtime and a compatibility route through `Interpreter`, `execute(program, ...)`, and the host-oriented `RuntimeValue` model.
-
-Decide whether that compatibility surface should:
-
-- remain a supported alpha API;
-- remain a temporary testing, migration, or importer adapter without broader feature growth; or
-- be deprecated after remaining callers and tests migrate to the instruction-plan runtime.
-
-This decision must define the intended support period, migration expectations, public-export impact, and whether the host-value and serializable-value models remain separate. Until then, the current exports remain implemented POC behavior rather than a permanent alpha commitment.
-
 The current plan version 5 and runtime/checkpoint version 6 schemas are POC implementation details, not a promise of permanent wire-format compatibility.
 
 ## Remaining language and library work

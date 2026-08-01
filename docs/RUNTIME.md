@@ -2,7 +2,7 @@
 
 ## Playground execution helper
 
-`playground/workspace/controller.ts` is the DOM-free adapter shared by the browser controller and development automation routes. The old `playground/workspace.ts` path is a compatibility facade. It uses the public compiler and canonical `run`/`stepToEvent` runtime interfaces to create fresh validated snapshots and return JSON-safe diagnostics, events, plan, snapshot, status, and instruction count. It stops on `halted`, `failed`, `waiting`, or the canonical instruction-budget failure and does not use the compatibility `Interpreter.execute(...)` route.
+`playground/workspace/controller.ts` is the DOM-free adapter shared by the browser controller and development automation routes. The old `playground/workspace.ts` path is a compatibility facade. It uses `compileSource(...)` and canonical `run`/`stepToEvent` runtime interfaces to create fresh validated snapshots and return JSON-safe diagnostics, events, plan, snapshot, status, and instruction count. It stops on `halted`, `failed`, `waiting`, or the canonical instruction-budget failure.
 
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
 
@@ -373,21 +373,13 @@ Template interpolation uses normal TeaseScript expression parsing and supports r
 
 Unterminated nested content remains structured: `TSL004` reports an unterminated template and `TSL005` reports an unterminated interpolation. A backtick starts a nested template whenever the current interpolation position can begin an expression, including when horizontal whitespace or a physical line ending follows the nested opening backtick. A backtick in a position where an expression cannot start remains the outer-template recovery boundary.
 
-### Direct AST compatibility route
+### Canonical source-to-runtime route
 
-`execute(program, options)` and `Interpreter.execute(program)` are compatibility/testing entry points for callers that already hold a `Program`. They are not an alternative runtime representation: they validate the program, lower it to an instruction plan, create explicit runtime state, and execute that plan.
+Ordinary TeaseScript source is compiled through `compileSource(...)` into a validated instruction plan, then executed with fresh or restored explicit serializable runtime state. AST data and lowering remain compiler and authoring-tool internals, not product execution APIs.
 
-Before lowering, the compatibility route runs the shared non-finite-literal AST validation and semantic validation with configured global and builtin names. Non-finite literals produce exact-span `TSC001` diagnostics. These diagnostics are ordered before ordinary semantic diagnostics, and any error throws `InterpreterCompilationError` before lowering, runtime-state creation, event emission, or RNG consumption. `InterpreterOptions.random` is required so compatibility execution remains deterministic.
+### Low-level runtime route
 
-After valid lowering but before a runtime snapshot is created, the compatibility route rejects a plan containing any compiled blocking `wait` instruction with `InterpreterCompilationError` diagnostic `TSC004`: "Blocking `wait` requires the canonical resumable runtime API." The diagnostic uses the first `wait` instruction in canonical plan order. This conservative whole-program rule includes waits in branches, loops, nested blocks, and called or uncalled function bodies; it prevents this result shape from silently returning partial pre-wait output without a pending action or resume operation.
-
-This is a temporary compatibility-boundary behavior, not a statement that blocking `wait` is unsupported. The canonical plan/snapshot/runtime API continues to support waits, pending actions, checkpoints, completion, and resumption. The long-term lifecycle of the compatibility APIs and any resumable compatibility result require a separate owner-approved decision.
-
-The compatibility result exposes `say` and `exit` events in its `events` array, structured runtime failures in `errors`, and developer warnings in `warnings`.
-
-### Low-level lowering and runtime route
-
-`compileProgram(program)` is a low-level lowering function for a semantically valid AST. It does not replace `validateSemantics()`. As a narrow defensive boundary, it reuses the shared AST-level finite-literal validation and throws `InstructionCompilationError` with `TSC001` before returning a plan containing `NaN`, `Infinity`, or `-Infinity`. Its other defensive lowering checks include `InstructionCompilationError` with `TSC003` when direct invalid input supplies more positional arguments than a function defines.
+The compiler internally lowers semantically valid AST data after `compileSource(...)` validation. This internal lowering does not replace semantic validation or create a supported direct-AST product route.
 
 The low-level runtime entry points are:
 
@@ -439,7 +431,6 @@ Current POC defaults and validation limits are:
 - maximum external runtime-data nesting depth: `128` (`MAX_EXTERNAL_RUNTIME_DATA_DEPTH`);
 - maximum external runtime-data validation work: `100,000` visited values (`MAX_EXTERNAL_RUNTIME_DATA_WORK`);
 - default `run(...)` and `stepToEvent(...)` instruction budget: `10,000`;
-- compatibility `execute(program, options)` instruction budget: `100,000`;
 - default playground RNG algorithm: `xorshift32-v1`;
 - default playground seed: `0x6d2b79f5`.
 
