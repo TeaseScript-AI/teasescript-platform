@@ -126,7 +126,8 @@ function executeCapturedInstruction(
     events.push(createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan));
     return result(snapshot, events, 1);
   }
-  const instruction = plan.instructions[snapshot.nextInstruction];
+  const instructionIndex = snapshot.nextInstruction;
+  const instruction = plan.instructions[instructionIndex];
   if (instruction === undefined) {
     snapshot.status = "halted";
     return result(snapshot, [], 0);
@@ -136,6 +137,12 @@ function executeCapturedInstruction(
   const evaluator = new Evaluator(snapshot, capabilities, events);
   try {
     executePlannedInstruction(plan, instruction, snapshot, evaluator, events);
+    if (
+      snapshot.interactionResultHandoff?.continuationInstruction ===
+      instructionIndex
+    ) {
+      snapshot.interactionResultHandoff = null;
+    }
     if (
       snapshot.status === "running" &&
       snapshot.callFrames.length === 0 &&

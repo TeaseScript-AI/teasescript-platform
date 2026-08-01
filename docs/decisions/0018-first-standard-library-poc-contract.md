@@ -11,7 +11,7 @@ The next POC needs one implementation contract for ordinary chat output and basi
 
 The owner explicitly extended the issue discussion to decide that the normal Player application has no player-facing pause control. This does not decide browser-unavailability, reload, reconnect, device-sleep, or server-authoritative time policy.
 
-This ADR was accepted as documentation and design. Its generic foreground-interaction runtime is now partially implemented. The implementation uses an owner-approved short canonical result handoff: completion atomically commits a typed result into prepared ordinary runtime state, normal execution consumes or transfers it through one local boundary, and bounded `lastSettlement` remains replay data only. This implementation choice preserves the ADR's typed completion, event ordering, checkpoint, restore, and later-normal-entry requirements without adding a second lifecycle.
+This ADR was accepted as documentation and design. Its generic foreground-interaction runtime is now partially implemented. The implementation uses an owner-approved short canonical result handoff: completion atomically commits a typed result into prepared ordinary runtime state and records one nullable single-use authority until the first canonical consume, transfer, return, discard, or exit instruction succeeds. The record is then removed immediately, while bounded `lastSettlement` remains replay data only. This implementation choice preserves the ADR's typed completion, event ordering, checkpoint, restore, and later-normal-entry requirements without restoring a long-lived lifecycle or whole-plan liveness analysis.
 
 ## Decision summary
 

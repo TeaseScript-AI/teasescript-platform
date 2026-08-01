@@ -158,6 +158,7 @@ test("choice completion snapshots validate without a plan for every result domai
     for (const malformedResult of [null, { kind: "object", properties: [] }, -0]) {
       const malformed = structuredClone(completed.snapshot) as any;
       malformed.lastSettlement.result = malformedResult;
+      malformed.interactionResultHandoff.result = malformedResult;
       malformed.temporaries[0].value = malformedResult;
       assert.equal(validateRuntimeSnapshot(malformed).valid, false);
     }
@@ -165,6 +166,7 @@ test("choice completion snapshots validate without a plan for every result domai
   const identifier = complete(cases[1], payloads[1], "choice");
   const wrongForExactPlan = structuredClone(identifier.snapshot) as any;
   wrongForExactPlan.lastSettlement.result = 1;
+  wrongForExactPlan.interactionResultHandoff.result = 1;
   wrongForExactPlan.temporaries[0].value = 1;
   assert.equal(validateRuntimeSnapshot(wrongForExactPlan).valid, true);
   assert.equal(validateRuntimeSnapshot(wrongForExactPlan, cases[1]).valid, false);
@@ -1023,6 +1025,24 @@ test("result interactions use one bounded local handoff instead of future-path l
   assert.notEqual(cleanupCall, undefined);
   cleanupCall.returnInstruction = targeted.clearInstruction;
   assert.equal(validateInstructionPlan(targetedCleanup).valid, false);
+
+  const preparedReference = structuredClone(injected.plan) as any;
+  preparedReference.temporaryCount += 1;
+  preparedReference.instructions[injected.handoffInstruction] = {
+    kind: "prepareReference",
+    expression: {
+      kind: "temporary",
+      temporaryId: injected.destinationTemporary,
+      span: preparedReference.instructions[injected.handoffInstruction].span,
+    },
+    destinationTemporary: preparedReference.temporaryCount,
+    span: preparedReference.instructions[injected.handoffInstruction].span,
+  };
+  assert.equal(
+    validateInstructionPlan(preparedReference).valid,
+    true,
+    JSON.stringify(validateInstructionPlan(preparedReference).errors),
+  );
 });
 
 test("completion commits atomically and every short handoff checkpoint boundary validates", () => {
@@ -1045,6 +1065,14 @@ test("completion commits atomically and every short handoff checkpoint boundary 
     ["playerTranscript", "actionCompleted"],
   );
   assert.equal(completed.snapshot.nextInstruction, injected.handoffInstruction);
+  assert.deepEqual(completed.snapshot.interactionResultHandoff, {
+    actionId: completed.snapshot.lastSettlement!.actionId,
+    owningInstruction: injected.interactionInstruction,
+    continuationInstruction: injected.handoffInstruction,
+    ownerCallFrameId: null,
+    destinationTemporary: injected.destinationTemporary,
+    result: "committed",
+  });
   assert.equal(completed.snapshot.frames[0]!.bindings.some((binding) => binding.name === "answer"), false);
   assert.equal(
     completed.snapshot.temporaries.find((temporary) =>
@@ -1061,13 +1089,24 @@ test("completion commits atomically and every short handoff checkpoint boundary 
   assert.equal(validateRuntimeSnapshot(forgedAtCommit, injected.plan).valid, false);
   assert.throws(() => createCheckpoint(injected.plan, forgedAtCommit));
 
+  const missingHandoff = structuredClone(completed.snapshot);
+  missingHandoff.interactionResultHandoff = null;
+  assert.equal(validateRuntimeSnapshot(missingHandoff, injected.plan).valid, false);
+  assert.throws(() => createCheckpoint(injected.plan, missingHandoff));
+
   const forgedOwnerAtCommit = structuredClone(completed.snapshot) as any;
   forgedOwnerAtCommit.lastSettlement.ownerCallFrameId = 1;
+  forgedOwnerAtCommit.interactionResultHandoff.ownerCallFrameId = 1;
   forgedOwnerAtCommit.nextCallFrameId = 2;
   assert.equal(validateRuntimeSnapshot(forgedOwnerAtCommit, injected.plan).valid, false);
 
+  const extendedHandoff = structuredClone(completed.snapshot) as any;
+  extendedHandoff.interactionResultHandoff.extra = true;
+  assert.equal(validateRuntimeSnapshot(extendedHandoff, injected.plan).valid, false);
+
   const transferred = executeInstruction(injected.plan, completed.snapshot);
   assert.equal(transferred.snapshot.nextInstruction, injected.clearInstruction);
+  assert.equal(transferred.snapshot.interactionResultHandoff, null);
   assert.equal(
     transferred.snapshot.frames[0]!.bindings.find((binding) => binding.name === "answer")?.value,
     "committed",
@@ -1078,7 +1117,15 @@ test("completion commits atomically and every short handoff checkpoint boundary 
   forgedBeforeClear.temporaries.find((temporary) =>
     temporary.id === injected.destinationTemporary
   )!.value = "forged";
-  assert.equal(validateRuntimeSnapshot(forgedBeforeClear, injected.plan).valid, false);
+  assert.equal(validateRuntimeSnapshot(forgedBeforeClear, injected.plan).valid, true);
+  assert.doesNotThrow(() => createCheckpoint(injected.plan, forgedBeforeClear));
+  const clearedForged = executeInstruction(injected.plan, forgedBeforeClear);
+  assert.equal(
+    clearedForged.snapshot.frames[0]!.bindings.find((binding) =>
+      binding.name === "answer"
+    )?.value,
+    "committed",
+  );
 
   const cleared = executeInstruction(injected.plan, transferred.snapshot);
   assert.equal(
@@ -1160,6 +1207,13 @@ test("a newer settlement cannot corrupt or orphan an unconsumed interaction hand
     true,
     JSON.stringify(validateRuntimeSnapshot(newer, injected.plan).errors),
   );
+
+  const forged = structuredClone(newer);
+  forged.temporaries.find((temporary: any) =>
+    temporary.id === injected.destinationTemporary
+  )!.value = "FORGED";
+  assert.equal(validateRuntimeSnapshot(forged, injected.plan).valid, false);
+  assert.throws(() => createCheckpoint(injected.plan, forged));
 
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(injected.plan, newer)),

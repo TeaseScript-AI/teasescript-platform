@@ -995,7 +995,7 @@ function canonicalHandoffConsumesTemporary(
   temporaryId: number,
 ): boolean {
   const expression = instruction.kind === "prepareReference"
-    ? instruction.target
+    ? instruction.expression
     : [
         "declareBinding",
         "assign",
