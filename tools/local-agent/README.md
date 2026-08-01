@@ -1,20 +1,29 @@
 # Local Agent Tools
 
-Requires Python 3.10 or newer. The source-review, exact-editing, and compact-test helpers use only the Python standard library and ordinary shell/Git tools. Token-aware patch preparation optionally uses a local `tiktoken` Python installation and a separately stored `o200k_base.tiktoken` vocabulary; neither is a project runtime dependency.
+The source-review and compact-test helpers use the Python standard library and
+ordinary shell/Git tools. Token-aware patch preparation optionally uses a local
+`tiktoken` Python installation and a separately stored `o200k_base.tiktoken`
+vocabulary; neither is a project runtime dependency.
 
 ## Rule
 
-Never regenerate or replace an entire existing file for a localized change.
-Use a targeted unified diff or an exact replacement. Replace a complete file
-only when a complete rewrite is intentional and the entire result will be
-reviewed.
+For ordinary localized edits, use the environment-provided `apply_patch`
+command, including coherent changes across multiple hunks or files in one
+invocation. It is the default for small and medium source and documentation
+edits.
 
-Preferred order:
+A failed patch should normally be corrected with a smaller reread and better
+context, not by rewriting the entire file. Use a bounded temporary task-specific
+codemod, such as `ts-morph`, only when repeated structural or symbol-aware
+TypeScript edits would make an ordinary patch unclear or error-prone. Such
+scripts should normally remain uncommitted and be discarded after their
+verified use. Rewrite a complete existing file only when complete replacement
+is intentional or most of the file genuinely changes.
 
-1. checked unified diff;
-2. `replace-exact.py` for one exact replacement;
-3. bounded codemod for repeated mechanical edits;
-4. complete rewrite only when intentional.
+Do not add a repository-wide fallback for environments that lack `apply_patch`;
+that requires separate concrete evidence and review. Rare binary or
+byte-sensitive work should use a task-specific method appropriate to that
+concrete file, not justify a permanent general helper.
 
 ## Task-specific TypeScript codemods
 
@@ -32,85 +41,6 @@ the checkout and correct the task script.
 
 Use ordinary patches for small edits. Commit a codemod only when demonstrated
 future reuse justifies its own maintenance, tests, and documentation.
-
-## Replace an exact block
-
-For a short, simple UTF-8 edit, pass text directly:
-
-```bash
-python3 tools/local-agent/replace-exact.py \
-  --file src/config.ts \
-  --old-text 'const limit = 10;' \
-  --new-text 'const limit = 20;' \
-  --expected-count 1 \
-  --dry-run
-```
-
-Remove `--dry-run` to apply the edit.
-
-For multiline content, exact final newlines, complex shell characters, CRLF,
-or arbitrary bytes, use snippet files:
-
-```bash
-python3 tools/local-agent/replace-exact.py \
-  --file src/large-file.ts \
-  --old /tmp/old-snippet.txt \
-  --new /tmp/new-snippet.txt \
-  --expected-count 1
-```
-
-Provide exactly one of `--old` or `--old-text`, and exactly one of `--new` or
-`--new-text`.
-
-Direct text is encoded as UTF-8. File inputs remain byte-exact. A here-document
-includes its final newline; use `printf '%s'` when a snippet file must not end
-with a newline.
-
-When direct text begins with `-`, use the equals form, for example
-`--old-text=--example` or `--new-text=-value`. Direct text is intended for
-small snippets and is subject to the operating system's command-line size
-limit; use snippet files for larger content.
-
-`--dry-run` validates the target, snippets, and match count without writing.
-It does not prove that the later atomic write will succeed.
-
-## Delete an exact block
-
-For a short UTF-8 deletion, provide an explicitly empty `--new-text` value:
-
-```bash
-python3 tools/local-agent/replace-exact.py \
-  --file src/config.ts \
-  --old-text 'obsolete text' \
-  --new-text '' \
-  --expected-count 1
-```
-
-For multiline or byte-level deletion, use `--old` with the exact block and
-`--new tools/local-agent/empty-replacement.txt`. The new input is always
-required, so omission cannot silently become deletion.
-
-## Output and failures
-
-- `validated`: dry-run succeeded.
-- `replaced`: the target was changed.
-- `unchanged`: old and new content were identical.
-- exit code `1`: nothing was intentionally replaced.
-- exit code `2`: replacement was applied, but parent-directory synchronization
-  failed. Inspect the file before retrying.
-
-The helper preserves untouched bytes and Unix permission bits. It refuses the
-replacement if the target changes after validation. It does not preserve every
-filesystem metadata type or hard-link identity.
-
-The helper is not streaming and may need roughly two to three times the target
-file size in available memory.
-
-## Tests
-
-```bash
-python3 tools/local-agent/test-replace-exact.py
-```
 
 ## Compact test and shell output
 
