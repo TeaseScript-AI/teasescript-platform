@@ -36,12 +36,13 @@ Before treating a statement as a permanent requirement or review blocker,
 identify whether it is owner-approved product behavior, an accepted
 architecture/persistence/determinism/security boundary, a current
 implementation choice, a temporary POC choice, optional defensive hardening,
-or an unresolved proposal. Agent-written issues, tests, ADR drafts,
-pull-request descriptions, specifications, and earlier review comments do not
-become authoritative merely because they exist or another agent implemented
-them. Strong terms such as `must`, `exact`, `versioned`, `authoritative`, and
-`compatibility` require a concrete accepted behavior, real boundary, or
-explicit owner decision.
+or an unresolved proposal. Use the authority hierarchy in `README-FIRST.md`
+when making that classification. Agent-written issues, tests, ADR drafts,
+pull-request descriptions, specification drafts, and earlier review comments
+do not become authoritative merely because they exist or another agent
+implemented them. Strong terms such as `must`, `exact`, `versioned`,
+`authoritative`, and `compatibility` require a concrete accepted behavior, real
+boundary, or explicit owner decision.
 
 Review findings must use the severity and evidence rules in
 `docs/DEVELOPMENT-WORKFLOW.md`. A blocker needs a supported public or trusted
@@ -87,7 +88,17 @@ changes.
 
 ## Property-testable boundaries
 
-For parser, compiler, plan, runtime, action, state, checkpoint, and validated host-boundary changes, preserve deterministic public-boundary testing: every accepted plan and successful runtime transition must produce state accepted by the corresponding public validator. Use explicit time/RNG inputs, structured invalid-data handling, and reusable valid-state fixtures where practical. Follow `docs/TESTING.md` and the assigned issue for property or mutation testing; do not add unrelated fuzzing infrastructure, dependencies, or production hooks.
+For changes that affect supported parser, compiler, plan, runtime, action,
+state, checkpoint, or validated host boundaries, preserve deterministic testing
+through the real public or trusted path. Every canonical plan accepted through
+that boundary and every successful public runtime transition must produce state
+accepted by the corresponding validator. Do not extend this rule to arbitrary
+hand-built internal states or unsupported plan compositions merely because
+their individual parts are valid. Use explicit time/RNG inputs,
+structured invalid-data handling, and reusable valid-state fixtures where
+practical. Follow `docs/TESTING.md` and the assigned issue for property or
+mutation testing; do not add unrelated fuzzing infrastructure, dependencies,
+or production hooks.
 
 ## Before substantive coding
 

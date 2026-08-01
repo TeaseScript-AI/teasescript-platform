@@ -47,26 +47,29 @@ The issue author's recommendation is advisory. The owner or designated coordinat
 ## Requirement authority and review proportionality
 
 Implementation authority and review severity are separate from how detailed or
-confidently written an artifact is. Before treating a statement as a permanent
-contract, classify it as one of:
+confidently written an artifact is. Use the authority hierarchy in
+`README-FIRST.md` before treating a statement as a permanent contract, then
+classify it as one of:
 
 | Decision type | Governance effect |
 | --- | --- |
 | Owner-approved product behavior | Required within the recorded scope. |
-| Accepted architecture, persistence, determinism, security, or trust boundary | Required within the accepted decision or documented boundary. |
+| Accepted architecture, persistence, determinism, security, or trust boundary | Required within the accepted decision or current canonical boundary for a supported path. |
 | Current implementation choice | Describes how the current code works; it is not automatically a permanent compatibility promise. |
 | Temporary POC choice | May be replaced without preserving it when accepted behavior and real boundaries remain intact. |
 | Optional defensive hardening | May be proposed, but does not block unrelated work without a concrete current need. |
 | Unresolved proposal | Requires the normal owner/ADR decision route before implementation treats it as accepted. |
 
-An agent-written issue, test, ADR draft, specification, pull-request
+An agent-written issue, test, ADR draft, specification draft, pull-request
 description, or review comment is evidence and context, not authority by
 itself. A previous comment does not become authoritative merely because another
-agent accepted or implemented it. Existing behavior may still require
-preservation when it is part of a supported path, an accepted contract, or an
-explicit owner-approved acceptance criterion. Tests may prove such behavior,
-but their private fixture structure, helper identity, or exact harness design
-does not independently create a product contract.
+agent accepted or implemented it. A specification or ADR becomes authoritative
+only after acceptance through the repository authority process, and only within
+its recorded scope. Existing behavior may still require preservation when it is
+part of a supported path, an accepted contract, or an explicit owner-approved
+acceptance criterion. Tests may prove such behavior, but their private fixture
+structure, helper identity, or exact harness design does not independently
+create a product contract.
 
 Use words such as `must`, `exact`, `versioned`, `authoritative`, and
 `compatibility` only when the text identifies the accepted behavior, real
@@ -337,12 +340,12 @@ The coordinator records actual implemented behavior, not the original proposal. 
 
 | Change type | Minimum expected verification |
 | --- | --- |
-| Confirmed defect | Focused regression test and failing-before evidence for the reported root cause |
+| Confirmed defect on a supported path or real boundary | Focused regression test and failing-before evidence for the reported root cause, or a documented reason that failing-before evidence cannot reasonably be supplied |
 | Stateful runtime change | Functional tests plus runtime resume-equivalence |
 | External plan, snapshot, or checkpoint boundary | Valid cases and adversarial malformed-data tests through the documented public boundary |
 | RNG-dependent behavior | Fixed-seed deterministic comparison |
 | Time-dependent behavior | Fake clock or equivalent deterministic source; no real waiting |
-| Security boundary | Structured rejection, bounded work, and no uncontrolled host exception at the documented boundary |
+| Security boundary | Structured rejection, bounded work, and no uncontrolled host exception at the real documented boundary |
 | Browser host/player behavior | Real browser E2E after the concrete cross-origin boundary exists |
 
 These are relevance-based requirements. A pull request is not required to run or add every test category when the changed behavior does not reach that layer.

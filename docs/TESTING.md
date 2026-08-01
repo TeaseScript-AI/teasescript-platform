@@ -51,7 +51,11 @@ End-to-end testing does not replace focused unit, validator, and invariant tests
 
 ## Regression-test rule
 
-Every confirmed defect fix requires a focused regression test. The test should normally fail on the unmodified baseline for the reported root cause and pass after the repair.
+Every confirmed defect fix on a supported product path or real boundary requires
+a focused regression test. The test should normally fail on the unmodified
+baseline for the reported root cause and pass after the repair. When
+failing-before evidence cannot reasonably be supplied, document why and provide
+the strongest focused reproduction available.
 
 Do not weaken tests to hide failures. Do not fold unrelated speculative cases into a focused repair pull request. A newly suspected defect should first be reproduced against the relevant public boundary before it is documented or filed as established behavior.
 
@@ -83,7 +87,10 @@ execution resumed after JSON checkpoint round trip
 
 The current shared test-only runtime-equivalence helper evaluates every completed instruction boundary. It compiles real TeaseScript source, runs an uninterrupted baseline, advances a second execution one instruction at a time, round-trips a self-contained checkpoint through real JSON and the public restore boundary, resumes to completion, and compares the result.
 
-Complete event and snapshot equality is authoritative. The comparison includes:
+For this same-version resume-equivalence check, complete event and final-snapshot
+equality is the required current invariant. It does not make historical
+snapshot layouts, test-helper identity, or private harness traces public
+compatibility promises. The comparison includes:
 
 - accumulated and resumed events;
 - event sequence numbers;
