@@ -21,7 +21,7 @@ WISHES.xml or proposal material
     -> explicit owner selection
 POC-TO-ALPHA-BACKLOG.md
     -> explicit coordinator scheduling
-phase plan / work package / issue
+phase plan / issue
     -> implementation and verification
 PHASE-STATUS.md
 ```
@@ -29,7 +29,7 @@ PHASE-STATUS.md
 ## Governance
 
 - Agents may propose entries, but only the owner or designated coordinator may select an item as required, change its target gate, or schedule it for implementation.
-- A backlog item is not implementation scope unless a current phase plan, coordinator assignment, work package, or issue explicitly selects its ID.
+- A backlog item is not implementation scope unless a current phase plan, coordinator assignment, or issue explicitly selects its ID.
 - Ideas that still need product triage remain in `WISHES.xml` or another proposal document.
 - Accepted architecture and language semantics belong in ADRs and specifications, not in this backlog.
 - When an item is implemented and verified, record the result in `PHASE-STATUS.md` and remove it from this open backlog. Git history preserves the completed entry.

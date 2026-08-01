@@ -10,7 +10,7 @@
 
 This file records concrete maintenance opportunities that may improve development and review work but are not accepted architecture decisions, product requirements, or scheduled implementation scope.
 
-A candidate becomes implementation work only after the owner or coordinator selects it, confirms the current repository evidence, and creates a focused issue or work package. Accepted behavior remains defined by specifications, ADRs, and current topic documents.
+A candidate becomes implementation work only after the owner or coordinator selects it, confirms the current repository evidence, and creates a focused issue. Accepted behavior remains defined by specifications, ADRs, and current topic documents.
 
 ## Split large production modules along existing responsibilities
 

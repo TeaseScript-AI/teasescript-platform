@@ -15,7 +15,10 @@ Do not introduce a coordinator, integration branch, or multiple executor agents 
 
 Use coordinated multi-agent work only when the work cannot reasonably be completed as one coherent agent task, or when several dependent workstreams must be reviewed and landed together.
 
-A work-package ZIP and local integration runner are fallback mechanisms for agents without repository write access; they are not the default path.
+Source bundles and agent bootstrap provide local repository access when needed.
+Development and integration use GitHub-native branches and pull requests.
+Verified patch publication remains a separate route for publishing a concrete
+tested patch result.
 
 ## Issue sizing and execution recommendation
 
@@ -388,11 +391,3 @@ The final verifier reports:
 - remaining risks.
 
 When the gate passes, open one final pull request from the integration branch to `main`. Prefer squash merge, then delete the milestone and executor branches.
-
-## Fallback work-package flow
-
-Use repository branches and pull requests by default. Select the work-package fallback only when an assigned agent cannot create the required GitHub branch, commits, or pull request, or when a reproducible external patch handoff is explicitly required.
-
-The assignment must explicitly select fallback mode. Do not create a package ZIP as part of a normal GitHub-native task.
-
-See `../tools/work-packages/README.md` for package authoring, local integration, result, repair, publication, and cleanup rules. Package files remain outside the repository. A successful local integration must still be published, reviewed, verified by CI, and merged through the normal pull-request workflow.
