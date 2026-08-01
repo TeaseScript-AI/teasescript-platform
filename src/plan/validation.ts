@@ -5,11 +5,7 @@ import {
   MAX_INTERACTION_OPTION_ENTRIES,
   MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "../interaction-limits.js";
-import { MAX_EXTERNAL_RUNTIME_DATA_WORK } from "../external-data-limits.js";
-import {
-  interactionControlFlowWorkLimitForTesting,
-  recordValidationTestWork,
-} from "../validation-testing.js";
+import { recordValidationTestWork } from "../validation-testing.js";
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
@@ -791,118 +787,6 @@ function createPlanValidationIndex(
   return { owners, functionsById };
 }
 
-function instructionMayRequestForeground(
-  instruction: Record<string, unknown>,
-): boolean {
-  if (instruction.kind === "interaction") return true;
-  if (instruction.kind !== "wait") return false;
-  return !(
-    isRecord(instruction.duration) &&
-    instruction.duration.kind === "literal" &&
-    instruction.duration.value === 0
-  );
-}
-
-function collectReturningFunctions(
-  instructions: readonly unknown[],
-  functions: readonly ValidatedFunctionRange[],
-  budget: InteractionControlFlowBudget,
-): ReadonlySet<number> {
-  const returning = new Set<number>();
-  let changed = true;
-  while (changed && !budget.exceeded) {
-    changed = false;
-    for (const definition of functions) {
-      if (returning.has(definition.id)) continue;
-      const region: InstructionExecutionRegion = {
-        kind: "function",
-        functionId: definition.id,
-        startInstruction: definition.entryInstruction,
-        endInstruction: definition.endInstruction,
-      };
-      const pending = [definition.entryInstruction];
-      const visited = new Set<number>();
-      while (pending.length > 0) {
-        if (!consumeInteractionControlFlowWork(budget)) break;
-        const instructionIndex = pending.pop()!;
-        if (visited.has(instructionIndex)) continue;
-        visited.add(instructionIndex);
-        const instruction = instructions[instructionIndex];
-        if (!isRecord(instruction)) continue;
-        if (instruction.kind === "returnValue" || instruction.kind === "returnVoid") {
-          returning.add(definition.id);
-          changed = true;
-          break;
-        }
-        for (const successor of instructionRegionSuccessors(
-          instructions,
-          instructionIndex,
-          region,
-          returning,
-        )) {
-          if (!consumeInteractionControlFlowWork(budget)) break;
-          if (!visited.has(successor)) pending.push(successor);
-        }
-      }
-      if (budget.exceeded) break;
-    }
-  }
-  return returning;
-}
-
-function collectForegroundFunctions(
-  instructions: readonly unknown[],
-  functions: readonly ValidatedFunctionRange[],
-  returningFunctions: ReadonlySet<number>,
-  budget: InteractionControlFlowBudget,
-): ReadonlySet<number> {
-  const foreground = new Set<number>();
-  let changed = true;
-  while (changed && !budget.exceeded) {
-    changed = false;
-    for (const definition of functions) {
-      if (foreground.has(definition.id)) continue;
-      const region: InstructionExecutionRegion = {
-        kind: "function",
-        functionId: definition.id,
-        startInstruction: definition.entryInstruction,
-        endInstruction: definition.endInstruction,
-      };
-      const pending = [definition.entryInstruction];
-      const visited = new Set<number>();
-      while (pending.length > 0) {
-        if (!consumeInteractionControlFlowWork(budget)) break;
-        const instructionIndex = pending.pop()!;
-        if (visited.has(instructionIndex)) continue;
-        visited.add(instructionIndex);
-        const instruction = instructions[instructionIndex];
-        if (!isRecord(instruction)) continue;
-        if (
-          instructionMayRequestForeground(instruction) ||
-          (instruction.kind === "callFunction" &&
-            Number.isSafeInteger(instruction.functionId) &&
-            foreground.has(instruction.functionId as number))
-        ) {
-          foreground.add(definition.id);
-          changed = true;
-          break;
-        }
-        for (const successor of instructionRegionSuccessors(
-          instructions,
-          instructionIndex,
-          region,
-          returningFunctions,
-        )) {
-          if (!consumeInteractionControlFlowWork(budget)) break;
-          if (!visited.has(successor)) pending.push(successor);
-        }
-      }
-      if (budget.exceeded) break;
-    }
-  }
-  return foreground;
-}
-
 function validateInstructionControlFlowRegions(
   instructions: readonly unknown[],
   index: PlanValidationIndex | null,
@@ -910,89 +794,12 @@ function validateInstructionControlFlowRegions(
 ): void {
   if (index === null) return;
 
-  const budget: InteractionControlFlowBudget = {
-    remaining:
-      interactionControlFlowWorkLimitForTesting() ??
-      MAX_EXTERNAL_RUNTIME_DATA_WORK * 10,
-    exceeded: false,
-  };
-  const functions = [...index.functionsById.values()];
-  const returningFunctions = collectReturningFunctions(
-    instructions,
-    functions,
-    budget,
-  );
-  const foregroundFunctions = collectForegroundFunctions(
-    instructions,
-    functions,
-    returningFunctions,
-    budget,
-  );
-  const predecessors = buildInstructionPredecessors(
-    instructions,
-    index,
-    returningFunctions,
-    budget,
-  );
-  const reachable = buildReachableInstructions(
-    instructions,
-    index,
-    returningFunctions,
-    budget,
-  );
-
+  validateCanonicalInteractionResultHandoffs(instructions, index, errors);
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
     const region = index.owners[instructionIndex];
     if (region === undefined) return;
     const instructionPath = `$.instructions[${instructionIndex}]`;
-    if (
-      !budget.exceeded &&
-      reachable[instructionIndex] === true &&
-      instruction.kind === "interaction" &&
-      instruction.interactionKind !== "button"
-    ) {
-      const destinationTemporary = instruction.destinationTemporary;
-      const occupied = Number.isSafeInteger(destinationTemporary)
-        ? interactionDestinationMayBeLiveBefore(
-            instructions,
-            instructionIndex,
-            destinationTemporary as number,
-            region,
-            predecessors,
-            reachable,
-            budget,
-          )
-        : null;
-      if (occupied === true) {
-        errors.push(planError(
-          "TSC002",
-          "Result-bearing interaction destination may already be live when the interaction is reached.",
-          `${instructionPath}.destinationTemporary`,
-        ));
-      }
-
-      const discarded =
-        instructionIndex + 1 < region.endInstruction &&
-        Number.isSafeInteger(destinationTemporary)
-          ? interactionDestinationIsDiscarded(
-              instructions,
-              instructionIndex + 1,
-              destinationTemporary as number,
-              region,
-              foregroundFunctions,
-              returningFunctions,
-              budget,
-            )
-          : false;
-      if (discarded === false) {
-        errors.push(planError(
-          "TSC002",
-          "Result-bearing interaction requires every completion path to clear its destination or discard it through return or exit.",
-          instructionPath,
-        ));
-      }
-    }
     switch (instruction.kind) {
       case "jump":
       case "jumpIfFalse":
@@ -1033,255 +840,186 @@ function validateInstructionControlFlowRegions(
         return;
     }
   });
-
-  if (budget.exceeded) {
-    errors.push(planError(
-      "TSC002",
-      "Interaction control-flow validation exceeds the supported work limit.",
-      "$.instructions",
-    ));
-  }
 }
 
-interface InteractionControlFlowBudget {
-  remaining: number;
-  exceeded: boolean;
-}
-
-function consumeInteractionControlFlowWork(
-  budget: InteractionControlFlowBudget,
-  amount = 1,
-): boolean {
-  recordValidationTestWork("interactionControlFlowSteps", amount);
-  if (budget.remaining < amount) {
-    budget.exceeded = true;
-    return false;
-  }
-  budget.remaining -= amount;
-  return true;
-}
-
-function buildInstructionPredecessors(
+function validateCanonicalInteractionResultHandoffs(
   instructions: readonly unknown[],
   index: PlanValidationIndex,
-  returningFunctions: ReadonlySet<number>,
-  budget: InteractionControlFlowBudget,
-): readonly (readonly number[])[] {
-  const predecessors: number[][] = Array.from(
-    { length: instructions.length },
-    () => [],
-  );
-  for (let instructionIndex = 0; instructionIndex < instructions.length; instructionIndex += 1) {
-    if (!consumeInteractionControlFlowWork(budget)) break;
-    const region = index.owners[instructionIndex];
-    if (region === undefined) continue;
-    for (const successor of instructionRegionSuccessors(
-      instructions,
-      instructionIndex,
-      region,
-      returningFunctions,
-    )) {
-      if (!consumeInteractionControlFlowWork(budget)) break;
-      predecessors[successor]?.push(instructionIndex);
+  errors: PlanValidationError[],
+): void {
+  const producers = new Map<number, number[]>();
+  const explicitTargets = new Set<number>();
+  instructions.forEach((instruction, instructionIndex) => {
+    if (!isRecord(instruction)) return;
+    const produced = producedTemporaryId(instruction);
+    if (produced !== null) {
+      const indices = producers.get(produced) ?? [];
+      indices.push(instructionIndex);
+      producers.set(produced, indices);
     }
-  }
-  return predecessors;
+    for (const target of explicitInstructionTargets(instruction)) {
+      if (Number.isSafeInteger(target)) explicitTargets.add(target as number);
+    }
+  });
+
+  instructions.forEach((instruction, instructionIndex) => {
+    if (
+      !isRecord(instruction) ||
+      instruction.kind !== "interaction" ||
+      instruction.interactionKind === "button" ||
+      !Number.isSafeInteger(instruction.destinationTemporary)
+    ) return;
+    const destinationTemporary = instruction.destinationTemporary as number;
+    const path = `$.instructions[${instructionIndex}]`;
+    const region = index.owners[instructionIndex];
+    if (region === undefined) return;
+
+    const destinationProducers = producers.get(destinationTemporary) ?? [];
+    if (
+      destinationProducers.length !== 1 ||
+      destinationProducers[0] !== instructionIndex
+    ) {
+      errors.push(planError(
+        "TSC002",
+        "Canonical interaction result destinations must be produced only by their owning interaction.",
+        `${path}.destinationTemporary`,
+      ));
+    }
+
+    const continuation = instructionIndex + 1;
+    if (continuation >= region.endInstruction) {
+      errors.push(planError(
+        "TSC002",
+        "Result-bearing interaction requires a local in-region result handoff.",
+        path,
+      ));
+      return;
+    }
+    if (explicitTargets.has(continuation)) {
+      errors.push(planError(
+        "TSC002",
+        "Interaction result handoff entry must be reachable only from its owning interaction.",
+        `$.instructions[${continuation}]`,
+      ));
+    }
+
+    const handoff = instructions[continuation];
+    if (!isRecord(handoff)) return;
+    if (
+      handoff.kind === "clearTemporary" &&
+      handoff.temporaryId === destinationTemporary
+    ) return;
+    if (handoff.kind === "exit" || handoff.kind === "returnVoid") return;
+
+    if (!canonicalHandoffConsumesTemporary(handoff, destinationTemporary)) {
+      errors.push(planError(
+        "TSC002",
+        "Interaction result handoff must consume the destination immediately.",
+        `$.instructions[${continuation}]`,
+      ));
+      return;
+    }
+    if (handoff.kind === "returnValue") return;
+    if (![
+      "declareBinding",
+      "assign",
+      "evaluate",
+      "storeTemporary",
+      "say",
+      "setDeclaredSpeakerProperty",
+      "prepareReference",
+      "bindDefaultParameter",
+    ].includes(String(handoff.kind))) {
+      errors.push(planError(
+        "TSC002",
+        "Interaction result handoff contains a non-canonical intervening instruction.",
+        `$.instructions[${continuation}]`,
+      ));
+      return;
+    }
+
+    const clearIndex = continuation + 1;
+    const clear = instructions[clearIndex];
+    if (
+      clearIndex >= region.endInstruction ||
+      !isRecord(clear) ||
+      clear.kind !== "clearTemporary" ||
+      clear.temporaryId !== destinationTemporary
+    ) {
+      errors.push(planError(
+        "TSC002",
+        "Interaction result handoff must clear its transient destination immediately after transfer.",
+        `$.instructions[${clearIndex}]`,
+      ));
+      return;
+    }
+    if (explicitTargets.has(clearIndex)) {
+      errors.push(planError(
+        "TSC002",
+        "Interaction result handoff cleanup must not be an independent control-flow target.",
+        `$.instructions[${clearIndex}]`,
+      ));
+    }
+  });
 }
 
-function buildReachableInstructions(
-  instructions: readonly unknown[],
-  index: PlanValidationIndex,
-  returningFunctions: ReadonlySet<number>,
-  budget: InteractionControlFlowBudget,
-): readonly boolean[] {
-  const reachable = new Array<boolean>(instructions.length).fill(false);
-  const pending: number[] = [];
-  if (index.owners[0]?.kind === "root") pending.push(0);
-  for (const definition of index.functionsById.values()) {
-    pending.push(definition.entryInstruction);
-  }
-  while (pending.length > 0) {
-    if (!consumeInteractionControlFlowWork(budget)) break;
-    const instructionIndex = pending.pop()!;
-    if (reachable[instructionIndex] === true) continue;
-    const region = index.owners[instructionIndex];
-    if (region === undefined) continue;
-    reachable[instructionIndex] = true;
-    for (const successor of instructionRegionSuccessors(
-      instructions,
-      instructionIndex,
-      region,
-      returningFunctions,
-    )) {
-      if (!consumeInteractionControlFlowWork(budget)) break;
-      if (reachable[successor] !== true) pending.push(successor);
-    }
-  }
-  return reachable;
+function producedTemporaryId(instruction: Record<string, unknown>): number | null {
+  const value = instruction.kind === "storeTemporary"
+    ? instruction.temporaryId
+    : instruction.kind === "prepareReference" ||
+        instruction.kind === "callFunction" ||
+        instruction.kind === "interaction"
+      ? instruction.destinationTemporary
+      : null;
+  return Number.isSafeInteger(value) ? value as number : null;
 }
 
-function instructionRegionSuccessors(
-  instructions: readonly unknown[],
-  instructionIndex: number,
-  region: InstructionExecutionRegion,
-  returningFunctions?: ReadonlySet<number>,
-): readonly number[] {
-  const instruction = instructions[instructionIndex];
-  if (!isRecord(instruction)) return [];
-  const next = instructionIndex + 1 < region.endInstruction
-    ? instructionIndex + 1
-    : null;
-  const candidates: unknown[] = [];
+function explicitInstructionTargets(instruction: Record<string, unknown>): readonly unknown[] {
   switch (instruction.kind) {
     case "jump":
-    case "loopControl":
-      candidates.push(instruction.target);
-      break;
     case "jumpIfFalse":
-    case "loopStart":
+    case "loopControl":
     case "prepareParameterDefault":
-      candidates.push(instruction.target);
-      if (next !== null) candidates.push(next);
-      break;
+      return [instruction.target];
+    case "loopStart":
+      return [instruction.continueTarget, instruction.target];
     case "callFunction":
-      if (
-        returningFunctions === undefined ||
-        (Number.isSafeInteger(instruction.functionId) &&
-          returningFunctions.has(instruction.functionId as number))
-      ) {
-        candidates.push(instruction.returnInstruction);
-      }
-      break;
-    case "returnValue":
-    case "returnVoid":
-    case "exit":
-      break;
+      return [instruction.returnInstruction];
     default:
-      if (next !== null) candidates.push(next);
-      break;
+      return [];
   }
-  return candidates.filter(
-    (candidate): candidate is number =>
-      Number.isSafeInteger(candidate) &&
-      (candidate as number) >= region.startInstruction &&
-      (candidate as number) < region.endInstruction,
-  );
 }
 
-function interactionDestinationMayBeLiveBefore(
-  instructions: readonly unknown[],
-  interactionIndex: number,
-  destinationTemporary: number,
-  region: InstructionExecutionRegion,
-  predecessors: readonly (readonly number[])[],
-  reachable: readonly boolean[],
-  budget: InteractionControlFlowBudget,
-): boolean | null {
-  const pending = [...(predecessors[interactionIndex] ?? [])];
-  const visited = new Set<number>();
-  while (pending.length > 0) {
-    if (!consumeInteractionControlFlowWork(budget)) return null;
-    const index = pending.pop()!;
-    if (index < region.startInstruction || index >= region.endInstruction) continue;
-    if (reachable[index] !== true) continue;
-    if (visited.has(index)) continue;
-    visited.add(index);
-    const instruction = instructions[index];
-    if (!isRecord(instruction)) continue;
-    if (instruction.kind === "clearTemporary" && instruction.temporaryId === destinationTemporary) {
-      continue;
-    }
-    if (instructionProducesTemporary(instruction, destinationTemporary)) {
-      return true;
-    }
-    for (const predecessor of predecessors[index] ?? []) pending.push(predecessor);
-  }
-  return false;
-}
-
-function instructionProducesTemporary(
+function canonicalHandoffConsumesTemporary(
   instruction: Record<string, unknown>,
   temporaryId: number,
 ): boolean {
-  return (
-    (instruction.kind === "storeTemporary" && instruction.temporaryId === temporaryId) ||
-    (instruction.kind === "prepareReference" && instruction.destinationTemporary === temporaryId) ||
-    (instruction.kind === "callFunction" && instruction.destinationTemporary === temporaryId) ||
-    (instruction.kind === "interaction" && instruction.destinationTemporary === temporaryId)
-  );
+  const expression = instruction.kind === "prepareReference"
+    ? instruction.target
+    : [
+        "declareBinding",
+        "assign",
+        "evaluate",
+        "storeTemporary",
+        "say",
+        "setDeclaredSpeakerProperty",
+        "bindDefaultParameter",
+        "returnValue",
+      ].includes(String(instruction.kind))
+      ? instruction.value
+      : undefined;
+  return expressionContainsTemporary(expression, temporaryId);
 }
 
-function interactionDestinationIsDiscarded(
-  instructions: readonly unknown[],
-  startInstruction: number,
-  destinationTemporary: number,
-  region: InstructionExecutionRegion,
-  foregroundFunctions: ReadonlySet<number>,
-  returningFunctions: ReadonlySet<number>,
-  budget: InteractionControlFlowBudget,
-): boolean | null {
-  const pending: Array<{ readonly index: number; readonly live: boolean }> = [
-    { index: startInstruction, live: true },
-  ];
-  const entryState = new Map<number, boolean>();
-  while (pending.length > 0) {
-    if (!consumeInteractionControlFlowWork(budget)) return null;
-    const current = pending.pop()!;
-    if (current.index < region.startInstruction || current.index >= region.endInstruction) {
-      return current.live ? false : true;
-    }
-    const existing = entryState.get(current.index);
-    if (existing !== undefined) {
-      if (existing !== current.live) return false;
-      continue;
-    }
-    entryState.set(current.index, current.live);
-    const instruction = instructions[current.index];
-    if (!isRecord(instruction)) return false;
-
-    if (
-      current.live &&
-      (instructionMayRequestForeground(instruction) ||
-        (instruction.kind === "callFunction" &&
-          Number.isSafeInteger(instruction.functionId) &&
-          foregroundFunctions.has(instruction.functionId as number)))
-    ) return false;
-
-    let live = current.live;
-    if (
-      instruction.kind === "clearTemporary" &&
-      instruction.temporaryId === destinationTemporary
-    ) {
-      live = false;
-    } else if (instructionProducesTemporary(instruction, destinationTemporary)) {
-      if (live) return false;
-      if (instruction.kind === "interaction") continue;
-      live = false;
-    }
-
-    if (
-      instruction.kind === "returnValue" ||
-      instruction.kind === "returnVoid" ||
-      instruction.kind === "exit"
-    ) continue;
-    if (
-      instruction.kind === "callFunction" &&
-      Number.isSafeInteger(instruction.functionId) &&
-      !returningFunctions.has(instruction.functionId as number)
-    ) continue;
-    const successors = instructionRegionSuccessors(
-      instructions,
-      current.index,
-      region,
-      returningFunctions,
-    );
-    if (successors.length === 0) {
-      if (live) return false;
-      continue;
-    }
-    for (const successor of successors) pending.push({ index: successor, live });
+function expressionContainsTemporary(value: unknown, temporaryId: number): boolean {
+  if (Array.isArray(value)) {
+    return value.some((item) => expressionContainsTemporary(item, temporaryId));
   }
-  return true;
+  if (!isRecord(value)) return false;
+  if (value.kind === "temporary") return value.temporaryId === temporaryId;
+  return Object.values(value).some((nested) =>
+    expressionContainsTemporary(nested, temporaryId)
+  );
 }
 
 function validateInstructionRegionTarget(

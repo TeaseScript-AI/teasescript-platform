@@ -5,7 +5,6 @@ export interface ValidationTestStatistics {
 
 let active: Record<string, number> | null = null;
 let detailedValidationWorkLimit: number | null = null;
-let interactionControlFlowWorkLimit: number | null = null;
 
 export function beginValidationTestStatistics(): () => ValidationTestStatistics {
   if (active !== null) {
@@ -55,29 +54,6 @@ export function withDetailedValidationWorkLimitForTesting<T>(
 
 export function detailedValidationWorkLimitForTesting(): number | null {
   return detailedValidationWorkLimit;
-}
-
-/** Test-only override for instruction-plan interaction CFG validation. */
-export function withInteractionControlFlowWorkLimitForTesting<T>(
-  limit: number,
-  callback: () => T,
-): T {
-  if (!Number.isSafeInteger(limit) || limit < 0) {
-    throw new Error("The interaction control-flow test work limit must be a non-negative safe integer.");
-  }
-  if (interactionControlFlowWorkLimit !== null) {
-    throw new Error("An interaction control-flow test work limit is already active.");
-  }
-  interactionControlFlowWorkLimit = limit;
-  try {
-    return callback();
-  } finally {
-    interactionControlFlowWorkLimit = null;
-  }
-}
-
-export function interactionControlFlowWorkLimitForTesting(): number | null {
-  return interactionControlFlowWorkLimit;
 }
 
 export function recordValidationTestWork(name: string, amount = 1): void {

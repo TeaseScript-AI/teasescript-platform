@@ -79,7 +79,6 @@ function completeInteraction(
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;
-  current.lastSettlementResultState = action.destinationTemporary === null ? "none" : "live";
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;

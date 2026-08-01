@@ -95,10 +95,6 @@ test("validation-testing facade preserves canonical test instrumentation", () =>
     legacyValidationTesting.withDetailedValidationWorkLimitForTesting,
     canonicalValidationTesting.withDetailedValidationWorkLimitForTesting,
   );
-  assert.equal(
-    legacyValidationTesting.withInteractionControlFlowWorkLimitForTesting,
-    canonicalValidationTesting.withInteractionControlFlowWorkLimitForTesting,
-  );
 });
 
 test("action contracts remain runtime type-only at both canonical and state compatibility paths", () => {

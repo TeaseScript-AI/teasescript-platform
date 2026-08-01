@@ -10,7 +10,6 @@ import {
   createFreshRuntimeSnapshot,
   executeInstruction,
   observeTime,
-  restoreCheckpoint,
   run,
   type InstructionPlan,
   type RuntimeSnapshot,
@@ -258,101 +257,6 @@ function acceptedPlanCanonicalCase(
   });
 }
 
-function acceptedSnapshotCanonicalCase(
-  id: string,
-  mutate: (
-    value: Record<string, unknown>,
-    fixtures: PropertyFixtureCatalog,
-    variant: PropertyCaseVariant,
-  ) => void,
-): PropertyCaseDefinition {
-  return defineCase({
-    id,
-    property: "accepted extra snapshot data is canonically ignored",
-    boundary: "run",
-    workUnits: 4,
-    mutationCount: 1,
-    repeatable: true,
-    describe(fixtures, variant) {
-      return caseContext(id, summarizeFixture(fixtures.running), fixtures, variant);
-    },
-    execute(fixtures, variant) {
-      const modifiedSnapshot = cloneRecord(fixtures.running.snapshot);
-      mutate(modifiedSnapshot, fixtures, variant);
-      const modifiedBefore = capturePropertyValue(modifiedSnapshot);
-      const baseline = assertSuccessfulRuntimeOperation(
-        "run:baseline",
-        fixtures.running.plan,
-        fixtures.running.snapshot,
-        () => run(fixtures.running.plan, fixtures.running.snapshot),
-      );
-      const modified = assertSuccessfulRuntimeOperation(
-        "run:accepted-extra-snapshot",
-        fixtures.running.plan,
-        modifiedSnapshot as unknown as RuntimeSnapshot,
-        () => run(
-          fixtures.running.plan,
-          modifiedSnapshot as unknown as RuntimeSnapshot,
-        ),
-      );
-      assert.deepEqual(modified, baseline);
-      assertPropertyValueUnchanged(
-        modifiedSnapshot,
-        modifiedBefore,
-        "Accepted snapshot boundary mutated the caller-owned snapshot.",
-      );
-      return observation("accepted:canonical-equivalent", summarizeFixture(fixtures.running));
-    },
-  });
-}
-
-function acceptedCheckpointCanonicalCase(
-  id: string,
-  mutate: (
-    value: Record<string, unknown>,
-    fixtures: PropertyFixtureCatalog,
-    variant: PropertyCaseVariant,
-  ) => void,
-): PropertyCaseDefinition {
-  return defineCase({
-    id,
-    property: "accepted extra checkpoint data is canonically ignored",
-    boundary: "restoreCheckpoint",
-    workUnits: 3,
-    mutationCount: 1,
-    repeatable: true,
-    describe(fixtures, variant) {
-      return caseContext(id, "checkpoint:waiting-text", fixtures, variant);
-    },
-    execute(fixtures, variant) {
-      const modified = cloneCheckpointValue(fixtures.textCheckpoint);
-      mutate(modified, fixtures, variant);
-      const baselineBefore = capturePropertyValue(fixtures.textCheckpoint);
-      const modifiedBefore = capturePropertyValue(modified);
-      const baseline = atPropertyBoundary(
-        "restoreCheckpoint:baseline",
-        () => restoreCheckpoint(fixtures.textCheckpoint),
-      );
-      const restored = atPropertyBoundary(
-        "restoreCheckpoint:accepted-extra",
-        () => restoreCheckpoint(modified),
-      );
-      assert.deepEqual(restored, baseline);
-      assertPropertyValueUnchanged(
-        fixtures.textCheckpoint,
-        baselineBefore,
-        "Baseline checkpoint restore mutated its input.",
-      );
-      assertPropertyValueUnchanged(
-        modified,
-        modifiedBefore,
-        "Accepted checkpoint restore mutated its input.",
-      );
-      return observation("accepted:canonical-equivalent", "checkpoint:waiting-text");
-    },
-  });
-}
-
 function defineCase(
   definition: Omit<PropertyCaseDefinition, "describe"> & {
     readonly describe?: PropertyCaseDefinition["describe"];
@@ -595,7 +499,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
     value.extra = `retained-${variant.first.toString(16)}`;
   }),
   structuredPlanCase("plan-wrong-version", (value, _fixtures, variant) => {
-    value.version = 6 + (variant.first % 10_000);
+    value.version = 7 + (variant.first % 10_000);
   }),
   structuredPlanCase("plan-wrong-instructions-type", (value) => {
     value.instructions = "not-an-array";
@@ -723,11 +627,11 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   structuredSnapshotCase("snapshot-missing-status", "running", (value) => {
     delete value.status;
   }),
-  acceptedSnapshotCanonicalCase("snapshot-extra-root-field", (value, _fixtures, variant) => {
+  structuredSnapshotCase("snapshot-extra-root-field", "running", (value, _fixtures, variant) => {
     value.extra = `retained-${variant.first.toString(16)}`;
   }),
   structuredSnapshotCase("snapshot-wrong-version", "running", (value, _fixtures, variant) => {
-    value.version = 7 + (variant.first % 10_000);
+    value.version = 8 + (variant.first % 10_000);
   }),
   structuredSnapshotCase("snapshot-wrong-frames-type", "running", (value) => {
     value.frames = "not-an-array";
@@ -813,7 +717,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   structuredSnapshotCase("snapshot-non-plain-object", "running", (value) => {
     Object.setPrototypeOf(value, { inherited: true });
   }),
-  acceptedSnapshotCanonicalCase("snapshot-prototype-sensitive-own-key", (value) => {
+  structuredSnapshotCase("snapshot-prototype-sensitive-own-key", "running", (value) => {
     Object.defineProperty(value, "constructor", {
       value: "own-data",
       enumerable: true,
@@ -821,35 +725,35 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
       writable: true,
     });
   }),
-  structuredSnapshotCase("snapshot-exact-depth-boundary-accepted", "running", (value) => {
+  structuredSnapshotCase("snapshot-exact-depth-boundary-structured", "running", (value) => {
     value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH - 1);
-  }, { expected: "accepted", repeatable: false }),
+  }, { expected: "rejected", repeatable: false }),
   structuredSnapshotCase("snapshot-over-depth-boundary-structured", "running", (value) => {
     value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH);
   }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_DEPTH_MESSAGE }),
-  structuredSnapshotCase("snapshot-exact-work-boundary-accepted", "running", (value) => {
+  structuredSnapshotCase("snapshot-exact-work-boundary-structured", "running", (value) => {
     value.padding = sparseArray(MAX_EXTERNAL_RUNTIME_DATA_WORK);
-  }, { expected: "accepted", repeatable: false }),
+  }, { expected: "rejected", repeatable: false }),
   structuredSnapshotCase("snapshot-over-work-boundary-structured", "running", (value) => {
     value.padding = sparseArray(MAX_EXTERNAL_RUNTIME_DATA_WORK + 1);
   }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_WORK_MESSAGE }),
 
   structuredCheckpointCase("checkpoint-wrong-version", (value, _fixtures, variant) => {
-    value.version = 7 + (variant.first % 10_000);
+    value.version = 8 + (variant.first % 10_000);
   }),
   structuredCheckpointCase("checkpoint-nested-plan-version", (value, _fixtures, variant) => {
-    recordValue(value.plan).version = 6 + (variant.first % 10_000);
+    recordValue(value.plan).version = 7 + (variant.first % 10_000);
   }),
   structuredCheckpointCase("checkpoint-nested-snapshot-version", (value, _fixtures, variant) => {
-    recordValue(value.snapshot).version = 7 + (variant.first % 10_000);
+    recordValue(value.snapshot).version = 8 + (variant.first % 10_000);
   }),
   structuredCheckpointCase("checkpoint-plan-snapshot-mismatch", (value, fixtures) => {
     value.plan = structuredClone(fixtures.simplePlan);
   }),
-  acceptedCheckpointCanonicalCase("checkpoint-extra-root-field", (value, _fixtures, variant) => {
+  structuredCheckpointCase("checkpoint-extra-root-field", (value, _fixtures, variant) => {
     value.extra = `retained-${variant.first.toString(16)}`;
   }),
-  acceptedCheckpointCanonicalCase("checkpoint-prototype-sensitive-own-key", (value) => {
+  structuredCheckpointCase("checkpoint-prototype-sensitive-own-key", (value) => {
     Object.defineProperty(value, "__proto__", {
       value: "own-data",
       enumerable: true,
@@ -874,15 +778,15 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   structuredCheckpointCase("checkpoint-non-plain-object", (value) => {
     Object.setPrototypeOf(value, { inherited: true });
   }),
-  structuredCheckpointCase("checkpoint-exact-depth-boundary-accepted", (value) => {
+  structuredCheckpointCase("checkpoint-exact-depth-boundary-structured", (value) => {
     value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH - 1);
-  }, { expected: "accepted", repeatable: false }),
+  }, { expected: "rejected", repeatable: false }),
   structuredCheckpointCase("checkpoint-over-depth-boundary-structured", (value) => {
     value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH);
   }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_DEPTH_MESSAGE }),
-  structuredCheckpointCase("checkpoint-exact-work-boundary-accepted", (value) => {
+  structuredCheckpointCase("checkpoint-exact-work-boundary-structured", (value) => {
     value.padding = sparseArray(MAX_EXTERNAL_RUNTIME_DATA_WORK);
-  }, { expected: "accepted", repeatable: false }),
+  }, { expected: "rejected", repeatable: false }),
   structuredCheckpointCase("checkpoint-over-work-boundary-structured", (value) => {
     value.padding = sparseArray(MAX_EXTERNAL_RUNTIME_DATA_WORK + 1);
   }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_WORK_MESSAGE }),
