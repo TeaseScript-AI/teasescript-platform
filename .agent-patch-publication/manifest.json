@@ -1,0 +1,36 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "chore/remove-patch-publication-v1",
+  "expectedBaseSha": "2f0bac6bd9ab7f028665db6d184a037ffb80c702",
+  "expectedResultTreeSha": "9ff0c5d7e351da5310454651427631d7d96cb1dc",
+  "patchSizeBytes": 43250,
+  "patchSha256": "72ea10b56777779e920d1ea1e880ac20e6398fec273c40d88fd4f76d0be32a54",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0005",
+      "sizeBytes": 11845,
+      "sha256": "0790321214f870202adb6de4a5b92ab04ad21be92194ce44323e0ab1421b8ef2"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0005",
+      "sizeBytes": 6772,
+      "sha256": "8a3fee8bc3ff4611bc9514a7f5ce505fb4c143ef60d06f67ef29d3b703a9b394"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0005",
+      "sizeBytes": 10819,
+      "sha256": "12630a2dbf1173b38e703d534b5b8738a90eefb8cdaa2e69921724987553700f"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0005",
+      "sizeBytes": 10497,
+      "sha256": "ebd0125cf1b219a614cd0f71634e58ca8d1dc69d84ab5d0cafe392963708cd3d"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0005",
+      "sizeBytes": 3317,
+      "sha256": "81e9b40d240848997856f7f5232ddb3dcc4dd13e93d2b938f1fd3b61dda76d19"
+    }
+  ],
+  "commitMessage": "Remove patch publication transport v1"
+}

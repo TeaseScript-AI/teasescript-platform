@@ -1,0 +1,229 @@
+diff --git a/tools/local-agent/test-patch-publication-workflow.sh b/tools/local-agent/test-patch-publication-workflow.sh
+index 5f576055d35fc89749cf4512625146e8f8db0069..f1a1761bd4e5252ef9dc14140e13f7cfb9953e29 100755
+--- a/tools/local-agent/test-patch-publication-workflow.sh
++++ b/tools/local-agent/test-patch-publication-workflow.sh
+@@ -45,7 +45,6 @@ assert "github.rest.git.getRef" in request_text
+ assert "github.rest.repos.getContent" in request_text
+ assert "context.payload.comment.id" in request_text
+ assert "expected_transfer_sha" in text
+-assert "format_version" in text
+ assert "comment_id: ${{ steps.request.outputs.comment_id }}" in text
+ assert "Read exact transfer manifest" in text
+ assert 'actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"' in prepare_text
+@@ -53,7 +52,7 @@ assert 'sha256sum "$RUNNER_TEMP/manifest.json"' in prepare_text
+ assert "materialize-patch" in prepare_text
+ assert "refs/remotes/origin/patch-transfer" in prepare_text
+ assert "preserved_retry" in transfer_text
+-assert '[[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]' in transfer_text
++assert '[[ "$PUBLISH_RESULT" != success ]]' in transfer_text
+ assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
+ assert "preserved_changed" in transfer_text
+ assert "cleanup-transfer:" in text and "cleanup-comment:" in text
+@@ -780,12 +779,21 @@ git -C "$source_repo" reset -q --hard "$base"
+ python3 - "$manifest" "$target" "$base" "$tree" "$patch" <<'PY'
+ import hashlib, json, pathlib, sys
+ out, target, base, tree, patch = sys.argv[1:]
++patch_path = pathlib.Path(patch)
++patch_bytes = patch_path.read_bytes()
++part_path = ".agent-patch-publication/parts/change.patch.part-0001-of-0001"
+ data = {
+-    "formatVersion": 1,
++    "formatVersion": 2,
+     "targetBranch": target,
+     "expectedBaseSha": base,
+     "expectedResultTreeSha": tree,
+-    "patchSha256": hashlib.sha256(pathlib.Path(patch).read_bytes()).hexdigest(),
++    "patchSizeBytes": len(patch_bytes),
++    "patchSha256": hashlib.sha256(patch_bytes).hexdigest(),
++    "parts": [{
++        "path": part_path,
++        "sizeBytes": len(patch_bytes),
++        "sha256": hashlib.sha256(patch_bytes).hexdigest(),
++    }],
+     "commitMessage": "candidate",
+ }
+ pathlib.Path(out).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+@@ -838,9 +846,8 @@ git -C "$tmp/publisher" push -q origin "$candidate:refs/heads/$target"
+ test "$(git --git-dir="$remote" rev-parse "refs/heads/$target")" = "$candidate"
+ 
+ run_cleanup() {
+-  local format_version="$1"
+-  local publish_result="$2"
+-  local output_file="$3"
++  local publish_result="$1"
++  local output_file="$2"
+   : > "$output_file"
+   (
+     cd "$tmp/publisher"
+@@ -850,7 +857,6 @@ run_cleanup() {
+     PATCH_PUBLICATION_TEST_REMOTE_URL="$remote" \
+     TRANSFER_BRANCH="$transfer" \
+     EXPECTED_TRANSFER_SHA="$expected_transfer_sha" \
+-    FORMAT_VERSION="$format_version" \
+     PUBLISH_RESULT="$publish_result" \
+     GITHUB_OUTPUT="$output_file" \
+       bash "$cleanup_script"
+@@ -860,7 +866,7 @@ run_cleanup() {
+ # A failed or skipped V2 publication preserves the unchanged exact transfer ref
+ # so one bad part can be replaced without regenerating the manifest.
+ retry_output="$tmp/cleanup-retry.out"
+-run_cleanup 2 failure "$retry_output"
++run_cleanup failure "$retry_output"
+ test "$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")" = "$expected_transfer_sha"
+ grep -qx 'cleanup_status=preserved_retry' "$retry_output"
+ 
+@@ -872,7 +878,7 @@ git -C "$tmp/racer" commit -q -m 'replace transfer payload'
+ changed_transfer_sha="$(git -C "$tmp/racer" rev-parse HEAD)"
+ git -C "$tmp/racer" push -q origin "HEAD:refs/heads/$transfer"
+ changed_output="$tmp/cleanup-changed.out"
+-run_cleanup 2 failure "$changed_output"
++run_cleanup failure "$changed_output"
+ test "$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")" = "$changed_transfer_sha"
+ grep -qx 'cleanup_status=preserved_changed' "$changed_output"
+ 
+@@ -880,7 +886,7 @@ grep -qx 'cleanup_status=preserved_changed' "$changed_output"
+ git --git-dir="$remote" update-ref "refs/heads/$transfer" \
+   "$expected_transfer_sha" "$changed_transfer_sha"
+ removed_output="$tmp/cleanup-removed.out"
+-run_cleanup 2 success "$removed_output"
++run_cleanup success "$removed_output"
+ ! git --git-dir="$remote" show-ref --verify "refs/heads/$transfer" >/dev/null 2>&1
+ grep -qx 'cleanup_status=removed' "$removed_output"
+ 
+diff --git a/tools/local-agent/test-patch-publication.py b/tools/local-agent/test-patch-publication.py
+index dd18ba2ee5fec39b01706ddca356ad8c5d6747df..23f6491a7e60573f0429e960da5a205690637bb2 100755
+--- a/tools/local-agent/test-patch-publication.py
++++ b/tools/local-agent/test-patch-publication.py
+@@ -88,12 +88,24 @@ class PatchPublicationTests(unittest.TestCase):
+         self.tempdir.cleanup()
+ 
+     def write_manifest(self, **overrides: object) -> None:
++        patch = self.patch.read_bytes()
+         value: dict[str, object] = {
+-            "formatVersion": 1,
++            "formatVersion": 2,
+             "targetBranch": TARGET_BRANCH,
+             "expectedBaseSha": self.base_sha,
+             "expectedResultTreeSha": self.result_tree,
+-            "patchSha256": hashlib.sha256(self.patch.read_bytes()).hexdigest(),
++            "patchSizeBytes": len(patch),
++            "patchSha256": hashlib.sha256(patch).hexdigest(),
++            "parts": [
++                {
++                    "path": (
++                        ".agent-patch-publication/parts/"
++                        "change.patch.part-0001-of-0001"
++                    ),
++                    "sizeBytes": len(patch),
++                    "sha256": hashlib.sha256(patch).hexdigest(),
++                }
++            ],
+             "commitMessage": "Apply tested local patch",
+         }
+         value.update(overrides)
+@@ -128,7 +140,6 @@ class PatchPublicationTests(unittest.TestCase):
+     def create_transfer_payload(
+         self,
+         *,
+-        format_version: int = 2,
+         manifest_overrides: dict[str, object] | None = None,
+         omit_part: int | None = None,
+         extra_file: bool = False,
+@@ -153,57 +164,46 @@ class PatchPublicationTests(unittest.TestCase):
+         transfer_root.mkdir()
+         patch = self.patch.read_bytes()
+         part_paths: list[Path] = []
+-        if format_version == 1:
+-            (transfer_root / "change.patch").write_bytes(patch)
+-            manifest_value: dict[str, object] = {
+-                "formatVersion": 1,
+-                "targetBranch": TARGET_BRANCH,
+-                "expectedBaseSha": self.base_sha,
+-                "expectedResultTreeSha": self.result_tree,
+-                "patchSha256": hashlib.sha256(patch).hexdigest(),
+-                "commitMessage": "Apply tested local patch",
+-            }
+-        else:
+-            midpoint = max(1, len(patch) // 2)
+-            while midpoint < len(patch) and patch[midpoint] & 0xC0 == 0x80:
+-                midpoint += 1
+-            parts = [patch[:midpoint], patch[midpoint:]]
+-            if invalid_utf8_part is not None:
+-                parts[invalid_utf8_part - 1] = b"\xff\xfeinvalid\n"
+-            parts_root = transfer_root / "parts"
+-            parts_root.mkdir()
+-            manifest_parts: list[dict[str, object]] = []
+-            for index, value in enumerate(parts, start=1):
+-                relative = (
+-                    ".agent-patch-publication/parts/change.patch.part-"
+-                    f"{index:04d}-of-{len(parts):04d}"
+-                )
+-                path = worktree / relative
+-                part_paths.append(path)
+-                if omit_part != index:
+-                    path.write_bytes(value)
+-                manifest_parts.append(
+-                    {
+-                        "path": relative,
+-                        "sizeBytes": len(value),
+-                        "sha256": hashlib.sha256(value).hexdigest(),
+-                    }
+-                )
+-            reconstructed = b"".join(parts)
+-            manifest_value = {
+-                "formatVersion": 2,
+-                "targetBranch": TARGET_BRANCH,
+-                "expectedBaseSha": self.base_sha,
+-                "expectedResultTreeSha": self.result_tree,
+-                "patchSizeBytes": len(reconstructed),
+-                "patchSha256": hashlib.sha256(reconstructed).hexdigest(),
+-                "parts": manifest_parts,
+-                "commitMessage": "Apply tested local patch",
+-            }
+-            if extra_file:
+-                (parts_root / "unexpected.txt").write_text(
+-                    "unexpected\n", encoding="utf-8"
+-                )
++        midpoint = max(1, len(patch) // 2)
++        while midpoint < len(patch) and patch[midpoint] & 0xC0 == 0x80:
++            midpoint += 1
++        parts = [patch[:midpoint], patch[midpoint:]]
++        if invalid_utf8_part is not None:
++            parts[invalid_utf8_part - 1] = b"\xff\xfeinvalid\n"
++        parts_root = transfer_root / "parts"
++        parts_root.mkdir()
++        manifest_parts: list[dict[str, object]] = []
++        for index, value in enumerate(parts, start=1):
++            relative = (
++                ".agent-patch-publication/parts/change.patch.part-"
++                f"{index:04d}-of-{len(parts):04d}"
++            )
++            path = worktree / relative
++            part_paths.append(path)
++            if omit_part != index:
++                path.write_bytes(value)
++            manifest_parts.append(
++                {
++                    "path": relative,
++                    "sizeBytes": len(value),
++                    "sha256": hashlib.sha256(value).hexdigest(),
++                }
++            )
++        reconstructed = b"".join(parts)
++        manifest_value = {
++            "formatVersion": 2,
++            "targetBranch": TARGET_BRANCH,
++            "expectedBaseSha": self.base_sha,
++            "expectedResultTreeSha": self.result_tree,
++            "patchSizeBytes": len(reconstructed),
++            "patchSha256": hashlib.sha256(reconstructed).hexdigest(),
++            "parts": manifest_parts,
++            "commitMessage": "Apply tested local patch",
++        }
++        if extra_file:
++            (parts_root / "unexpected.txt").write_text(
++                "unexpected\n", encoding="utf-8"
++            )
+         if manifest_overrides:
+             manifest_value.update(manifest_overrides)
+         manifest_path = transfer_root / "manifest.json"

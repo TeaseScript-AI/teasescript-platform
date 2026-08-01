@@ -1,0 +1,262 @@
+diff --git a/tools/local-agent/patch-publication.py b/tools/local-agent/patch-publication.py
+index ef0e3334d5173a73afc209eb1ce591bdf6612eef..5569a3a0f75157be5cde07cd4d3e987e2130658f 100755
+--- a/tools/local-agent/patch-publication.py
++++ b/tools/local-agent/patch-publication.py
+@@ -44,14 +44,13 @@ class PatchPart:
+ 
+ @dataclass(frozen=True)
+ class Manifest:
+-    format_version: int
+     target_branch: str
+     expected_base_sha: str
+     expected_result_tree_sha: str
++    patch_size_bytes: int
+     patch_sha256: str
++    parts: tuple[PatchPart, ...]
+     commit_message: str
+-    patch_size_bytes: int | None = None
+-    parts: tuple[PatchPart, ...] = ()
+ 
+ 
+ @dataclass(frozen=True)
+@@ -209,37 +208,22 @@ def parse_manifest(
+     expected_target_branch: str | None,
+ ) -> Manifest:
+     value = load_json_object(path)
+-    format_version = require_int(value, "formatVersion", label="manifest")
+-    if format_version == 1:
+-        require_exact_fields(
+-            value,
+-            (
+-                "formatVersion",
+-                "targetBranch",
+-                "expectedBaseSha",
+-                "expectedResultTreeSha",
+-                "patchSha256",
+-                "commitMessage",
+-            ),
+-            label="manifest",
+-        )
+-    elif format_version == 2:
+-        require_exact_fields(
+-            value,
+-            (
+-                "formatVersion",
+-                "targetBranch",
+-                "expectedBaseSha",
+-                "expectedResultTreeSha",
+-                "patchSizeBytes",
+-                "patchSha256",
+-                "parts",
+-                "commitMessage",
+-            ),
+-            label="manifest",
+-        )
+-    else:
+-        fail("manifest.formatVersion must be the integer 1 or 2")
++    if require_int(value, "formatVersion", label="manifest") != 2:
++        fail("manifest.formatVersion must be the integer 2")
++    require_exact_fields(
++        value,
++        (
++            "formatVersion",
++            "targetBranch",
++            "expectedBaseSha",
++            "expectedResultTreeSha",
++            "patchSizeBytes",
++            "patchSha256",
++            "parts",
++            "commitMessage",
++        ),
++        label="manifest",
++    )
+ 
+     target_branch = validate_branch(
+         require_string(value, "targetBranch", label="manifest"),
+@@ -253,57 +237,53 @@ def parse_manifest(
+     if expected_target_branch is not None and target_branch != expected_target_branch:
+         fail("manifest target branch does not match the commented pull request")
+ 
+-    patch_size_bytes: int | None = None
+-    parts: tuple[PatchPart, ...] = ()
+-    if format_version == 2:
+-        patch_size_bytes = require_int(value, "patchSizeBytes", label="manifest")
+-        if not 1 <= patch_size_bytes <= MAX_PATCH_SIZE_BYTES:
++    patch_size_bytes = require_int(value, "patchSizeBytes", label="manifest")
++    if not 1 <= patch_size_bytes <= MAX_PATCH_SIZE_BYTES:
++        fail(
++            "manifest.patchSizeBytes must be between 1 and "
++            f"{MAX_PATCH_SIZE_BYTES}"
++        )
++    raw_parts = require_list(value, "parts", label="manifest")
++    if not 1 <= len(raw_parts) <= MAX_PART_COUNT:
++        fail(f"manifest.parts must contain between 1 and {MAX_PART_COUNT} entries")
++    parsed_parts: list[PatchPart] = []
++    for offset, raw_part in enumerate(raw_parts, start=1):
++        label = f"manifest.parts[{offset - 1}]"
++        if not isinstance(raw_part, dict):
++            fail(f"{label} must be an object")
++        require_exact_fields(
++            raw_part,
++            ("path", "sizeBytes", "sha256"),
++            label=label,
++        )
++        expected_path = (
++            f"{PART_DIRECTORY}/change.patch.part-"
++            f"{offset:04d}-of-{len(raw_parts):04d}"
++        )
++        part_path = require_string(raw_part, "path", label=label)
++        if part_path != expected_path:
++            fail(f"{label}.path must be exactly {expected_path}")
++        size_bytes = require_int(raw_part, "sizeBytes", label=label)
++        if not 1 <= size_bytes <= MAX_PART_SIZE_BYTES:
+             fail(
+-                "manifest.patchSizeBytes must be between 1 and "
+-                f"{MAX_PATCH_SIZE_BYTES}"
++                f"{label}.sizeBytes must be between 1 and "
++                f"{MAX_PART_SIZE_BYTES}"
+             )
+-        raw_parts = require_list(value, "parts", label="manifest")
+-        if not 1 <= len(raw_parts) <= MAX_PART_COUNT:
+-            fail(f"manifest.parts must contain between 1 and {MAX_PART_COUNT} entries")
+-        parsed_parts: list[PatchPart] = []
+-        for offset, raw_part in enumerate(raw_parts, start=1):
+-            label = f"manifest.parts[{offset - 1}]"
+-            if not isinstance(raw_part, dict):
+-                fail(f"{label} must be an object")
+-            require_exact_fields(
+-                raw_part,
+-                ("path", "sizeBytes", "sha256"),
+-                label=label,
++        parsed_parts.append(
++            PatchPart(
++                path=part_path,
++                size_bytes=size_bytes,
++                sha256=require_sha256(
++                    require_string(raw_part, "sha256", label=label),
++                    label=f"{label}.sha256",
++                ),
+             )
+-            expected_path = (
+-                f"{PART_DIRECTORY}/change.patch.part-"
+-                f"{offset:04d}-of-{len(raw_parts):04d}"
+-            )
+-            part_path = require_string(raw_part, "path", label=label)
+-            if part_path != expected_path:
+-                fail(f"{label}.path must be exactly {expected_path}")
+-            size_bytes = require_int(raw_part, "sizeBytes", label=label)
+-            if not 1 <= size_bytes <= MAX_PART_SIZE_BYTES:
+-                fail(
+-                    f"{label}.sizeBytes must be between 1 and "
+-                    f"{MAX_PART_SIZE_BYTES}"
+-                )
+-            parsed_parts.append(
+-                PatchPart(
+-                    path=part_path,
+-                    size_bytes=size_bytes,
+-                    sha256=require_sha256(
+-                        require_string(raw_part, "sha256", label=label),
+-                        label=f"{label}.sha256",
+-                    ),
+-                )
+-            )
+-        if sum(part.size_bytes for part in parsed_parts) != patch_size_bytes:
+-            fail("manifest patch size does not equal the sum of part sizes")
+-        parts = tuple(parsed_parts)
++        )
++    if sum(part.size_bytes for part in parsed_parts) != patch_size_bytes:
++        fail("manifest patch size does not equal the sum of part sizes")
++    parts = tuple(parsed_parts)
+ 
+     return Manifest(
+-        format_version=format_version,
+         target_branch=target_branch,
+         expected_base_sha=require_sha1(
+             require_string(value, "expectedBaseSha", label="manifest"),
+@@ -481,11 +461,7 @@ def materialize_patch(args: argparse.Namespace) -> None:
+         expected_target_branch=args.expected_target_branch,
+     )
+     manifest_path = f"{TRANSFER_DIRECTORY}/manifest.json"
+-    payload_paths = (
+-        [f"{TRANSFER_DIRECTORY}/change.patch"]
+-        if manifest.format_version == 1
+-        else [part.path for part in manifest.parts]
+-    )
++    payload_paths = [part.path for part in manifest.parts]
+     expected_paths = {manifest_path, *payload_paths}
+     actual_paths = set(read_transfer_tree(repository, transfer_ref))
+     missing = sorted(expected_paths - actual_paths)
+@@ -516,37 +492,28 @@ def materialize_patch(args: argparse.Namespace) -> None:
+     published = False
+     try:
+         with os.fdopen(descriptor, "wb") as handle:
+-            if manifest.format_version == 1:
+-                patch = read_transfer_file(repository, transfer_ref, payload_paths[0])
+-                handle.write(patch)
+-                complete_digest.update(patch)
+-                complete_size = len(patch)
+-            else:
+-                for part in manifest.parts:
+-                    value = read_transfer_file(repository, transfer_ref, part.path)
+-                    actual_size = len(value)
+-                    if actual_size != part.size_bytes:
+-                        fail(
+-                            f"patch part size mismatch for {part.path}: "
+-                            f"expected {part.size_bytes}, found {actual_size}"
+-                        )
+-                    actual_digest = hashlib.sha256(value).hexdigest()
+-                    if actual_digest != part.sha256:
+-                        fail(
+-                            f"patch part SHA-256 mismatch for {part.path}: "
+-                            f"expected {part.sha256}, found {actual_digest}"
+-                        )
+-                    require_utf8_part(value, path=part.path)
+-                    handle.write(value)
+-                    complete_digest.update(value)
+-                    complete_size += actual_size
++            for part in manifest.parts:
++                value = read_transfer_file(repository, transfer_ref, part.path)
++                actual_size = len(value)
++                if actual_size != part.size_bytes:
++                    fail(
++                        f"patch part size mismatch for {part.path}: "
++                        f"expected {part.size_bytes}, found {actual_size}"
++                    )
++                actual_digest = hashlib.sha256(value).hexdigest()
++                if actual_digest != part.sha256:
++                    fail(
++                        f"patch part SHA-256 mismatch for {part.path}: "
++                        f"expected {part.sha256}, found {actual_digest}"
++                    )
++                require_utf8_part(value, path=part.path)
++                handle.write(value)
++                complete_digest.update(value)
++                complete_size += actual_size
+             handle.flush()
+             os.fsync(handle.fileno())
+ 
+-        if (
+-            manifest.patch_size_bytes is not None
+-            and complete_size != manifest.patch_size_bytes
+-        ):
++        if complete_size != manifest.patch_size_bytes:
+             fail(
+                 "reconstructed patch size mismatch: "
+                 f"expected {manifest.patch_size_bytes}, found {complete_size}"
+@@ -565,14 +532,11 @@ def materialize_patch(args: argparse.Namespace) -> None:
+ 
+     write_github_outputs(
+         args.github_output,
+-        {
+-            "format_version": str(manifest.format_version),
+-            "patch_sha256": manifest.patch_sha256,
+-        },
++        {"patch_sha256": manifest.patch_sha256},
+     )
+     print(
+         "materialized patch publication payload "
+-        f"format={manifest.format_version} size={complete_size} "
++        f"format=2 size={complete_size} "
+         f"sha256={manifest.patch_sha256}"
+     )
+ 

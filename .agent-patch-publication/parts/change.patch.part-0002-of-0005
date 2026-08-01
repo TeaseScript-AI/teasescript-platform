@@ -1,0 +1,53 @@
+@@ -300,13 +218,13 @@ python3 -B tools/local-agent/test-patch-publication.py
+ bash tools/local-agent/test-patch-publication-workflow.sh
+ ```
+ 
+-The first suite covers both formats, deterministic byte-fallback generation at 64, 128, and 256 KiB, token-bounded splitting through an injected deterministic counter, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote for transfer cleanup and executes the exact trusted repository request, preparation, cleanup, and summary scripts against mocked GitHub API responses. It covers retry preservation, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, separated permissions, successful HTTP-204 deletion, already-absent comments before either the read or delete call, changed or mismatched identities, visible deletion failures, the 12-KiB workflow upload budget, and immutable Action pins. Live GitHub event permissions, actual comment deletion, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
++The first suite covers the multipart format, deterministic byte-fallback generation at 64, 128, and 256 KiB, token-bounded splitting through an injected deterministic counter, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote for transfer cleanup and executes the exact trusted repository request, preparation, cleanup, and summary scripts against mocked GitHub API responses. It covers retry preservation, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, separated permissions, successful HTTP-204 deletion, already-absent comments before either the read or delete call, changed or mismatched identities, visible deletion failures, the 12-KiB workflow upload budget, and immutable Action pins. Live GitHub event permissions, actual comment deletion, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
+ 
+ ## Current limits and follow-ups
+ 
+-Format version 1 remains the smallest transport for one manageable raw `change.patch`. Format version 2 is the normal multipart transport. Token-aware preparation targets 3,000 `o200k_base` tokens per connector content string and caps every planned connector upload, including the manifest, at 12 KiB by default. Both values are configurable local preparation settings, not accepted connector guarantees. When the tokenizer is unavailable, the helper falls back explicitly to the byte ceiling.
++A small patch uses a single format-version-2 part; larger patches use multiple parts. Token-aware preparation targets 3,000 `o200k_base` tokens per connector content string and caps every planned connector upload, including the manifest, at 12 KiB by default. Both values are configurable local preparation settings, not accepted connector guarantees. When the tokenizer is unavailable, the helper falls back explicitly to the byte ceiling.
+ 
+-Neither format accepts Base64. The protocol limits format version 2 to 1,024 parts, 256 KiB per part, and a 64 MiB reconstructed patch as bounded publication-tooling guards rather than TeaseScript content limits. The local tokenizer vocabulary and `tiktoken` installation belong in the reusable offline agent-toolchain archive, not in Git or source artifacts.
++The format does not accept Base64. The protocol limits it to 1,024 parts, 256 KiB per part, and a 64 MiB reconstructed patch as bounded publication-tooling guards rather than TeaseScript content limits. The local tokenizer vocabulary and `tiktoken` installation belong in the reusable offline agent-toolchain archive, not in Git or source artifacts.
+ 
+ The publish job currently uses the repository `GITHUB_TOKEN`. GitHub may require manual approval before a subsequent pull-request workflow runs after that token updates the PR branch. Replacing only the isolated publish credential with a repository-scoped GitHub App installation token is a separate operational follow-up; prepare and test jobs must remain read-only and must not receive the App private key.
+ 
+diff --git a/tools/local-agent/patch-publication-cleanup-transfer.sh b/tools/local-agent/patch-publication-cleanup-transfer.sh
+index 4240fe91b079cfc24e24b9f4ef3ebc7cb306a61b..cf3a8841735b941ff02e1ce325c409ec6ecfbf73 100755
+--- a/tools/local-agent/patch-publication-cleanup-transfer.sh
++++ b/tools/local-agent/patch-publication-cleanup-transfer.sh
+@@ -15,7 +15,7 @@ transfer_ref="refs/heads/$TRANSFER_BRANCH"
+ cleanup_status=failed
+ cleanup_failed=0
+ 
+-if [[ "$FORMAT_VERSION" == 2 && "$PUBLISH_RESULT" != success ]]; then
++if [[ "$PUBLISH_RESULT" != success ]]; then
+   set +e
+   remote_output="$(git -c "http.https://github.com/.extraheader=$auth_header" \
+     ls-remote --heads "$remote_url" "$transfer_ref" 2>&1)"
+diff --git a/tools/local-agent/patch-publication-request.cjs b/tools/local-agent/patch-publication-request.cjs
+index ed58baa11a81883e568b5e2a18b63eb01e02c7ea..c3f46f404768bece9bc8b824d844091cfc663a68 100644
+--- a/tools/local-agent/patch-publication-request.cjs
++++ b/tools/local-agent/patch-publication-request.cjs
+@@ -99,8 +99,8 @@ module.exports = async function runPatchPublicationRequest({ github, context, co
+     core.setFailed(`Transfer manifest is not valid UTF-8 JSON: ${error.message}`);
+     return;
+   }
+-  if (formatVersion !== 1 && formatVersion !== 2) {
+-    core.setFailed('Transfer manifest formatVersion must be the integer 1 or 2.');
++  if (formatVersion !== 2) {
++    core.setFailed('Transfer manifest formatVersion must be the integer 2.');
+     return;
+   }
+ 
+@@ -108,7 +108,6 @@ module.exports = async function runPatchPublicationRequest({ github, context, co
+   core.setOutput('expected_transfer_sha', expectedTransferSha);
+   core.setOutput('expected_manifest_sha256', expectedManifestSha256);
+   core.setOutput('expected_target_branch', pull.data.head.ref);
+-  core.setOutput('format_version', String(formatVersion));
+   core.setOutput('issue_number', String(context.issue.number));
+   core.setOutput('comment_id', String(context.payload.comment.id));
+ 

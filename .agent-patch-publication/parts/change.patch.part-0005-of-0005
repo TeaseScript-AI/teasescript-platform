@@ -1,0 +1,65 @@
+@@ -291,18 +291,7 @@ class PatchPublicationTests(unittest.TestCase):
+         self.assertEqual(completed.returncode, 1)
+         self.assertIn("patch SHA-256 mismatch", completed.stderr)
+ 
+-    def test_materializes_v1_transfer_payload_unchanged(self) -> None:
+-        manifest, transfer_ref, _parts = self.create_transfer_payload(
+-            format_version=1
+-        )
+-        output = self.root / "materialized-v1.patch"
+-        completed = run(
+-            self.materialize_command(manifest, transfer_ref, output), cwd=self.repo
+-        )
+-        self.assertIn("format=1", completed.stdout)
+-        self.assertEqual(output.read_bytes(), self.patch.read_bytes())
+-
+-    def test_materializes_v2_parts_and_prepares_candidate(self) -> None:
++    def test_materializes_parts_and_prepares_candidate(self) -> None:
+         manifest, transfer_ref, _parts = self.create_transfer_payload()
+         materialized = self.root / "materialized-v2.patch"
+         completed = run(
+@@ -384,7 +373,7 @@ class PatchPublicationTests(unittest.TestCase):
+         )
+         self.assertFalse(output.exists())
+ 
+-    def test_v2_missing_and_extra_parts_fail_closed(self) -> None:
++    def test_missing_and_extra_parts_fail_closed(self) -> None:
+         cases = (
+             ({"omit_part": 2}, "missing file(s)"),
+             ({"extra_file": True}, "unexpected file(s)"),
+@@ -402,7 +391,7 @@ class PatchPublicationTests(unittest.TestCase):
+                 self.assertEqual(completed.returncode, 1)
+                 self.assertIn(expected, completed.stderr)
+ 
+-    def test_v2_part_size_hash_and_utf8_errors_name_the_part(self) -> None:
++    def test_part_size_hash_and_utf8_errors_name_the_part(self) -> None:
+         for kind in ("size", "hash", "utf8"):
+             with self.subTest(kind=kind):
+                 if kind == "utf8":
+@@ -435,7 +424,7 @@ class PatchPublicationTests(unittest.TestCase):
+                     completed.stderr,
+                 )
+ 
+-    def test_v2_final_digest_and_canonical_order_fail_closed(self) -> None:
++    def test_final_digest_and_canonical_order_fail_closed(self) -> None:
+         manifest, transfer_ref, _parts = self.create_transfer_payload()
+         value = json.loads(manifest.read_text(encoding="utf-8"))
+         value["patchSha256"] = "0" * 64
+@@ -487,7 +476,7 @@ class PatchPublicationTests(unittest.TestCase):
+         self.assertEqual(completed3.returncode, 1)
+         self.assertIn(".path must be exactly", completed3.stderr)
+ 
+-    def test_v2_invalid_path_and_transport_limits_fail_closed(self) -> None:
++    def test_invalid_path_and_transport_limits_fail_closed(self) -> None:
+         cases: list[tuple[str, Callable[[dict[str, object]], None], str]] = []
+ 
+         def invalid_path(value: dict[str, object]) -> None:
+@@ -534,7 +523,7 @@ class PatchPublicationTests(unittest.TestCase):
+                 self.assertEqual(completed.returncode, 1)
+                 self.assertIn(expected, completed.stderr)
+ 
+-    def test_v2_one_part_repair_succeeds_on_new_transfer_commit(self) -> None:
++    def test_one_part_repair_succeeds_on_new_transfer_commit(self) -> None:
+         manifest, transfer_ref, parts = self.create_transfer_payload()
+         manifest_digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+         correct_part = parts[1].read_bytes()
