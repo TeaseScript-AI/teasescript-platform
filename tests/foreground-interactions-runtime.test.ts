@@ -1043,6 +1043,22 @@ test("result interactions use one bounded local handoff instead of future-path l
     true,
     JSON.stringify(validateInstructionPlan(preparedReference).errors),
   );
+
+  const evaluated = structuredClone(injected.plan) as any;
+  evaluated.instructions[injected.handoffInstruction] = {
+    kind: "evaluate",
+    expression: {
+      kind: "temporary",
+      temporaryId: injected.destinationTemporary,
+      span: evaluated.instructions[injected.handoffInstruction].span,
+    },
+    span: evaluated.instructions[injected.handoffInstruction].span,
+  };
+  assert.equal(
+    validateInstructionPlan(evaluated).valid,
+    true,
+    JSON.stringify(validateInstructionPlan(evaluated).errors),
+  );
 });
 
 test("completion commits atomically and every short handoff checkpoint boundary validates", () => {

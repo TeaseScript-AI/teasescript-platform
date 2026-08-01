@@ -994,20 +994,24 @@ function canonicalHandoffConsumesTemporary(
   instruction: Record<string, unknown>,
   temporaryId: number,
 ): boolean {
-  const expression = instruction.kind === "prepareReference"
-    ? instruction.expression
-    : [
-        "declareBinding",
-        "assign",
-        "evaluate",
-        "storeTemporary",
-        "say",
-        "setDeclaredSpeakerProperty",
-        "bindDefaultParameter",
-        "returnValue",
-      ].includes(String(instruction.kind))
-      ? instruction.value
-      : undefined;
+  let expression: unknown;
+  switch (instruction.kind) {
+    case "evaluate":
+    case "prepareReference":
+      expression = instruction.expression;
+      break;
+    case "declareBinding":
+    case "assign":
+    case "storeTemporary":
+    case "say":
+    case "setDeclaredSpeakerProperty":
+    case "bindDefaultParameter":
+    case "returnValue":
+      expression = instruction.value;
+      break;
+    default:
+      expression = undefined;
+  }
   return expressionContainsTemporary(expression, temporaryId);
 }
 
