@@ -64,21 +64,22 @@ search and bounded or ranged reads when the complete file is not required. Do
 not print or quote complete large files, diffs, or workflow logs without a
 concrete reason.
 
-Choose the smallest suitable edit method based on the shape of the change:
+Use the environment-provided `apply_patch` command for ordinary localized edits,
+including coherent changes across multiple hunks or files in one invocation.
+Use a bounded temporary task-specific codemod, such as `ts-morph`, only when
+repeated structural or symbol-aware TypeScript edits would make an ordinary
+patch unclear or error-prone. Rewrite a complete existing file only when
+complete replacement is intentional or most of the file genuinely changes, and
+review the complete result.
 
-- use `tools/local-agent/replace-exact.py` for one exact or byte-sensitive
-  replacement;
-- use a checked unified diff for another small local or structural change;
-- use a bounded task-specific codemod with explicit paths, preconditions, and
-  expected scope for repeated mechanical or symbol-aware changes;
-- rewrite a complete file only when complete replacement is intended or most of
-  the file genuinely changes, and review the complete result.
-
-When the change is naturally “replace exactly these bytes with these bytes,”
-use the exact-replacement helper; when it is naturally additions and deletions
-around code, use a checked unified diff. Read `tools/local-agent/README.md` when
-the selected helper needs detailed operation, limits, or failure diagnostics.
-Stop when an expected match count or scope differs.
+`apply_patch` is the default for small and medium source and documentation
+edits. A failed patch should normally be corrected with a smaller reread and
+better context, not by rewriting the entire file. Task-specific scripts should
+normally remain uncommitted and be discarded after their verified use. Do not
+add a repository-wide fallback for environments that lack `apply_patch`; that
+requires separate concrete evidence and review. Rare binary or byte-sensitive
+work should use a task-specific method appropriate to that concrete file, not
+justify a permanent general helper.
 
 After each coherent edit batch, inspect the relevant hunks, run
 `git diff --check`, and run focused checks. Summarize successful test runs
