@@ -1,0 +1,156 @@
+@@ -189,19 +277,22 @@ class PreparePatchPublicationTests(unittest.TestCase):
+                 "requires local TEASESCRIPT_O200K_TOKENIZER and importable tiktoken"
+             )
+         estimator = SUPPORT.load_token_estimator(Path(configured))
+-        patch = (
+-            "diff --git a/example.txt b/example.txt\n"
+-            + "ordinary source line with punctuation and identifiers\n" * 400
+-        ).encode()
++        patch = PR_174_PATCH.read_bytes()
++        self.assertEqual(len(patch), 43_250)
++        self.assertEqual(
++            SUPPORT.sha256_bytes(patch),
++            "72ea10b56777779e920d1ea1e880ac20e6398fec273c40d88fd4f76d0be32a54",
++        )
+         parts, counts = SUPPORT.split_utf8_patch(
+             patch,
+-            maximum_bytes=4096,
+-            target_tokens=600,
++            maximum_bytes=12 * 1024,
++            target_tokens=3_000,
+             count_tokens=estimator.count_bytes,
+         )
+         self.assertEqual(b"".join(parts), patch)
+-        self.assertGreater(len(parts), 1)
+-        self.assertTrue(all(count is not None and count <= 600 for count in counts))
++        self.assertEqual(len(parts), 4)
++        self.assertTrue(all(len(part) <= 12 * 1024 for part in parts))
++        self.assertTrue(all(count is not None and count <= 3_000 for count in counts))
+         self.assertEqual(estimator.vocabulary_sha256, SUPPORT.O200K_BASE_SHA256)
+ 
+     def test_multi_commit_range_and_one_file_at_a_time_upload(self) -> None:
+@@ -252,80 +343,60 @@ class PreparePatchPublicationTests(unittest.TestCase):
+         self.assertGreater(len(plan["files"]), 2)
+         first, second = plan["files"][:2]
+ 
+-        shown = run(
+-            [sys.executable, str(PREPARE), "--output-directory", str(output), "--show-next-upload"],
+-            cwd=repository,
+-        )
++        shown = run_cli("--output-directory", str(output), "--show-next-upload")
++        self.assertEqual(shown.returncode, 0)
+         self.assertIn(first["path"], shown.stdout)
+         self.assertNotIn(second["path"], shown.stdout)
+         self.assertIn('"encoding": "utf-8"', shown.stdout)
+ 
+-        wrong = run(
+-            [
+-                sys.executable,
+-                str(PREPARE),
+-                "--output-directory",
+-                str(output),
+-                "--record-upload-sha",
+-                "0" * 40,
+-            ],
+-            cwd=repository,
+-            check=False,
++        wrong = run_cli(
++            "--output-directory",
++            str(output),
++            "--record-upload-sha",
++            "0" * 40,
+         )
+         self.assertEqual(wrong.returncode, 1)
+         self.assertIn("do not advance", wrong.stderr)
+         state = json.loads((output / "upload-state.json").read_text())
+         self.assertEqual(state["completedUploads"], [])
+ 
+-        recorded = run(
+-            [
+-                sys.executable,
+-                str(PREPARE),
+-                "--output-directory",
+-                str(output),
+-                "--record-upload-sha",
+-                first["expectedGitBlobSha"],
+-            ],
+-            cwd=repository,
++        recorded = run_cli(
++            "--output-directory",
++            str(output),
++            "--record-upload-sha",
++            first["expectedGitBlobSha"],
+         )
++        self.assertEqual(recorded.returncode, 0)
+         self.assertIn("nextUploadIndex=2", recorded.stdout)
+-        shown_second = run(
+-            [sys.executable, str(PREPARE), "--output-directory", str(output), "--show-next-upload"],
+-            cwd=repository,
++        shown_second = run_cli(
++            "--output-directory", str(output), "--show-next-upload"
+         )
++        self.assertEqual(shown_second.returncode, 0)
+         self.assertIn(second["path"], shown_second.stdout)
+         self.assertNotIn(first["path"], shown_second.stdout)
+ 
+-        reset = run(
+-            [
+-                sys.executable,
+-                str(PREPARE),
+-                "--output-directory",
+-                str(output),
+-                "--reset-upload-index",
+-                str(first["index"]),
+-            ],
+-            cwd=repository,
++        reset = run_cli(
++            "--output-directory",
++            str(output),
++            "--reset-upload-index",
++            str(first["index"]),
+         )
++        self.assertEqual(reset.returncode, 0)
+         self.assertIn(f"resetUpload={first['index']}", reset.stdout)
+-        shown_first_again = run(
+-            [sys.executable, str(PREPARE), "--output-directory", str(output), "--show-next-upload"],
+-            cwd=repository,
++        shown_first_again = run_cli(
++            "--output-directory", str(output), "--show-next-upload"
+         )
++        self.assertEqual(shown_first_again.returncode, 0)
+         self.assertIn(first["path"], shown_first_again.stdout)
+         self.assertNotIn(second["path"], shown_first_again.stdout)
+ 
+-        rerecorded = run(
+-            [
+-                sys.executable,
+-                str(PREPARE),
+-                "--output-directory",
+-                str(output),
+-                "--record-upload-sha",
+-                first["expectedGitBlobSha"],
+-            ],
+-            cwd=repository,
++        rerecorded = run_cli(
++            "--output-directory",
++            str(output),
++            "--record-upload-sha",
++            first["expectedGitBlobSha"],
+         )
++        self.assertEqual(rerecorded.returncode, 0)
+         self.assertIn("nextUploadIndex=2", rerecorded.stdout)
+ 
+         completed = {
+@@ -340,10 +411,8 @@ class PreparePatchPublicationTests(unittest.TestCase):
+             ],
+         }
+         (output / "upload-state.json").write_text(json.dumps(completed) + "\n")
+-        final = run(
+-            [sys.executable, str(PREPARE), "--output-directory", str(output), "--show-next-upload"],
+-            cwd=repository,
+-        )
++        final = run_cli("--output-directory", str(output), "--show-next-upload")
++        self.assertEqual(final.returncode, 0)
+         self.assertIn("createTreeArguments=", final.stdout)
+         self.assertIn('"tree_elements":', final.stdout)
+         self.assertIn(f'"parent_sha": "{base}"', final.stdout)

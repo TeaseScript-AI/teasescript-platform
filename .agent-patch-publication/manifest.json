@@ -1,0 +1,46 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "fix/issue-175-patch-splitting",
+  "expectedBaseSha": "e21c82a5b9a49e497d5fb7b175c664ddf0d1ab0d",
+  "expectedResultTreeSha": "fe1e5653b50644202ee535ffd7fbda14fde8bdac",
+  "patchSizeBytes": 72027,
+  "patchSha256": "ee4eb4eb3974b4ffb7944a426ba84eaf73e83a687ec4fb09383da8057c03db88",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0007",
+      "sizeBytes": 12179,
+      "sha256": "bcc0e46cd21a2a5359cde27cce84ab5aad87c768bbee3e11f9cefcd1a874a615"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0007",
+      "sizeBytes": 12192,
+      "sha256": "b088ccc296e1baf0db7961516594ae0f62e3f3bc49b68d558cfb60fec4b10e72"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0007",
+      "sizeBytes": 11709,
+      "sha256": "9bd7a6f591142b4ae5fdbe13b057bfdf76077ec3c5d7e2e9ce7253080b42b1ea"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0007",
+      "sizeBytes": 10726,
+      "sha256": "542173ad47e25bb035cbd78ab563bd81ba63eae122485677d616848ceba75df8"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0007",
+      "sizeBytes": 9094,
+      "sha256": "cd295d769e4361c1702a240855c84cca777c64b9a236ed0656a4554dab6b857c"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0006-of-0007",
+      "sizeBytes": 9926,
+      "sha256": "a2db1f933d5ed1a0431c66388934e593cafce46cbb783fad1f43f03c75e4f02f"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0007-of-0007",
+      "sizeBytes": 6201,
+      "sha256": "891d62e490e140b41608fc450c4cce34422a4c87ff974fbfa0e7ef54ff3afec2"
+    }
+  ],
+  "commitMessage": "Keep patch splitting at minimum part count"
+}
