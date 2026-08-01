@@ -44,6 +44,97 @@ Do not recommend multiple agents only because an issue is large, touches several
 
 The issue author's recommendation is advisory. The owner or designated coordinator confirms the execution model before implementation begins.
 
+## Requirement authority and review proportionality
+
+Implementation authority and review severity are separate from how detailed or
+confidently written an artifact is. Before treating a statement as a permanent
+contract, classify it as one of:
+
+| Decision type | Governance effect |
+| --- | --- |
+| Owner-approved product behavior | Required within the recorded scope. |
+| Accepted architecture, persistence, determinism, security, or trust boundary | Required within the accepted decision or documented boundary. |
+| Current implementation choice | Describes how the current code works; it is not automatically a permanent compatibility promise. |
+| Temporary POC choice | May be replaced without preserving it when accepted behavior and real boundaries remain intact. |
+| Optional defensive hardening | May be proposed, but does not block unrelated work without a concrete current need. |
+| Unresolved proposal | Requires the normal owner/ADR decision route before implementation treats it as accepted. |
+
+An agent-written issue, test, ADR draft, specification, pull-request
+description, or review comment is evidence and context, not authority by
+itself. A previous comment does not become authoritative merely because another
+agent accepted or implemented it. Existing behavior may still require
+preservation when it is part of a supported path, an accepted contract, or an
+explicit owner-approved acceptance criterion. Tests may prove such behavior,
+but their private fixture structure, helper identity, or exact harness design
+does not independently create a product contract.
+
+Use words such as `must`, `exact`, `versioned`, `authoritative`, and
+`compatibility` only when the text identifies the accepted behavior, real
+boundary, or owner decision that requires that strength. A stricter
+implementation being technically possible is not sufficient.
+
+### Review finding classes
+
+Classify every actionable finding in plain language:
+
+- **Blocker:** accepted behavior, a supported public/trusted path, a real
+  boundary, an explicit owner-approved acceptance criterion, or normal
+  development/operation is concretely broken.
+- **Non-blocking correctness improvement:** a real defect or inconsistency with
+  limited consequence that does not prevent the current task from safely
+  landing.
+- **Optional hardening:** additional defense beyond current accepted behavior
+  and reachable boundaries.
+- **Maintainability suggestion:** a readability, organization, or future-cost
+  improvement without a current correctness failure.
+- **Speculative future concern:** a possible issue that depends on unaccepted
+  features, hypothetical consumers, or future architecture.
+- **Test-harness issue rather than product issue:** a defect in fixtures,
+  generators, replay metadata, or test-only helpers that does not demonstrate a
+  product/runtime failure.
+
+Labels such as `bug`, `contract violation`, `security issue`, or `missing edge
+case` do not establish severity without the concrete reason.
+
+### Blocking evidence
+
+A blocking correctness finding should normally include:
+
+- a reproducible case;
+- the supported public or trusted path through which it occurs;
+- expected and actual behavior;
+- the practical user, data, determinism, security, or maintenance consequence;
+- a focused failing test, or a clear reason why one cannot yet be supplied.
+
+Examples include broken accepted TeaseScript behavior, a supported
+source-to-runtime regression, partial or corrupt canonical state, observably
+incorrect deterministic execution or checkpoint restore, bypass of a real
+trust boundary, an unmet owner-approved criterion, or a concrete block to
+normal development, deployment, or maintenance.
+
+Manually fabricated impossible internal states, unsupported inputs, private
+implementation details, hypothetical future compatibility, and hostile objects
+that cannot cross a real boundary are not blockers by default. Classify them as
+hardening, future work, a harness issue, or out of scope unless evidence shows a
+reachable supported path or real boundary consequence.
+
+### Proportional repair and owner escalation
+
+Propose the smallest repair that restores accepted behavior or the real
+boundary. Do not expand a local defect into a generalized framework, new
+permanent compatibility layer, public contract, schema, or unrelated hardening
+campaign without a separate owner decision.
+
+When owner approval is required, explain in ordinary language what product
+behavior, data risk, security boundary, or maintenance problem the stronger
+contract protects, what happens without it, and what complexity it adds. Do not
+ask the owner to approve an unexplained technical abstraction.
+
+These rules prevent accidental scope escalation. They do not permit reviewers
+to dismiss reproducible defects or weaken accepted syntax/semantics,
+deterministic execution, serializable checkpoint requirements, or validation at
+external, host, checkpoint, persistence, package, and security boundaries.
+
 ## Default single-agent flow
 
 For a normal issue:

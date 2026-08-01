@@ -40,7 +40,8 @@ or an unresolved proposal. Agent-written issues, tests, ADR drafts,
 pull-request descriptions, specifications, and earlier review comments do not
 become authoritative merely because they exist or another agent implemented
 them. Strong terms such as `must`, `exact`, `versioned`, `authoritative`, and
-`compatibility` require a concrete accepted behavior or real boundary.
+`compatibility` require a concrete accepted behavior, real boundary, or
+explicit owner decision.
 
 Review findings must use the severity and evidence rules in
 `docs/DEVELOPMENT-WORKFLOW.md`. A blocker needs a supported public or trusted
