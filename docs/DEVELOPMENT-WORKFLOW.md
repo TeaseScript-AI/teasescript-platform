@@ -30,6 +30,8 @@ The agent creating or substantially refining an issue should include:
 - evidence, reproduction, or relevant source references;
 - explicit scope and exclusions;
 - acceptance criteria;
+- when proposing future-facing infrastructure, the concrete scheduled consumer
+  or difficult-to-reverse boundary problem that justifies implementing it now;
 - an execution recommendation:
   - `Single agent` — the default;
   - `Coordinated multi-agent` — only with a short concrete rationale.
@@ -79,6 +81,31 @@ Use words such as `must`, `exact`, `versioned`, `authoritative`, and
 boundary, or owner decision that requires that strength. A stricter
 implementation being technically possible is not sufficient.
 
+### Pragmatic YAGNI
+
+Once the current requirement and its authority are established, implement only
+the complexity needed for that requirement and its real boundaries.
+
+Statements such as “we may need this later,” “a more general solution would be
+cleaner,” an unscheduled backlog entry, a historical implementation, or an
+earlier test or review comment do not by themselves justify present
+infrastructure.
+
+Future-facing complexity needs a concrete reason, such as:
+
+- an owner- or coordinator-scheduled consumer that will use it;
+- an accepted boundary that must be correct when first introduced;
+- a demonstrated data, security, persistence, or public-compatibility problem
+  that would be materially harder to repair later.
+
+Use the smallest seam that addresses that concrete reason. A narrow interface
+for an already scheduled next consumer may be proportionate; implementing the
+complete generalized future subsystem is not.
+
+When no present implementation is justified, route the idea to the appropriate
+wish, planning, backlog, or open-decision location. Recording an idea preserves
+it without turning it into production maintenance surface.
+
 ### Review finding classes
 
 Classify every actionable finding in plain language:
@@ -127,9 +154,10 @@ reachable supported path or real boundary consequence.
 ### Proportional repair and owner escalation
 
 Propose the smallest repair that restores accepted behavior or the real
-boundary. Do not expand a local defect into a generalized framework, new
-permanent compatibility layer, public contract, schema, or unrelated hardening
-campaign without a separate owner decision.
+boundary. Apply the pragmatic YAGNI rule above before broadening a repair for
+future prevention or hypothetical reuse. Do not expand a local defect into a
+generalized framework, new permanent compatibility layer, public contract,
+schema, or unrelated hardening campaign without a separate owner decision.
 
 When owner approval is required, explain in ordinary language what product
 behavior, data risk, security boundary, or maintenance problem the stronger
