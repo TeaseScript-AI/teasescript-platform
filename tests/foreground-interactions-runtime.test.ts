@@ -1212,6 +1212,87 @@ test("completion commits atomically and every short handoff checkpoint boundary 
   assert.doesNotThrow(() => createCheckpoint(injected.plan, ordinaryMutation));
 });
 
+test("completion stops at the handoff before ordinary continuation execution", () => {
+  const injected = injectTextInteraction(
+    'let answer = "__interaction_result__"\nsay answer\nexit',
+  );
+  const pending = waiting(injected.plan);
+  const planBefore = structuredClone(injected.plan);
+  const pendingBefore = structuredClone(pending.snapshot);
+  const completed = completeAction(
+    injected.plan,
+    pending.snapshot,
+    textCompletionRequest(pending.snapshot),
+  );
+
+  assert.deepEqual(injected.plan, planBefore, "completion plan input");
+  assert.deepEqual(pending.snapshot, pendingBefore, "completion snapshot input");
+  assert.equal(completed.outcome.kind, "completed");
+  assert.equal(completed.snapshot.nextInstruction, injected.handoffInstruction);
+  assert.equal(
+    temporaryValue(completed.snapshot, injected.destinationTemporary),
+    "committed",
+  );
+  assert.equal(
+    completed.snapshot.frames[0]?.bindings.some((binding) => binding.name === "answer"),
+    false,
+  );
+  assert.deepEqual(
+    completed.events.map((event) => event.kind),
+    ["playerTranscript", "actionCompleted"],
+  );
+  assert.equal(completed.events.some((event) => event.kind === "say"), false);
+});
+
+test("transferred interaction result is independent of the cleanup temporary", () => {
+  const injected = injectTextInteraction(
+    'let answer = "__interaction_result__"\nsay answer\nexit',
+  );
+  const pending = waiting(injected.plan);
+  const completed = completeAction(
+    injected.plan,
+    pending.snapshot,
+    textCompletionRequest(pending.snapshot),
+  );
+  const transferred = executeInstruction(injected.plan, completed.snapshot);
+
+  assert.equal(transferred.snapshot.nextInstruction, injected.clearInstruction);
+  assert.equal(transferred.snapshot.interactionResultHandoff, null);
+  assert.equal(bindingValue(transferred.snapshot, "answer"), "committed");
+  assert.equal(
+    temporaryValue(transferred.snapshot, injected.destinationTemporary),
+    "committed",
+  );
+
+  const changedCleanupTemporary = structuredClone(transferred.snapshot);
+  changedCleanupTemporary.temporaries.find((temporary) =>
+    temporary.id === injected.destinationTemporary
+  )!.value = "changed cleanup value";
+  const changedBeforeValidation = structuredClone(changedCleanupTemporary);
+  assert.equal(
+    validateRuntimeSnapshot(changedCleanupTemporary, injected.plan).valid,
+    true,
+  );
+  assert.deepEqual(changedCleanupTemporary, changedBeforeValidation);
+  assert.doesNotThrow(() => createCheckpoint(injected.plan, changedCleanupTemporary));
+
+  const cleaned = executeInstruction(injected.plan, changedCleanupTemporary);
+  assert.equal(
+    cleaned.snapshot.temporaries.some((temporary) =>
+      temporary.id === injected.destinationTemporary
+    ),
+    false,
+  );
+  assert.equal(bindingValue(cleaned.snapshot, "answer"), "committed");
+
+  const ordinaryMutation = structuredClone(cleaned.snapshot);
+  ordinaryMutation.frames[0]!.bindings.find((binding) =>
+    binding.name === "answer"
+  )!.value = "ordinary replacement";
+  assert.equal(validateRuntimeSnapshot(ordinaryMutation, injected.plan).valid, true);
+  assert.doesNotThrow(() => createCheckpoint(injected.plan, ordinaryMutation));
+});
+
 test("removed lifecycle fields and previous persisted versions are rejected structurally", () => {
   const plan = interactionPlan("text", {
     kind: "text",
@@ -1527,6 +1608,51 @@ test("compiler-shaped binding, assignment, argument, nested function, and source
   );
   assert.equal(
     validateRuntimeSnapshot(suspendedFinal.snapshot, suspendedCaller.plan).valid,
+    true,
+  );
+});
+
+test("compiler-shaped foo, interaction, bar source order remains exact", () => {
+  const injected = injectTextInteraction([
+    'function foo { say "foo"\nreturn "first" }',
+    'function bar { say "bar"\nreturn "third" }',
+    'function send(first, answer, third) { say `${first}:${answer}:${third}`\nreturn }',
+    'send(foo(), "__interaction_result__", bar())',
+    'exit',
+  ].join("\n"));
+  const beforeInteraction = run(
+    injected.plan,
+    createFreshRuntimeSnapshot(injected.plan),
+  );
+  assert.equal(beforeInteraction.snapshot.status, "waiting");
+  assert.deepEqual(
+    beforeInteraction.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["foo"],
+  );
+
+  const completed = completeAction(
+    injected.plan,
+    beforeInteraction.snapshot,
+    {
+      actionId: beforeInteraction.snapshot.foregroundAction!.actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: "middle" },
+    },
+  );
+  assert.equal(
+    completed.events.some((event) => event.kind === "say" && event.text === "bar"),
+    false,
+  );
+
+  const final = run(injected.plan, completed.snapshot);
+  assert.deepEqual(
+    final.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["bar", "first:middle:third"],
+  );
+  assert.equal(final.snapshot.status, "halted");
+  assert.equal(
+    validateRuntimeSnapshot(final.snapshot, injected.plan).valid,
     true,
   );
 });
@@ -2914,6 +3040,13 @@ test("PR194 matrix: settlement and active handoff validation", () => {
       },
     },
     {
+      id: "PR194-handoff-null",
+      category: "malformed handoff",
+      mutate: (snapshot) => {
+        snapshot.interactionResultHandoff = null;
+      },
+    },
+    {
       id: "PR194-handoff-missing-field",
       category: "malformed handoff",
       mutate: (snapshot) => {
@@ -3921,6 +4054,100 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
     assert.ok(validation.errors.some((error) => error.code === "TSC002"), row.id);
     assert.deepEqual(plan, beforeValidation, row.id);
   }
+
+  const assertExactLocalHandoffError = (
+    plan: InstructionPlan,
+    id: string,
+    message: string,
+    path: string,
+  ): void => {
+    const before = structuredClone(plan);
+    const validation = validateInstructionPlan(plan);
+    assert.equal(validation.valid, false, id);
+    assert.equal(validation.errors.length, 1, `${id}: unrelated validation error`);
+    assert.equal(validation.errors[0]?.code, "TSC002", id);
+    assert.equal(validation.errors[0]?.message, message, id);
+    assert.equal(validation.errors[0]?.path, path, id);
+    assert.deepEqual(plan, before, `${id}: plan input`);
+  };
+
+  const callInjected = injectTextInteraction([
+    'function helper { return "helper" }',
+    'let ignored = helper()',
+    'let answer = "__interaction_result__"',
+    'say answer',
+    'exit',
+  ].join("\n"));
+  const compilerCall = callInjected.plan.instructions.find((instruction) =>
+    instruction.kind === "callFunction"
+  );
+  assert.ok(compilerCall !== undefined && compilerCall.kind === "callFunction");
+  const callDestinationTemporary = callInjected.plan.temporaryCount + 1;
+  const callAtHandoff = replaceHandoffInstruction(
+    callInjected,
+    {
+      ...structuredClone(compilerCall),
+      destinationTemporary: callDestinationTemporary,
+      returnInstruction: callInjected.clearInstruction,
+      span: callInjected.plan.instructions[callInjected.handoffInstruction]!.span,
+    },
+    callDestinationTemporary,
+  );
+  const callFunctionRow = {
+    id: "PR194-call-function-as-handoff",
+    plan: callAtHandoff,
+    message: "Interaction result handoff must consume the destination immediately.",
+    path: `$.instructions[${callInjected.handoffInstruction}]`,
+  } as const;
+  assertExactLocalHandoffError(
+    callFunctionRow.plan,
+    callFunctionRow.id,
+    callFunctionRow.message,
+    callFunctionRow.path,
+  );
+
+  const targetInjected = injectTextInteraction([
+    'if true { say "before" } else { say "other" }',
+    'let answer = "__interaction_result__"',
+    'say answer',
+    'exit',
+  ].join("\n"));
+  assert.equal(
+    validateInstructionPlan(targetInjected.plan).valid,
+    true,
+    JSON.stringify(validateInstructionPlan(targetInjected.plan).errors),
+  );
+  const jumpIndex = targetInjected.plan.instructions.findIndex((instruction) =>
+    instruction.kind === "jump"
+  );
+  assert.notEqual(jumpIndex, -1);
+  const jump = targetInjected.plan.instructions[jumpIndex];
+  assert.ok(jump !== undefined && jump.kind === "jump");
+  const targetedRows = [
+    {
+      id: "PR194-explicit-target-handoff-entry",
+      target: targetInjected.handoffInstruction,
+      message: "Interaction result handoff entry must be reachable only from its owning interaction.",
+      path: `$.instructions[${targetInjected.handoffInstruction}]`,
+    },
+    {
+      id: "PR194-explicit-target-handoff-cleanup",
+      target: targetInjected.clearInstruction,
+      message: "Interaction result handoff cleanup must not be an independent control-flow target.",
+      path: `$.instructions[${targetInjected.clearInstruction}]`,
+    },
+  ] as const;
+  for (const row of targetedRows) {
+    const targeted: InstructionPlan = {
+      ...structuredClone(targetInjected.plan),
+      instructions: targetInjected.plan.instructions.map((instruction, index) =>
+        index === jumpIndex && instruction.kind === "jump"
+          ? { ...instruction, target: row.target }
+          : instruction
+      ),
+    };
+    assertExactLocalHandoffError(targeted, row.id, row.message, row.path);
+  }
 });
 
 test("PR194 matrix: rejected completion and snapshot operations preserve canonical state", () => {
@@ -4213,25 +4440,55 @@ test("PR194 matrix: validated composite persisted state resumes equivalently", (
   });
 });
 
-test("PR194 matrix: newer settlement changes old interaction replay to staleAction", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit');
+test("PR194 matrix: later settlement preserves ordinary result and makes old replay stale", () => {
+  const injected = injectTextInteraction(
+    'let answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit',
+  );
   const pending = waiting(injected.plan);
-  const request = {
-    actionId: pending.snapshot.foregroundAction!.actionId,
-    actionKind: "interaction" as const,
-    interactionKind: "text" as const,
-    payload: {
-      kind: "submittedText",
-      submittedText: "committed",
-    },
-  };
+  const request = textCompletionRequest(pending.snapshot);
   const completed = completeAction(injected.plan, pending.snapshot, request);
-  const afterClear = executeInstruction(injected.plan, executeInstruction(injected.plan, completed.snapshot).snapshot).snapshot;
-  const delay = run(injected.plan, afterClear);
+  assert.equal(completed.outcome.kind, "completed");
+
+  const transferred = executeInstruction(injected.plan, completed.snapshot);
+  assert.equal(transferred.snapshot.interactionResultHandoff, null);
+  assert.equal(bindingValue(transferred.snapshot, "answer"), "committed");
+  const cleaned = executeInstruction(injected.plan, transferred.snapshot);
+  assert.equal(
+    cleaned.snapshot.temporaries.some((temporary) =>
+      temporary.id === injected.destinationTemporary
+    ),
+    false,
+  );
+  assert.equal(bindingValue(cleaned.snapshot, "answer"), "committed");
+
+  const delay = run(injected.plan, cleaned.snapshot);
+  assert.equal(delay.snapshot.foregroundAction?.kind, "delay");
+  const interactionSettlement = completed.snapshot.lastSettlement;
+  assert.ok(interactionSettlement !== null && interactionSettlement.actionKind === "interaction");
   const newer = observeTime(injected.plan, delay.snapshot, 1);
-  const before = structuredClone(newer.snapshot);
-  const replay = completeAction(injected.plan, newer.snapshot, request);
+  assert.equal(newer.snapshot.lastSettlement?.actionKind, "delay");
+  assert.ok(
+    newer.snapshot.lastSettlement !== null &&
+      newer.snapshot.lastSettlement.actionId > interactionSettlement.actionId,
+  );
+  assert.equal(bindingValue(newer.snapshot, "answer"), "committed");
+
+  const restored = checkpointJsonRoundTrip(injected.plan, newer.snapshot);
+  assert.equal(bindingValue(restored.snapshot, "answer"), "committed");
+  assert.deepEqual(restored.snapshot.lastSettlement, newer.snapshot.lastSettlement);
+  const final = run(restored.plan, restored.snapshot);
+  assert.ok(final.events.some((event) => event.kind === "say" && event.text === "committed"));
+  assert.equal(bindingValue(final.snapshot, "answer"), "committed");
+
+  const planBeforeReplay = structuredClone(injected.plan);
+  const snapshotBeforeReplay = structuredClone(final.snapshot);
+  const replay = completeAction(injected.plan, final.snapshot, request);
   assert.equal(replay.outcome.kind, "staleAction", "PR194-newer-settlement-replay");
+  if (replay.outcome.kind === "staleAction") {
+    assert.equal(replay.outcome.actionId, request.actionId);
+  }
   assert.deepEqual(replay.events, []);
-  assert.deepEqual(replay.snapshot, before);
+  assert.deepEqual(replay.snapshot, snapshotBeforeReplay);
+  assert.deepEqual(injected.plan, planBeforeReplay);
+  assert.deepEqual(final.snapshot, snapshotBeforeReplay);
 });
