@@ -64,20 +64,21 @@ boundaries.
 
 Do not add abstractions, extension points, compatibility layers, migration
 paths, registries, schemas, services, generalized hardening, or permanent test
-contracts for hypothetical consumers, unscheduled features, or unaccepted
-future architecture.
+contracts when their only justification is hypothetical consumers, unscheduled
+features, or unaccepted future architecture.
 
 Future-facing preparation is justified only when a concrete consumer or
-obligation has been explicitly scheduled by the owner or coordinator, or when
-deferral would create a demonstrated, material, and difficult-to-reverse data,
-security, persistence, or public-compatibility problem. Even then, add only the
-smallest seam needed for that concrete case; do not build the generalized
-future system.
+obligation has been explicitly scheduled by the owner or coordinator, an
+accepted boundary must be correct when first introduced, or deferral would
+create a demonstrated, material, and difficult-to-reverse data, security,
+persistence, or public-compatibility problem. Even then, add only the smallest
+seam needed for that concrete case; do not build the generalized future system.
 
-Otherwise record the idea in `WISHES.xml`, planning, or `docs/OPEN-DECISIONS.md`
-as appropriate. Pragmatic YAGNI does not permit weakening accepted behavior or
-real external, host, checkpoint, persistence, package, determinism, or security
-boundaries.
+Otherwise propose or route the idea through the appropriate owner-governed
+`WISHES.xml`, planning, backlog, or `docs/OPEN-DECISIONS.md` process. Recording a
+proposal does not accept, schedule, or authorize implementation. Pragmatic
+YAGNI does not permit weakening accepted behavior or real external, host,
+checkpoint, persistence, package, determinism, or security boundaries.
 
 ## Review convergence
 

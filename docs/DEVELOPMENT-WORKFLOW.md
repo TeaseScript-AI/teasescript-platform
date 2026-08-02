@@ -30,8 +30,9 @@ The agent creating or substantially refining an issue should include:
 - evidence, reproduction, or relevant source references;
 - explicit scope and exclusions;
 - acceptance criteria;
-- when proposing future-facing infrastructure, the concrete scheduled consumer
-  or difficult-to-reverse boundary problem that justifies implementing it now;
+- when proposing future-facing infrastructure, the concrete scheduled
+  consumer, accepted boundary that must be correct when first introduced, or
+  difficult-to-reverse boundary problem that justifies implementing it now;
 - an execution recommendation:
   - `Single agent` — the default;
   - `Coordinated multi-agent` — only with a short concrete rationale.
@@ -102,9 +103,11 @@ Use the smallest seam that addresses that concrete reason. A narrow interface
 for an already scheduled next consumer may be proportionate; implementing the
 complete generalized future subsystem is not.
 
-When no present implementation is justified, route the idea to the appropriate
-wish, planning, backlog, or open-decision location. Recording an idea preserves
-it without turning it into production maintenance surface.
+When no present implementation is justified, propose or route the idea through
+the appropriate owner-governed wish, planning, backlog, or open-decision
+process. Recording a proposal preserves it without accepting, scheduling, or
+authorizing implementation and without turning it into production maintenance
+surface.
 
 ### Review finding classes
 
