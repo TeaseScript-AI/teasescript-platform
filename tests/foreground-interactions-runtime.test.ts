@@ -8,11 +8,20 @@ import {
   MAX_INTERACTION_OPTION_ENTRIES,
   MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "../src/interaction-limits.js";
-import type { InstructionPlan, InteractionInstruction, InteractionUiPayload } from "../src/plan/model.js";
+import type {
+  BinaryExpressionPlan,
+  ExpressionPlan,
+  Instruction,
+  InstructionPlan,
+  InteractionInstruction,
+  InteractionUiPayload,
+} from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { CheckpointError, createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { completeAction, executeInstruction, observeTime, run } from "../src/runtime/engine.js";
-import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import { getSerializableProperty, type SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
+import { createFreshRuntimeSnapshot, type RuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import type { SourceSpan } from "../src/source.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 
 function interactionPlan(interactionKind: InteractionInstruction["interactionKind"], ui: InteractionUiPayload, options: { speaker?: string | null } = {}): InstructionPlan {
@@ -1571,36 +1580,26 @@ function injectInteraction(
   const compiled = compileSource(source);
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
-  const plan = structuredClone(compiled.plan!) as any;
+  const base = structuredClone(compiled.plan!);
   const marker = "__interaction_result__";
-  const targetIndex = plan.instructions.findIndex((instruction: unknown) =>
+  const targetIndex = base.instructions.findIndex((instruction) =>
     containsLiteralMarker(instruction, marker)
   );
   assert.notEqual(targetIndex, -1, source);
   assert.equal(
-    plan.instructions.filter((instruction: unknown) =>
+    base.instructions.filter((instruction) =>
       containsLiteralMarker(instruction, marker)
     ).length,
     1,
     source,
   );
 
-  const destinationTemporary = plan.temporaryCount + 1;
-  plan.temporaryCount = destinationTemporary;
-  plan.rootEndInstruction = shiftBoundary(plan.rootEndInstruction, targetIndex);
-  for (const definition of plan.functions) {
-    definition.entryInstruction = shiftBoundary(definition.entryInstruction, targetIndex);
-    definition.bodyEntryInstruction = shiftBoundary(definition.bodyEntryInstruction, targetIndex);
-    definition.implicitReturnInstruction = shiftBoundary(definition.implicitReturnInstruction, targetIndex);
-    definition.endInstruction = shiftBoundary(definition.endInstruction, targetIndex);
-  }
-  for (const instruction of plan.instructions) shiftInstructionTargets(instruction, targetIndex);
-
+  const destinationTemporary = base.temporaryCount + 1;
   const original = replaceLiteralMarker(
-    plan.instructions[targetIndex],
+    base.instructions[targetIndex],
     marker,
     destinationTemporary,
-  );
+  ) as Instruction;
   const span = original.span;
   const expectedResult = interactionKind === "number" ||
     (ui.kind === "choice" && ui.labelType === "number")
@@ -1616,11 +1615,27 @@ function injectInteraction(
     ui,
     span,
   };
-  plan.instructions.splice(targetIndex, 1,
-    interaction,
-    original,
-    { kind: "clearTemporary", temporaryId: destinationTemporary, span },
-  );
+  const plan: InstructionPlan = {
+    ...base,
+    temporaryCount: destinationTemporary,
+    rootEndInstruction: shiftBoundary(base.rootEndInstruction, targetIndex),
+    functions: base.functions.map((definition) => ({
+      ...definition,
+      entryInstruction: shiftBoundary(definition.entryInstruction, targetIndex),
+      bodyEntryInstruction: shiftBoundary(definition.bodyEntryInstruction, targetIndex),
+      implicitReturnInstruction: shiftBoundary(definition.implicitReturnInstruction, targetIndex),
+      endInstruction: shiftBoundary(definition.endInstruction, targetIndex),
+    })),
+    instructions: [
+      ...base.instructions.slice(0, targetIndex).map((instruction) =>
+        shiftInstructionTargets(instruction, targetIndex)),
+      interaction,
+      original,
+      { kind: "clearTemporary", temporaryId: destinationTemporary, span },
+      ...base.instructions.slice(targetIndex + 1).map((instruction) =>
+        shiftInstructionTargets(instruction, targetIndex)),
+    ],
+  };
 
   const validation = validateInstructionPlan(plan);
   assert.equal(validation.valid, true, JSON.stringify(validation.errors));
@@ -1637,11 +1652,26 @@ function shiftBoundary(value: number, insertionIndex: number): number {
   return value > insertionIndex ? value + 2 : value;
 }
 
-function shiftInstructionTargets(instruction: any, insertionIndex: number): void {
-  for (const field of ["target", "continueTarget", "returnInstruction"] as const) {
-    if (Number.isSafeInteger(instruction[field])) {
-      instruction[field] = shiftBoundary(instruction[field], insertionIndex);
-    }
+function shiftInstructionTargets(instruction: Instruction, insertionIndex: number): Instruction {
+  switch (instruction.kind) {
+    case "jump":
+    case "jumpIfFalse":
+    case "loopControl":
+    case "prepareParameterDefault":
+      return { ...instruction, target: shiftBoundary(instruction.target, insertionIndex) };
+    case "loopStart":
+      return {
+        ...instruction,
+        continueTarget: shiftBoundary(instruction.continueTarget, insertionIndex),
+        target: shiftBoundary(instruction.target, insertionIndex),
+      };
+    case "callFunction":
+      return {
+        ...instruction,
+        returnInstruction: shiftBoundary(instruction.returnInstruction, insertionIndex),
+      };
+    default:
+      return instruction;
   }
 }
 
@@ -1657,7 +1687,7 @@ function replaceLiteralMarker(
   value: unknown,
   marker: string,
   destinationTemporary: number,
-): any {
+): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => replaceLiteralMarker(item, marker, destinationTemporary));
   }
@@ -1680,62 +1710,484 @@ function replaceLiteralMarker(
 
 // Phase 1 deliberately retains the earlier focused regressions above.  These
 // tables make the local handoff boundary explicit without replacing them.
-test("PR194 matrix: canonical direct and ordinary handoff forms", () => {
-  const cases = [
-    { id: "PR194-declare-binding", source: 'let answer = "__interaction_result__"\nsay answer\nexit', observe: (snapshot: any) => assert.equal(snapshot.frames[0].bindings.find((entry: any) => entry.name === "answer")?.value, "committed") },
-    { id: "PR194-assign", source: 'let answer = "before"\nanswer = "__interaction_result__"\nsay answer\nexit', observe: (snapshot: any) => assert.equal(snapshot.frames[0].bindings.find((entry: any) => entry.name === "answer")?.value, "committed") },
-  ] as const;
-  for (const entry of cases) {
-    const injected = injectTextInteraction(entry.source);
-    const pending = waiting(injected.plan);
-    const pendingBefore = structuredClone(pending.snapshot);
-    assert.equal(pending.snapshot.temporaries.some((temporary) => temporary.id === injected.destinationTemporary), false, entry.id);
-    const completed = completeAction(injected.plan, pending.snapshot, {
-      actionId: pending.snapshot.foregroundAction!.actionId,
-      actionKind: "interaction",
-      interactionKind: "text",
-      payload: { kind: "submittedText", submittedText: "committed" },
-    });
-    assert.deepEqual(pending.snapshot, pendingBefore, entry.id);
-    assert.equal(completed.outcome.kind, "completed", entry.id);
-    assert.deepEqual(completed.events.map((event) => event.kind), ["playerTranscript", "actionCompleted"], entry.id);
-    assert.deepEqual(Object.keys(completed.snapshot.interactionResultHandoff!).sort(), ["actionId", "continuationInstruction", "destinationTemporary", "ownerCallFrameId", "owningInstruction", "result"], entry.id);
-    assert.equal(completed.snapshot.interactionResultHandoff?.result, "committed", entry.id);
-    assert.doesNotThrow(() => createCheckpoint(injected.plan, completed.snapshot), entry.id);
-    const committed = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, completed.snapshot)));
-    const consumed = executeInstruction(injected.plan, committed.snapshot);
-    assert.equal(consumed.snapshot.interactionResultHandoff, null, entry.id);
-    const cleaned = run(injected.plan, consumed.snapshot).snapshot;
-    entry.observe(cleaned);
-    assert.doesNotThrow(() => createCheckpoint(injected.plan, cleaned), entry.id);
+type CanonicalHandoffKind =
+  | "clearTemporary"
+  | "exit"
+  | "returnVoid"
+  | "returnValue"
+  | "declareBinding"
+  | "assign"
+  | "evaluate"
+  | "storeTemporary"
+  | "say"
+  | "setDeclaredSpeakerProperty"
+  | "prepareReference";
+
+interface CanonicalHandoffRow {
+  readonly id: string;
+  readonly kind: CanonicalHandoffKind;
+  readonly source: string;
+  readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
+  readonly needsCleanup: boolean;
+  readonly assertResult: (snapshot: RuntimeSnapshot, events: readonly { readonly kind: string }[]) => void;
+}
+
+function replaceHandoffInstruction(
+  injected: InjectedInteractionPlan,
+  instruction: Instruction,
+  temporaryCount = injected.plan.temporaryCount,
+): InstructionPlan {
+  return {
+    ...injected.plan,
+    temporaryCount,
+    instructions: injected.plan.instructions.map((current, index) =>
+      index === injected.handoffInstruction ? instruction : current),
+  };
+}
+
+function completeCommittedTextInteraction(plan: InstructionPlan) {
+  const pending = waiting(plan);
+  const before = structuredClone(pending.snapshot);
+  const action = pending.snapshot.foregroundAction;
+  assert.ok(action !== null);
+  const completed = completeAction(plan, pending.snapshot, {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "committed" },
+  });
+  assert.deepEqual(pending.snapshot, before);
+  assert.equal(completed.outcome.kind, "completed");
+  assert.deepEqual(completed.events.map((event) => event.kind), [
+    "playerTranscript",
+    "actionCompleted",
+  ]);
+  return { pending, completed };
+}
+
+function checkpointJsonRoundTrip(plan: InstructionPlan, snapshot: RuntimeSnapshot) {
+  const before = structuredClone(snapshot);
+  const checkpoint = createCheckpoint(plan, snapshot);
+  assert.deepEqual(snapshot, before);
+  return deserializeCheckpoint(serializeCheckpoint(checkpoint));
+}
+
+function temporaryValue(snapshot: RuntimeSnapshot, temporaryId: number) {
+  const temporary = snapshot.temporaries.find((entry) => entry.id === temporaryId);
+  assert.ok(temporary !== undefined, `missing temporary ${temporaryId}`);
+  return temporary.value;
+}
+
+function bindingValue(snapshot: RuntimeSnapshot, name: string) {
+  const binding = snapshot.frames[0]?.bindings.find((entry) => entry.name === name);
+  assert.ok(binding !== undefined, `missing binding ${name}`);
+  return binding.value;
+}
+
+function assertPreparedReference(value: unknown): void {
+  assert.notEqual(value, null);
+  assert.equal(typeof value, "object");
+  const reference = value as SerializableRuntimeObject;
+  assert.equal(reference.kind, "object");
+  assert.equal(getSerializableProperty(reference, "marker"), "preparedReference");
+  assert.equal(getSerializableProperty(reference, "rootFrameId"), null);
+  assert.equal(getSerializableProperty(reference, "rootName"), null);
+  assert.deepEqual(getSerializableProperty(reference, "path"), { kind: "list", items: [] });
+  assert.equal(getSerializableProperty(reference, "capturedRoot"), "committed");
+  assert.equal(getSerializableProperty(reference, "detached"), true);
+}
+
+type ExternalRecord = Record<string, unknown>;
+
+function externalRecord(value: unknown, label: string): ExternalRecord {
+  assert.equal(typeof value, "object", `${label} must be an object`);
+  assert.notEqual(value, null, `${label} must not be null`);
+  return value as ExternalRecord;
+}
+
+function externalArray(value: unknown, label: string): unknown[] {
+  assert.ok(Array.isArray(value), `${label} must be an array`);
+  return value;
+}
+
+function externalInstructions(plan: ExternalRecord): unknown[] {
+  return externalArray(plan.instructions, "plan instructions");
+}
+
+test("PR194 matrix: every reachable canonical handoff form consumes exactly once", () => {
+  const rows: readonly CanonicalHandoffRow[] = [
+    {
+      id: "PR194-form-clear-temporary",
+      kind: "clearTemporary",
+      source: 'let answer = "__interaction_result__"\nexit',
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "clearTemporary",
+        temporaryId: injected.destinationTemporary,
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }),
+      needsCleanup: false,
+      assertResult: () => undefined,
+    },
+    {
+      id: "PR194-form-exit",
+      kind: "exit",
+      source: 'let answer = "__interaction_result__"\nexit',
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "exit",
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }),
+      needsCleanup: false,
+      assertResult: (snapshot, events) => {
+        assert.equal(snapshot.status, "halted");
+        assert.ok(events.some((event) => event.kind === "exit"));
+      },
+    },
+    {
+      id: "PR194-form-return-void",
+      kind: "returnVoid",
+      source: 'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit',
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "returnVoid",
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }),
+      needsCleanup: false,
+      assertResult: (snapshot) => {
+        assert.equal(snapshot.callFrames.length, 0);
+      },
+    },
+    {
+      id: "PR194-form-return-value",
+      kind: "returnValue",
+      source: 'function prompt { return "__interaction_result__" }\nlet answer = prompt()\nsay answer\nexit',
+      makePlan: (injected) => injected.plan,
+      needsCleanup: false,
+      assertResult: (snapshot) => {
+        assert.equal(snapshot.callFrames.length, 0);
+      },
+    },
+    {
+      id: "PR194-form-declare-binding",
+      kind: "declareBinding",
+      source: 'let answer = "__interaction_result__"\nsay answer\nexit',
+      makePlan: (injected) => injected.plan,
+      needsCleanup: true,
+      assertResult: (snapshot) => assert.equal(bindingValue(snapshot, "answer"), "committed"),
+    },
+    {
+      id: "PR194-form-assign",
+      kind: "assign",
+      source: 'let answer = "before"\nanswer = "__interaction_result__"\nsay answer\nexit',
+      makePlan: (injected) => injected.plan,
+      needsCleanup: true,
+      assertResult: (snapshot) => assert.equal(bindingValue(snapshot, "answer"), "committed"),
+    },
+    {
+      id: "PR194-form-evaluate",
+      kind: "evaluate",
+      source: 'let answer = "__interaction_result__"\nexit',
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "evaluate",
+        expression: { kind: "temporary", temporaryId: injected.destinationTemporary, span: injected.plan.instructions[injected.handoffInstruction]!.span },
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }),
+      needsCleanup: true,
+      assertResult: (snapshot) => assert.equal(snapshot.status, "running"),
+    },
+    {
+      id: "PR194-form-store-temporary",
+      kind: "storeTemporary",
+      source: 'let answer = "__interaction_result__"\nexit',
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "storeTemporary",
+        temporaryId: injected.destinationTemporary + 1,
+        value: { kind: "temporary", temporaryId: injected.destinationTemporary, span: injected.plan.instructions[injected.handoffInstruction]!.span },
+        expectBoolean: false,
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }, injected.plan.temporaryCount + 1),
+      needsCleanup: true,
+      assertResult: (snapshot) => assert.equal(temporaryValue(snapshot, 2), "committed"),
+    },
+    {
+      id: "PR194-form-say",
+      kind: "say",
+      source: 'let answer = "__interaction_result__"\nexit',
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "say",
+        speaker: null,
+        value: { kind: "temporary", temporaryId: injected.destinationTemporary, span: injected.plan.instructions[injected.handoffInstruction]!.span },
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }),
+      needsCleanup: true,
+      assertResult: (_snapshot, events) => assert.ok(events.some((event) => event.kind === "say" && "text" in event && event.text === "committed")),
+    },
+    {
+      id: "PR194-form-set-declared-speaker-property",
+      kind: "setDeclaredSpeakerProperty",
+      source: 'speaker guide {}\nspeaker guide\nlet answer = "__interaction_result__"\nexit',
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "setDeclaredSpeakerProperty",
+        speaker: "guide",
+        name: "answer",
+        value: { kind: "temporary", temporaryId: injected.destinationTemporary, span: injected.plan.instructions[injected.handoffInstruction]!.span },
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }),
+      needsCleanup: true,
+      assertResult: (snapshot) => {
+        const speaker = snapshot.speakers.find((entry) => entry.identifier === "guide");
+        assert.ok(speaker !== undefined);
+        assert.equal(speaker.properties.find((property) => property.name === "answer")?.value, "committed");
+      },
+    },
+    {
+      id: "PR194-form-prepare-reference",
+      kind: "prepareReference",
+      source: 'let answer = "__interaction_result__"\nexit',
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "prepareReference",
+        expression: { kind: "temporary", temporaryId: injected.destinationTemporary, span: injected.plan.instructions[injected.handoffInstruction]!.span },
+        destinationTemporary: injected.destinationTemporary + 1,
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }, injected.plan.temporaryCount + 1),
+      needsCleanup: true,
+      assertResult: (snapshot) => assertPreparedReference(temporaryValue(snapshot, 2)),
+    },
+  ];
+
+  for (const row of rows) {
+    const injected = injectTextInteraction(row.source);
+    const plan = row.makePlan(injected);
+    const planBefore = structuredClone(plan);
+    const validation = validateInstructionPlan(plan);
+    assert.equal(validation.valid, true, `${row.id}: ${JSON.stringify(validation.errors)}`);
+    assert.deepEqual(plan, planBefore, row.id);
+    assert.equal(plan.instructions[injected.handoffInstruction]?.kind, row.kind, row.id);
+    const { completed } = completeCommittedTextInteraction(plan);
+    const handoff = completed.snapshot.interactionResultHandoff;
+    assert.ok(handoff !== null, row.id);
+    assert.equal(handoff.destinationTemporary, injected.destinationTemporary, row.id);
+    assert.equal(handoff.result, "committed", row.id);
+    const restored = checkpointJsonRoundTrip(plan, completed.snapshot);
+    const continuationBefore = structuredClone(restored.snapshot);
+    const continued = executeInstruction(restored.plan, restored.snapshot);
+    assert.deepEqual(restored.snapshot, continuationBefore, row.id);
+    assert.equal(continued.snapshot.interactionResultHandoff, null, row.id);
+    if (!row.needsCleanup) {
+      assert.equal(
+        continued.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary),
+        false,
+        row.id,
+      );
+    }
+    row.assertResult(continued.snapshot, continued.events);
+    assert.doesNotThrow(() => createCheckpoint(restored.plan, continued.snapshot), row.id);
+    if (row.needsCleanup) {
+      const cleanupBefore = structuredClone(continued.snapshot);
+      const cleaned = executeInstruction(restored.plan, continued.snapshot);
+      assert.deepEqual(continued.snapshot, cleanupBefore, row.id);
+      assert.equal(cleaned.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary), false, row.id);
+    }
+    if (row.kind === "returnVoid" || row.kind === "returnValue") {
+      const final = run(restored.plan, continued.snapshot);
+      assert.equal(final.snapshot.callFrames.length, 0, row.id);
+      if (row.kind === "returnVoid") assert.ok(final.events.some((event) => event.kind === "say" && event.text === "after"), row.id);
+      else {
+        assert.equal(bindingValue(final.snapshot, "answer"), "committed", row.id);
+        assert.ok(final.events.some((event) => event.kind === "say" && event.text === "committed"), row.id);
+      }
+    }
   }
 });
 
-test("PR194 matrix: expression consumption is guaranteed rather than syntactic", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
+interface ExpressionGuaranteeRow {
+  readonly id: string;
+  readonly category: string;
+  readonly expression: ExpressionPlan | unknown;
+  readonly valid: boolean;
+}
+
+function temporaryExpression(temporaryId: number, span: SourceSpan): ExpressionPlan {
+  return { kind: "temporary", temporaryId, span };
+}
+
+function literalExpression(value: string | number | boolean | null, span: SourceSpan): ExpressionPlan {
+  return { kind: "literal", value, span };
+}
+
+function binaryExpression(
+  operator: BinaryExpressionPlan["operator"],
+  left: ExpressionPlan,
+  right: ExpressionPlan,
+  span: SourceSpan,
+): ExpressionPlan {
+  return { kind: "binary", operator, left, right, span };
+}
+
+function handoffPlanWithExpression(
+  injected: InjectedInteractionPlan,
+  expression: ExpressionPlan,
+): InstructionPlan {
+  return replaceHandoffInstruction(injected, {
+    kind: "declareBinding",
+    name: "answer",
+    value: expression,
+    span: injected.plan.instructions[injected.handoffInstruction]!.span,
+  }, injected.plan.temporaryCount + 1);
+}
+
+function handoffPlanWithMalformedExpression(
+  injected: InjectedInteractionPlan,
+  expression: unknown,
+): InstructionPlan {
+  const instruction = {
+    kind: "declareBinding",
+    name: "answer",
+    value: expression,
+    span: injected.plan.instructions[injected.handoffInstruction]!.span,
+  };
+  // Deliberately malformed external plan data cannot be represented by Instruction.
+  return replaceHandoffInstruction(
+    injected,
+    instruction as unknown as Instruction,
+    injected.plan.temporaryCount + 1,
+  );
+}
+
+test("PR194 matrix: expression consumption requires guaranteed evaluation", () => {
+  const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
   const span = injected.plan.instructions[injected.handoffInstruction]!.span;
-  const rows = [
-    { id: "PR194-direct-temporary", expression: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, valid: true },
-    { id: "PR194-eager-right", expression: { kind: "binary", operator: "+", left: { kind: "literal", value: "x", span }, right: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, span }, valid: true },
-    { id: "PR194-short-circuit-and-right-not-guaranteed", expression: { kind: "binary", operator: "and", left: { kind: "literal", value: false, span }, right: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, span }, valid: false },
-    { id: "PR194-short-circuit-or-right-not-guaranteed", expression: { kind: "binary", operator: "or", left: { kind: "literal", value: true, span }, right: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, span }, valid: false },
-    { id: "PR194-short-circuit-left-guaranteed", expression: { kind: "binary", operator: "and", left: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, right: { kind: "literal", value: true, span }, span }, valid: true },
-    { id: "PR194-ignored-expression-field", expression: { kind: "literal", value: false, span, ignored: { kind: "temporary", temporaryId: injected.destinationTemporary, span } }, valid: false },
-  ] as const;
-  for (const row of rows) {
-    const plan = structuredClone(injected.plan) as any;
-    plan.instructions[injected.handoffInstruction].value = row.expression;
+  const destination = injected.destinationTemporary;
+  const matching = temporaryExpression(destination, span);
+  const wrong = temporaryExpression(destination + 1, span);
+  const propertyCallee: ExpressionPlan = {
+    kind: "property",
+    object: { kind: "list", elements: [], span },
+    name: "contains",
+    span,
+  };
+  const accepted: readonly ExpressionGuaranteeRow[] = [
+    { id: "PR194-expression-direct-temporary", category: "temporary", expression: matching, valid: true },
+    { id: "PR194-expression-list-element", category: "list", expression: { kind: "list", elements: [matching], span }, valid: true },
+    { id: "PR194-expression-set-element", category: "set", expression: { kind: "set", elements: [matching], span }, valid: true },
+    { id: "PR194-expression-object-property-value", category: "object", expression: { kind: "object", properties: [{ name: "answer", value: matching, span }], span }, valid: true },
+    { id: "PR194-expression-group", category: "group", expression: { kind: "group", expression: matching, span }, valid: true },
+    { id: "PR194-expression-template-part", category: "template", expression: { kind: "template", parts: [{ kind: "text", value: "answer: ", span }, { kind: "expression", expression: matching, span }], span }, valid: true },
+    { id: "PR194-expression-property-object", category: "property", expression: { kind: "property", object: matching, name: "length", span }, valid: true },
+    { id: "PR194-expression-index-object", category: "index", expression: { kind: "index", object: matching, index: literalExpression(0, span), span }, valid: true },
+    { id: "PR194-expression-index-index", category: "index", expression: { kind: "index", object: { kind: "list", elements: [literalExpression("value", span)], span }, index: matching, span }, valid: true },
+    { id: "PR194-expression-property-call-receiver", category: "call", expression: { kind: "call", callee: { kind: "property", object: matching, name: "contains", span }, arguments: [], span }, valid: true },
+    { id: "PR194-expression-positional-call-argument", category: "call", expression: { kind: "call", callee: propertyCallee, arguments: [{ kind: "positional", value: matching, span }], span }, valid: true },
+    { id: "PR194-expression-named-call-argument", category: "call", expression: { kind: "call", callee: propertyCallee, arguments: [{ kind: "named", name: "value", value: matching, span }], span }, valid: true },
+    { id: "PR194-expression-unary-operand", category: "unary", expression: { kind: "unary", operator: "not", operand: matching, span }, valid: true },
+    { id: "PR194-expression-eager-left", category: "binary", expression: binaryExpression("==", matching, literalExpression("committed", span), span), valid: true },
+    { id: "PR194-expression-eager-right", category: "binary", expression: binaryExpression("==", literalExpression("committed", span), matching, span), valid: true },
+    { id: "PR194-expression-range-start", category: "range", expression: { kind: "range", start: matching, end: literalExpression(2, span), inclusive: true, span }, valid: true },
+    { id: "PR194-expression-range-end", category: "range", expression: { kind: "range", start: literalExpression(1, span), end: matching, inclusive: true, span }, valid: true },
+    { id: "PR194-expression-and-left", category: "short-circuit", expression: binaryExpression("and", matching, literalExpression(true, span), span), valid: true },
+    { id: "PR194-expression-or-left", category: "short-circuit", expression: binaryExpression("or", matching, literalExpression(false, span), span), valid: true },
+    { id: "PR194-expression-multiple-guaranteed", category: "multiple", expression: { kind: "list", elements: [matching, matching], span }, valid: true },
+    { id: "PR194-expression-wrong-and-correct", category: "multiple", expression: { kind: "list", elements: [wrong, matching], span }, valid: true },
+  ];
+  const rejected: readonly ExpressionGuaranteeRow[] = [
+    { id: "PR194-expression-no-occurrence", category: "missing", expression: literalExpression(false, span), valid: false },
+    { id: "PR194-expression-wrong-temporary", category: "wrong temporary", expression: wrong, valid: false },
+    { id: "PR194-expression-prepared-reference", category: "prepared reference", expression: { kind: "preparedReference", temporaryId: destination, span }, valid: false },
+    { id: "PR194-expression-and-right-false", category: "short-circuit", expression: binaryExpression("and", literalExpression(false, span), matching, span), valid: false },
+    { id: "PR194-expression-and-right-true", category: "short-circuit", expression: binaryExpression("and", literalExpression(true, span), matching, span), valid: false },
+    { id: "PR194-expression-or-right-false", category: "short-circuit", expression: binaryExpression("or", literalExpression(false, span), matching, span), valid: false },
+    { id: "PR194-expression-or-right-true", category: "short-circuit", expression: binaryExpression("or", literalExpression(true, span), matching, span), valid: false },
+    { id: "PR194-expression-nested-short-circuit-right", category: "short-circuit", expression: binaryExpression("and", literalExpression(true, span), binaryExpression("or", literalExpression(false, span), matching, span), span), valid: false },
+    { id: "PR194-expression-non-property-callee", category: "call", expression: { kind: "call", callee: matching, arguments: [], span }, valid: false },
+    { id: "PR194-expression-template-text-metadata", category: "metadata", expression: { kind: "template", parts: [{ kind: "text", value: "ignored", span, temporaryId: destination }], span } as unknown, valid: false },
+    { id: "PR194-expression-ignored-extra-field", category: "ignored field", expression: { kind: "literal", value: false, span, ignored: matching }, valid: false },
+    { id: "PR194-expression-wrong-left-correct-right", category: "short-circuit", expression: binaryExpression("or", wrong, matching, span), valid: false },
+  ];
+
+  for (const row of [...accepted, ...rejected]) {
+    const plan = row.valid
+      ? handoffPlanWithExpression(injected, row.expression as ExpressionPlan)
+      : handoffPlanWithMalformedExpression(injected, row.expression);
+    const before = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, row.valid, row.id);
+    assert.equal(validation.valid, row.valid, `${row.id}: ${row.category}`);
     if (!row.valid) assert.ok(validation.errors.some((error) => error.code === "TSC002"), row.id);
+    assert.deepEqual(plan, before, row.id);
   }
-  for (const kind of ["evaluate", "prepareReference"] as const) {
-    const plan = structuredClone(injected.plan) as any;
-    plan.instructions[injected.handoffInstruction] = kind === "evaluate"
-      ? { kind, expression: rows[0].expression, span }
-      : { kind, expression: rows[0].expression, destinationTemporary: injected.destinationTemporary + 1, span };
-    if (kind === "prepareReference") plan.temporaryCount += 1;
-    assert.equal(validateInstructionPlan(plan).valid, true, `PR194-${kind}-expression-field`);
+
+  for (const row of accepted.filter((entry) => [
+    "PR194-expression-direct-temporary",
+    "PR194-expression-list-element",
+    "PR194-expression-eager-right",
+    "PR194-expression-multiple-guaranteed",
+  ].includes(entry.id))) {
+    const plan = handoffPlanWithExpression(injected, row.expression as ExpressionPlan);
+    const { completed } = completeCommittedTextInteraction(plan);
+    const continued = executeInstruction(plan, completed.snapshot);
+    assert.equal(continued.snapshot.interactionResultHandoff, null, row.id);
+  }
+});
+
+test("PR194 matrix: continuation kinds read only their canonical expression field", () => {
+  const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
+  const span = injected.plan.instructions[injected.handoffInstruction]!.span;
+  const destination = temporaryExpression(injected.destinationTemporary, span);
+  const ignored = literalExpression(false, span);
+  const validRows: readonly { readonly id: string; readonly instruction: Instruction; readonly temporaryCount: number }[] = [
+    {
+      id: "PR194-dispatch-evaluate-expression",
+      instruction: { kind: "evaluate", expression: destination, span },
+      temporaryCount: injected.plan.temporaryCount,
+    },
+    {
+      id: "PR194-dispatch-prepare-reference-expression",
+      instruction: {
+        kind: "prepareReference",
+        expression: destination,
+        destinationTemporary: injected.destinationTemporary + 1,
+        span,
+      },
+      temporaryCount: injected.plan.temporaryCount + 1,
+    },
+    {
+      id: "PR194-dispatch-declare-binding-value",
+      instruction: { kind: "declareBinding", name: "answer", value: destination, span },
+      temporaryCount: injected.plan.temporaryCount,
+    },
+  ];
+  for (const row of validRows) {
+    const plan = replaceHandoffInstruction(injected, row.instruction, row.temporaryCount);
+    const before = structuredClone(plan);
+    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
+    assert.deepEqual(plan, before, row.id);
+  }
+
+  const invalidRows: readonly { readonly id: string; readonly instruction: unknown }[] = [
+    {
+      id: "PR194-dispatch-evaluate-value-ignored",
+      instruction: { kind: "evaluate", expression: ignored, value: destination, span },
+    },
+    {
+      id: "PR194-dispatch-prepare-reference-value-ignored",
+      instruction: {
+        kind: "prepareReference",
+        expression: ignored,
+        value: destination,
+        destinationTemporary: injected.destinationTemporary + 1,
+        span,
+      },
+    },
+    {
+      id: "PR194-dispatch-declare-binding-expression-ignored",
+      instruction: { kind: "declareBinding", name: "answer", value: ignored, expression: destination, span },
+    },
+  ];
+  for (const row of invalidRows) {
+    // Deliberately unsupported sibling fields exercise public malformed-plan validation.
+    const plan = replaceHandoffInstruction(injected, row.instruction as Instruction);
+    const before = structuredClone(plan);
+    const validation = validateInstructionPlan(plan);
+    assert.equal(validation.valid, false, row.id);
+    assert.ok(validation.errors.some((error) => error.code === "TSC002"), row.id);
+    assert.deepEqual(plan, before, row.id);
   }
 });
 
@@ -1744,22 +2196,23 @@ test("PR194 matrix: settlement authority and replay remain atomic", () => {
   const pending = waiting(injected.plan);
   const request = { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction" as const, interactionKind: "text" as const, payload: { kind: "submittedText", submittedText: "committed" } };
   const completed = completeAction(injected.plan, pending.snapshot, request);
-  const rows = [
-    { id: "PR194-null-settlement", mutate: (snapshot: any) => { snapshot.lastSettlement = null; } },
-    { id: "PR194-older-settlement", mutate: (snapshot: any) => { snapshot.lastSettlement.actionId = 0; } },
-    { id: "PR194-equal-id-wrong-action-kind", mutate: (snapshot: any) => { snapshot.lastSettlement.actionKind = "delay"; } },
-    { id: "PR194-wrong-result", mutate: (snapshot: any) => { snapshot.lastSettlement.result = "forged"; } },
-    { id: "PR194-extra-handoff-field", mutate: (snapshot: any) => { snapshot.interactionResultHandoff.extra = true; } },
+  const rows: readonly { readonly id: string; readonly mutate: (snapshot: ExternalRecord) => void }[] = [
+    { id: "PR194-null-settlement", mutate: (snapshot) => { snapshot.lastSettlement = null; } },
+    { id: "PR194-older-settlement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").actionId = 0; } },
+    { id: "PR194-equal-id-wrong-action-kind", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").actionKind = "delay"; } },
+    { id: "PR194-wrong-result", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").result = "forged"; } },
+    { id: "PR194-extra-handoff-field", mutate: (snapshot) => { externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true; } },
   ];
   for (const row of rows) {
-    const snapshot = structuredClone(completed.snapshot) as any;
+    const snapshot = externalRecord(structuredClone(completed.snapshot), row.id);
     row.mutate(snapshot);
     const beforeValidation = structuredClone(snapshot);
     assert.equal(validateRuntimeSnapshot(snapshot, injected.plan).valid, false, row.id);
     assert.deepEqual(snapshot, beforeValidation, row.id);
     const beforeCheckpoint = structuredClone(snapshot);
     const beforePlan = structuredClone(injected.plan);
-    assert.throws(() => createCheckpoint(injected.plan, snapshot), (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002", row.id);
+    // Deliberately malformed external snapshot data crosses the public checkpoint boundary.
+    assert.throws(() => createCheckpoint(injected.plan, snapshot as unknown as RuntimeSnapshot), (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002", row.id);
     assert.deepEqual(snapshot, beforeCheckpoint, row.id);
     assert.deepEqual(injected.plan, beforePlan, row.id);
     const checkpoint = { ...createCheckpoint(injected.plan, completed.snapshot), snapshot };
@@ -1773,86 +2226,6 @@ test("PR194 matrix: settlement authority and replay remain atomic", () => {
     assert.equal(replay.outcome.kind, "alreadySettled", "PR194-duplicate-replay");
     assert.deepEqual(replay.events, []);
     assert.deepEqual(replay.snapshot, before);
-  }
-});
-
-test("PR194 matrix: remaining reachable continuation instruction fields execute", () => {
-  const ordinaryRows = [
-    {
-      id: "PR194-evaluate-expression-field",
-      source: 'let answer = "__interaction_result__"\nexit',
-      extraTemporary: false,
-      instruction: (span: any, destination: number) => ({ kind: "evaluate", expression: { kind: "temporary", temporaryId: destination, span }, span }),
-    },
-    {
-      id: "PR194-prepare-reference-expression-field",
-      source: 'let answer = "__interaction_result__"\nexit',
-      instruction: (span: any, destination: number) => ({ kind: "prepareReference", expression: { kind: "temporary", temporaryId: destination, span }, destinationTemporary: destination + 1, span }),
-      extraTemporary: true,
-    },
-    {
-      id: "PR194-store-temporary",
-      source: 'let answer = "__interaction_result__"\nexit',
-      instruction: (span: any, destination: number) => ({ kind: "storeTemporary", temporaryId: destination + 1, value: { kind: "temporary", temporaryId: destination, span }, expectBoolean: false, span }),
-      extraTemporary: true,
-    },
-    {
-      id: "PR194-say",
-      source: 'let answer = "__interaction_result__"\nexit',
-      extraTemporary: false,
-      instruction: (span: any, destination: number) => ({ kind: "say", speaker: null, value: { kind: "temporary", temporaryId: destination, span }, span }),
-    },
-    {
-      id: "PR194-set-declared-speaker-property",
-      source: 'speaker guide {}\nspeaker guide\nlet answer = "__interaction_result__"\nexit',
-      extraTemporary: false,
-      instruction: (span: any, destination: number) => ({ kind: "setDeclaredSpeakerProperty", speaker: "guide", name: "answer", value: { kind: "temporary", temporaryId: destination, span }, span }),
-    },
-  ] as const;
-  for (const row of ordinaryRows) {
-    const injected = injectTextInteraction(row.source);
-    const plan = structuredClone(injected.plan) as any;
-    const span = plan.instructions[injected.handoffInstruction].span;
-    if (row.extraTemporary) plan.temporaryCount += 1;
-    plan.instructions[injected.handoffInstruction] = row.instruction(span, injected.destinationTemporary);
-    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
-    const pending = waiting(plan);
-    const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
-    const continued = executeInstruction(plan, completed.snapshot);
-    assert.equal(continued.snapshot.interactionResultHandoff, null, row.id);
-    if (row.id === "PR194-prepare-reference-expression-field") {
-      assert.ok(continued.snapshot.temporaries.some((entry: any) => entry.id === injected.destinationTemporary + 1), row.id);
-    }
-    if (row.id === "PR194-store-temporary") assert.equal(continued.snapshot.temporaries.find((entry: any) => entry.id === injected.destinationTemporary + 1)?.value, "committed", row.id);
-    if (row.id === "PR194-say") assert.ok(continued.events.some((event) => event.kind === "say" && event.text === "committed"), row.id);
-    if (row.id === "PR194-set-declared-speaker-property") {
-      assert.equal(continued.snapshot.speakers.find((speaker) => speaker.identifier === "guide")?.properties.find((property) => property.name === "answer")?.value, "committed", row.id);
-    }
-    assert.equal(executeInstruction(plan, continued.snapshot).snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary), false, row.id);
-  }
-});
-
-test("PR194 matrix: direct clear and exit discard the handoff", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
-  const span = injected.plan.instructions[injected.handoffInstruction]!.span;
-  const rows = [
-    { id: "PR194-direct-clear", instruction: { kind: "clearTemporary", temporaryId: injected.destinationTemporary, span }, expectHalted: false },
-    { id: "PR194-exit", instruction: { kind: "exit", span }, expectHalted: true },
-  ] as const;
-  for (const row of rows) {
-    const plan = structuredClone(injected.plan) as any;
-    plan.instructions[injected.handoffInstruction] = row.instruction;
-    if (row.expectHalted) {
-      plan.instructions = plan.instructions.slice(0, injected.handoffInstruction + 1);
-      plan.rootEndInstruction = plan.instructions.length;
-    }
-    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
-    const pending = waiting(plan);
-    const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
-    const after = executeInstruction(plan, completed.snapshot).snapshot;
-    assert.equal(after.interactionResultHandoff, null, row.id);
-    assert.equal(after.temporaries.some((entry) => entry.id === injected.destinationTemporary), false, row.id);
-    if (row.expectHalted) assert.equal(after.status, "halted", row.id);
   }
 });
 
@@ -1883,17 +2256,27 @@ test("PR194 matrix: checkpoint boundaries preserve typed interaction results", (
 test("PR194 matrix: invalid local handoff shapes reject without mutating plans", () => {
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
   const span = injected.plan.instructions[injected.handoffInstruction]!.span;
-  const rows = [
-    { id: "PR194-jump-continuation", mutate: (plan: any) => { plan.instructions[injected.handoffInstruction] = { kind: "jump", target: injected.clearInstruction, span }; } },
-    { id: "PR194-second-blocking-action", mutate: (plan: any) => { plan.instructions[injected.handoffInstruction] = { kind: "wait", duration: { kind: "literal", value: 1, span }, unit: "ms", span }; } },
-    { id: "PR194-consume-wrong-temporary", mutate: (plan: any) => { plan.instructions[injected.handoffInstruction].value = { kind: "temporary", temporaryId: injected.destinationTemporary + 1, span }; } },
-    { id: "PR194-missing-clear", mutate: (plan: any) => { plan.instructions[injected.clearInstruction] = { kind: "say", speaker: null, value: { kind: "literal", value: "x", span }, span }; } },
-    { id: "PR194-wrong-clear", mutate: (plan: any) => { plan.instructions[injected.clearInstruction].temporaryId = injected.destinationTemporary + 1; } },
-    { id: "PR194-second-producer", mutate: (plan: any) => { plan.instructions[injected.clearInstruction] = { kind: "storeTemporary", temporaryId: injected.destinationTemporary, value: { kind: "literal", value: "x", span }, expectBoolean: false, span }; } },
-    { id: "PR194-return-value-not-guaranteed", mutate: (plan: any) => { plan.instructions[injected.handoffInstruction].value = { kind: "binary", operator: "or", left: { kind: "literal", value: true, span }, right: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, span }; } },
+  const rows: readonly { readonly id: string; readonly mutate: (plan: ExternalRecord) => void }[] = [
+    { id: "PR194-jump-continuation", mutate: (plan) => { externalInstructions(plan)[injected.handoffInstruction] = { kind: "jump", target: injected.clearInstruction, span }; } },
+    { id: "PR194-second-blocking-action", mutate: (plan) => { externalInstructions(plan)[injected.handoffInstruction] = { kind: "wait", duration: { kind: "literal", value: 1, span }, unit: "ms", span }; } },
+    {
+      id: "PR194-consume-wrong-temporary",
+      mutate: (plan) => {
+        plan.temporaryCount = injected.plan.temporaryCount + 1;
+        externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value = {
+          kind: "temporary",
+          temporaryId: injected.destinationTemporary + 1,
+          span,
+        };
+      },
+    },
+    { id: "PR194-missing-clear", mutate: (plan) => { externalInstructions(plan)[injected.clearInstruction] = { kind: "say", speaker: null, value: { kind: "literal", value: "x", span }, span }; } },
+    { id: "PR194-wrong-clear", mutate: (plan) => { externalRecord(externalInstructions(plan)[injected.clearInstruction], "clear").temporaryId = injected.destinationTemporary + 1; } },
+    { id: "PR194-second-producer", mutate: (plan) => { externalInstructions(plan)[injected.clearInstruction] = { kind: "storeTemporary", temporaryId: injected.destinationTemporary, value: { kind: "literal", value: "x", span }, expectBoolean: false, span }; } },
+    { id: "PR194-return-value-not-guaranteed", mutate: (plan) => { externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value = { kind: "binary", operator: "or", left: { kind: "literal", value: true, span }, right: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, span }; } },
   ];
   for (const row of rows) {
-    const plan = structuredClone(injected.plan) as any;
+    const plan = externalRecord(structuredClone(injected.plan), row.id);
     row.mutate(plan);
     const beforeValidation = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
@@ -1918,15 +2301,17 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
     assert.deepEqual(result.events, [], row.id);
   }
   const completed = completeAction(injected.plan, pending.snapshot, { actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
-  for (const mutation of [
-    (snapshot: any) => { snapshot.interactionResultHandoff = null; },
-    (snapshot: any) => { snapshot.interactionResultHandoff.ownerCallFrameId = 99; snapshot.nextCallFrameId = 100; },
-    (snapshot: any) => { snapshot.interactionResultHandoff.extra = true; },
-  ]) {
-    const snapshot = structuredClone(completed.snapshot) as any;
+  const mutations: readonly ((snapshot: ExternalRecord) => void)[] = [
+    (snapshot) => { snapshot.interactionResultHandoff = null; },
+    (snapshot) => { externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99; snapshot.nextCallFrameId = 100; },
+    (snapshot) => { externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true; },
+  ];
+  for (const mutation of mutations) {
+    const snapshot = externalRecord(structuredClone(completed.snapshot), "malformed snapshot");
     mutation(snapshot);
     const before = structuredClone(snapshot);
-    assert.throws(() => completeAction(injected.plan, snapshot, { actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } }));
+    // Deliberately malformed external snapshot data must be rejected before completion mutates it.
+    assert.throws(() => completeAction(injected.plan, snapshot as unknown as RuntimeSnapshot, { actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } }));
     assert.deepEqual(snapshot, before);
   }
 });
@@ -1950,37 +2335,6 @@ test("PR194 matrix: root, function, argument, and suspended-caller ownership con
     const final = run(injected.plan, restored.snapshot);
     assert.equal(final.snapshot.interactionResultHandoff, null, row.id);
     assert.ok(final.events.some((event) => event.kind === "say" && event.text.includes("committed")), row.id);
-  }
-});
-
-test("PR194 matrix: returnVoid and returnValue consume in real function frames", () => {
-  const rows = [
-    { id: "PR194-return-void", source: 'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit', value: false },
-    { id: "PR194-return-value", source: 'function prompt { return "__interaction_result__" }\nlet answer = prompt()\nsay answer\nexit', value: true },
-  ] as const;
-  for (const row of rows) {
-    const injected = injectTextInteraction(row.source);
-    const plan = structuredClone(injected.plan) as InstructionPlan;
-    if (row.id === "PR194-return-void") {
-      const returnVoid = plan.instructions.find((instruction) => instruction.kind === "returnVoid");
-      assert.notEqual(returnVoid, undefined, row.id);
-      (plan.instructions as any)[injected.handoffInstruction] = returnVoid;
-    }
-    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
-    assert.equal(plan.instructions[injected.handoffInstruction]?.kind, row.value ? "returnValue" : "returnVoid", row.id);
-    const pending = waiting(plan);
-    assert.ok(pending.snapshot.foregroundAction!.ownerCallFrameId !== null, row.id);
-    const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
-    assert.notEqual(completed.snapshot.interactionResultHandoff, null, row.id);
-    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, completed.snapshot)));
-    const directReturn = executeInstruction(plan, restored.snapshot);
-    assert.equal(directReturn.snapshot.interactionResultHandoff, null, row.id);
-    const final = run(plan, directReturn.snapshot);
-    assert.equal(final.snapshot.interactionResultHandoff, null, row.id);
-    assert.equal(final.snapshot.callFrames.length, 0, row.id);
-    assert.equal(final.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary), false, row.id);
-    if (row.value) assert.ok(final.events.some((event) => event.kind === "say" && event.text === "committed"), row.id);
-    else assert.ok(final.events.some((event) => event.kind === "say" && event.text === "after"), row.id);
   }
 });
 
