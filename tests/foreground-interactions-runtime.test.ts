@@ -1682,10 +1682,8 @@ function replaceLiteralMarker(
 // tables make the local handoff boundary explicit without replacing them.
 test("PR194 matrix: canonical direct and ordinary handoff forms", () => {
   const cases = [
-    { id: "PR194-direct-clear", source: 'let answer = "__interaction_result__"\nexit', observe: (snapshot: any, injected: InjectedInteractionPlan) => assert.equal(snapshot.temporaries.some((entry: any) => entry.id === injected.destinationTemporary), false) },
     { id: "PR194-declare-binding", source: 'let answer = "__interaction_result__"\nsay answer\nexit', observe: (snapshot: any) => assert.equal(snapshot.frames[0].bindings.find((entry: any) => entry.name === "answer")?.value, "committed") },
     { id: "PR194-assign", source: 'let answer = "before"\nanswer = "__interaction_result__"\nsay answer\nexit', observe: (snapshot: any) => assert.equal(snapshot.frames[0].bindings.find((entry: any) => entry.name === "answer")?.value, "committed") },
-    { id: "PR194-store-temporary", source: 'let answer = "__interaction_result__"\nsay answer\nexit', observe: (snapshot: any) => assert.equal(snapshot.frames[0].bindings.find((entry: any) => entry.name === "answer")?.value, "committed") },
   ] as const;
   for (const entry of cases) {
     const injected = injectTextInteraction(entry.source);
@@ -1708,7 +1706,7 @@ test("PR194 matrix: canonical direct and ordinary handoff forms", () => {
     const consumed = executeInstruction(injected.plan, committed.snapshot);
     assert.equal(consumed.snapshot.interactionResultHandoff, null, entry.id);
     const cleaned = run(injected.plan, consumed.snapshot).snapshot;
-    entry.observe(cleaned, injected);
+    entry.observe(cleaned);
     assert.doesNotThrow(() => createCheckpoint(injected.plan, cleaned), entry.id);
   }
 });
@@ -1755,12 +1753,19 @@ test("PR194 matrix: settlement authority and replay remain atomic", () => {
   ];
   for (const row of rows) {
     const snapshot = structuredClone(completed.snapshot) as any;
-    const before = structuredClone(snapshot);
     row.mutate(snapshot);
+    const beforeValidation = structuredClone(snapshot);
     assert.equal(validateRuntimeSnapshot(snapshot, injected.plan).valid, false, row.id);
+    assert.deepEqual(snapshot, beforeValidation, row.id);
+    const beforeCheckpoint = structuredClone(snapshot);
+    const beforePlan = structuredClone(injected.plan);
     assert.throws(() => createCheckpoint(injected.plan, snapshot), (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002", row.id);
-    assert.throws(() => restoreCheckpoint({ ...createCheckpoint(injected.plan, completed.snapshot), snapshot }), (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002", row.id);
-    assert.notDeepEqual(snapshot, before, row.id);
+    assert.deepEqual(snapshot, beforeCheckpoint, row.id);
+    assert.deepEqual(injected.plan, beforePlan, row.id);
+    const checkpoint = { ...createCheckpoint(injected.plan, completed.snapshot), snapshot };
+    const beforeRestore = structuredClone(checkpoint);
+    assert.throws(() => restoreCheckpoint(checkpoint), (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002", row.id);
+    assert.deepEqual(checkpoint, beforeRestore, row.id);
   }
   for (const boundary of [completed.snapshot, deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, completed.snapshot))).snapshot, executeInstruction(injected.plan, completed.snapshot).snapshot, run(injected.plan, executeInstruction(injected.plan, completed.snapshot).snapshot).snapshot]) {
     const before = structuredClone(boundary);
@@ -1815,8 +1820,14 @@ test("PR194 matrix: remaining reachable continuation instruction fields execute"
     const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
     const continued = executeInstruction(plan, completed.snapshot);
     assert.equal(continued.snapshot.interactionResultHandoff, null, row.id);
+    if (row.id === "PR194-prepare-reference-expression-field") {
+      assert.ok(continued.snapshot.temporaries.some((entry: any) => entry.id === injected.destinationTemporary + 1), row.id);
+    }
     if (row.id === "PR194-store-temporary") assert.equal(continued.snapshot.temporaries.find((entry: any) => entry.id === injected.destinationTemporary + 1)?.value, "committed", row.id);
     if (row.id === "PR194-say") assert.ok(continued.events.some((event) => event.kind === "say" && event.text === "committed"), row.id);
+    if (row.id === "PR194-set-declared-speaker-property") {
+      assert.equal(continued.snapshot.speakers.find((speaker) => speaker.identifier === "guide")?.properties.find((property) => property.name === "answer")?.value, "committed", row.id);
+    }
     assert.equal(executeInstruction(plan, continued.snapshot).snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary), false, row.id);
   }
 });
@@ -1883,13 +1894,12 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
   ];
   for (const row of rows) {
     const plan = structuredClone(injected.plan) as any;
-    const before = structuredClone(plan);
     row.mutate(plan);
+    const beforeValidation = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
     assert.equal(validation.valid, false, row.id);
     assert.ok(validation.errors.some((error) => error.code === "TSC002"), row.id);
-    assert.deepEqual(plan, structuredClone(plan), row.id);
-    assert.deepEqual(before, injected.plan, row.id);
+    assert.deepEqual(plan, beforeValidation, row.id);
   }
 });
 
@@ -1950,13 +1960,25 @@ test("PR194 matrix: returnVoid and returnValue consume in real function frames",
   ] as const;
   for (const row of rows) {
     const injected = injectTextInteraction(row.source);
-    const pending = waiting(injected.plan);
+    const plan = structuredClone(injected.plan) as InstructionPlan;
+    if (row.id === "PR194-return-void") {
+      const returnVoid = plan.instructions.find((instruction) => instruction.kind === "returnVoid");
+      assert.notEqual(returnVoid, undefined, row.id);
+      (plan.instructions as any)[injected.handoffInstruction] = returnVoid;
+    }
+    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
+    assert.equal(plan.instructions[injected.handoffInstruction]?.kind, row.value ? "returnValue" : "returnVoid", row.id);
+    const pending = waiting(plan);
     assert.ok(pending.snapshot.foregroundAction!.ownerCallFrameId !== null, row.id);
-    const completed = completeAction(injected.plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
-    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, completed.snapshot)));
-    const final = run(injected.plan, restored.snapshot);
+    const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
+    assert.notEqual(completed.snapshot.interactionResultHandoff, null, row.id);
+    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, completed.snapshot)));
+    const directReturn = executeInstruction(plan, restored.snapshot);
+    assert.equal(directReturn.snapshot.interactionResultHandoff, null, row.id);
+    const final = run(plan, directReturn.snapshot);
     assert.equal(final.snapshot.interactionResultHandoff, null, row.id);
     assert.equal(final.snapshot.callFrames.length, 0, row.id);
+    assert.equal(final.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary), false, row.id);
     if (row.value) assert.ok(final.events.some((event) => event.kind === "say" && event.text === "committed"), row.id);
     else assert.ok(final.events.some((event) => event.kind === "say" && event.text === "after"), row.id);
   }
