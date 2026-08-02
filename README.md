@@ -8,7 +8,7 @@ Start with [`README-FIRST.md`](README-FIRST.md).
 
 The repository contains the parser/core language, semantic validation, a versioned serializable instruction runtime, explicit loop and call frames, checkpoint save/restore, deterministic control flow and random built-ins, user-defined functions, source-order/checkpoint hardening, and a standalone browser playground.
 
-Instruction plans currently use version 6; runtime snapshots and checkpoints use version 8. Unsupported older versions are rejected. The wider V30 language and complete static type checking remain out of scope.
+The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). Non-current revisions are rejected. The wider V30 language and complete static type checking remain out of scope.
 
 ## Development
 

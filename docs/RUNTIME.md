@@ -295,7 +295,7 @@ The implementation includes:
 - defensive validation of function regions, parameter progress, call stacks, and prepared-reference state;
 - standalone playground and constrained development server.
 
-Instruction plans use version 6; runtime snapshots and checkpoints use version 8. They are POC formats rather than permanent public wire-format guarantees.
+The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are listed under [Format evolution](#format-evolution). They are POC formats rather than permanent public wire-format guarantees.
 
 The current implementation contains compiler-owned blocking `wait` and one generic foreground `interaction` instruction/action family for button, text, number, and choice. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, author-facing interaction syntax, Player controls, and background pacing remain out of scope.
 
@@ -467,17 +467,30 @@ Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preser
 
 ## Format evolution
 
-The current formats use version 6 instruction plans and version 8 runtime snapshots/checkpoints. Plan version 6 replaces arbitrary long-lived interaction-result arrangements with one locally validated consume/transfer boundary. Snapshot/checkpoint version 8 removes dependence on `lastSettlement` for the still-unconsumed destination by adding one nullable single-use `interactionResultHandoff` record. The bounded settlement remains replay data; the record disappears immediately after the first canonical consume, transfer, return, discard, or exit succeeds:
+The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `CHECKPOINT_VERSION` are authoritative for the numeric revisions accepted by the runtime. Accepted ADRs and canonical specifications remain authoritative for format semantics, architecture, and compatibility policy. This table is the single general human-readable summary of the current revisions:
 
-```text
-instruction plan version: 6
-runtime snapshot version: 8
-checkpoint version: 8
-```
+| Format | Current revision | Reason for current revision |
+| --- | ---: | --- |
+| Instruction plan | 6 | Replaced arbitrary long-lived interaction-result arrangements with one locally validated canonical consume/transfer boundary. |
+| Runtime snapshot | 8 | Added one nullable single-use `interactionResultHandoff` authority that protects the still-unconsumed destination independently of `lastSettlement`. |
+| Checkpoint | 8 | Updated the self-contained plan-and-snapshot bundle to carry and validate the current plan contract and the snapshot handoff authority together. |
 
-These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field.
+These numbers are internal POC format revisions, not TeaseScript product releases, public wire-format promises, or backward-compatibility commitments. A changed number in code does not by itself create a new accepted architecture or compatibility policy. Pending-action entries do not receive redundant nested version fields.
 
-No migration is provided; older incompatible objects are rejected through the existing structured boundaries. Populated background actions, prepared pacing output, or captured smart-autoplay settings require their own later explicit format changes.
+Increase a revision when the accepted serialized contract changes incompatibly, including when a required field is added or removed, a field type or meaning changes, new invariants reject previously accepted data, restore behavior changes for the same stored data, or older data must be rejected for correctness or safety. Do not increase a revision for internal refactoring, code movement, renaming, performance work, reorganized tests, clearer diagnostics, documentation-only corrections, or a bug fix that restores already documented behavior while preserving the accepted meaning and validity of stored data. A bug fix does require a bump when previously accepted data changes meaning, becomes unsafe, must be rejected, or would resume differently.
+
+The checkpoint revision represents the complete accepted checkpoint bundle:
+
+| Incompatible change | Revisions to increase |
+| --- | --- |
+| Instruction-plan contract only | instruction plan and checkpoint |
+| Runtime-snapshot contract only | runtime snapshot and checkpoint |
+| Checkpoint envelope only | checkpoint |
+| Internal implementation only | none |
+
+Instruction-plan and runtime-snapshot revisions remain independent and do not need matching numbers. No nested duplicate version fields, hidden sub-format registry, migration chain, or generated documentation synchronization is introduced.
+
+During the POC, only the current revision of each format is supported. Non-current revisions may be rejected explicitly, obsolete development saves and fixtures may become invalid after an incompatible change, and migration code requires a separate owner-approved decision. Git history is sufficient for reconstructing exact older schemas. Populated background actions, prepared pacing output, or captured smart-autoplay settings require their own later explicit format changes.
 
 ## API stability boundary
 

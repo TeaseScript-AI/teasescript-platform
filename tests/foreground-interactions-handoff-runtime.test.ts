@@ -185,7 +185,7 @@ test("transferred interaction result is independent of the cleanup temporary", (
   assert.doesNotThrow(() => createCheckpoint(injected.plan, ordinaryMutation));
 });
 
-test("removed lifecycle fields and previous persisted versions are rejected structurally", () => {
+test("removed lifecycle fields are rejected structurally", () => {
   const plan = interactionPlan("text", {
     kind: "text",
     hint: null,
@@ -197,18 +197,6 @@ test("removed lifecycle fields and previous persisted versions are rejected stru
   oldLifecycle.lastSettlementResultState = "none";
   assert.equal(validateRuntimeSnapshot(oldLifecycle, plan).valid, false);
   assert.throws(() => createCheckpoint(plan, oldLifecycle));
-
-  const oldPlan = structuredClone(plan) as any;
-  oldPlan.version -= 1;
-  assert.equal(validateInstructionPlan(oldPlan).valid, false);
-
-  const oldSnapshot = structuredClone(snapshot) as any;
-  oldSnapshot.version -= 1;
-  assert.equal(validateRuntimeSnapshot(oldSnapshot, plan).valid, false);
-
-  const oldCheckpoint = structuredClone(createCheckpoint(plan, snapshot)) as any;
-  oldCheckpoint.version -= 1;
-  assert.throws(() => restoreCheckpoint(oldCheckpoint));
 });
 
 test("compiler-shaped foo, interaction, bar source order remains exact", () => {

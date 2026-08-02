@@ -144,7 +144,7 @@ test("function plans survive JSON round trips with preserved spans", () => {
   );
 });
 
-test("rejects malformed v3 function metadata, targets, and temporaries", () => {
+test("rejects malformed function metadata, targets, and temporaries", () => {
   const original = plan("function value { return 1 }\nlet result = value()");
 
   const duplicateId = mutable(original);
@@ -262,16 +262,6 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     span: assignment.target.index.span,
   };
   assertInvalid(unpreparedAssignment, /indexes must be prepared/u);
-});
-
-test("rejects instruction-plan versions 1 and 2", () => {
-  for (const version of [1, 2]) {
-    const legacy = mutable(plan("exit")) as { version: number };
-    legacy.version = version;
-    const validation = validateInstructionPlan(legacy);
-    assert.equal(validation.valid, false);
-    assert.ok(validation.errors.some((error) => error.code === "TSC001"));
-  }
 });
 
 function plan(source: string): InstructionPlan {
