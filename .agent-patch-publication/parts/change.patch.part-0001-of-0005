@@ -1,0 +1,100 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 926f377c9cedf9ef6a45284a71801f315887946a..1aa5618542d72fbe24143cd7cc8dea7a64819778 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -13,6 +13,7 @@ For every substantive task, read:
+ 7. `docs/OPEN-DECISIONS.md` when resolving a gap
+ 8. `docs/planning/POC-TO-ALPHA-BACKLOG.md` when proposing or selecting future POC/pre-alpha work
+ 9. `docs/DEVELOPMENT-WORKFLOW.md` when creating implementation issues, reviewing pull requests, processing review feedback, or participating in coordinated work
++10. `docs/DOCUMENTATION-OWNERSHIP.md` before non-trivial documentation edits or reviews
+ 
+ Do not treat planning documents, wishes, research files, historical audits, or source examples as accepted decisions. A backlog item is not implementation scope unless the current owner/coordinator assignment or phase plan explicitly schedules its ID.
+ 
+@@ -25,8 +26,6 @@ Do not treat planning documents, wishes, research files, historical audits, or s
+ - Laravel is the only public backend.
+ - Preserve deterministic source evaluation order and explicit JSON-safe pause/resume state.
+ - Validate external, checkpoint, host, package, and future integration data at runtime.
+-- Apply the KISS and pragmatic YAGNI rule below when deciding design,
+-  workflow, implementation scope, evidence, and future-facing complexity.
+ - Do not add dependencies without documenting need, alternatives, maintenance impact, and security impact.
+ - Do not weaken tests to hide failures.
+ 
+@@ -57,29 +56,20 @@ These proportionality rules do not weaken accepted behavior, deterministic
+ execution, serializable checkpoints, or validation at real external, host,
+ checkpoint, persistence, package, and security boundaries.
+ 
+-## KISS and pragmatic YAGNI
+-
+-Choose the simplest complete design, workflow, implementation, and evidence
+-strategy that safely satisfies current owner-approved behavior and real
+-architecture, persistence, determinism, security, and trust boundaries. Assess
+-simplicity across the complete change and its maintenance cost, not only by the
+-size of one local patch.
+-
+-Pragmatic YAGNI applies this rule to future-facing complexity. Preparation is
+-justified only when a concrete consumer or
+-obligation has been explicitly scheduled by the owner or coordinator, an
+-accepted boundary must be correct when first introduced, or deferral would
+-create a demonstrated, material, and difficult-to-reverse data, security,
+-persistence, or public-compatibility problem. Add only the smallest seam needed
+-for that concrete case; hypothetical consumers, unscheduled features, and
+-unaccepted future architecture do not justify broader infrastructure.
+-
+-Otherwise propose or route the idea through the appropriate owner-governed
+-process. A proposal does not accept, schedule, or authorize implementation.
+-Neither KISS nor pragmatic YAGNI permits weakening accepted behavior or real
+-external, host, checkpoint, persistence, package, determinism, or security
+-boundaries. Use `docs/DEVELOPMENT-WORKFLOW.md` for the detailed decision and
+-routing rules.
++## KISS, pragmatic YAGNI, and DRY
++
++KISS is primary: choose the simplest complete approach across design,
++implementation, evidence, workflow, and maintenance while preserving current
++owner-approved behavior and real boundaries. Pragmatic YAGNI applies KISS to
++future-facing complexity: add only current need or the smallest preparation
++justified by a scheduled consumer, a boundary that must be correct when first
++introduced, or a demonstrated difficult-to-reverse problem.
++
++Prefer DRY when one canonical source plus references is clearer and simpler;
++prefer limited local repetition when that is clearer and does not create
++competing authority, duplicated moving facts, or unnecessary recurring context.
++Use `docs/DEVELOPMENT-WORKFLOW.md` for detailed application and
++`docs/DOCUMENTATION-OWNERSHIP.md` for documentation placement and review.
+ 
+ ## Review convergence
+ 
+diff --git a/CURRENT-DESIGN.md b/CURRENT-DESIGN.md
+index 1729cdce7452dc2b09af0360d5c5f62476f73f75..aea60c89a76b22f9869298d2e7b0c94a65e35666 100644
+--- a/CURRENT-DESIGN.md
++++ b/CURRENT-DESIGN.md
+@@ -135,7 +135,7 @@ The current implementation also:
+ - restricts automatic visible-list text selection to strings and finite numbers after one item is selected;
+ - rejects malformed zero `xorshift32-v1` seed, direct state, runtime snapshot state, and restored checkpoint state.
+ 
+-Instruction plans use version 6; runtime snapshots and checkpoints use version 8. The pending-action runtime provides compiler-owned blocking `wait` delays plus ADR 0018's generic foreground-interaction foundation, with explicit typed completion, JSON-safe checkpoint/restore, canonical player transcript events, and bounded last-settlement replay. Result-bearing interaction completion commits directly into the prepared ordinary runtime destination and records one nullable single-use handoff authority until the first canonical consume, transfer, return, discard, or exit instruction succeeds. That record is then removed immediately; no interaction-specific provenance remains during the following cleanup or later ordinary execution. `lastSettlement` is replay data only and carries no live-result lifecycle. Author-facing interaction syntax and Player UI remain unimplemented. Complete static typing and the wider V30 runtime/API surface remain out of scope.
++The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). The pending-action runtime provides compiler-owned blocking `wait` delays plus ADR 0018's generic foreground-interaction foundation, with explicit typed completion, JSON-safe checkpoint/restore, canonical player transcript events, and bounded last-settlement replay. Result-bearing interaction completion commits directly into the prepared ordinary runtime destination and records one nullable single-use handoff authority until the first canonical consume, transfer, return, discard, or exit instruction succeeds. That record is then removed immediately; no interaction-specific provenance remains during the following cleanup or later ordinary execution. `lastSettlement` is replay data only and carries no live-result lifecycle. Author-facing interaction syntax and Player UI remain unimplemented. Complete static typing and the wider V30 runtime/API surface remain out of scope.
+ 
+ ## Accepted pending-action direction
+ 
+diff --git a/PHASE-STATUS.md b/PHASE-STATUS.md
+index 7e485a37a9a89ce92957c287dc12f3d90fd90d32..2eb4526bb31632c37748eff2f55597285fea6225 100644
+--- a/PHASE-STATUS.md
++++ b/PHASE-STATUS.md
+@@ -41,7 +41,7 @@
+ - One-instruction and event-boundary stepping with instruction budgets.
+ - Standalone repository-backed browser playground and constrained development server.
+ - Reusable deterministic resume-equivalence coverage that compares uninterrupted execution with execution restored from a JSON-roundtripped checkpoint after every completed instruction boundary across a small bounded runtime-state corpus.
+-- The approved Option A source-layout seams and compatibility facades were implemented without a format change at that time; later runtime work now uses plan v6, runtime-snapshot v8, and checkpoint v8.
++- The approved Option A source-layout seams and compatibility facades were implemented without a format change at that time; later runtime work changed the internal formats independently.
+ - One generic typed foreground-interaction instruction/action/settlement family for runtime-created button, text, number, and choice actions.
+ - Engine-owned text normalization, number parsing, exact choice matching, requesting-speaker provenance, canonical player transcript derivation, mandatory retry behavior, and bounded duplicate settlement replay.
+ - Shared version-1 interaction limits of 65,536 UTF-8 bytes for one retained string, 65,536 aggregate UTF-8 bytes per interaction definition, and 4,096 choice options.
+@@ -72,7 +72,7 @@
+ - Own-property-only runtime builtin registration and prototype-free named builtin arguments.
+ - Automatic visible-list selection restricted to strings and finite numbers after one item is selected.
+ 
+-The current plan format is version 6 and the runtime-snapshot/checkpoint formats are version 8 POC formats. The implemented pending-action foundation supports compiler-owned blocking `wait` delays and one generic typed foreground-interaction action family. Result-bearing completion uses a short atomic commit into an ordinary runtime destination plus one nullable single-use handoff authority that survives settlement replacement only until the first canonical consume, transfer, return, discard, or exit instruction succeeds. The record is then removed immediately; no settlement-result live/released state or whole-plan interaction liveness analysis remains. Author-facing interaction syntax, smart-autoplay pacing, and Player UI remain unimplemented; background actions remain intentionally empty.
++The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). The implemented pending-action foundation supports compiler-owned blocking `wait` delays and one generic typed foreground-interaction action family. Result-bearing completion uses a short atomic commit into an ordinary runtime destination plus one nullable single-use handoff authority that survives settlement replacement only until the first canonical consume, transfer, return, discard, or exit instruction succeeds. The record is then removed immediately; no settlement-result live/released state or whole-plan interaction liveness analysis remains. Author-facing interaction syntax, smart-autoplay pacing, and Player UI remain unimplemented; background actions remain intentionally empty.
+ 
+ The implemented ADR 0017 infrastructure slice provides a tooling-only exact-identity in-memory library catalog and deterministic static metadata for the documented narrow TypeScript export subset. Its external boundaries use stable capture, a bounded source-text limit before parsing, and bounded retained metadata text before canonicalization. These internal POC identities and metadata shapes are not final package manifests, import syntax, library bindings, or checkpoint data; neither the tooling surface nor privileged adapter internals are exported from the runtime root entry point.
+ 

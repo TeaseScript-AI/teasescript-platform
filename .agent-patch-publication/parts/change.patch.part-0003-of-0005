@@ -1,0 +1,165 @@
+diff --git a/docs/DOCUMENTATION-OWNERSHIP.md b/docs/DOCUMENTATION-OWNERSHIP.md
+index fef54cb8ee898f69ca0efafeb9aae3a3e4ae7cc5..35d2d3c51d12b22850f2d119be4783f8928f7b36 100644
+--- a/docs/DOCUMENTATION-OWNERSHIP.md
++++ b/docs/DOCUMENTATION-OWNERSHIP.md
+@@ -1,5 +1,73 @@
+ # Documentation ownership
+ 
++This document is the mandatory guide for every non-trivial repository
++documentation edit and documentation review. Pure spelling, link, or formatting
++corrections may skip the reread only when they cannot alter meaning, authority,
++placement, or maintenance obligations. This guide defines where durable
++information belongs and how to avoid competing authority, stale copies, and
++unnecessary recurring agent-context cost.
++
++## Canonical ownership and useful repetition
++
++Give each maintenance-sensitive fact, rule, status statement, or instruction
++one clear canonical owner. Keep the complete authoritative explanation there.
++Elsewhere, prefer a link or the smallest stable summary needed for the local
++document to remain understandable.
++
++KISS is primary: choose the simplest complete documentation structure across
++local clarity, authority, maintenance, and recurring reader or agent context.
++Pragmatic YAGNI applies that rule to future-facing documentation and rejects
++policy, inventories, or abstractions that have no current accepted purpose.
++
++DRY is recommended when one canonical explanation plus references is clearer
++and simpler to understand and maintain than several copies. Limited local
++repetition is also recommended when it is the clearer KISS solution, provided
++it does not create competing authority, duplicate moving facts, or add
++unnecessary recurring context cost. DRY is not an absolute ban on repetition.
++
++Distinguish these uses:
++
++- **canonical definition:** the complete maintained rule, contract, or current
++  fact in its owning document;
++- **routing summary:** a short statement that directs the reader to the
++  canonical definition;
++- **necessary local context:** limited repetition needed to understand or apply
++  the local document without reconstructing its basic purpose elsewhere;
++- **moving fact:** a current revision, test count, implementation status,
++  temporary inventory, active default, or similar value that normally needs
++  one current location;
++- **historical statement:** a stable record of a past accepted decision, such
++  as the revision that introduced a contract change.
++
++Historical ADR and specification statements may retain exact old values when
++those values explain the recorded decision. Do not convert such history into a
++second moving current-state summary.
++
++## Documentation edit and review workflow
++
++Before every non-trivial documentation edit, the writer must:
++
++1. identify the fact, rule, status, or instruction being changed;
++2. search the repository for existing coverage and determine the canonical
++   owner;
++3. update one complete canonical explanation rather than adding a competing
++   definition;
++4. use links or minimal stable summaries elsewhere where that remains clear;
++5. retain concise local repetition where it materially improves independent
++   comprehension without creating competing authority or duplicated moving
++   facts;
++6. update or remove stale statements made false by the change;
++7. consolidate existing duplication when it is directly in scope and safe,
++   without expanding into unrelated cleanup;
++8. review the complete documentation diff for placement, consistency,
++   maintenance cost, and recurring agent-context cost.
++
++The documentation reviewer performs the same ownership check independently.
++Verify that DRY is used where it reduces total complexity, that intentional
++repetition serves local comprehension, that moving facts are not copied without
++a concrete local need, and that routing documents do not silently become
++competing policy or current-status owners.
++
+ ## GitHub repository: canonical and continuously maintained
+ 
+ The repository owns documentation that must change with code, architecture, language semantics, security boundaries, product decisions, or the stable development process:
+diff --git a/docs/OPEN-DECISIONS.md b/docs/OPEN-DECISIONS.md
+index b63addfdebfa01dcd4fe13e4fe6f50da62b55196..28fdf8228e05b5b980d6ea7f213f4349e4644c20 100644
+--- a/docs/OPEN-DECISIONS.md
++++ b/docs/OPEN-DECISIONS.md
+@@ -27,7 +27,7 @@ ADR 0018 is partially implemented. PR #117 implemented and versioned the generic
+ 
+ Default checkpoint restore should resume the exact validated saved state. Author-defined rollback or restart points are a separate advanced recovery feature and must not silently duplicate irreversible external effects.
+ 
+-The current plan version 6 and runtime/checkpoint version 8 schemas are POC implementation details, not a promise of permanent wire-format compatibility.
++The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`RUNTIME.md`](RUNTIME.md). Their schemas remain POC implementation details, not a promise of permanent wire-format compatibility.
+ 
+ ## Remaining language and library work
+ 
+diff --git a/docs/README.md b/docs/README.md
+index f6dbdf82540ee74d3441ba1a0b0ceede0a124a48..cc5b0302d0ef507472058a3f70679f1ef076bf7e 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -54,4 +54,4 @@ Temporary work breakdowns, executor assignments, and merge tracking remain outsi
+ 
+ ## Documentation ownership
+ 
+-See `DOCUMENTATION-OWNERSHIP.md` for the boundary between canonical repository documentation and the shared project research archive.
++See `DOCUMENTATION-OWNERSHIP.md` for mandatory documentation-edit/review guidance and the boundary between canonical repository documentation and the shared project research archive.
+diff --git a/docs/RUNTIME.md b/docs/RUNTIME.md
+index 0792b59b92afdd513bf5f39cccda3801386d7f6d..6b75b4f63148362736bf2afd835a57be8b1e9b08 100644
+--- a/docs/RUNTIME.md
++++ b/docs/RUNTIME.md
+@@ -295,7 +295,7 @@ The implementation includes:
+ - defensive validation of function regions, parameter progress, call stacks, and prepared-reference state;
+ - standalone playground and constrained development server.
+ 
+-Instruction plans use version 6; runtime snapshots and checkpoints use version 8. They are POC formats rather than permanent public wire-format guarantees.
++The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are listed under [Format evolution](#format-evolution). They are POC formats rather than permanent public wire-format guarantees.
+ 
+ The current implementation contains compiler-owned blocking `wait` and one generic foreground `interaction` instruction/action family for button, text, number, and choice. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, author-facing interaction syntax, Player controls, and background pacing remain out of scope.
+ 
+@@ -422,9 +422,6 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
+ 
+ Current POC defaults and validation limits are:
+ 
+-- instruction-plan format version: `6`;
+-- runtime-snapshot format version: `8`;
+-- checkpoint format version: `8`;
+ - default maximum call depth: `256`;
+ - accepted maximum call depth range: `1` through `4096`;
+ - maximum external runtime-data nesting depth: `128` (`MAX_EXTERNAL_RUNTIME_DATA_DEPTH`);
+@@ -467,17 +464,32 @@ Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preser
+ 
+ ## Format evolution
+ 
+-The current formats use version 6 instruction plans and version 8 runtime snapshots/checkpoints. Plan version 6 replaces arbitrary long-lived interaction-result arrangements with one locally validated consume/transfer boundary. Snapshot/checkpoint version 8 removes dependence on `lastSettlement` for the still-unconsumed destination by adding one nullable single-use `interactionResultHandoff` record. The bounded settlement remains replay data; the record disappears immediately after the first canonical consume, transfer, return, discard, or exit succeeds:
++The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `CHECKPOINT_VERSION` are authoritative for the numeric revisions accepted by the runtime. Accepted ADRs and canonical specifications remain authoritative for format semantics, architecture, and compatibility policy. This table is the single general human-readable summary of the current revisions:
+ 
+-```text
+-instruction plan version: 6
+-runtime snapshot version: 8
+-checkpoint version: 8
+-```
++| Format | Current revision | Reason for current revision |
++| --- | ---: | --- |
++| Instruction plan | 6 | Replaced arbitrary long-lived interaction-result arrangements with one locally validated canonical consume/transfer boundary. |
++| Runtime snapshot | 8 | Added one nullable single-use `interactionResultHandoff` authority that protects the still-unconsumed destination independently of `lastSettlement`. |
++| Checkpoint | 8 | Updated the self-contained plan-and-snapshot bundle to carry and validate the current plan contract and the snapshot handoff authority together. |
++
++Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
++
++These numbers are internal POC format revisions, not TeaseScript product releases, public wire-format promises, or backward-compatibility commitments. A changed number in code does not by itself create a new accepted architecture or compatibility policy. Pending-action entries do not receive redundant nested version fields.
++
++Increase a revision when the accepted serialized contract changes incompatibly, including when a required field is added or removed, a field type or meaning changes, new invariants reject previously accepted data, restore behavior changes for the same stored data, or older data must be rejected for correctness or safety. Do not increase a revision for internal refactoring, code movement, renaming, performance work, reorganized tests, clearer diagnostics, documentation-only corrections, or a bug fix that restores already documented behavior while preserving the accepted meaning and validity of stored data. A bug fix does require a bump when previously accepted data changes meaning, becomes unsafe, must be rejected, or would resume differently.
++
++The checkpoint revision represents the complete accepted checkpoint bundle:
++
++| Incompatible change | Revisions to increase |
++| --- | --- |
++| Instruction-plan contract only | instruction plan and checkpoint |
++| Runtime-snapshot contract only | runtime snapshot and checkpoint |
++| Checkpoint envelope only | checkpoint |
++| Internal implementation only | none |
+ 
+-These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field.
++Instruction-plan and runtime-snapshot revisions remain independent and do not need matching numbers. No nested duplicate version fields, hidden sub-format registry, migration chain, or generated documentation synchronization is introduced.
+ 
+-No migration is provided; older incompatible objects are rejected through the existing structured boundaries. Populated background actions, prepared pacing output, or captured smart-autoplay settings require their own later explicit format changes.
++During the POC, only the current revision of each format is supported. Non-current revisions may be rejected explicitly, obsolete development saves and fixtures may become invalid after an incompatible change, and migration code requires a separate owner-approved decision. Git history is sufficient for reconstructing exact older schemas. Populated background actions, prepared pacing output, or captured smart-autoplay settings require their own later explicit format changes.
+ 
+ ## API stability boundary
+ 

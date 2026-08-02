@@ -1,0 +1,224 @@
+diff --git a/tests/control-flow-runtime.test.ts b/tests/control-flow-runtime.test.ts
+index a0892cc966d5f2a674b490d361d7002d3ba4501c..ad1fe4f0042a38262d003b95a55718e07469b60d 100644
+--- a/tests/control-flow-runtime.test.ts
++++ b/tests/control-flow-runtime.test.ts
+@@ -2,19 +2,15 @@ import assert from "node:assert/strict";
+ import test from "node:test";
+ 
+ import { compileSource } from "../src/compiler.js";
+-import {
+-  INSTRUCTION_PLAN_VERSION,
+-  type InstructionPlan,
+-} from "../src/plan/model.js";
++import type { InstructionPlan } from "../src/plan/model.js";
+ import { validateInstructionPlan } from "../src/plan/validation.js";
+ import {
+-  CHECKPOINT_VERSION,
+   CheckpointError,
+   createCheckpoint,
+   restoreCheckpoint,
+ } from "../src/runtime/checkpoint.js";
+ import { run, stepToEvent } from "../src/runtime/engine.js";
+-import { createFreshRuntimeSnapshot, RUNTIME_SNAPSHOT_VERSION } from "../src/runtime/state.js";
++import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
+ import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+ 
+ test("executes exclusive and inclusive integer ranges", () => {
+@@ -146,30 +142,14 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
+   assert.deepEqual(rest.events.map((event) => event.sequence), [2, 3]);
+ });
+ 
+-test("rejects old formats and malformed serialized loop state", () => {
++test("rejects malformed serialized loop state", () => {
+   const compiled = plan("for value in 1..=3 { say value }");
+   const active = stepToEvent(compiled, createFreshRuntimeSnapshot(compiled));
+   const checkpoint = JSON.parse(
+     JSON.stringify(createCheckpoint(compiled, active.snapshot)),
+   ) as Record<string, unknown>;
+ 
+-  checkpoint.version = 1;
+-  assertCheckpointRejected(checkpoint, "TSK001");
+-  checkpoint.version = 2;
+-  assertCheckpointRejected(checkpoint, "TSK001");
+-  checkpoint.version = CHECKPOINT_VERSION;
+   const snapshot = checkpoint.snapshot as Record<string, unknown>;
+-  snapshot.version = 1;
+-  assertCheckpointRejected(checkpoint, "TSK001");
+-  snapshot.version = 2;
+-  assertCheckpointRejected(checkpoint, "TSK001");
+-  snapshot.version = RUNTIME_SNAPSHOT_VERSION;
+-  const checkpointPlan = checkpoint.plan as Record<string, unknown>;
+-  checkpointPlan.version = 1;
+-  assertCheckpointRejected(checkpoint, "TSK001");
+-  checkpointPlan.version = 2;
+-  assertCheckpointRejected(checkpoint, "TSK001");
+-  checkpointPlan.version = INSTRUCTION_PLAN_VERSION;
+   const loops = snapshot.loopFrames as Array<Record<string, unknown>>;
+   loops[0]!.position = 99;
+   assertCheckpointRejected(checkpoint, "TSK002");
+diff --git a/tests/foreground-interactions-handoff-runtime.test.ts b/tests/foreground-interactions-handoff-runtime.test.ts
+index e4673f0f7428c7216d998233f5546f2fc51ad7de..75be814634cb15e512ccb94227da1a6cebf06f14 100644
+--- a/tests/foreground-interactions-handoff-runtime.test.ts
++++ b/tests/foreground-interactions-handoff-runtime.test.ts
+@@ -185,7 +185,7 @@ test("transferred interaction result is independent of the cleanup temporary", (
+   assert.doesNotThrow(() => createCheckpoint(injected.plan, ordinaryMutation));
+ });
+ 
+-test("removed lifecycle fields and previous persisted versions are rejected structurally", () => {
++test("removed lifecycle fields are rejected structurally", () => {
+   const plan = interactionPlan("text", {
+     kind: "text",
+     hint: null,
+@@ -197,18 +197,6 @@ test("removed lifecycle fields and previous persisted versions are rejected stru
+   oldLifecycle.lastSettlementResultState = "none";
+   assert.equal(validateRuntimeSnapshot(oldLifecycle, plan).valid, false);
+   assert.throws(() => createCheckpoint(plan, oldLifecycle));
+-
+-  const oldPlan = structuredClone(plan) as any;
+-  oldPlan.version -= 1;
+-  assert.equal(validateInstructionPlan(oldPlan).valid, false);
+-
+-  const oldSnapshot = structuredClone(snapshot) as any;
+-  oldSnapshot.version -= 1;
+-  assert.equal(validateRuntimeSnapshot(oldSnapshot, plan).valid, false);
+-
+-  const oldCheckpoint = structuredClone(createCheckpoint(plan, snapshot)) as any;
+-  oldCheckpoint.version -= 1;
+-  assert.throws(() => restoreCheckpoint(oldCheckpoint));
+ });
+ 
+ test("compiler-shaped foo, interaction, bar source order remains exact", () => {
+diff --git a/tests/functions-checkpoint.test.ts b/tests/functions-checkpoint.test.ts
+index cc8d68b23114d670e2e0f1018319ae71c2b8ecc1..fd72ef7368c14be96a7948f034a21bf5e8acf2c0 100644
+--- a/tests/functions-checkpoint.test.ts
++++ b/tests/functions-checkpoint.test.ts
+@@ -222,27 +222,6 @@ test("checkpoint creation defensively isolates the supplied plan", () => {
+   assert.equal(checkpoint.plan.functions[0]!.name, originalName);
+ });
+ 
+-test("rejects legacy v1 and v2 checkpoint, plan, and snapshot formats", () => {
+-  const compiled = plan("exit");
+-  const base = mutableCheckpoint(
+-    createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)),
+-  );
+-
+-  for (const version of [1, 2]) {
+-    const checkpointVersion = structuredClone(base);
+-    checkpointVersion.version = version;
+-    assertCheckpointRejected(checkpointVersion, "TSK001");
+-
+-    const planVersion = structuredClone(base);
+-    planVersion.plan.version = version;
+-    assertCheckpointRejected(planVersion, "TSK001");
+-
+-    const snapshotVersion = structuredClone(base);
+-    snapshotVersion.snapshot.version = version;
+-    assertCheckpointRejected(snapshotVersion, "TSK001");
+-  }
+-});
+-
+ test("rejects malformed active call-frame identity and return state", () => {
+   const { plan: compiled, snapshot } = recursiveSnapshot(3);
+   const cases: Array<(checkpoint: MutableCheckpoint) => void> = [
+diff --git a/tests/functions-instruction-plan.test.ts b/tests/functions-instruction-plan.test.ts
+index 3ca36811566fb7a8d256702cd51d602dcf62d42b..72ab97042ced6377a7f6f8c04d3c9df8d7a7c7fe 100644
+--- a/tests/functions-instruction-plan.test.ts
++++ b/tests/functions-instruction-plan.test.ts
+@@ -144,7 +144,7 @@ test("function plans survive JSON round trips with preserved spans", () => {
+   );
+ });
+ 
+-test("rejects malformed v3 function metadata, targets, and temporaries", () => {
++test("rejects malformed function metadata, targets, and temporaries", () => {
+   const original = plan("function value { return 1 }\nlet result = value()");
+ 
+   const duplicateId = mutable(original);
+@@ -264,16 +264,6 @@ test("rejects malformed function regions and aliased call temporaries", () => {
+   assertInvalid(unpreparedAssignment, /indexes must be prepared/u);
+ });
+ 
+-test("rejects instruction-plan versions 1 and 2", () => {
+-  for (const version of [1, 2]) {
+-    const legacy = mutable(plan("exit")) as { version: number };
+-    legacy.version = version;
+-    const validation = validateInstructionPlan(legacy);
+-    assert.equal(validation.valid, false);
+-    assert.ok(validation.errors.some((error) => error.code === "TSC001"));
+-  }
+-});
+-
+ function plan(source: string): InstructionPlan {
+   const result = compileSource(source);
+   assert.deepEqual(result.diagnostics, []);
+diff --git a/tests/property/mutations.ts b/tests/property/mutations.ts
+index 7375fb031312dc01f1abbfa3b0d5c8418cb1236b..cf7f98a32632895a91701a21b8e40041174f4831 100644
+--- a/tests/property/mutations.ts
++++ b/tests/property/mutations.ts
+@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
+ import {
+   EXTERNAL_DATA_DEPTH_MESSAGE,
+   EXTERNAL_DATA_WORK_MESSAGE,
++  CHECKPOINT_VERSION,
++  INSTRUCTION_PLAN_VERSION,
+   MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
+   MAX_EXTERNAL_RUNTIME_DATA_WORK,
+   MAX_INTERACTION_STRING_UTF8_BYTES,
++  RUNTIME_SNAPSHOT_VERSION,
+   completeAction,
+   createFreshRuntimeSnapshot,
+   executeInstruction,
+@@ -499,7 +502,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
+     value.extra = `retained-${variant.first.toString(16)}`;
+   }),
+   structuredPlanCase("plan-wrong-version", (value, _fixtures, variant) => {
+-    value.version = 7 + (variant.first % 10_000);
++    value.version = INSTRUCTION_PLAN_VERSION + 1 + (variant.first % 10_000);
+   }),
+   structuredPlanCase("plan-wrong-instructions-type", (value) => {
+     value.instructions = "not-an-array";
+@@ -631,7 +634,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
+     value.extra = `retained-${variant.first.toString(16)}`;
+   }),
+   structuredSnapshotCase("snapshot-wrong-version", "running", (value, _fixtures, variant) => {
+-    value.version = 8 + (variant.first % 10_000);
++    value.version = RUNTIME_SNAPSHOT_VERSION + 1 + (variant.first % 10_000);
+   }),
+   structuredSnapshotCase("snapshot-wrong-frames-type", "running", (value) => {
+     value.frames = "not-an-array";
+@@ -739,13 +742,15 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
+   }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_WORK_MESSAGE }),
+ 
+   structuredCheckpointCase("checkpoint-wrong-version", (value, _fixtures, variant) => {
+-    value.version = 8 + (variant.first % 10_000);
++    value.version = CHECKPOINT_VERSION + 1 + (variant.first % 10_000);
+   }),
+   structuredCheckpointCase("checkpoint-nested-plan-version", (value, _fixtures, variant) => {
+-    recordValue(value.plan).version = 7 + (variant.first % 10_000);
++    recordValue(value.plan).version = INSTRUCTION_PLAN_VERSION + 1 +
++      (variant.first % 10_000);
+   }),
+   structuredCheckpointCase("checkpoint-nested-snapshot-version", (value, _fixtures, variant) => {
+-    recordValue(value.snapshot).version = 8 + (variant.first % 10_000);
++    recordValue(value.snapshot).version = RUNTIME_SNAPSHOT_VERSION + 1 +
++      (variant.first % 10_000);
+   }),
+   structuredCheckpointCase("checkpoint-plan-snapshot-mismatch", (value, fixtures) => {
+     value.plan = structuredClone(fixtures.simplePlan);
+@@ -1067,7 +1072,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
+     repeatable: true,
+     execute(fixtures: PropertyFixtureCatalog) {
+       const plan = structuredClone(fixtures.simplePlan) as InstructionPlan;
+-      (plan as unknown as { version: number }).version = 999;
++      (plan as unknown as { version: number }).version = INSTRUCTION_PLAN_VERSION + 1;
+       const result = observeRuntimeBoundary(plan, fixtures.fresh.snapshot);
+       assert.equal(result.kind, "rejected");
+       return observation(stableObservation(result), summarizeFixture(fixtures.fresh));
+@@ -1082,7 +1087,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
+     repeatable: true,
+     execute(fixtures: PropertyFixtureCatalog) {
+       const snapshot = structuredClone(fixtures.fresh.snapshot) as RuntimeSnapshot;
+-      (snapshot as unknown as { version: number }).version = 999;
++      (snapshot as unknown as { version: number }).version = RUNTIME_SNAPSHOT_VERSION + 1;
+       const result = observeRuntimeBoundary(fixtures.simplePlan, snapshot);
+       assert.equal(result.kind, "rejected");
+       return observation(stableObservation(result), summarizeFixture(fixtures.fresh));

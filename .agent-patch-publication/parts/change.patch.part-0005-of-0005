@@ -1,0 +1,154 @@
+diff --git a/tests/runtime-checkpoint.test.ts b/tests/runtime-checkpoint.test.ts
+index df5010561f23e02b9121ed07d3e99517f9741bd2..ce18dc9b00d39aafc98479b9a468014ccd4f9a4f 100644
+--- a/tests/runtime-checkpoint.test.ts
++++ b/tests/runtime-checkpoint.test.ts
+@@ -3,6 +3,7 @@ import test from "node:test";
+ 
+ import { compileSource } from "../src/compiler.js";
+ import type { InstructionPlan } from "../src/plan/model.js";
++import { validateInstructionPlan } from "../src/plan/validation.js";
+ import {
+   CheckpointError,
+   createCheckpoint,
+@@ -214,17 +215,62 @@ test("continues deterministic RNG state after restore", () => {
+   assert.deepEqual(rest.snapshot.rng, uninterrupted.snapshot.rng);
+ });
+ 
+-test("rejects unsupported checkpoint and nested format versions", () => {
++test("accepts current internal format revisions and rejects non-current or malformed revisions", () => {
+   const compiled = plan("exit");
+-  const checkpoint = JSON.parse(
+-    serializeCheckpoint(createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled))),
+-  ) as Record<string, unknown>;
++  const snapshot = createFreshRuntimeSnapshot(compiled);
++  const checkpoint = structuredClone(createCheckpoint(compiled, snapshot)) as unknown as {
++    version: unknown;
++    plan: { version: unknown };
++    snapshot: { version: unknown };
++  };
++
++  assert.equal(validateInstructionPlan(compiled).valid, true);
++  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
++  assert.doesNotThrow(() => restoreCheckpoint(checkpoint));
++
++  for (const replacement of [compiled.version + 1, String(compiled.version)]) {
++    const invalidPlan = structuredClone(compiled) as unknown as { version: unknown };
++    invalidPlan.version = replacement;
++    assert.deepEqual(validateInstructionPlan(invalidPlan).errors[0], {
++      code: "TSC001",
++      message: "Unsupported instruction-plan version.",
++      path: "$.version",
++    });
++  }
+ 
+-  checkpoint.version = 99;
+-  assertCheckpointCode(checkpoint, "TSK001");
+-  checkpoint.version = 1;
+-  (checkpoint.plan as Record<string, unknown>).version = 99;
+-  assertCheckpointCode(checkpoint, "TSK001");
++  for (const replacement of [snapshot.version + 1, String(snapshot.version)]) {
++    const invalidSnapshot = structuredClone(snapshot) as unknown as { version: unknown };
++    invalidSnapshot.version = replacement;
++    assert.deepEqual(validateRuntimeSnapshot(invalidSnapshot, compiled).errors, [
++      "Unsupported runtime-snapshot version.",
++    ]);
++  }
++
++  for (const replacement of [Number(checkpoint.version) + 1, String(checkpoint.version)]) {
++    const invalidCheckpoint = structuredClone(checkpoint);
++    invalidCheckpoint.version = replacement;
++    assertCheckpointError(invalidCheckpoint, {
++      code: "TSK001",
++      message: "Unsupported checkpoint version.",
++      path: "$.version",
++    });
++  }
++
++  const invalidNestedPlan = structuredClone(checkpoint);
++  invalidNestedPlan.plan.version = compiled.version + 1;
++  assertCheckpointError(invalidNestedPlan, {
++    code: "TSK001",
++    message: "Unsupported instruction-plan version.",
++    path: "$.plan.version",
++  });
++
++  const invalidNestedSnapshot = structuredClone(checkpoint);
++  invalidNestedSnapshot.snapshot.version = snapshot.version + 1;
++  assertCheckpointError(invalidNestedSnapshot, {
++    code: "TSK001",
++    message: "Unsupported runtime-snapshot version.",
++    path: "$.snapshot",
++  });
+ });
+ 
+ test("rejects corrupted checkpoint data through structured errors", () => {
+@@ -296,3 +342,14 @@ function assertCheckpointCode(value: unknown, code: string): void {
+     return error instanceof CheckpointError && error.info.code === code;
+   });
+ }
++
++function assertCheckpointError(
++  value: unknown,
++  expected: CheckpointError["info"],
++): void {
++  assert.throws(() => restoreCheckpoint(value), (error: unknown) => {
++    assert.ok(error instanceof CheckpointError);
++    assert.deepEqual(error.info, expected);
++    return true;
++  });
++}
+diff --git a/tools/local-agent/test-patch-publication-workflow.sh b/tools/local-agent/test-patch-publication-workflow.sh
+index 8feb14f79cb447ea0616bf605294c86d62e18b02..b302092b2a1915e8c98ae0fbec404d2b2996e582 100755
+--- a/tools/local-agent/test-patch-publication-workflow.sh
++++ b/tools/local-agent/test-patch-publication-workflow.sh
+@@ -97,10 +97,26 @@ def parse_uses_scalar(scalar, job_name, source_line):
+         if not match:
+             continue
+         ref = match.group("ref")
+-        assert re.fullmatch(r"[^@\\\s]+@[0-9a-f]{40}", ref), (
++        action_match = re.fullmatch(
++            r"(?P<path>[^@\\\s]+)@(?P<pin>[0-9a-f]{40})",
++            ref,
++        )
++        assert action_match, (
+             f"workflow action refs must use one immutable 40-hex pin in job "
+             f"{job_name}: {source_line.strip()}"
+         )
++        path_segments = action_match.group("path").split("/")
++        assert (
++            len(path_segments) >= 2
++            and all(
++                segment not in {"", ".", ".."}
++                and re.fullmatch(r"[A-Za-z0-9_.-]+", segment)
++                for segment in path_segments
++            )
++        ), (
++            f"workflow action refs must use canonical owner/repository[/path] "
++            f"syntax in job {job_name}: {source_line.strip()}"
++        )
+         return ref
+     raise AssertionError(
+         f"unsupported workflow uses scalar in job {job_name}: {source_line.strip()}"
+@@ -442,6 +458,22 @@ assert_rejected(
+     ),
+     "cannot combine job-level uses with steps",
+ )
++
++subdirectory_ref = f"example/action/subdirectory@{checkout_sha}"
++assert assert_checkout_jobs_have_contents_access(
++    make_checkout_job([f"- uses: {subdirectory_ref}"])
++) == [subdirectory_ref]
++for noncanonical_action_ref in [
++    f"actions//checkout@{checkout_sha}",
++    f"/actions/checkout@{checkout_sha}",
++    f"actions/checkout/@{checkout_sha}",
++    f"actions/checkout/.@{checkout_sha}",
++    f"actions/checkout/..@{checkout_sha}",
++]:
++    assert_rejected(
++        make_checkout_job([f"- uses: {noncanonical_action_ref}"]),
++        "canonical owner/repository[/path] syntax",
++    )
+ for hidden_jobs_key in [
+     '"jobs":',
+     r'"jo\u0062s":',

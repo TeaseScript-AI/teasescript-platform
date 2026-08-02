@@ -1,0 +1,120 @@
+diff --git a/README-FIRST.md b/README-FIRST.md
+index 2c3e21b292792da872e0473e8182f4b569a1d68d..3ab85ecb73a4a418d6f330b9c2018d059506239a 100644
+--- a/README-FIRST.md
++++ b/README-FIRST.md
+@@ -26,7 +26,7 @@ The current repository implementation includes:
+ - source-order-preserving expression and assignment lowering, checkpoint-safe prepared references, complete suspended-caller temporary validation, and centralized V30 protected-name enforcement;
+ - a standalone fixed-example browser playground.
+ 
+-Instruction plans use version 6; runtime snapshots and checkpoints use version 8. These are POC formats, not permanent public wire-format promises.
++The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). These are POC formats, not permanent public wire-format promises.
+ 
+ This does not mean that the complete V30 language, static type system, timers, input, media, cross-origin player host, Laravel persistence, accounts, publishing, or continuous personalities are implemented.
+ 
+@@ -49,7 +49,7 @@ This does not mean that the complete V30 language, static type system, timers, i
+ - `AGENTS.md`: coding, review, and Git rules for every agent.
+ - `docs/DEVELOPMENT-WORKFLOW.md`: coordinator, executor, pull-request, documentation, and final-verification workflow.
+ - `docs/README.md`: documentation map.
+-- `docs/DOCUMENTATION-OWNERSHIP.md`: which material belongs in GitHub versus the shared project research archive.
++- `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
+ - `docs/specifications/`: accepted consolidated specifications.
+ - `docs/decisions/`: accepted and proposed ADRs.
+ - `docs/planning/POC-TO-ALPHA-BACKLOG.md`: selected work required before a stated POC, pre-alpha, or alpha gate, but not automatically scheduled.
+diff --git a/README.md b/README.md
+index 97db40467bf56af15006725b340929faff8e0c79..a48dc73cc960e4e14259a7b5967228c0b8fad0b0 100644
+--- a/README.md
++++ b/README.md
+@@ -8,7 +8,7 @@ Start with [`README-FIRST.md`](README-FIRST.md).
+ 
+ The repository contains the parser/core language, semantic validation, a versioned serializable instruction runtime, explicit loop and call frames, checkpoint save/restore, deterministic control flow and random built-ins, user-defined functions, source-order/checkpoint hardening, and a standalone browser playground.
+ 
+-Instruction plans currently use version 6; runtime snapshots and checkpoints use version 8. Unsupported older versions are rejected. The wider V30 language and complete static type checking remain out of scope.
++The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). Non-current revisions are rejected. The wider V30 language and complete static type checking remain out of scope.
+ 
+ ## Development
+ 
+diff --git a/docs/CODE-EDITOR.md b/docs/CODE-EDITOR.md
+index 106b40d68e3ac0ab1aa3672f19263244df6b42e2..4e6ac0a72de81a7908514d45ba07e17eaed6b896 100644
+--- a/docs/CODE-EDITOR.md
++++ b/docs/CODE-EDITOR.md
+@@ -10,7 +10,7 @@ temporary compatibility facade; browser and server entrypoints use the
+ canonical controller directly. This refactor does not create Player modules
+ or claim editor functionality that is not implemented.
+ 
+-The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are separate from version-8 runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the draft and never overwrites repository examples. A local `.tease` file may be imported or exported without repository or server writes.
++The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are separate from runtime checkpoints using the current internal POC format. Storage failures are bounded technical messages; explicit example reload discards the draft and never overwrites repository examples. A local `.tease` file may be imported or exported without repository or server writes.
+ 
+ Every edit increments a source revision and invalidates the plan, snapshot, transcript, events, counters, and checkpoint controls. Run, step, checkpoint save, and checkpoint restore require a successfully compiled runtime at the current revision. Reset recompiles the textarea contents; no plan migration occurs. Restore accepts only a validated self-contained checkpoint whose plan exactly matches the current runtime, so source text is never checkpoint identity.
+ 
+diff --git a/docs/DATA-AND-API.md b/docs/DATA-AND-API.md
+index ab4121915a390f20a99a399833e9a1c539e47116..57f385bb1fab3483772a608c6c334f6fbd6f5bda 100644
+--- a/docs/DATA-AND-API.md
++++ b/docs/DATA-AND-API.md
+@@ -94,8 +94,8 @@ Camera and file APIs continue to return engine-managed references rather than br
+ 
+ ## Stability and future contracts
+ 
+-The current TypeScript exports, version-6 instruction plans, and version-8 runtime-snapshot/checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
++The current TypeScript exports and internal instruction-plan, runtime-snapshot, and checkpoint formats are POC implementation surfaces. The current numeric revisions are documented in [`RUNTIME.md`](RUNTIME.md). Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
+ 
+-Implementation of ADR 0016 introduced version-4 instruction plans and pending-action state. Version-5 plans and version-6 runtime snapshots/checkpoints added the generic interaction instruction/action/settlement family and canonical player-transcript event data. Current version-6 plans restrict result-bearing interactions to one local canonical consume/transfer boundary, and version-8 runtime snapshots/checkpoints retain one nullable single-use result handoff only until the first canonical consume, transfer, return, discard, or exit succeeds. That handoff preserves destination/result consistency independently of `lastSettlement`, which remains bounded replay data only. These remain internal POC format revisions, not product release numbers.
++Implementation of ADR 0016 introduced revision-4 instruction plans and pending-action state. Revision-5 plans and revision-6 runtime snapshots/checkpoints added the generic interaction instruction/action/settlement family and canonical player-transcript event data. Revision-6 plans introduced the local canonical result consume/transfer boundary, and revision-8 runtime snapshots/checkpoints introduced one nullable single-use result handoff that remains authoritative until the first canonical consume, transfer, return, discard, or exit succeeds. That handoff preserves destination/result consistency independently of `lastSettlement`, which remains bounded replay data only. These are historical internal format revisions, not product release numbers.
+ 
+ Exact account, toy, history, global-data, checkpoint storage, host-message, media-persistence, time-integrity, and integration payloads remain open and must be defined as typed contracts before implementation. This document does not resolve their long-term versioning and migration policy.
+diff --git a/docs/DEVELOPMENT-WORKFLOW.md b/docs/DEVELOPMENT-WORKFLOW.md
+index 764217c52a59864cb52d4b8f4be719e73943ca4e..87b2d3c8463b03a3322bb79a10cb9a9b2b0ee64b 100644
+--- a/docs/DEVELOPMENT-WORKFLOW.md
++++ b/docs/DEVELOPMENT-WORKFLOW.md
+@@ -82,7 +82,7 @@ Use words such as `must`, `exact`, `versioned`, `authoritative`, and
+ boundary, or owner decision that requires that strength. A stricter
+ implementation being technically possible is not sufficient.
+ 
+-### KISS and pragmatic YAGNI
++### KISS, pragmatic YAGNI, and DRY
+ 
+ Once the current requirement and its authority are established, choose the
+ simplest complete approach that safely satisfies that requirement and its real
+@@ -93,6 +93,10 @@ simplest overall solution.
+ Pragmatic YAGNI applies this rule to future-facing complexity. Implement only
+ the complexity needed for the current requirement and its real boundaries.
+ 
++KISS and pragmatic YAGNI are not competing rules. Apparent conflict normally
++means simplicity is being assessed too locally or hypothetical future value is
++being treated as a current requirement.
++
+ Statements such as “we may need this later,” “a more general solution would be
+ cleaner,” an unscheduled backlog entry, a historical implementation, or an
+ earlier test or review comment do not by themselves justify present
+@@ -115,6 +119,14 @@ process. Recording a proposal preserves it without accepting, scheduling, or
+ authorizing implementation and without turning it into production maintenance
+ surface.
+ 
++Use DRY when one canonical implementation, rule, or explanation plus references
++is clearer and simpler across the complete maintenance lifecycle. Use limited
++local repetition when that is the clearer KISS solution. Do not force either
++choice when it creates indirection, competing authority, duplicated moving
++facts, speculative abstraction, or unnecessary recurring context cost. For the
++documentation-specific application, follow
++[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md).
++
+ ### Review finding classes
+ 
+ Classify every actionable finding in plain language:
+@@ -407,6 +419,17 @@ Fresh executor sessions must read the repository documents required by `AGENTS.m
+ 
+ ## Documentation ownership
+ 
++Before every non-trivial documentation change or documentation review, read
++[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md). The writer and
++reviewer must check canonical placement, necessary versus harmful repetition,
++cross-document consistency, stale statements, moving facts, and recurring
++agent-context cost. Record material ownership or consolidation decisions in the
++active issue, pull request, or review discussion; do not create a separate
++report unless the task explicitly requires one.
++
++Pure spelling, link, or formatting corrections may skip that reread only when
++they cannot alter meaning, authority, placement, or maintenance obligations.
++
+ For a single-agent issue, that agent updates documentation affected by the implemented behavior in the same pull request unless the task explicitly reserves a shared document for someone else.
+ 
+ For coordinated work, executors update documentation local to their assigned behavior. Shared summary and routing documents are coordinator-owned unless explicitly assigned, especially:

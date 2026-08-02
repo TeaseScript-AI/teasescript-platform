@@ -1,0 +1,36 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "docs/kiss-and-pragmatic-yagni",
+  "expectedBaseSha": "d88cdc109f8bc2a6cf4b601fd9d6de6d3675bff1",
+  "expectedResultTreeSha": "672467c6ad3dde749db77398199b0720a24d6629",
+  "patchSizeBytes": 50556,
+  "patchSha256": "58b0bb87dc340335aa22ce31640ff39df3535fe9a82245e3cb0dfeef6d7dc4bf",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0005",
+      "sizeBytes": 10444,
+      "sha256": "a8f96ae9cf937459c8c8d309ff57266b1d3177d2c581b73e013f56879ed52fd8"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0005",
+      "sizeBytes": 10752,
+      "sha256": "cd20c13a48ecb7374cf001b8b2ef421573473704c0c8955a3f05e1c5b7f7e089"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0005",
+      "sizeBytes": 12195,
+      "sha256": "94934c6ee9ec11c0448f41e5b58c74a69b888fd27a4964d42a253b67ac7da99b"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0005",
+      "sizeBytes": 10956,
+      "sha256": "eeecc09d6cc045d2d1db6a04345ee09297d30bbb3196c04786c14eef6eebeaa4"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0005",
+      "sizeBytes": 6209,
+      "sha256": "cdd882481148c800d44d3a0cc10dc450b2c9d8bfae4d995eb390458aad462b42"
+    }
+  ],
+  "commitMessage": "Define KISS, YAGNI, DRY, and documentation guidance"
+}
