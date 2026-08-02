@@ -20,6 +20,9 @@ import { validateInstructionPlan } from "../src/plan/validation.js";
 import { CheckpointError, createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { completeAction, executeInstruction, observeTime, run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
+import type {
+  RuntimeDelayActionSettlementSnapshot,
+} from "../src/runtime/actions/model.js";
 import { getSerializableProperty, type SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import type { SourceSpan } from "../src/source.js";
@@ -2230,13 +2233,25 @@ test("PR194 matrix: continuation kinds read only their canonical expression fiel
 
 interface SettlementHandoffFixture {
   readonly injected: InjectedInteractionPlan;
-  readonly committed: RuntimeSnapshot;
-  readonly olderSettlement: unknown;
-  readonly newer: RuntimeSnapshot;
+  /** Produced through the public interaction completion operation. */
+  readonly runtimeProducedCommittedInteraction: RuntimeSnapshot;
+  /** Produced through the public completion of the first delay. */
+  readonly olderDelaySettlement: RuntimeDelayActionSettlementSnapshot;
+  /** Produced through the public completion of the later delay. */
+  readonly laterDelaySettlement: RuntimeDelayActionSettlementSnapshot;
+  /** A real pending later delay, retained only to build an incompatible pair. */
+  readonly runtimeProducedLaterPendingDelay: RuntimeSnapshot;
+  /**
+   * A deliberately assembled persisted-state fixture: it combines the
+   * runtime-produced committed interaction with the later runtime-produced
+   * delay settlement.  The validator and checkpoint boundaries accept it.
+   */
+  readonly validatedCompositeWithNewerSettlement: RuntimeSnapshot;
 }
 
 interface RejectedSettlementHandoffRow {
   readonly id: string;
+  readonly category: "malformed settlement" | "handoff disagreement" | "incompatible lifecycle" | "counter" | "chronology";
   readonly mutate: (snapshot: ExternalRecord, fixture: SettlementHandoffFixture) => void;
 }
 
@@ -2259,9 +2274,10 @@ function settledHandoffFixture(): SettlementHandoffFixture {
   });
   assert.equal(completed.outcome.kind, "completed");
   assert.equal(validateRuntimeSnapshot(completed.snapshot, injected.plan).valid, true);
-  assert.ok(firstSettled.snapshot.lastSettlement !== null);
+  const olderDelaySettlement = firstSettled.snapshot.lastSettlement;
+  assert.ok(olderDelaySettlement !== null && olderDelaySettlement.actionKind === "delay");
   assert.ok(
-    firstSettled.snapshot.lastSettlement.actionId < completed.snapshot.nextActionId - 1,
+    olderDelaySettlement.actionId < completed.snapshot.nextActionId - 1,
     "the retained delay settlement must be a positive, genuinely older action",
   );
   assert.doesNotThrow(() => checkpointJsonRoundTrip(injected.plan, completed.snapshot));
@@ -2270,23 +2286,30 @@ function settledHandoffFixture(): SettlementHandoffFixture {
   const cleared = executeInstruction(injected.plan, consumed.snapshot);
   const laterDelay = run(injected.plan, cleared.snapshot);
   assert.equal(laterDelay.snapshot.foregroundAction?.kind, "delay");
+  assert.equal(validateRuntimeSnapshot(laterDelay.snapshot, injected.plan).valid, true);
   const laterSettled = observeTime(injected.plan, laterDelay.snapshot, 2);
-  assert.equal(laterSettled.snapshot.lastSettlement?.actionKind, "delay");
+  const laterDelaySettlement = laterSettled.snapshot.lastSettlement;
+  assert.ok(laterDelaySettlement !== null && laterDelaySettlement.actionKind === "delay");
 
-  const newer = structuredClone(completed.snapshot);
-  newer.lastSettlement = structuredClone(laterSettled.snapshot.lastSettlement);
-  newer.nextActionId = laterSettled.snapshot.nextActionId;
-  newer.nextEventSequence = laterSettled.snapshot.nextEventSequence;
-  newer.currentSessionTimeMs = laterSettled.snapshot.currentSessionTimeMs;
-  const newerValidation = validateRuntimeSnapshot(newer, injected.plan);
-  assert.equal(newerValidation.valid, true, JSON.stringify(newerValidation.errors));
-  assert.doesNotThrow(() => checkpointJsonRoundTrip(injected.plan, newer));
+  // This exact state is deliberately assembled as persisted data; it is not
+  // claimed to arise from a single uninterrupted runtime path.
+  const validatedCompositeWithNewerSettlement = structuredClone(completed.snapshot);
+  validatedCompositeWithNewerSettlement.lastSettlement = structuredClone(laterDelaySettlement);
+  validatedCompositeWithNewerSettlement.nextActionId = laterSettled.snapshot.nextActionId;
+  validatedCompositeWithNewerSettlement.nextEventSequence = laterSettled.snapshot.nextEventSequence;
+  validatedCompositeWithNewerSettlement.currentSessionTimeMs = laterSettled.snapshot.currentSessionTimeMs;
+  const compositeValidation = validateRuntimeSnapshot(validatedCompositeWithNewerSettlement, injected.plan);
+  assert.equal(compositeValidation.valid, true, JSON.stringify(compositeValidation.errors));
+  const compositeRoundTrip = checkpointJsonRoundTrip(injected.plan, validatedCompositeWithNewerSettlement);
+  assert.deepEqual(compositeRoundTrip.snapshot, validatedCompositeWithNewerSettlement);
 
   return {
     injected,
-    committed: completed.snapshot,
-    olderSettlement: structuredClone(firstSettled.snapshot.lastSettlement),
-    newer,
+    runtimeProducedCommittedInteraction: completed.snapshot,
+    olderDelaySettlement: structuredClone(olderDelaySettlement),
+    laterDelaySettlement: structuredClone(laterDelaySettlement),
+    runtimeProducedLaterPendingDelay: laterDelay.snapshot,
+    validatedCompositeWithNewerSettlement,
   };
 }
 
@@ -2324,7 +2347,11 @@ function assertRejectedSettlementHandoffSnapshot(
 
 test("PR194 matrix: settlement and active handoff validation", () => {
   const fixture = settledHandoffFixture();
-  const { injected, committed, newer } = fixture;
+  const {
+    injected,
+    runtimeProducedCommittedInteraction: committed,
+    validatedCompositeWithNewerSettlement,
+  } = fixture;
 
   const accepted: readonly { readonly id: string; readonly snapshot: RuntimeSnapshot }[] = [
     { id: "PR194-settlement-exact-matching", snapshot: committed },
@@ -2332,10 +2359,13 @@ test("PR194 matrix: settlement and active handoff validation", () => {
       id: "PR194-settlement-exact-matching-roundtrip",
       snapshot: checkpointJsonRoundTrip(injected.plan, committed).snapshot,
     },
-    { id: "PR194-settlement-genuinely-newer-delay", snapshot: newer },
     {
-      id: "PR194-settlement-genuinely-newer-delay-roundtrip",
-      snapshot: checkpointJsonRoundTrip(injected.plan, newer).snapshot,
+      id: "PR194-settlement-validated-composite-newer-delay",
+      snapshot: validatedCompositeWithNewerSettlement,
+    },
+    {
+      id: "PR194-settlement-validated-composite-newer-delay-roundtrip",
+      snapshot: checkpointJsonRoundTrip(injected.plan, validatedCompositeWithNewerSettlement).snapshot,
     },
   ];
   for (const row of accepted) {
@@ -2350,42 +2380,78 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     assert.deepEqual(row.snapshot, before, row.id);
   }
 
-  const continued = executeInstruction(injected.plan, newer);
+  const beforeContinuation = structuredClone(validatedCompositeWithNewerSettlement);
+  const continued = executeInstruction(injected.plan, validatedCompositeWithNewerSettlement);
   assert.equal(continued.snapshot.interactionResultHandoff, null, "PR194-newer-settlement-consume");
   assert.equal(bindingValue(continued.snapshot, "answer"), "committed");
-  assert.deepEqual(continued.snapshot.lastSettlement, newer.lastSettlement);
+  assert.deepEqual(continued.snapshot.lastSettlement, fixture.laterDelaySettlement);
+  assert.deepEqual(validatedCompositeWithNewerSettlement, beforeContinuation);
   const cleaned = executeInstruction(injected.plan, continued.snapshot);
   assert.equal(
     cleaned.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary),
     false,
   );
+  assert.deepEqual(cleaned.snapshot.lastSettlement, fixture.laterDelaySettlement);
+  assert.deepEqual(
+    checkpointJsonRoundTrip(injected.plan, cleaned.snapshot).snapshot,
+    cleaned.snapshot,
+  );
 
   const rows: readonly RejectedSettlementHandoffRow[] = [
-    { id: "PR194-settlement-null", mutate: (snapshot) => { snapshot.lastSettlement = null; } },
-    { id: "PR194-settlement-older-valid", mutate: (snapshot, current) => { snapshot.lastSettlement = structuredClone(current.olderSettlement); } },
-    { id: "PR194-settlement-equal-wrong-action-kind", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").actionKind = "delay"; } },
-    { id: "PR194-settlement-equal-wrong-interaction-kind", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").interactionKind = "number"; } },
-    { id: "PR194-settlement-equal-wrong-kind", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").settlementKind = "rejected"; } },
-    { id: "PR194-settlement-wrong-owning-instruction", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").owningInstruction = 0; } },
-    { id: "PR194-settlement-wrong-continuation", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").continuationInstruction = 0; } },
-    { id: "PR194-settlement-wrong-owner", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 1; snapshot.nextCallFrameId = 2; } },
-    { id: "PR194-settlement-wrong-destination", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").destinationTemporary = 2; } },
-    { id: "PR194-settlement-wrong-result", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").result = "forged"; } },
-    { id: "PR194-settlement-wrong-transcript", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").transcriptText = "forged"; } },
-    { id: "PR194-settlement-missing-field", mutate: (snapshot) => { delete externalRecord(snapshot.lastSettlement, "settlement").result; } },
-    { id: "PR194-settlement-extra-field", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").extra = true; } },
-    { id: "PR194-handoff-missing-field", mutate: (snapshot) => { delete externalRecord(snapshot.interactionResultHandoff, "handoff").result; } },
-    { id: "PR194-handoff-extra-field", mutate: (snapshot) => { externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true; } },
-    { id: "PR194-handoff-destination-missing", mutate: (snapshot) => { externalArray(snapshot.temporaries, "temporaries").splice(0, 1); } },
-    { id: "PR194-handoff-destination-forged", mutate: (snapshot) => { externalRecord(externalArray(snapshot.temporaries, "temporaries")[0], "temporary").value = "forged"; } },
-    { id: "PR194-handoff-next-instruction", mutate: (snapshot) => { snapshot.nextInstruction = 0; } },
-    { id: "PR194-handoff-active-foreground", mutate: (snapshot) => { snapshot.foregroundAction = { kind: "delay" }; } },
-    { id: "PR194-handoff-action-id-counter", mutate: (snapshot) => { snapshot.nextActionId = externalRecord(snapshot.interactionResultHandoff, "handoff").actionId; } },
-    { id: "PR194-settlement-action-id-counter", mutate: (snapshot) => { snapshot.nextActionId = externalRecord(snapshot.lastSettlement, "settlement").actionId; } },
-    { id: "PR194-settlement-request-nonpositive", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").requestEventSequence = 0; } },
-    { id: "PR194-settlement-request-after-transcript", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); settlement.requestEventSequence = settlement.transcriptEventSequence; } },
-    { id: "PR194-settlement-transcript-after-completion", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); settlement.transcriptEventSequence = settlement.completionEventSequence; } },
-    { id: "PR194-settlement-completion-after-next-event", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); snapshot.nextEventSequence = settlement.completionEventSequence; } },
+    { id: "PR194-settlement-null", category: "handoff disagreement", mutate: (snapshot) => { snapshot.lastSettlement = null; } },
+    { id: "PR194-settlement-older-valid", category: "handoff disagreement", mutate: (snapshot, current) => { snapshot.lastSettlement = structuredClone(current.olderDelaySettlement); } },
+    {
+      id: "PR194-settlement-equal-wrong-action-kind",
+      category: "handoff disagreement",
+      mutate: (snapshot, current) => {
+        const delay = structuredClone(current.laterDelaySettlement);
+        const handoffActionId = externalRecord(snapshot.interactionResultHandoff, "handoff").actionId;
+        const nextEventSequence = snapshot.nextEventSequence;
+        if (typeof handoffActionId !== "number" || typeof nextEventSequence !== "number") {
+          throw new Error("committed handoff fields must be numeric");
+        }
+        snapshot.nextActionId = delay.actionId + 1;
+        snapshot.nextEventSequence = Math.max(nextEventSequence, delay.completionEventSequence + 1);
+        snapshot.lastSettlement = { ...delay, actionId: handoffActionId };
+      },
+    },
+    { id: "PR194-settlement-equal-wrong-interaction-kind", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").interactionKind = "number"; } },
+    { id: "PR194-settlement-equal-wrong-kind", category: "malformed settlement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").settlementKind = "rejected"; } },
+    { id: "PR194-settlement-wrong-owning-instruction", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").owningInstruction = 0; } },
+    { id: "PR194-settlement-wrong-continuation", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").continuationInstruction = 0; } },
+    { id: "PR194-settlement-wrong-owner", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 1; snapshot.nextCallFrameId = 2; } },
+    { id: "PR194-settlement-wrong-destination", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").destinationTemporary = 2; } },
+    { id: "PR194-settlement-wrong-result", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").result = "forged"; } },
+    { id: "PR194-settlement-wrong-transcript", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").transcriptText = "forged"; } },
+    { id: "PR194-settlement-missing-field", category: "malformed settlement", mutate: (snapshot) => { delete externalRecord(snapshot.lastSettlement, "settlement").result; } },
+    { id: "PR194-settlement-extra-field", category: "malformed settlement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").extra = true; } },
+    { id: "PR194-handoff-missing-field", category: "malformed settlement", mutate: (snapshot) => { delete externalRecord(snapshot.interactionResultHandoff, "handoff").result; } },
+    { id: "PR194-handoff-extra-field", category: "malformed settlement", mutate: (snapshot) => { externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true; } },
+    { id: "PR194-handoff-destination-missing", category: "handoff disagreement", mutate: (snapshot) => { externalArray(snapshot.temporaries, "temporaries").splice(0, 1); } },
+    { id: "PR194-handoff-destination-forged", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(externalArray(snapshot.temporaries, "temporaries")[0], "temporary").value = "forged"; } },
+    { id: "PR194-handoff-next-instruction", category: "handoff disagreement", mutate: (snapshot) => { snapshot.nextInstruction = 0; } },
+    {
+      id: "PR194-handoff-active-foreground",
+      category: "incompatible lifecycle",
+      mutate: (snapshot, current) => {
+        // The delay is a real runtime-produced pending action.  Pairing it
+        // with an older active handoff deliberately combines incompatible
+        // lifecycle states, including their distinct continuation positions.
+        const pendingDelay = current.runtimeProducedLaterPendingDelay;
+        snapshot.foregroundAction = structuredClone(pendingDelay.foregroundAction);
+        snapshot.status = pendingDelay.status;
+        snapshot.nextInstruction = pendingDelay.nextInstruction;
+        snapshot.nextActionId = pendingDelay.nextActionId;
+        snapshot.nextEventSequence = pendingDelay.nextEventSequence;
+        snapshot.currentSessionTimeMs = pendingDelay.currentSessionTimeMs;
+      },
+    },
+    { id: "PR194-handoff-action-id-counter", category: "counter", mutate: (snapshot) => { snapshot.nextActionId = externalRecord(snapshot.interactionResultHandoff, "handoff").actionId; } },
+    { id: "PR194-settlement-action-id-counter", category: "counter", mutate: (snapshot) => { snapshot.nextActionId = externalRecord(snapshot.lastSettlement, "settlement").actionId; } },
+    { id: "PR194-settlement-request-nonpositive", category: "chronology", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").requestEventSequence = 0; } },
+    { id: "PR194-settlement-request-after-transcript", category: "chronology", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); settlement.requestEventSequence = settlement.transcriptEventSequence; } },
+    { id: "PR194-settlement-transcript-after-completion", category: "chronology", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); settlement.transcriptEventSequence = settlement.completionEventSequence; } },
+    { id: "PR194-settlement-completion-after-next-event", category: "chronology", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); snapshot.nextEventSequence = settlement.completionEventSequence; } },
   ];
   for (const row of rows) {
     const invalid = externalRecord(structuredClone(committed), row.id);
@@ -2423,6 +2489,230 @@ test("PR194 matrix: settlement authority and replay remain atomic", () => {
     assert.equal(replay.outcome.kind, "alreadySettled", "PR194-duplicate-replay");
     assert.deepEqual(replay.events, []);
     assert.deepEqual(replay.snapshot, before);
+  }
+});
+
+interface TextInteractionCompletionRequest {
+  readonly actionId: number;
+  readonly actionKind: "interaction";
+  readonly interactionKind: "text";
+  readonly payload: {
+    readonly kind: "submittedText";
+    readonly submittedText: string;
+  };
+}
+
+interface ReplayRow {
+  readonly id: string;
+  readonly plan: InstructionPlan;
+  readonly snapshot: RuntimeSnapshot;
+  readonly request: TextInteractionCompletionRequest | { readonly actionId: number; readonly actionKind: "delay"; readonly payload: { readonly kind: "time"; readonly currentSessionTimeMs: number } };
+  readonly expected: "alreadySettled" | "staleAction" | "unknownAction";
+}
+
+function textCompletionRequest(snapshot: RuntimeSnapshot): TextInteractionCompletionRequest {
+  const action = snapshot.foregroundAction;
+  assert.ok(action !== null && action.kind === "interaction" && action.interactionKind === "text");
+  return {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: {
+      kind: "submittedText",
+      submittedText: "committed",
+    },
+  };
+}
+
+function assertReplayRow(row: ReplayRow): void {
+  const planBefore = structuredClone(row.plan);
+  const snapshotBefore = structuredClone(row.snapshot);
+  const replay = completeAction(row.plan, row.snapshot, row.request);
+  assert.equal(replay.outcome.kind, row.expected, row.id);
+  assert.deepEqual(replay.events, [], `${row.id}: no duplicate events`);
+  assert.deepEqual(replay.snapshot, snapshotBefore, `${row.id}: returned state`);
+  assert.deepEqual(row.plan, planBefore, `${row.id}: plan input`);
+  assert.deepEqual(row.snapshot, snapshotBefore, `${row.id}: snapshot input`);
+  if (replay.outcome.kind === "alreadySettled") {
+    assert.deepEqual(replay.outcome.settlement, row.snapshot.lastSettlement, `${row.id}: settlement`);
+  }
+}
+
+test("PR194 matrix: bounded replay is exact-once across ordinary and direct handoff boundaries", () => {
+  const ordinary = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
+  const pending = waiting(ordinary.plan);
+  const request = textCompletionRequest(pending.snapshot);
+  const completion = completeAction(ordinary.plan, pending.snapshot, request);
+  assert.equal(completion.outcome.kind, "completed");
+  assert.deepEqual(completion.events.map((event) => event.kind), ["playerTranscript", "actionCompleted"]);
+  const consumed = executeInstruction(ordinary.plan, completion.snapshot);
+  const cleaned = executeInstruction(ordinary.plan, consumed.snapshot);
+  const halted = run(ordinary.plan, cleaned.snapshot).snapshot;
+
+  const directClearInjected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
+  const directClearPlan = replaceHandoffInstruction(directClearInjected, {
+    kind: "clearTemporary",
+    temporaryId: directClearInjected.destinationTemporary,
+    span: directClearInjected.plan.instructions[directClearInjected.handoffInstruction]!.span,
+  });
+  const directClearPending = waiting(directClearPlan);
+  const directClearRequest = textCompletionRequest(directClearPending.snapshot);
+  const directClearCommitted = completeAction(directClearPlan, directClearPending.snapshot, directClearRequest);
+  const afterDirectClear = executeInstruction(directClearPlan, directClearCommitted.snapshot).snapshot;
+
+  const directExitInjected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
+  const directExitPlan = replaceHandoffInstruction(directExitInjected, {
+    kind: "exit",
+    span: directExitInjected.plan.instructions[directExitInjected.handoffInstruction]!.span,
+  });
+  const directExitPending = waiting(directExitPlan);
+  const directExitRequest = textCompletionRequest(directExitPending.snapshot);
+  const directExitCommitted = completeAction(directExitPlan, directExitPending.snapshot, directExitRequest);
+  const afterDirectExit = executeInstruction(directExitPlan, directExitCommitted.snapshot).snapshot;
+
+  const directReturnInjected = injectTextInteraction(
+    'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit',
+  );
+  const directReturnPlan = replaceHandoffInstruction(directReturnInjected, {
+    kind: "returnVoid",
+    span: directReturnInjected.plan.instructions[directReturnInjected.handoffInstruction]!.span,
+  });
+  const directReturnPending = waiting(directReturnPlan);
+  const directReturnRequest = textCompletionRequest(directReturnPending.snapshot);
+  const directReturnCommitted = completeAction(
+    directReturnPlan,
+    directReturnPending.snapshot,
+    directReturnRequest,
+  );
+  const afterDirectReturn = executeInstruction(directReturnPlan, directReturnCommitted.snapshot).snapshot;
+
+  const rows: readonly ReplayRow[] = [
+    { id: "PR194-replay-committed", plan: ordinary.plan, snapshot: completion.snapshot, request, expected: "alreadySettled" },
+    { id: "PR194-replay-committed-roundtrip", plan: ordinary.plan, snapshot: checkpointJsonRoundTrip(ordinary.plan, completion.snapshot).snapshot, request, expected: "alreadySettled" },
+    { id: "PR194-replay-consumed", plan: ordinary.plan, snapshot: consumed.snapshot, request, expected: "alreadySettled" },
+    { id: "PR194-replay-consumed-roundtrip", plan: ordinary.plan, snapshot: checkpointJsonRoundTrip(ordinary.plan, consumed.snapshot).snapshot, request, expected: "alreadySettled" },
+    { id: "PR194-replay-cleaned", plan: ordinary.plan, snapshot: cleaned.snapshot, request, expected: "alreadySettled" },
+    { id: "PR194-replay-cleaned-roundtrip", plan: ordinary.plan, snapshot: checkpointJsonRoundTrip(ordinary.plan, cleaned.snapshot).snapshot, request, expected: "alreadySettled" },
+    { id: "PR194-replay-halted", plan: ordinary.plan, snapshot: halted, request, expected: "alreadySettled" },
+    { id: "PR194-replay-halted-roundtrip", plan: ordinary.plan, snapshot: checkpointJsonRoundTrip(ordinary.plan, halted).snapshot, request, expected: "alreadySettled" },
+    { id: "PR194-replay-direct-clear", plan: directClearPlan, snapshot: afterDirectClear, request: directClearRequest, expected: "alreadySettled" },
+    { id: "PR194-replay-direct-exit", plan: directExitPlan, snapshot: afterDirectExit, request: directExitRequest, expected: "alreadySettled" },
+    { id: "PR194-replay-direct-return", plan: directReturnPlan, snapshot: afterDirectReturn, request: directReturnRequest, expected: "alreadySettled" },
+    { id: "PR194-replay-next-action-unknown", plan: ordinary.plan, snapshot: cleaned.snapshot, request: { ...request, actionId: cleaned.snapshot.nextActionId }, expected: "unknownAction" },
+  ];
+  for (const row of rows) assertReplayRow(row);
+
+  const settlementFixture = settledHandoffFixture();
+  const composite = settlementFixture.validatedCompositeWithNewerSettlement;
+  const oldHandoff = composite.interactionResultHandoff;
+  assert.ok(oldHandoff !== null);
+  const oldRequest: TextInteractionCompletionRequest = {
+    actionId: oldHandoff.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "committed" },
+  };
+  const compositeConsumed = executeInstruction(settlementFixture.injected.plan, composite).snapshot;
+  const compositeCleaned = executeInstruction(settlementFixture.injected.plan, compositeConsumed).snapshot;
+  const newerDelayRequest = {
+    actionId: settlementFixture.laterDelaySettlement.actionId,
+    actionKind: "delay" as const,
+    payload: {
+      kind: "time" as const,
+      currentSessionTimeMs: settlementFixture.laterDelaySettlement.completedAtMs,
+    },
+  };
+  const staleRows: readonly ReplayRow[] = [
+    { id: "PR194-replay-old-interaction-newer-composite", plan: settlementFixture.injected.plan, snapshot: composite, request: oldRequest, expected: "staleAction" },
+    { id: "PR194-replay-old-interaction-newer-composite-roundtrip", plan: settlementFixture.injected.plan, snapshot: checkpointJsonRoundTrip(settlementFixture.injected.plan, composite).snapshot, request: oldRequest, expected: "staleAction" },
+    { id: "PR194-replay-old-interaction-after-consume", plan: settlementFixture.injected.plan, snapshot: compositeConsumed, request: oldRequest, expected: "staleAction" },
+    { id: "PR194-replay-old-interaction-after-cleanup", plan: settlementFixture.injected.plan, snapshot: compositeCleaned, request: oldRequest, expected: "staleAction" },
+    { id: "PR194-replay-old-interaction-cleanup-roundtrip", plan: settlementFixture.injected.plan, snapshot: checkpointJsonRoundTrip(settlementFixture.injected.plan, compositeCleaned).snapshot, request: oldRequest, expected: "staleAction" },
+    { id: "PR194-replay-current-newer-delay", plan: settlementFixture.injected.plan, snapshot: composite, request: newerDelayRequest, expected: "alreadySettled" },
+  ];
+  for (const row of staleRows) assertReplayRow(row);
+});
+
+interface FailedContinuationRow {
+  readonly id: string;
+  readonly expectedCode: string;
+  readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
+  readonly assertUntouchedTarget: (snapshot: RuntimeSnapshot, injected: InjectedInteractionPlan) => void;
+}
+
+test("PR194 matrix: failed canonical continuations retain the handoff atomically", () => {
+  const rows: readonly FailedContinuationRow[] = [
+    {
+      id: "PR194-failed-continuation-before-evaluation",
+      expectedCode: "TSR023",
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "say",
+        speaker: "missing",
+        value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }),
+      assertUntouchedTarget: (snapshot) => assert.equal(snapshot.speakers.length, 0),
+    },
+    {
+      id: "PR194-failed-continuation-during-evaluation",
+      expectedCode: "TSR026",
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "evaluate",
+        expression: binaryExpression(
+          "and",
+          temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
+          literalExpression(true, injected.plan.sourceSpan),
+          injected.plan.sourceSpan,
+        ),
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }),
+      assertUntouchedTarget: () => undefined,
+    },
+    {
+      id: "PR194-failed-continuation-before-target-mutation",
+      expectedCode: "TSR026",
+      makePlan: (injected) => replaceHandoffInstruction(injected, {
+        kind: "storeTemporary",
+        temporaryId: injected.destinationTemporary + 1,
+        value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
+        expectBoolean: true,
+        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+      }, injected.plan.temporaryCount + 1),
+      assertUntouchedTarget: (snapshot, injected) => assert.equal(
+        snapshot.temporaries.some((temporary) => temporary.id === injected.destinationTemporary + 1),
+        false,
+      ),
+    },
+  ];
+  for (const row of rows) {
+    const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
+    const plan = row.makePlan(injected);
+    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
+    const pending = waiting(plan);
+    const request = textCompletionRequest(pending.snapshot);
+    const completed = completeAction(plan, pending.snapshot, request);
+    assert.equal(completed.outcome.kind, "completed", row.id);
+    const committed = checkpointJsonRoundTrip(plan, completed.snapshot).snapshot;
+    const planBefore = structuredClone(plan);
+    const committedBefore = structuredClone(committed);
+    const failed = executeInstruction(plan, committed);
+    assert.deepEqual(plan, planBefore, `${row.id}: plan input`);
+    assert.deepEqual(committed, committedBefore, `${row.id}: snapshot input`);
+    assert.equal(failed.snapshot.status, "failed", row.id);
+    assert.equal(failed.snapshot.nextInstruction, committed.nextInstruction, row.id);
+    assert.deepEqual(failed.snapshot.interactionResultHandoff, committed.interactionResultHandoff, row.id);
+    assert.equal(temporaryValue(failed.snapshot, injected.destinationTemporary), "committed", row.id);
+    assert.deepEqual(failed.snapshot.lastSettlement, committed.lastSettlement, row.id);
+    assert.equal(failed.events.length, 1, row.id);
+    const failure = failed.events[0];
+    assert.ok(failure !== undefined && failure.kind === "runtimeFailure", row.id);
+    assert.equal(failure.code, row.expectedCode, row.id);
+    row.assertUntouchedTarget(failed.snapshot, injected);
+    assert.equal(validateRuntimeSnapshot(failed.snapshot, plan).valid, true, row.id);
+    assert.deepEqual(checkpointJsonRoundTrip(plan, failed.snapshot).snapshot, failed.snapshot, row.id);
+    assertReplayRow({ id: `${row.id}-replay`, plan, snapshot: failed.snapshot, request, expected: "alreadySettled" });
+    assert.deepEqual(executeInstruction(plan, failed.snapshot).snapshot, failed.snapshot, `${row.id}: execute noop`);
+    assert.deepEqual(run(plan, failed.snapshot).snapshot, failed.snapshot, `${row.id}: run noop`);
   }
 });
 
