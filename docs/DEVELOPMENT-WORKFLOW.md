@@ -420,15 +420,10 @@ Fresh executor sessions must read the repository documents required by `AGENTS.m
 ## Documentation ownership
 
 Before every non-trivial documentation change or documentation review, read
-[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md). The writer and
-reviewer must check canonical placement, necessary versus harmful repetition,
-cross-document consistency, stale statements, moving facts, and recurring
-agent-context cost. Record material ownership or consolidation decisions in the
-active issue, pull request, or review discussion; do not create a separate
-report unless the task explicitly requires one.
-
-Pure spelling, link, or formatting corrections may skip that reread only when
-they cannot alter meaning, authority, placement, or maintenance obligations.
+[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md). Record material
+ownership or consolidation decisions in the active issue, pull request, or
+review discussion; do not create a separate report unless the task explicitly
+requires one.
 
 For a single-agent issue, that agent updates documentation affected by the implemented behavior in the same pull request unless the task explicitly reserves a shared document for someone else.
 
