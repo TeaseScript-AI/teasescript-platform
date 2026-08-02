@@ -13,6 +13,7 @@ import type {
   ExpressionPlan,
   Instruction,
   InstructionPlan,
+  InteractionAccessibleName,
   InteractionInstruction,
   InteractionUiPayload,
 } from "../src/plan/model.js";
@@ -1774,8 +1775,10 @@ function completeCommittedTextInteraction(plan: InstructionPlan) {
 }
 
 function checkpointJsonRoundTrip(plan: InstructionPlan, snapshot: RuntimeSnapshot) {
+  const planBefore = structuredClone(plan);
   const before = structuredClone(snapshot);
   const checkpoint = createCheckpoint(plan, snapshot);
+  assert.deepEqual(plan, planBefore, "checkpoint plan input");
   assert.deepEqual(snapshot, before);
   return deserializeCheckpoint(serializeCheckpoint(checkpoint));
 }
@@ -1791,11 +1794,15 @@ function assertInteractionResumeEquivalent<T>(
   const restoredBoundary = checkpointJsonRoundTrip(plan, snapshot);
   assert.deepEqual(restoredBoundary.plan, plan, `${label}: restored plan`);
   assert.deepEqual(restoredBoundary.snapshot, snapshot, `${label}: restored snapshot`);
+  const restoredPlanBefore = structuredClone(restoredBoundary.plan);
+  const restoredSnapshotBefore = structuredClone(restoredBoundary.snapshot);
   const uninterrupted = operation(plan, snapshot);
   const restored = operation(restoredBoundary.plan, restoredBoundary.snapshot);
   assert.deepEqual(restored, uninterrupted, `${label}: resumed operation`);
-  assert.deepEqual(plan, planBefore, `${label}: plan input`);
-  assert.deepEqual(snapshot, snapshotBefore, `${label}: snapshot input`);
+  assert.deepEqual(plan, planBefore, `${label}: original plan input`);
+  assert.deepEqual(snapshot, snapshotBefore, `${label}: original snapshot input`);
+  assert.deepEqual(restoredBoundary.plan, restoredPlanBefore, `${label}: restored plan input`);
+  assert.deepEqual(restoredBoundary.snapshot, restoredSnapshotBefore, `${label}: restored snapshot input`);
   return { uninterrupted, restored };
 }
 
@@ -2394,7 +2401,10 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     },
     {
       id: "PR194-settlement-validated-composite-newer-delay-roundtrip",
-      snapshot: checkpointJsonRoundTrip(injected.plan, validatedCompositeWithNewerSettlement).snapshot,
+      snapshot: checkpointJsonRoundTrip(
+        injected.plan,
+        validatedCompositeWithNewerSettlement,
+      ).snapshot,
     },
   ];
   for (const row of accepted) {
@@ -2427,8 +2437,20 @@ test("PR194 matrix: settlement and active handoff validation", () => {
   );
 
   const rows: readonly RejectedSettlementHandoffRow[] = [
-    { id: "PR194-settlement-null", category: "handoff disagreement", mutate: (snapshot) => { snapshot.lastSettlement = null; } },
-    { id: "PR194-settlement-older-valid", category: "handoff disagreement", mutate: (snapshot, current) => { snapshot.lastSettlement = structuredClone(current.olderDelaySettlement); } },
+    {
+      id: "PR194-settlement-null",
+      category: "handoff disagreement",
+      mutate: (snapshot) => {
+        snapshot.lastSettlement = null;
+      },
+    },
+    {
+      id: "PR194-settlement-older-valid",
+      category: "handoff disagreement",
+      mutate: (snapshot, current) => {
+        snapshot.lastSettlement = structuredClone(current.olderDelaySettlement);
+      },
+    },
     {
       id: "PR194-settlement-equal-wrong-action-kind",
       category: "handoff disagreement",
@@ -2444,21 +2466,118 @@ test("PR194 matrix: settlement and active handoff validation", () => {
         snapshot.lastSettlement = { ...delay, actionId: handoffActionId };
       },
     },
-    { id: "PR194-settlement-equal-wrong-interaction-kind", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").interactionKind = "number"; } },
-    { id: "PR194-settlement-equal-wrong-kind", category: "malformed settlement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").settlementKind = "rejected"; } },
-    { id: "PR194-settlement-wrong-owning-instruction", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").owningInstruction = 0; } },
-    { id: "PR194-settlement-wrong-continuation", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").continuationInstruction = 0; } },
-    { id: "PR194-settlement-wrong-owner", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 1; snapshot.nextCallFrameId = 2; } },
-    { id: "PR194-settlement-wrong-destination", category: "handoff disagreement", mutate: (snapshot, current) => { externalRecord(snapshot.lastSettlement, "settlement").destinationTemporary = current.injected.destinationTemporary + 1; } },
-    { id: "PR194-settlement-wrong-result", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").result = "forged"; } },
-    { id: "PR194-settlement-wrong-transcript", category: "handoff disagreement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").transcriptText = "forged"; } },
-    { id: "PR194-settlement-missing-field", category: "malformed settlement", mutate: (snapshot) => { delete externalRecord(snapshot.lastSettlement, "settlement").result; } },
-    { id: "PR194-settlement-extra-field", category: "malformed settlement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").extra = true; } },
-    { id: "PR194-handoff-missing-field", category: "malformed handoff", mutate: (snapshot) => { delete externalRecord(snapshot.interactionResultHandoff, "handoff").result; } },
-    { id: "PR194-handoff-extra-field", category: "malformed handoff", mutate: (snapshot) => { externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true; } },
-    { id: "PR194-handoff-destination-missing", category: "handoff disagreement", mutate: (snapshot, current) => { const temporaries = externalArray(snapshot.temporaries, "temporaries"); const index = temporaries.findIndex((entry) => externalRecord(entry, "temporary").id === current.injected.destinationTemporary); assert.notEqual(index, -1); temporaries.splice(index, 1); } },
-    { id: "PR194-handoff-destination-forged", category: "handoff disagreement", mutate: (snapshot, current) => { externalTemporary(snapshot, current.injected.destinationTemporary).value = "forged"; } },
-    { id: "PR194-handoff-next-instruction", category: "handoff disagreement", mutate: (snapshot) => { snapshot.nextInstruction = 0; } },
+    {
+      id: "PR194-settlement-equal-wrong-interaction-kind",
+      category: "handoff disagreement",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").interactionKind = "number";
+      },
+    },
+    {
+      id: "PR194-settlement-equal-wrong-kind",
+      category: "malformed settlement",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").settlementKind = "rejected";
+      },
+    },
+    {
+      id: "PR194-settlement-wrong-owning-instruction",
+      category: "handoff disagreement",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").owningInstruction = 0;
+      },
+    },
+    {
+      id: "PR194-settlement-wrong-continuation",
+      category: "handoff disagreement",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").continuationInstruction = 0;
+      },
+    },
+    {
+      id: "PR194-settlement-wrong-owner",
+      category: "handoff disagreement",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 1;
+        snapshot.nextCallFrameId = 2;
+      },
+    },
+    {
+      id: "PR194-settlement-wrong-destination",
+      category: "handoff disagreement",
+      mutate: (snapshot, current) => {
+        externalRecord(snapshot.lastSettlement, "settlement").destinationTemporary =
+          current.injected.destinationTemporary + 1;
+      },
+    },
+    {
+      id: "PR194-settlement-wrong-result",
+      category: "handoff disagreement",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").result = "forged";
+      },
+    },
+    {
+      id: "PR194-settlement-wrong-transcript",
+      category: "handoff disagreement",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").transcriptText = "forged";
+      },
+    },
+    {
+      id: "PR194-settlement-missing-field",
+      category: "malformed settlement",
+      mutate: (snapshot) => {
+        delete externalRecord(snapshot.lastSettlement, "settlement").result;
+      },
+    },
+    {
+      id: "PR194-settlement-extra-field",
+      category: "malformed settlement",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").extra = true;
+      },
+    },
+    {
+      id: "PR194-handoff-missing-field",
+      category: "malformed handoff",
+      mutate: (snapshot) => {
+        delete externalRecord(snapshot.interactionResultHandoff, "handoff").result;
+      },
+    },
+    {
+      id: "PR194-handoff-extra-field",
+      category: "malformed handoff",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true;
+      },
+    },
+    {
+      id: "PR194-handoff-destination-missing",
+      category: "handoff disagreement",
+      mutate: (snapshot, current) => {
+        const temporaries = externalArray(snapshot.temporaries, "temporaries");
+        const index = temporaries.findIndex(
+          (entry) => externalRecord(entry, "temporary").id === current.injected.destinationTemporary,
+        );
+        assert.notEqual(index, -1);
+        temporaries.splice(index, 1);
+      },
+    },
+    {
+      id: "PR194-handoff-destination-forged",
+      category: "handoff disagreement",
+      mutate: (snapshot, current) => {
+        externalTemporary(snapshot, current.injected.destinationTemporary).value = "forged";
+      },
+    },
+    {
+      id: "PR194-handoff-next-instruction",
+      category: "handoff disagreement",
+      mutate: (snapshot) => {
+        snapshot.nextInstruction = 0;
+      },
+    },
     {
       id: "PR194-handoff-active-foreground",
       category: "incompatible lifecycle",
@@ -2658,18 +2777,96 @@ test("PR194 matrix: bounded replay is exact-once across ordinary and direct hand
   const afterDirectReturn = executeInstruction(directReturnPlan, directReturnCommitted.snapshot).snapshot;
 
   const rows: readonly ReplayRow[] = [
-    { id: "PR194-replay-committed", plan: ordinary.plan, snapshot: completion.snapshot, request, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-committed-roundtrip", plan: ordinary.plan, snapshot: checkpointJsonRoundTrip(ordinary.plan, completion.snapshot).snapshot, request, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-consumed", plan: ordinary.plan, snapshot: consumed.snapshot, request, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-consumed-roundtrip", plan: ordinary.plan, snapshot: checkpointJsonRoundTrip(ordinary.plan, consumed.snapshot).snapshot, request, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-cleaned", plan: ordinary.plan, snapshot: cleaned.snapshot, request, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-cleaned-roundtrip", plan: ordinary.plan, snapshot: checkpointJsonRoundTrip(ordinary.plan, cleaned.snapshot).snapshot, request, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-halted", plan: ordinary.plan, snapshot: halted, request, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-halted-roundtrip", plan: ordinary.plan, snapshot: checkpointJsonRoundTrip(ordinary.plan, halted).snapshot, request, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-direct-clear", plan: directClearPlan, snapshot: afterDirectClear, request: directClearRequest, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-direct-exit", plan: directExitPlan, snapshot: afterDirectExit, request: directExitRequest, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-direct-return", plan: directReturnPlan, snapshot: afterDirectReturn, request: directReturnRequest, expected: { kind: "alreadySettled" } },
-    { id: "PR194-replay-next-action-unknown", plan: ordinary.plan, snapshot: cleaned.snapshot, request: { ...request, actionId: cleaned.snapshot.nextActionId }, expected: { kind: "unknownAction", actionId: cleaned.snapshot.nextActionId } },
+    {
+      id: "PR194-replay-committed",
+      plan: ordinary.plan,
+      snapshot: completion.snapshot,
+      request,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-committed-roundtrip",
+      plan: ordinary.plan,
+      snapshot: checkpointJsonRoundTrip(ordinary.plan, completion.snapshot).snapshot,
+      request,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-consumed",
+      plan: ordinary.plan,
+      snapshot: consumed.snapshot,
+      request,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-consumed-roundtrip",
+      plan: ordinary.plan,
+      snapshot: checkpointJsonRoundTrip(ordinary.plan, consumed.snapshot).snapshot,
+      request,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-cleaned",
+      plan: ordinary.plan,
+      snapshot: cleaned.snapshot,
+      request,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-cleaned-roundtrip",
+      plan: ordinary.plan,
+      snapshot: checkpointJsonRoundTrip(ordinary.plan, cleaned.snapshot).snapshot,
+      request,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-halted",
+      plan: ordinary.plan,
+      snapshot: halted,
+      request,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-halted-roundtrip",
+      plan: ordinary.plan,
+      snapshot: checkpointJsonRoundTrip(ordinary.plan, halted).snapshot,
+      request,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-direct-clear",
+      plan: directClearPlan,
+      snapshot: afterDirectClear,
+      request: directClearRequest,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-direct-exit",
+      plan: directExitPlan,
+      snapshot: afterDirectExit,
+      request: directExitRequest,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-direct-return",
+      plan: directReturnPlan,
+      snapshot: afterDirectReturn,
+      request: directReturnRequest,
+      expected: { kind: "alreadySettled" },
+    },
+    {
+      id: "PR194-replay-next-action-unknown",
+      plan: ordinary.plan,
+      snapshot: cleaned.snapshot,
+      request: {
+        ...request,
+        actionId: cleaned.snapshot.nextActionId,
+      },
+      expected: {
+        kind: "unknownAction",
+        actionId: cleaned.snapshot.nextActionId,
+      },
+    },
   ];
   for (const row of rows) assertReplayRow(row);
 
@@ -2799,19 +2996,75 @@ test("PR194 matrix: failed canonical continuations retain the handoff atomically
   }
 });
 
-type TypedInteractionPayload =
-  | { readonly kind: "submittedText"; readonly submittedText: string }
-  | { readonly kind: "selectedText"; readonly selectedText: string }
-  | { readonly kind: "selectedLabel"; readonly selectedLabel: string | number };
-
-interface TypedResultBoundaryRow {
+interface TypedResultBoundaryBase {
   readonly id: string;
-  readonly interactionKind: "text" | "number" | "choice";
-  readonly ui: InteractionUiPayload;
-  readonly payload: TypedInteractionPayload;
-  readonly result: string | number;
   readonly transcript: string;
 }
+
+interface TextTypedResultBoundaryRow extends TypedResultBoundaryBase {
+  readonly interactionKind: "text";
+  readonly ui: {
+    readonly kind: "text";
+    readonly hint: string | null;
+    readonly accessibleName: InteractionAccessibleName;
+  };
+  readonly payload: { readonly kind: "submittedText"; readonly submittedText: string };
+  readonly result: string;
+}
+
+interface NumberTypedResultBoundaryRow extends TypedResultBoundaryBase {
+  readonly interactionKind: "number";
+  readonly ui: {
+    readonly kind: "number";
+    readonly hint: string | null;
+    readonly accessibleName: InteractionAccessibleName;
+  };
+  readonly payload: { readonly kind: "submittedText"; readonly submittedText: string };
+  readonly result: number;
+}
+
+interface VisibleChoiceTypedResultBoundaryRow extends TypedResultBoundaryBase {
+  readonly interactionKind: "choice";
+  readonly ui: {
+    readonly kind: "choice";
+    readonly labelType: "none";
+    readonly options: readonly { readonly text: string; readonly label: null }[];
+    readonly accessibleName: typeof defaults.choice;
+  };
+  readonly payload: { readonly kind: "selectedText"; readonly selectedText: string };
+  readonly result: string;
+}
+
+interface IdentifierChoiceTypedResultBoundaryRow extends TypedResultBoundaryBase {
+  readonly interactionKind: "choice";
+  readonly ui: {
+    readonly kind: "choice";
+    readonly labelType: "identifier";
+    readonly options: readonly { readonly text: string; readonly label: string }[];
+    readonly accessibleName: typeof defaults.choice;
+  };
+  readonly payload: { readonly kind: "selectedLabel"; readonly selectedLabel: string };
+  readonly result: string;
+}
+
+interface NumericChoiceTypedResultBoundaryRow extends TypedResultBoundaryBase {
+  readonly interactionKind: "choice";
+  readonly ui: {
+    readonly kind: "choice";
+    readonly labelType: "number";
+    readonly options: readonly { readonly text: string; readonly label: number }[];
+    readonly accessibleName: typeof defaults.choice;
+  };
+  readonly payload: { readonly kind: "selectedLabel"; readonly selectedLabel: number };
+  readonly result: number;
+}
+
+type TypedResultBoundaryRow =
+  | TextTypedResultBoundaryRow
+  | NumberTypedResultBoundaryRow
+  | VisibleChoiceTypedResultBoundaryRow
+  | IdentifierChoiceTypedResultBoundaryRow
+  | NumericChoiceTypedResultBoundaryRow;
 
 function completeTypedInteraction(
   plan: InstructionPlan,
@@ -2833,40 +3086,93 @@ test("PR194 matrix: checkpoint boundaries preserve typed interaction results", (
     {
       id: "PR194-resume-domain-text",
       interactionKind: "text",
-      ui: { kind: "text", hint: null, accessibleName: defaults.text },
-      payload: { kind: "submittedText", submittedText: "typed text" },
+      ui: {
+        kind: "text",
+        hint: null,
+        accessibleName: defaults.text,
+      },
+      payload: {
+        kind: "submittedText",
+        submittedText: "typed text",
+      },
       result: "typed text",
       transcript: "typed text",
     },
     {
       id: "PR194-resume-domain-number",
       interactionKind: "number",
-      ui: { kind: "number", hint: null, accessibleName: defaults.number },
-      payload: { kind: "submittedText", submittedText: " 12.5 " },
+      ui: {
+        kind: "number",
+        hint: null,
+        accessibleName: defaults.number,
+      },
+      payload: {
+        kind: "submittedText",
+        submittedText: " 12.5 ",
+      },
       result: 12.5,
       transcript: "12.5",
     },
     {
       id: "PR194-resume-domain-choice-visible-text",
       interactionKind: "choice",
-      ui: { kind: "choice", labelType: "none", options: [{ text: "Visible", label: null }], accessibleName: defaults.choice },
-      payload: { kind: "selectedText", selectedText: "Visible" },
+      ui: {
+        kind: "choice",
+        labelType: "none",
+        options: [
+          {
+            text: "Visible",
+            label: null,
+          },
+        ],
+        accessibleName: defaults.choice,
+      },
+      payload: {
+        kind: "selectedText",
+        selectedText: "Visible",
+      },
       result: "Visible",
       transcript: "Visible",
     },
     {
       id: "PR194-resume-domain-choice-identifier-label",
       interactionKind: "choice",
-      ui: { kind: "choice", labelType: "identifier", options: [{ text: "Visible", label: "saved" }], accessibleName: defaults.choice },
-      payload: { kind: "selectedLabel", selectedLabel: "saved" },
+      ui: {
+        kind: "choice",
+        labelType: "identifier",
+        options: [
+          {
+            text: "Visible",
+            label: "saved",
+          },
+        ],
+        accessibleName: defaults.choice,
+      },
+      payload: {
+        kind: "selectedLabel",
+        selectedLabel: "saved",
+      },
       result: "saved",
       transcript: "Visible",
     },
     {
       id: "PR194-resume-domain-choice-numeric-label",
       interactionKind: "choice",
-      ui: { kind: "choice", labelType: "number", options: [{ text: "Visible", label: 7 }], accessibleName: defaults.choice },
-      payload: { kind: "selectedLabel", selectedLabel: 7 },
+      ui: {
+        kind: "choice",
+        labelType: "number",
+        options: [
+          {
+            text: "Visible",
+            label: 7,
+          },
+        ],
+        accessibleName: defaults.choice,
+      },
+      payload: {
+        kind: "selectedLabel",
+        selectedLabel: 7,
+      },
       result: 7,
       transcript: "Visible",
     },
