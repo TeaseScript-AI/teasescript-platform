@@ -25,10 +25,9 @@ Do not treat planning documents, wishes, research files, historical audits, or s
 - Laravel is the only public backend.
 - Preserve deterministic source evaluation order and explicit JSON-safe pause/resume state.
 - Validate external, checkpoint, host, package, and future integration data at runtime.
-- Choose the simplest design that meets the current milestone.
+- Apply the pragmatic YAGNI rule below when deciding present implementation scope and future-facing complexity.
 - Do not add dependencies without documenting need, alternatives, maintenance impact, and security impact.
 - Do not weaken tests to hide failures.
-- Do not implement deferred capabilities merely because they appear in planning or reference material.
 
 ## Requirement authority and proportional review
 
@@ -56,6 +55,29 @@ the complexity being added.
 These proportionality rules do not weaken accepted behavior, deterministic
 execution, serializable checkpoints, or validation at real external, host,
 checkpoint, persistence, package, and security boundaries.
+
+## Pragmatic YAGNI
+
+Implement the smallest design that satisfies current owner-approved behavior
+and real architecture, persistence, determinism, security, and trust
+boundaries.
+
+Do not add abstractions, extension points, compatibility layers, migration
+paths, registries, schemas, services, generalized hardening, or permanent test
+contracts for hypothetical consumers, unscheduled features, or unaccepted
+future architecture.
+
+Future-facing preparation is justified only when a concrete consumer or
+obligation has been explicitly scheduled by the owner or coordinator, or when
+deferral would create a demonstrated, material, and difficult-to-reverse data,
+security, persistence, or public-compatibility problem. Even then, add only the
+smallest seam needed for that concrete case; do not build the generalized
+future system.
+
+Otherwise record the idea in `WISHES.xml`, planning, or `docs/OPEN-DECISIONS.md`
+as appropriate. Pragmatic YAGNI does not permit weakening accepted behavior or
+real external, host, checkpoint, persistence, package, determinism, or security
+boundaries.
 
 ## Efficient editing and context use
 
