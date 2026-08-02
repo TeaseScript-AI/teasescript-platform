@@ -19,6 +19,7 @@ import type {
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { CheckpointError, createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { completeAction, executeInstruction, observeTime, run } from "../src/runtime/engine.js";
+import type { InterpreterEvent } from "../src/runtime/events.js";
 import { getSerializableProperty, type SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import type { SourceSpan } from "../src/source.js";
@@ -1729,7 +1730,11 @@ interface CanonicalHandoffRow {
   readonly source: string;
   readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
   readonly needsCleanup: boolean;
-  readonly assertResult: (snapshot: RuntimeSnapshot, events: readonly { readonly kind: string }[]) => void;
+  readonly assertResult: (
+    snapshot: RuntimeSnapshot,
+    events: readonly InterpreterEvent[],
+    injected: InjectedInteractionPlan,
+  ) => void;
 }
 
 function replaceHandoffInstruction(
@@ -1905,7 +1910,10 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
         span: injected.plan.instructions[injected.handoffInstruction]!.span,
       }, injected.plan.temporaryCount + 1),
       needsCleanup: true,
-      assertResult: (snapshot) => assert.equal(temporaryValue(snapshot, 2), "committed"),
+      assertResult: (snapshot, _events, injected) => assert.equal(
+        temporaryValue(snapshot, injected.destinationTemporary + 1),
+        "committed",
+      ),
     },
     {
       id: "PR194-form-say",
@@ -1918,7 +1926,9 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
         span: injected.plan.instructions[injected.handoffInstruction]!.span,
       }),
       needsCleanup: true,
-      assertResult: (_snapshot, events) => assert.ok(events.some((event) => event.kind === "say" && "text" in event && event.text === "committed")),
+      assertResult: (_snapshot, events) => assert.ok(
+        events.some((event) => event.kind === "say" && event.text === "committed"),
+      ),
     },
     {
       id: "PR194-form-set-declared-speaker-property",
@@ -1949,7 +1959,9 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
         span: injected.plan.instructions[injected.handoffInstruction]!.span,
       }, injected.plan.temporaryCount + 1),
       needsCleanup: true,
-      assertResult: (snapshot) => assertPreparedReference(temporaryValue(snapshot, 2)),
+      assertResult: (snapshot, _events, injected) => assertPreparedReference(
+        temporaryValue(snapshot, injected.destinationTemporary + 1),
+      ),
     },
   ];
 
@@ -1978,7 +1990,7 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
         row.id,
       );
     }
-    row.assertResult(continued.snapshot, continued.events);
+    row.assertResult(continued.snapshot, continued.events, injected);
     assert.doesNotThrow(() => createCheckpoint(restored.plan, continued.snapshot), row.id);
     if (row.needsCleanup) {
       const cleanupBefore = structuredClone(continued.snapshot);
@@ -1998,11 +2010,19 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
   }
 });
 
-interface ExpressionGuaranteeRow {
+interface AcceptedExpressionGuaranteeRow {
   readonly id: string;
   readonly category: string;
-  readonly expression: ExpressionPlan | unknown;
-  readonly valid: boolean;
+  readonly expression: ExpressionPlan;
+  readonly temporaryCount?: number;
+  readonly valid: true;
+}
+
+interface RejectedExpressionGuaranteeRow {
+  readonly id: string;
+  readonly category: string;
+  readonly expression: unknown;
+  readonly valid: false;
 }
 
 function temporaryExpression(temporaryId: number, span: SourceSpan): ExpressionPlan {
@@ -2025,13 +2045,14 @@ function binaryExpression(
 function handoffPlanWithExpression(
   injected: InjectedInteractionPlan,
   expression: ExpressionPlan,
+  temporaryCount = injected.plan.temporaryCount,
 ): InstructionPlan {
   return replaceHandoffInstruction(injected, {
     kind: "declareBinding",
     name: "answer",
     value: expression,
     span: injected.plan.instructions[injected.handoffInstruction]!.span,
-  }, injected.plan.temporaryCount + 1);
+  }, temporaryCount);
 }
 
 function handoffPlanWithMalformedExpression(
@@ -2048,7 +2069,7 @@ function handoffPlanWithMalformedExpression(
   return replaceHandoffInstruction(
     injected,
     instruction as unknown as Instruction,
-    injected.plan.temporaryCount + 1,
+    injected.plan.temporaryCount,
   );
 }
 
@@ -2064,7 +2085,7 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
     name: "contains",
     span,
   };
-  const accepted: readonly ExpressionGuaranteeRow[] = [
+  const accepted: readonly AcceptedExpressionGuaranteeRow[] = [
     { id: "PR194-expression-direct-temporary", category: "temporary", expression: matching, valid: true },
     { id: "PR194-expression-list-element", category: "list", expression: { kind: "list", elements: [matching], span }, valid: true },
     { id: "PR194-expression-set-element", category: "set", expression: { kind: "set", elements: [matching], span }, valid: true },
@@ -2085,9 +2106,15 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
     { id: "PR194-expression-and-left", category: "short-circuit", expression: binaryExpression("and", matching, literalExpression(true, span), span), valid: true },
     { id: "PR194-expression-or-left", category: "short-circuit", expression: binaryExpression("or", matching, literalExpression(false, span), span), valid: true },
     { id: "PR194-expression-multiple-guaranteed", category: "multiple", expression: { kind: "list", elements: [matching, matching], span }, valid: true },
-    { id: "PR194-expression-wrong-and-correct", category: "multiple", expression: { kind: "list", elements: [wrong, matching], span }, valid: true },
+    {
+      id: "PR194-expression-wrong-and-correct",
+      category: "multiple",
+      expression: { kind: "list", elements: [wrong, matching], span },
+      temporaryCount: injected.plan.temporaryCount + 1,
+      valid: true,
+    },
   ];
-  const rejected: readonly ExpressionGuaranteeRow[] = [
+  const rejected: readonly RejectedExpressionGuaranteeRow[] = [
     { id: "PR194-expression-no-occurrence", category: "missing", expression: literalExpression(false, span), valid: false },
     { id: "PR194-expression-wrong-temporary", category: "wrong temporary", expression: wrong, valid: false },
     { id: "PR194-expression-prepared-reference", category: "prepared reference", expression: { kind: "preparedReference", temporaryId: destination, span }, valid: false },
@@ -2102,14 +2129,24 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
     { id: "PR194-expression-wrong-left-correct-right", category: "short-circuit", expression: binaryExpression("or", wrong, matching, span), valid: false },
   ];
 
-  for (const row of [...accepted, ...rejected]) {
-    const plan = row.valid
-      ? handoffPlanWithExpression(injected, row.expression as ExpressionPlan)
-      : handoffPlanWithMalformedExpression(injected, row.expression);
+  for (const row of accepted) {
+    const plan = handoffPlanWithExpression(
+      injected,
+      row.expression,
+      row.temporaryCount,
+    );
     const before = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, row.valid, `${row.id}: ${row.category}`);
-    if (!row.valid) assert.ok(validation.errors.some((error) => error.code === "TSC002"), row.id);
+    assert.equal(validation.valid, true, `${row.id}: ${row.category}`);
+    assert.deepEqual(plan, before, row.id);
+  }
+
+  for (const row of rejected) {
+    const plan = handoffPlanWithMalformedExpression(injected, row.expression);
+    const before = structuredClone(plan);
+    const validation = validateInstructionPlan(plan);
+    assert.equal(validation.valid, false, `${row.id}: ${row.category}`);
+    assert.ok(validation.errors.some((error) => error.code === "TSC002"), row.id);
     assert.deepEqual(plan, before, row.id);
   }
 
@@ -2119,7 +2156,7 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
     "PR194-expression-eager-right",
     "PR194-expression-multiple-guaranteed",
   ].includes(entry.id))) {
-    const plan = handoffPlanWithExpression(injected, row.expression as ExpressionPlan);
+    const plan = handoffPlanWithExpression(injected, row.expression);
     const { completed } = completeCommittedTextInteraction(plan);
     const continued = executeInstruction(plan, completed.snapshot);
     assert.equal(continued.snapshot.interactionResultHandoff, null, row.id);
@@ -2191,36 +2228,196 @@ test("PR194 matrix: continuation kinds read only their canonical expression fiel
   }
 });
 
-test("PR194 matrix: settlement authority and replay remain atomic", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
-  const pending = waiting(injected.plan);
-  const request = { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction" as const, interactionKind: "text" as const, payload: { kind: "submittedText", submittedText: "committed" } };
-  const completed = completeAction(injected.plan, pending.snapshot, request);
-  const rows: readonly { readonly id: string; readonly mutate: (snapshot: ExternalRecord) => void }[] = [
-    { id: "PR194-null-settlement", mutate: (snapshot) => { snapshot.lastSettlement = null; } },
-    { id: "PR194-older-settlement", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").actionId = 0; } },
-    { id: "PR194-equal-id-wrong-action-kind", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").actionKind = "delay"; } },
-    { id: "PR194-wrong-result", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").result = "forged"; } },
-    { id: "PR194-extra-handoff-field", mutate: (snapshot) => { externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true; } },
+interface SettlementHandoffFixture {
+  readonly injected: InjectedInteractionPlan;
+  readonly committed: RuntimeSnapshot;
+  readonly olderSettlement: unknown;
+  readonly newer: RuntimeSnapshot;
+}
+
+interface RejectedSettlementHandoffRow {
+  readonly id: string;
+  readonly mutate: (snapshot: ExternalRecord, fixture: SettlementHandoffFixture) => void;
+}
+
+function settledHandoffFixture(): SettlementHandoffFixture {
+  const injected = injectTextInteraction(
+    'wait 1 ms\nlet answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit',
+  );
+  const firstDelay = run(injected.plan, createFreshRuntimeSnapshot(injected.plan));
+  assert.equal(firstDelay.snapshot.foregroundAction?.kind, "delay");
+  const firstSettled = observeTime(injected.plan, firstDelay.snapshot, 1);
+  assert.equal(validateRuntimeSnapshot(firstSettled.snapshot, injected.plan).valid, true);
+  const interactionPending = run(injected.plan, firstSettled.snapshot);
+  const action = interactionPending.snapshot.foregroundAction;
+  assert.ok(action !== null && action.kind === "interaction");
+  const completed = completeAction(injected.plan, interactionPending.snapshot, {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "committed" },
+  });
+  assert.equal(completed.outcome.kind, "completed");
+  assert.equal(validateRuntimeSnapshot(completed.snapshot, injected.plan).valid, true);
+  assert.ok(firstSettled.snapshot.lastSettlement !== null);
+  assert.ok(
+    firstSettled.snapshot.lastSettlement.actionId < completed.snapshot.nextActionId - 1,
+    "the retained delay settlement must be a positive, genuinely older action",
+  );
+  assert.doesNotThrow(() => checkpointJsonRoundTrip(injected.plan, completed.snapshot));
+
+  const consumed = executeInstruction(injected.plan, completed.snapshot);
+  const cleared = executeInstruction(injected.plan, consumed.snapshot);
+  const laterDelay = run(injected.plan, cleared.snapshot);
+  assert.equal(laterDelay.snapshot.foregroundAction?.kind, "delay");
+  const laterSettled = observeTime(injected.plan, laterDelay.snapshot, 2);
+  assert.equal(laterSettled.snapshot.lastSettlement?.actionKind, "delay");
+
+  const newer = structuredClone(completed.snapshot);
+  newer.lastSettlement = structuredClone(laterSettled.snapshot.lastSettlement);
+  newer.nextActionId = laterSettled.snapshot.nextActionId;
+  newer.nextEventSequence = laterSettled.snapshot.nextEventSequence;
+  newer.currentSessionTimeMs = laterSettled.snapshot.currentSessionTimeMs;
+  const newerValidation = validateRuntimeSnapshot(newer, injected.plan);
+  assert.equal(newerValidation.valid, true, JSON.stringify(newerValidation.errors));
+  assert.doesNotThrow(() => checkpointJsonRoundTrip(injected.plan, newer));
+
+  return {
+    injected,
+    committed: completed.snapshot,
+    olderSettlement: structuredClone(firstSettled.snapshot.lastSettlement),
+    newer,
+  };
+}
+
+function assertRejectedSettlementHandoffSnapshot(
+  plan: InstructionPlan,
+  validSnapshot: RuntimeSnapshot,
+  invalidSnapshot: ExternalRecord,
+  id: string,
+): void {
+  const beforeValidation = structuredClone(invalidSnapshot);
+  assert.equal(validateRuntimeSnapshot(invalidSnapshot, plan).valid, false, id);
+  assert.deepEqual(invalidSnapshot, beforeValidation, `${id}: validation input`);
+
+  const beforePlan = structuredClone(plan);
+  const beforeCheckpoint = structuredClone(invalidSnapshot);
+  // The external snapshot is deliberately malformed at this public boundary.
+  assert.throws(
+    () => createCheckpoint(plan, invalidSnapshot as unknown as RuntimeSnapshot),
+    (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002",
+    id,
+  );
+  assert.deepEqual(plan, beforePlan, `${id}: checkpoint plan input`);
+  assert.deepEqual(invalidSnapshot, beforeCheckpoint, `${id}: checkpoint snapshot input`);
+
+  const validCheckpoint = createCheckpoint(plan, validSnapshot);
+  const invalidCheckpoint = { ...validCheckpoint, snapshot: invalidSnapshot };
+  const beforeRestore = structuredClone(invalidCheckpoint);
+  assert.throws(
+    () => restoreCheckpoint(invalidCheckpoint),
+    (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002",
+    id,
+  );
+  assert.deepEqual(invalidCheckpoint, beforeRestore, `${id}: restore checkpoint input`);
+}
+
+test("PR194 matrix: settlement and active handoff validation", () => {
+  const fixture = settledHandoffFixture();
+  const { injected, committed, newer } = fixture;
+
+  const accepted: readonly { readonly id: string; readonly snapshot: RuntimeSnapshot }[] = [
+    { id: "PR194-settlement-exact-matching", snapshot: committed },
+    {
+      id: "PR194-settlement-exact-matching-roundtrip",
+      snapshot: checkpointJsonRoundTrip(injected.plan, committed).snapshot,
+    },
+    { id: "PR194-settlement-genuinely-newer-delay", snapshot: newer },
+    {
+      id: "PR194-settlement-genuinely-newer-delay-roundtrip",
+      snapshot: checkpointJsonRoundTrip(injected.plan, newer).snapshot,
+    },
+  ];
+  for (const row of accepted) {
+    const beforePlan = structuredClone(injected.plan);
+    const before = structuredClone(row.snapshot);
+    assert.equal(validateRuntimeSnapshot(row.snapshot, injected.plan).valid, true, row.id);
+    assert.doesNotThrow(() => createCheckpoint(injected.plan, row.snapshot), row.id);
+    const restored = checkpointJsonRoundTrip(injected.plan, row.snapshot);
+    assert.deepEqual(restored.plan, injected.plan, `${row.id}: restored plan`);
+    assert.deepEqual(restored.snapshot, row.snapshot, `${row.id}: restored snapshot`);
+    assert.deepEqual(injected.plan, beforePlan, `${row.id}: plan input`);
+    assert.deepEqual(row.snapshot, before, row.id);
+  }
+
+  const continued = executeInstruction(injected.plan, newer);
+  assert.equal(continued.snapshot.interactionResultHandoff, null, "PR194-newer-settlement-consume");
+  assert.equal(bindingValue(continued.snapshot, "answer"), "committed");
+  assert.deepEqual(continued.snapshot.lastSettlement, newer.lastSettlement);
+  const cleaned = executeInstruction(injected.plan, continued.snapshot);
+  assert.equal(
+    cleaned.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary),
+    false,
+  );
+
+  const rows: readonly RejectedSettlementHandoffRow[] = [
+    { id: "PR194-settlement-null", mutate: (snapshot) => { snapshot.lastSettlement = null; } },
+    { id: "PR194-settlement-older-valid", mutate: (snapshot, current) => { snapshot.lastSettlement = structuredClone(current.olderSettlement); } },
+    { id: "PR194-settlement-equal-wrong-action-kind", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").actionKind = "delay"; } },
+    { id: "PR194-settlement-equal-wrong-interaction-kind", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").interactionKind = "number"; } },
+    { id: "PR194-settlement-equal-wrong-kind", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").settlementKind = "rejected"; } },
+    { id: "PR194-settlement-wrong-owning-instruction", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").owningInstruction = 0; } },
+    { id: "PR194-settlement-wrong-continuation", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").continuationInstruction = 0; } },
+    { id: "PR194-settlement-wrong-owner", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 1; snapshot.nextCallFrameId = 2; } },
+    { id: "PR194-settlement-wrong-destination", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").destinationTemporary = 2; } },
+    { id: "PR194-settlement-wrong-result", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").result = "forged"; } },
+    { id: "PR194-settlement-wrong-transcript", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").transcriptText = "forged"; } },
+    { id: "PR194-settlement-missing-field", mutate: (snapshot) => { delete externalRecord(snapshot.lastSettlement, "settlement").result; } },
+    { id: "PR194-settlement-extra-field", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").extra = true; } },
+    { id: "PR194-handoff-missing-field", mutate: (snapshot) => { delete externalRecord(snapshot.interactionResultHandoff, "handoff").result; } },
+    { id: "PR194-handoff-extra-field", mutate: (snapshot) => { externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true; } },
+    { id: "PR194-handoff-destination-missing", mutate: (snapshot) => { externalArray(snapshot.temporaries, "temporaries").splice(0, 1); } },
+    { id: "PR194-handoff-destination-forged", mutate: (snapshot) => { externalRecord(externalArray(snapshot.temporaries, "temporaries")[0], "temporary").value = "forged"; } },
+    { id: "PR194-handoff-next-instruction", mutate: (snapshot) => { snapshot.nextInstruction = 0; } },
+    { id: "PR194-handoff-active-foreground", mutate: (snapshot) => { snapshot.foregroundAction = { kind: "delay" }; } },
+    { id: "PR194-handoff-action-id-counter", mutate: (snapshot) => { snapshot.nextActionId = externalRecord(snapshot.interactionResultHandoff, "handoff").actionId; } },
+    { id: "PR194-settlement-action-id-counter", mutate: (snapshot) => { snapshot.nextActionId = externalRecord(snapshot.lastSettlement, "settlement").actionId; } },
+    { id: "PR194-settlement-request-nonpositive", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").requestEventSequence = 0; } },
+    { id: "PR194-settlement-request-after-transcript", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); settlement.requestEventSequence = settlement.transcriptEventSequence; } },
+    { id: "PR194-settlement-transcript-after-completion", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); settlement.transcriptEventSequence = settlement.completionEventSequence; } },
+    { id: "PR194-settlement-completion-after-next-event", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); snapshot.nextEventSequence = settlement.completionEventSequence; } },
   ];
   for (const row of rows) {
-    const snapshot = externalRecord(structuredClone(completed.snapshot), row.id);
-    row.mutate(snapshot);
-    const beforeValidation = structuredClone(snapshot);
-    assert.equal(validateRuntimeSnapshot(snapshot, injected.plan).valid, false, row.id);
-    assert.deepEqual(snapshot, beforeValidation, row.id);
-    const beforeCheckpoint = structuredClone(snapshot);
-    const beforePlan = structuredClone(injected.plan);
-    // Deliberately malformed external snapshot data crosses the public checkpoint boundary.
-    assert.throws(() => createCheckpoint(injected.plan, snapshot as unknown as RuntimeSnapshot), (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002", row.id);
-    assert.deepEqual(snapshot, beforeCheckpoint, row.id);
-    assert.deepEqual(injected.plan, beforePlan, row.id);
-    const checkpoint = { ...createCheckpoint(injected.plan, completed.snapshot), snapshot };
-    const beforeRestore = structuredClone(checkpoint);
-    assert.throws(() => restoreCheckpoint(checkpoint), (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002", row.id);
-    assert.deepEqual(checkpoint, beforeRestore, row.id);
+    const invalid = externalRecord(structuredClone(committed), row.id);
+    row.mutate(invalid, fixture);
+    assertRejectedSettlementHandoffSnapshot(injected.plan, committed, invalid, row.id);
   }
-  for (const boundary of [completed.snapshot, deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, completed.snapshot))).snapshot, executeInstruction(injected.plan, completed.snapshot).snapshot, run(injected.plan, executeInstruction(injected.plan, completed.snapshot).snapshot).snapshot]) {
+});
+
+// Retained focused replay regression; the full replay matrix remains milestone 3B.
+test("PR194 matrix: settlement authority and replay remain atomic", () => {
+  const injected = injectTextInteraction(
+    'let answer = "__interaction_result__"\nsay answer\nexit',
+  );
+  const pending = waiting(injected.plan);
+  const action = pending.snapshot.foregroundAction;
+  assert.ok(action !== null);
+  const request = {
+    actionId: action.actionId,
+    actionKind: "interaction" as const,
+    interactionKind: "text" as const,
+    payload: { kind: "submittedText" as const, submittedText: "committed" },
+  };
+  const completed = completeAction(injected.plan, pending.snapshot, request);
+  const consumed = executeInstruction(injected.plan, completed.snapshot);
+  const cleaned = run(injected.plan, consumed.snapshot).snapshot;
+  const boundaries = [
+    completed.snapshot,
+    checkpointJsonRoundTrip(injected.plan, completed.snapshot).snapshot,
+    consumed.snapshot,
+    cleaned,
+  ];
+  for (const boundary of boundaries) {
     const before = structuredClone(boundary);
     const replay = completeAction(injected.plan, boundary, request);
     assert.equal(replay.outcome.kind, "alreadySettled", "PR194-duplicate-replay");
