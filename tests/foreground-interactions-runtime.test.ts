@@ -2115,14 +2115,101 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
     span,
   };
   const accepted: readonly AcceptedExpressionGuaranteeRow[] = [
-    { id: "PR194-expression-direct-temporary", category: "temporary", expression: matching, valid: true },
-    { id: "PR194-expression-list-element", category: "list", expression: { kind: "list", elements: [matching], span }, valid: true },
-    { id: "PR194-expression-set-element", category: "set", expression: { kind: "set", elements: [matching], span }, valid: true },
-    { id: "PR194-expression-object-property-value", category: "object", expression: { kind: "object", properties: [{ name: "answer", value: matching, span }], span }, valid: true },
-    { id: "PR194-expression-group", category: "group", expression: { kind: "group", expression: matching, span }, valid: true },
-    { id: "PR194-expression-template-part", category: "template", expression: { kind: "template", parts: [{ kind: "text", value: "answer: ", span }, { kind: "expression", expression: matching, span }], span }, valid: true },
-    { id: "PR194-expression-property-object", category: "property", expression: { kind: "property", object: matching, name: "length", span }, valid: true },
-    { id: "PR194-expression-index-object", category: "index", expression: { kind: "index", object: matching, index: literalExpression(0, span), span }, valid: true },
+    {
+      id: "PR194-expression-direct-temporary",
+      category: "temporary",
+      expression: matching,
+      valid: true,
+    },
+    {
+      id: "PR194-expression-list-element",
+      category: "list",
+      expression: {
+        kind: "list",
+        elements: [matching],
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-set-element",
+      category: "set",
+      expression: {
+        kind: "set",
+        elements: [matching],
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-object-property-value",
+      category: "object",
+      expression: {
+        kind: "object",
+        properties: [
+          {
+            name: "answer",
+            value: matching,
+            span,
+          },
+        ],
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-group",
+      category: "group",
+      expression: {
+        kind: "group",
+        expression: matching,
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-template-part",
+      category: "template",
+      expression: {
+        kind: "template",
+        parts: [
+          {
+            kind: "text",
+            value: "answer: ",
+            span,
+          },
+          {
+            kind: "expression",
+            expression: matching,
+            span,
+          },
+        ],
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-property-object",
+      category: "property",
+      expression: {
+        kind: "property",
+        object: matching,
+        name: "length",
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-index-object",
+      category: "index",
+      expression: {
+        kind: "index",
+        object: matching,
+        index: literalExpression(0, span),
+        span,
+      },
+      valid: true,
+    },
     { id: "PR194-expression-index-index", category: "index", expression: { kind: "index", object: { kind: "list", elements: [literalExpression("value", span)], span }, index: matching, span }, valid: true },
     { id: "PR194-expression-property-call-receiver", category: "call", expression: { kind: "call", callee: { kind: "property", object: matching, name: "contains", span }, arguments: [], span }, valid: true },
     { id: "PR194-expression-positional-call-argument", category: "call", expression: { kind: "call", callee: propertyCallee, arguments: [{ kind: "positional", value: matching, span }], span }, valid: true },
@@ -2594,11 +2681,47 @@ test("PR194 matrix: settlement and active handoff validation", () => {
         snapshot.currentSessionTimeMs = pendingDelay.currentSessionTimeMs;
       },
     },
-    { id: "PR194-exact-matching-handoff-settlement-counter", category: "counter", mutate: (snapshot) => { snapshot.nextActionId = externalRecord(snapshot.interactionResultHandoff, "handoff").actionId; } },
-    { id: "PR194-settlement-request-nonpositive", category: "chronology", mutate: (snapshot) => { externalRecord(snapshot.lastSettlement, "settlement").requestEventSequence = 0; } },
-    { id: "PR194-settlement-request-after-transcript", category: "chronology", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); settlement.requestEventSequence = settlement.transcriptEventSequence; } },
-    { id: "PR194-settlement-transcript-after-completion", category: "chronology", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); settlement.transcriptEventSequence = settlement.completionEventSequence; } },
-    { id: "PR194-settlement-completion-after-next-event", category: "chronology", mutate: (snapshot) => { const settlement = externalRecord(snapshot.lastSettlement, "settlement"); snapshot.nextEventSequence = settlement.completionEventSequence; } },
+    {
+      id: "PR194-exact-matching-handoff-settlement-counter",
+      category: "counter",
+      mutate: (snapshot) => {
+        snapshot.nextActionId = externalRecord(
+          snapshot.interactionResultHandoff,
+          "handoff",
+        ).actionId;
+      },
+    },
+    {
+      id: "PR194-settlement-request-nonpositive",
+      category: "chronology",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").requestEventSequence = 0;
+      },
+    },
+    {
+      id: "PR194-settlement-request-after-transcript",
+      category: "chronology",
+      mutate: (snapshot) => {
+        const settlement = externalRecord(snapshot.lastSettlement, "settlement");
+        settlement.requestEventSequence = settlement.transcriptEventSequence;
+      },
+    },
+    {
+      id: "PR194-settlement-transcript-after-completion",
+      category: "chronology",
+      mutate: (snapshot) => {
+        const settlement = externalRecord(snapshot.lastSettlement, "settlement");
+        settlement.transcriptEventSequence = settlement.completionEventSequence;
+      },
+    },
+    {
+      id: "PR194-settlement-completion-after-next-event",
+      category: "chronology",
+      mutate: (snapshot) => {
+        const settlement = externalRecord(snapshot.lastSettlement, "settlement");
+        snapshot.nextEventSequence = settlement.completionEventSequence;
+      },
+    },
   ];
   const equalIdDelayControl = structuredClone(fixture.runtimeProducedLaterSettledDelay);
   const exactHandoff = committed.interactionResultHandoff;
@@ -2623,7 +2746,10 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     assertRejectedSettlementHandoffSnapshot(injected.plan, committed, invalid, `${row.category}: ${row.id}`);
   }
 
-  const retainedSettlementCounter = externalRecord(structuredClone(validatedCompositeWithNewerSettlement), "retained newer settlement counter");
+  const retainedSettlementCounter = externalRecord(
+    structuredClone(validatedCompositeWithNewerSettlement),
+    "retained newer settlement counter",
+  );
   retainedSettlementCounter.nextActionId = fixture.laterDelaySettlement.actionId;
   assertRejectedSettlementHandoffSnapshot(
     injected.plan,
@@ -2679,7 +2805,16 @@ interface ReplayRow {
   readonly id: string;
   readonly plan: InstructionPlan;
   readonly snapshot: RuntimeSnapshot;
-  readonly request: TextInteractionCompletionRequest | { readonly actionId: number; readonly actionKind: "delay"; readonly payload: { readonly kind: "time"; readonly currentSessionTimeMs: number } };
+  readonly request:
+    | TextInteractionCompletionRequest
+    | {
+      readonly actionId: number;
+      readonly actionKind: "delay";
+      readonly payload: {
+        readonly kind: "time";
+        readonly currentSessionTimeMs: number;
+      };
+    };
   readonly expected:
     | { readonly kind: "alreadySettled" }
     | { readonly kind: "staleAction"; readonly actionId: number }
@@ -2891,12 +3026,66 @@ test("PR194 matrix: bounded replay is exact-once across ordinary and direct hand
     },
   };
   const staleRows: readonly ReplayRow[] = [
-    { id: "PR194-replay-old-interaction-newer-composite", plan: settlementFixture.injected.plan, snapshot: composite, request: oldRequest, expected: { kind: "staleAction", actionId: oldRequest.actionId } },
-    { id: "PR194-replay-old-interaction-newer-composite-roundtrip", plan: settlementFixture.injected.plan, snapshot: checkpointJsonRoundTrip(settlementFixture.injected.plan, composite).snapshot, request: oldRequest, expected: { kind: "staleAction", actionId: oldRequest.actionId } },
-    { id: "PR194-replay-old-interaction-after-consume", plan: settlementFixture.injected.plan, snapshot: compositeConsumed, request: oldRequest, expected: { kind: "staleAction", actionId: oldRequest.actionId } },
-    { id: "PR194-replay-old-interaction-after-cleanup", plan: settlementFixture.injected.plan, snapshot: compositeCleaned, request: oldRequest, expected: { kind: "staleAction", actionId: oldRequest.actionId } },
-    { id: "PR194-replay-old-interaction-cleanup-roundtrip", plan: settlementFixture.injected.plan, snapshot: checkpointJsonRoundTrip(settlementFixture.injected.plan, compositeCleaned).snapshot, request: oldRequest, expected: { kind: "staleAction", actionId: oldRequest.actionId } },
-    { id: "PR194-replay-current-newer-delay", plan: settlementFixture.injected.plan, snapshot: composite, request: newerDelayRequest, expected: { kind: "alreadySettled" } },
+    {
+      id: "PR194-replay-old-interaction-newer-composite",
+      plan: settlementFixture.injected.plan,
+      snapshot: composite,
+      request: oldRequest,
+      expected: {
+        kind: "staleAction",
+        actionId: oldRequest.actionId,
+      },
+    },
+    {
+      id: "PR194-replay-old-interaction-newer-composite-roundtrip",
+      plan: settlementFixture.injected.plan,
+      snapshot: checkpointJsonRoundTrip(settlementFixture.injected.plan, composite).snapshot,
+      request: oldRequest,
+      expected: {
+        kind: "staleAction",
+        actionId: oldRequest.actionId,
+      },
+    },
+    {
+      id: "PR194-replay-old-interaction-after-consume",
+      plan: settlementFixture.injected.plan,
+      snapshot: compositeConsumed,
+      request: oldRequest,
+      expected: {
+        kind: "staleAction",
+        actionId: oldRequest.actionId,
+      },
+    },
+    {
+      id: "PR194-replay-old-interaction-after-cleanup",
+      plan: settlementFixture.injected.plan,
+      snapshot: compositeCleaned,
+      request: oldRequest,
+      expected: {
+        kind: "staleAction",
+        actionId: oldRequest.actionId,
+      },
+    },
+    {
+      id: "PR194-replay-old-interaction-cleanup-roundtrip",
+      plan: settlementFixture.injected.plan,
+      snapshot: checkpointJsonRoundTrip(
+        settlementFixture.injected.plan,
+        compositeCleaned,
+      ).snapshot,
+      request: oldRequest,
+      expected: {
+        kind: "staleAction",
+        actionId: oldRequest.actionId,
+      },
+    },
+    {
+      id: "PR194-replay-current-newer-delay",
+      plan: settlementFixture.injected.plan,
+      snapshot: composite,
+      request: newerDelayRequest,
+      expected: { kind: "alreadySettled" },
+    },
   ];
   for (const row of staleRows) assertReplayRow(row);
 });
@@ -3329,8 +3518,31 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
   const span = injected.plan.instructions[injected.handoffInstruction]!.span;
   const rows: readonly { readonly id: string; readonly mutate: (plan: ExternalRecord) => void }[] = [
-    { id: "PR194-jump-continuation", mutate: (plan) => { externalInstructions(plan)[injected.handoffInstruction] = { kind: "jump", target: injected.clearInstruction, span }; } },
-    { id: "PR194-second-blocking-action", mutate: (plan) => { externalInstructions(plan)[injected.handoffInstruction] = { kind: "wait", duration: { kind: "literal", value: 1, span }, unit: "ms", span }; } },
+    {
+      id: "PR194-jump-continuation",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.handoffInstruction] = {
+          kind: "jump",
+          target: injected.clearInstruction,
+          span,
+        };
+      },
+    },
+    {
+      id: "PR194-second-blocking-action",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.handoffInstruction] = {
+          kind: "wait",
+          duration: {
+            kind: "literal",
+            value: 1,
+            span,
+          },
+          unit: "ms",
+          span,
+        };
+      },
+    },
     {
       id: "PR194-consume-wrong-temporary",
       mutate: (plan) => {
@@ -3342,10 +3554,69 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
         };
       },
     },
-    { id: "PR194-missing-clear", mutate: (plan) => { externalInstructions(plan)[injected.clearInstruction] = { kind: "say", speaker: null, value: { kind: "literal", value: "x", span }, span }; } },
-    { id: "PR194-wrong-clear", mutate: (plan) => { externalRecord(externalInstructions(plan)[injected.clearInstruction], "clear").temporaryId = injected.destinationTemporary + 1; } },
-    { id: "PR194-second-producer", mutate: (plan) => { externalInstructions(plan)[injected.clearInstruction] = { kind: "storeTemporary", temporaryId: injected.destinationTemporary, value: { kind: "literal", value: "x", span }, expectBoolean: false, span }; } },
-    { id: "PR194-return-value-not-guaranteed", mutate: (plan) => { externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value = { kind: "binary", operator: "or", left: { kind: "literal", value: true, span }, right: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, span }; } },
+    {
+      id: "PR194-missing-clear",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.clearInstruction] = {
+          kind: "say",
+          speaker: null,
+          value: {
+            kind: "literal",
+            value: "x",
+            span,
+          },
+          span,
+        };
+      },
+    },
+    {
+      id: "PR194-wrong-clear",
+      mutate: (plan) => {
+        externalRecord(
+          externalInstructions(plan)[injected.clearInstruction],
+          "clear",
+        ).temporaryId = injected.destinationTemporary + 1;
+      },
+    },
+    {
+      id: "PR194-second-producer",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.clearInstruction] = {
+          kind: "storeTemporary",
+          temporaryId: injected.destinationTemporary,
+          value: {
+            kind: "literal",
+            value: "x",
+            span,
+          },
+          expectBoolean: false,
+          span,
+        };
+      },
+    },
+    {
+      id: "PR194-return-value-not-guaranteed",
+      mutate: (plan) => {
+        externalRecord(
+          externalInstructions(plan)[injected.handoffInstruction],
+          "handoff",
+        ).value = {
+          kind: "binary",
+          operator: "or",
+          left: {
+            kind: "literal",
+            value: true,
+            span,
+          },
+          right: {
+            kind: "temporary",
+            temporaryId: injected.destinationTemporary,
+            span,
+          },
+          span,
+        };
+      },
+    },
   ];
   for (const row of rows) {
     const plan = externalRecord(structuredClone(injected.plan), row.id);
@@ -3363,8 +3634,29 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
   const pending = waiting(injected.plan);
   const actionId = pending.snapshot.foregroundAction!.actionId;
   const requests = [
-    { id: "PR194-invalid-payload", request: { actionId, actionKind: "interaction" as const, interactionKind: "text" as const, payload: { kind: "submittedText", submittedText: " \t" } } },
-    { id: "PR194-wrong-action-kind", request: { actionId, actionKind: "delay" as const, payload: { kind: "time", currentSessionTimeMs: 0 } } },
+    {
+      id: "PR194-invalid-payload",
+      request: {
+        actionId,
+        actionKind: "interaction" as const,
+        interactionKind: "text" as const,
+        payload: {
+          kind: "submittedText",
+          submittedText: " \t",
+        },
+      },
+    },
+    {
+      id: "PR194-wrong-action-kind",
+      request: {
+        actionId,
+        actionKind: "delay" as const,
+        payload: {
+          kind: "time",
+          currentSessionTimeMs: 0,
+        },
+      },
+    },
   ];
   for (const row of requests) {
     const before = structuredClone(pending.snapshot);
@@ -3372,28 +3664,67 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
     assert.deepEqual(result.snapshot, before, row.id);
     assert.deepEqual(result.events, [], row.id);
   }
-  const completed = completeAction(injected.plan, pending.snapshot, { actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
+  const completed = completeAction(injected.plan, pending.snapshot, {
+    actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: {
+      kind: "submittedText",
+      submittedText: "committed",
+    },
+  });
   const mutations: readonly ((snapshot: ExternalRecord) => void)[] = [
-    (snapshot) => { snapshot.interactionResultHandoff = null; },
-    (snapshot) => { externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99; snapshot.nextCallFrameId = 100; },
-    (snapshot) => { externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true; },
+    (snapshot) => {
+      snapshot.interactionResultHandoff = null;
+    },
+    (snapshot) => {
+      externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99;
+      snapshot.nextCallFrameId = 100;
+    },
+    (snapshot) => {
+      externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true;
+    },
   ];
   for (const mutation of mutations) {
     const snapshot = externalRecord(structuredClone(completed.snapshot), "malformed snapshot");
     mutation(snapshot);
     const before = structuredClone(snapshot);
     // Deliberately malformed external snapshot data must be rejected before completion mutates it.
-    assert.throws(() => completeAction(injected.plan, snapshot as unknown as RuntimeSnapshot, { actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } }));
+    assert.throws(() => completeAction(injected.plan, snapshot as unknown as RuntimeSnapshot, {
+      actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: {
+        kind: "submittedText",
+        submittedText: "committed",
+      },
+    }));
     assert.deepEqual(snapshot, before);
   }
 });
 
 test("PR194 matrix: root, function, argument, and suspended-caller ownership contexts", () => {
   const rows = [
-    { id: "PR194-root-context", source: 'let answer = "__interaction_result__"\nsay answer\nexit', owner: null },
-    { id: "PR194-function-context", source: 'function prompt { let answer = "__interaction_result__"\nsay answer\nreturn }\nprompt()\nexit', owner: "frame" },
-    { id: "PR194-argument-context", source: 'function send(value) { say value\nreturn }\nsend("__interaction_result__")\nexit', owner: null },
-    { id: "PR194-suspended-caller-context", source: 'function prompt { return "__interaction_result__" }\nfunction send(before, answer) { say `${before}:${answer}`\nreturn }\nsend("first", prompt())\nexit', owner: "frame" },
+    {
+      id: "PR194-root-context",
+      source: 'let answer = "__interaction_result__"\nsay answer\nexit',
+      owner: null,
+    },
+    {
+      id: "PR194-function-context",
+      source: 'function prompt { let answer = "__interaction_result__"\nsay answer\nreturn }\nprompt()\nexit',
+      owner: "frame",
+    },
+    {
+      id: "PR194-argument-context",
+      source: 'function send(value) { say value\nreturn }\nsend("__interaction_result__")\nexit',
+      owner: null,
+    },
+    {
+      id: "PR194-suspended-caller-context",
+      source: 'function prompt { return "__interaction_result__" }\nfunction send(before, answer) { say `${before}:${answer}`\nreturn }\nsend("first", prompt())\nexit',
+      owner: "frame",
+    },
   ] as const;
   for (const row of rows) {
     const injected = injectTextInteraction(row.source);
