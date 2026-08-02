@@ -13,6 +13,7 @@ For every substantive task, read:
 7. `docs/OPEN-DECISIONS.md` when resolving a gap
 8. `docs/planning/POC-TO-ALPHA-BACKLOG.md` when proposing or selecting future POC/pre-alpha work
 9. `docs/DEVELOPMENT-WORKFLOW.md` when creating implementation issues, reviewing pull requests, processing review feedback, or participating in coordinated work
+10. `docs/DOCUMENTATION-OWNERSHIP.md` before non-trivial documentation edits or reviews
 
 Do not treat planning documents, wishes, research files, historical audits, or source examples as accepted decisions. A backlog item is not implementation scope unless the current owner/coordinator assignment or phase plan explicitly schedules its ID.
 
@@ -25,7 +26,6 @@ Do not treat planning documents, wishes, research files, historical audits, or s
 - Laravel is the only public backend.
 - Preserve deterministic source evaluation order and explicit JSON-safe pause/resume state.
 - Validate external, checkpoint, host, package, and future integration data at runtime.
-- Apply the pragmatic YAGNI rule below when deciding present implementation scope and future-facing complexity.
 - Do not add dependencies without documenting need, alternatives, maintenance impact, and security impact.
 - Do not weaken tests to hide failures.
 
@@ -56,25 +56,20 @@ These proportionality rules do not weaken accepted behavior, deterministic
 execution, serializable checkpoints, or validation at real external, host,
 checkpoint, persistence, package, and security boundaries.
 
-## Pragmatic YAGNI
+## KISS, pragmatic YAGNI, and DRY
 
-Implement the smallest design that satisfies current owner-approved behavior
-and real architecture, persistence, determinism, security, and trust
-boundaries.
+KISS is primary: choose the simplest complete approach across design,
+implementation, evidence, workflow, and maintenance while preserving current
+owner-approved behavior and real boundaries. Pragmatic YAGNI applies KISS to
+future-facing complexity: add only current need or the smallest preparation
+justified by a scheduled consumer, a boundary that must be correct when first
+introduced, or a demonstrated difficult-to-reverse problem.
 
-Future-facing preparation is justified only when a concrete consumer or
-obligation has been explicitly scheduled by the owner or coordinator, an
-accepted boundary must be correct when first introduced, or deferral would
-create a demonstrated, material, and difficult-to-reverse data, security,
-persistence, or public-compatibility problem. Add only the smallest seam needed
-for that concrete case; hypothetical consumers, unscheduled features, and
-unaccepted future architecture do not justify broader infrastructure.
-
-Otherwise propose or route the idea through the appropriate owner-governed
-process. A proposal does not accept, schedule, or authorize implementation.
-Pragmatic YAGNI does not permit weakening accepted behavior or real external,
-host, checkpoint, persistence, package, determinism, or security boundaries.
-Use `docs/DEVELOPMENT-WORKFLOW.md` for the detailed decision and routing rules.
+Prefer DRY when one canonical source plus references is clearer and simpler;
+prefer limited local repetition when that is clearer and does not create
+competing authority, duplicated moving facts, or unnecessary recurring context.
+Use `docs/DEVELOPMENT-WORKFLOW.md` for detailed application and
+`docs/DOCUMENTATION-OWNERSHIP.md` for documentation placement and review.
 
 ## Review convergence
 

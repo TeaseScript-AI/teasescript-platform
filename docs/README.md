@@ -54,4 +54,4 @@ Temporary work breakdowns, executor assignments, and merge tracking remain outsi
 
 ## Documentation ownership
 
-See `DOCUMENTATION-OWNERSHIP.md` for the boundary between canonical repository documentation and the shared project research archive.
+See `DOCUMENTATION-OWNERSHIP.md` for mandatory documentation-edit/review guidance and the boundary between canonical repository documentation and the shared project research archive.
