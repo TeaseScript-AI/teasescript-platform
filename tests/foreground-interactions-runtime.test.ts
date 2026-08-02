@@ -3697,6 +3697,7 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
     const snapshot = externalRecord(structuredClone(completed.snapshot), "malformed snapshot");
     row.mutate(snapshot);
     const before = structuredClone(snapshot);
+    const planBefore = structuredClone(injected.plan);
     // Deliberately malformed external snapshot data must be rejected before completion mutates it.
     assert.throws(() => completeAction(injected.plan, snapshot as unknown as RuntimeSnapshot, {
       actionId,
@@ -3712,6 +3713,7 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
       assert.equal(error.message, row.message, row.id);
       return true;
     }, row.id);
+    assert.deepEqual(injected.plan, planBefore, row.id);
     assert.deepEqual(snapshot, before, row.id);
   }
 });
