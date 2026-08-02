@@ -12,7 +12,7 @@ For every substantive task, read:
 6. relevant ADRs in `docs/decisions/`
 7. `docs/OPEN-DECISIONS.md` when resolving a gap
 8. `docs/planning/POC-TO-ALPHA-BACKLOG.md` when proposing or selecting future POC/pre-alpha work
-9. `docs/DEVELOPMENT-WORKFLOW.md` when creating implementation issues or participating in coordinated work
+9. `docs/DEVELOPMENT-WORKFLOW.md` when creating implementation issues, reviewing pull requests, processing review feedback, or participating in coordinated work
 
 Do not treat planning documents, wishes, research files, historical audits, or source examples as accepted decisions. A backlog item is not implementation scope unless the current owner/coordinator assignment or phase plan explicitly schedules its ID.
 
@@ -62,23 +62,19 @@ Implement the smallest design that satisfies current owner-approved behavior
 and real architecture, persistence, determinism, security, and trust
 boundaries.
 
-Do not add abstractions, extension points, compatibility layers, migration
-paths, registries, schemas, services, generalized hardening, or permanent test
-contracts when their only justification is hypothetical consumers, unscheduled
-features, or unaccepted future architecture.
-
 Future-facing preparation is justified only when a concrete consumer or
 obligation has been explicitly scheduled by the owner or coordinator, an
 accepted boundary must be correct when first introduced, or deferral would
 create a demonstrated, material, and difficult-to-reverse data, security,
-persistence, or public-compatibility problem. Even then, add only the smallest
-seam needed for that concrete case; do not build the generalized future system.
+persistence, or public-compatibility problem. Add only the smallest seam needed
+for that concrete case; hypothetical consumers, unscheduled features, and
+unaccepted future architecture do not justify broader infrastructure.
 
 Otherwise propose or route the idea through the appropriate owner-governed
-`WISHES.xml`, planning, backlog, or `docs/OPEN-DECISIONS.md` process. Recording a
-proposal does not accept, schedule, or authorize implementation. Pragmatic
-YAGNI does not permit weakening accepted behavior or real external, host,
-checkpoint, persistence, package, determinism, or security boundaries.
+process. A proposal does not accept, schedule, or authorize implementation.
+Pragmatic YAGNI does not permit weakening accepted behavior or real external,
+host, checkpoint, persistence, package, determinism, or security boundaries.
+Use `docs/DEVELOPMENT-WORKFLOW.md` for the detailed decision and routing rules.
 
 ## Review convergence
 

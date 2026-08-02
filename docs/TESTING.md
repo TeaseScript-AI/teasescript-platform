@@ -57,7 +57,7 @@ baseline for the reported root cause and pass after the repair. When
 failing-before evidence cannot reasonably be supplied, document why and provide
 the strongest focused reproduction available.
 
-One focused regression is sufficient when the defect and its neighboring
+A focused regression set is sufficient when the defect and its neighboring
 supported behavior are understood. When repeated sibling findings or an
 enumerable behavior space leave material completeness uncertainty, use the
 systematic-coverage guidance below instead of indefinitely accumulating
@@ -124,10 +124,12 @@ A matrix or equivalent model should:
 - permit later consolidation without losing any unique evidence obligation.
 
 Unsupported or out-of-scope combinations do not automatically require
-executable cases. Accepted behavior and rejection through a real supported or
-trusted boundary require executable evidence. Add an unsupported-case
-regression only when it protects a real boundary or prevents an actually
-reachable unsupported composition from being accepted.
+executable cases. For obligations included in the bounded coverage model,
+accepted behavior and required rejection through a real supported or trusted
+boundary require executable evidence. When a real boundary must reject an
+otherwise unsupported composition, classify that cell as a rejected obligation
+and test it as such. Other unsupported or out-of-scope cells may remain
+classified but unexecuted.
 
 An additive evidence phase may temporarily retain overlapping regressions while
 the behavior space is being mapped. Once an independent check confirms that the
@@ -413,7 +415,7 @@ Timed actions must use an injected fake clock or equivalent deterministic time s
 
 ADR 0016 defines the shared contract; action-specific tests remain required for each later API and UI behavior.
 
-The implemented ADR 0018 runtime foundation adds manual validated-plan coverage for button, text, number, unlabelled choice, identifier-labelled choice, and numeric-labelled choice. Tests cover exact normalization/parsing, ambiguous typed choices, canonical transcript ordering and requesting-speaker provenance, duplicate/stale/unknown/wrong-kind classification, checkpoint JSON round trips, destination absence before action creation, immutable settlement replay plus separate live/released result lifecycle after intervening instructions and across suspended caller temporaries, destination liveness through branches/loops/returns/exits, rejection of ambiguous lifecycle merges and newer foreground actions while a result is live, bounded interaction control-flow work, exact event-capacity boundaries, exact UTF-8 and option boundaries with measurement instrumentation, unknown persisted fields, malformed actions/settlements, and hostile completion capture. Every rejected completion compares the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot change unnoticed. Parser/compiler syntax and browser UI coverage remain assigned to their later implementation slices.
+The implemented ADR 0018 runtime foundation adds manual validated-plan coverage for button, text, number, unlabelled choice, identifier-labelled choice, and numeric-labelled choice. Tests cover exact normalization/parsing, ambiguous typed choices, canonical transcript ordering and requesting-speaker provenance, duplicate/stale/unknown/wrong-kind classification, pending and post-completion checkpoint JSON round trips, destination absence before action creation, direct atomic result commit, one local consume/transfer-and-clear boundary, exact-once transfer, and source-shaped bindings, assignments, function arguments, nested functions, suspended caller arguments, and source-order-sensitive expressions through private test-only plan injection. The single-use handoff regressions prove that a newer retained settlement cannot remove destination/result mismatch rejection before consumption, that the handoff disappears immediately after the first successful consume or discard instruction, and that later ordinary state no longer carries interaction provenance. Non-canonical branches, loops, second actions, unrelated writers, duplicate producers, and independent targets inside the handoff are rejected locally rather than supported through global interaction-result liveness. Tests also retain exact event-capacity boundaries, exact UTF-8 and option boundaries with measurement instrumentation, unknown persisted fields, malformed actions/settlements, and hostile completion capture. Every rejected completion compares the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot change unnoticed. Parser/compiler syntax and browser UI coverage remain assigned to their later implementation slices.
 
 ## Browser E2E gate
 

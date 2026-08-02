@@ -184,6 +184,11 @@ briefly record:
 5. whether a material scope or execution-strategy change needs owner or
    coordinator approval.
 
+Record this assessment in the active pull-request or issue discussion, or in
+the owner/coordinator handoff when that is the active coordination surface. Do
+not create a separate report or policy file solely for this checkpoint unless
+an existing canonical document genuinely becomes inaccurate.
+
 Possible alternatives include an explicit test matrix, state-transition table,
 invariant inventory, property- or model-based strategy, a focused completeness
 audit, splitting an overly broad issue, or simplifying or redesigning the
