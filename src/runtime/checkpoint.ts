@@ -19,7 +19,7 @@ import {
 } from "./state.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 6;
+export const CHECKPOINT_VERSION = 8;
 
 export interface RuntimeCheckpoint {
   readonly format: typeof CHECKPOINT_FORMAT;
@@ -74,6 +74,13 @@ export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {
   const stable = capture.value;
   if (!isPlainRecord(stable)) {
     throw checkpointError("TSK002", "Checkpoint must be a JSON object.", "$.");
+  }
+  if (!hasExactKeys(stable, ["format", "version", "plan", "snapshot"])) {
+    throw checkpointError(
+      "TSK002",
+      "Checkpoint contains unsupported fields or omits required fields.",
+      "$.",
+    );
   }
   if (stable.format !== CHECKPOINT_FORMAT) {
     throw checkpointError("TSK001", "Unsupported checkpoint format.", "$.format");
@@ -196,6 +203,11 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => keys.includes(key));
 }
 
 function deepFreeze<T>(value: T): T {

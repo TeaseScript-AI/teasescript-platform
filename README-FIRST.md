@@ -26,7 +26,7 @@ The current repository implementation includes:
 - source-order-preserving expression and assignment lowering, checkpoint-safe prepared references, complete suspended-caller temporary validation, and centralized V30 protected-name enforcement;
 - a standalone fixed-example browser playground.
 
-Instruction plans use version 5; runtime snapshots and checkpoints use version 6. These are POC formats, not permanent public wire-format promises.
+Instruction plans use version 6; runtime snapshots and checkpoints use version 8. These are POC formats, not permanent public wire-format promises.
 
 This does not mean that the complete V30 language, static type system, timers, input, media, cross-origin player host, Laravel persistence, accounts, publishing, or continuous personalities are implemented.
 
