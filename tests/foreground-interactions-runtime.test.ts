@@ -1191,6 +1191,103 @@ function injectInteraction(
   };
 }
 
+test("injectInteraction inserts one exact canonical boundary without collateral plan changes", () => {
+  const sources: readonly {
+    readonly name: string;
+    readonly source: string;
+    readonly suspendedCaller?: true;
+  }[] = [
+    {
+      name: "root plan",
+      source: 'let answer = "__interaction_result__"\nsay answer\nexit',
+    },
+    {
+      name: "function-body plan",
+      source: 'function prompt { let answer = "__interaction_result__"\nsay answer\nreturn }\nprompt()\nexit',
+    },
+    {
+      name: "suspended caller plan",
+      source: 'function prompt { return "__interaction_result__" }\nlet answer = prompt()\nsay answer\nexit',
+      suspendedCaller: true,
+    },
+  ] as const;
+  const marker = "__interaction_result__";
+
+  for (const row of sources) {
+    const compiled = compileSource(row.source);
+    assert.deepEqual(compiled.diagnostics, [], row.name);
+    assert.notEqual(compiled.plan, null, row.name);
+    const original = compiled.plan!;
+    const markerInstructions = original.instructions.filter((instruction) =>
+      containsLiteralMarker(instruction, marker)
+    );
+    assert.equal(markerInstructions.length, 1, row.name);
+    const markerInstruction = markerInstructions[0]!;
+    const markerIndex = original.instructions.indexOf(markerInstruction);
+    const injected = injectTextInteraction(row.source);
+    const expectedContinuation = replaceLiteralMarker(
+      markerInstruction,
+      marker,
+      injected.destinationTemporary,
+    ) as Instruction;
+    const expectedInteraction: InteractionInstruction = {
+      kind: "interaction",
+      interactionKind: "text",
+      target: "standardChat",
+      speaker: null,
+      destinationTemporary: injected.destinationTemporary,
+      expectedResult: "string",
+      ui: { kind: "text", hint: null, accessibleName: defaults.text },
+      span: markerInstruction.span,
+    };
+
+    assert.equal(injected.interactionInstruction, markerIndex, row.name);
+    assert.equal(injected.handoffInstruction, markerIndex + 1, row.name);
+    assert.equal(injected.clearInstruction, markerIndex + 2, row.name);
+    assert.equal(injected.plan.instructions.length, original.instructions.length + 2, row.name);
+    assert.equal(injected.plan.temporaryCount, original.temporaryCount + 1, row.name);
+    assert.equal(injected.plan.format, original.format, row.name);
+    assert.equal(injected.plan.version, original.version, row.name);
+    assert.deepEqual(injected.plan.sourceSpan, original.sourceSpan, row.name);
+    assert.deepEqual(injected.plan.instructions.slice(0, markerIndex), original.instructions.slice(0, markerIndex), row.name);
+    assert.deepEqual(injected.plan.instructions[injected.interactionInstruction], expectedInteraction, row.name);
+    assert.deepEqual(injected.plan.instructions[injected.handoffInstruction], expectedContinuation, row.name);
+    assert.deepEqual(injected.plan.instructions[injected.clearInstruction], {
+      kind: "clearTemporary",
+      temporaryId: injected.destinationTemporary,
+      span: markerInstruction.span,
+    }, row.name);
+    assert.deepEqual(
+      injected.plan.instructions.slice(injected.clearInstruction + 1),
+      original.instructions.slice(markerIndex + 1).map((instruction) => shiftInstructionTargets(instruction, markerIndex)),
+      row.name,
+    );
+    assert.equal(injected.plan.instructions.filter((instruction) => containsLiteralMarker(instruction, marker)).length, 0, row.name);
+    assert.equal(injected.plan.rootEndInstruction, shiftBoundary(original.rootEndInstruction, markerIndex), row.name);
+    assert.deepEqual(
+      injected.plan.functions,
+      original.functions.map((definition) => ({
+        ...definition,
+        entryInstruction: shiftBoundary(definition.entryInstruction, markerIndex),
+        bodyEntryInstruction: shiftBoundary(definition.bodyEntryInstruction, markerIndex),
+        implicitReturnInstruction: shiftBoundary(definition.implicitReturnInstruction, markerIndex),
+        endInstruction: shiftBoundary(definition.endInstruction, markerIndex),
+      })),
+      row.name,
+    );
+    if (row.suspendedCaller) {
+      const pending = waiting(injected.plan).snapshot;
+      const action = pending.foregroundAction;
+      const caller = pending.callFrames.at(-1);
+      assert.ok(action !== null && action.kind === "interaction", row.name);
+      assert.ok(caller !== undefined, row.name);
+      assert.equal(action.ownerCallFrameId, caller.id, row.name);
+      assert.equal(action.destinationTemporary, injected.destinationTemporary, row.name);
+      assert.notEqual(caller.destinationTemporary, action.destinationTemporary, row.name);
+    }
+  }
+});
+
 function shiftBoundary(value: number, insertionIndex: number): number {
   return value > insertionIndex ? value + 2 : value;
 }
@@ -1266,18 +1363,33 @@ type CanonicalHandoffKind =
   | "setDeclaredSpeakerProperty"
   | "prepareReference";
 
-interface CanonicalHandoffRow {
+interface DirectCanonicalHandoffRow {
   readonly id: string;
   readonly kind: CanonicalHandoffKind;
   readonly source: string;
   readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
-  readonly needsCleanup: boolean;
+  readonly needsCleanup: false;
+  readonly assertResult?: (
+    snapshot: RuntimeSnapshot,
+    events: readonly InterpreterEvent[],
+    injected: InjectedInteractionPlan,
+  ) => void;
+}
+
+interface CleanupCanonicalHandoffRow {
+  readonly id: string;
+  readonly kind: CanonicalHandoffKind;
+  readonly source: string;
+  readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
+  readonly needsCleanup: true;
   readonly assertResult: (
     snapshot: RuntimeSnapshot,
     events: readonly InterpreterEvent[],
     injected: InjectedInteractionPlan,
   ) => void;
 }
+
+type CanonicalHandoffRow = DirectCanonicalHandoffRow | CleanupCanonicalHandoffRow;
 
 function replaceHandoffInstruction(
   injected: InjectedInteractionPlan,
@@ -1290,6 +1402,10 @@ function replaceHandoffInstruction(
     instructions: injected.plan.instructions.map((current, index) =>
       index === injected.handoffInstruction ? instruction : current),
   };
+}
+
+function handoffInstructionSpan(injected: InjectedInteractionPlan): SourceSpan {
+  return injected.plan.instructions[injected.handoffInstruction]!.span;
 }
 
 function completeCommittedTextInteraction(plan: InstructionPlan) {
@@ -1395,10 +1511,9 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
       makePlan: (injected) => replaceHandoffInstruction(injected, {
         kind: "clearTemporary",
         temporaryId: injected.destinationTemporary,
-        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+        span: handoffInstructionSpan(injected),
       }),
       needsCleanup: false,
-      assertResult: () => undefined,
     },
     {
       id: "PR194-form-exit",
@@ -1406,7 +1521,7 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
       source: 'let answer = "__interaction_result__"\nexit',
       makePlan: (injected) => replaceHandoffInstruction(injected, {
         kind: "exit",
-        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+        span: handoffInstructionSpan(injected),
       }),
       needsCleanup: false,
       assertResult: (snapshot, events) => {
@@ -1420,7 +1535,7 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
       source: 'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit',
       makePlan: (injected) => replaceHandoffInstruction(injected, {
         kind: "returnVoid",
-        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+        span: handoffInstructionSpan(injected),
       }),
       needsCleanup: false,
       assertResult: (snapshot) => {
@@ -1459,8 +1574,8 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
       source: 'let answer = "__interaction_result__"\nexit',
       makePlan: (injected) => replaceHandoffInstruction(injected, {
         kind: "evaluate",
-        expression: { kind: "temporary", temporaryId: injected.destinationTemporary, span: injected.plan.instructions[injected.handoffInstruction]!.span },
-        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+        expression: { kind: "temporary", temporaryId: injected.destinationTemporary, span: handoffInstructionSpan(injected) },
+        span: handoffInstructionSpan(injected),
       }),
       needsCleanup: true,
       assertResult: (snapshot) => assert.equal(snapshot.status, "running"),
@@ -1472,9 +1587,9 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
       makePlan: (injected) => replaceHandoffInstruction(injected, {
         kind: "storeTemporary",
         temporaryId: injected.destinationTemporary + 1,
-        value: { kind: "temporary", temporaryId: injected.destinationTemporary, span: injected.plan.instructions[injected.handoffInstruction]!.span },
+        value: { kind: "temporary", temporaryId: injected.destinationTemporary, span: handoffInstructionSpan(injected) },
         expectBoolean: false,
-        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+        span: handoffInstructionSpan(injected),
       }, injected.plan.temporaryCount + 1),
       needsCleanup: true,
       assertResult: (snapshot, _events, injected) => assert.equal(
@@ -1489,8 +1604,8 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
       makePlan: (injected) => replaceHandoffInstruction(injected, {
         kind: "say",
         speaker: null,
-        value: { kind: "temporary", temporaryId: injected.destinationTemporary, span: injected.plan.instructions[injected.handoffInstruction]!.span },
-        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+        value: { kind: "temporary", temporaryId: injected.destinationTemporary, span: handoffInstructionSpan(injected) },
+        span: handoffInstructionSpan(injected),
       }),
       needsCleanup: true,
       assertResult: (_snapshot, events) => assert.ok(
@@ -1505,8 +1620,8 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
         kind: "setDeclaredSpeakerProperty",
         speaker: "guide",
         name: "answer",
-        value: { kind: "temporary", temporaryId: injected.destinationTemporary, span: injected.plan.instructions[injected.handoffInstruction]!.span },
-        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+        value: { kind: "temporary", temporaryId: injected.destinationTemporary, span: handoffInstructionSpan(injected) },
+        span: handoffInstructionSpan(injected),
       }),
       needsCleanup: true,
       assertResult: (snapshot) => {
@@ -1521,9 +1636,9 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
       source: 'let answer = "__interaction_result__"\nexit',
       makePlan: (injected) => replaceHandoffInstruction(injected, {
         kind: "prepareReference",
-        expression: { kind: "temporary", temporaryId: injected.destinationTemporary, span: injected.plan.instructions[injected.handoffInstruction]!.span },
+        expression: { kind: "temporary", temporaryId: injected.destinationTemporary, span: handoffInstructionSpan(injected) },
         destinationTemporary: injected.destinationTemporary + 1,
-        span: injected.plan.instructions[injected.handoffInstruction]!.span,
+        span: handoffInstructionSpan(injected),
       }, injected.plan.temporaryCount + 1),
       needsCleanup: true,
       assertResult: (snapshot, _events, injected) => assertPreparedReference(
@@ -1557,7 +1672,7 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
         row.id,
       );
     }
-    row.assertResult(continued.snapshot, continued.events, injected);
+    row.assertResult?.(continued.snapshot, continued.events, injected);
     assert.doesNotThrow(() => createCheckpoint(restored.plan, continued.snapshot), row.id);
     if (row.needsCleanup) {
       const cleanupBefore = structuredClone(continued.snapshot);
@@ -1582,7 +1697,6 @@ interface AcceptedExpressionGuaranteeRow {
   readonly category: string;
   readonly expression: ExpressionPlan;
   readonly temporaryCount?: number;
-  readonly valid: true;
   readonly runtimeWitness?: true;
 }
 
@@ -1591,7 +1705,6 @@ interface RejectedExpressionGuaranteeRow {
   readonly category: string;
   readonly expression: unknown;
   readonly temporaryCount?: number;
-  readonly valid: false;
 }
 
 function temporaryExpression(temporaryId: number, span: SourceSpan): ExpressionPlan {
@@ -1620,7 +1733,7 @@ function handoffPlanWithExpression(
     kind: "declareBinding",
     name: "answer",
     value: expression,
-    span: injected.plan.instructions[injected.handoffInstruction]!.span,
+    span: handoffInstructionSpan(injected),
   }, temporaryCount);
 }
 
@@ -1633,7 +1746,7 @@ function handoffPlanWithMalformedExpression(
     kind: "declareBinding",
     name: "answer",
     value: expression,
-    span: injected.plan.instructions[injected.handoffInstruction]!.span,
+    span: handoffInstructionSpan(injected),
   };
   // Deliberately malformed external plan data cannot be represented by Instruction.
   return replaceHandoffInstruction(
@@ -1645,7 +1758,7 @@ function handoffPlanWithMalformedExpression(
 
 test("PR194 matrix: expression consumption requires guaranteed evaluation", () => {
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
-  const span = injected.plan.instructions[injected.handoffInstruction]!.span;
+  const span = handoffInstructionSpan(injected);
   const destination = injected.destinationTemporary;
   const matching = temporaryExpression(destination, span);
   const wrong = temporaryExpression(destination + 1, span);
@@ -1660,7 +1773,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
       id: "PR194-expression-direct-temporary",
       category: "temporary",
       expression: matching,
-      valid: true,
       runtimeWitness: true,
     },
     {
@@ -1671,7 +1783,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         elements: [matching],
         span,
       },
-      valid: true,
       runtimeWitness: true,
     },
     {
@@ -1682,7 +1793,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         elements: [matching],
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-object-property-value",
@@ -1698,7 +1808,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         ],
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-group",
@@ -1708,7 +1817,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         expression: matching,
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-template-part",
@@ -1729,7 +1837,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         ],
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-property-object",
@@ -1740,7 +1847,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         name: "length",
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-index-object",
@@ -1751,7 +1857,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         index: literalExpression(0, span),
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-index-index",
@@ -1766,7 +1871,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         index: matching,
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-property-call-receiver",
@@ -1782,7 +1886,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         arguments: [],
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-positional-call-argument",
@@ -1799,7 +1902,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         ],
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-named-call-argument",
@@ -1817,7 +1919,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         ],
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-unary-operand",
@@ -1828,7 +1929,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         operand: matching,
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-eager-left",
@@ -1839,7 +1939,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         literalExpression("committed", span),
         span,
       ),
-      valid: true,
     },
     {
       id: "PR194-expression-eager-right",
@@ -1850,7 +1949,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         matching,
         span,
       ),
-      valid: true,
       runtimeWitness: true,
     },
     {
@@ -1863,7 +1961,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         inclusive: true,
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-range-end",
@@ -1875,7 +1972,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         inclusive: true,
         span,
       },
-      valid: true,
     },
     {
       id: "PR194-expression-and-left",
@@ -1886,7 +1982,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         literalExpression(true, span),
         span,
       ),
-      valid: true,
     },
     {
       id: "PR194-expression-or-left",
@@ -1897,7 +1992,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         literalExpression(false, span),
         span,
       ),
-      valid: true,
     },
     {
       id: "PR194-expression-multiple-guaranteed",
@@ -1907,7 +2001,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         elements: [matching, matching],
         span,
       },
-      valid: true,
       runtimeWitness: true,
     },
     {
@@ -1915,7 +2008,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
       category: "multiple",
       expression: { kind: "list", elements: [wrong, matching], span },
       temporaryCount: injected.plan.temporaryCount + 1,
-      valid: true,
     },
   ];
   const rejected: readonly RejectedExpressionGuaranteeRow[] = [
@@ -1923,14 +2015,12 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
       id: "PR194-expression-no-occurrence",
       category: "missing",
       expression: literalExpression(false, span),
-      valid: false,
     },
     {
       id: "PR194-expression-wrong-temporary",
       category: "wrong temporary",
       expression: wrong,
       temporaryCount: injected.plan.temporaryCount + 1,
-      valid: false,
     },
     {
       id: "PR194-expression-prepared-reference",
@@ -1940,7 +2030,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         temporaryId: destination,
         span,
       },
-      valid: false,
     },
     {
       id: "PR194-expression-and-right-false",
@@ -1951,7 +2040,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         matching,
         span,
       ),
-      valid: false,
     },
     {
       id: "PR194-expression-and-right-true",
@@ -1962,7 +2050,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         matching,
         span,
       ),
-      valid: false,
     },
     {
       id: "PR194-expression-or-right-false",
@@ -1973,7 +2060,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         matching,
         span,
       ),
-      valid: false,
     },
     {
       id: "PR194-expression-or-right-true",
@@ -1984,7 +2070,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         matching,
         span,
       ),
-      valid: false,
     },
     {
       id: "PR194-expression-nested-short-circuit-right",
@@ -2000,7 +2085,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         ),
         span,
       ),
-      valid: false,
     },
     {
       id: "PR194-expression-non-property-callee",
@@ -2011,7 +2095,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         arguments: [],
         span,
       },
-      valid: false,
     },
     {
       id: "PR194-expression-template-text-metadata",
@@ -2028,7 +2111,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         ],
         span,
       } as unknown,
-      valid: false,
     },
     {
       id: "PR194-expression-ignored-extra-field",
@@ -2039,14 +2121,12 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         span,
         ignored: matching,
       },
-      valid: false,
     },
     {
       id: "PR194-expression-wrong-left-correct-right",
       category: "short-circuit",
       expression: binaryExpression("or", wrong, matching, span),
       temporaryCount: injected.plan.temporaryCount + 1,
-      valid: false,
     },
   ];
 
@@ -2907,7 +2987,7 @@ interface FailedContinuationRow {
   readonly id: string;
   readonly expectedCode: string;
   readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
-  readonly assertUntouchedTarget: (snapshot: RuntimeSnapshot, injected: InjectedInteractionPlan) => void;
+  readonly assertUntouchedTarget?: (snapshot: RuntimeSnapshot, injected: InjectedInteractionPlan) => void;
 }
 
 test("PR194 matrix: failed canonical continuations retain the handoff atomically", () => {
@@ -2936,7 +3016,6 @@ test("PR194 matrix: failed canonical continuations retain the handoff atomically
         ),
         span: injected.plan.instructions[injected.handoffInstruction]!.span,
       }),
-      assertUntouchedTarget: () => undefined,
     },
     {
       id: "PR194-failed-continuation-before-target-mutation",
@@ -2977,7 +3056,7 @@ test("PR194 matrix: failed canonical continuations retain the handoff atomically
     const failure = failed.events[0];
     assert.ok(failure !== undefined && failure.kind === "runtimeFailure", row.id);
     assert.equal(failure.code, row.expectedCode, row.id);
-    row.assertUntouchedTarget(failed.snapshot, injected);
+    row.assertUntouchedTarget?.(failed.snapshot, injected);
     assert.equal(validateRuntimeSnapshot(failed.snapshot, plan).valid, true, row.id);
     assert.deepEqual(checkpointJsonRoundTrip(plan, failed.snapshot).snapshot, failed.snapshot, row.id);
     assertReplayRow({ id: `${row.id}-replay`, plan, snapshot: failed.snapshot, request, expected: { kind: "alreadySettled" } });
