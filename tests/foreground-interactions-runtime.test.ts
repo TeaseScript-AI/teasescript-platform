@@ -2210,18 +2210,161 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
       },
       valid: true,
     },
-    { id: "PR194-expression-index-index", category: "index", expression: { kind: "index", object: { kind: "list", elements: [literalExpression("value", span)], span }, index: matching, span }, valid: true },
-    { id: "PR194-expression-property-call-receiver", category: "call", expression: { kind: "call", callee: { kind: "property", object: matching, name: "contains", span }, arguments: [], span }, valid: true },
-    { id: "PR194-expression-positional-call-argument", category: "call", expression: { kind: "call", callee: propertyCallee, arguments: [{ kind: "positional", value: matching, span }], span }, valid: true },
-    { id: "PR194-expression-named-call-argument", category: "call", expression: { kind: "call", callee: propertyCallee, arguments: [{ kind: "named", name: "value", value: matching, span }], span }, valid: true },
-    { id: "PR194-expression-unary-operand", category: "unary", expression: { kind: "unary", operator: "not", operand: matching, span }, valid: true },
-    { id: "PR194-expression-eager-left", category: "binary", expression: binaryExpression("==", matching, literalExpression("committed", span), span), valid: true },
-    { id: "PR194-expression-eager-right", category: "binary", expression: binaryExpression("==", literalExpression("committed", span), matching, span), valid: true },
-    { id: "PR194-expression-range-start", category: "range", expression: { kind: "range", start: matching, end: literalExpression(2, span), inclusive: true, span }, valid: true },
-    { id: "PR194-expression-range-end", category: "range", expression: { kind: "range", start: literalExpression(1, span), end: matching, inclusive: true, span }, valid: true },
-    { id: "PR194-expression-and-left", category: "short-circuit", expression: binaryExpression("and", matching, literalExpression(true, span), span), valid: true },
-    { id: "PR194-expression-or-left", category: "short-circuit", expression: binaryExpression("or", matching, literalExpression(false, span), span), valid: true },
-    { id: "PR194-expression-multiple-guaranteed", category: "multiple", expression: { kind: "list", elements: [matching, matching], span }, valid: true },
+    {
+      id: "PR194-expression-index-index",
+      category: "index",
+      expression: {
+        kind: "index",
+        object: {
+          kind: "list",
+          elements: [literalExpression("value", span)],
+          span,
+        },
+        index: matching,
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-property-call-receiver",
+      category: "call",
+      expression: {
+        kind: "call",
+        callee: {
+          kind: "property",
+          object: matching,
+          name: "contains",
+          span,
+        },
+        arguments: [],
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-positional-call-argument",
+      category: "call",
+      expression: {
+        kind: "call",
+        callee: propertyCallee,
+        arguments: [
+          {
+            kind: "positional",
+            value: matching,
+            span,
+          },
+        ],
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-named-call-argument",
+      category: "call",
+      expression: {
+        kind: "call",
+        callee: propertyCallee,
+        arguments: [
+          {
+            kind: "named",
+            name: "value",
+            value: matching,
+            span,
+          },
+        ],
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-unary-operand",
+      category: "unary",
+      expression: {
+        kind: "unary",
+        operator: "not",
+        operand: matching,
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-eager-left",
+      category: "binary",
+      expression: binaryExpression(
+        "==",
+        matching,
+        literalExpression("committed", span),
+        span,
+      ),
+      valid: true,
+    },
+    {
+      id: "PR194-expression-eager-right",
+      category: "binary",
+      expression: binaryExpression(
+        "==",
+        literalExpression("committed", span),
+        matching,
+        span,
+      ),
+      valid: true,
+    },
+    {
+      id: "PR194-expression-range-start",
+      category: "range",
+      expression: {
+        kind: "range",
+        start: matching,
+        end: literalExpression(2, span),
+        inclusive: true,
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-range-end",
+      category: "range",
+      expression: {
+        kind: "range",
+        start: literalExpression(1, span),
+        end: matching,
+        inclusive: true,
+        span,
+      },
+      valid: true,
+    },
+    {
+      id: "PR194-expression-and-left",
+      category: "short-circuit",
+      expression: binaryExpression(
+        "and",
+        matching,
+        literalExpression(true, span),
+        span,
+      ),
+      valid: true,
+    },
+    {
+      id: "PR194-expression-or-left",
+      category: "short-circuit",
+      expression: binaryExpression(
+        "or",
+        matching,
+        literalExpression(false, span),
+        span,
+      ),
+      valid: true,
+    },
+    {
+      id: "PR194-expression-multiple-guaranteed",
+      category: "multiple",
+      expression: {
+        kind: "list",
+        elements: [matching, matching],
+        span,
+      },
+      valid: true,
+    },
     {
       id: "PR194-expression-wrong-and-correct",
       category: "multiple",
@@ -2231,18 +2374,133 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
     },
   ];
   const rejected: readonly RejectedExpressionGuaranteeRow[] = [
-    { id: "PR194-expression-no-occurrence", category: "missing", expression: literalExpression(false, span), valid: false },
-    { id: "PR194-expression-wrong-temporary", category: "wrong temporary", expression: wrong, valid: false },
-    { id: "PR194-expression-prepared-reference", category: "prepared reference", expression: { kind: "preparedReference", temporaryId: destination, span }, valid: false },
-    { id: "PR194-expression-and-right-false", category: "short-circuit", expression: binaryExpression("and", literalExpression(false, span), matching, span), valid: false },
-    { id: "PR194-expression-and-right-true", category: "short-circuit", expression: binaryExpression("and", literalExpression(true, span), matching, span), valid: false },
-    { id: "PR194-expression-or-right-false", category: "short-circuit", expression: binaryExpression("or", literalExpression(false, span), matching, span), valid: false },
-    { id: "PR194-expression-or-right-true", category: "short-circuit", expression: binaryExpression("or", literalExpression(true, span), matching, span), valid: false },
-    { id: "PR194-expression-nested-short-circuit-right", category: "short-circuit", expression: binaryExpression("and", literalExpression(true, span), binaryExpression("or", literalExpression(false, span), matching, span), span), valid: false },
-    { id: "PR194-expression-non-property-callee", category: "call", expression: { kind: "call", callee: matching, arguments: [], span }, valid: false },
-    { id: "PR194-expression-template-text-metadata", category: "metadata", expression: { kind: "template", parts: [{ kind: "text", value: "ignored", span, temporaryId: destination }], span } as unknown, valid: false },
-    { id: "PR194-expression-ignored-extra-field", category: "ignored field", expression: { kind: "literal", value: false, span, ignored: matching }, valid: false },
-    { id: "PR194-expression-wrong-left-correct-right", category: "short-circuit", expression: binaryExpression("or", wrong, matching, span), valid: false },
+    {
+      id: "PR194-expression-no-occurrence",
+      category: "missing",
+      expression: literalExpression(false, span),
+      valid: false,
+    },
+    {
+      id: "PR194-expression-wrong-temporary",
+      category: "wrong temporary",
+      expression: wrong,
+      valid: false,
+    },
+    {
+      id: "PR194-expression-prepared-reference",
+      category: "prepared reference",
+      expression: {
+        kind: "preparedReference",
+        temporaryId: destination,
+        span,
+      },
+      valid: false,
+    },
+    {
+      id: "PR194-expression-and-right-false",
+      category: "short-circuit",
+      expression: binaryExpression(
+        "and",
+        literalExpression(false, span),
+        matching,
+        span,
+      ),
+      valid: false,
+    },
+    {
+      id: "PR194-expression-and-right-true",
+      category: "short-circuit",
+      expression: binaryExpression(
+        "and",
+        literalExpression(true, span),
+        matching,
+        span,
+      ),
+      valid: false,
+    },
+    {
+      id: "PR194-expression-or-right-false",
+      category: "short-circuit",
+      expression: binaryExpression(
+        "or",
+        literalExpression(false, span),
+        matching,
+        span,
+      ),
+      valid: false,
+    },
+    {
+      id: "PR194-expression-or-right-true",
+      category: "short-circuit",
+      expression: binaryExpression(
+        "or",
+        literalExpression(true, span),
+        matching,
+        span,
+      ),
+      valid: false,
+    },
+    {
+      id: "PR194-expression-nested-short-circuit-right",
+      category: "short-circuit",
+      expression: binaryExpression(
+        "and",
+        literalExpression(true, span),
+        binaryExpression(
+          "or",
+          literalExpression(false, span),
+          matching,
+          span,
+        ),
+        span,
+      ),
+      valid: false,
+    },
+    {
+      id: "PR194-expression-non-property-callee",
+      category: "call",
+      expression: {
+        kind: "call",
+        callee: matching,
+        arguments: [],
+        span,
+      },
+      valid: false,
+    },
+    {
+      id: "PR194-expression-template-text-metadata",
+      category: "metadata",
+      expression: {
+        kind: "template",
+        parts: [
+          {
+            kind: "text",
+            value: "ignored",
+            span,
+            temporaryId: destination,
+          },
+        ],
+        span,
+      } as unknown,
+      valid: false,
+    },
+    {
+      id: "PR194-expression-ignored-extra-field",
+      category: "ignored field",
+      expression: {
+        kind: "literal",
+        value: false,
+        span,
+        ignored: matching,
+      },
+      valid: false,
+    },
+    {
+      id: "PR194-expression-wrong-left-correct-right",
+      category: "short-circuit",
+      expression: binaryExpression("or", wrong, matching, span),
+      valid: false,
+    },
   ];
 
   for (const row of accepted) {
@@ -2477,7 +2735,10 @@ test("PR194 matrix: settlement and active handoff validation", () => {
   } = fixture;
 
   const accepted: readonly { readonly id: string; readonly snapshot: RuntimeSnapshot }[] = [
-    { id: "PR194-settlement-exact-matching", snapshot: committed },
+    {
+      id: "PR194-settlement-exact-matching",
+      snapshot: committed,
+    },
     {
       id: "PR194-settlement-exact-matching-roundtrip",
       snapshot: checkpointJsonRoundTrip(injected.plan, committed).snapshot,
@@ -3414,7 +3675,13 @@ test("PR194 matrix: checkpoint boundaries preserve typed interaction results", (
       run,
       `${row.id}: cleaned`,
     );
-    assert.deepEqual(final.uninterrupted.events.filter((event) => event.kind === "say").map((event) => event.text), [String(row.result)], `${row.id}: final say`);
+    assert.deepEqual(
+      final.uninterrupted.events
+        .filter((event) => event.kind === "say")
+        .map((event) => event.text),
+      [String(row.result)],
+      `${row.id}: final say`,
+    );
     assert.equal(final.uninterrupted.snapshot.status, "halted", `${row.id}: final status`);
   }
 });
@@ -3732,7 +3999,15 @@ test("PR194 matrix: root, function, argument, and suspended-caller ownership con
     const action = pending.snapshot.foregroundAction!;
     if (row.owner === null) assert.equal(action.ownerCallFrameId, null, row.id);
     else assert.ok(action.ownerCallFrameId !== null, row.id);
-    const completed = completeAction(injected.plan, pending.snapshot, { actionId: action.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
+    const completed = completeAction(injected.plan, pending.snapshot, {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: {
+        kind: "submittedText",
+        submittedText: "committed",
+      },
+    });
     assert.equal(completed.snapshot.interactionResultHandoff?.ownerCallFrameId, action.ownerCallFrameId, row.id);
     const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, completed.snapshot)));
     const final = run(injected.plan, restored.snapshot);
@@ -3914,7 +4189,15 @@ test("PR194 matrix: validated composite persisted state resumes equivalently", (
 test("PR194 matrix: newer settlement changes old interaction replay to staleAction", () => {
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit');
   const pending = waiting(injected.plan);
-  const request = { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction" as const, interactionKind: "text" as const, payload: { kind: "submittedText", submittedText: "committed" } };
+  const request = {
+    actionId: pending.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction" as const,
+    interactionKind: "text" as const,
+    payload: {
+      kind: "submittedText",
+      submittedText: "committed",
+    },
+  };
   const completed = completeAction(injected.plan, pending.snapshot, request);
   const afterClear = executeInstruction(injected.plan, executeInstruction(injected.plan, completed.snapshot).snapshot).snapshot;
   const delay = run(injected.plan, afterClear);
