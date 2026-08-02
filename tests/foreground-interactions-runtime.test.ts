@@ -10,7 +10,7 @@ import {
 } from "../src/interaction-limits.js";
 import type { InstructionPlan, InteractionInstruction, InteractionUiPayload } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
+import { CheckpointError, createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { completeAction, executeInstruction, observeTime, run } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
@@ -1677,3 +1677,302 @@ function replaceLiteralMarker(
     ]),
   );
 }
+
+// Phase 1 deliberately retains the earlier focused regressions above.  These
+// tables make the local handoff boundary explicit without replacing them.
+test("PR194 matrix: canonical direct and ordinary handoff forms", () => {
+  const cases = [
+    { id: "PR194-direct-clear", source: 'let answer = "__interaction_result__"\nexit', observe: (snapshot: any, injected: InjectedInteractionPlan) => assert.equal(snapshot.temporaries.some((entry: any) => entry.id === injected.destinationTemporary), false) },
+    { id: "PR194-declare-binding", source: 'let answer = "__interaction_result__"\nsay answer\nexit', observe: (snapshot: any) => assert.equal(snapshot.frames[0].bindings.find((entry: any) => entry.name === "answer")?.value, "committed") },
+    { id: "PR194-assign", source: 'let answer = "before"\nanswer = "__interaction_result__"\nsay answer\nexit', observe: (snapshot: any) => assert.equal(snapshot.frames[0].bindings.find((entry: any) => entry.name === "answer")?.value, "committed") },
+    { id: "PR194-store-temporary", source: 'let answer = "__interaction_result__"\nsay answer\nexit', observe: (snapshot: any) => assert.equal(snapshot.frames[0].bindings.find((entry: any) => entry.name === "answer")?.value, "committed") },
+  ] as const;
+  for (const entry of cases) {
+    const injected = injectTextInteraction(entry.source);
+    const pending = waiting(injected.plan);
+    const pendingBefore = structuredClone(pending.snapshot);
+    assert.equal(pending.snapshot.temporaries.some((temporary) => temporary.id === injected.destinationTemporary), false, entry.id);
+    const completed = completeAction(injected.plan, pending.snapshot, {
+      actionId: pending.snapshot.foregroundAction!.actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: "committed" },
+    });
+    assert.deepEqual(pending.snapshot, pendingBefore, entry.id);
+    assert.equal(completed.outcome.kind, "completed", entry.id);
+    assert.deepEqual(completed.events.map((event) => event.kind), ["playerTranscript", "actionCompleted"], entry.id);
+    assert.deepEqual(Object.keys(completed.snapshot.interactionResultHandoff!).sort(), ["actionId", "continuationInstruction", "destinationTemporary", "ownerCallFrameId", "owningInstruction", "result"], entry.id);
+    assert.equal(completed.snapshot.interactionResultHandoff?.result, "committed", entry.id);
+    assert.doesNotThrow(() => createCheckpoint(injected.plan, completed.snapshot), entry.id);
+    const committed = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, completed.snapshot)));
+    const consumed = executeInstruction(injected.plan, committed.snapshot);
+    assert.equal(consumed.snapshot.interactionResultHandoff, null, entry.id);
+    const cleaned = run(injected.plan, consumed.snapshot).snapshot;
+    entry.observe(cleaned, injected);
+    assert.doesNotThrow(() => createCheckpoint(injected.plan, cleaned), entry.id);
+  }
+});
+
+test("PR194 matrix: expression consumption is guaranteed rather than syntactic", () => {
+  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
+  const span = injected.plan.instructions[injected.handoffInstruction]!.span;
+  const rows = [
+    { id: "PR194-direct-temporary", expression: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, valid: true },
+    { id: "PR194-eager-right", expression: { kind: "binary", operator: "+", left: { kind: "literal", value: "x", span }, right: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, span }, valid: true },
+    { id: "PR194-short-circuit-and-right-not-guaranteed", expression: { kind: "binary", operator: "and", left: { kind: "literal", value: false, span }, right: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, span }, valid: false },
+    { id: "PR194-short-circuit-or-right-not-guaranteed", expression: { kind: "binary", operator: "or", left: { kind: "literal", value: true, span }, right: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, span }, valid: false },
+    { id: "PR194-short-circuit-left-guaranteed", expression: { kind: "binary", operator: "and", left: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, right: { kind: "literal", value: true, span }, span }, valid: true },
+    { id: "PR194-ignored-expression-field", expression: { kind: "literal", value: false, span, ignored: { kind: "temporary", temporaryId: injected.destinationTemporary, span } }, valid: false },
+  ] as const;
+  for (const row of rows) {
+    const plan = structuredClone(injected.plan) as any;
+    plan.instructions[injected.handoffInstruction].value = row.expression;
+    const validation = validateInstructionPlan(plan);
+    assert.equal(validation.valid, row.valid, row.id);
+    if (!row.valid) assert.ok(validation.errors.some((error) => error.code === "TSC002"), row.id);
+  }
+  for (const kind of ["evaluate", "prepareReference"] as const) {
+    const plan = structuredClone(injected.plan) as any;
+    plan.instructions[injected.handoffInstruction] = kind === "evaluate"
+      ? { kind, expression: rows[0].expression, span }
+      : { kind, expression: rows[0].expression, destinationTemporary: injected.destinationTemporary + 1, span };
+    if (kind === "prepareReference") plan.temporaryCount += 1;
+    assert.equal(validateInstructionPlan(plan).valid, true, `PR194-${kind}-expression-field`);
+  }
+});
+
+test("PR194 matrix: settlement authority and replay remain atomic", () => {
+  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
+  const pending = waiting(injected.plan);
+  const request = { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction" as const, interactionKind: "text" as const, payload: { kind: "submittedText", submittedText: "committed" } };
+  const completed = completeAction(injected.plan, pending.snapshot, request);
+  const rows = [
+    { id: "PR194-null-settlement", mutate: (snapshot: any) => { snapshot.lastSettlement = null; } },
+    { id: "PR194-older-settlement", mutate: (snapshot: any) => { snapshot.lastSettlement.actionId = 0; } },
+    { id: "PR194-equal-id-wrong-action-kind", mutate: (snapshot: any) => { snapshot.lastSettlement.actionKind = "delay"; } },
+    { id: "PR194-wrong-result", mutate: (snapshot: any) => { snapshot.lastSettlement.result = "forged"; } },
+    { id: "PR194-extra-handoff-field", mutate: (snapshot: any) => { snapshot.interactionResultHandoff.extra = true; } },
+  ];
+  for (const row of rows) {
+    const snapshot = structuredClone(completed.snapshot) as any;
+    const before = structuredClone(snapshot);
+    row.mutate(snapshot);
+    assert.equal(validateRuntimeSnapshot(snapshot, injected.plan).valid, false, row.id);
+    assert.throws(() => createCheckpoint(injected.plan, snapshot), (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002", row.id);
+    assert.throws(() => restoreCheckpoint({ ...createCheckpoint(injected.plan, completed.snapshot), snapshot }), (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002", row.id);
+    assert.notDeepEqual(snapshot, before, row.id);
+  }
+  for (const boundary of [completed.snapshot, deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, completed.snapshot))).snapshot, executeInstruction(injected.plan, completed.snapshot).snapshot, run(injected.plan, executeInstruction(injected.plan, completed.snapshot).snapshot).snapshot]) {
+    const before = structuredClone(boundary);
+    const replay = completeAction(injected.plan, boundary, request);
+    assert.equal(replay.outcome.kind, "alreadySettled", "PR194-duplicate-replay");
+    assert.deepEqual(replay.events, []);
+    assert.deepEqual(replay.snapshot, before);
+  }
+});
+
+test("PR194 matrix: remaining reachable continuation instruction fields execute", () => {
+  const ordinaryRows = [
+    {
+      id: "PR194-evaluate-expression-field",
+      source: 'let answer = "__interaction_result__"\nexit',
+      extraTemporary: false,
+      instruction: (span: any, destination: number) => ({ kind: "evaluate", expression: { kind: "temporary", temporaryId: destination, span }, span }),
+    },
+    {
+      id: "PR194-prepare-reference-expression-field",
+      source: 'let answer = "__interaction_result__"\nexit',
+      instruction: (span: any, destination: number) => ({ kind: "prepareReference", expression: { kind: "temporary", temporaryId: destination, span }, destinationTemporary: destination + 1, span }),
+      extraTemporary: true,
+    },
+    {
+      id: "PR194-store-temporary",
+      source: 'let answer = "__interaction_result__"\nexit',
+      instruction: (span: any, destination: number) => ({ kind: "storeTemporary", temporaryId: destination + 1, value: { kind: "temporary", temporaryId: destination, span }, expectBoolean: false, span }),
+      extraTemporary: true,
+    },
+    {
+      id: "PR194-say",
+      source: 'let answer = "__interaction_result__"\nexit',
+      extraTemporary: false,
+      instruction: (span: any, destination: number) => ({ kind: "say", speaker: null, value: { kind: "temporary", temporaryId: destination, span }, span }),
+    },
+    {
+      id: "PR194-set-declared-speaker-property",
+      source: 'speaker guide {}\nspeaker guide\nlet answer = "__interaction_result__"\nexit',
+      extraTemporary: false,
+      instruction: (span: any, destination: number) => ({ kind: "setDeclaredSpeakerProperty", speaker: "guide", name: "answer", value: { kind: "temporary", temporaryId: destination, span }, span }),
+    },
+  ] as const;
+  for (const row of ordinaryRows) {
+    const injected = injectTextInteraction(row.source);
+    const plan = structuredClone(injected.plan) as any;
+    const span = plan.instructions[injected.handoffInstruction].span;
+    if (row.extraTemporary) plan.temporaryCount += 1;
+    plan.instructions[injected.handoffInstruction] = row.instruction(span, injected.destinationTemporary);
+    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
+    const pending = waiting(plan);
+    const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
+    const continued = executeInstruction(plan, completed.snapshot);
+    assert.equal(continued.snapshot.interactionResultHandoff, null, row.id);
+    if (row.id === "PR194-store-temporary") assert.equal(continued.snapshot.temporaries.find((entry: any) => entry.id === injected.destinationTemporary + 1)?.value, "committed", row.id);
+    if (row.id === "PR194-say") assert.ok(continued.events.some((event) => event.kind === "say" && event.text === "committed"), row.id);
+    assert.equal(executeInstruction(plan, continued.snapshot).snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary), false, row.id);
+  }
+});
+
+test("PR194 matrix: direct clear and exit discard the handoff", () => {
+  const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
+  const span = injected.plan.instructions[injected.handoffInstruction]!.span;
+  const rows = [
+    { id: "PR194-direct-clear", instruction: { kind: "clearTemporary", temporaryId: injected.destinationTemporary, span }, expectHalted: false },
+    { id: "PR194-exit", instruction: { kind: "exit", span }, expectHalted: true },
+  ] as const;
+  for (const row of rows) {
+    const plan = structuredClone(injected.plan) as any;
+    plan.instructions[injected.handoffInstruction] = row.instruction;
+    if (row.expectHalted) {
+      plan.instructions = plan.instructions.slice(0, injected.handoffInstruction + 1);
+      plan.rootEndInstruction = plan.instructions.length;
+    }
+    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
+    const pending = waiting(plan);
+    const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
+    const after = executeInstruction(plan, completed.snapshot).snapshot;
+    assert.equal(after.interactionResultHandoff, null, row.id);
+    assert.equal(after.temporaries.some((entry) => entry.id === injected.destinationTemporary), false, row.id);
+    if (row.expectHalted) assert.equal(after.status, "halted", row.id);
+  }
+});
+
+test("PR194 matrix: checkpoint boundaries preserve typed interaction results", () => {
+  const rows = [
+    { id: "PR194-boundary-text", kind: "text" as const, ui: { kind: "text" as const, hint: null, accessibleName: defaults.text }, payload: { kind: "submittedText", submittedText: "text" } },
+    { id: "PR194-boundary-number", kind: "number" as const, ui: { kind: "number" as const, hint: null, accessibleName: defaults.number }, payload: { kind: "submittedText", submittedText: "12" } },
+    { id: "PR194-boundary-choice", kind: "choice" as const, ui: { kind: "choice" as const, labelType: "identifier" as const, options: [{ text: "Visible", label: "saved" }], accessibleName: defaults.choice }, payload: { kind: "selectedLabel", selectedLabel: "saved" } },
+  ];
+  for (const row of rows) {
+    const injected = injectInteraction('let answer = "__interaction_result__"\nsay answer\nexit', row.kind, row.ui);
+    const pending = waiting(injected.plan);
+    const pendingRestored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, pending.snapshot)));
+    assert.equal(pendingRestored.snapshot.interactionResultHandoff, null, row.id);
+    assert.equal(pendingRestored.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary), false, row.id);
+    const completed = completeAction(injected.plan, pendingRestored.snapshot, { actionId: pendingRestored.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: row.kind, payload: row.payload });
+    const committed = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, completed.snapshot)));
+    assert.notEqual(committed.snapshot.interactionResultHandoff, null, row.id);
+    const transferred = executeInstruction(injected.plan, committed.snapshot);
+    const transferredRestored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, transferred.snapshot)));
+    assert.equal(transferredRestored.snapshot.interactionResultHandoff, null, row.id);
+    const cleaned = executeInstruction(injected.plan, transferredRestored.snapshot);
+    const cleanedRestored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, cleaned.snapshot)));
+    assert.equal(cleanedRestored.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary), false, row.id);
+  }
+});
+
+test("PR194 matrix: invalid local handoff shapes reject without mutating plans", () => {
+  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
+  const span = injected.plan.instructions[injected.handoffInstruction]!.span;
+  const rows = [
+    { id: "PR194-jump-continuation", mutate: (plan: any) => { plan.instructions[injected.handoffInstruction] = { kind: "jump", target: injected.clearInstruction, span }; } },
+    { id: "PR194-second-blocking-action", mutate: (plan: any) => { plan.instructions[injected.handoffInstruction] = { kind: "wait", duration: { kind: "literal", value: 1, span }, unit: "ms", span }; } },
+    { id: "PR194-consume-wrong-temporary", mutate: (plan: any) => { plan.instructions[injected.handoffInstruction].value = { kind: "temporary", temporaryId: injected.destinationTemporary + 1, span }; } },
+    { id: "PR194-missing-clear", mutate: (plan: any) => { plan.instructions[injected.clearInstruction] = { kind: "say", speaker: null, value: { kind: "literal", value: "x", span }, span }; } },
+    { id: "PR194-wrong-clear", mutate: (plan: any) => { plan.instructions[injected.clearInstruction].temporaryId = injected.destinationTemporary + 1; } },
+    { id: "PR194-second-producer", mutate: (plan: any) => { plan.instructions[injected.clearInstruction] = { kind: "storeTemporary", temporaryId: injected.destinationTemporary, value: { kind: "literal", value: "x", span }, expectBoolean: false, span }; } },
+    { id: "PR194-return-value-not-guaranteed", mutate: (plan: any) => { plan.instructions[injected.handoffInstruction].value = { kind: "binary", operator: "or", left: { kind: "literal", value: true, span }, right: { kind: "temporary", temporaryId: injected.destinationTemporary, span }, span }; } },
+  ];
+  for (const row of rows) {
+    const plan = structuredClone(injected.plan) as any;
+    const before = structuredClone(plan);
+    row.mutate(plan);
+    const validation = validateInstructionPlan(plan);
+    assert.equal(validation.valid, false, row.id);
+    assert.ok(validation.errors.some((error) => error.code === "TSC002"), row.id);
+    assert.deepEqual(plan, structuredClone(plan), row.id);
+    assert.deepEqual(before, injected.plan, row.id);
+  }
+});
+
+test("PR194 matrix: rejected completion and snapshot operations preserve canonical state", () => {
+  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
+  const pending = waiting(injected.plan);
+  const actionId = pending.snapshot.foregroundAction!.actionId;
+  const requests = [
+    { id: "PR194-invalid-payload", request: { actionId, actionKind: "interaction" as const, interactionKind: "text" as const, payload: { kind: "submittedText", submittedText: " \t" } } },
+    { id: "PR194-wrong-action-kind", request: { actionId, actionKind: "delay" as const, payload: { kind: "time", currentSessionTimeMs: 0 } } },
+  ];
+  for (const row of requests) {
+    const before = structuredClone(pending.snapshot);
+    const result = completeAction(injected.plan, pending.snapshot, row.request);
+    assert.deepEqual(result.snapshot, before, row.id);
+    assert.deepEqual(result.events, [], row.id);
+  }
+  const completed = completeAction(injected.plan, pending.snapshot, { actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
+  for (const mutation of [
+    (snapshot: any) => { snapshot.interactionResultHandoff = null; },
+    (snapshot: any) => { snapshot.interactionResultHandoff.ownerCallFrameId = 99; snapshot.nextCallFrameId = 100; },
+    (snapshot: any) => { snapshot.interactionResultHandoff.extra = true; },
+  ]) {
+    const snapshot = structuredClone(completed.snapshot) as any;
+    mutation(snapshot);
+    const before = structuredClone(snapshot);
+    assert.throws(() => completeAction(injected.plan, snapshot, { actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } }));
+    assert.deepEqual(snapshot, before);
+  }
+});
+
+test("PR194 matrix: root, function, argument, and suspended-caller ownership contexts", () => {
+  const rows = [
+    { id: "PR194-root-context", source: 'let answer = "__interaction_result__"\nsay answer\nexit', owner: null },
+    { id: "PR194-function-context", source: 'function prompt { let answer = "__interaction_result__"\nsay answer\nreturn }\nprompt()\nexit', owner: "frame" },
+    { id: "PR194-argument-context", source: 'function send(value) { say value\nreturn }\nsend("__interaction_result__")\nexit', owner: null },
+    { id: "PR194-suspended-caller-context", source: 'function prompt { return "__interaction_result__" }\nfunction send(before, answer) { say `${before}:${answer}`\nreturn }\nsend("first", prompt())\nexit', owner: "frame" },
+  ] as const;
+  for (const row of rows) {
+    const injected = injectTextInteraction(row.source);
+    const pending = waiting(injected.plan);
+    const action = pending.snapshot.foregroundAction!;
+    if (row.owner === null) assert.equal(action.ownerCallFrameId, null, row.id);
+    else assert.ok(action.ownerCallFrameId !== null, row.id);
+    const completed = completeAction(injected.plan, pending.snapshot, { actionId: action.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
+    assert.equal(completed.snapshot.interactionResultHandoff?.ownerCallFrameId, action.ownerCallFrameId, row.id);
+    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, completed.snapshot)));
+    const final = run(injected.plan, restored.snapshot);
+    assert.equal(final.snapshot.interactionResultHandoff, null, row.id);
+    assert.ok(final.events.some((event) => event.kind === "say" && event.text.includes("committed")), row.id);
+  }
+});
+
+test("PR194 matrix: returnVoid and returnValue consume in real function frames", () => {
+  const rows = [
+    { id: "PR194-return-void", source: 'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit', value: false },
+    { id: "PR194-return-value", source: 'function prompt { return "__interaction_result__" }\nlet answer = prompt()\nsay answer\nexit', value: true },
+  ] as const;
+  for (const row of rows) {
+    const injected = injectTextInteraction(row.source);
+    const pending = waiting(injected.plan);
+    assert.ok(pending.snapshot.foregroundAction!.ownerCallFrameId !== null, row.id);
+    const completed = completeAction(injected.plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "committed" } });
+    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(injected.plan, completed.snapshot)));
+    const final = run(injected.plan, restored.snapshot);
+    assert.equal(final.snapshot.interactionResultHandoff, null, row.id);
+    assert.equal(final.snapshot.callFrames.length, 0, row.id);
+    if (row.value) assert.ok(final.events.some((event) => event.kind === "say" && event.text === "committed"), row.id);
+    else assert.ok(final.events.some((event) => event.kind === "say" && event.text === "after"), row.id);
+  }
+});
+
+test("PR194 matrix: newer settlement changes old interaction replay to staleAction", () => {
+  const injected = injectTextInteraction('let answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit');
+  const pending = waiting(injected.plan);
+  const request = { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction" as const, interactionKind: "text" as const, payload: { kind: "submittedText", submittedText: "committed" } };
+  const completed = completeAction(injected.plan, pending.snapshot, request);
+  const afterClear = executeInstruction(injected.plan, executeInstruction(injected.plan, completed.snapshot).snapshot).snapshot;
+  const delay = run(injected.plan, afterClear);
+  const newer = observeTime(injected.plan, delay.snapshot, 1);
+  const before = structuredClone(newer.snapshot);
+  const replay = completeAction(injected.plan, newer.snapshot, request);
+  assert.equal(replay.outcome.kind, "staleAction", "PR194-newer-settlement-replay");
+  assert.deepEqual(replay.events, []);
+  assert.deepEqual(replay.snapshot, before);
+});
