@@ -151,6 +151,55 @@ that cannot cross a real boundary are not blockers by default. Classify them as
 hardening, future work, a harness issue, or out of scope unless evidence shows a
 reachable supported path or real boundary consequence.
 
+### Review convergence
+
+A review is not converging when successive substantive findings come from the
+same invariant or problem family and each repair addresses only one newly found
+sibling without reducing uncertainty about the remaining supported behavior
+space. No fixed review count triggers this rule. Both the implementer and the
+reviewer are responsible for recognizing and reporting the pattern.
+
+Relevant signals include:
+
+- consecutive findings involving the same lifecycle, validator, helper, state
+  transition, or public/trusted boundary;
+- repairs repeatedly adding one isolated special case;
+- no explicit account of the remaining bounded behavior space;
+- tests growing mainly as a list of previously discovered incidents;
+- uncertainty about completeness not decreasing after each repair;
+- a reviewer continuing to find sibling cases without being able to explain
+  why the remaining space is covered.
+
+When these signals appear, pause before repeating the same repair cycle and
+briefly record:
+
+1. the recurring pattern;
+2. why the current method is not demonstrating convergence;
+3. whether the weakness is in the implementation, decomposition, requirement
+   model, or evidence strategy;
+4. the smallest appropriate alternative;
+5. whether a material scope or execution-strategy change needs owner or
+   coordinator approval.
+
+Possible alternatives include an explicit test matrix, state-transition table,
+invariant inventory, property- or model-based strategy, a focused completeness
+audit, splitting an overly broad issue, or simplifying or redesigning the
+implementation. Do not prescribe a matrix or new framework for every repeated
+finding; choose the smallest method that matches the demonstrated problem.
+
+Isolated findings, unrelated defects, and a known finite repair list whose
+remaining coverage is understood may continue through ordinary repair and
+review. Repeatedly applying the smallest local patch is not automatically the
+simplest overall solution. Under pragmatic YAGNI, a bounded systematic model is
+justified when it is the smallest credible way to resolve demonstrated
+completeness uncertainty, but it does not justify generic infrastructure,
+speculative compatibility, or unrelated hardening.
+
+The implementer must not silently broaden the pull request into a large
+campaign. When the revised approach materially changes scope or execution
+strategy, present the pattern, options, recommendation, cost, and exclusions to
+the owner or coordinator before proceeding.
+
 ### Proportional repair and owner escalation
 
 Propose the smallest repair that restores accepted behavior or the real

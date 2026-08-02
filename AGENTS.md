@@ -79,6 +79,21 @@ as appropriate. Pragmatic YAGNI does not permit weakening accepted behavior or
 real external, host, checkpoint, persistence, package, determinism, or security
 boundaries.
 
+## Review convergence
+
+Implementers and reviewers must signal repeated sibling findings or other
+evidence that review is not converging. Do not keep alternating isolated
+repairs and adjacent findings when uncertainty about the remaining supported
+behavior space is not decreasing. Reassess the implementation, decomposition,
+requirement model, and evidence strategy before continuing.
+
+Use `docs/DEVELOPMENT-WORKFLOW.md` for the convergence assessment and any
+owner/coordinator escalation. Use `docs/TESTING.md` when a bounded behavior
+space needs a matrix, transition table, invariant inventory, property/model
+coverage, or evidence-preserving consolidation. Apply these rules
+proportionately: isolated findings and known finite repair lists may continue
+through ordinary review.
+
 ## Efficient editing and context use
 
 Complete the mandatory authority reads above. For supporting context, prefer
