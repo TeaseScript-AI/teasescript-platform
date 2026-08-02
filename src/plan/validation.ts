@@ -928,7 +928,6 @@ function validateCanonicalInteractionResultHandoffs(
       "say",
       "setDeclaredSpeakerProperty",
       "prepareReference",
-      "bindDefaultParameter",
     ].includes(String(handoff.kind))) {
       errors.push(planError(
         "TSC002",
@@ -1005,7 +1004,6 @@ function canonicalHandoffConsumesTemporary(
     case "storeTemporary":
     case "say":
     case "setDeclaredSpeakerProperty":
-    case "bindDefaultParameter":
     case "returnValue":
       expression = instruction.value;
       break;
