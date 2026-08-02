@@ -1012,18 +1012,65 @@ function canonicalHandoffConsumesTemporary(
     default:
       expression = undefined;
   }
-  return expressionContainsTemporary(expression, temporaryId);
+  return expressionGuaranteesTemporaryEvaluation(expression, temporaryId);
 }
 
-function expressionContainsTemporary(value: unknown, temporaryId: number): boolean {
-  if (Array.isArray(value)) {
-    return value.some((item) => expressionContainsTemporary(item, temporaryId));
-  }
+function expressionGuaranteesTemporaryEvaluation(
+  value: unknown,
+  temporaryId: number,
+): boolean {
   if (!isRecord(value)) return false;
-  if (value.kind === "temporary") return value.temporaryId === temporaryId;
-  return Object.values(value).some((nested) =>
-    expressionContainsTemporary(nested, temporaryId)
-  );
+  switch (value.kind) {
+    case "temporary":
+      return value.temporaryId === temporaryId;
+    case "list":
+    case "set":
+      return Array.isArray(value.elements) && value.elements.some((item) =>
+        expressionGuaranteesTemporaryEvaluation(item, temporaryId)
+      );
+    case "object":
+      return Array.isArray(value.properties) && value.properties.some((property) =>
+        isRecord(property) &&
+        expressionGuaranteesTemporaryEvaluation(property.value, temporaryId)
+      );
+    case "group":
+      return expressionGuaranteesTemporaryEvaluation(value.expression, temporaryId);
+    case "template":
+      return Array.isArray(value.parts) && value.parts.some((part) =>
+        isRecord(part) &&
+        part.kind === "expression" &&
+        expressionGuaranteesTemporaryEvaluation(part.expression, temporaryId)
+      );
+    case "property":
+      return expressionGuaranteesTemporaryEvaluation(value.object, temporaryId);
+    case "index":
+      return expressionGuaranteesTemporaryEvaluation(value.object, temporaryId) ||
+        expressionGuaranteesTemporaryEvaluation(value.index, temporaryId);
+    case "call": {
+      const calleeConsumes =
+        isRecord(value.callee) &&
+        value.callee.kind === "property" &&
+        expressionGuaranteesTemporaryEvaluation(value.callee.object, temporaryId);
+      const argumentConsumes = Array.isArray(value.arguments) && value.arguments.some((argument) =>
+        isRecord(argument) &&
+        expressionGuaranteesTemporaryEvaluation(argument.value, temporaryId)
+      );
+      return calleeConsumes || argumentConsumes;
+    }
+    case "unary":
+      return expressionGuaranteesTemporaryEvaluation(value.operand, temporaryId);
+    case "binary":
+      if (value.operator === "and" || value.operator === "or") {
+        return expressionGuaranteesTemporaryEvaluation(value.left, temporaryId);
+      }
+      return expressionGuaranteesTemporaryEvaluation(value.left, temporaryId) ||
+        expressionGuaranteesTemporaryEvaluation(value.right, temporaryId);
+    case "range":
+      return expressionGuaranteesTemporaryEvaluation(value.start, temporaryId) ||
+        expressionGuaranteesTemporaryEvaluation(value.end, temporaryId);
+    default:
+      return false;
+  }
 }
 
 function validateInstructionRegionTarget(

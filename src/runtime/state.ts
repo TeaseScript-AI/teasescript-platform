@@ -2073,10 +2073,15 @@ function validateInteractionResultHandoffState(
 
   const settlement = snapshot.lastSettlement;
   if (
-    isPlainRecord(settlement) &&
-    settlement.actionKind === "interaction" &&
+    !isPlainRecord(settlement) ||
+    !positiveSafeInteger(settlement.actionId) ||
+    settlement.actionId < handoff.actionId
+  ) {
+    errors.push("Runtime interaction result handoff requires its settlement or a newer retained settlement.");
+  } else if (
     settlement.actionId === handoff.actionId &&
     (
+      settlement.actionKind !== "interaction" ||
       settlement.owningInstruction !== handoff.owningInstruction ||
       settlement.continuationInstruction !== handoff.continuationInstruction ||
       settlement.ownerCallFrameId !== handoff.ownerCallFrameId ||

@@ -1059,6 +1059,46 @@ test("result interactions use one bounded local handoff instead of future-path l
     true,
     JSON.stringify(validateInstructionPlan(evaluated).errors),
   );
+
+  const shortCircuited = structuredClone(injected.plan) as any;
+  const shortCircuitSpan = shortCircuited.instructions[injected.handoffInstruction].span;
+  shortCircuited.instructions[injected.handoffInstruction].value = {
+    kind: "binary",
+    operator: "and",
+    left: { kind: "literal", value: false, span: shortCircuitSpan },
+    right: {
+      kind: "temporary",
+      temporaryId: injected.destinationTemporary,
+      span: shortCircuitSpan,
+    },
+    span: shortCircuitSpan,
+  };
+  assert.equal(validateInstructionPlan(shortCircuited).valid, false);
+
+  const guaranteedLeft = structuredClone(injected.plan) as any;
+  guaranteedLeft.instructions[injected.handoffInstruction].value = {
+    ...shortCircuited.instructions[injected.handoffInstruction].value,
+    left: shortCircuited.instructions[injected.handoffInstruction].value.right,
+    right: shortCircuited.instructions[injected.handoffInstruction].value.left,
+  };
+  assert.equal(
+    validateInstructionPlan(guaranteedLeft).valid,
+    true,
+    JSON.stringify(validateInstructionPlan(guaranteedLeft).errors),
+  );
+
+  const ignoredExtraField = structuredClone(injected.plan) as any;
+  ignoredExtraField.instructions[injected.handoffInstruction].value = {
+    kind: "literal",
+    value: false,
+    span: shortCircuitSpan,
+    ignored: {
+      kind: "temporary",
+      temporaryId: injected.destinationTemporary,
+      span: shortCircuitSpan,
+    },
+  };
+  assert.equal(validateInstructionPlan(ignoredExtraField).valid, false);
 });
 
 test("completion commits atomically and every short handoff checkpoint boundary validates", () => {
@@ -1252,6 +1292,54 @@ test("a newer settlement cannot corrupt or orphan an unconsumed interaction hand
     serializeCheckpoint(createCheckpoint(restored.plan, cleared.snapshot)),
   );
   assert.deepEqual(roundTrip.snapshot, cleared.snapshot);
+});
+
+test("an active interaction handoff requires its settlement or a genuinely newer one", () => {
+  const injected = injectTextInteraction(
+    'wait 1 ms\nlet answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit',
+  );
+  const delayPending = run(
+    injected.plan,
+    createFreshRuntimeSnapshot(injected.plan),
+  );
+  assert.equal(delayPending.snapshot.foregroundAction?.kind, "delay");
+  const delayCompleted = observeTime(injected.plan, delayPending.snapshot, 1);
+  assert.equal(delayCompleted.snapshot.lastSettlement?.actionKind, "delay");
+  const olderSettlement = structuredClone(delayCompleted.snapshot.lastSettlement!);
+
+  const interactionPending = run(injected.plan, delayCompleted.snapshot);
+  assert.equal(interactionPending.snapshot.foregroundAction?.kind, "interaction");
+  const completed = completeAction(injected.plan, interactionPending.snapshot, {
+    actionId: interactionPending.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "committed" },
+  });
+  assert.equal(completed.outcome.kind, "completed");
+  assert.equal(
+    validateRuntimeSnapshot(completed.snapshot, injected.plan).valid,
+    true,
+    JSON.stringify(validateRuntimeSnapshot(completed.snapshot, injected.plan).errors),
+  );
+
+  const laterWaitInstruction = injected.plan.instructions.findIndex(
+    (instruction, index) =>
+      index > injected.clearInstruction && instruction.kind === "wait",
+  );
+  assert.notEqual(laterWaitInstruction, -1);
+  const equalWrongKind = structuredClone(completed.snapshot) as any;
+  equalWrongKind.lastSettlement = {
+    ...olderSettlement,
+    actionId: completed.snapshot.interactionResultHandoff!.actionId,
+    owningInstruction: laterWaitInstruction,
+    continuationInstruction: laterWaitInstruction + 1,
+  };
+  for (const lastSettlement of [null, olderSettlement, equalWrongKind.lastSettlement]) {
+    const malformed = structuredClone(completed.snapshot);
+    malformed.lastSettlement = lastSettlement;
+    assert.equal(validateRuntimeSnapshot(malformed, injected.plan).valid, false);
+    assert.throws(() => createCheckpoint(injected.plan, malformed));
+  }
 });
 
 test("pending, committed, transferred, and cleared interaction boundaries restore equivalently", () => {
