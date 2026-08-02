@@ -2571,10 +2571,16 @@ test("PR194 matrix: continuation kinds read only their canonical expression fiel
     assert.deepEqual(plan, before, row.id);
   }
 
-  const invalidRows: readonly { readonly id: string; readonly instruction: unknown }[] = [
+  const invalidRows: readonly {
+    readonly id: string;
+    readonly instruction: unknown;
+    readonly temporaryCount: number;
+    readonly destinationIsInRange?: true;
+  }[] = [
     {
       id: "PR194-dispatch-evaluate-value-ignored",
       instruction: { kind: "evaluate", expression: ignored, value: destination, span },
+      temporaryCount: injected.plan.temporaryCount,
     },
     {
       id: "PR194-dispatch-prepare-reference-value-ignored",
@@ -2585,19 +2591,40 @@ test("PR194 matrix: continuation kinds read only their canonical expression fiel
         destinationTemporary: injected.destinationTemporary + 1,
         span,
       },
+      temporaryCount: injected.plan.temporaryCount + 1,
+      destinationIsInRange: true,
     },
     {
       id: "PR194-dispatch-declare-binding-expression-ignored",
       instruction: { kind: "declareBinding", name: "answer", value: ignored, expression: destination, span },
+      temporaryCount: injected.plan.temporaryCount,
     },
   ];
   for (const row of invalidRows) {
     // Deliberately unsupported sibling fields exercise public malformed-plan validation.
-    const plan = replaceHandoffInstruction(injected, row.instruction as Instruction);
+    const plan = replaceHandoffInstruction(
+      injected,
+      row.instruction as Instruction,
+      row.temporaryCount,
+    );
     const before = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
     assert.equal(validation.valid, false, row.id);
-    assert.ok(validation.errors.some((error) => error.code === "TSC002"), row.id);
+    assert.ok(
+      validation.errors.some((error) =>
+        error.code === "TSC002" &&
+        error.message === "Interaction result handoff must consume the destination immediately." &&
+        error.path === `$.instructions[${injected.handoffInstruction}]`),
+      row.id,
+    );
+    if (row.destinationIsInRange) {
+      assert.ok(
+        validation.errors.every(
+          (error) => error.message !== "Temporary reference is outside the plan's temporary range.",
+        ),
+        row.id,
+      );
+    }
     assert.deepEqual(plan, before, row.id);
   }
 });
