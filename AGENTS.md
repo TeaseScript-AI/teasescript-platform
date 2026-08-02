@@ -25,7 +25,8 @@ Do not treat planning documents, wishes, research files, historical audits, or s
 - Laravel is the only public backend.
 - Preserve deterministic source evaluation order and explicit JSON-safe pause/resume state.
 - Validate external, checkpoint, host, package, and future integration data at runtime.
-- Apply the pragmatic YAGNI rule below when deciding present implementation scope and future-facing complexity.
+- Apply the KISS and pragmatic YAGNI rule below when deciding design,
+  workflow, implementation scope, evidence, and future-facing complexity.
 - Do not add dependencies without documenting need, alternatives, maintenance impact, and security impact.
 - Do not weaken tests to hide failures.
 
@@ -56,13 +57,16 @@ These proportionality rules do not weaken accepted behavior, deterministic
 execution, serializable checkpoints, or validation at real external, host,
 checkpoint, persistence, package, and security boundaries.
 
-## Pragmatic YAGNI
+## KISS and pragmatic YAGNI
 
-Implement the smallest design that satisfies current owner-approved behavior
-and real architecture, persistence, determinism, security, and trust
-boundaries.
+Choose the simplest complete design, workflow, implementation, and evidence
+strategy that safely satisfies current owner-approved behavior and real
+architecture, persistence, determinism, security, and trust boundaries. Assess
+simplicity across the complete change and its maintenance cost, not only by the
+size of one local patch.
 
-Future-facing preparation is justified only when a concrete consumer or
+Pragmatic YAGNI applies this rule to future-facing complexity. Preparation is
+justified only when a concrete consumer or
 obligation has been explicitly scheduled by the owner or coordinator, an
 accepted boundary must be correct when first introduced, or deferral would
 create a demonstrated, material, and difficult-to-reverse data, security,
@@ -72,9 +76,10 @@ unaccepted future architecture do not justify broader infrastructure.
 
 Otherwise propose or route the idea through the appropriate owner-governed
 process. A proposal does not accept, schedule, or authorize implementation.
-Pragmatic YAGNI does not permit weakening accepted behavior or real external,
-host, checkpoint, persistence, package, determinism, or security boundaries.
-Use `docs/DEVELOPMENT-WORKFLOW.md` for the detailed decision and routing rules.
+Neither KISS nor pragmatic YAGNI permits weakening accepted behavior or real
+external, host, checkpoint, persistence, package, determinism, or security
+boundaries. Use `docs/DEVELOPMENT-WORKFLOW.md` for the detailed decision and
+routing rules.
 
 ## Review convergence
 

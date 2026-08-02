@@ -82,10 +82,16 @@ Use words such as `must`, `exact`, `versioned`, `authoritative`, and
 boundary, or owner decision that requires that strength. A stricter
 implementation being technically possible is not sufficient.
 
-### Pragmatic YAGNI
+### KISS and pragmatic YAGNI
 
-Once the current requirement and its authority are established, implement only
-the complexity needed for that requirement and its real boundaries.
+Once the current requirement and its authority are established, choose the
+simplest complete approach that safely satisfies that requirement and its real
+boundaries. Assess simplicity across implementation, evidence, workflow, and
+maintenance cost. The smallest individual patch is not automatically the
+simplest overall solution.
+
+Pragmatic YAGNI applies this rule to future-facing complexity. Implement only
+the complexity needed for the current requirement and its real boundaries.
 
 Statements such as “we may need this later,” “a more general solution would be
 cleaner,” an unscheduled backlog entry, a historical implementation, or an
@@ -198,8 +204,8 @@ finding; choose the smallest method that matches the demonstrated problem.
 Isolated findings, unrelated defects, and a known finite repair list whose
 remaining coverage is understood may continue through ordinary repair and
 review. Repeatedly applying the smallest local patch is not automatically the
-simplest overall solution. Under pragmatic YAGNI, a bounded systematic model is
-justified when it is the smallest credible way to resolve demonstrated
+simplest overall solution. Under KISS and pragmatic YAGNI, a bounded systematic
+model is justified when it is the smallest credible way to resolve demonstrated
 completeness uncertainty, but it does not justify generic infrastructure,
 speculative compatibility, or unrelated hardening.
 
@@ -211,10 +217,11 @@ the owner or coordinator before proceeding.
 ### Proportional repair and owner escalation
 
 Propose the smallest repair that restores accepted behavior or the real
-boundary. Apply the pragmatic YAGNI rule above before broadening a repair for
-future prevention or hypothetical reuse. Do not expand a local defect into a
-generalized framework, new permanent compatibility layer, public contract,
-schema, or unrelated hardening campaign without a separate owner decision.
+boundary. Apply the KISS and pragmatic YAGNI rule above before broadening a
+repair for future prevention or hypothetical reuse. Do not expand a local
+defect into a generalized framework, new permanent compatibility layer, public
+contract, schema, or unrelated hardening campaign without a separate owner
+decision.
 
 When owner approval is required, explain in ordinary language what product
 behavior, data risk, security boundary, or maintenance problem the stronger
