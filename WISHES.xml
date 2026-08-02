@@ -729,22 +729,28 @@
       </history>
     </wish>
     <wish id="W-056" status="active">
-      <title>On-device media vision and adaptive censoring</title>
-      <description>Analyze runtime-selected or user-provided images and video, including private local media libraries, on the client with a local vision model so scripts can receive bounded typed observations about detected content, counts, regions, confidence, and tracked changes over time. Support uses such as detecting and counting nudity or anatomical regions including breasts or genitals to parameterize deterministic tasks, supplying structured scene context to an LLM, and applying optional blur or other censoring overlays that follow detected regions in still images or video. Prefer browser-local inference with available acceleration such as WebGPU or WebAssembly-based runtimes so private media remains local by default; raw media or richer evidence may leave the device only through a later explicit privacy and capability design.</description>
+      <title>Dedicated on-device computer vision and adaptive censoring</title>
+      <description>Run specialized task-specific computer-vision models, such as object detectors, segmenters, trackers and pose or keypoint estimators, over runtime-selected or user-provided images, video and camera streams, including private local media libraries. Produce low-latency bounded typed observations such as class labels, counts, bounding boxes or masks, keypoints, confidence scores and stable tracking identities that deterministic scripts can use directly. Example uses include counting detected breasts or genitals to parameterize tasks, validating posture or movement, and applying optional blur, pixelation or other censoring overlays that follow detected regions through still images or video. This fast inference layer is distinct from multimodal LLM image interpretation: an LLM may later receive selected structured observations or occasional frames, but it is not required for real-time detection, counting, tracking or pose analysis. Prefer browser-local inference with available acceleration such as WebGPU or WebAssembly and ONNX-style runtimes so private media remains local by default; raw media or richer evidence may leave the device only through a later explicit privacy and capability design.</description>
       <tags>
         <tag>computer-vision</tag>
+        <tag>object-detection</tag>
+        <tag>segmentation</tag>
+        <tag>tracking</tag>
+        <tag>pose-estimation</tag>
         <tag>media</tag>
         <tag>video</tag>
         <tag>local-inference</tag>
         <tag>webgpu</tag>
         <tag>wasm</tag>
+        <tag>onnx</tag>
         <tag>privacy</tag>
         <tag>runtime-input</tag>
         <tag>censoring</tag>
       </tags>
       <history>
-        <event date="2026-08-02" type="created">Added as a distinct extension of the general vision-assessment direction in W-008 for unknown-at-authoring-time media, adaptive runtime input, and moving censor overlays.</event>
-        <event date="2026-08-02" type="deferred">Explicitly excluded from the current POC and alpha. Evaluate it for a later beta only if the media, privacy, capability, and deterministic typed-result foundations are ready; otherwise retain it as serious post-1.0 work. This records product intent, not a scheduled release or accepted implementation architecture.</event>
+        <event date="2026-08-02" type="created">Added as a distinct extension of the general vision-assessment direction in W-008 for unknown-at-authoring-time media, adaptive runtime input and moving censor overlays.</event>
+        <event date="2026-08-02" type="refined">Clarified using NudeNet, EraX-NSFW and Ultralytics pose estimation as capability references: the core is low-latency specialized detection, segmentation, tracking and keypoint inference rather than multimodal LLM vision. LLM use is optional downstream context.</event>
+        <event date="2026-08-02" type="deferred">Explicitly excluded from the current POC and alpha. Evaluate it for a later beta only if the media, privacy, capability and deterministic typed-result foundations are ready; otherwise retain it as serious post-1.0 work. This records product intent, not a scheduled release, dependency choice or accepted implementation architecture.</event>
       </history>
     </wish>
   </wishes>
