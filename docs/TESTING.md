@@ -109,9 +109,10 @@ distinct behavior.
 
 A matrix or equivalent model should:
 
-- name the relevant dimensions and give each row, transition, or generated
-  class a distinct evidence obligation;
-- distinguish accepted, rejected, and unsupported behavior;
+- name the relevant dimensions and give each included accepted or rejected row,
+  transition, or generated class a distinct evidence obligation;
+- distinguish accepted, rejected, unsupported, and out-of-scope behavior so
+  omissions are intentional;
 - make uncovered obligations visible rather than relying on the set of bugs
   found so far;
 - describe fixture provenance truthfully, distinguishing directly
@@ -122,12 +123,24 @@ A matrix or equivalent model should:
   boundaries when those boundaries are relevant;
 - permit later consolidation without losing any unique evidence obligation.
 
+Unsupported or out-of-scope combinations do not automatically require
+executable cases. Accepted behavior and rejection through a real supported or
+trusted boundary require executable evidence. Add an unsupported-case
+regression only when it protects a real boundary or prevents an actually
+reachable unsupported composition from being accepted.
+
 An additive evidence phase may temporarily retain overlapping regressions while
 the behavior space is being mapped. Once an independent check confirms that the
 coverage model accounts for the accepted dimensions and real boundaries,
 remove duplicate regressions and temporary scaffolding while preserving every
 unique obligation. A final independent review should verify both the resulting
 coverage model and the consolidated evidence.
+
+For this process, the completeness check is independent when it is performed by
+a reviewer or agent that did not construct the coverage model being audited.
+The final review must be performed by a reviewer or agent that did not perform
+the consolidation it assesses. This does not require a new role framework or a
+separate branch.
 
 Do not require this multi-stage process for ordinary small changes, isolated
 defects, or a known finite repair list whose coverage is already clear.
