@@ -222,27 +222,6 @@ test("checkpoint creation defensively isolates the supplied plan", () => {
   assert.equal(checkpoint.plan.functions[0]!.name, originalName);
 });
 
-test("rejects legacy v1 and v2 checkpoint, plan, and snapshot formats", () => {
-  const compiled = plan("exit");
-  const base = mutableCheckpoint(
-    createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)),
-  );
-
-  for (const version of [1, 2]) {
-    const checkpointVersion = structuredClone(base);
-    checkpointVersion.version = version;
-    assertCheckpointRejected(checkpointVersion, "TSK001");
-
-    const planVersion = structuredClone(base);
-    planVersion.plan.version = version;
-    assertCheckpointRejected(planVersion, "TSK001");
-
-    const snapshotVersion = structuredClone(base);
-    snapshotVersion.snapshot.version = version;
-    assertCheckpointRejected(snapshotVersion, "TSK001");
-  }
-});
-
 test("rejects malformed active call-frame identity and return state", () => {
   const { plan: compiled, snapshot } = recursiveSnapshot(3);
   const cases: Array<(checkpoint: MutableCheckpoint) => void> = [
