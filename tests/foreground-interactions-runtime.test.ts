@@ -19,7 +19,7 @@ import type {
 } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { CheckpointError, createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
-import { completeAction, executeInstruction, observeTime, run } from "../src/runtime/engine.js";
+import { completeAction, executeInstruction, observeTime, run, RuntimeDataError } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import type {
   RuntimeDelayActionSettlementSnapshot,
@@ -1583,12 +1583,14 @@ interface AcceptedExpressionGuaranteeRow {
   readonly expression: ExpressionPlan;
   readonly temporaryCount?: number;
   readonly valid: true;
+  readonly runtimeWitness?: true;
 }
 
 interface RejectedExpressionGuaranteeRow {
   readonly id: string;
   readonly category: string;
   readonly expression: unknown;
+  readonly temporaryCount?: number;
   readonly valid: false;
 }
 
@@ -1625,6 +1627,7 @@ function handoffPlanWithExpression(
 function handoffPlanWithMalformedExpression(
   injected: InjectedInteractionPlan,
   expression: unknown,
+  temporaryCount = injected.plan.temporaryCount,
 ): InstructionPlan {
   const instruction = {
     kind: "declareBinding",
@@ -1636,7 +1639,7 @@ function handoffPlanWithMalformedExpression(
   return replaceHandoffInstruction(
     injected,
     instruction as unknown as Instruction,
-    injected.plan.temporaryCount,
+    temporaryCount,
   );
 }
 
@@ -1658,6 +1661,7 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
       category: "temporary",
       expression: matching,
       valid: true,
+      runtimeWitness: true,
     },
     {
       id: "PR194-expression-list-element",
@@ -1668,6 +1672,7 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         span,
       },
       valid: true,
+      runtimeWitness: true,
     },
     {
       id: "PR194-expression-set-element",
@@ -1846,6 +1851,7 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         span,
       ),
       valid: true,
+      runtimeWitness: true,
     },
     {
       id: "PR194-expression-range-start",
@@ -1902,6 +1908,7 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
         span,
       },
       valid: true,
+      runtimeWitness: true,
     },
     {
       id: "PR194-expression-wrong-and-correct",
@@ -1922,6 +1929,7 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
       id: "PR194-expression-wrong-temporary",
       category: "wrong temporary",
       expression: wrong,
+      temporaryCount: injected.plan.temporaryCount + 1,
       valid: false,
     },
     {
@@ -2037,6 +2045,7 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
       id: "PR194-expression-wrong-left-correct-right",
       category: "short-circuit",
       expression: binaryExpression("or", wrong, matching, span),
+      temporaryCount: injected.plan.temporaryCount + 1,
       valid: false,
     },
   ];
@@ -2054,20 +2063,33 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
   }
 
   for (const row of rejected) {
-    const plan = handoffPlanWithMalformedExpression(injected, row.expression);
+    const plan = handoffPlanWithMalformedExpression(
+      injected,
+      row.expression,
+      row.temporaryCount,
+    );
     const before = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
     assert.equal(validation.valid, false, `${row.id}: ${row.category}`);
-    assert.ok(validation.errors.some((error) => error.code === "TSC002"), row.id);
+    assert.ok(
+      validation.errors.some((error) =>
+        error.code === "TSC002" &&
+        error.message === "Interaction result handoff must consume the destination immediately." &&
+        error.path === `$.instructions[${injected.handoffInstruction}]`),
+      row.id,
+    );
+    if (row.id === "PR194-expression-wrong-temporary" || row.id === "PR194-expression-wrong-left-correct-right") {
+      assert.ok(
+        validation.errors.every(
+          (error) => error.message !== "Temporary reference is outside the plan's temporary range.",
+        ),
+        row.id,
+      );
+    }
     assert.deepEqual(plan, before, row.id);
   }
 
-  for (const row of accepted.filter((entry) => [
-    "PR194-expression-direct-temporary",
-    "PR194-expression-list-element",
-    "PR194-expression-eager-right",
-    "PR194-expression-multiple-guaranteed",
-  ].includes(entry.id))) {
+  for (const row of accepted.filter((entry) => entry.runtimeWitness === true)) {
     const plan = handoffPlanWithExpression(injected, row.expression);
     const { completed } = completeCommittedTextInteraction(plan);
     const continued = executeInstruction(plan, completed.snapshot);
@@ -3564,21 +3586,37 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
       submittedText: "committed",
     },
   });
-  const mutations: readonly ((snapshot: ExternalRecord) => void)[] = [
-    (snapshot) => {
-      snapshot.interactionResultHandoff = null;
+  const malformedOperationRows: readonly {
+    readonly id: string;
+    readonly mutate: (snapshot: ExternalRecord) => void;
+    readonly message: string;
+  }[] = [
+    {
+      id: "PR194-rejected-operation-handoff-null",
+      mutate: (snapshot) => {
+        snapshot.interactionResultHandoff = null;
+      },
+      message: "Runtime interaction result handoff is missing at its canonical commit boundary.",
     },
-    (snapshot) => {
-      externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99;
-      snapshot.nextCallFrameId = 100;
+    {
+      id: "PR194-rejected-operation-handoff-owner",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99;
+        snapshot.nextCallFrameId = 100;
+      },
+      message: "Runtime interaction result handoff has invalid ownership or state.",
     },
-    (snapshot) => {
-      externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true;
+    {
+      id: "PR194-rejected-operation-handoff-extra-field",
+      mutate: (snapshot) => {
+        externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true;
+      },
+      message: "Runtime interaction result handoff is malformed.",
     },
   ];
-  for (const mutation of mutations) {
+  for (const row of malformedOperationRows) {
     const snapshot = externalRecord(structuredClone(completed.snapshot), "malformed snapshot");
-    mutation(snapshot);
+    row.mutate(snapshot);
     const before = structuredClone(snapshot);
     // Deliberately malformed external snapshot data must be rejected before completion mutates it.
     assert.throws(() => completeAction(injected.plan, snapshot as unknown as RuntimeSnapshot, {
@@ -3589,8 +3627,13 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
         kind: "submittedText",
         submittedText: "committed",
       },
-    }));
-    assert.deepEqual(snapshot, before);
+    }), (error: unknown) => {
+      assert.ok(error instanceof RuntimeDataError, row.id);
+      assert.equal(error.code, "TSR101", row.id);
+      assert.equal(error.message, row.message, row.id);
+      return true;
+    }, row.id);
+    assert.deepEqual(snapshot, before, row.id);
   }
 });
 
