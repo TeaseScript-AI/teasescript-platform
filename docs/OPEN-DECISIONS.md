@@ -27,7 +27,7 @@ ADR 0018 is partially implemented. PR #117 implemented and versioned the generic
 
 Default checkpoint restore should resume the exact validated saved state. Author-defined rollback or restart points are a separate advanced recovery feature and must not silently duplicate irreversible external effects.
 
-The current plan version 5 and runtime/checkpoint version 6 schemas are POC implementation details, not a promise of permanent wire-format compatibility.
+The current plan version 6 and runtime/checkpoint version 8 schemas are POC implementation details, not a promise of permanent wire-format compatibility.
 
 ## Remaining language and library work
 

@@ -94,8 +94,8 @@ Camera and file APIs continue to return engine-managed references rather than br
 
 ## Stability and future contracts
 
-The current TypeScript exports, version-5 instruction plans, and version-6 runtime-snapshot/checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
+The current TypeScript exports, version-6 instruction plans, and version-8 runtime-snapshot/checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
 
-Implementation of ADR 0016 introduced version-4 instruction plans and pending-action state. The current version-5 plans and version-6 runtime snapshots/checkpoints add the generic interaction instruction/action/settlement family and canonical player-transcript event data while retaining delay-settlement provenance. These remain internal POC format revisions, not product release numbers.
+Implementation of ADR 0016 introduced version-4 instruction plans and pending-action state. Version-5 plans and version-6 runtime snapshots/checkpoints added the generic interaction instruction/action/settlement family and canonical player-transcript event data. Current version-6 plans restrict result-bearing interactions to one local canonical consume/transfer boundary, and version-8 runtime snapshots/checkpoints retain one nullable single-use result handoff only until the first canonical consume, transfer, return, discard, or exit succeeds. That handoff preserves destination/result consistency independently of `lastSettlement`, which remains bounded replay data only. These remain internal POC format revisions, not product release numbers.
 
 Exact account, toy, history, global-data, checkpoint storage, host-message, media-persistence, time-integrity, and integration payloads remain open and must be defined as typed contracts before implementation. This document does not resolve their long-term versioning and migration policy.

@@ -54,11 +54,38 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 6;
+export const RUNTIME_SNAPSHOT_VERSION = 8;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
 const MAX_DETAILED_VALIDATION_WORK = 1_000_000;
+const RUNTIME_SNAPSHOT_KEYS = [
+  "format",
+  "version",
+  "nextInstruction",
+  "frames",
+  "speakers",
+  "defaultSpeaker",
+  "contextualSpeaker",
+  "rng",
+  "warnedSpeakerIds",
+  "loopFrames",
+  "temporaries",
+  "callFrames",
+  "nextEventSequence",
+  "nextScopeId",
+  "nextSpeakerId",
+  "nextCallFrameId",
+  "currentSessionTimeMs",
+  "foregroundAction",
+  "backgroundActions",
+  "nextActionId",
+  "lastSettlement",
+  "interactionResultHandoff",
+  "maxCallDepth",
+  "status",
+  "failure",
+] as const;
 
 export type RuntimeStatus = "ready" | "running" | "waiting" | "halted" | "failed";
 
@@ -149,6 +176,15 @@ export interface RuntimeCallFrameSnapshot {
   parameterState: RuntimeParameterStateSnapshot;
 }
 
+export interface RuntimeInteractionResultHandoffSnapshot {
+  readonly actionId: number;
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
+  readonly destinationTemporary: number;
+  readonly result: string | number;
+}
+
 export interface RuntimeSnapshot {
   readonly format: typeof RUNTIME_SNAPSHOT_FORMAT;
   readonly version: typeof RUNTIME_SNAPSHOT_VERSION;
@@ -171,7 +207,7 @@ export interface RuntimeSnapshot {
   readonly backgroundActions: RuntimePendingActionSnapshot[];
   nextActionId: number;
   lastSettlement: RuntimeActionSettlementSnapshot | null;
-  lastSettlementResultState: "none" | "live" | "released";
+  interactionResultHandoff: RuntimeInteractionResultHandoffSnapshot | null;
   readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
@@ -270,7 +306,7 @@ export function createFreshRuntimeSnapshot(
     backgroundActions: [],
     nextActionId: 1,
     lastSettlement: null,
-    lastSettlementResultState: "none",
+    interactionResultHandoff: null,
     maxCallDepth,
     status: capturedPlan.plan.rootEndInstruction === 0 ? "halted" : "ready",
     failure: null,
@@ -353,7 +389,10 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     backgroundActions: snapshot.backgroundActions.map(clonePendingAction),
     nextActionId: snapshot.nextActionId,
     lastSettlement: snapshot.lastSettlement === null ? null : cloneSettlement(snapshot.lastSettlement),
-    lastSettlementResultState: snapshot.lastSettlementResultState,
+    interactionResultHandoff:
+      snapshot.interactionResultHandoff === null
+        ? null
+        : cloneInteractionResultHandoff(snapshot.interactionResultHandoff),
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -364,6 +403,19 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
             message: snapshot.failure.message,
             span: copySpan(snapshot.failure.span),
           },
+  };
+}
+
+function cloneInteractionResultHandoff(
+  handoff: RuntimeInteractionResultHandoffSnapshot,
+): RuntimeInteractionResultHandoffSnapshot {
+  return {
+    actionId: handoff.actionId,
+    owningInstruction: handoff.owningInstruction,
+    continuationInstruction: handoff.continuationInstruction,
+    ownerCallFrameId: handoff.ownerCallFrameId,
+    destinationTemporary: handoff.destinationTemporary,
+    result: handoff.result,
   };
 }
 
@@ -508,6 +560,9 @@ export function validateCapturedRuntimeSnapshot(
   if (!isPlainRecord(value)) {
     return Object.freeze({ valid: false, errors: Object.freeze(["Runtime snapshot must be an object."]) });
   }
+  if (!hasExactKeys(value, RUNTIME_SNAPSHOT_KEYS)) {
+    errors.push("Runtime snapshot contains unsupported fields or omits required fields.");
+  }
   if (value.format !== RUNTIME_SNAPSHOT_FORMAT) errors.push("Unsupported runtime-snapshot format.");
   if (value.version !== RUNTIME_SNAPSHOT_VERSION) errors.push("Unsupported runtime-snapshot version.");
   const analysis = plan === undefined ? undefined : createSnapshotValidationAnalysis(plan);
@@ -639,6 +694,7 @@ export function validateCapturedRuntimeSnapshot(
     errors.push("Runtime maxCallDepth is outside the supported range.");
   }
   validatePendingActionState(value, plan, analysis, errors);
+  validateInteractionResultHandoffState(value, plan, analysis, errors);
   if (
     analysis?.detailedWorkExceeded === true &&
     !errors.includes("Runtime snapshot exceeds the detailed validation work limit.")
@@ -1926,23 +1982,6 @@ function validatePendingActionState(
   if (settlement !== null && (!isPlainRecord(settlement) || !["delay", "interaction"].includes(String(settlement.actionKind)) || settlement.settlementKind !== "completed" || !positiveSafeInteger(settlement.actionId) || !validSettlementProvenance(settlement, plan) || !validSettlementKindData(settlement, value, plan, analysis) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.completionEventSequence || settlement.completionEventSequence >= (typeof value.nextEventSequence === "number" ? value.nextEventSequence : 0) || settlement.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0) || (isPlainRecord(action) && action.actionId === settlement.actionId))) {
     errors.push("Runtime lastSettlement is malformed.");
   }
-  const resultState = value.lastSettlementResultState;
-  if (resultState !== "none" && resultState !== "live" && resultState !== "released") {
-    errors.push("Runtime lastSettlementResultState is invalid.");
-  }
-  const resultBearingSettlement =
-    isPlainRecord(settlement) &&
-    settlement.actionKind === "interaction" &&
-    settlement.interactionKind !== "button";
-  if (
-    (resultBearingSettlement && resultState === "none") ||
-    (!resultBearingSettlement && resultState !== "none")
-  ) {
-    errors.push("Runtime settlement-result lifecycle does not match lastSettlement.");
-  }
-  if (resultState === "live" && action !== null) {
-    errors.push("Runtime cannot retain a live interaction result while another foreground action is active.");
-  }
   if (
     isPlainRecord(action) &&
     isPlainRecord(settlement) &&
@@ -1959,6 +1998,165 @@ function validatePendingActionState(
   ) {
     errors.push("Runtime foreground action must be newer than the retained settlement.");
   }
+}
+
+function validateInteractionResultHandoffState(
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
+  errors: string[],
+): void {
+  const handoff = snapshot.interactionResultHandoff;
+  const nextInstruction = snapshot.nextInstruction;
+  const precedingInstruction =
+    plan !== undefined && positiveSafeInteger(nextInstruction)
+      ? plan.instructions[nextInstruction - 1]
+      : undefined;
+  const requiresHandoff =
+    precedingInstruction?.kind === "interaction" &&
+    precedingInstruction.destinationTemporary !== null;
+
+  if (handoff === null) {
+    if (requiresHandoff) {
+      errors.push("Runtime interaction result handoff is missing at its canonical commit boundary.");
+    }
+    return;
+  }
+  if (
+    !isPlainRecord(handoff) ||
+    !hasExactKeys(handoff, [
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "destinationTemporary",
+      "result",
+    ]) ||
+    !positiveSafeInteger(handoff.actionId) ||
+    !nonNegativeSafeInteger(handoff.owningInstruction) ||
+    !nonNegativeSafeInteger(handoff.continuationInstruction) ||
+    !positiveSafeInteger(handoff.destinationTemporary) ||
+    (handoff.ownerCallFrameId !== null &&
+      !positiveSafeInteger(handoff.ownerCallFrameId)) ||
+    !(
+      (typeof handoff.result === "string" && interactionStringFits(handoff.result)) ||
+      (typeof handoff.result === "number" &&
+        Number.isFinite(handoff.result) &&
+        !Object.is(handoff.result, -0))
+    ) ||
+    !positiveSafeInteger(snapshot.nextActionId) ||
+    handoff.actionId >= snapshot.nextActionId ||
+    snapshot.foregroundAction !== null ||
+    !["running", "failed"].includes(String(snapshot.status)) ||
+    snapshot.nextInstruction !== handoff.continuationInstruction
+  ) {
+    errors.push("Runtime interaction result handoff is malformed.");
+    return;
+  }
+
+  if (
+    !validInteractionResultHandoffOwner(handoff, snapshot, analysis) ||
+    !Array.isArray(snapshot.temporaries)
+  ) {
+    errors.push("Runtime interaction result handoff has invalid ownership or state.");
+    return;
+  }
+  const destination = snapshot.temporaries.find((temporary) =>
+    isPlainRecord(temporary) && temporary.id === handoff.destinationTemporary
+  );
+  if (
+    !isPlainRecord(destination) ||
+    !sameCanonicalSettlementResult(destination.value, handoff.result)
+  ) {
+    errors.push("Runtime interaction result handoff destination does not match its canonical result.");
+  }
+
+  const settlement = snapshot.lastSettlement;
+  if (
+    !isPlainRecord(settlement) ||
+    !positiveSafeInteger(settlement.actionId) ||
+    settlement.actionId < handoff.actionId
+  ) {
+    errors.push("Runtime interaction result handoff requires its settlement or a newer retained settlement.");
+  } else if (
+    settlement.actionId === handoff.actionId &&
+    (
+      settlement.actionKind !== "interaction" ||
+      settlement.owningInstruction !== handoff.owningInstruction ||
+      settlement.continuationInstruction !== handoff.continuationInstruction ||
+      settlement.ownerCallFrameId !== handoff.ownerCallFrameId ||
+      settlement.destinationTemporary !== handoff.destinationTemporary ||
+      !sameCanonicalSettlementResult(settlement.result, handoff.result)
+    )
+  ) {
+    errors.push("Runtime interaction result handoff disagrees with its retained settlement.");
+  }
+
+  if (plan === undefined) return;
+  const instruction = plan.instructions[handoff.owningInstruction];
+  if (
+    instruction?.kind !== "interaction" ||
+    instruction.destinationTemporary === null ||
+    handoff.owningInstruction + 1 !== handoff.continuationInstruction ||
+    instruction.destinationTemporary !== handoff.destinationTemporary ||
+    precedingInstruction !== instruction ||
+    !validInteractionResultForInstruction(instruction, handoff.result)
+  ) {
+    errors.push("Runtime interaction result handoff does not match its canonical plan instruction.");
+  }
+}
+
+function validInteractionResultHandoffOwner(
+  handoff: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  analysis: SnapshotValidationAnalysis | undefined,
+): boolean {
+  const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
+  const activeOwner = callFrames.at(-1);
+  const ownerCallFrameId = handoff.ownerCallFrameId;
+  if (ownerCallFrameId === null) {
+    if (callFrames.length !== 0) return false;
+    return analysis === undefined ||
+      (nonNegativeSafeInteger(handoff.owningInstruction) &&
+        analysis.functionIdsByInstruction[handoff.owningInstruction] === null);
+  }
+  if (
+    !positiveSafeInteger(ownerCallFrameId) ||
+    !isPlainRecord(activeOwner) ||
+    activeOwner.id !== ownerCallFrameId
+  ) return false;
+  if (analysis === undefined || !nonNegativeSafeInteger(handoff.owningInstruction)) {
+    return true;
+  }
+  const ownerFunctionId = analysis.functionIdsByInstruction[handoff.owningInstruction];
+  return ownerFunctionId !== null && activeOwner.functionId === ownerFunctionId;
+}
+
+function validInteractionResultForInstruction(
+  instruction: Extract<Instruction, { kind: "interaction" }>,
+  result: unknown,
+): boolean {
+  if (instruction.expectedResult === "number") {
+    if (
+      typeof result !== "number" ||
+      !Number.isFinite(result) ||
+      Object.is(result, -0)
+    ) return false;
+    return instruction.ui.kind !== "choice" ||
+      instruction.ui.options.some((option) => option.label === result);
+  }
+  if (
+    instruction.expectedResult !== "string" ||
+    typeof result !== "string" ||
+    !interactionStringFits(result)
+  ) return false;
+  if (instruction.ui.kind === "text") {
+    return !result.includes("\r") && interactionStringHasNonWhitespace(result);
+  }
+  if (instruction.ui.kind !== "choice") return false;
+  return instruction.ui.options.some((option) =>
+    (option.label ?? option.text) === result
+  );
 }
 
 function validInteractionAction(action: Record<string, unknown>, snapshot: Record<string, unknown>, plan: InstructionPlan | undefined): boolean {
@@ -2131,16 +2329,9 @@ function validSettlementKindData(
   if (!resultValid) return false;
 
   const resultBearing = settlement.interactionKind !== "button";
-  const resultState = snapshot.lastSettlementResultState;
   if (resultBearing) {
-    if (
-      !positiveSafeInteger(settlement.destinationTemporary) ||
-      (resultState !== "live" && resultState !== "released")
-    ) return false;
-  } else if (
-    settlement.destinationTemporary !== null ||
-    resultState !== "none"
-  ) return false;
+    if (!positiveSafeInteger(settlement.destinationTemporary)) return false;
+  } else if (settlement.destinationTemporary !== null) return false;
   if (
     settlement.ownerCallFrameId !== null &&
     (!positiveSafeInteger(settlement.ownerCallFrameId) ||
@@ -2161,25 +2352,12 @@ function validSettlementKindData(
     if (!Number.isFinite(parsed) || (Object.is(parsed, -0) ? 0 : parsed) !== settlement.result) return false;
   }
 
-  if (resultState === "live") {
-    const temporaries = interactionSettlementOwnerTemporaries(settlement, snapshot);
-    if (temporaries === null) return false;
-    const destination = temporaries.find((temporary) =>
-      isPlainRecord(temporary) && temporary.id === settlement.destinationTemporary
-    );
-    if (
-      !isPlainRecord(destination) ||
-      !sameCanonicalSettlementResult(destination.value, settlement.result)
-    ) return false;
-  }
-
   if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const instruction = plan.instructions[settlement.owningInstruction];
   if (instruction?.kind !== "interaction" || instruction.interactionKind !== settlement.interactionKind) return false;
   if (
     settlement.destinationTemporary !== instruction.destinationTemporary ||
-    !validInteractionSettlementOwner(settlement, snapshot, analysis) ||
-    !validInteractionSettlementDestinationState(settlement, snapshot, analysis)
+    !validInteractionSettlementOwner(settlement, snapshot, analysis)
   ) return false;
   if (instruction.ui.kind === "button") return settlement.transcriptText === instruction.ui.buttonLabel;
   if (instruction.ui.kind === "text") return settlement.result === settlement.transcriptText;
@@ -2205,154 +2383,8 @@ function validInteractionSettlementOwner(
   const activeOwner = callFrames.find((frame) =>
     isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId
   );
-  if (snapshot.lastSettlementResultState === "live" && activeOwner === undefined) return false;
   return activeOwner === undefined ||
     (isPlainRecord(activeOwner) && activeOwner.functionId === ownerFunctionId);
-}
-
-function interactionSettlementOwnerTemporaries(
-  settlement: Record<string, unknown>,
-  snapshot: Record<string, unknown>,
-): readonly unknown[] | null {
-  const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
-  if (settlement.ownerCallFrameId === null) {
-    if (callFrames.length === 0) {
-      return Array.isArray(snapshot.temporaries) ? snapshot.temporaries : null;
-    }
-    const first = callFrames[0];
-    return isPlainRecord(first) && Array.isArray(first.callerTemporaries)
-      ? first.callerTemporaries
-      : null;
-  }
-  if (!positiveSafeInteger(settlement.ownerCallFrameId)) return null;
-  const ownerIndex = callFrames.findIndex((frame) =>
-    isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId
-  );
-  if (ownerIndex < 0) return null;
-  if (ownerIndex === callFrames.length - 1) {
-    return Array.isArray(snapshot.temporaries) ? snapshot.temporaries : null;
-  }
-  const child = callFrames[ownerIndex + 1];
-  return isPlainRecord(child) && Array.isArray(child.callerTemporaries)
-    ? child.callerTemporaries
-    : null;
-}
-
-function validInteractionSettlementDestinationState(
-  settlement: Record<string, unknown>,
-  snapshot: Record<string, unknown>,
-  analysis: SnapshotValidationAnalysis | undefined,
-): boolean {
-  const resultState = snapshot.lastSettlementResultState;
-  if (resultState === "none") return true;
-  if (
-    analysis === undefined ||
-    !nonNegativeSafeInteger(settlement.owningInstruction) ||
-    !nonNegativeSafeInteger(settlement.continuationInstruction) ||
-    !positiveSafeInteger(settlement.destinationTemporary)
-  ) return true;
-
-  const context = interactionSettlementOwnerContext(settlement, snapshot);
-  if (context === null) {
-    return resultState === "released";
-  }
-  if (snapshot.status === "halted") {
-    return resultState === "released";
-  }
-  const possible = interactionSettlementDestinationStatesAtCurrent(
-    settlement.owningInstruction,
-    settlement.continuationInstruction,
-    context.currentInstruction,
-    settlement.destinationTemporary,
-    analysis,
-  );
-  if (possible === null) return false;
-  return resultState === "live"
-    ? possible.live
-    : possible.released;
-}
-
-function interactionSettlementOwnerContext(
-  settlement: Record<string, unknown>,
-  snapshot: Record<string, unknown>,
-): { readonly currentInstruction: number } | null {
-  const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
-  if (settlement.ownerCallFrameId === null) {
-    if (callFrames.length === 0) {
-      return nonNegativeSafeInteger(snapshot.nextInstruction)
-        ? { currentInstruction: snapshot.nextInstruction }
-        : null;
-    }
-    const first = callFrames[0];
-    return isPlainRecord(first) && nonNegativeSafeInteger(first.returnInstruction)
-      ? { currentInstruction: first.returnInstruction - 1 }
-      : null;
-  }
-  if (!positiveSafeInteger(settlement.ownerCallFrameId)) return null;
-  const ownerIndex = callFrames.findIndex((frame) =>
-    isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId
-  );
-  if (ownerIndex < 0) return null;
-  if (ownerIndex === callFrames.length - 1) {
-    return nonNegativeSafeInteger(snapshot.nextInstruction)
-      ? { currentInstruction: snapshot.nextInstruction }
-      : null;
-  }
-  const child = callFrames[ownerIndex + 1];
-  return isPlainRecord(child) && nonNegativeSafeInteger(child.returnInstruction)
-    ? { currentInstruction: child.returnInstruction - 1 }
-    : null;
-}
-
-function interactionSettlementDestinationStatesAtCurrent(
-  owningInstruction: number,
-  continuationInstruction: number,
-  currentInstruction: number,
-  destinationTemporary: number,
-  analysis: SnapshotValidationAnalysis,
-): { readonly live: boolean; readonly released: boolean } | null {
-  const ownerFunctionId = analysis.functionIdsByInstruction[owningInstruction] ?? null;
-  const regionEnd = analysis.regionEnds[owningInstruction];
-  if (
-    regionEnd === undefined ||
-    continuationInstruction > regionEnd ||
-    currentInstruction < 0 ||
-    currentInstruction > regionEnd
-  ) return null;
-
-  const pending: Array<{ readonly instruction: number; readonly live: boolean }> = [
-    { instruction: continuationInstruction, live: true },
-  ];
-  const visited = new Set<string>();
-  let mayLive = false;
-  let mayReleased = false;
-  while (pending.length > 0) {
-    if (!consumeDetailedValidationWork(analysis)) return null;
-    const current = pending.pop()!;
-    const key = `${current.instruction}:${current.live ? 1 : 0}`;
-    if (visited.has(key)) continue;
-    visited.add(key);
-    if (current.instruction === currentInstruction) {
-      if (current.live) mayLive = true;
-      else mayReleased = true;
-      continue;
-    }
-    if (
-      current.instruction < 0 ||
-      current.instruction >= regionEnd ||
-      analysis.functionIdsByInstruction[current.instruction] !== ownerFunctionId
-    ) continue;
-    const instruction = analysis.plan.instructions[current.instruction];
-    if (instruction === undefined) continue;
-    const live = current.live &&
-      !instructionKilledTemporaries(instruction).has(destinationTemporary);
-    for (const successor of instructionSuccessors(analysis, current.instruction)) {
-      pending.push({ instruction: successor, live });
-    }
-  }
-  return mayLive || mayReleased
-    ? { live: mayLive, released: mayReleased }
-    : null;
 }
 
 function validSettlementChronology(

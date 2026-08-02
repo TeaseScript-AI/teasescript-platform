@@ -104,9 +104,9 @@ const EXPECTED_PROPERTY_CASE_IDS = Object.freeze([
   "snapshot-accessor",
   "snapshot-non-plain-object",
   "snapshot-prototype-sensitive-own-key",
-  "snapshot-exact-depth-boundary-accepted",
+  "snapshot-exact-depth-boundary-structured",
   "snapshot-over-depth-boundary-structured",
-  "snapshot-exact-work-boundary-accepted",
+  "snapshot-exact-work-boundary-structured",
   "snapshot-over-work-boundary-structured",
   "checkpoint-wrong-version",
   "checkpoint-nested-plan-version",
@@ -118,9 +118,9 @@ const EXPECTED_PROPERTY_CASE_IDS = Object.freeze([
   "checkpoint-cycle",
   "checkpoint-accessor",
   "checkpoint-non-plain-object",
-  "checkpoint-exact-depth-boundary-accepted",
+  "checkpoint-exact-depth-boundary-structured",
   "checkpoint-over-depth-boundary-structured",
-  "checkpoint-exact-work-boundary-accepted",
+  "checkpoint-exact-work-boundary-structured",
   "checkpoint-over-work-boundary-structured",
   "completion-missing-action-id",
   "completion-extra-field",
@@ -151,7 +151,7 @@ const EXPECTED_PROPERTY_CASE_IDS = Object.freeze([
 ] as const);
 
 const PINNED_SMOKE_SIGNATURE =
-  "7f44ebca5b8bafdae0137e25f5651b370a7bea57bfb7c6aa1f9867e7d7cbc6cd";
+  "60c046e112942e245387310d06837aa3f37dbae429cba5a24e7f87c6745dd094";
 
 const malformedArguments: readonly (readonly string[])[] = Object.freeze([
   Object.freeze(["--seed", "0"]),
