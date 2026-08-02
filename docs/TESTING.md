@@ -57,6 +57,12 @@ baseline for the reported root cause and pass after the repair. When
 failing-before evidence cannot reasonably be supplied, document why and provide
 the strongest focused reproduction available.
 
+A focused regression set is sufficient when the defect and its neighboring
+supported behavior are understood. When repeated sibling findings or an
+enumerable behavior space leave material completeness uncertainty, use the
+systematic-coverage guidance below instead of indefinitely accumulating
+incident-specific tests.
+
 Do not weaken tests to hide failures. Do not fold unrelated speculative cases into a focused repair pull request. A newly suspected defect should first be reproduced against the relevant public boundary before it is documented or filed as established behavior.
 
 A failing test is evidence, not by itself a new product contract or review
@@ -74,6 +80,76 @@ failures in source-to-runtime behavior, checkpoint/restore equivalence,
 structured external-data rejection, atomic mutation, deterministic ordering,
 or other accepted invariants remain correctness defects and require the
 appropriate focused regression.
+
+## Systematic coverage for bounded behavior spaces
+
+When supported behavior can be described through a finite or otherwise
+systematically enumerable set of dimensions, prefer an explicit coverage model
+over an accumulating collection of isolated regressions when that model is the
+smallest credible way to establish completeness. Derive the model from accepted
+behavior and real public or trusted boundaries, not only from defects already
+discovered.
+
+Relevant dimensions may include:
+
+- operation or instruction kind;
+- accepted, rejected, and unsupported forms;
+- state or lifecycle phase;
+- ownership or execution context;
+- persistence or checkpoint boundary;
+- replay classification;
+- failure and atomicity behavior;
+- combinations whose evaluation rules differ.
+
+The model may be a test matrix, state-transition table, invariant inventory,
+bounded property strategy, or bounded model-based strategy. Choose the smallest
+form that makes the concrete obligations and omissions visible; do not create a
+generic framework or enumerate a Cartesian product whose combinations have no
+distinct behavior.
+
+A matrix or equivalent model should:
+
+- name the relevant dimensions and give each included accepted or rejected row,
+  transition, or generated class a distinct evidence obligation;
+- distinguish accepted, rejected, unsupported, and out-of-scope behavior so
+  omissions are intentional;
+- make uncovered obligations visible rather than relying on the set of bugs
+  found so far;
+- describe fixture provenance truthfully, distinguishing directly
+  runtime-produced fixtures, compiler-produced canonical fixtures, and
+  validator-confirmed or otherwise assembled fixtures;
+- avoid claiming stronger runtime provenance than fixture construction proves;
+- preserve evidence across checkpoint, replay, failure, and atomicity
+  boundaries when those boundaries are relevant;
+- permit later consolidation without losing any unique evidence obligation.
+
+Unsupported or out-of-scope combinations do not automatically require
+executable cases. For obligations included in the bounded coverage model,
+accepted behavior and required rejection through a real supported or trusted
+boundary require executable evidence. When a real boundary must reject an
+otherwise unsupported composition, classify that cell as a rejected obligation
+and test it as such. Other unsupported or out-of-scope cells may remain
+classified but unexecuted.
+
+An additive evidence phase may temporarily retain overlapping regressions while
+the behavior space is being mapped. Once an independent check confirms that the
+coverage model accounts for the accepted dimensions and real boundaries,
+remove duplicate regressions and temporary scaffolding while preserving every
+unique obligation. A final independent review should verify both the resulting
+coverage model and the consolidated evidence.
+
+For this process, the completeness check is independent when it is performed by
+a reviewer or agent that did not construct the coverage model being audited.
+The final review must be performed by a reviewer or agent that did not perform
+the consolidation it assesses. This does not require a new role framework or a
+separate branch.
+
+Do not require this multi-stage process for ordinary small changes, isolated
+defects, or a known finite repair list whose coverage is already clear.
+Pragmatic YAGNI permits systematic evidence when it is needed to resolve a
+demonstrated completeness problem; it does not justify speculative test
+infrastructure, unrelated hardening, or a permanent framework without a
+concrete need.
 
 ## Runtime resume-equivalence invariant
 

@@ -30,6 +30,9 @@ The agent creating or substantially refining an issue should include:
 - evidence, reproduction, or relevant source references;
 - explicit scope and exclusions;
 - acceptance criteria;
+- when proposing future-facing infrastructure, the concrete scheduled
+  consumer, accepted boundary that must be correct when first introduced, or
+  difficult-to-reverse boundary problem that justifies implementing it now;
 - an execution recommendation:
   - `Single agent` — the default;
   - `Coordinated multi-agent` — only with a short concrete rationale.
@@ -79,6 +82,33 @@ Use words such as `must`, `exact`, `versioned`, `authoritative`, and
 boundary, or owner decision that requires that strength. A stricter
 implementation being technically possible is not sufficient.
 
+### Pragmatic YAGNI
+
+Once the current requirement and its authority are established, implement only
+the complexity needed for that requirement and its real boundaries.
+
+Statements such as “we may need this later,” “a more general solution would be
+cleaner,” an unscheduled backlog entry, a historical implementation, or an
+earlier test or review comment do not by themselves justify present
+infrastructure.
+
+Future-facing complexity needs a concrete reason, such as:
+
+- an owner- or coordinator-scheduled consumer that will use it;
+- an accepted boundary that must be correct when first introduced;
+- a demonstrated data, security, persistence, or public-compatibility problem
+  that would be materially harder to repair later.
+
+Use the smallest seam that addresses that concrete reason. A narrow interface
+for an already scheduled next consumer may be proportionate; implementing the
+complete generalized future subsystem is not.
+
+When no present implementation is justified, propose or route the idea through
+the appropriate owner-governed wish, planning, backlog, or open-decision
+process. Recording a proposal preserves it without accepting, scheduling, or
+authorizing implementation and without turning it into production maintenance
+surface.
+
 ### Review finding classes
 
 Classify every actionable finding in plain language:
@@ -124,12 +154,67 @@ that cannot cross a real boundary are not blockers by default. Classify them as
 hardening, future work, a harness issue, or out of scope unless evidence shows a
 reachable supported path or real boundary consequence.
 
+### Review convergence
+
+A review is not converging when successive substantive findings come from the
+same invariant or problem family and each repair addresses only one newly found
+sibling without reducing uncertainty about the remaining supported behavior
+space. No fixed review count triggers this rule. Both the implementer and the
+reviewer are responsible for recognizing and reporting the pattern.
+
+Relevant signals include:
+
+- consecutive findings involving the same lifecycle, validator, helper, state
+  transition, or public/trusted boundary;
+- repairs repeatedly adding one isolated special case;
+- no explicit account of the remaining bounded behavior space;
+- tests growing mainly as a list of previously discovered incidents;
+- uncertainty about completeness not decreasing after each repair;
+- a reviewer continuing to find sibling cases without being able to explain
+  why the remaining space is covered.
+
+When these signals appear, pause before repeating the same repair cycle and
+briefly record:
+
+1. the recurring pattern;
+2. why the current method is not demonstrating convergence;
+3. whether the weakness is in the implementation, decomposition, requirement
+   model, or evidence strategy;
+4. the smallest appropriate alternative;
+5. whether a material scope or execution-strategy change needs owner or
+   coordinator approval.
+
+Record this assessment in the active pull-request or issue discussion, or in
+the owner/coordinator handoff when that is the active coordination surface. Do
+not create a separate report or policy file solely for this checkpoint unless
+an existing canonical document genuinely becomes inaccurate.
+
+Possible alternatives include an explicit test matrix, state-transition table,
+invariant inventory, property- or model-based strategy, a focused completeness
+audit, splitting an overly broad issue, or simplifying or redesigning the
+implementation. Do not prescribe a matrix or new framework for every repeated
+finding; choose the smallest method that matches the demonstrated problem.
+
+Isolated findings, unrelated defects, and a known finite repair list whose
+remaining coverage is understood may continue through ordinary repair and
+review. Repeatedly applying the smallest local patch is not automatically the
+simplest overall solution. Under pragmatic YAGNI, a bounded systematic model is
+justified when it is the smallest credible way to resolve demonstrated
+completeness uncertainty, but it does not justify generic infrastructure,
+speculative compatibility, or unrelated hardening.
+
+The implementer must not silently broaden the pull request into a large
+campaign. When the revised approach materially changes scope or execution
+strategy, present the pattern, options, recommendation, cost, and exclusions to
+the owner or coordinator before proceeding.
+
 ### Proportional repair and owner escalation
 
 Propose the smallest repair that restores accepted behavior or the real
-boundary. Do not expand a local defect into a generalized framework, new
-permanent compatibility layer, public contract, schema, or unrelated hardening
-campaign without a separate owner decision.
+boundary. Apply the pragmatic YAGNI rule above before broadening a repair for
+future prevention or hypothetical reuse. Do not expand a local defect into a
+generalized framework, new permanent compatibility layer, public contract,
+schema, or unrelated hardening campaign without a separate owner decision.
 
 When owner approval is required, explain in ordinary language what product
 behavior, data risk, security boundary, or maintenance problem the stronger
