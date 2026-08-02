@@ -422,9 +422,6 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
 
 Current POC defaults and validation limits are:
 
-- instruction-plan format version: `6`;
-- runtime-snapshot format version: `8`;
-- checkpoint format version: `8`;
 - default maximum call depth: `256`;
 - accepted maximum call depth range: `1` through `4096`;
 - maximum external runtime-data nesting depth: `128` (`MAX_EXTERNAL_RUNTIME_DATA_DEPTH`);
@@ -474,6 +471,8 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 | Instruction plan | 6 | Replaced arbitrary long-lived interaction-result arrangements with one locally validated canonical consume/transfer boundary. |
 | Runtime snapshot | 8 | Added one nullable single-use `interactionResultHandoff` authority that protects the still-unconsumed destination independently of `lastSettlement`. |
 | Checkpoint | 8 | Updated the self-contained plan-and-snapshot bundle to carry and validate the current plan contract and the snapshot handoff authority together. |
+
+Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
 These numbers are internal POC format revisions, not TeaseScript product releases, public wire-format promises, or backward-compatibility commitments. A changed number in code does not by itself create a new accepted architecture or compatibility policy. Pending-action entries do not receive redundant nested version fields.
 
