@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<controlsystems_project name="MilovanaAlternative" schema_version="1.0" last_updated="2026-07-23">
+<controlsystems_project name="MilovanaAlternative" schema_version="1.0" last_updated="2026-08-02">
   <wishlist_policy>
     <memory_note>Project memory is disabled. This XML file is the persistent wishlist artifact for this conversation.</memory_note>
     <retention_rule>Never delete a wish. When abandoned or superseded, change its status to retired or superseded and add a dated history note explaining why.</retention_rule>
@@ -726,6 +726,25 @@
       <history>
         <event date="2026-07-23" type="created">Confirmed during the phase-1 core language and runtime design.</event>
         <event date="2026-07-23" type="clarified">The custom-view capability remains accepted while exact author syntax and lifecycle semantics remain open.</event>
+      </history>
+    </wish>
+    <wish id="W-056" status="active">
+      <title>On-device media vision and adaptive censoring</title>
+      <description>Analyze runtime-selected or user-provided images and video, including private local media libraries, on the client with a local vision model so scripts can receive bounded typed observations about detected content, counts, regions, confidence, and tracked changes over time. Support uses such as detecting and counting nudity or anatomical regions including breasts or genitals to parameterize deterministic tasks, supplying structured scene context to an LLM, and applying optional blur or other censoring overlays that follow detected regions in still images or video. Prefer browser-local inference with available acceleration such as WebGPU or WebAssembly-based runtimes so private media remains local by default; raw media or richer evidence may leave the device only through a later explicit privacy and capability design.</description>
+      <tags>
+        <tag>computer-vision</tag>
+        <tag>media</tag>
+        <tag>video</tag>
+        <tag>local-inference</tag>
+        <tag>webgpu</tag>
+        <tag>wasm</tag>
+        <tag>privacy</tag>
+        <tag>runtime-input</tag>
+        <tag>censoring</tag>
+      </tags>
+      <history>
+        <event date="2026-08-02" type="created">Added as a distinct extension of the general vision-assessment direction in W-008 for unknown-at-authoring-time media, adaptive runtime input, and moving censor overlays.</event>
+        <event date="2026-08-02" type="deferred">Explicitly excluded from the current POC and alpha. Evaluate it for a later beta only if the media, privacy, capability, and deterministic typed-result foundations are ready; otherwise retain it as serious post-1.0 work. This records product intent, not a scheduled release or accepted implementation architecture.</event>
       </history>
     </wish>
   </wishes>
