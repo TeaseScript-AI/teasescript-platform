@@ -2,19 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import {
-  INSTRUCTION_PLAN_VERSION,
-  type InstructionPlan,
-} from "../src/plan/model.js";
+import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
-  CHECKPOINT_VERSION,
   CheckpointError,
   createCheckpoint,
   restoreCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { run, stepToEvent } from "../src/runtime/engine.js";
-import { createFreshRuntimeSnapshot, RUNTIME_SNAPSHOT_VERSION } from "../src/runtime/state.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("executes exclusive and inclusive integer ranges", () => {
@@ -146,30 +142,14 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
   assert.deepEqual(rest.events.map((event) => event.sequence), [2, 3]);
 });
 
-test("rejects old formats and malformed serialized loop state", () => {
+test("rejects malformed serialized loop state", () => {
   const compiled = plan("for value in 1..=3 { say value }");
   const active = stepToEvent(compiled, createFreshRuntimeSnapshot(compiled));
   const checkpoint = JSON.parse(
     JSON.stringify(createCheckpoint(compiled, active.snapshot)),
   ) as Record<string, unknown>;
 
-  checkpoint.version = 1;
-  assertCheckpointRejected(checkpoint, "TSK001");
-  checkpoint.version = 2;
-  assertCheckpointRejected(checkpoint, "TSK001");
-  checkpoint.version = CHECKPOINT_VERSION;
   const snapshot = checkpoint.snapshot as Record<string, unknown>;
-  snapshot.version = 1;
-  assertCheckpointRejected(checkpoint, "TSK001");
-  snapshot.version = 2;
-  assertCheckpointRejected(checkpoint, "TSK001");
-  snapshot.version = RUNTIME_SNAPSHOT_VERSION;
-  const checkpointPlan = checkpoint.plan as Record<string, unknown>;
-  checkpointPlan.version = 1;
-  assertCheckpointRejected(checkpoint, "TSK001");
-  checkpointPlan.version = 2;
-  assertCheckpointRejected(checkpoint, "TSK001");
-  checkpointPlan.version = INSTRUCTION_PLAN_VERSION;
   const loops = snapshot.loopFrames as Array<Record<string, unknown>>;
   loops[0]!.position = 99;
   assertCheckpointRejected(checkpoint, "TSK002");

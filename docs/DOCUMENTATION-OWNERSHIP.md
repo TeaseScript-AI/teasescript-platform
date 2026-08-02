@@ -1,5 +1,73 @@
 # Documentation ownership
 
+This document is the mandatory guide for every non-trivial repository
+documentation edit and documentation review. Pure spelling, link, or formatting
+corrections may skip the reread only when they cannot alter meaning, authority,
+placement, or maintenance obligations. This guide defines where durable
+information belongs and how to avoid competing authority, stale copies, and
+unnecessary recurring agent-context cost.
+
+## Canonical ownership and useful repetition
+
+Give each maintenance-sensitive fact, rule, status statement, or instruction
+one clear canonical owner. Keep the complete authoritative explanation there.
+Elsewhere, prefer a link or the smallest stable summary needed for the local
+document to remain understandable.
+
+KISS is primary: choose the simplest complete documentation structure across
+local clarity, authority, maintenance, and recurring reader or agent context.
+Pragmatic YAGNI applies that rule to future-facing documentation and rejects
+policy, inventories, or abstractions that have no current accepted purpose.
+
+DRY is recommended when one canonical explanation plus references is clearer
+and simpler to understand and maintain than several copies. Limited local
+repetition is also recommended when it is the clearer KISS solution, provided
+it does not create competing authority, duplicate moving facts, or add
+unnecessary recurring context cost. DRY is not an absolute ban on repetition.
+
+Distinguish these uses:
+
+- **canonical definition:** the complete maintained rule, contract, or current
+  fact in its owning document;
+- **routing summary:** a short statement that directs the reader to the
+  canonical definition;
+- **necessary local context:** limited repetition needed to understand or apply
+  the local document without reconstructing its basic purpose elsewhere;
+- **moving fact:** a current revision, test count, implementation status,
+  temporary inventory, active default, or similar value that normally needs
+  one current location;
+- **historical statement:** a stable record of a past accepted decision, such
+  as the revision that introduced a contract change.
+
+Historical ADR and specification statements may retain exact old values when
+those values explain the recorded decision. Do not convert such history into a
+second moving current-state summary.
+
+## Documentation edit and review workflow
+
+Before every non-trivial documentation edit, the writer must:
+
+1. identify the fact, rule, status, or instruction being changed;
+2. search the repository for existing coverage and determine the canonical
+   owner;
+3. update one complete canonical explanation rather than adding a competing
+   definition;
+4. use links or minimal stable summaries elsewhere where that remains clear;
+5. retain concise local repetition where it materially improves independent
+   comprehension without creating competing authority or duplicated moving
+   facts;
+6. update or remove stale statements made false by the change;
+7. consolidate existing duplication when it is directly in scope and safe,
+   without expanding into unrelated cleanup;
+8. review the complete documentation diff for placement, consistency,
+   maintenance cost, and recurring agent-context cost.
+
+The documentation reviewer performs the same ownership check independently.
+Verify that DRY is used where it reduces total complexity, that intentional
+repetition serves local comprehension, that moving facts are not copied without
+a concrete local need, and that routing documents do not silently become
+competing policy or current-status owners.
+
 ## GitHub repository: canonical and continuously maintained
 
 The repository owns documentation that must change with code, architecture, language semantics, security boundaries, product decisions, or the stable development process:

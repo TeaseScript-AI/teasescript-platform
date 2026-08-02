@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import {
   EXTERNAL_DATA_DEPTH_MESSAGE,
   EXTERNAL_DATA_WORK_MESSAGE,
+  CHECKPOINT_VERSION,
+  INSTRUCTION_PLAN_VERSION,
   MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
   MAX_EXTERNAL_RUNTIME_DATA_WORK,
   MAX_INTERACTION_STRING_UTF8_BYTES,
+  RUNTIME_SNAPSHOT_VERSION,
   completeAction,
   createFreshRuntimeSnapshot,
   executeInstruction,
@@ -499,7 +502,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
     value.extra = `retained-${variant.first.toString(16)}`;
   }),
   structuredPlanCase("plan-wrong-version", (value, _fixtures, variant) => {
-    value.version = 7 + (variant.first % 10_000);
+    value.version = INSTRUCTION_PLAN_VERSION + 1 + (variant.first % 10_000);
   }),
   structuredPlanCase("plan-wrong-instructions-type", (value) => {
     value.instructions = "not-an-array";
@@ -631,7 +634,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
     value.extra = `retained-${variant.first.toString(16)}`;
   }),
   structuredSnapshotCase("snapshot-wrong-version", "running", (value, _fixtures, variant) => {
-    value.version = 8 + (variant.first % 10_000);
+    value.version = RUNTIME_SNAPSHOT_VERSION + 1 + (variant.first % 10_000);
   }),
   structuredSnapshotCase("snapshot-wrong-frames-type", "running", (value) => {
     value.frames = "not-an-array";
@@ -739,13 +742,15 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
   }, { expected: "rejected", repeatable: false, detailIncludes: EXTERNAL_DATA_WORK_MESSAGE }),
 
   structuredCheckpointCase("checkpoint-wrong-version", (value, _fixtures, variant) => {
-    value.version = 8 + (variant.first % 10_000);
+    value.version = CHECKPOINT_VERSION + 1 + (variant.first % 10_000);
   }),
   structuredCheckpointCase("checkpoint-nested-plan-version", (value, _fixtures, variant) => {
-    recordValue(value.plan).version = 7 + (variant.first % 10_000);
+    recordValue(value.plan).version = INSTRUCTION_PLAN_VERSION + 1 +
+      (variant.first % 10_000);
   }),
   structuredCheckpointCase("checkpoint-nested-snapshot-version", (value, _fixtures, variant) => {
-    recordValue(value.snapshot).version = 8 + (variant.first % 10_000);
+    recordValue(value.snapshot).version = RUNTIME_SNAPSHOT_VERSION + 1 +
+      (variant.first % 10_000);
   }),
   structuredCheckpointCase("checkpoint-plan-snapshot-mismatch", (value, fixtures) => {
     value.plan = structuredClone(fixtures.simplePlan);
@@ -1067,7 +1072,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
       const plan = structuredClone(fixtures.simplePlan) as InstructionPlan;
-      (plan as unknown as { version: number }).version = 999;
+      (plan as unknown as { version: number }).version = INSTRUCTION_PLAN_VERSION + 1;
       const result = observeRuntimeBoundary(plan, fixtures.fresh.snapshot);
       assert.equal(result.kind, "rejected");
       return observation(stableObservation(result), summarizeFixture(fixtures.fresh));
@@ -1082,7 +1087,7 @@ const CASES: readonly PropertyCaseDefinition[] = Object.freeze([
     repeatable: true,
     execute(fixtures: PropertyFixtureCatalog) {
       const snapshot = structuredClone(fixtures.fresh.snapshot) as RuntimeSnapshot;
-      (snapshot as unknown as { version: number }).version = 999;
+      (snapshot as unknown as { version: number }).version = RUNTIME_SNAPSHOT_VERSION + 1;
       const result = observeRuntimeBoundary(fixtures.simplePlan, snapshot);
       assert.equal(result.kind, "rejected");
       return observation(stableObservation(result), summarizeFixture(fixtures.fresh));

@@ -97,9 +97,25 @@ def parse_uses_scalar(scalar, job_name, source_line):
         if not match:
             continue
         ref = match.group("ref")
-        assert re.fullmatch(r"[^@\\\s]+@[0-9a-f]{40}", ref), (
+        action_match = re.fullmatch(
+            r"(?P<path>[^@\\\s]+)@(?P<pin>[0-9a-f]{40})",
+            ref,
+        )
+        assert action_match, (
             f"workflow action refs must use one immutable 40-hex pin in job "
             f"{job_name}: {source_line.strip()}"
+        )
+        path_segments = action_match.group("path").split("/")
+        assert (
+            len(path_segments) >= 2
+            and all(
+                segment not in {"", ".", ".."}
+                and re.fullmatch(r"[A-Za-z0-9_.-]+", segment)
+                for segment in path_segments
+            )
+        ), (
+            f"workflow action refs must use canonical owner/repository[/path] "
+            f"syntax in job {job_name}: {source_line.strip()}"
         )
         return ref
     raise AssertionError(
@@ -442,6 +458,22 @@ assert_rejected(
     ),
     "cannot combine job-level uses with steps",
 )
+
+subdirectory_ref = f"example/action/subdirectory@{checkout_sha}"
+assert assert_checkout_jobs_have_contents_access(
+    make_checkout_job([f"- uses: {subdirectory_ref}"])
+) == [subdirectory_ref]
+for noncanonical_action_ref in [
+    f"actions//checkout@{checkout_sha}",
+    f"/actions/checkout@{checkout_sha}",
+    f"actions/checkout/@{checkout_sha}",
+    f"actions/checkout/.@{checkout_sha}",
+    f"actions/checkout/..@{checkout_sha}",
+]:
+    assert_rejected(
+        make_checkout_job([f"- uses: {noncanonical_action_ref}"]),
+        "canonical owner/repository[/path] syntax",
+    )
 for hidden_jobs_key in [
     '"jobs":',
     r'"jo\u0062s":',

@@ -26,7 +26,7 @@ The current repository implementation includes:
 - source-order-preserving expression and assignment lowering, checkpoint-safe prepared references, complete suspended-caller temporary validation, and centralized V30 protected-name enforcement;
 - a standalone fixed-example browser playground.
 
-Instruction plans use version 6; runtime snapshots and checkpoints use version 8. These are POC formats, not permanent public wire-format promises.
+The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). These are POC formats, not permanent public wire-format promises.
 
 This does not mean that the complete V30 language, static type system, timers, input, media, cross-origin player host, Laravel persistence, accounts, publishing, or continuous personalities are implemented.
 
@@ -49,7 +49,7 @@ This does not mean that the complete V30 language, static type system, timers, i
 - `AGENTS.md`: coding, review, and Git rules for every agent.
 - `docs/DEVELOPMENT-WORKFLOW.md`: coordinator, executor, pull-request, documentation, and final-verification workflow.
 - `docs/README.md`: documentation map.
-- `docs/DOCUMENTATION-OWNERSHIP.md`: which material belongs in GitHub versus the shared project research archive.
+- `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
 - `docs/specifications/`: accepted consolidated specifications.
 - `docs/decisions/`: accepted and proposed ADRs.
 - `docs/planning/POC-TO-ALPHA-BACKLOG.md`: selected work required before a stated POC, pre-alpha, or alpha gate, but not automatically scheduled.

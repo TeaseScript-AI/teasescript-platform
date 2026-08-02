@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   CheckpointError,
   createCheckpoint,
@@ -214,17 +215,62 @@ test("continues deterministic RNG state after restore", () => {
   assert.deepEqual(rest.snapshot.rng, uninterrupted.snapshot.rng);
 });
 
-test("rejects unsupported checkpoint and nested format versions", () => {
+test("accepts current internal format revisions and rejects non-current or malformed revisions", () => {
   const compiled = plan("exit");
-  const checkpoint = JSON.parse(
-    serializeCheckpoint(createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled))),
-  ) as Record<string, unknown>;
+  const snapshot = createFreshRuntimeSnapshot(compiled);
+  const checkpoint = structuredClone(createCheckpoint(compiled, snapshot)) as unknown as {
+    version: unknown;
+    plan: { version: unknown };
+    snapshot: { version: unknown };
+  };
 
-  checkpoint.version = 99;
-  assertCheckpointCode(checkpoint, "TSK001");
-  checkpoint.version = 1;
-  (checkpoint.plan as Record<string, unknown>).version = 99;
-  assertCheckpointCode(checkpoint, "TSK001");
+  assert.equal(validateInstructionPlan(compiled).valid, true);
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+  assert.doesNotThrow(() => restoreCheckpoint(checkpoint));
+
+  for (const replacement of [compiled.version + 1, String(compiled.version)]) {
+    const invalidPlan = structuredClone(compiled) as unknown as { version: unknown };
+    invalidPlan.version = replacement;
+    assert.deepEqual(validateInstructionPlan(invalidPlan).errors[0], {
+      code: "TSC001",
+      message: "Unsupported instruction-plan version.",
+      path: "$.version",
+    });
+  }
+
+  for (const replacement of [snapshot.version + 1, String(snapshot.version)]) {
+    const invalidSnapshot = structuredClone(snapshot) as unknown as { version: unknown };
+    invalidSnapshot.version = replacement;
+    assert.deepEqual(validateRuntimeSnapshot(invalidSnapshot, compiled).errors, [
+      "Unsupported runtime-snapshot version.",
+    ]);
+  }
+
+  for (const replacement of [Number(checkpoint.version) + 1, String(checkpoint.version)]) {
+    const invalidCheckpoint = structuredClone(checkpoint);
+    invalidCheckpoint.version = replacement;
+    assertCheckpointError(invalidCheckpoint, {
+      code: "TSK001",
+      message: "Unsupported checkpoint version.",
+      path: "$.version",
+    });
+  }
+
+  const invalidNestedPlan = structuredClone(checkpoint);
+  invalidNestedPlan.plan.version = compiled.version + 1;
+  assertCheckpointError(invalidNestedPlan, {
+    code: "TSK001",
+    message: "Unsupported instruction-plan version.",
+    path: "$.plan.version",
+  });
+
+  const invalidNestedSnapshot = structuredClone(checkpoint);
+  invalidNestedSnapshot.snapshot.version = snapshot.version + 1;
+  assertCheckpointError(invalidNestedSnapshot, {
+    code: "TSK001",
+    message: "Unsupported runtime-snapshot version.",
+    path: "$.snapshot",
+  });
 });
 
 test("rejects corrupted checkpoint data through structured errors", () => {
@@ -294,5 +340,16 @@ function objectProperty(
 function assertCheckpointCode(value: unknown, code: string): void {
   assert.throws(() => restoreCheckpoint(value), (error: unknown) => {
     return error instanceof CheckpointError && error.info.code === code;
+  });
+}
+
+function assertCheckpointError(
+  value: unknown,
+  expected: CheckpointError["info"],
+): void {
+  assert.throws(() => restoreCheckpoint(value), (error: unknown) => {
+    assert.ok(error instanceof CheckpointError);
+    assert.deepEqual(error.info, expected);
+    return true;
   });
 }

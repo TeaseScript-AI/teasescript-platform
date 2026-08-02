@@ -82,7 +82,7 @@ Use words such as `must`, `exact`, `versioned`, `authoritative`, and
 boundary, or owner decision that requires that strength. A stricter
 implementation being technically possible is not sufficient.
 
-### KISS and pragmatic YAGNI
+### KISS, pragmatic YAGNI, and DRY
 
 Once the current requirement and its authority are established, choose the
 simplest complete approach that safely satisfies that requirement and its real
@@ -92,6 +92,10 @@ simplest overall solution.
 
 Pragmatic YAGNI applies this rule to future-facing complexity. Implement only
 the complexity needed for the current requirement and its real boundaries.
+
+KISS and pragmatic YAGNI are not competing rules. Apparent conflict normally
+means simplicity is being assessed too locally or hypothetical future value is
+being treated as a current requirement.
 
 Statements such as “we may need this later,” “a more general solution would be
 cleaner,” an unscheduled backlog entry, a historical implementation, or an
@@ -114,6 +118,14 @@ the appropriate owner-governed wish, planning, backlog, or open-decision
 process. Recording a proposal preserves it without accepting, scheduling, or
 authorizing implementation and without turning it into production maintenance
 surface.
+
+Use DRY when one canonical implementation, rule, or explanation plus references
+is clearer and simpler across the complete maintenance lifecycle. Use limited
+local repetition when that is the clearer KISS solution. Do not force either
+choice when it creates indirection, competing authority, duplicated moving
+facts, speculative abstraction, or unnecessary recurring context cost. For the
+documentation-specific application, follow
+[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md).
 
 ### Review finding classes
 
@@ -406,6 +418,17 @@ A coordinated executor assignment must identify:
 Fresh executor sessions must read the repository documents required by `AGENTS.md`; they should not depend on another chat's history.
 
 ## Documentation ownership
+
+Before every non-trivial documentation change or documentation review, read
+[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md). The writer and
+reviewer must check canonical placement, necessary versus harmful repetition,
+cross-document consistency, stale statements, moving facts, and recurring
+agent-context cost. Record material ownership or consolidation decisions in the
+active issue, pull request, or review discussion; do not create a separate
+report unless the task explicitly requires one.
+
+Pure spelling, link, or formatting corrections may skip that reread only when
+they cannot alter meaning, authority, placement, or maintenance obligations.
 
 For a single-agent issue, that agent updates documentation affected by the implemented behavior in the same pull request unless the task explicitly reserves a shared document for someone else.
 
