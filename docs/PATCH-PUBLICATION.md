@@ -14,7 +14,8 @@ The workflow separates untrusted candidate execution from repository write permi
 
 1. A request job accepts one exact command from a repository writer and binds it to the pull-request head branch and the exact current transfer-branch commit.
 2. A read-only prepare job verifies that exact transfer revision, validates the payload, and creates one deterministic candidate commit.
-3. A separate read-only test job runs repository checks on that exact candidate.
+3. A separate read-only test job verifies the exact candidate and runs the
+   trusted change-scope validation profile described below.
 4. A publish job with only built-in `contents: read` access re-verifies the tested candidate without executing candidate-controlled code. Only after that verification succeeds, it creates one current-repository GitHub App installation token with explicit `contents: write` and `workflows: write` permissions and uses that token for the normal non-force push. The token is not shared with another job and is revoked by the token action when the publish job ends.
 5. A `contents: write` cleanup job checks out only the exact trusted workflow revision and runs the trusted cleanup script without executing candidate-controlled code. It preserves the unchanged exact format-version-2 transfer ref after a failed publication for targeted repair; otherwise it deletes only the exact authorized transfer-ref revision with SHA-bound `--force-with-lease`. A ref that changed after authorization is always preserved.
 6. A separate cleanup job with `contents: read` and `pull-requests: write` checks out only the exact trusted workflow revision, revalidates the original event identity, and then reads the current comment by exact ID, pull request, and unchanged body immediately before deletion. It treats an already-absent comment as a successful no-op, requires any completed delete call to return HTTP 204, and records explicit transfer- and command-cleanup statuses in the Actions summary.
@@ -275,10 +276,38 @@ The workflow rejects the request before publication when, among other checks:
 - the patch does not apply exactly, produces no change, or modifies `.agent-patch-publication/`;
 - the resulting tree differs from `expectedResultTreeSha`;
 - candidate metadata or the candidate bundle changes between preparation, test, and publication;
-- repository checks fail;
+- the required candidate validation profile fails;
 - the final target update is not a normal fast-forward.
 
 Target-branch publication never force-pushes, rebases, or merges. Cleanup uses an exact-SHA `--force-with-lease` only to delete the temporary transfer ref; it cannot update or delete a changed transfer ref.
+
+## Candidate validation profiles
+
+The trusted prepare tool classifies the exact staged paths and stores the result
+in the immutable candidate metadata. Candidate code cannot choose or weaken its
+own profile. Unknown paths fail closed to `full`.
+
+- `docs` accepts only the documented root files and Markdown below `docs/`.
+  Exact commit, parent, tree, bundle, artifact, and target-base checks still run.
+  Node execution is skipped because these paths cannot alter executable source,
+  package inputs, workflow permissions, transport, or cleanup behavior.
+- `source` covers recognized product source, tests, examples, playground code,
+  package/lock/config inputs, and the test-output filter. It runs `npm ci
+  --no-audit --no-fund` followed by `npm run check` to prevent build, type,
+  runtime, and test regressions. The local-agent infrastructure suite is skipped
+  because no publication or connector implementation changed.
+- `full` covers `.github/`, `tools/local-agent/`, unknown paths, and mixtures
+  containing those paths. It runs the complete local-agent security/workflow
+  regressions followed by the repository build/tests. The two suites remain
+  sequential because benchmarking them concurrently on one runner increased
+  wall-clock time through CPU and I/O contention.
+
+This pre-publication check and the later pull-request CI are intentionally
+different gates. The first prevents the publisher from pushing an untested
+candidate to the PR branch. After the verified fast-forward, GitHub starts the
+normal PR CI on the actual published commit, which independently proves that the
+branch contains and tests the expected result. Patch publication updates the PR
+branch; it does not merge the pull request.
 
 ## Failure, cleanup, and retry
 
