@@ -1,0 +1,31 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "agent/issue-223-patch-validation-profiles",
+  "expectedBaseSha": "126ab3a90b50f55b5a25b775d48f34fafc775d52",
+  "expectedResultTreeSha": "2002ed4270ee18fd61d15fb7ccf739b835dd0549",
+  "patchSizeBytes": 38808,
+  "patchSha256": "0f0f9b7e6d3e8cd59149048621df0bade5ce74e78f43240b2ce589fb13732d69",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0004",
+      "sizeBytes": 11010,
+      "sha256": "374584a9dfb22c02971ae5da45807f2cdd0e4ef9a48786612059861c091b3306"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0004",
+      "sizeBytes": 12100,
+      "sha256": "4d571cef0985f3ebaa77aa56ba43a7b208e31fce05d0fb2b22d4ab7eb8e49917"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0004",
+      "sizeBytes": 9428,
+      "sha256": "36ecbf70bef2e17a9a56ed46b708d4eee24f8ead0efaced2a094ec154ac8970e"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0004",
+      "sizeBytes": 6270,
+      "sha256": "83af65626bcd6bba47cf789eaa4bc1a44ffac8d20eb9e3711e8910a879d735dc"
+    }
+  ],
+  "commitMessage": "Optimize patch candidate validation"
+}

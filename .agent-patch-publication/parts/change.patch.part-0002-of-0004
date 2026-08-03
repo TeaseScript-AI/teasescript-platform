@@ -1,0 +1,289 @@
+diff --git a/tools/local-agent/README.md b/tools/local-agent/README.md
+index b31c4feb0e5d614d6c3c8ab1c376a943f2f9661b..5997db84337a8e27e38b140578e9836fe5187900 100644
+--- a/tools/local-agent/README.md
++++ b/tools/local-agent/README.md
+@@ -104,12 +104,19 @@ boundary:
+ 
+ Their tests cover different contracts:
+ 
+-- `test-prepare-patch-publication.py` covers producer, sizing, manifest, upload
+-  plan, and resumable handoff behavior;
+-- `test-patch-publication.py` covers runner-side materialization, candidate
+-  creation, and bundle verification;
+-- `test-patch-publication-workflow.sh` covers the workflow graph, permissions,
+-  immutable pins, cleanup boundaries, and an end-to-end local Git integration.
++- `test-prepare-source-review.py` prevents unsafe or identity-mismatched source
++  artifact extraction, including path traversal, checksum, tree, and ancestry
++  failures;
++- `test-prepare-patch-publication.py` prevents malformed patch splitting,
++  manifests, connector upload plans, and broken resumable handoff state;
++- `test-patch-publication.py` prevents transfer reconstruction, candidate commit,
++  result-tree, metadata, and bundle identity mismatches;
++- `test-patch-publication-validate-candidate.sh` proves documentation, source,
++  and full profiles select the intended commands, preserve fail-fast ordering,
++  and treat every required suite failure as fatal;
++- `test-patch-publication-workflow.sh` prevents weakened workflow permissions,
++  mutable action pins, unsafe job ordering, cleanup regressions, and broken local
++  Git integration.
+ 
+ These are complementary tests, not alternative implementations. The canonical
+ `check-local-agent.sh` entry point runs each one once.
+diff --git a/tools/local-agent/check-local-agent.sh b/tools/local-agent/check-local-agent.sh
+index 6dd3e0be073f511bd7bf9a0b64555a88b7533c31..38168708770c2b135959571f31f2804aee26a48f 100755
+--- a/tools/local-agent/check-local-agent.sh
++++ b/tools/local-agent/check-local-agent.sh
+@@ -15,6 +15,7 @@ bash "$script_dir/run-compact.sh" \
+ python3 -B "$script_dir/test-prepare-source-review.py"
+ python3 -B "$script_dir/test-prepare-patch-publication.py"
+ python3 -B "$script_dir/test-patch-publication.py"
++bash "$script_dir/test-patch-publication-validate-candidate.sh"
+ bash "$script_dir/run-compact.sh" \
+   --label patch-publication-workflow \
+   --log "$log_dir/patch-publication-workflow.log" \
+diff --git a/tools/local-agent/patch-publication-validate-candidate.sh b/tools/local-agent/patch-publication-validate-candidate.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..66be9d2a23cf7b1e32cb28d9606a21373e711eac
+--- /dev/null
++++ b/tools/local-agent/patch-publication-validate-candidate.sh
+@@ -0,0 +1,61 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++mode=${1:?validation mode is required}
++
++verify_identity() {
++  : "${TARGET_BRANCH:?TARGET_BRANCH is required}"
++  : "${CANDIDATE_COMMIT_SHA:?CANDIDATE_COMMIT_SHA is required}"
++  : "${EXPECTED_BASE_SHA:?EXPECTED_BASE_SHA is required}"
++  : "${EXPECTED_RESULT_TREE_SHA:?EXPECTED_RESULT_TREE_SHA is required}"
++  publication_bundle=${PUBLICATION_BUNDLE:-${RUNNER_TEMP:?RUNNER_TEMP is required}/publication/publication.bundle}
++
++  git fetch --no-tags origin \
++    "refs/heads/$TARGET_BRANCH:refs/remotes/origin/patch-target"
++  test "$(git rev-parse refs/remotes/origin/patch-target)" = "$EXPECTED_BASE_SHA"
++  git fetch --no-tags "$publication_bundle" \
++    "refs/heads/patch-publication-candidate:refs/heads/test-candidate"
++  git checkout --detach refs/heads/test-candidate
++  test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT_SHA"
++  test "$(git show -s --format=%P HEAD)" = "$EXPECTED_BASE_SHA"
++  test "$(git show -s --format=%T HEAD)" = "$EXPECTED_RESULT_TREE_SHA"
++}
++
++run_repository_checks() {
++  npm ci --no-audit --no-fund &&
++    npm run check
++}
++
++validate_profile() {
++  local profile=${1:?validation profile is required}
++  case "$profile" in
++    docs)
++      echo "Documentation-only validation: executable checks are skipped because the trusted classifier proved that every changed path is non-executable documentation. Candidate commit, parent, tree, bundle, artifact, and target-base identity checks still run."
++      ;;
++
++    source)
++      echo "Repository validation: install the locked dependency graph and run the complete configured build/test suite to prevent source, build, package, and test regressions. Workflow transport and permission tests are skipped because no workflow or local-agent path changed."
++      run_repository_checks
++      ;;
++
++    full)
++      echo "Full validation: first run workflow/local-agent security regressions, then repository build/tests. This prevents transport, permission, cleanup, candidate-verification, source, build, and runtime regressions."
++      bash tools/local-agent/check-local-agent.sh
++      run_repository_checks
++      ;;
++
++    *)
++      echo "Unknown candidate validation profile: $profile" >&2
++      exit 2
++      ;;
++  esac
++}
++
++case "$mode" in
++  verify-identity) verify_identity ;;
++  validate-profile) validate_profile "${2-}" ;;
++  *)
++    echo "Unknown candidate validation mode: $mode" >&2
++    exit 2
++    ;;
++esac
+diff --git a/tools/local-agent/patch-publication.py b/tools/local-agent/patch-publication.py
+index 5569a3a0f75157be5cde07cd4d3e987e2130658f..4c07fdb2aa3a9d85518021ed1c99baf318ce729e 100755
+--- a/tools/local-agent/patch-publication.py
++++ b/tools/local-agent/patch-publication.py
+@@ -29,6 +29,28 @@ MAX_PART_COUNT = 1024
+ MAX_PATCH_SIZE_BYTES = 64 * 1024 * 1024
+ SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
++VALIDATION_PROFILES = frozenset({"docs", "source", "full"})
++ROOT_DOCUMENTATION_PATHS = frozenset(
++    {
++        "AGENTS.md",
++        "CURRENT-DESIGN.md",
++        "PHASE-STATUS.md",
++        "README-FIRST.md",
++        "README.md",
++        "WISHES.xml",
++    }
++)
++SOURCE_PATH_PREFIXES = ("examples/", "playground/", "src/", "tests/")
++SOURCE_EXACT_PATHS = frozenset(
++    {
++        ".nvmrc",
++        "package-lock.json",
++        "package.json",
++        "tools/test-output-filter.mjs",
++        "tsconfig.json",
++    }
++)
++FULL_VALIDATION_PREFIXES = (".github/", "tools/local-agent/")
+ 
+ 
+ class PublicationError(RuntimeError):
+@@ -62,12 +84,43 @@ class PublicationMetadata:
+     patch_sha256: str
+     candidate_commit_sha: str
+     commit_message: str
++    validation_profile: str
+ 
+ 
+ def fail(message: str) -> NoReturn:
+     raise PublicationError(message)
+ 
+ 
++def require_validation_profile(value: str, *, label: str) -> str:
++    if value not in VALIDATION_PROFILES:
++        fail(f"{label} must be one of: docs, source, full")
++    return value
++
++
++def validation_profile_for_paths(paths: Iterable[str]) -> str:
++    """Return the narrowest safe validation profile for exact changed paths."""
++
++    changed_paths = tuple(paths)
++    if not changed_paths:
++        fail("cannot classify an empty candidate change")
++
++    def is_documentation(path: str) -> bool:
++        return path in ROOT_DOCUMENTATION_PATHS or (
++            path.startswith("docs/") and path.endswith(".md")
++        )
++
++    def is_source(path: str) -> bool:
++        return path in SOURCE_EXACT_PATHS or path.startswith(SOURCE_PATH_PREFIXES)
++
++    if any(path.startswith(FULL_VALIDATION_PREFIXES) for path in changed_paths):
++        return "full"
++    if all(is_documentation(path) for path in changed_paths):
++        return "docs"
++    if all(is_documentation(path) or is_source(path) for path in changed_paths):
++        return "source"
++    return "full"
++
++
+ def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+     result: dict[str, Any] = {}
+     for key, value in pairs:
+@@ -318,11 +371,12 @@ def parse_metadata(path: Path, *, repository: Path) -> PublicationMetadata:
+             "patchSha256",
+             "candidateCommitSha",
+             "commitMessage",
++            "validationProfile",
+         ),
+         label="publication metadata",
+     )
+-    if type(value["formatVersion"]) is not int or value["formatVersion"] != 1:
+-        fail("publication metadata formatVersion must be the integer 1")
++    if type(value["formatVersion"]) is not int or value["formatVersion"] != 2:
++        fail("publication metadata formatVersion must be the integer 2")
+     return PublicationMetadata(
+         target_branch=validate_branch(
+             require_string(value, "targetBranch", label="publication metadata"),
+@@ -354,6 +408,12 @@ def parse_metadata(path: Path, *, repository: Path) -> PublicationMetadata:
+         commit_message=validate_commit_message(
+             require_string(value, "commitMessage", label="publication metadata")
+         ),
++        validation_profile=require_validation_profile(
++            require_string(
++                value, "validationProfile", label="publication metadata"
++            ),
++            label="publication metadata.validationProfile",
++        ),
+     )
+ 
+ 
+@@ -607,7 +667,7 @@ def current_head(repository: Path) -> str:
+ 
+ def staged_paths(repository: Path) -> list[str]:
+     completed = subprocess.run(
+-        ["git", "diff", "--cached", "--name-only", "-z"],
++        ["git", "diff", "--cached", "--name-only", "-z", "--no-renames"],
+         cwd=repository,
+         stdout=subprocess.PIPE,
+         stderr=subprocess.PIPE,
+@@ -662,9 +722,10 @@ def create_candidate_bundle(
+         fail("patch produces no staged change")
+ 
+     forbidden_prefix = f"{TRANSFER_DIRECTORY}/"
++    candidate_paths = staged_paths(repository)
+     forbidden = [
+         path
+-        for path in staged_paths(repository)
++        for path in candidate_paths
+         if path == TRANSFER_DIRECTORY or path.startswith(forbidden_prefix)
+     ]
+     if forbidden:
+@@ -734,12 +795,13 @@ def create_candidate_bundle(
+         patch_sha256=manifest.patch_sha256,
+         candidate_commit_sha=candidate_commit_sha,
+         commit_message=manifest.commit_message,
++        validation_profile=validation_profile_for_paths(candidate_paths),
+     )
+     metadata_path = output_directory / "publication.json"
+     metadata_path.write_text(
+         json.dumps(
+             {
+-                "formatVersion": 1,
++                "formatVersion": 2,
+                 "targetBranch": metadata.target_branch,
+                 "transferBranch": metadata.transfer_branch,
+                 "expectedBaseSha": metadata.expected_base_sha,
+@@ -747,6 +809,7 @@ def create_candidate_bundle(
+                 "patchSha256": metadata.patch_sha256,
+                 "candidateCommitSha": metadata.candidate_commit_sha,
+                 "commitMessage": metadata.commit_message,
++                "validationProfile": metadata.validation_profile,
+             },
+             indent=2,
+             sort_keys=True,
+@@ -785,18 +848,29 @@ def prepare(args: argparse.Namespace) -> None:
+             "expected_base_sha": metadata.expected_base_sha,
+             "expected_result_tree_sha": metadata.expected_result_tree_sha,
+             "candidate_commit_sha": metadata.candidate_commit_sha,
++            "validation_profile": metadata.validation_profile,
+         },
+     )
+     print(
+         "prepared patch publication "
+         f"target={metadata.target_branch} commit={metadata.candidate_commit_sha} "
+-        f"tree={metadata.expected_result_tree_sha}"
++        f"tree={metadata.expected_result_tree_sha} "
++        f"validation={metadata.validation_profile}"
+     )
+ 
+ 
+ def verify_bundle(args: argparse.Namespace) -> None:
+     repository = args.repository.resolve()
+     metadata = parse_metadata(args.metadata, repository=repository)
++    if (
++        args.expected_validation_profile is not None
++        and metadata.validation_profile != args.expected_validation_profile
++    ):
++        fail(
++            "publication validation profile mismatch: "
++            f"expected {args.expected_validation_profile}, "
++            f"found {metadata.validation_profile}"
++        )
+     bundle = args.bundle.resolve()
+     if not bundle.is_file():
+         fail(f"publication bundle does not exist: {bundle}")
