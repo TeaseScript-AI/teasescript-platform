@@ -8,9 +8,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -23,23 +28,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - name: Validate local-agent tooling
-        run: |
-          set -euo pipefail
-          log_dir="$RUNNER_TEMP/teasescript-local-agent-logs"
-          mkdir -p "$log_dir"
-
-          python3 -B tools/local-agent/test-compact-unittest.py
-          bash tools/local-agent/test-run-compact.sh
-          bash tools/local-agent/run-compact.sh \
-            --label source-bundle-workflow \
-            --log "$log_dir/source-bundle-workflow.log" \
-            -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash tools/local-agent/test-create-source-bundle.sh
-          python3 -B tools/local-agent/test-prepare-source-review.py
-          python3 -B tools/local-agent/test-patch-publication.py
-          bash tools/local-agent/run-compact.sh \
-            --label patch-publication-workflow \
-            --log "$log_dir/patch-publication-workflow.log" \
-            -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash tools/local-agent/test-patch-publication-workflow.sh
+        run: bash tools/local-agent/check-local-agent.sh
       - name: Upload local-agent failure logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

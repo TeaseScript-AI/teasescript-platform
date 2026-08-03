@@ -7,9 +7,10 @@ on:
 permissions: {}
 
 jobs:
-  request:
+  prepare:
     if: startsWith(github.event.comment.body, '/publish-patch ')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
       issues: read
@@ -21,12 +22,21 @@ jobs:
       expected_target_branch: ${{ steps.request.outputs.expected_target_branch }}
       issue_number: ${{ steps.request.outputs.issue_number }}
       comment_id: ${{ steps.request.outputs.comment_id }}
+      request_validated: ${{ steps.bind.outputs.validated }}
+      artifact_name: ${{ steps.names.outputs.artifact_name }}
+      target_branch: ${{ steps.prepare.outputs.target_branch }}
+      expected_base_sha: ${{ steps.prepare.outputs.expected_base_sha }}
+      expected_result_tree_sha: ${{ steps.prepare.outputs.expected_result_tree_sha }}
+      candidate_commit_sha: ${{ steps.prepare.outputs.candidate_commit_sha }}
     steps:
       - name: Check out trusted workflow revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
           persist-credentials: false
+          show-progress: false
+
       - name: Validate publication command
         id: request
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -34,33 +44,25 @@ jobs:
           script: |
             const request = require('./tools/local-agent/patch-publication-request.cjs');
             await request({ github, context, core });
-  prepare:
-    needs: request
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    outputs:
-      artifact_name: ${{ steps.names.outputs.artifact_name }}
-      target_branch: ${{ steps.prepare.outputs.target_branch }}
-      transfer_branch: ${{ steps.prepare.outputs.transfer_branch }}
-      expected_base_sha: ${{ steps.prepare.outputs.expected_base_sha }}
-      expected_result_tree_sha: ${{ steps.prepare.outputs.expected_result_tree_sha }}
-      candidate_commit_sha: ${{ steps.prepare.outputs.candidate_commit_sha }}
-    env:
-      TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
-      EXPECTED_TRANSFER_SHA: ${{ needs.request.outputs.expected_transfer_sha }}
-      EXPECTED_MANIFEST_SHA256: ${{ needs.request.outputs.expected_manifest_sha256 }}
-      EXPECTED_TARGET_BRANCH: ${{ needs.request.outputs.expected_target_branch }}
-      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-    steps:
-      - name: Check out trusted workflow revision
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ github.workflow_sha }}
-          fetch-depth: 0
-          persist-credentials: false
-          show-progress: false
+
+      - name: Bind validated publication request
+        id: bind
+        env:
+          TRANSFER_BRANCH: ${{ steps.request.outputs.transfer_branch }}
+          EXPECTED_TRANSFER_SHA: ${{ steps.request.outputs.expected_transfer_sha }}
+          EXPECTED_MANIFEST_SHA256: ${{ steps.request.outputs.expected_manifest_sha256 }}
+          EXPECTED_TARGET_BRANCH: ${{ steps.request.outputs.expected_target_branch }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          {
+            printf 'TRANSFER_BRANCH=%s\n' "$TRANSFER_BRANCH"
+            printf 'EXPECTED_TRANSFER_SHA=%s\n' "$EXPECTED_TRANSFER_SHA"
+            printf 'EXPECTED_MANIFEST_SHA256=%s\n' "$EXPECTED_MANIFEST_SHA256"
+            printf 'EXPECTED_TARGET_BRANCH=%s\n' "$EXPECTED_TARGET_BRANCH"
+            printf 'DEFAULT_BRANCH=%s\n' "$DEFAULT_BRANCH"
+          } >> "$GITHUB_ENV"
+          printf 'validated=true\n' >> "$GITHUB_OUTPUT"
+
       - name: Preserve trusted publication tool
         run: install -m 0755 tools/local-agent/patch-publication.py "$RUNNER_TEMP/patch-publication.py"
 
@@ -97,8 +99,8 @@ jobs:
 
   test:
     needs: prepare
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -106,7 +108,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.workflow_sha }}
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
 
@@ -140,25 +142,18 @@ jobs:
           cache: npm
 
       - name: Validate repository tooling
-        run: |
-          while IFS= read -r test_file; do
-            case "$test_file" in
-              *.py) python3 -B "$test_file" ;;
-              *.sh) bash "$test_file" ;;
-            esac
-          done < <(find tools/local-agent -maxdepth 1 -type f \
-            \( -name 'test-*.py' -o -name 'test-*.sh' \) -print | sort)
+        run: bash tools/local-agent/check-local-agent.sh
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Check source
         run: npm run check
 
   publish:
     needs: [prepare, test]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
     outputs:
@@ -168,7 +163,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.workflow_sha }}
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
           show-progress: false
 
@@ -223,9 +218,10 @@ jobs:
             "$CANDIDATE_COMMIT_SHA:refs/heads/$TARGET_BRANCH"
 
   cleanup-transfer:
-    if: ${{ always() && needs.request.result == 'success' }}
-    needs: [request, prepare, test, publish]
-    runs-on: ubuntu-latest
+    if: ${{ always() && needs.prepare.outputs.request_validated == 'true' }}
+    needs: [prepare, test, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
     permissions:
       contents: write
     outputs:
@@ -240,14 +236,15 @@ jobs:
         id: cleanup_transfer
         env:
           GH_TOKEN: ${{ github.token }}
-          TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
-          EXPECTED_TRANSFER_SHA: ${{ needs.request.outputs.expected_transfer_sha }}
+          TRANSFER_BRANCH: ${{ needs.prepare.outputs.transfer_branch }}
+          EXPECTED_TRANSFER_SHA: ${{ needs.prepare.outputs.expected_transfer_sha }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
         run: bash tools/local-agent/patch-publication-cleanup-transfer.sh
   cleanup-comment:
-    if: ${{ always() && needs.request.result == 'success' }}
-    needs: [request, prepare, test, publish, cleanup-transfer]
-    runs-on: ubuntu-latest
+    if: ${{ always() && needs.prepare.outputs.request_validated == 'true' }}
+    needs: [prepare, test, publish, cleanup-transfer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
     permissions:
       contents: read
       pull-requests: write
@@ -261,10 +258,10 @@ jobs:
         id: cleanup_comment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          COMMENT_ID: ${{ needs.request.outputs.comment_id }}
-          ISSUE_NUMBER: ${{ needs.request.outputs.issue_number }}
-          TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
-          EXPECTED_MANIFEST_SHA256: ${{ needs.request.outputs.expected_manifest_sha256 }}
+          COMMENT_ID: ${{ needs.prepare.outputs.comment_id }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          TRANSFER_BRANCH: ${{ needs.prepare.outputs.transfer_branch }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.prepare.outputs.expected_manifest_sha256 }}
         with:
           script: |
             const cleanup = require('./tools/local-agent/patch-publication-cleanup-comment.cjs');
@@ -272,7 +269,7 @@ jobs:
       - name: Record publication result
         if: ${{ always() }}
         env:
-          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch || needs.request.outputs.expected_target_branch }}
+          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch || needs.prepare.outputs.expected_target_branch }}
           PUBLISHED_COMMIT_SHA: ${{ needs.publish.outputs.published_commit_sha }}
           PREPARE_RESULT: ${{ needs.prepare.result }}
           TEST_RESULT: ${{ needs.test.result }}

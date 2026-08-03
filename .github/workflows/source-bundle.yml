@@ -8,9 +8,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   source-bundle:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     env:
       TOOLING_REF: ${{ github.workflow_sha }}
       REQUESTED_SOURCE: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}

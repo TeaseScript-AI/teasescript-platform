@@ -16,17 +16,17 @@ script="$root/tools/local-agent/patch-publication.py"
 target='feat/test-target'
 transfer='agent-patch-publication/integration-test'
 
-python3 -B "$root/tools/local-agent/test-prepare-patch-publication.py"
-
 python3 - "$workflow" \
   "$root/tools/local-agent/patch-publication-request.cjs" \
   "$root/tools/local-agent/patch-publication-cleanup-comment.cjs" \
   "$root/tools/local-agent/patch-publication-cleanup-transfer.sh" \
   "$root/tools/local-agent/patch-publication-prepare-steps.sh" \
-  "$root/tools/local-agent/patch-publication-summary.sh" <<'PY'
+  "$root/tools/local-agent/patch-publication-summary.sh" \
+  "$root/.github/workflows/ci.yml" <<'PY'
 import pathlib, re, subprocess, sys, tempfile, textwrap
-workflow_path, request_path, cleanup_path, transfer_path, prepare_path, summary_path = map(pathlib.Path, sys.argv[1:])
+workflow_path, request_path, cleanup_path, transfer_path, prepare_path, summary_path, ci_path = map(pathlib.Path, sys.argv[1:])
 text = workflow_path.read_text(encoding="utf-8")
+ci_text = ci_path.read_text(encoding="utf-8")
 request_text = request_path.read_text(encoding="utf-8")
 cleanup_text = cleanup_path.read_text(encoding="utf-8")
 transfer_text = transfer_path.read_text(encoding="utf-8")
@@ -38,7 +38,14 @@ assert "patch-publication-cleanup-comment.cjs" in text
 assert "patch-publication-cleanup-transfer.sh" in text
 assert "patch-publication-prepare-steps.sh" in text
 assert "patch-publication-summary.sh" in text
-assert text.count("ref: ${{ github.workflow_sha }}") >= 6
+assert text.count("ref: ${{ github.workflow_sha }}") >= 5
+assert "\n  request:\n" not in text
+assert text.count("\n  prepare:\n") == 1
+prepare = text.split("  prepare:\n", 1)[1].split("\n  test:\n", 1)[0]
+assert "issues: read" in prepare and "pull-requests: read" in prepare
+assert prepare.index("Validate publication command") < prepare.index("Read exact transfer manifest")
+assert "request_validated: ${{ steps.bind.outputs.validated }}" in prepare
+assert "fetch-depth: 1" in prepare
 assert "([0-9a-f]{64})$" in request_text
 assert "Patch publication commands must be placed on a pull request." in request_text
 assert "github.rest.git.getRef" in request_text
@@ -56,6 +63,17 @@ assert '[[ "$PUBLISH_RESULT" != success ]]' in transfer_text
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
+assert text.count("runs-on: ubuntu-24.04") == 5
+assert "timeout-minutes: 30" not in text
+assert "run: bash tools/local-agent/check-local-agent.sh" in text
+assert "run: npm ci --no-audit --no-fund" in text
+assert "needs.request" not in text
+assert "needs.prepare.outputs.request_validated == 'true'" in text
+assert "cancel-in-progress: true" in ci_text
+assert "runs-on: ubuntu-24.04" in ci_text
+assert "timeout-minutes: 5" in ci_text
+assert "run: bash tools/local-agent/check-local-agent.sh" in ci_text
+assert "run: npm ci --no-audit --no-fund" in ci_text
 
 publish = text.split("  publish:\n", 1)[1].split("  cleanup-transfer:\n", 1)[0]
 permission_header = publish.split("    outputs:\n", 1)[0]

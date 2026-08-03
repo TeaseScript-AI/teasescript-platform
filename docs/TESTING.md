@@ -21,6 +21,17 @@ The current repository uses:
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
+Workflow and connector tooling has one canonical complete validation command:
+
+```shell
+bash tools/local-agent/check-local-agent.sh
+```
+
+It runs each local-agent producer, consumer, workflow-contract, and compact-output
+suite exactly once. Individual files remain useful for focused development, but
+CI and verified patch publication use the canonical command to prevent duplicate
+execution and test-list drift.
+
 ## Test layers
 
 The testing strategy uses complementary layers:

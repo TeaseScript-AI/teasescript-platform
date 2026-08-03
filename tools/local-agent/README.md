@@ -50,15 +50,16 @@ future reuse justifies its own maintenance, tests, and documentation.
 
 `run-compact.sh` captures routine shell command output. On success it deletes the temporary log and prints one PASS line. On failure it prints the command and exit status, emits the complete diagnostic when it is small, or prints a bounded first/last excerpt while retaining the complete log for CI artifact upload.
 
-```bash
-python3 -B tools/local-agent/test-compact-unittest.py
-bash tools/local-agent/test-run-compact.sh
+The canonical complete local-agent validation entry point is:
 
-bash tools/local-agent/run-compact.sh \
-  --label source-bundle-workflow \
-  --log /tmp/source-bundle-workflow.log \
-  -- bash tools/local-agent/test-create-source-bundle.sh
+```bash
+bash tools/local-agent/check-local-agent.sh
 ```
+
+It runs every repository-owned Python and shell suite exactly once, keeps routine
+success output compact, and preserves complete failure logs for CI artifact
+upload. Run an individual test file only while developing or diagnosing that
+specific boundary.
 
 Do not redirect failures to `/dev/null` merely to reduce output. Compact successful output and retain actionable failures.
 
@@ -89,6 +90,29 @@ python3 -B tools/local-agent/test-prepare-source-review.py
 ## Prepare multipart patch publication
 
 `prepare-patch-publication.py` creates a verified raw Git patch between an exact base commit and the tested current `HEAD`, splits it into UTF-8 parts, writes the V2 manifest, proves reconstruction, and creates a local sequential upload plan. It never merges, rebases, squashes, commits, or pushes.
+
+The two Python tools deliberately live on opposite sides of the publication
+boundary:
+
+- `prepare-patch-publication.py` is the agent-side producer. It reads the tested
+  local Git history, prepares the patch and manifest, and guides exact connector
+  uploads. It never receives repository write credentials.
+- `patch-publication.py` is the trusted runner-side consumer. The workflow uses
+  it to materialize the authorized payload, create the deterministic candidate
+  bundle, and later verify that tested bundle without executing candidate code
+  before the write token is created.
+
+Their tests cover different contracts:
+
+- `test-prepare-patch-publication.py` covers producer, sizing, manifest, upload
+  plan, and resumable handoff behavior;
+- `test-patch-publication.py` covers runner-side materialization, candidate
+  creation, and bundle verification;
+- `test-patch-publication-workflow.sh` covers the workflow graph, permissions,
+  immutable pins, cleanup boundaries, and an end-to-end local Git integration.
+
+These are complementary tests, not alternative implementations. The canonical
+`check-local-agent.sh` entry point runs each one once.
 
 For the token-efficient route, keep `tiktoken` and `o200k_base.tiktoken` in the reusable offline toolchain and pass the vocabulary with `--tokenizer` or `TEASESCRIPT_O200K_TOKENIZER`. The conservative default target is 3,000 estimated `o200k_base` tokens per JSON-serialized connector content string, with an independent 12 KiB byte ceiling and fallback.
 

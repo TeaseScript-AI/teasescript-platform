@@ -11,7 +11,8 @@ jobs:
     if: >-
       github.event.ref_type == 'branch' &&
       startsWith(github.event.ref, 'source-bundle-request/')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
     steps:
       - name: Validate request branch shape
         env:

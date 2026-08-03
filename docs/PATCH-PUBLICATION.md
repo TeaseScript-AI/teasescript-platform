@@ -258,7 +258,7 @@ For example:
 
 After placing the command, wait 90 seconds before the first target pull request head lookup. If the head is still unchanged, wait 30 seconds before each retry. These delays reduce unnecessary connector calls; they are not completion guarantees because GitHub Actions queue time and the full repository test duration vary.
 
-The request job resolves the transfer branch to one exact commit SHA, records the exact command-comment identity, and verifies the exact manifest digest before accepting the request. The prepare job must fetch that same transfer commit. The manifest binds every declared part plus the final reconstructed patch. After the workflow finishes, a separately permissioned cleanup job deletes only that unchanged accepted command comment.
+The prepare job resolves the transfer branch to one exact commit SHA, records the exact command-comment identity, verifies the exact manifest digest, and fetches that same transfer commit. The manifest binds every declared part plus the final reconstructed patch. After the workflow finishes, a separately permissioned cleanup job deletes only that unchanged accepted command comment.
 
 The workflow rejects the request before publication when, among other checks:
 
@@ -282,7 +282,7 @@ Target-branch publication never force-pushes, rebases, or merges. Cleanup uses a
 
 ## Failure, cleanup, and retry
 
-After a successful publication, cleanup removes the transfer branch only when it still points to the exact commit authorized by the request job. A branch that was already removed is reported as absent. A branch that was updated or recreated is preserved so an older run cannot destroy a newer upload. The write-capable cleanup jobs check out only the exact trusted `github.workflow_sha`, do not persist checkout credentials, and execute the reviewed repository cleanup scripts from that revision. The exact accepted technical command is deleted after the workflow no longer needs it. The Actions summary records explicit command cleanup as `removed`, `already_absent`, `preserved_changed`, or `failed` so a publication result cannot be mistaken for successful comment cleanup.
+After a successful publication, cleanup removes the transfer branch only when it still points to the exact commit authorized by the prepare job. A branch that was already removed is reported as absent. A branch that was updated or recreated is preserved so an older run cannot destroy a newer upload. The write-capable cleanup jobs check out only the exact trusted `github.workflow_sha`, do not persist checkout credentials, and execute the reviewed repository cleanup scripts from that revision. The exact accepted technical command is deleted after the workflow no longer needs it. The Actions summary records explicit command cleanup as `removed`, `already_absent`, `preserved_changed`, or `failed` so a publication result cannot be mistaken for successful comment cleanup.
 
 The comment is re-read and compared immediately before deletion. GitHub's issue-comment endpoint does not provide a conditional compare-and-delete operation, so an edit that occurs after that read but before the delete request cannot be detected by the workflow. Comments already changed when the read occurs are preserved; this narrower platform race remains an explicit residual limitation.
 
@@ -295,8 +295,7 @@ A malformed or unauthorized command fails before accepting a transfer ref and is
 ## Reproducible local verification
 
 ```shell
-python3 -B tools/local-agent/test-patch-publication.py
-bash tools/local-agent/test-patch-publication-workflow.sh
+bash tools/local-agent/check-local-agent.sh
 ```
 
 The first suite covers the multipart format, compact deterministic byte-fallback and UTF-8 boundary regressions, token-bounded splitting through an injected deterministic counter, the exact PR #174 splitter regression with the optional local tokenizer, minimum-part preservation while preferring readable boundaries, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote for transfer cleanup and executes the exact trusted repository request, preparation, cleanup, and summary scripts against mocked GitHub API responses. It covers retry preservation, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, separated permissions, successful HTTP-204 deletion, already-absent comments before either the read or delete call, changed or mismatched identities, visible deletion failures, the 12-KiB workflow upload budget, immutable Action pins, read-only built-in publish permissions, non-persisted checkout credentials, exact App variable and secret routing, current-repository token scope, explicit App-token permissions, post-verification token creation, and App-authenticated push wiring. Live GitHub App installation behavior, actual workflow triggering, comment deletion, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
@@ -307,6 +306,6 @@ A small patch uses a single format-version-2 part; larger patches use multiple p
 
 The format does not accept Base64. The protocol limits it to 1,024 parts, 256 KiB per part, and a 64 MiB reconstructed patch as bounded publication-tooling guards rather than TeaseScript content limits. The local tokenizer vocabulary and `tiktoken` installation belong in the reusable offline agent-toolchain archive, not in Git or source artifacts.
 
-The publish job uses the dedicated repository-scoped GitHub App token described above. Prepare and test remain read-only and never receive the App private key or installation token. A live ordinary publication and a harmless workflow-file publication remain the final environment-specific proofs that pull-request checks start normally and workflow-file updates no longer hit the missing-`workflows` rejection.
+The publish job uses the dedicated repository-scoped GitHub App token described above. Prepare and test remain read-only and never receive the App private key or installation token. Issue #207 completed both environment-specific proofs: an ordinary publication and a harmless workflow-file publication succeeded, their pull-request checks started normally, and the workflow-file update did not hit a missing-`workflows` rejection.
 
 All external Actions used by the write-capable workflow are pinned to reviewed immutable commit SHAs. Updating a pin requires a normal dependency review and CI run.
