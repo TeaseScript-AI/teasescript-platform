@@ -14,8 +14,6 @@ import * as canonicalValidationTesting from "../src/validation-testing.js";
 import * as legacyEngine from "../src/runtime/engine.js";
 import * as legacyState from "../src/runtime/state.js";
 import * as legacyPlan from "../src/instructions.js";
-import * as canonicalLibraries from "../src/library-tooling/public.js";
-import * as legacyLibraries from "../src/libraries/public.js";
 import * as legacyValidationTesting from "../src/runtime/validation-testing.js";
 import * as canonicalWorkspace from "../playground/workspace/controller.js";
 import * as legacyWorkspace from "../playground/workspace.js";
@@ -61,11 +59,6 @@ test("root exports preserve the supported canonical surface", () => {
   assert.equal(root.observeTime, canonicalObserveTime.observeTime);
   assert.equal("captureInstructionPlan" in root, false);
   assert.equal("validateCapturedInstructionPlan" in root, false);
-});
-
-test("legacy library tooling facade preserves canonical exports", () => {
-  assert.equal(legacyLibraries.LibraryCatalog, canonicalLibraries.LibraryCatalog);
-  assert.equal(legacyLibraries.createPublicLibraryMetadata, canonicalLibraries.createPublicLibraryMetadata);
 });
 
 test("legacy workspace facade preserves the canonical controller", () => {

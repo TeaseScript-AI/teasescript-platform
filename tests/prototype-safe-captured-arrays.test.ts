@@ -15,20 +15,7 @@ import {
   type RuntimeSnapshot,
 } from "../src/index.js";
 import { captureExternalData } from "../src/external-data-limits.js";
-import {
-  LibraryMetadataError,
-  validatePublicLibraryMetadata,
-} from "../src/library-tooling/public.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
-
-const inheritedExport = Object.freeze({
-  name: "inherited",
-  kind: "type",
-  parameters: Object.freeze([]),
-  returnTypeDisplay: null,
-  documentation: null,
-  deprecation: null,
-});
 
 function compiledPlan(): InstructionPlan {
   const compiled = compileSource("exit");
@@ -61,13 +48,8 @@ function withArrayPrototypeIndex(
 
 test("captured sparse arrays ignore inherited numeric values", () => {
   const sparse = new Array<unknown>(1);
-  const metadata = {
-    identity: { token: "prototype-safe@1" },
-    exports: sparse,
-  };
-
   withArrayPrototypeIndex(
-    { value: inheritedExport, writable: true },
+    { value: "inherited", writable: true },
     () => {
       const captured = captureExternalData(sparse);
       assert.equal(captured.ok, true);
@@ -77,12 +59,6 @@ test("captured sparse arrays ignore inherited numeric values", () => {
       assert.equal(Object.hasOwn(captured.value as object, 0), false);
       assert.equal(0 in (captured.value as unknown[]), false);
       assert.equal(typeof (captured.value as unknown[]).map, "function");
-
-      assert.throws(
-        () => validatePublicLibraryMetadata(metadata),
-        (error: unknown) =>
-          error instanceof LibraryMetadataError && error.code === "invalidMetadata",
-      );
     },
   );
 });
@@ -104,11 +80,6 @@ test("inherited numeric getters are never invoked across captured-data boundarie
     kind: "list",
     items: new Array(1),
   };
-  const metadata = {
-    identity: { token: "prototype-getter@1" },
-    exports: new Array(1),
-  };
-
   let getterCalls = 0;
   const setter = function(this: unknown[], value: unknown): void {
     Reflect.defineProperty(this, "0", {
@@ -122,7 +93,7 @@ test("inherited numeric getters are never invoked across captured-data boundarie
     {
       get() {
         getterCalls += 1;
-        return inheritedExport;
+        return "inherited";
       },
       set: setter,
     },
@@ -136,10 +107,6 @@ test("inherited numeric getters are never invoked across captured-data boundarie
       assert.throws(
         () => cloneSerializableValue(serializable as never),
         SerializableValueError,
-      );
-      assert.throws(
-        () => validatePublicLibraryMetadata(metadata),
-        LibraryMetadataError,
       );
     },
   );

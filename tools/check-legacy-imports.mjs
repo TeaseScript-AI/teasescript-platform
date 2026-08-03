@@ -15,10 +15,6 @@ const legacyModules = [
     canonicalPath: "src/plan/model.ts, src/plan/capture.ts, src/plan/validation.ts, or src/compiler/compile-program.ts",
   },
   {
-    legacyPath: "src/libraries/public.ts",
-    canonicalPath: "src/library-tooling/public.ts",
-  },
-  {
     legacyPath: "playground/workspace.ts",
     canonicalPath: "playground/workspace/controller.ts",
   },
@@ -30,7 +26,6 @@ const legacyModules = [
 const extensions = new Set([".ts", ".mjs", ".js"]);
 const allowedFiles = new Set([
   "src/instructions.ts",
-  "src/libraries/public.ts",
   "playground/workspace.ts",
   "src/runtime/validation-testing.ts",
   compatibilityTest,
