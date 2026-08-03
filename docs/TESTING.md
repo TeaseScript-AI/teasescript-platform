@@ -21,6 +21,15 @@ The current repository uses:
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
+## Normal and diagnostic verification
+
+`npm run check` is the normal complete configured suite and preserves actionable
+failure information. `npm run test:full-output` and `npm run check:full-output`
+are diagnostic reruns only when compact output is insufficient for a failure or
+specific investigation. Do not run a normal and full-output variant by default
+for the same revision. Focused checks remain appropriate when they supply
+distinct task-relevant evidence.
+
 Workflow and connector tooling has one canonical complete validation command:
 
 ```shell

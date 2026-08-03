@@ -2,20 +2,32 @@
 
 ## Read before changing files
 
-For every substantive task, read:
+Start each task with:
 
-1. `README-FIRST.md`
-2. `CURRENT-DESIGN.md`
-3. `PHASE-STATUS.md`
-4. `docs/specifications/accepted-syntaxes-v30.md` when language syntax or semantics are involved
-5. the task-specific current document or planning file
-6. relevant ADRs in `docs/decisions/`
-7. `docs/OPEN-DECISIONS.md` when resolving a gap
-8. `docs/planning/POC-TO-ALPHA-BACKLOG.md` when proposing or selecting future POC/pre-alpha work
-9. `docs/DEVELOPMENT-WORKFLOW.md` when creating implementation issues, reviewing pull requests, processing review feedback, or participating in coordinated work
-10. `docs/DOCUMENTATION-OWNERSHIP.md` before non-trivial documentation edits or reviews
+1. applicable `AGENTS.md` files, including nested instructions for directories you edit;
+2. the compact authority and task router in `README-FIRST.md`;
+3. the assigned issue or pull request; and
+4. only the controlling topic documents, accepted decisions, workflow profile, code, and tests relevant to the task.
+
+Read `CURRENT-DESIGN.md` for architecture-affecting or broad cross-component
+work, and `PHASE-STATUS.md` for milestone, gate, integration-status, or
+current-capability work. Read syntax specifications, ADRs, open decisions,
+backlog, workflow, and documentation-ownership guidance only when their
+subject applies. Do not replace applicable repository instructions with memory
+or a broad background read.
 
 Do not treat planning documents, wishes, research files, historical audits, or source examples as accepted decisions. A backlog item is not implementation scope unless the current owner/coordinator assignment or phase plan explicitly schedules its ID.
+
+## Context re-entry
+
+Before the next write after context compaction or truncation, session resumption,
+a changed pull-request head, or a transition between implementation, review,
+repair, verification, and publication, re-establish the repository and exact
+branch/head; assigned issue or pull request; scope, exclusions, and controlling
+authority; required verification; current diff/worktree or review-head state;
+remaining work; and permitted GitHub writes. A compact task-state note outside
+the repository is allowed for long work; do not create permanent repository
+scratch plans for ordinary tasks.
 
 ## Working rules
 
@@ -56,6 +68,14 @@ These proportionality rules do not weaken accepted behavior, deterministic
 execution, serializable checkpoints, or validation at real external, host,
 checkpoint, persistence, package, and security boundaries.
 
+Do not invent project-wide policy, numeric thresholds, style or readability
+limits, naming rules, compatibility promises, mandatory tools, or workflow
+gates. A model preference, external convention, tool default, earlier agent
+suggestion, draft ADR, test fixture, issue wording, or review comment is not a
+repository requirement by itself. Propose durable rules separately with
+evidence and owner approval; until accepted, use configured tooling, current
+authority, and task-proportional judgment.
+
 ## KISS, pragmatic YAGNI, and DRY
 
 KISS is primary: choose the simplest complete approach across design,
@@ -86,12 +106,16 @@ coverage, or evidence-preserving consolidation. Apply these rules
 proportionately: isolated findings and known finite repair lists may continue
 through ordinary review.
 
+Select only relevant review lenses from `docs/DEVELOPMENT-WORKFLOW.md`; they
+are not a rigid checklist and preferences are not blockers without its required
+authority and evidence.
+
 ## Efficient editing and context use
 
-Complete the mandatory authority reads above. For supporting context, prefer
-search and bounded or ranged reads when the complete file is not required. Do
-not print or quote complete large files, diffs, or workflow logs without a
-concrete reason.
+Complete the task-relevant authority reads above. For supporting context,
+prefer search and bounded or ranged reads when the complete file is not
+required. Do not print or quote complete large files, diffs, or workflow logs
+without a concrete reason.
 
 Use the environment-provided `apply_patch` command for ordinary localized edits,
 including coherent changes across multiple hunks or files in one invocation.
@@ -162,7 +186,10 @@ The owner or designated coordinator confirms the execution model. An issue autho
 
 Run all configured formatting, linting, type checking, build, relevant unit/integration tests, playground smoke tests, and diff checks. Report the exact commands and remaining failures or risks. If a check is not configured or could not be run, state that rather than inventing success.
 
-`npm run check` is the normal complete configured test-suite verification. Do not follow a successful run with `npm run check:full-output`; use the full-output variant only when a failure or a specific debugging investigation requires the complete test listing.
+`npm run check` is the normal complete configured suite. Use
+`test:full-output` or `check:full-output` only as a diagnostic rerun when
+compact output is insufficient; do not run both variants by default on one
+revision. See `docs/TESTING.md`.
 
 ## Git workflow
 

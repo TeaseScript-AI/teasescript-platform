@@ -82,6 +82,17 @@ Use words such as `must`, `exact`, `versioned`, `authoritative`, and
 boundary, or owner decision that requires that strength. A stricter
 implementation being technically possible is not sufficient.
 
+Before declaring a project limitation, proposing infrastructure, or presenting
+owner options, verify the relevant existing capability through the smallest
+authoritative evidence set. Do not generalize one API action, connector method,
+helper, or environment limitation to the complete supported workflow. Report a
+material shared-workflow failure instead of silently working around it.
+
+Do not invent project-wide policy, numeric thresholds, style or readability
+limits, naming rules, compatibility promises, mandatory tools, or workflow
+gates. Until a durable rule has evidence and owner approval, use configured
+tooling, current authority, and task-proportional judgment.
+
 ### KISS, pragmatic YAGNI, and DRY
 
 Once the current requirement and its authority are established, choose the
@@ -149,6 +160,23 @@ Classify every actionable finding in plain language:
 
 Labels such as `bug`, `contract violation`, `security issue`, or `missing edge
 case` do not establish severity without the concrete reason.
+
+### Proportional review lenses
+
+Select only lenses relevant to the changed behavior: accepted behavior and
+issue scope; correctness and failure handling; architecture, ownership,
+dependency direction, and real security or trust boundaries; determinism,
+serialization, ordering, persistence, and compatibility; tests and negative
+paths; maintainability and readability, including over-compression and needless
+fragmentation; KISS, pragmatic YAGNI, useful DRY, and dependency cost;
+documentation and current-status impact; complete-diff
+collateral changes, generated files, debug code, and secrets; and convergence
+or remaining uncertainty. Ask whether a reasonable future maintainer could
+understand and safely change the result.
+
+This is not a rigid checklist: not every lens applies, and a preference is not
+a blocker. Use the finding classes and blocking-evidence rules below for
+severity and evidence.
 
 ### Blocking evidence
 
@@ -259,6 +287,12 @@ For a normal issue:
 8. Merge after approval and passing checks, then delete the branch.
 
 The pull request is the implementation handoff record. A separate coordinator report, integration branch, or milestone orchestrator is not required.
+
+For longer work, an orchestrator-supplied temporary checklist may track
+milestones, but the executor must compare it with the actual diff and relevant
+files before claiming completion. If required input cannot be obtained in the
+current environment, stop repeating impossible variants and request the
+smallest concrete owner action that can unblock the work.
 
 A single-agent pull request that completes its issue may use:
 

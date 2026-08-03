@@ -44,6 +44,13 @@ This does not mean that the complete V30 language, static type system, timers, i
 
 ## Documentation routing
 
+For a task, first read applicable `AGENTS.md` instructions, this compact route,
+and the assigned issue or pull request. Then load only the controlling topic
+documents, accepted decisions, workflow profile, code, and tests. Read
+`CURRENT-DESIGN.md` for architecture-affecting or broad cross-component work,
+and `PHASE-STATUS.md` for milestone, gate, integration-status, or
+current-capability work.
+
 - `CURRENT-DESIGN.md`: current architecture and implementation boundaries.
 - `PHASE-STATUS.md`: current milestone status and verification evidence.
 - `AGENTS.md`: coding, review, and Git rules for every agent.

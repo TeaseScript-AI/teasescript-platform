@@ -50,7 +50,8 @@ Before every non-trivial documentation edit, the writer must:
 1. identify the fact, rule, status, or instruction being changed;
 2. search the repository for existing coverage and determine the canonical
    owner;
-3. update one complete canonical explanation rather than adding a competing
+3. make targeted edits to one complete canonical explanation rather than
+   appending amendments, rewriting a whole document, or adding a competing
    definition;
 4. use links or minimal stable summaries elsewhere where that remains clear;
 5. retain concise local repetition where it materially improves independent
@@ -67,6 +68,9 @@ Verify that DRY is used where it reduces total complexity, that intentional
 repetition serves local comprehension, that moving facts are not copied without
 a concrete local need, and that routing documents do not silently become
 competing policy or current-status owners.
+
+Durable names describe purpose, not a temporary cleanup history or the latest
+review complaint.
 
 ## GitHub repository: canonical and continuously maintained
 
