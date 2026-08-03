@@ -14,7 +14,6 @@
     "check": "npm test",
     "playground": "npm run build && node dist/playground/server.js",
     "test:property": "npm run build && node dist/tests/property/replay.js",
-    "test:property:extended": "npm run build && node dist/tests/property/replay.js --profile extended",
     "test:compiled:full-output": "node --test --test-reporter=spec dist/tests/*.test.js",
     "test:full-output": "npm run build && npm run test:compiled:full-output",
     "check:full-output": "npm run test:full-output"

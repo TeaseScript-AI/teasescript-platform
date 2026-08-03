@@ -1,644 +1,253 @@
-import { createHash } from "node:crypto";
+import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 
 import {
-  assertPropertyFixtureCatalogFrozen,
-  createPropertyFixtureCatalog,
-  type PropertyFixtureCatalog,
-} from "./fixtures.js";
-import {
-  propertyCases,
-  type PropertyCaseDefinition,
-  type PropertyCaseObservation,
-  type PropertyCaseVariant,
-} from "./mutations.js";
-import {
-  PropertyBoundaryFailure,
-  measurePropertyBoundaryWork,
-} from "./invariants.js";
-import {
-  MAX_PROPERTY_SEED,
-  createPropertyPrng,
-  nextPropertyUint32,
-  propertyIndex,
-} from "./prng.js";
+  CheckpointError,
+  completeAction,
+  compileSource,
+  createCheckpoint,
+  createFreshRuntimeSnapshot,
+  deserializeCheckpoint,
+  executeInstruction,
+  observeTime,
+  restoreCheckpoint,
+  run,
+  serializeCheckpoint,
+  validateInstructionPlan,
+  validateRuntimeSnapshot,
+  type InstructionPlan,
+  type RuntimeSnapshot,
+} from "../../src/index.js";
 
-const MANDATORY_PROPERTY_CASES = Object.freeze([...propertyCases()]);
-
-export const PROPERTY_SMOKE_SEED = 1_364_229_357;
-export const PROPERTY_SMOKE_RUNS = 128;
-export const PROPERTY_EXTENDED_SEED = 1_591_436_852;
-export const PROPERTY_EXTENDED_RUNS = 10_000;
-export const PROPERTY_MODERATE_RUNS = 2_000;
-export const MAX_PROPERTY_RUNS = 1_000_000;
-export const MAX_PROPERTY_MUTATIONS_PER_CASE = 3;
-export const MAX_PROPERTY_WORK_UNITS_PER_CASE = 16;
-export const MAX_PROPERTY_TOTAL_WORK_UNITS =
-  MAX_PROPERTY_RUNS * MAX_PROPERTY_WORK_UNITS_PER_CASE;
-export const MAX_PROPERTY_TOTAL_MUTATIONS =
-  MAX_PROPERTY_RUNS * MAX_PROPERTY_MUTATIONS_PER_CASE;
-
-export type PropertyProfile = "smoke" | "extended";
+export const PROPERTY_DEFAULT_SEED = 1_364_229_357;
+export const PROPERTY_DEFAULT_RUNS = 128;
+export const MAX_PROPERTY_RUNS = 100_000;
 
 export interface PropertyCampaignConfig {
-  readonly profile: PropertyProfile;
   readonly seed: number;
   readonly runs: number;
   readonly caseIndex?: number;
-  readonly progressEvery: number;
 }
 
-export interface PropertyCaseDescriptor {
+export interface PropertyCaseResult {
   readonly index: number;
   readonly id: string;
-  readonly property: string;
   readonly boundary: string;
-  readonly workUnits: number;
-  readonly mutationCount: number;
-  readonly variant: PropertyCaseVariant;
 }
 
 export interface PropertyCampaignResult {
   readonly seed: number;
   readonly runs: number;
   readonly executed: number;
-  readonly totalWorkUnits: number;
-  readonly totalMutations: number;
-  readonly signature: string;
-  readonly firstCase: PropertyCaseDescriptor;
-  readonly lastCase: PropertyCaseDescriptor;
-  readonly trace?: readonly string[];
+  readonly firstCase: PropertyCaseResult;
+  readonly lastCase: PropertyCaseResult;
 }
 
-export interface PropertyProgress {
-  readonly seed: number;
-  readonly runs: number;
-  readonly completed: number;
-  readonly completedWorkUnits: number;
-  readonly completedMutations: number;
-  readonly currentCase: PropertyCaseDescriptor;
+interface PropertyDefinition {
+  readonly id: string;
+  readonly boundary: string;
+  readonly execute: (seed: number, index: number) => void;
 }
 
-export interface PropertyCampaignOptions {
-  readonly onProgress?: (progress: PropertyProgress) => void;
-  readonly captureTrace?: boolean;
-  readonly caseDefinitions?: readonly PropertyCaseDefinition[];
-  readonly fixtureFactory?: () => PropertyFixtureCatalog;
-}
-
-export interface PropertyCliIo {
-  readonly stdout: (text: string) => void;
-  readonly stderr: (text: string) => void;
-}
-
-export type PropertyCampaignRunner = (
-  config: PropertyCampaignConfig,
-  options?: PropertyCampaignOptions,
-) => PropertyCampaignResult;
+const PROPERTIES: readonly PropertyDefinition[] = Object.freeze([
+  { id: "operation-closure", boundary: "public runtime operation", execute: assertOperationClosure },
+  { id: "rejected-completion-is-atomic", boundary: "completeAction", execute: assertRejectedCompletionIsAtomic },
+  { id: "checkpoint-roundtrip-and-resume", boundary: "checkpoint/restore", execute: assertCheckpointRoundTripAndResume },
+  { id: "same-seed-is-deterministic", boundary: "compile/run", execute: assertSameSeedIsDeterministic },
+  { id: "malformed-boundary-rejection", boundary: "external/persistence validation", execute: assertMalformedBoundaryRejection },
+]);
 
 export class PropertyCampaignFailure extends Error {
-  public readonly seed: number;
-  public readonly runs: number;
-  public readonly caseIndex: number;
-  public readonly caseId: string;
-  public readonly property: string;
-  public readonly boundary: string;
-  public readonly fixtureSummary: string;
-  public readonly replayCommand: string;
-
   public constructor(
-    config: PropertyCampaignConfig,
-    descriptor: PropertyCaseDescriptor,
-    fixtureSummary: string,
+    readonly config: PropertyCampaignConfig,
+    readonly result: PropertyCaseResult,
+    readonly replayCommand: string,
     cause: unknown,
   ) {
-    const causeText = cause instanceof Error
-      ? `${cause.name}: ${cause.message}`
-      : String(cause);
-    const replayCommand = createReplayCommand(config, descriptor.index);
-    const boundary = cause instanceof PropertyBoundaryFailure
-      ? cause.boundary
-      : descriptor.boundary;
-    super(
-      [
-        `Property campaign failed at ${descriptor.property}.`,
-        `seed=${config.seed}`,
-        `runs=${config.runs}`,
-        `case=${descriptor.index}`,
-        `mutation=${descriptor.id}`,
-        `boundary=${boundary}`,
-        `fixture=${fixtureSummary}`,
-        `cause=${causeText}`,
-        `replay=${replayCommand}`,
-      ].join("\n"),
-      { cause },
-    );
+    const causeText = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
+    super([
+      "Property campaign failed.",
+      `seed=${config.seed}`,
+      `runs=${config.runs}`,
+      `case=${result.index}`,
+      `property=${result.id}`,
+      `boundary=${result.boundary}`,
+      `context=${describeContext(config.seed, result.index)}`,
+      `replay=${replayCommand}`,
+      `cause=${causeText}`,
+    ].join("\n"), { cause });
     this.name = "PropertyCampaignFailure";
-    this.seed = config.seed;
-    this.runs = config.runs;
-    this.caseIndex = descriptor.index;
-    this.caseId = descriptor.id;
-    this.property = descriptor.property;
-    this.boundary = boundary;
-    this.fixtureSummary = fixtureSummary;
-    this.replayCommand = replayCommand;
   }
 }
 
-export class PropertyCliArgumentError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "PropertyCliArgumentError";
-  }
+export function defaultPropertyCampaignConfig(): PropertyCampaignConfig {
+  return Object.freeze({ seed: PROPERTY_DEFAULT_SEED, runs: PROPERTY_DEFAULT_RUNS });
 }
 
-validatePropertyDefinitions(MANDATORY_PROPERTY_CASES);
-
-export function validatePropertyDefinitions(
-  definitions: readonly PropertyCaseDefinition[],
-): void {
-  const identifiers = new Set<string>();
-  for (const definition of definitions) {
-    if (identifiers.has(definition.id)) {
-      throw new Error(`Duplicate property case ID: ${definition.id}.`);
-    }
-    identifiers.add(definition.id);
-    if (
-      !Number.isSafeInteger(definition.workUnits) ||
-      definition.workUnits < 1 ||
-      definition.workUnits > MAX_PROPERTY_WORK_UNITS_PER_CASE
-    ) {
-      throw new Error(
-        `Property case ${definition.id} has invalid workUnits=${definition.workUnits}; ` +
-          `expected 1..${MAX_PROPERTY_WORK_UNITS_PER_CASE}.`,
-      );
-    }
-    if (
-      !Number.isSafeInteger(definition.mutationCount) ||
-      definition.mutationCount < 0 ||
-      definition.mutationCount > MAX_PROPERTY_MUTATIONS_PER_CASE
-    ) {
-      throw new Error(
-        `Property case ${definition.id} has invalid mutationCount=${definition.mutationCount}; ` +
-          `expected 0..${MAX_PROPERTY_MUTATIONS_PER_CASE}.`,
-      );
-    }
-  }
-}
-
-export function defaultPropertyCampaignConfig(
-  profile: PropertyProfile,
-): PropertyCampaignConfig {
-  return profile === "smoke"
-    ? Object.freeze({
-        profile,
-        seed: PROPERTY_SMOKE_SEED,
-        runs: PROPERTY_SMOKE_RUNS,
-        progressEvery: 0,
-      })
-    : Object.freeze({
-        profile,
-        seed: PROPERTY_EXTENDED_SEED,
-        runs: PROPERTY_EXTENDED_RUNS,
-        progressEvery: 1_000,
-      });
-}
-
-export function validatePropertyCampaignConfig(
-  config: PropertyCampaignConfig,
-): void {
-  if (!Number.isSafeInteger(config.seed) || config.seed < 1 || config.seed > MAX_PROPERTY_SEED) {
-    throw new PropertyCliArgumentError(
-      `--seed must be an integer from 1 through ${MAX_PROPERTY_SEED}.`,
-    );
-  }
-  if (!Number.isSafeInteger(config.runs) || config.runs < 1 || config.runs > MAX_PROPERTY_RUNS) {
-    throw new PropertyCliArgumentError(
-      `--runs must be an integer from 1 through ${MAX_PROPERTY_RUNS}.`,
-    );
-  }
-  if (
-    config.caseIndex !== undefined &&
-    (!Number.isSafeInteger(config.caseIndex) ||
-      config.caseIndex < 0 ||
-      config.caseIndex >= config.runs)
-  ) {
-    throw new PropertyCliArgumentError(
-      `--case must be an integer from 0 through ${config.runs - 1}.`,
-    );
-  }
-  if (
-    !Number.isSafeInteger(config.progressEvery) ||
-    config.progressEvery < 0 ||
-    config.progressEvery > MAX_PROPERTY_RUNS
-  ) {
-    throw new PropertyCliArgumentError(
-      `--progress-every must be an integer from 0 through ${MAX_PROPERTY_RUNS}.`,
-    );
-  }
-}
-
-export function describePropertyCase(
-  seed: number,
-  caseIndex: number,
-): PropertyCaseDescriptor {
-  return describePropertyCaseFromDefinitions(seed, caseIndex, MANDATORY_PROPERTY_CASES);
-}
-
-export function runPropertyCampaign(
-  config: PropertyCampaignConfig,
-  options: PropertyCampaignOptions = {},
-): PropertyCampaignResult {
-  validatePropertyCampaignConfig(config);
-  const definitions = Object.freeze([
-    ...(options.caseDefinitions ?? MANDATORY_PROPERTY_CASES),
-  ]);
-  validatePropertyDefinitions(definitions);
-  const selectedCount = config.caseIndex === undefined ? config.runs : 1;
-  const configured = calculateConfiguredBounds(config, definitions);
-  if (configured.workUnits > MAX_PROPERTY_TOTAL_WORK_UNITS) {
-    throw new PropertyCliArgumentError(
-      `Configured work ${configured.workUnits} exceeds ${MAX_PROPERTY_TOTAL_WORK_UNITS} units.`,
-    );
-  }
-  if (configured.mutations > MAX_PROPERTY_TOTAL_MUTATIONS) {
-    throw new PropertyCliArgumentError(
-      `Configured mutations ${configured.mutations} exceed ${MAX_PROPERTY_TOTAL_MUTATIONS}.`,
-    );
-  }
-
-  const fixtures = (options.fixtureFactory ?? createPropertyFixtureCatalog)();
-  assertPropertyFixtureCatalogFrozen(fixtures);
-  const digest = createHash("sha256");
-  const trace = options.captureTrace === true ? [] as string[] : undefined;
-  let firstCase: PropertyCaseDescriptor | undefined;
-  let lastCase: PropertyCaseDescriptor | undefined;
-  let completed = 0;
-  let completedWorkUnits = 0;
-  let completedMutations = 0;
-
-  for (let offset = 0; offset < selectedCount; offset += 1) {
-    const caseIndex = config.caseIndex ?? offset;
-    const descriptor = describePropertyCaseFromDefinitions(config.seed, caseIndex, definitions);
-    let caseContext = JSON.stringify({
-      caseId: descriptor.id,
-      fixture: "unresolved",
-      variant: descriptor.variant,
-    });
-    let caseObservation: PropertyCaseObservation;
-    let actualBoundaries: readonly string[] = Object.freeze([]);
-    try {
-      const definition = definitionForDescriptor(descriptor, definitions);
-      caseContext = definition.describe(fixtures, descriptor.variant);
-      const measured = measurePropertyBoundaryWork(
-        () => definition.execute(fixtures, descriptor.variant),
-      );
-      caseObservation = measured.value;
-      actualBoundaries = measured.boundaries;
-      if (actualBoundaries.length < 1) {
-        throw new PropertyBoundaryFailure(
-          "work-accounting",
-          new Error(`Case ${descriptor.id} executed no documented public boundary.`),
-        );
-      }
-      if (actualBoundaries.length > descriptor.workUnits) {
-        throw new PropertyBoundaryFailure(
-          "work-accounting",
-          new Error(
-            `Case ${descriptor.id} executed ${actualBoundaries.length} public boundaries ` +
-              `but declares a conservative limit of ${descriptor.workUnits}: ` +
-              actualBoundaries.join(", "),
-          ),
-        );
-      }
-    } catch (error) {
-      throw new PropertyCampaignFailure(config, descriptor, caseContext, error);
-    }
-
-    firstCase ??= descriptor;
-    lastCase = descriptor;
-    const traceEntry = JSON.stringify({
-      index: descriptor.index,
-      id: descriptor.id,
-      property: descriptor.property,
-      boundary: descriptor.boundary,
-      workUnits: descriptor.workUnits,
-      actualWorkUnits: actualBoundaries.length,
-      boundaries: actualBoundaries,
-      mutationCount: descriptor.mutationCount,
-      variant: descriptor.variant,
-      observation: caseObservation,
-    });
-    digest.update(traceEntry);
-    digest.update("\n");
-    trace?.push(traceEntry);
-    completed += 1;
-    completedWorkUnits += actualBoundaries.length;
-    completedMutations += descriptor.mutationCount;
-
-    if (
-      options.onProgress !== undefined &&
-      config.progressEvery > 0 &&
-      (completed % config.progressEvery === 0 || completed === selectedCount)
-    ) {
-      options.onProgress(Object.freeze({
-        seed: config.seed,
-        runs: config.runs,
-        completed,
-        completedWorkUnits,
-        completedMutations,
-        currentCase: descriptor,
-      }));
-    }
-  }
-
-  if (firstCase === undefined || lastCase === undefined) {
-    throw new Error("Property campaign executed no cases.");
-  }
-  return Object.freeze({
-    seed: config.seed,
-    runs: config.runs,
-    executed: completed,
-    totalWorkUnits: completedWorkUnits,
-    totalMutations: completedMutations,
-    signature: digest.digest("hex"),
-    firstCase,
-    lastCase,
-    ...(trace === undefined ? {} : { trace: Object.freeze(trace) }),
-  });
-}
-
-export function calculateConfiguredWorkUnits(
-  config: Pick<PropertyCampaignConfig, "seed" | "runs" | "caseIndex">,
-): number {
-  return calculateConfiguredBounds(config, MANDATORY_PROPERTY_CASES).workUnits;
-}
-
-export function calculateConfiguredMutationCount(
-  config: Pick<PropertyCampaignConfig, "seed" | "runs" | "caseIndex">,
-): number {
-  return calculateConfiguredBounds(config, MANDATORY_PROPERTY_CASES).mutations;
-}
-
-function calculateConfiguredBounds(
-  config: Pick<PropertyCampaignConfig, "seed" | "runs" | "caseIndex">,
-  definitions: readonly PropertyCaseDefinition[],
-): { readonly workUnits: number; readonly mutations: number } {
-  const selectedCount = config.caseIndex === undefined ? config.runs : 1;
-  let workUnits = 0;
-  let mutations = 0;
-  for (let offset = 0; offset < selectedCount; offset += 1) {
-    const caseIndex = config.caseIndex ?? offset;
-    const descriptor = describePropertyCaseFromDefinitions(config.seed, caseIndex, definitions);
-    workUnits += descriptor.workUnits;
-    mutations += descriptor.mutationCount;
-    if (!Number.isSafeInteger(workUnits) || !Number.isSafeInteger(mutations)) {
-      throw new PropertyCliArgumentError("Configured property bounds are not safe integers.");
-    }
-  }
-  return Object.freeze({ workUnits, mutations });
-}
-
-export function parsePropertyCliArguments(
-  argv: readonly string[],
-): PropertyCampaignConfig {
-  let profile: PropertyProfile = "smoke";
-  let seed: number | undefined;
-  let runs: number | undefined;
+export function parsePropertyCliArguments(argv: readonly string[]): PropertyCampaignConfig {
+  let seed = PROPERTY_DEFAULT_SEED;
+  let runs = PROPERTY_DEFAULT_RUNS;
   let caseIndex: number | undefined;
-  let progressEvery: number | undefined;
   const seen = new Set<string>();
-
   for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index]!;
-    if (argument === "--help") {
-      throw new PropertyCliArgumentError(propertyCliUsage());
-    }
-    if (!argument.startsWith("--")) {
-      throw new PropertyCliArgumentError(`Unexpected positional argument: ${argument}`);
-    }
-    if (seen.has(argument)) {
-      throw new PropertyCliArgumentError(`Duplicate option: ${argument}`);
-    }
-    seen.add(argument);
-    const rawValue = argv[index + 1];
-    if (rawValue === undefined || rawValue.startsWith("--")) {
-      throw new PropertyCliArgumentError(`Missing value for ${argument}.`);
-    }
+    const option = argv[index]!;
+    if (seen.has(option)) throw new Error(`Duplicate option: ${option}`);
+    seen.add(option);
+    const raw = argv[index + 1];
+    if (raw === undefined || raw.startsWith("--")) throw new Error(`Missing value for ${option}.`);
     index += 1;
-    switch (argument) {
-      case "--profile":
-        if (rawValue !== "smoke" && rawValue !== "extended") {
-          throw new PropertyCliArgumentError(
-            "--profile must be either smoke or extended.",
-          );
-        }
-        profile = rawValue;
-        break;
-      case "--seed":
-        seed = parseUnsignedDecimal(argument, rawValue);
-        break;
-      case "--runs":
-        runs = parseUnsignedDecimal(argument, rawValue);
-        break;
-      case "--case":
-        caseIndex = parseUnsignedDecimal(argument, rawValue, true);
-        break;
-      case "--progress-every":
-        progressEvery = parseUnsignedDecimal(argument, rawValue, true);
-        break;
-      default:
-        throw new PropertyCliArgumentError(`Unknown option: ${argument}`);
-    }
+    const value = parseDecimal(option, raw, option === "--case");
+    if (option === "--seed") seed = value;
+    else if (option === "--runs") runs = value;
+    else if (option === "--case") caseIndex = value;
+    else throw new Error(`Unknown option: ${option}`);
   }
-
-  const defaults = defaultPropertyCampaignConfig(profile);
-  const config: PropertyCampaignConfig = Object.freeze({
-    profile,
-    seed: seed ?? defaults.seed,
-    runs: runs ?? defaults.runs,
-    ...(caseIndex === undefined ? {} : { caseIndex }),
-    progressEvery: progressEvery ?? defaults.progressEvery,
-  });
-  validatePropertyCampaignConfig(config);
-  return config;
+  validateConfig({ seed, runs, ...(caseIndex === undefined ? {} : { caseIndex }) });
+  return Object.freeze({ seed, runs, ...(caseIndex === undefined ? {} : { caseIndex }) });
 }
 
-export function runPropertyCli(
-  argv: readonly string[],
-  io: PropertyCliIo = defaultCliIo(),
-  campaignRunner: PropertyCampaignRunner = runPropertyCampaign,
-): number {
-  let config: PropertyCampaignConfig;
-  try {
-    config = parsePropertyCliArguments(argv);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    io.stderr(`${message}\n`);
-    return 2;
+export function runPropertyCampaign(config: PropertyCampaignConfig): PropertyCampaignResult {
+  validateConfig(config);
+  const count = config.caseIndex === undefined ? config.runs : 1;
+  let firstCase: PropertyCaseResult | undefined;
+  let lastCase: PropertyCaseResult | undefined;
+  for (let offset = 0; offset < count; offset += 1) {
+    const index = config.caseIndex ?? offset;
+    const definition = PROPERTIES[index % PROPERTIES.length]!;
+    const result = Object.freeze({ index, id: definition.id, boundary: definition.boundary });
+    try {
+      definition.execute(config.seed, index);
+    } catch (error) {
+      throw new PropertyCampaignFailure(config, result, createReplayCommand(config, index), error);
+    }
+    firstCase ??= result;
+    lastCase = result;
   }
+  return Object.freeze({ seed: config.seed, runs: config.runs, executed: count, firstCase: firstCase!, lastCase: lastCase! });
+}
 
+export function createReplayCommand(config: Pick<PropertyCampaignConfig, "seed" | "runs">, caseIndex: number): string {
+  return `npm run test:property -- --seed ${config.seed} --runs ${config.runs} --case ${caseIndex}`;
+}
+
+export function runPropertyCli(argv: readonly string[]): number {
   try {
-    const configuredWorkUnits = calculateConfiguredWorkUnits(config);
-    const configuredMutations = calculateConfiguredMutationCount(config);
-    const result = campaignRunner(config, {
-      onProgress(progress) {
-        io.stdout(
-          `property progress seed=${progress.seed} completed=${progress.completed}/` +
-            `${config.caseIndex === undefined ? config.runs : 1} ` +
-            `work=${progress.completedWorkUnits}/${configuredWorkUnits} ` +
-            `mutations=${progress.completedMutations}/${configuredMutations} ` +
-            `case=${progress.currentCase.index}:${progress.currentCase.id}\n`,
-        );
-      },
-    });
-    io.stdout(
-      `property campaign passed seed=${result.seed} runs=${result.runs} ` +
-        `executed=${result.executed} work=${result.totalWorkUnits} ` +
-        `mutations=${result.totalMutations} signature=${result.signature}\n`,
-    );
+    const result = runPropertyCampaign(parsePropertyCliArguments(argv));
+    process.stdout.write(`property campaign passed seed=${result.seed} runs=${result.runs} executed=${result.executed}\n`);
     return 0;
   } catch (error) {
-    if (error instanceof PropertyCampaignFailure) {
-      io.stderr(`${error.message}\n`);
-    } else {
-      const message = error instanceof Error
-        ? `${error.name}: ${error.message}`
-        : String(error);
-      io.stderr(`Property campaign infrastructure failed: ${message}\n`);
-    }
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
 }
 
-export function createReplayCommand(
-  config: Pick<PropertyCampaignConfig, "seed" | "runs">,
-  caseIndex: number,
-): string {
-  return "npm run test:property:extended -- " +
-    `--seed ${config.seed} --runs ${config.runs} --case ${caseIndex}`;
+function assertOperationClosure(seed: number, index: number): void {
+  const source = "wait 1 ms\nexit";
+  const plan = compilePlan(source);
+  const snapshot = createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) });
+  const operation = index % 4;
+  const result = operation === 0 ? run(plan, snapshot)
+    : operation === 1 ? executeInstruction(plan, snapshot)
+    : (() => {
+      const waiting = run(plan, snapshot).snapshot;
+      return operation === 2
+        ? observeTime(plan, waiting, 1)
+        : completeAction(plan, waiting, delayCompletion(waiting, 1));
+    })();
+  assertValidSnapshot(plan, result.snapshot);
 }
 
-export function propertyCliUsage(): string {
-  return [
-    "Usage:",
-    "  npm run test:property -- [--profile smoke|extended] [options]",
-    "  npm run test:property:extended -- [options]",
-    "The extended wrapper already selects the extended profile; use the generic wrapper to override it.",
-    `  --seed 1..${MAX_PROPERTY_SEED}`,
-    `  --runs 1..${MAX_PROPERTY_RUNS}`,
-    "  --case 0..runs-1",
-    `  --progress-every 0..${MAX_PROPERTY_RUNS}`,
-  ].join("\n");
+function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
+  const plan = compilePlan("wait 10 ms\nexit");
+  const waiting = run(plan, createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) })).snapshot;
+  const before = structuredClone(waiting);
+  const request = delayCompletion(waiting, index % 2 === 0 ? 9 : 10);
+  const input = index % 2 === 0 ? waiting : completeAction(plan, waiting, request).snapshot;
+  const inputBefore = structuredClone(input);
+  const result = completeAction(plan, input, request);
+  assert.ok(["notDue", "alreadySettled"].includes(result.outcome.kind));
+  assert.deepEqual(result.snapshot, inputBefore);
+  assert.deepEqual(result.events, []);
+  assert.deepEqual(waiting, before);
 }
 
-function describePropertyCaseFromDefinitions(
-  seed: number,
-  caseIndex: number,
-  definitions: readonly PropertyCaseDefinition[],
-): PropertyCaseDescriptor {
-  if (!Number.isSafeInteger(caseIndex) || caseIndex < 0) {
-    throw new RangeError("Property case index must be a non-negative safe integer.");
-  }
-  if (definitions.length === 0) throw new Error("Property case catalog is empty.");
-  const repeatable = definitions.filter((definition) => definition.repeatable);
-  if (caseIndex >= definitions.length && repeatable.length === 0) {
-    throw new Error("Property case catalog has no repeatable cases.");
-  }
-
-  let state = createPropertyPrng(mixSeedWithCaseIndex(seed, caseIndex));
-  const selection = nextPropertyUint32(state);
-  state = selection.state;
-  const first = nextPropertyUint32(state);
-  state = first.state;
-  const second = nextPropertyUint32(state);
-  state = second.state;
-  const third = nextPropertyUint32(state);
-
-  const definition = caseIndex < definitions.length
-    ? definitions[caseIndex]!
-    : repeatable[propertyIndex(selection.value, repeatable.length)]!;
-  return Object.freeze({
-    index: caseIndex,
-    id: definition.id,
-    property: definition.property,
-    boundary: definition.boundary,
-    workUnits: definition.workUnits,
-    mutationCount: definition.mutationCount,
-    variant: Object.freeze({
-      first: first.value,
-      second: second.value,
-      third: third.value,
-    }),
-  });
+function assertCheckpointRoundTripAndResume(seed: number, index: number): void {
+  const plan = compilePlan('wait 1 ms\nsay "done"\nexit');
+  const waiting = run(plan, createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) })).snapshot;
+  const checkpoint = createCheckpoint(plan, waiting);
+  const restored = deserializeCheckpoint(serializeCheckpoint(checkpoint));
+  assert.doesNotThrow(() => restoreCheckpoint(restored));
+  assert.deepEqual(restored.plan, plan);
+  assert.deepEqual(restored.snapshot, waiting);
+  const uninterruptedFirst = observeTime(plan, waiting, 1);
+  const resumedFirst = observeTime(restored.plan, restored.snapshot, 1);
+  assert.deepEqual(resumedFirst, uninterruptedFirst);
+  assert.deepEqual(run(restored.plan, resumedFirst.snapshot), run(plan, uninterruptedFirst.snapshot));
 }
 
-function definitionForDescriptor(
-  descriptor: PropertyCaseDescriptor,
-  definitions: readonly PropertyCaseDefinition[],
-): PropertyCaseDefinition {
-  const mandatory = definitions[descriptor.index];
-  if (mandatory !== undefined) {
-    if (mandatory.id !== descriptor.id) {
-      throw new Error(`Property case changed: ${descriptor.id}.`);
-    }
-    return mandatory;
-  }
-  const repeatableById = new Map(
-    definitions.filter((definition) => definition.repeatable).map((definition) => [
-      definition.id,
-      definition,
-    ] as const),
-  );
-  const definition = repeatableById.get(descriptor.id);
-  if (definition === undefined) throw new Error(`Unknown property case: ${descriptor.id}.`);
-  return definition;
+function assertSameSeedIsDeterministic(seed: number, index: number): void {
+  const plan = compilePlan("let value = randomInteger(1, 100)\nsay `\${value}`\nexit");
+  const runSeed = caseSeed(seed, index);
+  const first = run(plan, createFreshRuntimeSnapshot(plan, { seed: runSeed }));
+  const second = run(plan, createFreshRuntimeSnapshot(plan, { seed: runSeed }));
+  assert.deepEqual(second, first);
+  assertValidSnapshot(plan, first.snapshot);
 }
 
-function mixSeedWithCaseIndex(seed: number, caseIndex: number): number {
-  createPropertyPrng(seed);
-  let value = (seed ^ Math.imul((caseIndex + 1) >>> 0, 0x9e37_79b1)) >>> 0;
-  value ^= value >>> 16;
-  value = Math.imul(value, 0x85eb_ca6b) >>> 0;
-  value ^= value >>> 13;
-  value = Math.imul(value, 0xc2b2_ae35) >>> 0;
-  value ^= value >>> 16;
-  value >>>= 0;
-  return value === 0 ? 0x6d2b_79f5 : value;
+function assertMalformedBoundaryRejection(seed: number, index: number): void {
+  const plan = compilePlan("exit");
+  const snapshot = createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) });
+  const variant = (seed + index) % 3;
+  if (variant === 0) {
+    assert.equal(validateInstructionPlan({ ...plan, version: plan.version + 1 }).valid, false);
+  } else if (variant === 1) {
+    assert.equal(validateRuntimeSnapshot({ ...snapshot, status: "invalid" }, plan).valid, false);
+  } else {
+    assert.throws(() => restoreCheckpoint({}), CheckpointError);
+  }
 }
 
-function parseUnsignedDecimal(
-  option: string,
-  rawValue: string,
-  allowZero = false,
-): number {
-  if (!/^(0|[1-9][0-9]*)$/.test(rawValue)) {
-    throw new PropertyCliArgumentError(
-      `${option} must be a base-10 integer without signs, fractions, or exponents.`,
-    );
-  }
-  const value = Number(rawValue);
-  if (!Number.isSafeInteger(value) || (!allowZero && value === 0)) {
-    throw new PropertyCliArgumentError(`${option} is outside the supported range.`);
-  }
+function compilePlan(source: string): InstructionPlan {
+  const compiled = compileSource(source);
+  assert.deepEqual(compiled.diagnostics, [], source);
+  assert.notEqual(compiled.plan, null, source);
+  assert.equal(validateInstructionPlan(compiled.plan!).valid, true);
+  return compiled.plan!;
+}
+
+function delayCompletion(snapshot: RuntimeSnapshot, currentSessionTimeMs: number): object {
+  const actionId = snapshot.foregroundAction?.actionId;
+  assert.notEqual(actionId, undefined);
+  return { actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs } };
+}
+
+function assertValidSnapshot(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {
+  assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
+}
+
+function validateConfig(config: PropertyCampaignConfig): void {
+  if (!Number.isSafeInteger(config.seed) || config.seed < 1 || config.seed > 0xffff_ffff) throw new Error("--seed must be an integer from 1 through 4294967295.");
+  if (!Number.isSafeInteger(config.runs) || config.runs < 1 || config.runs > MAX_PROPERTY_RUNS) throw new Error(`--runs must be an integer from 1 through ${MAX_PROPERTY_RUNS}.`);
+  if (config.caseIndex !== undefined && (!Number.isSafeInteger(config.caseIndex) || config.caseIndex < 0 || config.caseIndex >= config.runs)) throw new Error(`--case must be an integer from 0 through ${config.runs - 1}.`);
+}
+
+function parseDecimal(option: string, raw: string, allowZero: boolean): number {
+  if (!/^(0|[1-9][0-9]*)$/.test(raw)) throw new Error(`${option} must be a base-10 integer.`);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || (!allowZero && value === 0)) throw new Error(`${option} is outside the supported range.`);
   return value;
 }
 
-function defaultCliIo(): PropertyCliIo {
-  return Object.freeze({
-    stdout(text: string): void {
-      process.stdout.write(text);
-    },
-    stderr(text: string): void {
-      process.stderr.write(text);
-    },
-  });
+function caseSeed(seed: number, index: number): number {
+  const mixed = (seed ^ Math.imul(index + 1, 0x9e37_79b1)) >>> 0;
+  return mixed === 0 ? 1 : mixed;
+}
+
+function describeContext(seed: number, index: number): string {
+  return `variantSeed=${caseSeed(seed, index)} source=repository-authored`;
 }
 
 const invokedPath = process.argv[1];
-if (
-  invokedPath !== undefined &&
-  import.meta.url === pathToFileURL(invokedPath).href
-) {
+if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
   process.exitCode = runPropertyCli(process.argv.slice(2));
 }

@@ -178,113 +178,63 @@ The canonical self-contained checkpoint guarantee uses the serialized runtime RN
 
 JSON-safe runtime state at every instruction boundary does not mean production execution must persist after every instruction.
 
-## Implemented Phase 1 property and mutation harness
+## Implemented Phase 1 deterministic property harness
 
-Issue #120 implements a deterministic, test-owned harness around the current public plan, snapshot, pending-action, completion, checkpoint, restore, and resume boundaries. It uses Node's built-in test runner and adds no dependency or production-only hook.
+The repository keeps one small deterministic campaign around the current public
+plan, runtime, completion, checkpoint, restore, and external-data boundaries.
+It is test-owned, uses Node's built-in runner, and adds no dependency or
+production hook. It complements focused regressions and source-to-runtime
+tests; it is not a second runtime model or a compatibility contract for its
+private runner implementation.
 
 ### Layout and discovery
 
 ```text
 tests/property.test.ts
 tests/property/
-  prng.ts
-  fixtures.ts
-  mutations.ts
-  invariants.ts
   replay.ts
 ```
 
-`tests/property.test.ts` is a root test entrypoint, so the existing `dist/tests/*.test.js` compiled-test discovery executes the smoke campaign through the normal `npm run check` path. Helper modules remain test-owned and import the public exports from `src/index.ts`.
+`tests/property.test.ts` is a root test entrypoint, so normal compiled-test
+discovery executes the required 128-case campaign through `npm run check`.
+The replay implementation imports only public exports from `src/index.ts`.
 
 ### Commands and budgets
 
-```shell
-npm run test:property -- --profile smoke --seed 1364229357 --runs 128
-npm run test:property:extended -- --seed 1591436852 --runs 10000
-```
-
-The required smoke profile defaults to seed `1364229357` and `128` cases. The current mandatory catalog contains `102` ordered cases, all executed at the start of every smoke run; the remaining cases use the repeatable deterministic schedule. The extended profile defaults to seed `1591436852` and `10,000` cases. A moderate implementation-verification budget is `2,000` cases.
-
-Both commands compile the repository before invoking the same `dist/tests/property/replay.js` campaign implementation. After one successful build, independent larger processes may safely use the compiled entrypoint directly with separate seeds:
+The required campaign defaults to seed `1364229357` and 128 cases. For a
+larger local campaign, use the same implementation with an explicit seed and
+run count:
 
 ```shell
-node dist/tests/property/replay.js --profile extended --seed 1591436852 --runs 100000
+npm run test:property -- --seed 1591436852 --runs 2000
 ```
 
-Do not run several build-producing npm commands concurrently against one checkout. Separate compiled processes are read-only and may run in parallel.
+After one successful build, the compiled entrypoint may be run directly. The
+global run cap is 100,000 cases; there are no real waits, network calls, or
+unbounded generated inputs.
 
 ### CLI and replay contract
 
-Supported options are:
-
-- `--profile smoke|extended`;
-- `--seed` as a decimal integer from `1` through `4294967295`;
-- `--runs` as a decimal integer from `1` through `1000000`;
-- `--case` as one zero-based case index below the configured run count;
-- `--progress-every` from `0` through `1000000`.
-
-Signs, fractions, exponents, non-finite text, unsafe values, unsupported ranges, duplicate options, unknown options, and missing values fail clearly. Argument failures return exit status `2`; property or infrastructure failures return `1`; success returns `0`.
-
-Every property failure reports the seed, run budget, case index, mutation/operation ID, property, first boundary, case-specific fixture/state context, generated variant, cause, and an exact command such as:
+The command accepts `--seed`, `--runs`, and optional zero-based `--case`.
+`--case` replays one generated case from the stated campaign without relying on
+catalog order, a trace, or a successful-campaign signature. Every failure
+reports seed, run count, case number, property ID, boundary, repository-authored
+fixture/source context, cause, and a working replay command such as:
 
 ```shell
-npm run test:property:extended -- --seed 12345 --runs 250 --case 17
+npm run test:property -- --seed 12345 --runs 250 --case 17
 ```
-
-Progress is concise and periodic. Progress and success lines report the exact accumulated case work units as well as case counts. Successful large campaigns produce one final signature line. The same seed and budget reproduce the same cases, variants, operation order, observations, work-unit total, and signature.
-
-Composite invariant helpers wrap each direct public stage. Failure output therefore reports the first failing stage, such as `createCheckpoint`, `serializeCheckpoint`, `deserializeCheckpoint`, `completeAction:uninterrupted`, or `run:resumed-remainder`, instead of only a composite descriptor label.
-
-### Explicit generation bounds
-
-The harness permits at most:
-
-- `1,000,000` cases;
-- at most three controlled field mutations per case;
-- sixteen conservative direct-public-boundary work units per case;
-- a declared maximum generated graph depth of `64`;
-- `16,000,000` total case-execution work units.
-
-Every case definition declares a conservative `workUnits` ceiling. One measured unit represents one direct call to a documented public validation, runtime, completion, checkpoint, serialization, deserialization, or restore boundary. The harness instruments these calls during execution, rejects a case that performs no public boundary, and fails when measured calls exceed the declared ceiling. Composite resume-equivalence cases currently declare twelve units. Module initialization rejects missing, unsafe, zero, or over-sixteen metadata. Before fixture construction, the campaign derives the exact selected schedule, sums its ceilings, and rejects a total above the configured bound. Progress and final output report the measured executed total; the configured ceiling remains available for comparison. Deterministic schedule-generation overhead and the fixed fixture-catalog setup are bounded separately from public-operation work and do not vary per executed boundary.
-
-Each case also declares a conservative controlled-mutation count from zero through three. Module initialization rejects invalid metadata, the selected schedule is summed before execution, and progress/final output report the accumulated declared mutation count.
-
-Technical boundary cases use the accepted interaction limits: at most the exact accepted string/collection boundary for valid fixtures and one unit over it for rejection fixtures. There is no real-time sleep, network access, process-global generator state, or unpublished homelab implementation.
-
-### Fixtures and mutation domains
-
-Fixture construction prefers real public compile and runtime paths. Because author-facing interaction syntax is not implemented yet, interaction fixtures replace a compiled `wait` instruction with the current public interaction instruction shape and must pass `validateInstructionPlan(...)` before execution. Every baseline plan and snapshot is validated before mutation.
-
-The catalog covers fresh, running, waiting, continuation-ready, halted, and failed snapshots; delay and generic interaction actions; settlements; valid, invalid, duplicate, stale, and unknown completions; checkpoints; JSON round trips; speakers; scopes; loops; calls; and temporaries. Builders assert the exact lifecycle status, pending-action kind, interaction kind, settlement, and active frame structures promised by each fixture name before the catalog is frozen.
-
-The complete fixture catalog is recursively frozen. Every case receives that same immutable catalog, and the campaign verifies the freeze before and after execution. A required regression also proves that a case observed inside a full campaign has the exact same trace entry as isolated `--case` replay.
-
-Controlled mutations cover:
-
-- missing, extra, and wrong-typed fields according to each documented boundary;
-- zero, negative zero, exact numeric boundaries, unsafe integers, and non-finite numbers;
-- action/event, speaker, scope, loop, call-frame, and temporary identities;
-- instruction targets, continuation ownership, destinations, settlement/result relationships, and status chronology;
-- unsupported plan, snapshot, and checkpoint versions;
-- exact-limit and over-limit strings and option collections;
-- sparse arrays, cycles, throwing accessors, non-plain objects, and prototype-sensitive own keys.
-
-Unknown extra fields are observed according to the current contract; the harness does not assume they must be rejected. For the current version-1 completion request boundary, an unknown top-level field is accepted and ignored: the harness compares the complete operation result with the same completion request without that field.
 
 ### Executable properties
 
-The shared assertions enforce:
+The bounded campaign keeps only these durable properties:
 
 ```text
 accepted plan + valid snapshot + successful public runtime operation
 => result snapshot passes the public validator
-=> input plan and input snapshot remain unchanged
 
 invalid or duplicate completion
 => complete canonical state and emitted events remain unchanged
-
-checkpoint creation
-=> checkpoint plan and snapshot equal the original canonical inputs
 
 checkpoint -> JSON -> restore
 => complete canonical plan and snapshot equality with those original inputs
@@ -292,24 +242,20 @@ checkpoint -> JSON -> restore
 restore then continue
 => complete event and final-snapshot equality with uninterrupted execution
 
-mutated external plan/snapshot/checkpoint/request
-=> documented structured acceptance or rejection without incidental native failure,
-   hang, partial mutation, or hidden continuation
+malformed external plan/snapshot/checkpoint data
+=> structured rejection at the public or trusted boundary
 
-same seed + same budget
-=> same complete trace of cases, variants, measured boundary order, mutations, and observations
-=> same SHA-256 signature
+same source + same inputs/time observations + same seed
+=> identical result
 ```
 
-The mandatory catalog is pinned by ordered case ID and count, rejects duplicate IDs, and must fit inside the smoke budget. Known PRNG vectors, a seed/index descriptor vector, and the complete 128-case smoke SHA-256 signature are pinned. The required smoke test captures and compares the exact trace twice; the CLI prints only the compact digest.
-
-A genuine internal programming defect is not concealed. Each confirmed production defect must be reduced to a focused named regression test and handled in the owning repair issue or a separate blocker rather than by weakening the property.
-
-### Large-campaign handoff
-
-A practical first Codex/homelab campaign is `100,000` cases for each of several explicit seeds, for example `1591436852`, `1`, `305419896`, and `3735928559`. On Node `24.18.0`, the strengthened implementation measured `2,000` direct cases in about `1.58` seconds after build with approximately `149` MB maximum resident memory. The complete required suite passed `505` tests in about `7.40` seconds including build with approximately `446` MB maximum resident memory. These measurements are environment-specific; use progress output for unattended runs and derive revised estimates from the target machine.
-
-No private configuration or unpublished helper is required. Record any failure's seed, runs, case, property, boundary, state summary, and replay command on the implementation pull request. Rerun the exact case after every harness repair. Convert confirmed production defects to permanent focused regressions and separate issues where the repair is unrelated or substantial.
+The campaign deliberately does not pin an ordered catalog/count, PRNG vectors,
+successful signatures, complete traces, work/mutation accounting, fixture
+identity, profiles, or CLI compatibility. Exact technical limits, hostile-data
+shapes, interaction variants, and confirmed defects remain in their focused
+runtime/checkpoint/corruption/regression suites. Convert a confirmed product
+defect to a focused permanent regression; do not preserve private harness
+bookkeeping as evidence.
 
 ## Source-to-runtime conformance corpus
 
