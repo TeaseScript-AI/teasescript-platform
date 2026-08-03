@@ -1,0 +1,268 @@
+@@ -785,18 +848,29 @@ def prepare(args: argparse.Namespace) -> None:
+             "expected_base_sha": metadata.expected_base_sha,
+             "expected_result_tree_sha": metadata.expected_result_tree_sha,
+             "candidate_commit_sha": metadata.candidate_commit_sha,
++            "validation_profile": metadata.validation_profile,
+         },
+     )
+     print(
+         "prepared patch publication "
+         f"target={metadata.target_branch} commit={metadata.candidate_commit_sha} "
+-        f"tree={metadata.expected_result_tree_sha}"
++        f"tree={metadata.expected_result_tree_sha} "
++        f"validation={metadata.validation_profile}"
+     )
+ 
+ 
+ def verify_bundle(args: argparse.Namespace) -> None:
+     repository = args.repository.resolve()
+     metadata = parse_metadata(args.metadata, repository=repository)
++    if (
++        args.expected_validation_profile is not None
++        and metadata.validation_profile != args.expected_validation_profile
++    ):
++        fail(
++            "publication validation profile mismatch: "
++            f"expected {args.expected_validation_profile}, "
++            f"found {metadata.validation_profile}"
++        )
+     bundle = args.bundle.resolve()
+     if not bundle.is_file():
+         fail(f"publication bundle does not exist: {bundle}")
+@@ -846,6 +920,7 @@ def verify_bundle(args: argparse.Namespace) -> None:
+             "expected_base_sha": metadata.expected_base_sha,
+             "expected_result_tree_sha": metadata.expected_result_tree_sha,
+             "candidate_commit_sha": metadata.candidate_commit_sha,
++            "validation_profile": metadata.validation_profile,
+         },
+     )
+     print(
+@@ -900,6 +975,10 @@ def build_parser() -> argparse.ArgumentParser:
+     verify_parser.add_argument("--repository", type=Path, required=True)
+     verify_parser.add_argument("--metadata", type=Path, required=True)
+     verify_parser.add_argument("--bundle", type=Path, required=True)
++    verify_parser.add_argument(
++        "--expected-validation-profile",
++        choices=sorted(VALIDATION_PROFILES),
++    )
+     verify_parser.add_argument("--github-output", type=Path)
+     verify_parser.set_defaults(handler=verify_bundle)
+     return parser
+diff --git a/tools/local-agent/test-patch-publication-validate-candidate.sh b/tools/local-agent/test-patch-publication-validate-candidate.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..bca5b7cc0c99be018736a5781e93fd7f183f3cfa
+--- /dev/null
++++ b/tools/local-agent/test-patch-publication-validate-candidate.sh
+@@ -0,0 +1,148 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
++if [[ ${TEASESCRIPT_COMPACT_TEST_INNER:-0} != 1 ]]; then
++  log=$(mktemp -t patch-candidate-validation-XXXXXX.log)
++  rm -f "$log"
++  exec "$script_dir/run-compact.sh" \
++    --label patch-candidate-validation \
++    --log "$log" \
++    -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash "$0" "$@"
++fi
++
++runner="$script_dir/patch-publication-validate-candidate.sh"
++tmp=$(mktemp -d)
++trap 'rm -rf "$tmp"' EXIT
++work="$tmp/work"
++bin="$tmp/bin"
++sync="$tmp/sync"
++mkdir -p "$work/tools/local-agent" "$bin" "$sync"
++
++cat > "$work/tools/local-agent/check-local-agent.sh" <<'STUB'
++#!/usr/bin/env bash
++set -euo pipefail
++printf 'tooling\n' >> "$CALLS"
++if [[ ${EXPECT_PARALLEL:-0} == 1 ]]; then
++  touch "$SYNC/tooling-start"
++  for _ in {1..100}; do
++    [[ -e "$SYNC/repository-start" ]] && break
++    sleep 0.01
++  done
++  [[ -e "$SYNC/repository-start" ]]
++fi
++exit "${TOOLING_STATUS:-0}"
++STUB
++chmod +x "$work/tools/local-agent/check-local-agent.sh"
++
++cat > "$bin/npm" <<'STUB'
++#!/usr/bin/env bash
++set -euo pipefail
++printf 'npm %s\n' "$*" >> "$CALLS"
++case "$*" in
++  'ci --no-audit --no-fund')
++    if [[ ${EXPECT_PARALLEL:-0} == 1 ]]; then
++      touch "$SYNC/repository-start"
++      for _ in {1..100}; do
++        [[ -e "$SYNC/tooling-start" ]] && break
++        sleep 0.01
++      done
++      [[ -e "$SYNC/tooling-start" ]]
++    fi
++    exit "${CI_STATUS:-0}"
++    ;;
++  'run check') exit "${CHECK_STATUS:-0}" ;;
++  *) exit 64 ;;
++esac
++STUB
++chmod +x "$bin/npm"
++
++calls="$tmp/calls"
++run_profile() {
++  local profile="$1"
++  shift
++  (
++    cd "$work"
++    env PATH="$bin:$PATH" RUNNER_TEMP="$tmp/runner" CALLS="$calls" SYNC="$sync" "$@" \
++      bash "$runner" validate-profile "$profile"
++  )
++}
++
++identity_repo="$tmp/identity-repository"
++identity_remote="$tmp/identity-remote.git"
++identity_bundle="$tmp/publication.bundle"
++git init -q --bare "$identity_remote"
++git init -q -b main "$identity_repo"
++git -C "$identity_repo" config user.name 'Validation Test'
++git -C "$identity_repo" config user.email 'validation@example.invalid'
++printf 'base\n' > "$identity_repo/example.txt"
++git -C "$identity_repo" add example.txt
++git -C "$identity_repo" commit -q -m base
++base_sha=$(git -C "$identity_repo" rev-parse HEAD)
++git -C "$identity_repo" branch feat/test-target
++git -C "$identity_repo" remote add origin "$identity_remote"
++git -C "$identity_repo" push -q origin feat/test-target
++printf 'candidate\n' > "$identity_repo/example.txt"
++git -C "$identity_repo" commit -qam candidate
++candidate_sha=$(git -C "$identity_repo" rev-parse HEAD)
++candidate_tree=$(git -C "$identity_repo" rev-parse 'HEAD^{tree}')
++git -C "$identity_repo" branch patch-publication-candidate
++git -C "$identity_repo" bundle create "$identity_bundle" \
++  refs/heads/patch-publication-candidate "^$base_sha"
++git -C "$identity_repo" reset -q --hard "$base_sha"
++(
++  cd "$identity_repo"
++  env \
++    TARGET_BRANCH=feat/test-target \
++    CANDIDATE_COMMIT_SHA="$candidate_sha" \
++    EXPECTED_BASE_SHA="$base_sha" \
++    EXPECTED_RESULT_TREE_SHA="$candidate_tree" \
++    PUBLICATION_BUNDLE="$identity_bundle" \
++      bash "$runner" verify-identity >/dev/null
++)
++test "$(git -C "$identity_repo" rev-parse HEAD)" = "$candidate_sha"
++
++: > "$calls"
++run_profile docs >/dev/null
++test ! -s "$calls"
++
++: > "$calls"
++rm -f "$sync"/*
++run_profile source >/dev/null
++test "$(cat "$calls")" = $'npm ci --no-audit --no-fund\nnpm run check'
++
++: > "$calls"
++rm -f "$sync"/*
++run_profile full EXPECT_PARALLEL=1 >/dev/null
++grep -qx 'tooling' "$calls"
++grep -qx 'npm ci --no-audit --no-fund' "$calls"
++grep -qx 'npm run check' "$calls"
++
++: > "$calls"
++rm -f "$sync"/*
++set +e
++failure=$(run_profile full EXPECT_PARALLEL=1 TOOLING_STATUS=7 CHECK_STATUS=9 2>&1)
++status=$?
++set -e
++test "$status" -eq 1
++grep -q 'tooling_status=7 repository_status=9' <<<"$failure"
++
++: > "$calls"
++rm -f "$sync"/*
++set +e
++failure=$(run_profile full EXPECT_PARALLEL=1 CI_STATUS=8 2>&1)
++status=$?
++set -e
++test "$status" -eq 1
++grep -q 'tooling_status=0 repository_status=8' <<<"$failure"
++test "$(grep -c '^npm run check$' "$calls" || true)" -eq 0
++
++if run_profile unknown >/dev/null 2>&1; then
++  echo 'unknown validation profile unexpectedly succeeded' >&2
++  exit 1
++fi
++
++if bash "$runner" unknown-mode >/dev/null 2>&1; then
++  echo 'unknown validation mode unexpectedly succeeded' >&2
++  exit 1
++fi
+diff --git a/tools/local-agent/test-patch-publication-workflow.sh b/tools/local-agent/test-patch-publication-workflow.sh
+index 87a4c105803e6ac16778621463ca02a542ddafec..7f36604ad3fd7eb918a404d66ecde604ac76b95f 100755
+--- a/tools/local-agent/test-patch-publication-workflow.sh
++++ b/tools/local-agent/test-patch-publication-workflow.sh
+@@ -21,22 +21,25 @@ python3 - "$workflow" \
+   "$root/tools/local-agent/patch-publication-cleanup-comment.cjs" \
+   "$root/tools/local-agent/patch-publication-cleanup-transfer.sh" \
+   "$root/tools/local-agent/patch-publication-prepare-steps.sh" \
++  "$root/tools/local-agent/patch-publication-validate-candidate.sh" \
+   "$root/tools/local-agent/patch-publication-summary.sh" \
+   "$root/.github/workflows/ci.yml" <<'PY'
+ import pathlib, re, subprocess, sys, tempfile, textwrap
+-workflow_path, request_path, cleanup_path, transfer_path, prepare_path, summary_path, ci_path = map(pathlib.Path, sys.argv[1:])
++workflow_path, request_path, cleanup_path, transfer_path, prepare_path, validator_path, summary_path, ci_path = map(pathlib.Path, sys.argv[1:])
+ text = workflow_path.read_text(encoding="utf-8")
+ ci_text = ci_path.read_text(encoding="utf-8")
+ request_text = request_path.read_text(encoding="utf-8")
+ cleanup_text = cleanup_path.read_text(encoding="utf-8")
+ transfer_text = transfer_path.read_text(encoding="utf-8")
+ prepare_text = prepare_path.read_text(encoding="utf-8")
++validator_text = validator_path.read_text(encoding="utf-8")
+ summary_text = summary_path.read_text(encoding="utf-8")
+ assert len(text.encode("utf-8")) <= 12 * 1024
+ assert "patch-publication-request.cjs" in text
+ assert "patch-publication-cleanup-comment.cjs" in text
+ assert "patch-publication-cleanup-transfer.sh" in text
+ assert "patch-publication-prepare-steps.sh" in text
++assert "patch-publication-validate-candidate.sh" in text
+ assert "patch-publication-summary.sh" in text
+ assert text.count("ref: ${{ github.workflow_sha }}") >= 5
+ assert "\n  request:\n" not in text
+@@ -65,8 +68,22 @@ assert "preserved_changed" in transfer_text
+ assert "cleanup-transfer:" in text and "cleanup-comment:" in text
+ assert text.count("runs-on: ubuntu-24.04") == 5
+ assert "timeout-minutes: 30" not in text
+-assert "run: bash tools/local-agent/check-local-agent.sh" in text
+-assert "run: npm ci --no-audit --no-fund" in text
++assert "validation_profile: ${{ steps.prepare.outputs.validation_profile }}" in text
++test_job = text.split("  test:\n", 1)[1].split("\n  publish:\n", 1)[0]
++assert test_job.index("Preserve trusted candidate validation driver") < test_job.index("Verify exact candidate identity and target base")
++assert "needs.prepare.outputs.validation_profile != 'docs'" in test_job
++assert 'bash "$RUNNER_TEMP/validate-candidate" validate-profile "${{ needs.prepare.outputs.validation_profile }}"' in test_job
++assert "run: bash tools/local-agent/check-local-agent.sh" not in test_job
++assert "run: npm ci --no-audit --no-fund" not in test_job
++assert 'case "$mode" in' in validator_text
++assert 'verify-identity) verify_identity' in validator_text
++assert 'validate-profile) validate_profile' in validator_text
++assert 'wait "$tooling_pid"' in validator_text
++assert 'wait "$repository_pid"' in validator_text
++assert "tooling_status != 0 || repository_status != 0" in validator_text
++assert "Documentation-only validation" in validator_text
++assert "Repository validation" in validator_text
++assert "Full validation" in validator_text
+ assert "needs.request" not in text
+ assert "needs.prepare.outputs.request_validated == 'true'" in text
+ assert "cancel-in-progress: true" in ci_text
+@@ -90,6 +107,7 @@ verify_marker = "      - name: Verify candidate without executing it\n"
+ token_marker = "      - name: Create scoped patch publisher token\n"
+ push_marker = "      - name: Publish by non-force fast-forward\n"
+ assert publish.index(verify_marker) < publish.index(token_marker) < publish.index(push_marker)
++assert '--expected-validation-profile "$VALIDATION_PROFILE"' in publish
+ 
+ token_step = publish.split(token_marker, 1)[1].split("\n      - name:", 1)[0]
+ assert "id: patch-publisher-token" in token_step

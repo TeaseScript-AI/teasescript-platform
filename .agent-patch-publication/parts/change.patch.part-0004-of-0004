@@ -1,0 +1,159 @@
+diff --git a/tools/local-agent/test-patch-publication.py b/tools/local-agent/test-patch-publication.py
+index 17c33365d14ec82057346d46ef917957a804620f..1791773126f4893ac06b86a797ae8897cd87b512 100755
+--- a/tools/local-agent/test-patch-publication.py
++++ b/tools/local-agent/test-patch-publication.py
+@@ -4,6 +4,7 @@
+ from __future__ import annotations
+ 
+ import hashlib
++import importlib.util
+ import json
+ import os
+ import subprocess
+@@ -22,6 +23,12 @@ PREPARE_SCRIPT = Path(__file__).with_name("prepare-patch-publication.py")
+ TRANSFER_BRANCH = "agent-patch-publication/test-request"
+ TARGET_BRANCH = "feat/test-target"
+ 
++MODULE_SPEC = importlib.util.spec_from_file_location("patch_publication", SCRIPT)
++assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None
++PATCH_PUBLICATION = importlib.util.module_from_spec(MODULE_SPEC)
++sys.modules[MODULE_SPEC.name] = PATCH_PUBLICATION
++MODULE_SPEC.loader.exec_module(PATCH_PUBLICATION)
++
+ 
+ def run(
+     args: list[str],
+@@ -258,6 +265,8 @@ class PatchPublicationTests(unittest.TestCase):
+         )
+         self.assertEqual(metadata["expectedBaseSha"], self.base_sha)
+         self.assertEqual(metadata["expectedResultTreeSha"], self.result_tree)
++        self.assertEqual(metadata["formatVersion"], 2)
++        self.assertEqual(metadata["validationProfile"], "full")
+         self.assertTrue((self.output / "publication.bundle").is_file())
+ 
+         verify_repo = self.root / "verify"
+@@ -285,6 +294,68 @@ class PatchPublicationTests(unittest.TestCase):
+             git(verify_repo, "show", "-s", "--format=%T", candidate), self.result_tree
+         )
+ 
++    def test_validation_profiles_are_conservative(self) -> None:
++        cases = (
++            (("docs/TESTING.md", "README.md"), "docs"),
++            (("src/parser.ts", "tests/parser.test.ts"), "source"),
++            (("docs/TESTING.md", "src/parser.ts"), "source"),
++            ((".github/workflows/ci.yml",), "full"),
++            (("tools/local-agent/patch-publication.py",), "full"),
++            (("unknown/generated-file.bin",), "full"),
++            (("docs/guide.txt",), "full"),
++        )
++        for paths, expected in cases:
++            with self.subTest(paths=paths):
++                self.assertEqual(
++                    PATCH_PUBLICATION.validation_profile_for_paths(paths),
++                    expected,
++                )
++
++        with self.assertRaisesRegex(
++            PATCH_PUBLICATION.PublicationError,
++            "cannot classify an empty candidate change",
++        ):
++            PATCH_PUBLICATION.validation_profile_for_paths(())
++
++    def test_staged_paths_expose_rename_and_deletion_boundaries(self) -> None:
++        repository = self.root / "path-classification"
++        repository.mkdir()
++        git(repository, "init", "-q", "-b", "main")
++        git(repository, "config", "user.name", "Test User")
++        git(repository, "config", "user.email", "test@example.invalid")
++        workflow = repository / ".github/workflows/old.yml"
++        workflow.parent.mkdir(parents=True)
++        workflow.write_text("name: old\n", encoding="utf-8")
++        deleted = repository / "docs/deleted.md"
++        deleted.parent.mkdir(parents=True)
++        deleted.write_text("old\n", encoding="utf-8")
++        git(repository, "add", ".")
++        git(repository, "commit", "-q", "-m", "base")
++
++        renamed = repository / "docs/old-workflow.md"
++        git(
++            repository,
++            "mv",
++            str(workflow.relative_to(repository)),
++            str(renamed.relative_to(repository)),
++        )
++        deleted.unlink()
++        git(repository, "add", "-A")
++
++        paths = PATCH_PUBLICATION.staged_paths(repository)
++        self.assertEqual(
++            set(paths),
++            {
++                ".github/workflows/old.yml",
++                "docs/deleted.md",
++                "docs/old-workflow.md",
++            },
++        )
++        self.assertEqual(
++            PATCH_PUBLICATION.validation_profile_for_paths(paths),
++            "full",
++        )
++
+     def test_inspect_rejects_wrong_patch_digest(self) -> None:
+         self.write_manifest(patchSha256="0" * 64)
+         completed = run(
+@@ -715,6 +786,55 @@ class PatchPublicationTests(unittest.TestCase):
+         self.assertEqual(completed.returncode, 1)
+         self.assertIn("candidate tree mismatch", completed.stderr)
+ 
++    def test_verify_rejects_invalid_or_mismatched_profile(self) -> None:
++        run(
++            self.command("prepare", "--output-directory", str(self.output)),
++            cwd=self.repo,
++        )
++        metadata_path = self.output / "publication.json"
++        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
++        metadata["validationProfile"] = "skip-everything"
++        metadata_path.write_text(json.dumps(metadata) + "\n", encoding="utf-8")
++        invalid = run(
++            [
++                sys.executable,
++                str(SCRIPT),
++                "verify-bundle",
++                "--repository",
++                str(self.repo),
++                "--metadata",
++                str(metadata_path),
++                "--bundle",
++                str(self.output / "publication.bundle"),
++            ],
++            cwd=self.repo,
++            check=False,
++        )
++        self.assertEqual(invalid.returncode, 1)
++        self.assertIn("validationProfile must be one of", invalid.stderr)
++
++        metadata["validationProfile"] = "full"
++        metadata_path.write_text(json.dumps(metadata) + "\n", encoding="utf-8")
++        mismatch = run(
++            [
++                sys.executable,
++                str(SCRIPT),
++                "verify-bundle",
++                "--repository",
++                str(self.repo),
++                "--metadata",
++                str(metadata_path),
++                "--bundle",
++                str(self.output / "publication.bundle"),
++                "--expected-validation-profile",
++                "source",
++            ],
++            cwd=self.repo,
++            check=False,
++        )
++        self.assertEqual(mismatch.returncode, 1)
++        self.assertIn("validation profile mismatch", mismatch.stderr)
++
+ 
+ if __name__ == "__main__":
+     run_compact_unittest("patch-publication")
