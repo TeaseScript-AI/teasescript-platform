@@ -1,0 +1,109 @@
+diff --git a/PHASE-STATUS.md b/PHASE-STATUS.md
+index 5d74ebfad7df9c750ed62cbc01cd265e2449210f..d5313d3aafc863e402307576adddf33565e629a4 100644
+--- a/PHASE-STATUS.md
++++ b/PHASE-STATUS.md
+@@ -11,7 +11,7 @@
+ - PR #117 completed issue #110 by implementing the generic typed foreground-interaction runtime, shared version-1 interaction limits, canonical player transcript events, typed completion, and versioned checkpoint/restore behavior.
+ - PR #206 completed issue #173's testing-strategy work: source-to-runtime conformance is the primary safety net, backed by focused runtime/checkpoint/corruption tests and a small deterministic property campaign.
+ - PR #119 recorded the owner-approved Option A source-layout proposal; issue #124 applies its behavior-neutral physical implementation from this baseline.
+-- Final verification for PR #206 uses Node `v24.18.0` and npm `11.16.0`; typecheck, build, the bounded property campaign, focused source/runtime suites, the complete configured check (440 tests, 0 failures), full-output check, and diff check pass on its final implementation head.
++- Final verification for PR #206 uses Node `v24.18.0` and npm `11.16.0`; typecheck, build, the bounded property campaign, focused source/runtime suites, the complete configured check (441 tests, 0 failures), and diff check pass on its final implementation head.
+ - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
+ 
+ ## Implemented in the current repository code
+diff --git a/docs/DEVELOPMENT-WORKFLOW.md b/docs/DEVELOPMENT-WORKFLOW.md
+index c1cd1c6b44f8b7a0ffec9668f603c6449fddc61d..1d72915270e5a3c2395be4fc9af32672af87fbf7 100644
+--- a/docs/DEVELOPMENT-WORKFLOW.md
++++ b/docs/DEVELOPMENT-WORKFLOW.md
+@@ -489,6 +489,13 @@ npm run check
+ git diff --check
+ ```
+ 
++`npm run check` is the normal complete configured test-suite verification. Its
++output filter suppresses routine passing test lines to conserve terminal output
++and agent context while retaining failures and relevant diagnostics. Do not
++follow a successful compact check with `npm run check:full-output`; use the
++full-output variant only when a failure or specific investigation requires the
++complete test listing.
++
+ The canonical compiler is the `@typescript/native` npm alias pinned in `package.json`; build and typecheck use its public `tsc` command. The separately pinned `ts-morph` package is a development-only agent codemod tool. Do not replace either dependency without an explicit dependency migration.
+ 
+ Also inspect the complete combined diff and run any milestone-specific playground, browser, security, or migration checks.
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index 7e21c75001cb3e0363fcbbb029746b0b088ae12e..0a5f5eb8cdd377a5a25b46f0b6de3f538bdddfc3 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -193,6 +193,7 @@ private runner implementation.
+ tests/property.test.ts
+ tests/property/
+   replay.ts
++  source-fuzz.ts
+ ```
+ 
+ `tests/property.test.ts` is a root test entrypoint, so normal compiled-test
+@@ -283,11 +284,12 @@ second language specification or permanent test catalog.
+ 
+ ## Implemented bounded source fuzzing
+ 
+-The same required deterministic campaign includes two small source families
+-through the package-root `compileSource(...)` boundary. Each family uses a few
+-bounded seed/case-derived choices, so larger explicit-seed campaigns explore
+-additional meaningful source strings. This is not a grammar framework or an
+-arbitrary-token fuzzer.
++The same required deterministic campaign includes valid and near-valid source
++classifications through the package-root `compileSource(...)` boundary, with
++six small families in each classification. Every family uses a few bounded
++seed/case-derived choices, so larger explicit-seed campaigns explore additional
++meaningful source strings. This is not a grammar framework or an arbitrary-token
++fuzzer.
+ 
+ - Valid source templates cover literals, unary/binary expressions, ranges and
+   templates; variables, lexical scope, lists, objects, scalar sets and `for`;
+@@ -295,8 +297,9 @@ arbitrary-token fuzzer.
+   and bounded recursion; speaker output and `say as`; and deterministic random
+   built-ins.
+ - Near-valid templates apply one targeted current diagnostic mutation: a missing
+-  declaration identifier or template expression, out-of-loop `break`, unknown
+-  name, duplicate function parameter, or composite set element.
++  declaration identifier or template expression, out-of-loop `break` or
++  `continue`, unknown name, duplicate function parameter, or composite set
++  element.
+ 
+ Every valid case is at most 512 source characters, uses nesting at most three,
+ collections and loop/recursion counts at most four, and runs with a 200
+diff --git a/tests/property.test.ts b/tests/property.test.ts
+index 1dd2399155d85714faaf06b295cd3a6a265431c2..131a42b435260093917f7ccd7d01307f3cecdc27 100644
+--- a/tests/property.test.ts
++++ b/tests/property.test.ts
+@@ -33,14 +33,8 @@ test("property replay selects the same generated case by seed and case number",
+ });
+ 
+ test("source family selection uses the selected family collection", () => {
+-  assert.equal(
+-    selectSourceFamily(["valid-a", "valid-b"], 1, 4),
+-    "valid-b",
+-  );
+-  assert.equal(
+-    selectSourceFamily(["near-a", "near-b", "near-c"], 1, 4),
+-    "near-c",
+-  );
++  assert.equal(selectSourceFamily(["valid-a", "valid-b"], 1, 4), "valid-b");
++  assert.equal(selectSourceFamily(["near-a", "near-b", "near-c"], 1, 4), "near-c");
+ });
+ 
+ test("required campaign reaches retained variants and varied source-fuzz families", () => {
+@@ -81,8 +75,12 @@ test("required campaign reaches retained variants and varied source-fuzz familie
+     createNearValidSourceCase(config.seed, 6).source,
+   );
+ 
+-  const functionsSource = createValidSourceCase(1, 2).source;
+-  assert.match(functionsSource, /return `\$\{prefix\}:\$\{value\}`/);
++  const functionsCase = Array.from(
++    { length: VALID_SOURCE_FAMILIES.length },
++    (_, index) => createValidSourceCase(1, index),
++  ).find(({ family }) => family === "functions-defaults-calls-and-recursion");
++  assert.ok(functionsCase);
++  assert.match(functionsCase.source, /return `\$\{prefix\}:\$\{value\}`/);
+ });
+ 
+ function assertSourceFamilyCoverage(

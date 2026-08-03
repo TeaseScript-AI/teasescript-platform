@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "agent/issue-173-testing-strategy",
+  "expectedBaseSha": "3dc7e2e3662e561d6e9dca722aab31fa8a3d61cf",
+  "expectedResultTreeSha": "c15f34ceeb48ca641528dc7ac2c39a4ad65a3863",
+  "patchSizeBytes": 6314,
+  "patchSha256": "226bcb03f6aa38719f4efef39240aa385a4bdf02645de463021d12a9ca940a80",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0001",
+      "sizeBytes": 6314,
+      "sha256": "226bcb03f6aa38719f4efef39240aa385a4bdf02645de463021d12a9ca940a80"
+    }
+  ],
+  "commitMessage": "docs: clarify compact verification workflow"
+}
