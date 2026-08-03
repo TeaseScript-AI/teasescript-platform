@@ -9,9 +9,9 @@
 - PR #46 rejects ordinary instruction-plan control-flow targets that cross between root and function execution regions before execution or checkpoint restore.
 - PR #45 rejects core and configured injected builtin identifiers when they are used as ordinary runtime values while preserving direct builtin calls.
 - PR #117 completed issue #110 by implementing the generic typed foreground-interaction runtime, shared version-1 interaction limits, canonical player transcript events, typed completion, and versioned checkpoint/restore behavior.
-- PR #122 documented the staged property/fuzz testing roadmap. PR #123 completed issue #120 and the selected `POC-ENGINE-003` adversarial runtime-data mutation-testing outcome with a deterministic repository-owned Phase 1 harness.
+- PR #206 completed issue #173's testing-strategy work: source-to-runtime conformance is the primary safety net, backed by focused runtime/checkpoint/corruption tests and a small deterministic property campaign.
 - PR #119 recorded the owner-approved Option A source-layout proposal; issue #124 applies its behavior-neutral physical implementation from this baseline.
-- Final verification reported for PR #123 used Node `v24.18.0` and npm `11.16.0`; the complete configured check passed 505 tests with 0 failures.
+- Final verification for PR #206 uses Node `v24.18.0` and npm `11.16.0`; typecheck, build, the bounded property campaign, focused source/runtime suites, the complete configured check (440 tests, 0 failures), full-output check, and diff check pass on its final reviewed head.
 - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
 ## Implemented in the current repository code
@@ -47,11 +47,12 @@
 - Engine-owned text normalization, number parsing, exact choice matching, requesting-speaker provenance, canonical player transcript derivation, mandatory retry behavior, and bounded duplicate settlement replay.
 - Shared version-1 interaction limits of 65,536 UTF-8 bytes for one retained string, 65,536 aggregate UTF-8 bytes per interaction definition, and 4,096 choice options.
 
-### Deterministic mutation and property testing
+### Source-to-runtime conformance and deterministic property testing
 
-- A repository-owned test-only Phase 1 harness with deterministic seeds, exact case replay, reusable valid fixtures, controlled one-or-few-field mutations, and bounded work accounting.
-- Public-boundary properties cover plan/snapshot closure, rejection immutability, checkpoint JSON equivalence, restore-and-resume equivalence, structured hostile-input handling, fixture integrity, and reproducible campaign signatures.
-- The normal required check includes a bounded smoke campaign; larger campaigns use the same implementation through explicit extended commands.
+- Representative real `.tease` source through the package-root compile/runtime path is the primary regression safety net for implemented author-facing syntax and source-reachable observable behavior.
+- A small test-only deterministic campaign retains successful public-operation closure, rejected completion atomicity, checkpoint JSON/restore/resume equivalence, same-seed execution, and structured malformed plan/snapshot/checkpoint rejection. It supports exact seed/run/case replay on the same repository revision; its private ordering is not a compatibility contract.
+- The same bounded required campaign now includes structured valid and near-valid source fuzzing. Valid templates prove plan/runtime closure and repeatable results; targeted near-valid templates prove stable structured diagnostics and no executable plan. They use fixed source, nesting, collection, loop/recursion, and instruction-budget limits with no real waits or external inputs.
+- The normal required check includes the bounded campaign; larger explicit-seed campaigns use the same implementation. The removed catalog/count identity, campaign signatures, private PRNG vectors, complete traces, fixture catalog, work/mutation accounting, profiles, and extended wrapper are not current requirements.
 
 ### Control flow
 

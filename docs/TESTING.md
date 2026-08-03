@@ -17,7 +17,7 @@ The current repository uses:
 - real source-to-runtime tests where public behavior crosses parser, compiler, instruction-plan, and runtime boundaries;
 - deterministic RNG seeds, JSON checkpoint round trips, and runtime resume-equivalence coverage;
 - playground HTTP and static-path security tests;
-- a repository-owned deterministic Phase 1 mutation/property harness for plan and runtime-state boundaries.
+- a small repository-owned deterministic property campaign for runtime and source-pipeline boundaries.
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
@@ -30,7 +30,7 @@ lexer/parser/semantic unit tests
 source-to-runtime contract tests
 runtime invariant and checkpoint tests
 external-data validation and corruption tests
-deterministic property and mutation tests
+deterministic property and bounded source-fuzz tests
 player/host integration tests
 browser E2E tests
 performance benchmarks
@@ -216,10 +216,11 @@ unbounded generated inputs.
 ### CLI and replay contract
 
 The command accepts `--seed`, `--runs`, and optional zero-based `--case`.
-`--case` replays one generated case from the stated campaign without relying on
-catalog order, a trace, or a successful-campaign signature. Every failure
-reports seed, run count, case number, property ID, boundary, repository-authored
-fixture/source context, cause, and a working replay command such as:
+`--case` replays one generated case from the stated campaign on the same
+repository revision and campaign implementation. The small internal property
+ordering is not a compatibility contract. Every failure reports seed, run
+count, case number, property ID, boundary, property-specific context, the
+generated source when applicable, cause, and a working replay command such as:
 
 ```shell
 npm run test:property -- --seed 12345 --runs 250 --case 17
@@ -280,35 +281,39 @@ compiler tests where lowering itself is the subject. The bounded coverage model
 for a consolidation/review lives in the active pull request rather than as a
 second language specification or permanent test catalog.
 
-## Future Phase 2 source and model-based testing
+## Implemented bounded source fuzzing
 
-Future Phase 2 fuzz and property tests must use fixed seeds and report the failing seed and generated input. Initial implementation should use existing tools unless a demonstrated need justifies a dependency.
+The same required deterministic campaign includes two small source families
+through the package-root `compileSource(...)` boundary. They are structured,
+seed-derived templates, not a grammar framework or arbitrary-token fuzzer.
 
-Useful generated inputs include:
+- Valid source templates cover literals, unary/binary expressions, ranges and
+  templates; variables, lexical scope, lists, objects, scalar sets and `for`;
+  conditions, `repeat`, `while`, `break` and `continue`; defaults, named calls
+  and bounded recursion; speaker output and `say as`; and deterministic random
+  built-ins.
+- Near-valid templates apply one targeted current diagnostic mutation: a missing
+  declaration identifier or template expression, out-of-loop `break`, unknown
+  name, duplicate function parameter, or composite set element.
 
-- short token sequences;
-- nested templates and interpolations;
-- bounded nested collections;
-- expressions and calls;
-- Unicode and unusual identifiers;
-- incomplete strings, comments, and blocks;
-- deeply nested but otherwise valid source structures, including parentheses, unary expressions, lists, templates, and interpolations;
-- bounded deeply nested source structures that exercise parser and compiler limits.
+Every valid case is at most 512 source characters, uses nesting at most three,
+collections and loop/recursion counts at most four, and runs with a 200
+instruction budget. It compiles without diagnostics, validates its public plan,
+runs to a valid halted snapshot, and produces the same complete observable
+result on a second run with the same seed. Near-valid cases compile twice and
+must return the same ordered diagnostic codes and spans with no executable plan.
+There are no generated waits, real sleeping, network input, filesystem corpus,
+process-global generator state, or external service.
 
-Required properties include:
+The default 128-case campaign reaches every template family. Larger explicit
+seed campaigns and exact revision-scoped replay use the command above. A source
+failure prints its valid/near-valid classification, family, mutation where
+applicable, and exact bounded source before the replay command.
 
-- lexer and parser termination;
-- invalid input produces diagnostics rather than an uncontrolled crash;
-- accepted plans and snapshots are JSON-safe;
-- documented public validation boundaries remain structured;
-- the same seed reproduces the same input and result;
-- failing input, seed, and first failing boundary are reported;
-- generated depth, input size, and total work are bounded;
-- deeply nested valid source either succeeds or reaches a documented bounded rejection rather than an incidental native stack overflow.
-
-This strategy does not assert that deeply nested valid source currently has a confirmed defect. A bug issue requires a repository reproduction that identifies the first failing public boundary.
-
-Phase 1 does not select `fast-check` or another dependency. Phase 2 may propose one only after concrete implementation evidence and the normal dependency review.
+This is deliberately not a complete grammar, abstract runtime model, reducer,
+dependency, browser/Laravel/device fuzzing route, or self-hosted untrusted-PR
+runner. Focused parser, compiler, checkpoint, corruption, and source-to-runtime
+tests remain the evidence for their detailed boundaries.
 
 ## Interactive runtime state-machine testing
 
