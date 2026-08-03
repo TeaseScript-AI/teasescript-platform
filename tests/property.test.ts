@@ -10,6 +10,7 @@ import {
   createNearValidSourceCase,
   createValidSourceCase,
   NEAR_VALID_SOURCE_FAMILIES,
+  selectSourceFamily,
   VALID_SOURCE_FAMILIES,
 } from "./property/source-fuzz.js";
 
@@ -29,6 +30,17 @@ test("property replay selects the same generated case by seed and case number", 
   assert.equal(replay.executed, 1);
   assert.equal(replay.firstCase.index, 17);
   assert.deepEqual(full, runPropertyCampaign(config));
+});
+
+test("source family selection uses the selected family collection", () => {
+  assert.equal(
+    selectSourceFamily(["valid-a", "valid-b"], 1, 4),
+    "valid-b",
+  );
+  assert.equal(
+    selectSourceFamily(["near-a", "near-b", "near-c"], 1, 4),
+    "near-c",
+  );
 });
 
 test("required campaign reaches retained variants and varied source-fuzz families", () => {
@@ -68,6 +80,9 @@ test("required campaign reaches retained variants and varied source-fuzz familie
     changedNearValidSeed.source,
     createNearValidSourceCase(config.seed, 6).source,
   );
+
+  const functionsSource = createValidSourceCase(1, 2).source;
+  assert.match(functionsSource, /return `\$\{prefix\}:\$\{value\}`/);
 });
 
 function assertSourceFamilyCoverage(

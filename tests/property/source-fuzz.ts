@@ -36,7 +36,7 @@ export interface NearValidSourceCase {
 
 export function createValidSourceCase(seed: number, index: number): ValidSourceCase {
   const choices = new SourceChoices(seed, index);
-  const family = VALID_SOURCE_FAMILIES[selectFamily(seed, index)]!;
+  const family = selectSourceFamily(VALID_SOURCE_FAMILIES, seed, index);
 
   switch (family) {
     case "literals-expressions-ranges-templates":
@@ -56,7 +56,7 @@ export function createValidSourceCase(seed: number, index: number): ValidSourceC
 
 export function createNearValidSourceCase(seed: number, index: number): NearValidSourceCase {
   const choices = new SourceChoices(seed, index);
-  const family = NEAR_VALID_SOURCE_FAMILIES[selectFamily(seed, index)]!;
+  const family = selectSourceFamily(NEAR_VALID_SOURCE_FAMILIES, seed, index);
 
   switch (family) {
     case "missing-declaration-identifier":
@@ -149,8 +149,9 @@ function functionsSource(choices: SourceChoices): ValidSourceCase {
       "  if value <= 0 { return 0 }",
       "  return step + count(value - 1, step)",
       "}",
-      "function describeValue(value, prefix = \"" + prefix
-        + "\") { return `" + prefix + ":${value}` }",
+      `function describeValue(value, prefix = "${prefix}") {`,
+      "  return `${prefix}:${value}`",
+      "}",
       `say describeValue(${call})`,
     ],
   );
@@ -281,8 +282,12 @@ function countCall(
   }
 }
 
-function selectFamily(seed: number, index: number): number {
-  return (seed + index) % VALID_SOURCE_FAMILIES.length;
+export function selectSourceFamily<T>(
+  families: readonly T[],
+  seed: number,
+  index: number,
+): T {
+  return families[(seed + index) % families.length]!;
 }
 
 class SourceChoices {
