@@ -160,7 +160,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
     outputs:
       published_commit_sha: ${{ steps.verify.outputs.candidate_commit_sha }}
     steps:
@@ -169,7 +169,7 @@ jobs:
         with:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
           show-progress: false
 
       - name: Preserve trusted publication tool
@@ -203,12 +203,23 @@ jobs:
             --bundle "$RUNNER_TEMP/publication/publication.bundle" \
             --github-output "$GITHUB_OUTPUT"
 
+      - name: Create scoped patch publisher token
+        id: patch-publisher-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.PATCH_PUBLISHER_CLIENT_ID }}
+          private-key: ${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+
       - name: Publish by non-force fast-forward
         env:
           TARGET_BRANCH: ${{ steps.verify.outputs.target_branch }}
           CANDIDATE_COMMIT_SHA: ${{ steps.verify.outputs.candidate_commit_sha }}
+          PATCH_PUBLISHER_TOKEN: ${{ steps.patch-publisher-token.outputs.token }}
         run: |
-          git push --porcelain origin \
+          git push --porcelain \
+            "https://x-access-token:${PATCH_PUBLISHER_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "$CANDIDATE_COMMIT_SHA:refs/heads/$TARGET_BRANCH"
 
   cleanup-transfer:

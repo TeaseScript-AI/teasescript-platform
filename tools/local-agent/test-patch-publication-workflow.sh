@@ -56,6 +56,57 @@ assert '[[ "$PUBLISH_RESULT" != success ]]' in transfer_text
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
+
+publish = text.split("  publish:\n", 1)[1].split("  cleanup-transfer:\n", 1)[0]
+permission_header = publish.split("    outputs:\n", 1)[0]
+assert re.search(r"(?m)^    permissions:\n      contents: read$", permission_header)
+assert "contents: write" not in permission_header
+
+checkout = publish.split(
+    "      - name: Check out trusted workflow revision\n", 1
+)[1].split("\n      - name:", 1)[0]
+assert "persist-credentials: false" in checkout
+assert "persist-credentials: true" not in checkout
+
+verify_marker = "      - name: Verify candidate without executing it\n"
+token_marker = "      - name: Create scoped patch publisher token\n"
+push_marker = "      - name: Publish by non-force fast-forward\n"
+assert publish.index(verify_marker) < publish.index(token_marker) < publish.index(push_marker)
+
+token_step = publish.split(token_marker, 1)[1].split("\n      - name:", 1)[0]
+assert "id: patch-publisher-token" in token_step
+assert (
+    "uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"
+) in token_step
+token_inputs = {}
+for line in token_step.split("        with:\n", 1)[1].splitlines():
+    match = re.fullmatch(r"          ([a-z][a-z0-9-]*): (.+)", line)
+    assert match, f"unsupported patch publisher input syntax: {line.strip()}"
+    key, value = match.groups()
+    assert key not in token_inputs
+    token_inputs[key] = value
+assert token_inputs == {
+    "client-id": "${{ vars.PATCH_PUBLISHER_CLIENT_ID }}",
+    "private-key": "${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}",
+    "permission-contents": "write",
+    "permission-workflows": "write",
+}
+
+push_step = publish.split(push_marker, 1)[1]
+assert (
+    "PATCH_PUBLISHER_TOKEN: ${{ steps.patch-publisher-token.outputs.token }}"
+) in push_step
+assert (
+    '"https://x-access-token:${PATCH_PUBLISHER_TOKEN}'
+    '@github.com/${GITHUB_REPOSITORY}.git"'
+) in push_step
+assert "git push --porcelain origin" not in push_step
+
+assert text.count("${{ vars.PATCH_PUBLISHER_CLIENT_ID }}") == 1
+assert text.count("${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}") == 1
+assert text.count("${{ steps.patch-publisher-token.outputs.token }}") == 1
+for forbidden in ["${{ github.token }}", "secrets.GITHUB_TOKEN", "GITHUB_TOKEN:"]:
+    assert forbidden not in publish
 # This guard intentionally accepts one canonical block-style YAML subset.
 # Any alternative structure must fail closed rather than bypass action scanning.
 def line_indentation(line):
