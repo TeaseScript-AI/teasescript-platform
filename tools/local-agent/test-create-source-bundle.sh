@@ -49,12 +49,17 @@ assert "bash ../tooling/tools/local-agent/create-source-bundle.sh" in automatic
 assert "--output ../source-artifact" in automatic
 assert "steps.source.outputs.sha" in automatic
 assert "name: teasescript-source-${{ steps.source.outputs.sha }}" in automatic
+assert "cancel-in-progress: true" in automatic
+assert "runs-on: ubuntu-24.04" in automatic
+assert "timeout-minutes: 5" in automatic
 
 assert re.search(r"^on:\n  create:\n", gate, re.MULTILINE)
 assert "permissions: {}" in gate
 assert "source-bundle-request/" in gate
 assert "^[0-9a-f]{40}$" in gate
 assert "uses:" not in gate
+assert "runs-on: ubuntu-24.04" in gate
+assert "timeout-minutes: 3" in gate
 
 assert re.search(r"^  workflow_run:\n    workflows: \[Source bundle request\]\n    types: \[completed\]", processor, re.MULTILINE)
 assert "permissions: {}" in processor
@@ -66,6 +71,8 @@ assert "github.rest.repos.get" in processor
 assert "github.rest.git.getCommit" in processor
 assert "github.rest.repos.compareCommitsWithBasehead" in processor
 assert "['ahead', 'identical']" in processor
+assert "\n  validate:\n" not in processor
+assert processor.count("\n  bundle:\n") == 1
 assert "TOOLING_REF: ${{ github.workflow_sha }}" in processor
 assert processor.count("uses: actions/checkout@") == 2
 cleanup = processor.split("  cleanup-request:\n", 1)[1]
@@ -76,6 +83,8 @@ assert "--event-name source-bundle-request" in processor
 assert "artifact_id: ${{ steps.upload.outputs.artifact-id }}" in processor
 assert "artifact_url: ${{ steps.upload.outputs.artifact-url }}" in processor
 assert "artifact_digest: ${{ steps.upload.outputs.artifact-digest }}" in processor
+assert "request_validated: ${{ steps.request.outputs.validated }}" in processor
+assert "needs.bundle.outputs.request_validated == 'true'" in processor
 assert "statuses: write" in processor
 assert "github.rest.repos.createCommitStatus" in processor
 assert "/^[0-9a-f]{64}$/.test(artifactDigest)" in processor
@@ -87,6 +96,8 @@ status_description = f"artifact 8758008910 sha256:{artifact_digest}"
 status_match = re.fullmatch(r"artifact ([0-9]+) sha256:([0-9a-f]{64})", status_description)
 assert status_match and len(status_description) <= 140
 assert "needs.publish-result.result == 'success'" in processor
+assert processor.count("runs-on: ubuntu-24.04") == 3
+assert processor.count("timeout-minutes:") == 3
 assert "contents: write" in processor
 assert '--force-with-lease="${request_ref}:${EXPECTED_REQUEST_SHA}"' in processor
 assert "github.rest.git.deleteRef" not in processor
