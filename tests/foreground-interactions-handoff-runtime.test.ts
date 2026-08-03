@@ -13,7 +13,9 @@ import type {
 } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { CheckpointError, createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
-import { completeAction, executeInstruction, observeTime, run, RuntimeDataError } from "../src/runtime/engine.js";
+import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine.js";
+import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import type {
   RuntimeDelayActionSettlementSnapshot,

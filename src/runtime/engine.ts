@@ -21,8 +21,6 @@ import {
   takeSequence,
 } from "./operations/support.js";
 import type { RuntimeOperationResult } from "./operations/model.js";
-export { completeAction } from "./operations/complete-action.js";
-export { observeTime } from "./operations/observe-time.js";
 export type {
   ActionCompletionOutcome,
   PendingActionOperationResult,

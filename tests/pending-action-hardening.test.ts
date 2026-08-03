@@ -9,12 +9,14 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { completeAction, executeInstruction, observeTime, run, stepToEvent } from "../src/runtime/engine.js";
+import { executeInstruction, run, stepToEvent } from "../src/runtime/engine.js";
+import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
+import type { RuntimeDelayActionSnapshot } from "../src/runtime/actions/model.js";
 import {
   MAX_RUNTIME_SESSION_TIME_MS,
   createFreshRuntimeSnapshot,
   validateRuntimeSnapshot,
-  type RuntimeDelayActionSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 

@@ -14,11 +14,8 @@
 The current source layout uses shared plan contracts under `src/plan/`,
 compiler seams under `src/compiler/`, pure runtime action helpers under
 `src/runtime/actions/`, and runtime operation entrypoints under
-`src/runtime/operations/`. Temporary source-layout facades remain during
-migration, but they are not public compatibility contracts.
-`src/instructions.ts` now re-exports only plan model, capture, and validation
-symbols; AST lowering remains internal to the compiler. This layout refactor
-does not change format versions.
+`src/runtime/operations/`. AST lowering remains internal to the compiler.
+This layout refactor does not change format versions.
 
 ## TeaseScript authority
 

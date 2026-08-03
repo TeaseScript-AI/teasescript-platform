@@ -2,7 +2,7 @@
 
 ## Playground execution helper
 
-`playground/workspace/controller.ts` is the DOM-free adapter shared by the browser controller and development automation routes. The old `playground/workspace.ts` path is a compatibility facade. It uses `compileSource(...)` and canonical `run`/`stepToEvent` runtime interfaces to create fresh validated snapshots and return JSON-safe diagnostics, events, plan, snapshot, status, and instruction count. It stops on `halted`, `failed`, `waiting`, or the canonical instruction-budget failure.
+`playground/workspace/controller.ts` is the DOM-free adapter shared by the browser controller and development automation routes. It uses `compileSource(...)` and canonical `run`/`stepToEvent` runtime interfaces to create fresh validated snapshots and return JSON-safe diagnostics, events, plan, snapshot, status, and instruction count. It stops on `halted`, `failed`, `waiting`, or the canonical instruction-budget failure.
 
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
 
@@ -15,17 +15,15 @@ ADR 0016 accepts the resumable pending-action contract for waits, timers, choice
 ## Implemented runtime ownership
 
 Shared serializable action and settlement contracts are owned by
-`src/runtime/actions/model.ts` and re-exported from `state.ts` for direct-import
-compatibility. Pure interaction normalization and matching live in
+`src/runtime/actions/model.ts`. Pure interaction normalization and matching live in
 `actions/interaction.ts`; delay helpers and replay classification remain
 action-specific. Canonical completion and time-observation transitions are
 implemented in `src/runtime/operations/complete-action.ts` and
 `src/runtime/operations/observe-time.ts`, with a small shared operation support
 module for validated input capture, result construction, and event-sequence
-allocation. `src/runtime/engine.ts` re-exports those operations for direct
-compatibility and remains the execution facade for instructions, expressions,
-`run`, and orchestration. No new action state machine or pacing implementation
-was added.
+allocation. `src/runtime/engine.ts` remains the execution facade for
+instructions, expressions, `run`, and orchestration. No new action state
+machine or pacing implementation was added.
 
 ## Accepted primitive boundary
 

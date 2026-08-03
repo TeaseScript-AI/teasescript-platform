@@ -23,10 +23,6 @@ src/runtime/state.ts
 src/runtime/engine.ts
 ```
 
-`src/instructions.ts` is no longer a large implementation module. It is a small
-temporary plan-model/capture/validation facade whose retirement is tracked by
-issue #180.
-
 `src/parser.ts` is also large, but its cursor, recovery, diagnostics, and AST construction are tightly coupled. Do not split it merely because of line count; require a concrete maintenance problem and a coherent boundary first.
 
 ### Motivation

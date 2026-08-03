@@ -15,7 +15,9 @@ import type {
 } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
-import { completeAction, observeTime, run } from "../src/runtime/engine.js";
+import { run } from "../src/runtime/engine.js";
+import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 
