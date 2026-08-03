@@ -313,28 +313,26 @@ No private configuration or unpublished helper is required. Record any failure's
 
 ## Source-to-runtime conformance corpus
 
-A future small behavior-oriented corpus should use a stable layout such as:
+The current behavior-oriented corpus lives in focused `tests/*.test.ts` files
+next to the behavior they cover, with `tests/source-to-runtime-conformance.test.ts`
+exercising representative public-package scenarios. Each case starts with real
+`.tease` source, calls the root `compileSource(...)` API, and asserts only the
+relevant observable diagnostic/span, event/order/provenance, status, selected
+binding, structured failure, or checkpoint/replay result.
 
-```text
-tests/cases/
-  collections/
-  control-flow/
-  functions/
-  diagnostics/
-  checkpoint/
-  security-boundaries/
-```
+The shared resume-equivalence helper compiles through the same root API and
+checks every completed instruction boundary by creating a real JSON checkpoint,
+restoring it through the public boundary, and comparing complete events and the
+final snapshot with uninterrupted execution. Use it whenever a representative
+scenario crosses a resumable instruction boundary. Pending-action suites retain
+their focused fake-time and checkpoint cases because completion is a separate
+public operation.
 
-A case may define:
-
-- `.tease` source;
-- expected diagnostic codes and spans;
-- expected public events;
-- expected final status;
-- selected final values;
-- whether full resume-equivalence is required.
-
-Prefer assertions on public behavior. Do not use complete instruction-plan snapshots as broad golden files. Assert internal instruction structure only when that structure is itself an accepted contract or when a focused lowering test requires it.
+Prefer behavior-oriented local tests over a generic case schema, fixture
+registry, or broad instruction-plan snapshots. Inspect lowering only in focused
+compiler tests where lowering itself is the subject. The bounded coverage model
+for a consolidation/review lives in the active pull request rather than as a
+second language specification or permanent test catalog.
 
 ## Future Phase 2 source and model-based testing
 
