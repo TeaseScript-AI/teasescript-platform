@@ -352,6 +352,180 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertTrue(all(count is not None and count <= 3_000 for count in counts))
         self.assertEqual(estimator.vocabulary_sha256, SUPPORT.O200K_BASE_SHA256)
 
+    def test_rename_aware_patches_are_compact_self_contained_and_exact(self) -> None:
+        def prepare_case(
+            name: str,
+            *,
+            source_path: str,
+            target_path: str,
+            original: bytes,
+            changed: bytes | None = None,
+        ) -> tuple[bytes, bytes]:
+            repository = self.root / f"{name}-repository"
+            repository.mkdir()
+            git(repository, "init", "-q", "-b", "main")
+            git(repository, "config", "user.name", "Test")
+            git(repository, "config", "user.email", "test@example.invalid")
+
+            source = repository / source_path
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(original)
+            git(repository, "add", source_path)
+            git(repository, "commit", "-q", "-m", "Add original file")
+            base = git(repository, "rev-parse", "HEAD")
+
+            target = repository / target_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            git(repository, "mv", source_path, target_path)
+            if changed is not None:
+                target.write_bytes(changed)
+            git(repository, "add", "-A")
+            git(repository, "commit", "-q", "-m", "Move file")
+            tested = git(repository, "rev-parse", "HEAD")
+            expected_tree = git(repository, "show", "-s", "--format=%T", tested)
+
+            output = self.root / f"{name}-payload"
+            run(
+                [
+                    sys.executable,
+                    str(PREPARE),
+                    "--repository",
+                    str(repository),
+                    "--repository-full-name",
+                    "TeaseScript-AI/teasescript-platform",
+                    "--target-branch",
+                    "feat/test-target",
+                    "--expected-base-sha",
+                    base,
+                    "--tested-commit",
+                    tested,
+                    "--output-directory",
+                    str(output),
+                ],
+                cwd=repository,
+            )
+
+            manifest = json.loads(
+                (output / SUPPORT.TRANSFER_DIRECTORY / "manifest.json").read_text()
+            )
+            patch = b"".join(
+                (output / entry["path"]).read_bytes()
+                for entry in manifest["parts"]
+            )
+            self.assertEqual(len(patch), manifest["patchSizeBytes"])
+            self.assertEqual(SUPPORT.sha256_bytes(patch), manifest["patchSha256"])
+
+            no_rename = subprocess.run(
+                [
+                    "git",
+                    "diff",
+                    "--binary",
+                    "--full-index",
+                    "--no-renames",
+                    base,
+                    tested,
+                ],
+                cwd=repository,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            ).stdout
+
+            patch_path = self.root / f"{name}.patch"
+            patch_path.write_bytes(patch)
+            applied = self.root / f"{name}-applied"
+            run(
+                [
+                    "git",
+                    "worktree",
+                    "add",
+                    "-q",
+                    "-b",
+                    f"apply-{name}",
+                    str(applied),
+                    base,
+                ],
+                cwd=repository,
+            )
+            run(
+                ["git", "apply", "--check", "--index", "--binary", str(patch_path)],
+                cwd=applied,
+            )
+            run(
+                ["git", "apply", "--index", "--binary", str(patch_path)],
+                cwd=applied,
+            )
+            self.assertEqual(git(applied, "write-tree"), expected_tree)
+            self.assertEqual((applied / target_path).read_bytes(), changed or original)
+            self.assertFalse((applied / source_path).exists())
+            return patch, no_rename
+
+        text = "".join(
+            f"line {index:05d}: canonical historical material\n"
+            for index in range(3_000)
+        ).encode()
+        text_changed = text.replace(
+            b"line 01500: canonical historical material",
+            b"line 01500: superseded historical material",
+        )
+
+        pure_text, pure_text_without_renames = prepare_case(
+            "text-rename",
+            source_path="current/document.md",
+            target_path="history/document.md",
+            original=text,
+        )
+        self.assertIn(b"similarity index 100%", pure_text)
+        self.assertIn(b"rename from current/document.md", pure_text)
+        self.assertIn(b"rename to history/document.md", pure_text)
+        self.assertLess(len(pure_text) * 20, len(pure_text_without_renames))
+
+        edited_text, edited_text_without_renames = prepare_case(
+            "text-rename-edit",
+            source_path="current/document.md",
+            target_path="history/document.md",
+            original=text,
+            changed=text_changed,
+        )
+        self.assertIn(b"rename from current/document.md", edited_text)
+        self.assertIn(b"rename to history/document.md", edited_text)
+        self.assertIn(b"superseded historical material", edited_text)
+        self.assertLess(len(edited_text) * 20, len(edited_text_without_renames))
+        split_parts, _ = SUPPORT.split_utf8_patch(
+            edited_text,
+            maximum_bytes=160,
+        )
+        self.assertGreater(len(split_parts), 1)
+        self.assertEqual(b"".join(split_parts), edited_text)
+
+        binary = bytes((index * 37) % 256 for index in range(8_192))
+        binary_changed = bytearray(binary)
+        binary_changed[4_000:4_008] = b"CHANGED!"
+
+        pure_binary, pure_binary_without_renames = prepare_case(
+            "binary-rename",
+            source_path="current/data.bin",
+            target_path="history/data.bin",
+            original=binary,
+        )
+        self.assertIn(b"similarity index 100%", pure_binary)
+        self.assertIn(b"rename from current/data.bin", pure_binary)
+        self.assertIn(b"rename to history/data.bin", pure_binary)
+        self.assertNotIn(b"GIT binary patch", pure_binary)
+        self.assertLess(len(pure_binary) * 5, len(pure_binary_without_renames))
+
+        edited_binary, edited_binary_without_renames = prepare_case(
+            "binary-rename-edit",
+            source_path="current/data.bin",
+            target_path="history/data.bin",
+            original=binary,
+            changed=bytes(binary_changed),
+        )
+        self.assertIn(b"rename from current/data.bin", edited_binary)
+        self.assertIn(b"rename to history/data.bin", edited_binary)
+        self.assertIn(b"GIT binary patch", edited_binary)
+        self.assertLess(len(edited_binary) * 3, len(edited_binary_without_renames))
+
     def test_multi_commit_range_and_one_file_at_a_time_upload(self) -> None:
         repository = self.root / "repository"
         repository.mkdir()
