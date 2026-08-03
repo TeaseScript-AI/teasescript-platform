@@ -162,6 +162,8 @@ The owner or designated coordinator confirms the execution model. An issue autho
 
 Run all configured formatting, linting, type checking, build, relevant unit/integration tests, playground smoke tests, and diff checks. Report the exact commands and remaining failures or risks. If a check is not configured or could not be run, state that rather than inventing success.
 
+`npm run check` is the normal complete configured test-suite verification. Do not follow a successful run with `npm run check:full-output`; use the full-output variant only when a failure or a specific debugging investigation requires the complete test listing.
+
 ## Git workflow
 
 - Keep `main` stable and usable.
