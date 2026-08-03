@@ -1,221 +1,97 @@
 # Agent instructions
 
-## Read before changing files
+## Start and authority
 
-Start each task with:
+Start with the applicable `AGENTS.md` files, `README-FIRST.md`, and the assigned
+issue or pull request. Use `README-FIRST.md` to load only the controlling topic
+documents, accepted decisions, workflow profile, code, and tests needed for the
+task. Read `CURRENT-DESIGN.md` for architecture-affecting or broad
+cross-component work and `PHASE-STATUS.md` for milestone, gate,
+integration-status, or current-capability work.
 
-1. applicable `AGENTS.md` files, including nested instructions for directories you edit;
-2. the compact authority and task router in `README-FIRST.md`;
-3. the assigned issue or pull request; and
-4. only the controlling topic documents, accepted decisions, workflow profile, code, and tests relevant to the task.
+Planning documents, wishes, research, historical audits, examples, draft ADRs,
+tests, issues, pull-request text, and review comments are not accepted authority
+by themselves. Do not invent project-wide policy, thresholds, style rules,
+naming rules, compatibility promises, mandatory tools, or workflow gates.
+Propose durable rules separately with evidence and owner approval.
 
-Read `CURRENT-DESIGN.md` for architecture-affecting or broad cross-component
-work, and `PHASE-STATUS.md` for milestone, gate, integration-status, or
-current-capability work. Read syntax specifications, ADRs, open decisions,
-backlog, workflow, and documentation-ownership guidance only when their
-subject applies. Do not replace applicable repository instructions with memory
-or a broad background read.
+Before the next write after context loss, session resumption, a changed review
+head, or a transition between implementation, review, repair, verification, and
+publication, re-establish the exact repository and branch/head, task scope and
+authority, current diff or review state, required checks, remaining work, and
+permitted GitHub writes. Long-task scratch notes stay outside the repository.
 
-Do not treat planning documents, wishes, research files, historical audits, or source examples as accepted decisions. A backlog item is not implementation scope unless the current owner/coordinator assignment or phase plan explicitly schedules its ID.
-
-## Context re-entry
-
-Before the next write after context compaction or truncation, session resumption,
-a changed pull-request head, or a transition between implementation, review,
-repair, verification, and publication, re-establish the repository and exact
-branch/head; assigned issue or pull request; scope, exclusions, and controlling
-authority; required verification; current diff/worktree or review-head state;
-remaining work; and permitted GitHub writes. A compact task-state note outside
-the repository is allowed for long work; do not create permanent repository
-scratch plans for ordinary tasks.
-
-## Working rules
+## Core boundaries
 
 - Use English for source code, identifiers, comments, documentation, package metadata, editor text, and UI text.
 - Do not silently change architecture, language semantics, security boundaries, or product scope.
-- `.tease` is not TypeScript. Advanced reusable code belongs in `.ts` libraries.
-- Keep one engine, one state model, and one save/checkpoint format.
+- `.tease` is not TypeScript; advanced reusable code belongs in `.ts` libraries.
 - Laravel is the only public backend.
+- Keep one deterministic engine, one state model, and one save/checkpoint format.
 - Preserve deterministic source evaluation order and explicit JSON-safe pause/resume state.
 - Validate external, checkpoint, host, package, and future integration data at runtime.
-- Do not add dependencies without documenting need, alternatives, maintenance impact, and security impact.
+- Explain need, alternatives, maintenance impact, and security impact before adding a dependency.
 - Do not weaken tests to hide failures.
 
-## Requirement authority and proportional review
+## Requirements, simplicity, and review
 
-Before treating a statement as a permanent requirement or review blocker,
-identify whether it is owner-approved product behavior, an accepted
-architecture/persistence/determinism/security boundary, a current
-implementation choice, a temporary POC choice, optional defensive hardening,
-or an unresolved proposal. Use the authority hierarchy in `README-FIRST.md`
-when making that classification. Agent-written issues, tests, ADR drafts,
-pull-request descriptions, specification drafts, and earlier review comments
-do not become authoritative merely because they exist or another agent
-implemented them. Strong terms such as `must`, `exact`, `versioned`,
-`authoritative`, and `compatibility` require a concrete accepted behavior, real
-boundary, or explicit owner decision.
+Use the authority hierarchy in `README-FIRST.md` before treating a statement as
+a permanent requirement or blocker. Follow the finding classes, evidence rules,
+proportional review lenses, KISS, pragmatic YAGNI, DRY, and escalation guidance
+in `docs/DEVELOPMENT-WORKFLOW.md`. A blocker needs a supported public or trusted
+path, a concrete consequence, and reproducible evidence. Prefer the smallest
+complete repair; do not turn a local defect into a framework, compatibility
+layer, public contract, or unrelated hardening campaign without owner approval.
 
-Review findings must use the severity and evidence rules in
-`docs/DEVELOPMENT-WORKFLOW.md`. A blocker needs a supported public or trusted
-path, a concrete consequence, and reproducible evidence. Propose the smallest
-repair that restores accepted behavior; do not turn a local defect into a new
-framework, compatibility layer, public contract, or unrelated hardening
-campaign without a separate owner decision. When requesting that decision,
-explain the practical product, data, security, or maintenance consequence and
-the complexity being added.
+Accepted behavior, deterministic execution, serializable checkpoints, and real
+validation or security boundaries remain mandatory. When repeated sibling
+findings stop reducing uncertainty, report the pattern and reassess the
+implementation or evidence strategy instead of continuing isolated repairs.
+Use `docs/TESTING.md` for systematic coverage when it is proportionate.
 
-These proportionality rules do not weaken accepted behavior, deterministic
-execution, serializable checkpoints, or validation at real external, host,
-checkpoint, persistence, package, and security boundaries.
+Before declaring a project limitation, proposing infrastructure, or presenting
+owner options, verify the complete relevant capability rather than generalizing
+from one action, helper, connector, or environment. Report material shared
+workflow failures instead of silently working around them.
 
-Do not invent project-wide policy, numeric thresholds, style or readability
-limits, naming rules, compatibility promises, mandatory tools, or workflow
-gates. A model preference, external convention, tool default, earlier agent
-suggestion, draft ADR, test fixture, issue wording, or review comment is not a
-repository requirement by itself. Propose durable rules separately with
-evidence and owner approval; until accepted, use configured tooling, current
-authority, and task-proportional judgment.
+## Work and editing
 
-## KISS, pragmatic YAGNI, and DRY
+Before substantive work, state the expected files, acceptance criteria, and
+major risks or unresolved decisions, then continue in small verifiable steps.
+Use targeted reads and edits. Correct existing wording before appending an
+amendment, and rewrite a complete file only when complete replacement is
+intentional or most of the file genuinely changes. Use the task's supported
+editing route, inspect each coherent edit batch, and review the complete diff
+before commit, handoff, or merge. Follow `docs/DOCUMENTATION-OWNERSHIP.md` for
+non-trivial documentation edits and reviews.
 
-KISS is primary: choose the simplest complete approach across design,
-implementation, evidence, workflow, and maintenance while preserving current
-owner-approved behavior and real boundaries. Pragmatic YAGNI applies KISS to
-future-facing complexity: add only current need or the smallest preparation
-justified by a scheduled consumer, a boundary that must be correct when first
-introduced, or a demonstrated difficult-to-reverse problem.
+If required input cannot be obtained, stop repeating equivalent impossible
+attempts, identify the exact missing input and checked alternatives, and request
+the smallest owner action that unblocks the work.
 
-Prefer DRY when one canonical source plus references is clearer and simpler;
-prefer limited local repetition when that is clearer and does not create
-competing authority, duplicated moving facts, or unnecessary recurring context.
-Use `docs/DEVELOPMENT-WORKFLOW.md` for detailed application and
-`docs/DOCUMENTATION-OWNERSHIP.md` for documentation placement and review.
+For supported parser, compiler, plan, runtime, checkpoint, or host behavior,
+verify through the real public or trusted path. New author-facing syntax and
+source-reachable observable behavior require representative source-to-runtime
+coverage. Follow `docs/TESTING.md`; do not add unrelated fuzzing infrastructure,
+dependencies, or production hooks.
 
-## Review convergence
+## Verification and Git
 
-Implementers and reviewers must signal repeated sibling findings or other
-evidence that review is not converging. Do not keep alternating isolated
-repairs and adjacent findings when uncertainty about the remaining supported
-behavior space is not decreasing. Reassess the implementation, decomposition,
-requirement model, and evidence strategy before continuing.
+Run configured formatting, linting, type checking, build, relevant tests,
+playground checks, and `git diff --check`. Report exact commands, failures,
+warnings, skipped checks, and remaining risks. `npm run check` is the normal
+complete suite; use full-output variants only as diagnostic reruns when compact
+output is insufficient.
 
-Use `docs/DEVELOPMENT-WORKFLOW.md` for the convergence assessment and any
-owner/coordinator escalation. Use `docs/TESTING.md` when a bounded behavior
-space needs a matrix, transition table, invariant inventory, property/model
-coverage, or evidence-preserving consolidation. Apply these rules
-proportionately: isolated findings and known finite repair lists may continue
-through ordinary review.
+Keep `main` stable. Use one issue, one owning agent, one short-lived branch, and
+one pull request by default. Do not make substantive changes directly on
+`main`, push to another agent's branch without an explicit handoff, force-push
+or rewrite `main`, or silently combine unrelated work. Keep the pull-request
+description aligned with the final scope, verification, documentation impact,
+and risks. Prefer squash merge after approval and passing checks, then delete
+the branch.
 
-Select only relevant review lenses from `docs/DEVELOPMENT-WORKFLOW.md`; they
-are not a rigid checklist and preferences are not blockers without its required
-authority and evidence.
-
-## Efficient editing and context use
-
-Complete the task-relevant authority reads above. For supporting context,
-prefer search and bounded or ranged reads when the complete file is not
-required. Do not print or quote complete large files, diffs, or workflow logs
-without a concrete reason.
-
-Use the environment-provided `apply_patch` command for ordinary localized edits,
-including coherent changes across multiple hunks or files in one invocation.
-Use a bounded temporary task-specific codemod, such as `ts-morph`, only when
-repeated structural or symbol-aware TypeScript edits would make an ordinary
-patch unclear or error-prone. Rewrite a complete existing file only when
-complete replacement is intentional or most of the file genuinely changes, and
-review the complete result.
-
-`apply_patch` is the default for small and medium source and documentation
-edits. A failed patch should normally be corrected with a smaller reread and
-better context, not by rewriting the entire file. Task-specific scripts should
-normally remain uncommitted and be discarded after their verified use. Do not
-add a repository-wide fallback for environments that lack `apply_patch`; that
-requires separate concrete evidence and review. Rare binary or byte-sensitive
-work should use a task-specific method appropriate to that concrete file, not
-justify a permanent general helper.
-
-After each coherent edit batch, inspect the relevant hunks, run
-`git diff --check`, and run focused checks. Summarize successful test runs
-compactly, but retain warnings, failures, and relevant diagnostics. Before a
-commit, handoff, or merge, review the complete diff for unexpected collateral
-changes.
-
-## Property-testable boundaries
-
-For changes that affect supported parser, compiler, plan, runtime, action,
-state, checkpoint, or validated host boundaries, preserve deterministic testing
-through the real public or trusted path. Every canonical plan accepted through
-that boundary and every successful public runtime transition must produce state
-accepted by the corresponding validator. Do not extend this rule to arbitrary
-hand-built internal states or unsupported plan compositions merely because
-their individual parts are valid. Use explicit time/RNG inputs,
-structured invalid-data handling, and reusable valid-state fixtures where
-practical. Follow `docs/TESTING.md` and the assigned issue for property or
-mutation testing; do not add unrelated fuzzing infrastructure, dependencies,
-or production hooks.
-
-New author-facing TeaseScript syntax and source-reachable observable behavior
-require representative source-to-runtime coverage through the public package
-path. Runtime-only primitives without a source route retain focused
-public/trusted-boundary coverage until one exists; see `docs/TESTING.md`.
-
-## Before substantive coding
-
-State briefly:
-
-- files expected to change;
-- acceptance criteria;
-- major risks or unresolved decisions.
-
-Then work in small verifiable steps.
-
-## Issue sizing and execution recommendation
-
-When creating or substantially refining an implementation issue:
-
-- describe one coherent, reviewable task whenever practical;
-- include evidence or reproduction, scope, exclusions, and acceptance criteria;
-- state `Execution recommendation: Single agent` by default;
-- recommend `Coordinated multi-agent` only with a concrete reason why one agent or independently mergeable issues are insufficient;
-- do not recommend multiple agents merely because the task is difficult, touches several files, or spans multiple layers;
-- first consider splitting broad work into separate single-agent issues.
-
-The owner or designated coordinator confirms the execution model. An issue author's recommendation does not schedule work by itself.
-
-## Verification
-
-Run all configured formatting, linting, type checking, build, relevant unit/integration tests, playground smoke tests, and diff checks. Report the exact commands and remaining failures or risks. If a check is not configured or could not be run, state that rather than inventing success.
-
-`npm run check` is the normal complete configured suite. Use
-`test:full-output` or `check:full-output` only as a diagnostic rerun when
-compact output is insufficient; do not run both variants by default on one
-revision. See `docs/TESTING.md`.
-
-## Git workflow
-
-- Keep `main` stable and usable.
-- Do not make substantive changes directly on `main`.
-- Prefer one issue, one owning agent, one short-lived branch, and one pull request to `main`.
-- Use an integration branch and multiple executor branches only when the owner or coordinator explicitly selects coordinated multi-agent work.
-- Keep each branch limited to one clear purpose.
-- Make small logical commits with concise English imperative messages.
-- Open the pull request to the branch assigned for the task: normally `main`, or an integration branch for explicitly coordinated work.
-- Do not push to another agent's branch unless ownership has been explicitly handed over or reassigned.
-- State scope, intentionally deferred work, verification, documentation impact, and remaining risks in the pull request.
-- Process review feedback on the same branch and keep the pull request description aligned with the final result.
-- Review the complete diff for accidental files, debug code, secrets, unrelated changes, and stale documentation.
-- Prefer squash merge after checks pass, then delete the branch.
-- Never force-push or rewrite `main`.
-
-Follow `docs/DEVELOPMENT-WORKFLOW.md` for issue sizing, single-agent defaults, coordinator, executor, integration-branch, documentation, and final-verification responsibilities.
-
-## Backlog governance
-
-- Agents may propose backlog entries, but only the owner or designated coordinator may select an item as required, change its target gate, or schedule it for implementation.
-- `docs/planning/POC-TO-ALPHA-BACKLOG.md` contains open obligations selected for a future gate. It is not the current phase plan.
-- Ideas that have not been selected as required remain in `WISHES.xml` or another proposal document.
-- When a backlog item is implemented and verified, record the result in `PHASE-STATUS.md` and remove the item from the open backlog in the same documentation update. Git history preserves the completed entry.
-
-## Milestone discipline
-
-Use `PHASE-STATUS.md` and the current task/PR description to identify active work. Do not rely on stale parser-POC or earlier-branch wording. Select backlog IDs explicitly when a phase is planned; do not expand a focused branch into timers, media, iframe integration, Laravel, modules, or unrelated V30 syntax without revising the plan and recording the decision.
+The owner or coordinator selects scheduling and any coordinated multi-agent
+exception. Backlog, wish, and planning entries do not schedule themselves.
+Follow `docs/DEVELOPMENT-WORKFLOW.md` for issue sizing, execution roles,
+publication, review, merge, and final verification.
