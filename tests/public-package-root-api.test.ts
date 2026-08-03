@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import * as root from "../src/index.js";
+import * as validationTesting from "../src/validation-testing.js";
 
 test("the package root exposes supported runtime and checkpoint capabilities", () => {
   for (const capability of [
@@ -25,6 +26,9 @@ test("the package root excludes internal compiler and test seams", () => {
     "execute",
     "captureInstructionPlan",
     "validateCapturedInstructionPlan",
-    "beginValidationTestStatistics",
   ]) assert.equal(internal in root, false, `${internal} is internal`);
+
+  for (const runtimeExport of Object.keys(validationTesting)) {
+    assert.equal(runtimeExport in root, false, `${runtimeExport} is test-only`);
+  }
 });
