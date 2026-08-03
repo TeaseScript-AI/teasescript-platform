@@ -19,11 +19,12 @@ local clarity, authority, maintenance, and recurring reader or agent context.
 Pragmatic YAGNI applies that rule to future-facing documentation and rejects
 policy, inventories, or abstractions that have no current accepted purpose.
 
-DRY is recommended when one canonical explanation plus references is clearer
-and simpler to understand and maintain than several copies. Limited local
-repetition is also recommended when it is the clearer KISS solution, provided
-it does not create competing authority, duplicate moving facts, or add
-unnecessary recurring context cost. DRY is not an absolute ban on repetition.
+DRY is subordinate to KISS and pragmatic YAGNI. Use one canonical explanation
+plus references when that is clearer and simpler to understand and maintain
+than several copies. Prefer limited local repetition when it is the clearer
+KISS solution, provided it does not create competing authority, duplicate
+moving facts, or add unnecessary recurring context cost. DRY is not an absolute
+ban on repetition.
 
 Distinguish these uses:
 
@@ -51,8 +52,8 @@ Before every non-trivial documentation edit, the writer must:
 2. search the repository for existing coverage and determine the canonical
    owner;
 3. make targeted edits to one complete canonical explanation rather than
-   appending amendments, rewriting a whole document, or adding a competing
-   definition;
+   appending amendments, replacing the whole document when existing content
+   should survive, or adding a competing definition;
 4. use links or minimal stable summaries elsewhere where that remains clear;
 5. retain concise local repetition where it materially improves independent
    comprehension without creating competing authority or duplicated moving
@@ -69,8 +70,9 @@ repetition serves local comprehension, that moving facts are not copied without
 a concrete local need, and that routing documents do not silently become
 competing policy or current-status owners.
 
-Durable names describe purpose, not a temporary cleanup history or the latest
-review complaint.
+Document names describe durable purpose, not a temporary cleanup history or the
+latest review complaint. General tool, command, option, branch, issue, and
+workflow naming is owned by [`DEVELOPMENT-WORKFLOW.md`](DEVELOPMENT-WORKFLOW.md).
 
 ## GitHub repository: canonical and continuously maintained
 

@@ -58,6 +58,11 @@ performance benchmarks
 
 Focused tests isolate syntax, diagnostics, lowering, validators, and runtime operations. Source-to-runtime tests prove that the public compilation and execution path preserves the accepted behavior. Runtime invariant and corruption tests cover explicit serializable state and restore boundaries. Future integration and browser tests cover concrete player/host surfaces after those surfaces exist.
 
+New author-facing syntax and source-reachable observable behavior require
+representative source-to-runtime coverage. Runtime-only primitives without a
+source route retain focused public or trusted-boundary coverage until one
+exists.
+
 End-to-end testing does not replace focused unit, validator, and invariant tests.
 
 ## Regression-test rule
