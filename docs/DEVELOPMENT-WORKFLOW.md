@@ -489,7 +489,7 @@ npm run check
 git diff --check
 ```
 
-The canonical compiler is the `@typescript/native` npm alias pinned in `package.json`; build and typecheck use its public `tsc` command. Repository tooling imports the separately pinned `typescript` compatibility package for the TypeScript 6 programmable API, which exposes `tsc6` rather than competing for `tsc`. Do not replace or collapse these packages without an explicit dependency migration.
+The canonical compiler is the `@typescript/native` npm alias pinned in `package.json`; build and typecheck use its public `tsc` command. The separately pinned `ts-morph` package is a development-only agent codemod tool. Do not replace either dependency without an explicit dependency migration.
 
 Also inspect the complete combined diff and run any milestone-specific playground, browser, security, or migration checks.
 

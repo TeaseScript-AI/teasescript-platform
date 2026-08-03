@@ -61,6 +61,6 @@ The first implementation should provide:
 
 The editor may preview the Player application's dynamic choice presentation, but button rows versus dropdown are not canonical runtime state. Buttons may use one or two rows; exact layout measurements and breakpoints remain Player UI work.
 
-Editor metadata must not imply that issue #74's opaque catalog token is a final package version or that the first POC supports imports, package manifests, Standard Library replacement, or checkpoint migration.
+Editor metadata must not imply that the first POC supports imports, package manifests, Standard Library replacement, or checkpoint migration.
 
 The advanced detailed-result option, `showButton` timeout/elapsed return, typing-indicator options, accessibility override field, concrete limit values, LLM interpretation options, and exact choice-layout thresholds remain deferred and must not appear as accepted completion suggestions before their contracts are approved.
