@@ -130,7 +130,7 @@ def prepare(args: argparse.Namespace) -> None:
             "diff",
             "--binary",
             "--full-index",
-            "--no-renames",
+            "--find-renames=50%",
             expected_base_sha,
             tested_commit,
         ],

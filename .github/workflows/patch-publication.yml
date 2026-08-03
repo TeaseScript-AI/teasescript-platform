@@ -28,6 +28,7 @@ jobs:
       expected_base_sha: ${{ steps.prepare.outputs.expected_base_sha }}
       expected_result_tree_sha: ${{ steps.prepare.outputs.expected_result_tree_sha }}
       candidate_commit_sha: ${{ steps.prepare.outputs.candidate_commit_sha }}
+      validation_profile: ${{ steps.prepare.outputs.validation_profile }}
     steps:
       - name: Check out trusted workflow revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -63,27 +64,31 @@ jobs:
           } >> "$GITHUB_ENV"
           printf 'validated=true\n' >> "$GITHUB_OUTPUT"
 
-      - name: Preserve trusted publication tool
-        run: install -m 0755 tools/local-agent/patch-publication.py "$RUNNER_TEMP/patch-publication.py"
+      - name: Preserve trusted publication tools
+        run: |
+          install -m 0755 tools/local-agent/patch-publication.py \
+            "$RUNNER_TEMP/patch-publication.py"
+          install -m 0755 tools/local-agent/patch-publication-prepare-steps.sh \
+            "$RUNNER_TEMP/patch-publication-prepare-steps.sh"
 
       - name: Read exact transfer manifest
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh read-manifest
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" read-manifest
       - name: Verify authorized manifest digest
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh verify-manifest
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" verify-manifest
       - name: Materialize exact patch payload
         id: materialize
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh materialize
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" materialize
       - name: Inspect request
         id: inspect
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh inspect
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" inspect
       - name: Check out exact target base
         env:
           TARGET_BRANCH: ${{ steps.inspect.outputs.target_branch }}
           EXPECTED_BASE_SHA: ${{ steps.inspect.outputs.expected_base_sha }}
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh checkout-base
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" checkout-base
       - name: Prepare exact candidate bundle
         id: prepare
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh prepare
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" prepare
       - name: Name candidate artifact
         id: names
         run: echo "artifact_name=patch-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
@@ -112,43 +117,32 @@ jobs:
           persist-credentials: false
           show-progress: false
 
+      - name: Preserve trusted candidate validation driver
+        run: install -m 0755 tools/local-agent/patch-publication-validate-candidate.sh "$RUNNER_TEMP/validate-candidate"
+
       - name: Download prepared candidate
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ needs.prepare.outputs.artifact_name }}
           path: ${{ runner.temp }}/publication
 
-      - name: Check out exact candidate
+      - name: Verify exact candidate identity and target base
         env:
           TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch }}
           CANDIDATE_COMMIT_SHA: ${{ needs.prepare.outputs.candidate_commit_sha }}
           EXPECTED_BASE_SHA: ${{ needs.prepare.outputs.expected_base_sha }}
           EXPECTED_RESULT_TREE_SHA: ${{ needs.prepare.outputs.expected_result_tree_sha }}
-        run: |
-          git fetch --no-tags origin \
-            "refs/heads/$TARGET_BRANCH:refs/remotes/origin/patch-target"
-          test "$(git rev-parse refs/remotes/origin/patch-target)" = "$EXPECTED_BASE_SHA"
-          git fetch --no-tags "$RUNNER_TEMP/publication/publication.bundle" \
-            "refs/heads/patch-publication-candidate:refs/heads/test-candidate"
-          git checkout --detach refs/heads/test-candidate
-          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT_SHA"
-          test "$(git show -s --format=%P HEAD)" = "$EXPECTED_BASE_SHA"
-          test "$(git show -s --format=%T HEAD)" = "$EXPECTED_RESULT_TREE_SHA"
+        run: bash "$RUNNER_TEMP/validate-candidate" verify-identity
 
-      - name: Set up Node.js
+      - name: Set up Node.js for executable candidate checks
+        if: ${{ needs.prepare.outputs.validation_profile != 'docs' }}
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .nvmrc
           cache: npm
 
-      - name: Validate repository tooling
-        run: bash tools/local-agent/check-local-agent.sh
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Check source
-        run: npm run check
+      - name: Validate candidate against selected risks
+        run: bash "$RUNNER_TEMP/validate-candidate" validate-profile "${{ needs.prepare.outputs.validation_profile }}"
 
   publish:
     needs: [prepare, test]
@@ -191,11 +185,14 @@ jobs:
 
       - name: Verify candidate without executing it
         id: verify
+        env:
+          VALIDATION_PROFILE: ${{ needs.prepare.outputs.validation_profile }}
         run: |
           python3 -B "$RUNNER_TEMP/patch-publication.py" verify-bundle \
             --repository "$GITHUB_WORKSPACE" \
             --metadata "$RUNNER_TEMP/publication/publication.json" \
             --bundle "$RUNNER_TEMP/publication/publication.bundle" \
+            --expected-validation-profile "$VALIDATION_PROFILE" \
             --github-output "$GITHUB_OUTPUT"
 
       - name: Create scoped patch publisher token

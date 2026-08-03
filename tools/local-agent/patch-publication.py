@@ -29,6 +29,28 @@ MAX_PART_COUNT = 1024
 MAX_PATCH_SIZE_BYTES = 64 * 1024 * 1024
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+VALIDATION_PROFILES = frozenset({"docs", "source", "full"})
+ROOT_DOCUMENTATION_PATHS = frozenset(
+    {
+        "AGENTS.md",
+        "CURRENT-DESIGN.md",
+        "PHASE-STATUS.md",
+        "README-FIRST.md",
+        "README.md",
+        "WISHES.xml",
+    }
+)
+SOURCE_PATH_PREFIXES = ("examples/", "playground/", "src/", "tests/")
+SOURCE_EXACT_PATHS = frozenset(
+    {
+        ".nvmrc",
+        "package-lock.json",
+        "package.json",
+        "tools/test-output-filter.mjs",
+        "tsconfig.json",
+    }
+)
+FULL_VALIDATION_PREFIXES = (".github/", "tools/local-agent/")
 
 
 class PublicationError(RuntimeError):
@@ -62,10 +84,41 @@ class PublicationMetadata:
     patch_sha256: str
     candidate_commit_sha: str
     commit_message: str
+    validation_profile: str
 
 
 def fail(message: str) -> NoReturn:
     raise PublicationError(message)
+
+
+def require_validation_profile(value: str, *, label: str) -> str:
+    if value not in VALIDATION_PROFILES:
+        fail(f"{label} must be one of: docs, source, full")
+    return value
+
+
+def validation_profile_for_paths(paths: Iterable[str]) -> str:
+    """Return the narrowest safe validation profile for exact changed paths."""
+
+    changed_paths = tuple(paths)
+    if not changed_paths:
+        fail("cannot classify an empty candidate change")
+
+    def is_documentation(path: str) -> bool:
+        return path in ROOT_DOCUMENTATION_PATHS or (
+            path.startswith("docs/") and path.endswith(".md")
+        )
+
+    def is_source(path: str) -> bool:
+        return path in SOURCE_EXACT_PATHS or path.startswith(SOURCE_PATH_PREFIXES)
+
+    if any(path.startswith(FULL_VALIDATION_PREFIXES) for path in changed_paths):
+        return "full"
+    if all(is_documentation(path) for path in changed_paths):
+        return "docs"
+    if all(is_documentation(path) or is_source(path) for path in changed_paths):
+        return "source"
+    return "full"
 
 
 def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -318,11 +371,12 @@ def parse_metadata(path: Path, *, repository: Path) -> PublicationMetadata:
             "patchSha256",
             "candidateCommitSha",
             "commitMessage",
+            "validationProfile",
         ),
         label="publication metadata",
     )
-    if type(value["formatVersion"]) is not int or value["formatVersion"] != 1:
-        fail("publication metadata formatVersion must be the integer 1")
+    if type(value["formatVersion"]) is not int or value["formatVersion"] != 2:
+        fail("publication metadata formatVersion must be the integer 2")
     return PublicationMetadata(
         target_branch=validate_branch(
             require_string(value, "targetBranch", label="publication metadata"),
@@ -353,6 +407,12 @@ def parse_metadata(path: Path, *, repository: Path) -> PublicationMetadata:
         ),
         commit_message=validate_commit_message(
             require_string(value, "commitMessage", label="publication metadata")
+        ),
+        validation_profile=require_validation_profile(
+            require_string(
+                value, "validationProfile", label="publication metadata"
+            ),
+            label="publication metadata.validationProfile",
         ),
     )
 
@@ -607,7 +667,7 @@ def current_head(repository: Path) -> str:
 
 def staged_paths(repository: Path) -> list[str]:
     completed = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "-z"],
+        ["git", "diff", "--cached", "--name-only", "-z", "--no-renames"],
         cwd=repository,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -662,9 +722,10 @@ def create_candidate_bundle(
         fail("patch produces no staged change")
 
     forbidden_prefix = f"{TRANSFER_DIRECTORY}/"
+    candidate_paths = staged_paths(repository)
     forbidden = [
         path
-        for path in staged_paths(repository)
+        for path in candidate_paths
         if path == TRANSFER_DIRECTORY or path.startswith(forbidden_prefix)
     ]
     if forbidden:
@@ -734,12 +795,13 @@ def create_candidate_bundle(
         patch_sha256=manifest.patch_sha256,
         candidate_commit_sha=candidate_commit_sha,
         commit_message=manifest.commit_message,
+        validation_profile=validation_profile_for_paths(candidate_paths),
     )
     metadata_path = output_directory / "publication.json"
     metadata_path.write_text(
         json.dumps(
             {
-                "formatVersion": 1,
+                "formatVersion": 2,
                 "targetBranch": metadata.target_branch,
                 "transferBranch": metadata.transfer_branch,
                 "expectedBaseSha": metadata.expected_base_sha,
@@ -747,6 +809,7 @@ def create_candidate_bundle(
                 "patchSha256": metadata.patch_sha256,
                 "candidateCommitSha": metadata.candidate_commit_sha,
                 "commitMessage": metadata.commit_message,
+                "validationProfile": metadata.validation_profile,
             },
             indent=2,
             sort_keys=True,
@@ -785,18 +848,29 @@ def prepare(args: argparse.Namespace) -> None:
             "expected_base_sha": metadata.expected_base_sha,
             "expected_result_tree_sha": metadata.expected_result_tree_sha,
             "candidate_commit_sha": metadata.candidate_commit_sha,
+            "validation_profile": metadata.validation_profile,
         },
     )
     print(
         "prepared patch publication "
         f"target={metadata.target_branch} commit={metadata.candidate_commit_sha} "
-        f"tree={metadata.expected_result_tree_sha}"
+        f"tree={metadata.expected_result_tree_sha} "
+        f"validation={metadata.validation_profile}"
     )
 
 
 def verify_bundle(args: argparse.Namespace) -> None:
     repository = args.repository.resolve()
     metadata = parse_metadata(args.metadata, repository=repository)
+    if (
+        args.expected_validation_profile is not None
+        and metadata.validation_profile != args.expected_validation_profile
+    ):
+        fail(
+            "publication validation profile mismatch: "
+            f"expected {args.expected_validation_profile}, "
+            f"found {metadata.validation_profile}"
+        )
     bundle = args.bundle.resolve()
     if not bundle.is_file():
         fail(f"publication bundle does not exist: {bundle}")
@@ -846,6 +920,7 @@ def verify_bundle(args: argparse.Namespace) -> None:
             "expected_base_sha": metadata.expected_base_sha,
             "expected_result_tree_sha": metadata.expected_result_tree_sha,
             "candidate_commit_sha": metadata.candidate_commit_sha,
+            "validation_profile": metadata.validation_profile,
         },
     )
     print(
@@ -900,6 +975,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument("--repository", type=Path, required=True)
     verify_parser.add_argument("--metadata", type=Path, required=True)
     verify_parser.add_argument("--bundle", type=Path, required=True)
+    verify_parser.add_argument(
+        "--expected-validation-profile",
+        choices=sorted(VALIDATION_PROFILES),
+    )
     verify_parser.add_argument("--github-output", type=Path)
     verify_parser.set_defaults(handler=verify_bundle)
     return parser
