@@ -1,0 +1,35 @@
+diff --git a/tools/local-agent/test-prepare-patch-publication.py b/tools/local-agent/test-prepare-patch-publication.py
+index ef1e1941a3717c94a31a301a714e9d72b01ec8f4..20f773c5c0431dca206b9b05d7e505f505e37caf 100755
+--- a/tools/local-agent/test-prepare-patch-publication.py
++++ b/tools/local-agent/test-prepare-patch-publication.py
+@@ -385,10 +385,11 @@ class PreparePatchPublicationTests(unittest.TestCase):
+             expected_tree = git(repository, "show", "-s", "--format=%T", tested)
+ 
+             output = self.root / f"{name}-payload"
+-            run(
+-                [
+-                    sys.executable,
+-                    str(PREPARE),
++            configured_tokenizer = os.environ.pop(
++                "TEASESCRIPT_O200K_TOKENIZER", None
++            )
++            try:
++                prepared = run_cli(
+                     "--repository",
+                     str(repository),
+                     "--repository-full-name",
+@@ -401,9 +402,11 @@ class PreparePatchPublicationTests(unittest.TestCase):
+                     tested,
+                     "--output-directory",
+                     str(output),
+-                ],
+-                cwd=repository,
+-            )
++                )
++            finally:
++                if configured_tokenizer is not None:
++                    os.environ["TEASESCRIPT_O200K_TOKENIZER"] = configured_tokenizer
++            self.assertEqual(prepared.returncode, 0, prepared.stderr)
+ 
+             manifest = json.loads(
+                 (output / SUPPORT.TRANSFER_DIRECTORY / "manifest.json").read_text()

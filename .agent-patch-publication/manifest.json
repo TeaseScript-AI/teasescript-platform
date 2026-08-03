@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "agent/issue-221-rename-aware-patches",
+  "expectedBaseSha": "9bf07c4c4e73923ba0b6a650b76799f789f1510c",
+  "expectedResultTreeSha": "03dd900331188b20e05d0545dc7a1db466b38618",
+  "patchSizeBytes": 1575,
+  "patchSha256": "cc36435d61f1b9f8dea36a9d03c82cdcc0e7ac73e4c8254ba4bce1ebf82625b1",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0001",
+      "sizeBytes": 1575,
+      "sha256": "cc36435d61f1b9f8dea36a9d03c82cdcc0e7ac73e4c8254ba4bce1ebf82625b1"
+    }
+  ],
+  "commitMessage": "Speed up rename regression setup"
+}
