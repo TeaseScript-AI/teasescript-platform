@@ -130,8 +130,10 @@ practical. Follow `docs/TESTING.md` and the assigned issue for property or
 mutation testing; do not add unrelated fuzzing infrastructure, dependencies,
 or production hooks.
 
-New TeaseScript syntax or observable runtime behavior requires representative
-source-to-runtime coverage through the supported public package path.
+New author-facing TeaseScript syntax and source-reachable observable behavior
+require representative source-to-runtime coverage through the public package
+path. Runtime-only primitives without a source route retain focused
+public/trusted-boundary coverage until one exists; see `docs/TESTING.md`.
 
 ## Before substantive coding
 
