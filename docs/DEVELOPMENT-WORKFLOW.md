@@ -98,8 +98,8 @@ task-proportional judgment.
 
 Once the current requirement and its authority are established, choose the
 simplest complete approach that safely satisfies that requirement and its real
-boundaries. Assess simplicity across implementation, evidence, workflow, and
-maintenance cost. The smallest individual patch is not automatically the
+boundaries. Assess simplicity across design, implementation, evidence, workflow,
+and maintenance cost. The smallest individual patch is not automatically the
 simplest overall solution.
 
 Pragmatic YAGNI applies this rule to future-facing complexity. Implement only
@@ -320,8 +320,7 @@ For a normal issue:
 
 The pull request is the implementation handoff record. A separate coordinator report, integration branch, or milestone orchestrator is not required.
 
-When multiple commits are useful, keep them logical and use concise English
-imperative messages.
+Make small logical commits with concise English imperative messages.
 
 A single-agent pull request that completes its issue may use:
 

@@ -49,12 +49,13 @@ source plus references only when that is the simpler complete solution, and
 prefer limited local repetition when it is clearer without creating competing
 authority, duplicated moving facts, or unnecessary recurring context.
 
-Follow the finding classes, evidence rules, proportional review lenses, and
-escalation guidance in `docs/DEVELOPMENT-WORKFLOW.md`. A blocker needs a
-supported public or trusted path, a concrete consequence, and reproducible
-evidence. Prefer the smallest complete repair; do not turn a local defect into a
-framework, compatibility layer, public contract, or unrelated hardening
-campaign without a separate owner decision.
+Follow the requirement/decision classifications, finding classes, evidence
+rules, proportional review lenses, and escalation guidance in
+`docs/DEVELOPMENT-WORKFLOW.md`. A blocker needs a supported public or trusted
+path, a concrete consequence, and reproducible evidence. Prefer the smallest
+complete repair; do not turn a local defect into a framework, compatibility
+layer, public contract, or unrelated hardening campaign without a separate
+owner decision.
 
 These proportionality rules do not weaken accepted behavior, deterministic
 execution, serializable checkpoints, or validation at real external, host,
@@ -111,9 +112,9 @@ one pull request by default. Do not make substantive changes directly on
 combine unrelated work. Never force-push or rewrite `main`. Keep the
 pull-request description aligned with the final scope, deferred work,
 verification, documentation impact, and risks. Process review feedback on the
-same branch and pull request. When multiple commits are useful, keep them
-logical and use concise English imperative messages. Prefer squash merge after
-approval and passing checks, then delete the branch.
+same branch and pull request. Make small logical commits with concise English
+imperative messages. Prefer squash merge after approval and passing checks,
+then delete the branch.
 
 The owner or coordinator selects scheduling and any coordinated multi-agent
 exception. Backlog, wish, and planning entries do not schedule themselves.
