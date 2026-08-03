@@ -74,17 +74,23 @@ push_marker = "      - name: Publish by non-force fast-forward\n"
 assert publish.index(verify_marker) < publish.index(token_marker) < publish.index(push_marker)
 
 token_step = publish.split(token_marker, 1)[1].split("\n      - name:", 1)[0]
-for required in [
-    "uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
-    "id: patch-publisher-token",
-    "client-id: ${{ vars.PATCH_PUBLISHER_CLIENT_ID }}",
-    "private-key: ${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}",
-    "permission-contents: write",
-    "permission-workflows: write",
-]:
-    assert required in token_step
-for forbidden in ["app-id:", "owner:", "repositories:", "skip-token-revoke:"]:
-    assert forbidden not in token_step
+assert "id: patch-publisher-token" in token_step
+assert (
+    "uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"
+) in token_step
+token_inputs = {}
+for line in token_step.split("        with:\n", 1)[1].splitlines():
+    match = re.fullmatch(r"          ([a-z][a-z0-9-]*): (.+)", line)
+    assert match, f"unsupported patch publisher input syntax: {line.strip()}"
+    key, value = match.groups()
+    assert key not in token_inputs
+    token_inputs[key] = value
+assert token_inputs == {
+    "client-id": "${{ vars.PATCH_PUBLISHER_CLIENT_ID }}",
+    "private-key": "${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}",
+    "permission-contents": "write",
+    "permission-workflows": "write",
+}
 
 push_step = publish.split(push_marker, 1)[1]
 assert (
