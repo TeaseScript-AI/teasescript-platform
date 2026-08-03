@@ -193,6 +193,7 @@ private runner implementation.
 tests/property.test.ts
 tests/property/
   replay.ts
+  source-fuzz.ts
 ```
 
 `tests/property.test.ts` is a root test entrypoint, so normal compiled-test
@@ -283,11 +284,11 @@ second language specification or permanent test catalog.
 
 ## Implemented bounded source fuzzing
 
-The same required deterministic campaign includes two small source families
-through the package-root `compileSource(...)` boundary. Each family uses a few
-bounded seed/case-derived choices, so larger explicit-seed campaigns explore
-additional meaningful source strings. This is not a grammar framework or an
-arbitrary-token fuzzer.
+The same required deterministic campaign includes two classifications through
+the package-root `compileSource(...)` boundary: six valid families and six
+targeted near-valid families. Each family uses a few bounded seed/case-derived
+choices, so larger explicit-seed campaigns explore additional meaningful source
+strings. This is not a grammar framework or an arbitrary-token fuzzer.
 
 - Valid source templates cover literals, unary/binary expressions, ranges and
   templates; variables, lexical scope, lists, objects, scalar sets and `for`;
@@ -301,10 +302,11 @@ arbitrary-token fuzzer.
 Every valid case is at most 512 source characters, uses nesting at most three,
 collections and loop/recursion counts at most four, and runs with a 200
 instruction budget. It compiles without diagnostics, validates its public plan,
-runs to a valid halted snapshot, and produces the same complete observable
-result on a second run with the same seed. Near-valid cases compile twice and
-must return the same ordered diagnostic codes and spans with no executable plan.
-There are no generated waits, real sleeping, network input, filesystem corpus,
+runs to a valid halted snapshot, and is independently compiled and executed a
+second time with the same seed before comparing the complete observable result.
+Near-valid cases compile the same prepared source twice and must return the
+same ordered diagnostic codes and spans with no executable plan. There are no
+generated waits, real sleeping, network input, filesystem corpus,
 process-global generator state, or external service.
 
 The default 128-case campaign reaches every template family and at least two

@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileSource } from "../src/index.js";
 import {
+  createPropertyDefinitions,
   defaultPropertyCampaignConfig,
   parsePropertyCliArguments,
+  PropertyCampaignFailure,
   runPropertyCampaign,
 } from "./property/replay.js";
 import {
@@ -30,6 +33,58 @@ test("property replay selects the same generated case by seed and case number", 
   assert.equal(replay.executed, 1);
   assert.equal(replay.firstCase.index, 17);
   assert.deepEqual(full, runPropertyCampaign(config));
+});
+
+test("property campaign wraps preparation failures with replay evidence", () => {
+  const cause = new Error("synthetic generator failure");
+  const config = sourceCaseConfig("valid");
+  const definitions = createPropertyDefinitions({
+    createValidSourceCase: () => {
+      throw cause;
+    },
+  });
+
+  assert.throws(
+    () => runPropertyCampaign(config, definitions),
+    (error: unknown) => {
+      assert.ok(error instanceof PropertyCampaignFailure);
+      assert.equal(error.cause, cause);
+      assert.equal(error.result.id, "valid-source-pipeline");
+      assert.equal(error.result.boundary, "package-root compile/run");
+      assert.equal(error.result.context, "preparation-failure context=unavailable");
+      assert.equal(error.result.source, undefined);
+      assert.match(error.message, /seed=/);
+      assert.match(error.message, /runs=/);
+      assert.match(error.message, /case=/);
+      assert.match(error.message, /replay=npm run test:property --/);
+      assert.match(error.message, /cause=Error: synthetic generator failure/);
+      return true;
+    },
+  );
+});
+
+test("valid source determinism independently compiles the prepared source", () => {
+  const config = sourceCaseConfig("valid");
+  let compilationCount = 0;
+  const definitions = createPropertyDefinitions({
+    compileSource: (source) => {
+      compilationCount += 1;
+      return compilationCount === 1
+        ? compileSource(source)
+        : compileSource('say "different"\nexit');
+    },
+  });
+
+  assert.throws(
+    () => runPropertyCampaign(config, definitions),
+    PropertyCampaignFailure,
+  );
+  assert.equal(compilationCount, 2);
+});
+
+test("source scenarios are prepared once for reporting and execution", () => {
+  assertSinglePreparedScenario("valid");
+  assertSinglePreparedScenario("near-valid");
 });
 
 test("source family selection uses the selected family collection", () => {
@@ -84,7 +139,11 @@ test("required campaign reaches retained variants and varied source-fuzz familie
 });
 
 function assertSourceFamilyCoverage(
-  cases: readonly { readonly context: string; readonly source?: string }[],
+  cases: readonly {
+    readonly index: number;
+    readonly context: string;
+    readonly source?: string;
+  }[],
   classification: "valid" | "near-valid",
   families: readonly string[],
 ): void {
@@ -102,7 +161,100 @@ function assertSourceFamilyCoverage(
       true,
       `${classification}/${family} must vary source`,
     );
+
+    const result = cases.find((caseResult) => (
+      caseResult.context.includes(`classification=${classification}`)
+      && caseResult.context.includes(`family=${family}`)
+    ));
+    assert.ok(result);
+    assertExactSourceReplay(result, classification);
   }
+}
+
+function assertSinglePreparedScenario(
+  classification: "valid" | "near-valid",
+): void {
+  const config = sourceCaseConfig(classification);
+  const expected = createSourceCase(config.seed, config.caseIndex!, classification);
+  let preparedCount = 0;
+  const definitions = createPropertyDefinitions({
+    ...(classification === "valid"
+      ? {
+        createValidSourceCase: (seed, index) => {
+          preparedCount += 1;
+          assert.equal(preparedCount, 1, "valid source must not be generated twice");
+          return createValidSourceCase(seed, index);
+        },
+      }
+      : {
+        createNearValidSourceCase: (seed, index) => {
+          preparedCount += 1;
+          assert.equal(preparedCount, 1, "near-valid source must not be generated twice");
+          return createNearValidSourceCase(seed, index);
+        },
+      }),
+  });
+
+  const replay = runPropertyCampaign(config, definitions);
+  assert.equal(preparedCount, 1);
+  assert.equal(replay.firstCase.source, expected.source);
+}
+
+function assertExactSourceReplay(
+  result: { readonly index: number; readonly source?: string },
+  classification: "valid" | "near-valid",
+): void {
+  const config = defaultPropertyCampaignConfig();
+  const replayConfig = { ...config, caseIndex: result.index };
+  const expected = createSourceCase(config.seed, result.index, classification);
+  let preparedCount = 0;
+  const replay = runPropertyCampaign(
+    replayConfig,
+    createPropertyDefinitions(
+      classification === "valid"
+        ? {
+          createValidSourceCase: (seed, index) => {
+            preparedCount += 1;
+            assert.equal(preparedCount, 1, "valid replay must reuse its prepared source");
+            return createValidSourceCase(seed, index);
+          },
+        }
+        : {
+          createNearValidSourceCase: (seed, index) => {
+            preparedCount += 1;
+            assert.equal(preparedCount, 1, "near-valid replay must reuse its prepared source");
+            return createNearValidSourceCase(seed, index);
+          },
+        },
+    ),
+  );
+
+  assert.equal(preparedCount, 1);
+  assert.equal(result.source, expected.source);
+  assert.equal(replay.firstCase.source, expected.source);
+}
+
+function createSourceCase(
+  seed: number,
+  index: number,
+  classification: "valid" | "near-valid",
+) {
+  return classification === "valid"
+    ? createValidSourceCase(seed, index)
+    : createNearValidSourceCase(seed, index);
+}
+
+function sourceCaseConfig(
+  classification: "valid" | "near-valid",
+) {
+  const config = defaultPropertyCampaignConfig();
+  const result = Array.from({ length: config.runs }, (_, index) =>
+    runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
+  ).find((caseResult) =>
+    caseResult.context.includes(`classification=${classification}`),
+  );
+  assert.ok(result, `expected a ${classification} source case`);
+  return { ...config, caseIndex: result.index };
 }
 
 test("property command accepts only seed, run count, and exact replay case", () => {

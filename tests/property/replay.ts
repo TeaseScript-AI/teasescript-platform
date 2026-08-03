@@ -62,11 +62,21 @@ export interface PropertyCampaignResult {
   readonly lastCase: PropertyCaseResult;
 }
 
-interface PropertyDefinition {
+export interface PropertyDefinition {
   readonly id: string;
   readonly boundary: string;
-  readonly describe: (seed: number, index: number) => PropertyCaseContext;
-  readonly execute: (seed: number, index: number) => void;
+  readonly prepare: (seed: number, index: number) => PreparedPropertyCase;
+}
+
+export interface PropertyCampaignDependencies {
+  readonly compileSource?: typeof compileSource;
+  readonly createValidSourceCase?: typeof createValidSourceCase;
+  readonly createNearValidSourceCase?: typeof createNearValidSourceCase;
+}
+
+interface PreparedPropertyCase {
+  readonly result: PropertyCaseResult;
+  readonly execute: () => void;
 }
 
 interface PropertyCaseContext {
@@ -74,50 +84,7 @@ interface PropertyCaseContext {
   readonly source?: string;
 }
 
-const PROPERTIES: readonly PropertyDefinition[] = [
-  {
-    id: "operation-closure",
-    boundary: "public runtime operation",
-    describe: describeOperationClosure,
-    execute: assertOperationClosure,
-  },
-  {
-    id: "rejected-completion-is-atomic",
-    boundary: "completeAction",
-    describe: describeRejectedCompletion,
-    execute: assertRejectedCompletionIsAtomic,
-  },
-  {
-    id: "checkpoint-roundtrip-and-resume",
-    boundary: "checkpoint/restore",
-    describe: describeCheckpointRoundTrip,
-    execute: assertCheckpointRoundTripAndResume,
-  },
-  {
-    id: "same-seed-is-deterministic",
-    boundary: "compile/run",
-    describe: describeSameSeed,
-    execute: assertSameSeedIsDeterministic,
-  },
-  {
-    id: "malformed-boundary-rejection",
-    boundary: "external/persistence validation",
-    describe: describeMalformedBoundary,
-    execute: assertMalformedBoundaryRejection,
-  },
-  {
-    id: "valid-source-pipeline",
-    boundary: "package-root compile/run",
-    describe: describeValidSource,
-    execute: assertValidSourcePipeline,
-  },
-  {
-    id: "near-valid-source-diagnostics",
-    boundary: "package-root compile",
-    describe: describeNearValidSource,
-    execute: assertNearValidSourceDiagnostics,
-  },
-];
+const PROPERTIES = createPropertyDefinitions();
 
 export class PropertyCampaignFailure extends Error {
   public constructor(
@@ -150,6 +117,64 @@ export class PropertyCampaignFailure extends Error {
     );
     this.name = "PropertyCampaignFailure";
   }
+}
+
+export function createPropertyDefinitions(
+  overrides: PropertyCampaignDependencies = {},
+): readonly PropertyDefinition[] {
+  const dependencies = {
+    compileSource: overrides.compileSource ?? compileSource,
+    createValidSourceCase: overrides.createValidSourceCase ?? createValidSourceCase,
+    createNearValidSourceCase:
+      overrides.createNearValidSourceCase ?? createNearValidSourceCase,
+  };
+
+  return [
+    ordinaryProperty(
+      "operation-closure",
+      "public runtime operation",
+      describeOperationClosure,
+      assertOperationClosure,
+    ),
+    ordinaryProperty(
+      "rejected-completion-is-atomic",
+      "completeAction",
+      describeRejectedCompletion,
+      assertRejectedCompletionIsAtomic,
+    ),
+    ordinaryProperty(
+      "checkpoint-roundtrip-and-resume",
+      "checkpoint/restore",
+      describeCheckpointRoundTrip,
+      assertCheckpointRoundTripAndResume,
+    ),
+    ordinaryProperty(
+      "same-seed-is-deterministic",
+      "compile/run",
+      describeSameSeed,
+      assertSameSeedIsDeterministic,
+    ),
+    ordinaryProperty(
+      "malformed-boundary-rejection",
+      "external/persistence validation",
+      describeMalformedBoundary,
+      assertMalformedBoundaryRejection,
+    ),
+    sourceProperty(
+      "valid-source-pipeline",
+      "package-root compile/run",
+      dependencies.createValidSourceCase,
+      (scenario, seed, index) =>
+        assertValidSourcePipeline(scenario, seed, index, dependencies.compileSource),
+    ),
+    sourceProperty(
+      "near-valid-source-diagnostics",
+      "package-root compile",
+      dependencies.createNearValidSourceCase,
+      (scenario) =>
+        assertNearValidSourceDiagnostics(scenario, dependencies.compileSource),
+    ),
+  ];
 }
 
 export function defaultPropertyCampaignConfig(): PropertyCampaignConfig {
@@ -205,6 +230,7 @@ export function parsePropertyCliArguments(
 
 export function runPropertyCampaign(
   config: PropertyCampaignConfig,
+  definitions: readonly PropertyDefinition[] = PROPERTIES,
 ): PropertyCampaignResult {
   validateConfig(config);
   const count = config.caseIndex === undefined ? config.runs : 1;
@@ -213,11 +239,13 @@ export function runPropertyCampaign(
 
   for (let offset = 0; offset < count; offset += 1) {
     const index = config.caseIndex ?? offset;
-    const definition = PROPERTIES[index % PROPERTIES.length]!;
-    const result = createPropertyCaseResult(config.seed, index, definition);
+    const definition = definitions[index % definitions.length]!;
+    let result = fallbackPropertyCaseResult(index, definition);
 
     try {
-      definition.execute(config.seed, index);
+      const prepared = definition.prepare(config.seed, index);
+      result = prepared.result;
+      prepared.execute();
     } catch (error) {
       throw new PropertyCampaignFailure(
         config,
@@ -270,18 +298,72 @@ export function runPropertyCli(argv: readonly string[]): number {
   }
 }
 
+function ordinaryProperty(
+  id: string,
+  boundary: string,
+  describe: (seed: number, index: number) => PropertyCaseContext,
+  execute: (seed: number, index: number) => void,
+): PropertyDefinition {
+  return {
+    id,
+    boundary,
+    prepare: (seed, index) => ({
+      result: createPropertyCaseResult(seed, index, id, boundary, describe(seed, index)),
+      execute: () => execute(seed, index),
+    }),
+  };
+}
+
+function sourceProperty<T extends ValidSourceCase | NearValidSourceCase>(
+  id: string,
+  boundary: string,
+  createScenario: (seed: number, index: number) => T,
+  executeScenario: (scenario: T, seed: number, index: number) => void,
+): PropertyDefinition {
+  return {
+    id,
+    boundary,
+    prepare: (seed, index) => {
+      const scenario = createScenario(seed, index);
+      return {
+        result: createPropertyCaseResult(
+          seed,
+          index,
+          id,
+          boundary,
+          describeSourceCase(scenario),
+        ),
+        execute: () => executeScenario(scenario, seed, index),
+      };
+    },
+  };
+}
+
 function createPropertyCaseResult(
   seed: number,
   index: number,
+  id: string,
+  boundary: string,
+  context: PropertyCaseContext,
+): PropertyCaseResult {
+  return Object.freeze({
+    index,
+    id,
+    boundary,
+    context: formatCaseContext(seed, index, context),
+    ...(context.source === undefined ? {} : { source: context.source }),
+  });
+}
+
+function fallbackPropertyCaseResult(
+  index: number,
   definition: PropertyDefinition,
 ): PropertyCaseResult {
-  const context = definition.describe(seed, index);
   return Object.freeze({
     index,
     id: definition.id,
     boundary: definition.boundary,
-    context: formatCaseContext(seed, index, context),
-    ...(context.source === undefined ? {} : { source: context.source }),
+    context: "preparation-failure context=unavailable",
   });
 }
 
@@ -432,17 +514,23 @@ function describeMalformedBoundary(seed: number, index: number): PropertyCaseCon
   };
 }
 
-function assertValidSourcePipeline(seed: number, index: number): void {
-  const scenario = createValidSourceCase(seed, index);
+function assertValidSourcePipeline(
+  scenario: ValidSourceCase,
+  seed: number,
+  index: number,
+  compile: typeof compileSource,
+): void {
   assert.ok(scenario.source.length <= MAX_SOURCE_FUZZ_LENGTH, scenario.variant);
 
-  const plan = compilePlan(scenario.source);
   const runtimeSeed = caseSeed(seed, index);
-  const first = runSourceToHalt(plan, runtimeSeed);
-  const second = runSourceToHalt(plan, runtimeSeed);
+  const firstPlan = compilePlan(scenario.source, compile);
+  const first = runSourceToHalt(firstPlan, runtimeSeed);
+  const secondPlan = compilePlan(scenario.source, compile);
+  const second = runSourceToHalt(secondPlan, runtimeSeed);
 
   assert.equal(first.snapshot.status, "halted", scenario.variant);
-  assertValidSnapshot(plan, first.snapshot);
+  assertValidSnapshot(firstPlan, first.snapshot);
+  assertValidSnapshot(secondPlan, second.snapshot);
   assert.deepEqual(second, first, scenario.variant);
 }
 
@@ -452,16 +540,14 @@ function runSourceToHalt(plan: InstructionPlan, seed: number) {
   });
 }
 
-function describeValidSource(seed: number, index: number): PropertyCaseContext {
-  return describeSourceCase(createValidSourceCase(seed, index));
-}
-
-function assertNearValidSourceDiagnostics(seed: number, index: number): void {
-  const scenario = createNearValidSourceCase(seed, index);
+function assertNearValidSourceDiagnostics(
+  scenario: NearValidSourceCase,
+  compile: typeof compileSource,
+): void {
   assert.ok(scenario.source.length <= MAX_SOURCE_FUZZ_LENGTH, scenario.variant);
 
-  const first = compileSource(scenario.source);
-  const second = compileSource(scenario.source);
+  const first = compile(scenario.source);
+  const second = compile(scenario.source);
   assert.equal(first.plan, null, scenario.variant);
   assert.ok(first.diagnostics.length > 0, scenario.variant);
   assert.deepEqual(diagnosticShape(second), diagnosticShape(first), scenario.variant);
@@ -475,10 +561,6 @@ function assertNearValidSourceDiagnostics(seed: number, index: number): void {
     assert.ok(diagnostic.span.start.offset >= 0);
     assert.ok(diagnostic.span.end.offset <= scenario.source.length);
   }
-}
-
-function describeNearValidSource(seed: number, index: number): PropertyCaseContext {
-  return describeSourceCase(createNearValidSourceCase(seed, index));
 }
 
 function describeSourceCase(
@@ -505,8 +587,11 @@ function diagnosticShape(result: ReturnType<typeof compileSource>) {
   ]);
 }
 
-function compilePlan(source: string): InstructionPlan {
-  const compiled = compileSource(source);
+function compilePlan(
+  source: string,
+  compile: typeof compileSource = compileSource,
+): InstructionPlan {
+  const compiled = compile(source);
   assert.deepEqual(compiled.diagnostics, [], source);
   if (compiled.plan === null) {
     throw new Error(`Expected a compiled plan for source:\n${source}`);

@@ -9,9 +9,9 @@
 - PR #46 rejects ordinary instruction-plan control-flow targets that cross between root and function execution regions before execution or checkpoint restore.
 - PR #45 rejects core and configured injected builtin identifiers when they are used as ordinary runtime values while preserving direct builtin calls.
 - PR #117 completed issue #110 by implementing the generic typed foreground-interaction runtime, shared version-1 interaction limits, canonical player transcript events, typed completion, and versioned checkpoint/restore behavior.
-- PR #206 completed issue #173's testing-strategy work: source-to-runtime conformance is the primary safety net, backed by focused runtime/checkpoint/corruption tests and a small deterministic property campaign.
+- PR #206 implements issue #173's testing-strategy work: source-to-runtime conformance is the primary safety net, backed by focused runtime/checkpoint/corruption tests and a small deterministic property campaign.
 - PR #119 recorded the owner-approved Option A source-layout proposal; issue #124 applies its behavior-neutral physical implementation from this baseline.
-- Final verification for PR #206 uses Node `v24.18.0` and npm `11.16.0`; typecheck, build, the bounded property campaign, focused source/runtime suites, the complete configured check (441 tests, 0 failures), and diff check pass on its final implementation head.
+- Final verification for PR #206 uses Node `v24.18.0` and npm `11.16.0`; typecheck, build, the bounded property campaign, focused source/runtime suites, the complete configured check (444 tests, 0 failures), and diff check pass on its final implementation head.
 - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
 ## Implemented in the current repository code
