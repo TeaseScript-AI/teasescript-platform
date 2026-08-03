@@ -1,4 +1,5 @@
 name: Source bundle
+# Temporary issue #207 workflow-file publication proof. Do not merge.
 
 on:
   push:
