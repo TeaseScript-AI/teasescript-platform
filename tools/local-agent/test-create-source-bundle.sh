@@ -77,6 +77,10 @@ assert "TOOLING_REF: ${{ github.workflow_sha }}" in processor
 assert processor.count("uses: actions/checkout@") == 2
 cleanup = processor.split("  cleanup-request:\n", 1)[1]
 assert "uses: actions/checkout@" not in cleanup
+cleanup_condition = cleanup.split("    needs:", 1)[0]
+assert "needs.bundle.outputs.request_validated == 'true'" in cleanup_condition
+assert "needs.publish-result.result == 'success'" in cleanup_condition
+assert "needs.bundle.result == 'success'" not in cleanup_condition
 assert "git init -q \"$cleanup_repo\"" in cleanup
 assert "Check out requested source as data" in processor
 assert "--event-name source-bundle-request" in processor

@@ -194,7 +194,7 @@ jobs:
   cleanup-request:
     if: >-
       always() &&
-      needs.bundle.result == 'success' &&
+      needs.bundle.outputs.request_validated == 'true' &&
       needs.publish-result.result == 'success'
     needs: [bundle, publish-result]
     runs-on: ubuntu-24.04
