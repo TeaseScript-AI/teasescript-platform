@@ -82,9 +82,46 @@ test("valid source determinism independently compiles the prepared source", () =
   assert.equal(compilationCount, 2);
 });
 
+test("near-valid source determinism rejects a plan from either compilation", () => {
+  const config = sourceCaseConfig("near-valid");
+  const executable = compileSource("exit");
+  assert.notEqual(executable.plan, null);
+  let compilationCount = 0;
+  const definitions = createPropertyDefinitions({
+    compileSource: (source) => {
+      compilationCount += 1;
+      const rejected = compileSource(source);
+      return compilationCount === 1
+        ? rejected
+        : { ...rejected, plan: executable.plan };
+    },
+  });
+
+  assert.throws(
+    () => runPropertyCampaign(config, definitions),
+    PropertyCampaignFailure,
+  );
+  assert.equal(compilationCount, 2);
+});
+
 test("source scenarios are prepared once for reporting and execution", () => {
   assertSinglePreparedScenario("valid");
   assertSinglePreparedScenario("near-valid");
+});
+
+test("exact generated scenarios include metadata as well as source", () => {
+  const config = sourceCaseConfig("near-valid");
+  const scenario = createNearValidSourceCase(config.seed, config.caseIndex!);
+  let generationCount = 0;
+
+  assert.throws(() => assertExactGeneratedScenario(
+    config.seed,
+    config.caseIndex!,
+    () => ({
+      ...scenario,
+      variant: generationCount++ === 0 ? scenario.variant : "metadata-changed",
+    }),
+  ));
 });
 
 test("source family selection uses the selected family collection", () => {
@@ -206,7 +243,11 @@ function assertExactSourceReplay(
 ): void {
   const config = defaultPropertyCampaignConfig();
   const replayConfig = { ...config, caseIndex: result.index };
-  const expected = createSourceCase(config.seed, result.index, classification);
+  const expected = assertExactGeneratedScenario(
+    config.seed,
+    result.index,
+    (seed, index) => createSourceCase(seed, index, classification),
+  );
   let preparedCount = 0;
   const replay = runPropertyCampaign(
     replayConfig,
@@ -231,7 +272,18 @@ function assertExactSourceReplay(
 
   assert.equal(preparedCount, 1);
   assert.equal(result.source, expected.source);
-  assert.equal(replay.firstCase.source, expected.source);
+  assert.deepEqual(replay.firstCase, result);
+}
+
+function assertExactGeneratedScenario<T>(
+  seed: number,
+  index: number,
+  createScenario: (seed: number, index: number) => T,
+): T {
+  const first = createScenario(seed, index);
+  const second = createScenario(seed, index);
+  assert.deepEqual(second, first);
+  return first;
 }
 
 function createSourceCase(

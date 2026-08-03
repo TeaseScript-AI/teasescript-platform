@@ -549,6 +549,7 @@ function assertNearValidSourceDiagnostics(
   const first = compile(scenario.source);
   const second = compile(scenario.source);
   assert.equal(first.plan, null, scenario.variant);
+  assert.equal(second.plan, null, scenario.variant);
   assert.ok(first.diagnostics.length > 0, scenario.variant);
   assert.deepEqual(diagnosticShape(second), diagnosticShape(first), scenario.variant);
   assert.deepEqual(
