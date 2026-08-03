@@ -1,0 +1,249 @@
+diff --git a/.github/workflows/runner-startup-benchmark.yml b/.github/workflows/runner-startup-benchmark.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..10963a73592efcb532d20f2d8fbbe5410a0131a7
+--- /dev/null
++++ b/.github/workflows/runner-startup-benchmark.yml
+@@ -0,0 +1,41 @@
++name: Runner startup benchmark
++
++on:
++  pull_request:
++    paths:
++      - .github/workflows/runner-startup-benchmark.yml
++
++permissions: {}
++
++jobs:
++  ubuntu-24-04:
++    runs-on: ubuntu-24.04
++    timeout-minutes: 3
++    steps:
++      - name: Exercise control-plane toolchain
++        run: |
++          set -euo pipefail
++          command -v bash git gh node python3
++          tmp=$(mktemp -d)
++          git init -q "$tmp"
++          python3 -c 'import hashlib; print(hashlib.sha256(b"runner-benchmark").hexdigest())'
++      - name: Initialize JavaScript action runtime
++        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
++        with:
++          script: core.info('runner benchmark complete')
++
++  ubuntu-slim:
++    runs-on: ubuntu-slim
++    timeout-minutes: 3
++    steps:
++      - name: Exercise control-plane toolchain
++        run: |
++          set -euo pipefail
++          command -v bash git gh node python3
++          tmp=$(mktemp -d)
++          git init -q "$tmp"
++          python3 -c 'import hashlib; print(hashlib.sha256(b"runner-benchmark").hexdigest())'
++      - name: Initialize JavaScript action runtime
++        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
++        with:
++          script: core.info('runner benchmark complete')
+\ No newline at end of file
+diff --git a/.github/workflows/source-bundle-request-processor.yml b/.github/workflows/source-bundle-request-processor.yml
+index bb7af112bd302ea44003ceb1890ac00576576f26..6a59e949cdafdb6eda06623e2f2febc8cf1454d2 100644
+--- a/.github/workflows/source-bundle-request-processor.yml
++++ b/.github/workflows/source-bundle-request-processor.yml
+@@ -9,12 +9,13 @@ on:
+ permissions: {}
+ 
+ jobs:
+-  validate:
++  bundle:
+     if: >-
+       github.event.workflow_run.event == 'create' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'source-bundle-request/')
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
++    timeout-minutes: 10
+     permissions:
+       contents: read
+     outputs:
+@@ -22,6 +23,12 @@ jobs:
+       request_branch: ${{ steps.request.outputs.request_branch }}
+       request_sha: ${{ steps.request.outputs.request_sha }}
+       status_context: ${{ steps.request.outputs.status_context }}
++      request_validated: ${{ steps.request.outputs.validated }}
++      artifact_id: ${{ steps.upload.outputs.artifact-id }}
++      artifact_url: ${{ steps.upload.outputs.artifact-url }}
++      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
++    env:
++      TOOLING_REF: ${{ github.workflow_sha }}
+     steps:
+       - name: Validate exact request against current default branch
+         id: request
+@@ -95,21 +102,8 @@ jobs:
+             core.setOutput('request_branch', branch);
+             core.setOutput('request_sha', requestSha);
+             core.setOutput('status_context', `source-bundle/request/${nonce}`);
++            core.setOutput('validated', 'true');
+ 
+-  bundle:
+-    needs: validate
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 10
+-    permissions:
+-      contents: read
+-    outputs:
+-      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+-      artifact_url: ${{ steps.upload.outputs.artifact-url }}
+-      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+-    env:
+-      TOOLING_REF: ${{ github.workflow_sha }}
+-      SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+-    steps:
+       - name: Check out trusted bundle tooling
+         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+         with:
+@@ -121,7 +115,7 @@ jobs:
+       - name: Check out requested source as data
+         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+         with:
+-          ref: ${{ env.SOURCE_SHA }}
++          ref: ${{ steps.request.outputs.source_sha }}
+           path: source
+           fetch-depth: 0
+           persist-credentials: false
+@@ -129,9 +123,13 @@ jobs:
+ 
+       - name: Verify exact requested source
+         working-directory: source
++        env:
++          SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
+         run: test "$(git rev-parse --verify HEAD)" = "$SOURCE_SHA"
+ 
+       - name: Create verified source bundle
++        env:
++          SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
+         run: |
+           cd source
+           bash ../tooling/tools/local-agent/create-source-bundle.sh \
+@@ -145,24 +143,25 @@ jobs:
+         id: upload
+         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+         with:
+-          name: teasescript-source-${{ env.SOURCE_SHA }}
++          name: teasescript-source-${{ steps.request.outputs.source_sha }}
+           path: source-artifact/
+           if-no-files-found: error
+           retention-days: 1
+           compression-level: 0
+ 
+   publish-result:
+-    if: ${{ always() && needs.validate.result == 'success' }}
+-    needs: [validate, bundle]
+-    runs-on: ubuntu-latest
++    if: ${{ always() && needs.bundle.outputs.request_validated == 'true' }}
++    needs: bundle
++    runs-on: ubuntu-24.04
++    timeout-minutes: 3
+     permissions:
+       statuses: write
+     steps:
+       - name: Publish connector-readable result status
+         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+         env:
+-          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+-          STATUS_CONTEXT: ${{ needs.validate.outputs.status_context }}
++          SOURCE_SHA: ${{ needs.bundle.outputs.source_sha }}
++          STATUS_CONTEXT: ${{ needs.bundle.outputs.status_context }}
+           BUNDLE_RESULT: ${{ needs.bundle.result }}
+           ARTIFACT_ID: ${{ needs.bundle.outputs.artifact_id }}
+           ARTIFACT_URL: ${{ needs.bundle.outputs.artifact_url }}
+@@ -195,19 +194,20 @@ jobs:
+   cleanup-request:
+     if: >-
+       always() &&
+-      needs.validate.result == 'success' &&
++      needs.bundle.result == 'success' &&
+       needs.publish-result.result == 'success'
+-    needs: [validate, bundle, publish-result]
+-    runs-on: ubuntu-latest
++    needs: [bundle, publish-result]
++    runs-on: ubuntu-24.04
++    timeout-minutes: 3
+     permissions:
+       contents: write
+     steps:
+       - name: Delete only the unchanged exact request ref
+         env:
+           GH_TOKEN: ${{ github.token }}
+-          REQUEST_BRANCH: ${{ needs.validate.outputs.request_branch }}
+-          EXPECTED_REQUEST_SHA: ${{ needs.validate.outputs.request_sha }}
+-          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
++          REQUEST_BRANCH: ${{ needs.bundle.outputs.request_branch }}
++          EXPECTED_REQUEST_SHA: ${{ needs.bundle.outputs.request_sha }}
++          SOURCE_SHA: ${{ needs.bundle.outputs.source_sha }}
+         run: |
+           set -euo pipefail
+           [[ "$REQUEST_BRANCH" =~ ^source-bundle-request/([0-9a-f]{40})/[a-z0-9][a-z0-9-]{0,31}$ ]]
+diff --git a/.github/workflows/source-bundle-request.yml b/.github/workflows/source-bundle-request.yml
+index 097d2fe883ab675d45c421aef733f01440f26586..de66ebdb883f39876649a361b9631370dc35e6ed 100644
+--- a/.github/workflows/source-bundle-request.yml
++++ b/.github/workflows/source-bundle-request.yml
+@@ -11,7 +11,8 @@ jobs:
+     if: >-
+       github.event.ref_type == 'branch' &&
+       startsWith(github.event.ref, 'source-bundle-request/')
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
++    timeout-minutes: 3
+     steps:
+       - name: Validate request branch shape
+         env:
+diff --git a/.github/workflows/source-bundle.yml b/.github/workflows/source-bundle.yml
+index c90ab6e79417fbaabc252b0f4a5c99ab886076c3..825ef20dc4b5dbf79840467810284e274867a7f7 100644
+--- a/.github/workflows/source-bundle.yml
++++ b/.github/workflows/source-bundle.yml
+@@ -8,9 +8,14 @@ on:
+ permissions:
+   contents: read
+ 
++concurrency:
++  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
++  cancel-in-progress: true
++
+ jobs:
+   source-bundle:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
++    timeout-minutes: 5
+     env:
+       TOOLING_REF: ${{ github.workflow_sha }}
+       REQUESTED_SOURCE: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+diff --git a/tools/local-agent/check-local-agent.sh b/tools/local-agent/check-local-agent.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..fc4d7b0167c418d8da9dd989d0491a09a4272406
+--- /dev/null
++++ b/tools/local-agent/check-local-agent.sh
+@@ -0,0 +1,22 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
++log_dir=${1:-${RUNNER_TEMP:-/tmp}/teasescript-local-agent-logs}
++mkdir -p "$log_dir"
++
++python3 -B "$script_dir/test-compact-unittest.py"
++bash "$script_dir/test-run-compact.sh"
++bash "$script_dir/run-compact.sh" \
++  --label source-bundle-workflow \
++  --log "$log_dir/source-bundle-workflow.log" \
++  -- env TEASESCRIPT_COMPACT_TEST_INNER=1 \
++    bash "$script_dir/test-create-source-bundle.sh"
++python3 -B "$script_dir/test-prepare-source-review.py"
++python3 -B "$script_dir/test-prepare-patch-publication.py"
++python3 -B "$script_dir/test-patch-publication.py"
++bash "$script_dir/run-compact.sh" \
++  --label patch-publication-workflow \
++  --log "$log_dir/patch-publication-workflow.log" \
++  -- env TEASESCRIPT_COMPACT_TEST_INNER=1 \
++    bash "$script_dir/test-patch-publication-workflow.sh"
+\ No newline at end of file

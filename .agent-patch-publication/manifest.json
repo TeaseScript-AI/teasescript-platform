@@ -1,0 +1,26 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "agent/issue-219-actions-performance",
+  "expectedBaseSha": "b1c3eac02b634e97a5bb8c3da52eeaf45182cc7d",
+  "expectedResultTreeSha": "9e274b7a81bf1ae130a2a10c4c32184e41afefc6",
+  "patchSizeBytes": 26819,
+  "patchSha256": "7efa5dc7467bf897061ae920783afc2eae6d2692d90e77cb641a8889b2f51696",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0003",
+      "sizeBytes": 10657,
+      "sha256": "967e6b763e5e70176acc241c9ae83c2eead1843ec9ef4b47bdfc38efc00db0b7"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0003",
+      "sizeBytes": 9745,
+      "sha256": "9bea0dbb7710a073692adedd94bbcb7ffcd5cbf54061d4df2a883d893ff48565"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0003",
+      "sizeBytes": 6417,
+      "sha256": "126896eaaf577d1d87c8830caf1df7e4d70b95bfd174177ac57abe5782e43e42"
+    }
+  ],
+  "commitMessage": "Optimize Actions job boundaries and validation"
+}
