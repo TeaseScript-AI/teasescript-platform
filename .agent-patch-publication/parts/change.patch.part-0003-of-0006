@@ -1,0 +1,99 @@
++    if: ${{ always() && needs.prepare.outputs.transfer_branch != '' }}
++    needs: [prepare, test, publish]
++    runs-on: ubuntu-slim
++    timeout-minutes: 5
+     permissions:
+       contents: write
+     outputs:
+@@ -240,14 +228,15 @@ jobs:
+         id: cleanup_transfer
+         env:
+           GH_TOKEN: ${{ github.token }}
+-          TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
+-          EXPECTED_TRANSFER_SHA: ${{ needs.request.outputs.expected_transfer_sha }}
++          TRANSFER_BRANCH: ${{ needs.prepare.outputs.transfer_branch }}
++          EXPECTED_TRANSFER_SHA: ${{ needs.prepare.outputs.expected_transfer_sha }}
+           PUBLISH_RESULT: ${{ needs.publish.result }}
+         run: bash tools/local-agent/patch-publication-cleanup-transfer.sh
+   cleanup-comment:
+-    if: ${{ always() && needs.request.result == 'success' }}
+-    needs: [request, prepare, test, publish, cleanup-transfer]
+-    runs-on: ubuntu-latest
++    if: ${{ always() && needs.prepare.outputs.transfer_branch != '' }}
++    needs: [prepare, test, publish, cleanup-transfer]
++    runs-on: ubuntu-slim
++    timeout-minutes: 5
+     permissions:
+       contents: read
+       pull-requests: write
+@@ -261,10 +250,10 @@ jobs:
+         id: cleanup_comment
+         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+         env:
+-          COMMENT_ID: ${{ needs.request.outputs.comment_id }}
+-          ISSUE_NUMBER: ${{ needs.request.outputs.issue_number }}
+-          TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
+-          EXPECTED_MANIFEST_SHA256: ${{ needs.request.outputs.expected_manifest_sha256 }}
++          COMMENT_ID: ${{ needs.prepare.outputs.comment_id }}
++          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
++          TRANSFER_BRANCH: ${{ needs.prepare.outputs.transfer_branch }}
++          EXPECTED_MANIFEST_SHA256: ${{ needs.prepare.outputs.expected_manifest_sha256 }}
+         with:
+           script: |
+             const cleanup = require('./tools/local-agent/patch-publication-cleanup-comment.cjs');
+@@ -272,7 +261,7 @@ jobs:
+       - name: Record publication result
+         if: ${{ always() }}
+         env:
+-          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch || needs.request.outputs.expected_target_branch }}
++          TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch || needs.prepare.outputs.expected_target_branch }}
+           PUBLISHED_COMMIT_SHA: ${{ needs.publish.outputs.published_commit_sha }}
+           PREPARE_RESULT: ${{ needs.prepare.result }}
+           TEST_RESULT: ${{ needs.test.result }}
+diff --git a/.github/workflows/runner-benchmark.yml b/.github/workflows/runner-benchmark.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..c71a33b90656ad422473c04798a93cf4788584e4
+--- /dev/null
++++ b/.github/workflows/runner-benchmark.yml
+@@ -0,0 +1,80 @@
++name: Runner benchmark
++
++on:
++  pull_request:
++
++permissions:
++  contents: read
++
++jobs:
++  standard-bundle:
++    name: standard-bundle-${{ matrix.iteration }}
++    strategy:
++      fail-fast: false
++      matrix:
++        iteration: [1, 2, 3]
++    runs-on: ubuntu-24.04
++    timeout-minutes: 5
++    env:
++      SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
++    steps:
++      - name: Check out trusted bundle tooling
++        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
++        with:
++          ref: ${{ github.workflow_sha }}
++          path: tooling
++          persist-credentials: false
++          show-progress: false
++      - name: Check out selected source
++        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
++        with:
++          ref: ${{ env.SOURCE_SHA }}
++          path: source
++          fetch-depth: 0
++          persist-credentials: false
++          show-progress: false
++      - name: Create verified source bundle
++        run: |
++          cd source
++          bash ../tooling/tools/local-agent/create-source-bundle.sh \
++            --output ../source-artifact \
++            --repository "${{ github.repository }}" \

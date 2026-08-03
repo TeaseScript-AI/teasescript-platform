@@ -1,0 +1,98 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 3fd25e3596d5ec214d9c45b45018c83ad55c5725..68f5c4bc890e683819c34ccba3567c4bfce6020b 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -8,9 +8,14 @@ on:
+ permissions:
+   contents: read
+ 
++concurrency:
++  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
++  cancel-in-progress: true
++
+ jobs:
+   check:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
++    timeout-minutes: 15
+     steps:
+       - name: Check out repository
+         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+@@ -23,23 +28,7 @@ jobs:
+           node-version-file: .nvmrc
+           cache: npm
+       - name: Validate local-agent tooling
+-        run: |
+-          set -euo pipefail
+-          log_dir="$RUNNER_TEMP/teasescript-local-agent-logs"
+-          mkdir -p "$log_dir"
+-
+-          python3 -B tools/local-agent/test-compact-unittest.py
+-          bash tools/local-agent/test-run-compact.sh
+-          bash tools/local-agent/run-compact.sh \
+-            --label source-bundle-workflow \
+-            --log "$log_dir/source-bundle-workflow.log" \
+-            -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash tools/local-agent/test-create-source-bundle.sh
+-          python3 -B tools/local-agent/test-prepare-source-review.py
+-          python3 -B tools/local-agent/test-patch-publication.py
+-          bash tools/local-agent/run-compact.sh \
+-            --label patch-publication-workflow \
+-            --log "$log_dir/patch-publication-workflow.log" \
+-            -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash tools/local-agent/test-patch-publication-workflow.sh
++        run: bash tools/local-agent/test-all.sh
+       - name: Upload local-agent failure logs
+         if: ${{ failure() }}
+         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+diff --git a/.github/workflows/patch-publication.yml b/.github/workflows/patch-publication.yml
+index 7bc8616ed2d73716d089730402420315c82b6a6d..bd62d493e99a986d36fcc933529eac1e39b755e8 100644
+--- a/.github/workflows/patch-publication.yml
++++ b/.github/workflows/patch-publication.yml
+@@ -7,9 +7,10 @@ on:
+ permissions: {}
+ 
+ jobs:
+-  request:
++  prepare:
+     if: startsWith(github.event.comment.body, '/publish-patch ')
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-slim
++    timeout-minutes: 10
+     permissions:
+       contents: read
+       issues: read
+@@ -21,12 +22,21 @@ jobs:
+       expected_target_branch: ${{ steps.request.outputs.expected_target_branch }}
+       issue_number: ${{ steps.request.outputs.issue_number }}
+       comment_id: ${{ steps.request.outputs.comment_id }}
++      artifact_name: ${{ steps.names.outputs.artifact_name }}
++      target_branch: ${{ steps.candidate.outputs.target_branch }}
++      expected_base_sha: ${{ steps.candidate.outputs.expected_base_sha }}
++      expected_result_tree_sha: ${{ steps.candidate.outputs.expected_result_tree_sha }}
++      candidate_commit_sha: ${{ steps.candidate.outputs.candidate_commit_sha }}
++    env:
++      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+     steps:
+       - name: Check out trusted workflow revision
+         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+         with:
+           ref: ${{ github.workflow_sha }}
+           persist-credentials: false
++          show-progress: false
++
+       - name: Validate publication command
+         id: request
+         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+@@ -34,33 +44,19 @@ jobs:
+           script: |
+             const request = require('./tools/local-agent/patch-publication-request.cjs');
+             await request({ github, context, core });
+-  prepare:
+-    needs: request
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 10
+-    permissions:
+-      contents: read
+-    outputs:
+-      artifact_name: ${{ steps.names.outputs.artifact_name }}
+-      target_branch: ${{ steps.prepare.outputs.target_branch }}
+-      transfer_branch: ${{ steps.prepare.outputs.transfer_branch }}

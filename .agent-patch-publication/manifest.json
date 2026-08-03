@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "agent/issue-219-actions-performance",
+  "expectedBaseSha": "b1c3eac02b634e97a5bb8c3da52eeaf45182cc7d",
+  "expectedResultTreeSha": "0cdbb9fc265414825444724842760141705af352",
+  "patchSizeBytes": 24392,
+  "patchSha256": "81e72f66c7f3150ea51884d2100ce92b140b876054ac77294eadb9416f11b3b0",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0006",
+      "sizeBytes": 4095,
+      "sha256": "95d6a8fba8c2187fbe7744dc095f310759c52d467a2aaa360df99c4685464e49"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0006",
+      "sizeBytes": 4059,
+      "sha256": "186c99c637cbb12e850536505ff8367b2a2b583d557c4be568302b47eafe949d"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0006",
+      "sizeBytes": 4081,
+      "sha256": "1cc50542d661db6ec6d43648586a894a86f131c85dd093b050d1343cda7c247e"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0006",
+      "sizeBytes": 4035,
+      "sha256": "bf91996458a14cf913600253bd7a240b9103b35dcecd33da965bea9f79057910"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0006",
+      "sizeBytes": 4083,
+      "sha256": "a19f5dd27b354d7031ddff697fdbae2b67d714f59ed0837db456827bc41e04d4"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0006-of-0006",
+      "sizeBytes": 4039,
+      "sha256": "7c9e4a750cfbc0b3ab706fa3215b1ab3cbc8607825ffe2fe7e68eff4feb2d53b"
+    }
+  ],
+  "commitMessage": "ci: optimize secure workflow execution"
+}

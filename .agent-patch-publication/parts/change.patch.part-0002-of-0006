@@ -1,0 +1,104 @@
+-      expected_base_sha: ${{ steps.prepare.outputs.expected_base_sha }}
+-      expected_result_tree_sha: ${{ steps.prepare.outputs.expected_result_tree_sha }}
+-      candidate_commit_sha: ${{ steps.prepare.outputs.candidate_commit_sha }}
+-    env:
+-      TRANSFER_BRANCH: ${{ needs.request.outputs.transfer_branch }}
+-      EXPECTED_TRANSFER_SHA: ${{ needs.request.outputs.expected_transfer_sha }}
+-      EXPECTED_MANIFEST_SHA256: ${{ needs.request.outputs.expected_manifest_sha256 }}
+-      EXPECTED_TARGET_BRANCH: ${{ needs.request.outputs.expected_target_branch }}
+-      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+-    steps:
+-      - name: Check out trusted workflow revision
+-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+-        with:
+-          ref: ${{ github.workflow_sha }}
+-          fetch-depth: 0
+-          persist-credentials: false
+-          show-progress: false
++
++      - name: Export authorized request inputs
++        env:
++          TRANSFER_BRANCH: ${{ steps.request.outputs.transfer_branch }}
++          EXPECTED_TRANSFER_SHA: ${{ steps.request.outputs.expected_transfer_sha }}
++          EXPECTED_MANIFEST_SHA256: ${{ steps.request.outputs.expected_manifest_sha256 }}
++          EXPECTED_TARGET_BRANCH: ${{ steps.request.outputs.expected_target_branch }}
++        run: |
++          printf 'TRANSFER_BRANCH=%s\n' "$TRANSFER_BRANCH" >> "$GITHUB_ENV"
++          printf 'EXPECTED_TRANSFER_SHA=%s\n' "$EXPECTED_TRANSFER_SHA" >> "$GITHUB_ENV"
++          printf 'EXPECTED_MANIFEST_SHA256=%s\n' "$EXPECTED_MANIFEST_SHA256" >> "$GITHUB_ENV"
++          printf 'EXPECTED_TARGET_BRANCH=%s\n' "$EXPECTED_TARGET_BRANCH" >> "$GITHUB_ENV"
++
+       - name: Preserve trusted publication tool
+         run: install -m 0755 tools/local-agent/patch-publication.py "$RUNNER_TEMP/patch-publication.py"
+ 
+@@ -80,7 +76,7 @@ jobs:
+           EXPECTED_BASE_SHA: ${{ steps.inspect.outputs.expected_base_sha }}
+         run: bash tools/local-agent/patch-publication-prepare-steps.sh checkout-base
+       - name: Prepare exact candidate bundle
+-        id: prepare
++        id: candidate
+         run: bash tools/local-agent/patch-publication-prepare-steps.sh prepare
+       - name: Name candidate artifact
+         id: names
+@@ -97,8 +93,8 @@ jobs:
+ 
+   test:
+     needs: prepare
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 30
++    runs-on: ubuntu-24.04
++    timeout-minutes: 15
+     permissions:
+       contents: read
+     steps:
+@@ -106,7 +102,6 @@ jobs:
+         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+         with:
+           ref: ${{ github.workflow_sha }}
+-          fetch-depth: 0
+           persist-credentials: false
+           show-progress: false
+ 
+@@ -140,24 +135,17 @@ jobs:
+           cache: npm
+ 
+       - name: Validate repository tooling
+-        run: |
+-          while IFS= read -r test_file; do
+-            case "$test_file" in
+-              *.py) python3 -B "$test_file" ;;
+-              *.sh) bash "$test_file" ;;
+-            esac
+-          done < <(find tools/local-agent -maxdepth 1 -type f \
+-            \( -name 'test-*.py' -o -name 'test-*.sh' \) -print | sort)
++        run: bash tools/local-agent/test-all.sh
+ 
+       - name: Install dependencies
+-        run: npm ci
++        run: npm ci --no-audit --no-fund
+ 
+       - name: Check source
+         run: npm run check
+ 
+   publish:
+     needs: [prepare, test]
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-slim
+     timeout-minutes: 10
+     permissions:
+       contents: read
+@@ -168,7 +156,6 @@ jobs:
+         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+         with:
+           ref: ${{ github.workflow_sha }}
+-          fetch-depth: 0
+           persist-credentials: false
+           show-progress: false
+ 
+@@ -223,9 +210,10 @@ jobs:
+             "$CANDIDATE_COMMIT_SHA:refs/heads/$TARGET_BRANCH"
+ 
+   cleanup-transfer:
+-    if: ${{ always() && needs.request.result == 'success' }}
+-    needs: [request, prepare, test, publish]
+-    runs-on: ubuntu-latest

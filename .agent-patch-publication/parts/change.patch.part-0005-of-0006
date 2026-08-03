@@ -1,0 +1,101 @@
+         run: test "$(git rev-parse --verify HEAD)" = "$SOURCE_SHA"
+ 
+       - name: Create verified source bundle
++        env:
++          SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
+         run: |
+           cd source
+           bash ../tooling/tools/local-agent/create-source-bundle.sh \
+@@ -145,24 +141,25 @@ jobs:
+         id: upload
+         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+         with:
+-          name: teasescript-source-${{ env.SOURCE_SHA }}
++          name: teasescript-source-${{ steps.request.outputs.source_sha }}
+           path: source-artifact/
+           if-no-files-found: error
+           retention-days: 1
+           compression-level: 0
+ 
+   publish-result:
+-    if: ${{ always() && needs.validate.result == 'success' }}
+-    needs: [validate, bundle]
+-    runs-on: ubuntu-latest
++    if: ${{ always() && needs.bundle.outputs.source_sha != '' }}
++    needs: bundle
++    runs-on: ubuntu-slim
++    timeout-minutes: 3
+     permissions:
+       statuses: write
+     steps:
+       - name: Publish connector-readable result status
+         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+         env:
+-          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+-          STATUS_CONTEXT: ${{ needs.validate.outputs.status_context }}
++          SOURCE_SHA: ${{ needs.bundle.outputs.source_sha }}
++          STATUS_CONTEXT: ${{ needs.bundle.outputs.status_context }}
+           BUNDLE_RESULT: ${{ needs.bundle.result }}
+           ARTIFACT_ID: ${{ needs.bundle.outputs.artifact_id }}
+           ARTIFACT_URL: ${{ needs.bundle.outputs.artifact_url }}
+@@ -195,19 +192,20 @@ jobs:
+   cleanup-request:
+     if: >-
+       always() &&
+-      needs.validate.result == 'success' &&
++      needs.bundle.outputs.source_sha != '' &&
+       needs.publish-result.result == 'success'
+-    needs: [validate, bundle, publish-result]
+-    runs-on: ubuntu-latest
++    needs: [bundle, publish-result]
++    runs-on: ubuntu-slim
++    timeout-minutes: 5
+     permissions:
+       contents: write
+     steps:
+       - name: Delete only the unchanged exact request ref
+         env:
+           GH_TOKEN: ${{ github.token }}
+-          REQUEST_BRANCH: ${{ needs.validate.outputs.request_branch }}
+-          EXPECTED_REQUEST_SHA: ${{ needs.validate.outputs.request_sha }}
+-          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
++          REQUEST_BRANCH: ${{ needs.bundle.outputs.request_branch }}
++          EXPECTED_REQUEST_SHA: ${{ needs.bundle.outputs.request_sha }}
++          SOURCE_SHA: ${{ needs.bundle.outputs.source_sha }}
+         run: |
+           set -euo pipefail
+           [[ "$REQUEST_BRANCH" =~ ^source-bundle-request/([0-9a-f]{40})/[a-z0-9][a-z0-9-]{0,31}$ ]]
+diff --git a/.github/workflows/source-bundle-request.yml b/.github/workflows/source-bundle-request.yml
+index 097d2fe883ab675d45c421aef733f01440f26586..080624654bb065b3e1549f042516746661e319c0 100644
+--- a/.github/workflows/source-bundle-request.yml
++++ b/.github/workflows/source-bundle-request.yml
+@@ -11,7 +11,8 @@ jobs:
+     if: >-
+       github.event.ref_type == 'branch' &&
+       startsWith(github.event.ref, 'source-bundle-request/')
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-slim
++    timeout-minutes: 3
+     steps:
+       - name: Validate request branch shape
+         env:
+diff --git a/.github/workflows/source-bundle.yml b/.github/workflows/source-bundle.yml
+index c90ab6e79417fbaabc252b0f4a5c99ab886076c3..825ef20dc4b5dbf79840467810284e274867a7f7 100644
+--- a/.github/workflows/source-bundle.yml
++++ b/.github/workflows/source-bundle.yml
+@@ -8,9 +8,14 @@ on:
+ permissions:
+   contents: read
+ 
++concurrency:
++  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
++  cancel-in-progress: true
++
+ jobs:
+   source-bundle:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
++    timeout-minutes: 5
+     env:
+       TOOLING_REF: ${{ github.workflow_sha }}
+       REQUESTED_SOURCE: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}

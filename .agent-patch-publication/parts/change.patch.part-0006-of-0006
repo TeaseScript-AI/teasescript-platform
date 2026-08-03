@@ -1,0 +1,81 @@
+diff --git a/tools/local-agent/test-all.sh b/tools/local-agent/test-all.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..b0eb864e733f4cbd1be544c3539fefc26af0b5ac
+--- /dev/null
++++ b/tools/local-agent/test-all.sh
+@@ -0,0 +1,20 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
++log_dir=${TEASESCRIPT_LOCAL_AGENT_LOG_DIR:-${RUNNER_TEMP:-/tmp}/teasescript-local-agent-logs}
++mkdir -p "$log_dir"
++
++python3 -B "$script_dir/test-compact-unittest.py"
++bash "$script_dir/test-run-compact.sh"
++bash "$script_dir/run-compact.sh" \
++  --label source-bundle-workflow \
++  --log "$log_dir/source-bundle-workflow.log" \
++  -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash "$script_dir/test-create-source-bundle.sh"
++python3 -B "$script_dir/test-prepare-source-review.py"
++python3 -B "$script_dir/test-prepare-patch-publication.py"
++python3 -B "$script_dir/test-patch-publication.py"
++bash "$script_dir/run-compact.sh" \
++  --label patch-publication-workflow \
++  --log "$log_dir/patch-publication-workflow.log" \
++  -- env TEASESCRIPT_COMPACT_TEST_INNER=1 bash "$script_dir/test-patch-publication-workflow.sh"
+\ No newline at end of file
+diff --git a/tools/local-agent/test-patch-publication-workflow.sh b/tools/local-agent/test-patch-publication-workflow.sh
+index af3b68620729fec7aa3c1b1808276d0a79347767..514428eaf675b39652996a05634d190e5fd0f2dc 100755
+--- a/tools/local-agent/test-patch-publication-workflow.sh
++++ b/tools/local-agent/test-patch-publication-workflow.sh
+@@ -16,8 +16,6 @@ script="$root/tools/local-agent/patch-publication.py"
+ target='feat/test-target'
+ transfer='agent-patch-publication/integration-test'
+ 
+-python3 -B "$root/tools/local-agent/test-prepare-patch-publication.py"
+-
+ python3 - "$workflow" \
+   "$root/tools/local-agent/patch-publication-request.cjs" \
+   "$root/tools/local-agent/patch-publication-cleanup-comment.cjs" \
+@@ -38,7 +36,7 @@ assert "patch-publication-cleanup-comment.cjs" in text
+ assert "patch-publication-cleanup-transfer.sh" in text
+ assert "patch-publication-prepare-steps.sh" in text
+ assert "patch-publication-summary.sh" in text
+-assert text.count("ref: ${{ github.workflow_sha }}") >= 6
++assert text.count("ref: ${{ github.workflow_sha }}") >= 5
+ assert "([0-9a-f]{64})$" in request_text
+ assert "Patch publication commands must be placed on a pull request." in request_text
+ assert "github.rest.git.getRef" in request_text
+@@ -56,6 +54,15 @@ assert '[[ "$PUBLISH_RESULT" != success ]]' in transfer_text
+ assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
+ assert "preserved_changed" in transfer_text
+ assert "cleanup-transfer:" in text and "cleanup-comment:" in text
++assert "\n  request:\n" not in text
++prepare_job = text.split("  prepare:\n", 1)[1].split("  test:\n", 1)[0]
++assert "runs-on: ubuntu-slim" in prepare_job
++assert "contents: read" in prepare_job
++assert "issues: read" in prepare_job
++assert "pull-requests: read" in prepare_job
++assert prepare_job.index("Validate publication command") < prepare_job.index("Read exact transfer manifest")
++assert "Export authorized request inputs" in prepare_job
++assert "fetch-depth: 0" not in prepare_job
+ 
+ publish = text.split("  publish:\n", 1)[1].split("  cleanup-transfer:\n", 1)[0]
+ permission_header = publish.split("    outputs:\n", 1)[0]
+@@ -101,6 +108,15 @@ assert (
+     '@github.com/${GITHUB_REPOSITORY}.git"'
+ ) in push_step
+ assert "git push --porcelain origin" not in push_step
++assert "runs-on: ubuntu-slim" in publish
++assert "fetch-depth: 0" not in publish
++
++test_job = text.split("  test:\n", 1)[1].split("  publish:\n", 1)[0]
++assert "runs-on: ubuntu-24.04" in test_job
++assert "timeout-minutes: 15" in test_job
++assert "bash tools/local-agent/test-all.sh" in test_job
++assert "find tools/local-agent" not in test_job
++assert "npm ci --no-audit --no-fund" in test_job
+ 
+ assert text.count("${{ vars.PATCH_PUBLISHER_CLIENT_ID }}") == 1
+ assert text.count("${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}") == 1

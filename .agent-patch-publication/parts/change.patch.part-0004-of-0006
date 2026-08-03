@@ -1,0 +1,107 @@
++            --source-sha "$SOURCE_SHA" \
++            --source-ref benchmark-standard-${{ matrix.iteration }} \
++            --event-name runner-benchmark
++
++  slim-bundle:
++    name: slim-bundle-${{ matrix.iteration }}
++    strategy:
++      fail-fast: false
++      matrix:
++        iteration: [1, 2, 3]
++    runs-on: ubuntu-slim
++    timeout-minutes: 5
++    env:
++      SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
++    steps:
++      - name: Check out trusted bundle tooling
++        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
++        with:
++          ref: ${{ github.workflow_sha }}
++          path: tooling
++          persist-credentials: false
++          show-progress: false
++      - name: Check out selected source
++        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
++        with:
++          ref: ${{ env.SOURCE_SHA }}
++          path: source
++          fetch-depth: 0
++          persist-credentials: false
++          show-progress: false
++      - name: Create verified source bundle
++        run: |
++          cd source
++          bash ../tooling/tools/local-agent/create-source-bundle.sh \
++            --output ../source-artifact \
++            --repository "${{ github.repository }}" \
++            --source-sha "$SOURCE_SHA" \
++            --source-ref benchmark-slim-${{ matrix.iteration }} \
++            --event-name runner-benchmark
+diff --git a/.github/workflows/source-bundle-request-processor.yml b/.github/workflows/source-bundle-request-processor.yml
+index bb7af112bd302ea44003ceb1890ac00576576f26..3e676cb5cf3923b1b0f47d1c83f04c96047160bd 100644
+--- a/.github/workflows/source-bundle-request-processor.yml
++++ b/.github/workflows/source-bundle-request-processor.yml
+@@ -9,12 +9,13 @@ on:
+ permissions: {}
+ 
+ jobs:
+-  validate:
++  bundle:
+     if: >-
+       github.event.workflow_run.event == 'create' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'source-bundle-request/')
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-slim
++    timeout-minutes: 15
+     permissions:
+       contents: read
+     outputs:
+@@ -22,6 +23,11 @@ jobs:
+       request_branch: ${{ steps.request.outputs.request_branch }}
+       request_sha: ${{ steps.request.outputs.request_sha }}
+       status_context: ${{ steps.request.outputs.status_context }}
++      artifact_id: ${{ steps.upload.outputs.artifact-id }}
++      artifact_url: ${{ steps.upload.outputs.artifact-url }}
++      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
++    env:
++      TOOLING_REF: ${{ github.workflow_sha }}
+     steps:
+       - name: Validate exact request against current default branch
+         id: request
+@@ -96,20 +102,6 @@ jobs:
+             core.setOutput('request_sha', requestSha);
+             core.setOutput('status_context', `source-bundle/request/${nonce}`);
+ 
+-  bundle:
+-    needs: validate
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 10
+-    permissions:
+-      contents: read
+-    outputs:
+-      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+-      artifact_url: ${{ steps.upload.outputs.artifact-url }}
+-      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+-    env:
+-      TOOLING_REF: ${{ github.workflow_sha }}
+-      SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+-    steps:
+       - name: Check out trusted bundle tooling
+         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+         with:
+@@ -121,7 +113,7 @@ jobs:
+       - name: Check out requested source as data
+         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+         with:
+-          ref: ${{ env.SOURCE_SHA }}
++          ref: ${{ steps.request.outputs.source_sha }}
+           path: source
+           fetch-depth: 0
+           persist-credentials: false
+@@ -129,9 +121,13 @@ jobs:
+ 
+       - name: Verify exact requested source
+         working-directory: source
++        env:
++          SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
