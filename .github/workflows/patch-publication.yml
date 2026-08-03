@@ -64,27 +64,31 @@ jobs:
           } >> "$GITHUB_ENV"
           printf 'validated=true\n' >> "$GITHUB_OUTPUT"
 
-      - name: Preserve trusted publication tool
-        run: install -m 0755 tools/local-agent/patch-publication.py "$RUNNER_TEMP/patch-publication.py"
+      - name: Preserve trusted publication tools
+        run: |
+          install -m 0755 tools/local-agent/patch-publication.py \
+            "$RUNNER_TEMP/patch-publication.py"
+          install -m 0755 tools/local-agent/patch-publication-prepare-steps.sh \
+            "$RUNNER_TEMP/patch-publication-prepare-steps.sh"
 
       - name: Read exact transfer manifest
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh read-manifest
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" read-manifest
       - name: Verify authorized manifest digest
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh verify-manifest
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" verify-manifest
       - name: Materialize exact patch payload
         id: materialize
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh materialize
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" materialize
       - name: Inspect request
         id: inspect
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh inspect
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" inspect
       - name: Check out exact target base
         env:
           TARGET_BRANCH: ${{ steps.inspect.outputs.target_branch }}
           EXPECTED_BASE_SHA: ${{ steps.inspect.outputs.expected_base_sha }}
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh checkout-base
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" checkout-base
       - name: Prepare exact candidate bundle
         id: prepare
-        run: bash tools/local-agent/patch-publication-prepare-steps.sh prepare
+        run: bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh" prepare
       - name: Name candidate artifact
         id: names
         run: echo "artifact_name=patch-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"

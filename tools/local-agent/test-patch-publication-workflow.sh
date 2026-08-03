@@ -57,6 +57,15 @@ assert "context.payload.comment.id" in request_text
 assert "expected_transfer_sha" in text
 assert "comment_id: ${{ steps.request.outputs.comment_id }}" in text
 assert "Read exact transfer manifest" in text
+preserve_tools = prepare.split(
+    "      - name: Preserve trusted publication tools\n", 1
+)[1].split("\n      - name:", 1)[0]
+assert '"$RUNNER_TEMP/patch-publication.py"' in preserve_tools
+assert '"$RUNNER_TEMP/patch-publication-prepare-steps.sh"' in preserve_tools
+assert prepare.index("Preserve trusted publication tools") < prepare.index("Read exact transfer manifest")
+trusted_prepare_driver = 'bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh"'
+assert prepare.count(trusted_prepare_driver) == 6
+assert "bash tools/local-agent/patch-publication-prepare-steps.sh" not in prepare
 assert 'actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"' in prepare_text
 assert 'sha256sum "$RUNNER_TEMP/manifest.json"' in prepare_text
 assert "materialize-patch" in prepare_text
@@ -875,17 +884,28 @@ PY
 tmp="$(mktemp -d -t patch-publication-workflow-XXXXXX)"
 trap 'rm -rf "$tmp"' EXIT
 cleanup_script="$root/tools/local-agent/patch-publication-cleanup-transfer.sh"
+prepare_script="$root/tools/local-agent/patch-publication-prepare-steps.sh"
 source_repo="$tmp/source"
 remote="$tmp/remote.git"
 output="$tmp/publication"
 manifest="$tmp/manifest.json"
 patch="$tmp/change.patch"
+prepare_output="$tmp/prepare-output"
+untrusted_marker="$tmp/untrusted-prepare-driver-ran"
 
 git init -q -b main "$source_repo"
 git -C "$source_repo" config user.name 'Test Author'
 git -C "$source_repo" config user.email test@example.invalid
+mkdir -p "$source_repo/tools/local-agent"
+cat > "$source_repo/tools/local-agent/patch-publication-prepare-steps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+touch "$UNTRUSTED_MARKER"
+printf 'validation_profile=docs\n' >> "$GITHUB_OUTPUT"
+SH
+chmod +x "$source_repo/tools/local-agent/patch-publication-prepare-steps.sh"
 printf 'before\n' > "$source_repo/example.txt"
-git -C "$source_repo" add example.txt
+git -C "$source_repo" add example.txt tools/local-agent/patch-publication-prepare-steps.sh
 git -C "$source_repo" commit -q -m base
 base="$(git -C "$source_repo" rev-parse HEAD)"
 git -C "$source_repo" branch "$target"
@@ -920,25 +940,63 @@ data = {
 pathlib.Path(out).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PY
 
-GIT_AUTHOR_DATE='2000-01-01T00:00:00+00:00' \
-GIT_COMMITTER_DATE='2000-01-01T00:00:00+00:00' \
-python3 -B "$script" prepare \
-  --repository "$source_repo" \
-  --manifest "$manifest" \
-  --patch "$patch" \
-  --transfer-branch "$transfer" \
-  --default-branch main \
-  --expected-target-branch "$target" \
-  --output-directory "$output"
+git -C "$source_repo" switch -q -c "$transfer"
+mkdir -p "$source_repo/.agent-patch-publication/parts"
+cp "$patch" "$source_repo/.agent-patch-publication/parts/change.patch.part-0001-of-0001"
+cp "$manifest" "$source_repo/.agent-patch-publication/manifest.json"
+git -C "$source_repo" add .agent-patch-publication
+git -C "$source_repo" commit -q -m 'transfer payload'
+expected_transfer_sha="$(git -C "$source_repo" rev-parse HEAD)"
+expected_manifest_sha256="$(sha256sum "$manifest" | awk '{print $1}')"
+
+git init -q --bare "$remote"
+git --git-dir="$remote" symbolic-ref HEAD refs/heads/main
+git -C "$source_repo" push -q "$remote" \
+  "$base:refs/heads/main" \
+  "$base:refs/heads/$target" \
+  "$expected_transfer_sha:refs/heads/$transfer"
+rm -f "$manifest" "$patch"
+
+git clone -q "$remote" "$tmp/publisher"
+install -m 0755 "$script" "$tmp/patch-publication.py"
+install -m 0755 "$prepare_script" "$tmp/patch-publication-prepare-steps.sh"
+: > "$prepare_output"
+(
+  cd "$tmp/publisher"
+  RUNNER_TEMP="$tmp" \
+  GITHUB_WORKSPACE="$tmp/publisher" \
+  GITHUB_OUTPUT="$prepare_output" \
+  UNTRUSTED_MARKER="$untrusted_marker" \
+  TRANSFER_BRANCH="$transfer" \
+  EXPECTED_TRANSFER_SHA="$expected_transfer_sha" \
+  EXPECTED_MANIFEST_SHA256="$expected_manifest_sha256" \
+  EXPECTED_TARGET_BRANCH="$target" \
+  DEFAULT_BRANCH=main \
+    bash "$tmp/patch-publication-prepare-steps.sh" read-manifest
+  RUNNER_TEMP="$tmp" EXPECTED_MANIFEST_SHA256="$expected_manifest_sha256" \
+    bash "$tmp/patch-publication-prepare-steps.sh" verify-manifest
+  RUNNER_TEMP="$tmp" GITHUB_WORKSPACE="$tmp/publisher" GITHUB_OUTPUT="$prepare_output" \
+    EXPECTED_TARGET_BRANCH="$target" DEFAULT_BRANCH=main \
+    bash "$tmp/patch-publication-prepare-steps.sh" materialize
+  RUNNER_TEMP="$tmp" GITHUB_WORKSPACE="$tmp/publisher" GITHUB_OUTPUT="$prepare_output" \
+    TRANSFER_BRANCH="$transfer" EXPECTED_TARGET_BRANCH="$target" DEFAULT_BRANCH=main \
+    bash "$tmp/patch-publication-prepare-steps.sh" inspect
+  RUNNER_TEMP="$tmp" TARGET_BRANCH="$target" EXPECTED_BASE_SHA="$base" \
+    bash "$tmp/patch-publication-prepare-steps.sh" checkout-base
+  RUNNER_TEMP="$tmp" GITHUB_WORKSPACE="$tmp/publisher" GITHUB_OUTPUT="$prepare_output" \
+    TRANSFER_BRANCH="$transfer" EXPECTED_TARGET_BRANCH="$target" DEFAULT_BRANCH=main \
+    bash "$tmp/patch-publication-prepare-steps.sh" prepare
+)
+test ! -e "$untrusted_marker"
+grep -qx 'validation_profile=full' "$prepare_output"
+! grep -qx 'validation_profile=docs' "$prepare_output"
+python3 - "$output/publication.json" <<'PY'
+import json, pathlib, sys
+metadata = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert metadata["validationProfile"] == "full"
+PY
 
 candidate="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["candidateCommitSha"])' "$output/publication.json")"
-git init -q --bare "$remote"
-git -C "$source_repo" push -q "$remote" \
-  "$base:refs/heads/$target" \
-  "$base:refs/heads/$transfer"
-
-expected_transfer_sha="$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")"
-git clone -q "$remote" "$tmp/publisher"
 python3 -B "$script" verify-bundle \
   --repository "$tmp/publisher" \
   --metadata "$output/publication.json" \
