@@ -284,8 +284,10 @@ second language specification or permanent test catalog.
 ## Implemented bounded source fuzzing
 
 The same required deterministic campaign includes two small source families
-through the package-root `compileSource(...)` boundary. They are structured,
-seed-derived templates, not a grammar framework or arbitrary-token fuzzer.
+through the package-root `compileSource(...)` boundary. Each family uses a few
+bounded seed/case-derived choices, so larger explicit-seed campaigns explore
+additional meaningful source strings. This is not a grammar framework or an
+arbitrary-token fuzzer.
 
 - Valid source templates cover literals, unary/binary expressions, ranges and
   templates; variables, lexical scope, lists, objects, scalar sets and `for`;
@@ -305,10 +307,14 @@ must return the same ordered diagnostic codes and spans with no executable plan.
 There are no generated waits, real sleeping, network input, filesystem corpus,
 process-global generator state, or external service.
 
-The default 128-case campaign reaches every template family. Larger explicit
-seed campaigns and exact revision-scoped replay use the command above. A source
-failure prints its valid/near-valid classification, family, mutation where
-applicable, and exact bounded source before the replay command.
+The default 128-case campaign reaches every template family and at least two
+source strings per family. Larger explicit-seed campaigns use the same bounded
+choices to explore more source shapes. Exact replay remains revision-scoped:
+the same repository revision, campaign implementation, seed, run count, and
+case reproduce the source and outcome; internal ordering and the generated
+corpus are not compatibility contracts. A source failure prints its
+valid/near-valid classification, family, selected variant or mutation, and
+exact bounded source before the replay command.
 
 This is deliberately not a complete grammar, abstract runtime model, reducer,
 dependency, browser/Laravel/device fuzzing route, or self-hosted untrusted-PR

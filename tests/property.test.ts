@@ -6,6 +6,12 @@ import {
   parsePropertyCliArguments,
   runPropertyCampaign,
 } from "./property/replay.js";
+import {
+  createNearValidSourceCase,
+  createValidSourceCase,
+  NEAR_VALID_SOURCE_FAMILIES,
+  VALID_SOURCE_FAMILIES,
+} from "./property/source-fuzz.js";
 
 test("required deterministic property campaign preserves durable runtime invariants", () => {
   const first = runPropertyCampaign(defaultPropertyCampaignConfig());
@@ -25,25 +31,66 @@ test("property replay selects the same generated case by seed and case number", 
   assert.deepEqual(full, runPropertyCampaign(config));
 });
 
-test("required campaign reaches every retained operation, malformed, and source-fuzz variant", () => {
+test("required campaign reaches retained variants and varied source-fuzz families", () => {
   const config = defaultPropertyCampaignConfig();
-  const contexts = Array.from({ length: 42 }, (_, index) =>
-    runPropertyCampaign({ ...config, caseIndex: index }).firstCase.context,
+  const cases = Array.from({ length: config.runs }, (_, index) =>
+    runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
   );
+  const contexts = cases.map((result) => result.context);
 
-  for (const operation of ["run", "executeInstruction", "observeTime", "completeAction"]) {
+  for (const operation of [
+    "run",
+    "executeInstruction",
+    "observeTime",
+    "completeAction",
+  ]) {
     assert.ok(contexts.some((context) => context.includes(`operation=${operation}`)));
+  }
+  for (const variant of ["not-due", "duplicate-settlement"]) {
+    assert.ok(
+      contexts.some((context) => context.includes(`rejected-completion=${variant}`)),
+    );
   }
   for (const malformed of ["plan", "snapshot", "checkpoint"]) {
     assert.ok(contexts.some((context) => context.includes(`malformed=${malformed}`)));
   }
-  for (const classification of ["classification=valid", "classification=near-valid"]) {
-    const families = contexts
-      .filter((context) => context.includes(classification))
-      .map((context) => context.match(/family=([^ ]+)/)?.[1]);
-    assert.equal(new Set(families).size, 6);
-  }
+
+  assertSourceFamilyCoverage(cases, "valid", VALID_SOURCE_FAMILIES);
+  assertSourceFamilyCoverage(cases, "near-valid", NEAR_VALID_SOURCE_FAMILIES);
+
+  const replayed = runPropertyCampaign({ ...config, caseIndex: 5 }).firstCase;
+  assert.deepEqual(replayed, cases[5]);
+
+  const changedValidSeed = createValidSourceCase(config.seed + 1, 5);
+  const changedNearValidSeed = createNearValidSourceCase(config.seed + 1, 6);
+  assert.notEqual(changedValidSeed.source, createValidSourceCase(config.seed, 5).source);
+  assert.notEqual(
+    changedNearValidSeed.source,
+    createNearValidSourceCase(config.seed, 6).source,
+  );
 });
+
+function assertSourceFamilyCoverage(
+  cases: readonly { readonly context: string; readonly source?: string }[],
+  classification: "valid" | "near-valid",
+  families: readonly string[],
+): void {
+  for (const family of families) {
+    const sources = cases
+      .filter((result) => (
+        result.context.includes(`classification=${classification}`)
+        && result.context.includes(`family=${family}`)
+      ))
+      .map((result) => result.source);
+
+    assert.ok(sources.length >= 2, `${classification}/${family} must be reached twice`);
+    assert.equal(
+      new Set(sources).size >= 2,
+      true,
+      `${classification}/${family} must vary source`,
+    );
+  }
+}
 
 test("property command accepts only seed, run count, and exact replay case", () => {
   assert.deepEqual(

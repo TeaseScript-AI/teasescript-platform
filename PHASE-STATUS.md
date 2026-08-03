@@ -11,7 +11,7 @@
 - PR #117 completed issue #110 by implementing the generic typed foreground-interaction runtime, shared version-1 interaction limits, canonical player transcript events, typed completion, and versioned checkpoint/restore behavior.
 - PR #206 completed issue #173's testing-strategy work: source-to-runtime conformance is the primary safety net, backed by focused runtime/checkpoint/corruption tests and a small deterministic property campaign.
 - PR #119 recorded the owner-approved Option A source-layout proposal; issue #124 applies its behavior-neutral physical implementation from this baseline.
-- Final verification for PR #206 uses Node `v24.18.0` and npm `11.16.0`; typecheck, build, the bounded property campaign, focused source/runtime suites, the complete configured check (440 tests, 0 failures), full-output check, and diff check pass on its final reviewed head.
+- Final verification for PR #206 uses Node `v24.18.0` and npm `11.16.0`; typecheck, build, the bounded property campaign, focused source/runtime suites, the complete configured check (440 tests, 0 failures), full-output check, and diff check pass on its final implementation head.
 - Live pull-request and GitHub Actions status must be checked in GitHub; this file records the implemented repository state rather than live CI metadata.
 
 ## Implemented in the current repository code
@@ -51,8 +51,8 @@
 
 - Representative real `.tease` source through the package-root compile/runtime path is the primary regression safety net for implemented author-facing syntax and source-reachable observable behavior.
 - A small test-only deterministic campaign retains successful public-operation closure, rejected completion atomicity, checkpoint JSON/restore/resume equivalence, same-seed execution, and structured malformed plan/snapshot/checkpoint rejection. It supports exact seed/run/case replay on the same repository revision; its private ordering is not a compatibility contract.
-- The same bounded required campaign now includes structured valid and near-valid source fuzzing. Valid templates prove plan/runtime closure and repeatable results; targeted near-valid templates prove stable structured diagnostics and no executable plan. They use fixed source, nesting, collection, loop/recursion, and instruction-budget limits with no real waits or external inputs.
-- The normal required check includes the bounded campaign; larger explicit-seed campaigns use the same implementation. The removed catalog/count identity, campaign signatures, private PRNG vectors, complete traces, fixture catalog, work/mutation accounting, profiles, and extended wrapper are not current requirements.
+- The same bounded required campaign now includes structured valid and near-valid source fuzzing. Each family uses small seed/case-derived source choices within fixed nesting, collection, loop/recursion, and instruction-budget limits. Valid cases prove plan/runtime closure and repeatable results; targeted near-valid cases prove stable structured diagnostics and no executable plan. There are no real waits or external inputs.
+- The normal required check includes the bounded campaign; larger explicit-seed campaigns use the same implementation to explore additional source strings. Exact replay is scoped to the same repository revision and campaign implementation. The removed catalog/count identity, campaign signatures, private PRNG vectors, complete traces, fixture catalog, work/mutation accounting, profiles, and extended wrapper are not current requirements.
 
 ### Control flow
 
