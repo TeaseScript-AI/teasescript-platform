@@ -41,7 +41,8 @@
 - One-instruction and event-boundary stepping with instruction budgets.
 - Standalone repository-backed browser playground and constrained development server.
 - Reusable deterministic resume-equivalence coverage that compares uninterrupted execution with execution restored from a JSON-roundtripped checkpoint after every completed instruction boundary across a small bounded runtime-state corpus.
-- The approved Option A source-layout seams and compatibility facades were implemented without a format change at that time; later runtime work changed the internal formats independently.
+- The approved Option A source-layout seams use canonical internal paths without a format change at that time; later runtime work changed the internal formats independently.
+- Issue #180 retired the temporary source-layout facades and migration-only re-exports without changing plan, runtime-snapshot, or checkpoint formats.
 - One generic typed foreground-interaction instruction/action/settlement family for runtime-created button, text, number, and choice actions.
 - Engine-owned text normalization, number parsing, exact choice matching, requesting-speaker provenance, canonical player transcript derivation, mandatory retry behavior, and bounded duplicate settlement replay.
 - Shared version-1 interaction limits of 65,536 UTF-8 bytes for one retained string, 65,536 aggregate UTF-8 bytes per interaction definition, and 4,096 choice options.

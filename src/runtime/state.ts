@@ -2,15 +2,6 @@ import type {
   RuntimeActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
 } from "./actions/model.js";
-export type {
-  RuntimeActionSettlementSnapshot,
-  RuntimeDelayActionSnapshot,
-  RuntimeDelayActionSettlementSnapshot,
-  RuntimeInteractionActionSnapshot,
-  RuntimeInteractionActionSettlementSnapshot,
-  RuntimePendingActionSnapshot,
-} from "./actions/model.js";
-
 import type {
   ExpressionPlan,
   Instruction,
