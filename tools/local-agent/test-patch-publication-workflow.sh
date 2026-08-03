@@ -21,22 +21,25 @@ python3 - "$workflow" \
   "$root/tools/local-agent/patch-publication-cleanup-comment.cjs" \
   "$root/tools/local-agent/patch-publication-cleanup-transfer.sh" \
   "$root/tools/local-agent/patch-publication-prepare-steps.sh" \
+  "$root/tools/local-agent/patch-publication-validate-candidate.sh" \
   "$root/tools/local-agent/patch-publication-summary.sh" \
   "$root/.github/workflows/ci.yml" <<'PY'
 import pathlib, re, subprocess, sys, tempfile, textwrap
-workflow_path, request_path, cleanup_path, transfer_path, prepare_path, summary_path, ci_path = map(pathlib.Path, sys.argv[1:])
+workflow_path, request_path, cleanup_path, transfer_path, prepare_path, validator_path, summary_path, ci_path = map(pathlib.Path, sys.argv[1:])
 text = workflow_path.read_text(encoding="utf-8")
 ci_text = ci_path.read_text(encoding="utf-8")
 request_text = request_path.read_text(encoding="utf-8")
 cleanup_text = cleanup_path.read_text(encoding="utf-8")
 transfer_text = transfer_path.read_text(encoding="utf-8")
 prepare_text = prepare_path.read_text(encoding="utf-8")
+validator_text = validator_path.read_text(encoding="utf-8")
 summary_text = summary_path.read_text(encoding="utf-8")
 assert len(text.encode("utf-8")) <= 12 * 1024
 assert "patch-publication-request.cjs" in text
 assert "patch-publication-cleanup-comment.cjs" in text
 assert "patch-publication-cleanup-transfer.sh" in text
 assert "patch-publication-prepare-steps.sh" in text
+assert "patch-publication-validate-candidate.sh" in text
 assert "patch-publication-summary.sh" in text
 assert text.count("ref: ${{ github.workflow_sha }}") >= 5
 assert "\n  request:\n" not in text
@@ -65,8 +68,22 @@ assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
 assert text.count("runs-on: ubuntu-24.04") == 5
 assert "timeout-minutes: 30" not in text
-assert "run: bash tools/local-agent/check-local-agent.sh" in text
-assert "run: npm ci --no-audit --no-fund" in text
+assert "validation_profile: ${{ steps.prepare.outputs.validation_profile }}" in text
+test_job = text.split("  test:\n", 1)[1].split("\n  publish:\n", 1)[0]
+assert test_job.index("Preserve trusted candidate validation driver") < test_job.index("Verify exact candidate identity and target base")
+assert "needs.prepare.outputs.validation_profile != 'docs'" in test_job
+assert 'bash "$RUNNER_TEMP/validate-candidate" validate-profile "${{ needs.prepare.outputs.validation_profile }}"' in test_job
+assert "run: bash tools/local-agent/check-local-agent.sh" not in test_job
+assert "run: npm ci --no-audit --no-fund" not in test_job
+assert 'case "$mode" in' in validator_text
+assert 'verify-identity) verify_identity' in validator_text
+assert 'validate-profile) validate_profile' in validator_text
+assert 'wait "$tooling_pid"' in validator_text
+assert 'wait "$repository_pid"' in validator_text
+assert "tooling_status != 0 || repository_status != 0" in validator_text
+assert "Documentation-only validation" in validator_text
+assert "Repository validation" in validator_text
+assert "Full validation" in validator_text
 assert "needs.request" not in text
 assert "needs.prepare.outputs.request_validated == 'true'" in text
 assert "cancel-in-progress: true" in ci_text
@@ -90,6 +107,7 @@ verify_marker = "      - name: Verify candidate without executing it\n"
 token_marker = "      - name: Create scoped patch publisher token\n"
 push_marker = "      - name: Publish by non-force fast-forward\n"
 assert publish.index(verify_marker) < publish.index(token_marker) < publish.index(push_marker)
+assert '--expected-validation-profile "$VALIDATION_PROFILE"' in publish
 
 token_step = publish.split(token_marker, 1)[1].split("\n      - name:", 1)[0]
 assert "id: patch-publisher-token" in token_step

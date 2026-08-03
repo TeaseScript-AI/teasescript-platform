@@ -104,12 +104,19 @@ boundary:
 
 Their tests cover different contracts:
 
-- `test-prepare-patch-publication.py` covers producer, sizing, manifest, upload
-  plan, and resumable handoff behavior;
-- `test-patch-publication.py` covers runner-side materialization, candidate
-  creation, and bundle verification;
-- `test-patch-publication-workflow.sh` covers the workflow graph, permissions,
-  immutable pins, cleanup boundaries, and an end-to-end local Git integration.
+- `test-prepare-source-review.py` prevents unsafe or identity-mismatched source
+  artifact extraction, including path traversal, checksum, tree, and ancestry
+  failures;
+- `test-prepare-patch-publication.py` prevents malformed patch splitting,
+  manifests, connector upload plans, and broken resumable handoff state;
+- `test-patch-publication.py` prevents transfer reconstruction, candidate commit,
+  result-tree, metadata, and bundle identity mismatches;
+- `test-patch-publication-validate-candidate.sh` proves documentation, source,
+  and full profiles select the intended commands, that full validation actually
+  overlaps both suites, and that either failure remains fatal;
+- `test-patch-publication-workflow.sh` prevents weakened workflow permissions,
+  mutable action pins, unsafe job ordering, cleanup regressions, and broken local
+  Git integration.
 
 These are complementary tests, not alternative implementations. The canonical
 `check-local-agent.sh` entry point runs each one once.

@@ -28,6 +28,7 @@ jobs:
       expected_base_sha: ${{ steps.prepare.outputs.expected_base_sha }}
       expected_result_tree_sha: ${{ steps.prepare.outputs.expected_result_tree_sha }}
       candidate_commit_sha: ${{ steps.prepare.outputs.candidate_commit_sha }}
+      validation_profile: ${{ steps.prepare.outputs.validation_profile }}
     steps:
       - name: Check out trusted workflow revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -112,43 +113,32 @@ jobs:
           persist-credentials: false
           show-progress: false
 
+      - name: Preserve trusted candidate validation driver
+        run: install -m 0755 tools/local-agent/patch-publication-validate-candidate.sh "$RUNNER_TEMP/validate-candidate"
+
       - name: Download prepared candidate
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ needs.prepare.outputs.artifact_name }}
           path: ${{ runner.temp }}/publication
 
-      - name: Check out exact candidate
+      - name: Verify exact candidate identity and target base
         env:
           TARGET_BRANCH: ${{ needs.prepare.outputs.target_branch }}
           CANDIDATE_COMMIT_SHA: ${{ needs.prepare.outputs.candidate_commit_sha }}
           EXPECTED_BASE_SHA: ${{ needs.prepare.outputs.expected_base_sha }}
           EXPECTED_RESULT_TREE_SHA: ${{ needs.prepare.outputs.expected_result_tree_sha }}
-        run: |
-          git fetch --no-tags origin \
-            "refs/heads/$TARGET_BRANCH:refs/remotes/origin/patch-target"
-          test "$(git rev-parse refs/remotes/origin/patch-target)" = "$EXPECTED_BASE_SHA"
-          git fetch --no-tags "$RUNNER_TEMP/publication/publication.bundle" \
-            "refs/heads/patch-publication-candidate:refs/heads/test-candidate"
-          git checkout --detach refs/heads/test-candidate
-          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT_SHA"
-          test "$(git show -s --format=%P HEAD)" = "$EXPECTED_BASE_SHA"
-          test "$(git show -s --format=%T HEAD)" = "$EXPECTED_RESULT_TREE_SHA"
+        run: bash "$RUNNER_TEMP/validate-candidate" verify-identity
 
-      - name: Set up Node.js
+      - name: Set up Node.js for executable candidate checks
+        if: ${{ needs.prepare.outputs.validation_profile != 'docs' }}
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .nvmrc
           cache: npm
 
-      - name: Validate repository tooling
-        run: bash tools/local-agent/check-local-agent.sh
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Check source
-        run: npm run check
+      - name: Validate candidate against selected risks
+        run: bash "$RUNNER_TEMP/validate-candidate" validate-profile "${{ needs.prepare.outputs.validation_profile }}"
 
   publish:
     needs: [prepare, test]
@@ -191,11 +181,14 @@ jobs:
 
       - name: Verify candidate without executing it
         id: verify
+        env:
+          VALIDATION_PROFILE: ${{ needs.prepare.outputs.validation_profile }}
         run: |
           python3 -B "$RUNNER_TEMP/patch-publication.py" verify-bundle \
             --repository "$GITHUB_WORKSPACE" \
             --metadata "$RUNNER_TEMP/publication/publication.json" \
             --bundle "$RUNNER_TEMP/publication/publication.bundle" \
+            --expected-validation-profile "$VALIDATION_PROFILE" \
             --github-output "$GITHUB_OUTPUT"
 
       - name: Create scoped patch publisher token
