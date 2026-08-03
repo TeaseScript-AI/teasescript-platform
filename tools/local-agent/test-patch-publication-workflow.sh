@@ -56,6 +56,170 @@ assert '[[ "$PUBLISH_RESULT" != success ]]' in transfer_text
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
+
+app_token_action_sha = "bcd2ba49218906704ab6c1aa796996da409d3eb1"
+
+
+def publish_job_section(workflow_text):
+    return workflow_text.split("  publish:\n", 1)[1].split(
+        "  cleanup-transfer:\n", 1
+    )[0]
+
+
+def assert_publish_app_token_contract(workflow_text):
+    publish = publish_job_section(workflow_text)
+    permission_header = publish.split("    outputs:\n", 1)[0]
+    assert re.search(
+        r"(?m)^    permissions:\n      contents: read$", permission_header
+    ), "publish job GITHUB_TOKEN must be read-only"
+    assert "contents: write" not in permission_header, (
+        "publish job must not grant write access to GITHUB_TOKEN"
+    )
+
+    checkout = publish.split(
+        "      - name: Check out trusted workflow revision\n", 1
+    )[1].split("\n      - name:", 1)[0]
+    assert "persist-credentials: false" in checkout, (
+        "publish checkout must not persist GITHUB_TOKEN credentials"
+    )
+    assert "persist-credentials: true" not in checkout
+
+    verify_marker = "      - name: Verify candidate without executing it\n"
+    token_marker = "      - name: Create scoped patch publisher token\n"
+    publish_marker = "      - name: Publish by non-force fast-forward\n"
+    verify_position = publish.index(verify_marker)
+    token_position = publish.index(token_marker)
+    push_position = publish.index(publish_marker)
+    assert verify_position < token_position < push_position, (
+        "App token must be created only after candidate verification and before push"
+    )
+
+    token_step = publish.split(token_marker, 1)[1].split("\n      - name:", 1)[0]
+    assert f"uses: actions/create-github-app-token@{app_token_action_sha}" in token_step, (
+        "uses: actions/create-github-app-token must use the reviewed immutable pin"
+    )
+    assert "id: patch-publisher-token" in token_step, "patch publisher token id missing"
+    assert "client-id: ${{ vars.PATCH_PUBLISHER_CLIENT_ID }}" in token_step, (
+        "PATCH_PUBLISHER_CLIENT_ID variable missing"
+    )
+    assert "private-key: ${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}" in token_step, (
+        "PATCH_PUBLISHER_PRIVATE_KEY secret missing"
+    )
+    assert "permission-contents: write" in token_step, (
+        "permission-contents: write missing"
+    )
+    assert "permission-workflows: write" in token_step, (
+        "permission-workflows: write missing"
+    )
+    for forbidden in [
+        "app-id:",
+        "owner:",
+        "repositories:",
+        "skip-token-revoke:",
+    ]:
+        assert forbidden not in token_step, (
+            f"patch publisher token must stay current-repository-only: {forbidden}"
+        )
+
+    push_step = publish.split(publish_marker, 1)[1]
+    assert (
+        "PATCH_PUBLISHER_TOKEN: "
+        "${{ steps.patch-publisher-token.outputs.token }}"
+    ) in push_step, "PATCH_PUBLISHER_TOKEN output missing from push step"
+    assert (
+        '"https://x-access-token:${PATCH_PUBLISHER_TOKEN}'
+        '@github.com/${GITHUB_REPOSITORY}.git"'
+    ) in push_step, "App-authenticated current-repository push URL missing"
+    assert "git push --porcelain origin" not in push_step
+
+    assert workflow_text.count("${{ vars.PATCH_PUBLISHER_CLIENT_ID }}") == 1
+    assert workflow_text.count("${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}") == 1
+    assert workflow_text.count("${{ steps.patch-publisher-token.outputs.token }}") == 1
+    for forbidden in ["${{ github.token }}", "secrets.GITHUB_TOKEN", "GITHUB_TOKEN:"]:
+        assert forbidden not in publish, (
+            f"publish job must not use built-in write credentials: {forbidden}"
+        )
+
+
+def assert_publish_contract_rejected(workflow_text, expected_fragment):
+    try:
+        assert_publish_app_token_contract(workflow_text)
+    except (AssertionError, ValueError) as error:
+        assert expected_fragment in str(error), (expected_fragment, str(error))
+    else:
+        raise AssertionError("unsafe patch publisher credential contract was accepted")
+
+
+assert_publish_app_token_contract(text)
+
+assert_publish_contract_rejected(
+    text.replace(
+        f"actions/create-github-app-token@{app_token_action_sha}",
+        "actions/create-github-app-token@v3",
+        1,
+    ),
+    "uses: actions/create-github-app-token",
+)
+assert_publish_contract_rejected(
+    text.replace("permission-workflows: write", "permission-workflows: read", 1),
+    "permission-workflows: write",
+)
+assert_publish_contract_rejected(
+    text.replace("permission-contents: write", "permission-contents: read", 1),
+    "permission-contents: write",
+)
+assert_publish_contract_rejected(
+    text.replace(
+        "  publish:\n    needs: [prepare, test]\n    runs-on: ubuntu-latest\n"
+        "    timeout-minutes: 10\n    permissions:\n      contents: read",
+        "  publish:\n    needs: [prepare, test]\n    runs-on: ubuntu-latest\n"
+        "    timeout-minutes: 10\n    permissions:\n      contents: write",
+        1,
+    ),
+    "read-only",
+)
+assert_publish_contract_rejected(
+    text.replace("persist-credentials: false", "persist-credentials: true", 4),
+    "must not persist",
+)
+assert_publish_contract_rejected(
+    text.replace(
+        "          private-key: ${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}",
+        "          private-key: ${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}\n"
+        "          owner: ${{ github.repository_owner }}",
+        1,
+    ),
+    "current-repository-only",
+)
+assert_publish_contract_rejected(
+    text.replace(
+        "          PATCH_PUBLISHER_TOKEN: "
+        "${{ steps.patch-publisher-token.outputs.token }}\n",
+        "",
+        1,
+    ),
+    "PATCH_PUBLISHER_TOKEN",
+)
+
+publish_contract = publish_job_section(text)
+verify_marker = "      - name: Verify candidate without executing it\n"
+token_marker = "      - name: Create scoped patch publisher token\n"
+push_marker = "      - name: Publish by non-force fast-forward\n"
+verify_start = publish_contract.index(verify_marker)
+token_start = publish_contract.index(token_marker)
+push_start = publish_contract.index(push_marker)
+verify_block = publish_contract[verify_start:token_start]
+token_block = publish_contract[token_start:push_start]
+misordered_publish = (
+    publish_contract[:verify_start]
+    + token_block
+    + verify_block
+    + publish_contract[push_start:]
+)
+assert_publish_contract_rejected(
+    text.replace(publish_contract, misordered_publish, 1),
+    "after candidate verification",
+)
 # This guard intentionally accepts one canonical block-style YAML subset.
 # Any alternative structure must fail closed rather than bypass action scanning.
 def line_indentation(line):

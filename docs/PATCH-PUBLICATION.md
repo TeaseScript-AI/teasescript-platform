@@ -15,11 +15,26 @@ The workflow separates untrusted candidate execution from repository write permi
 1. A request job accepts one exact command from a repository writer and binds it to the pull-request head branch and the exact current transfer-branch commit.
 2. A read-only prepare job verifies that exact transfer revision, validates the payload, and creates one deterministic candidate commit.
 3. A separate read-only test job runs repository checks on that exact candidate.
-4. A write-capable publish job re-verifies the tested candidate without executing candidate-controlled code and performs a normal non-force push.
+4. A publish job with only built-in `contents: read` access re-verifies the tested candidate without executing candidate-controlled code. Only after that verification succeeds, it creates one current-repository GitHub App installation token with explicit `contents: write` and `workflows: write` permissions and uses that token for the normal non-force push. The token is not shared with another job and is revoked by the token action when the publish job ends.
 5. A `contents: write` cleanup job checks out only the exact trusted workflow revision and runs the trusted cleanup script without executing candidate-controlled code. It preserves the unchanged exact format-version-2 transfer ref after a failed publication for targeted repair; otherwise it deletes only the exact authorized transfer-ref revision with SHA-bound `--force-with-lease`. A ref that changed after authorization is always preserved.
 6. A separate cleanup job with `contents: read` and `pull-requests: write` checks out only the exact trusted workflow revision, revalidates the original event identity, and then reads the current comment by exact ID, pull request, and unchanged body immediately before deletion. It treats an already-absent comment as a successful no-op, requires any completed delete call to return HTTP 204, and records explicit transfer- and command-cleanup statuses in the Actions summary.
 
 The command must be placed in the pull request's **Conversation** tab. Commands on ordinary issues are rejected. Normal pull-request comments, review summaries, inline review comments, malformed commands, and unauthorized commands remain unaffected. An accepted technical command is removed after the workflow no longer needs it; the Actions run summary remains the audit trail.
+
+## Patch publisher GitHub App
+
+The final target-branch update uses the organization-owned GitHub App `TeaseScript Patch Publisher`. The App is installed only on `TeaseScript-AI/teasescript-platform` and has only repository `Contents: read and write`, `Workflows: read and write`, and GitHub's automatic metadata read access. It has no webhook, OAuth flow, organization permission, account permission, administration permission, or unrelated repository permission.
+
+The repository stores:
+
+- the App client ID as the Actions configuration variable `PATCH_PUBLISHER_CLIENT_ID`;
+- the complete PEM private key as the encrypted Actions secret `PATCH_PUBLISHER_PRIVATE_KEY`.
+
+The client ID is routing metadata rather than a credential. The private key must not be committed, logged, uploaded as an artifact, copied into issue or pull-request text, or exposed to prepare, test, cleanup, or candidate-controlled execution.
+
+The trusted publish job uses the immutable-pinned GitHub-owned `actions/create-github-app-token` action. It does not pass `owner` or `repositories`, so the generated installation token is scoped to the current repository. It explicitly requests only `contents: write` and `workflows: write`, creates the token after candidate verification, and uses it in only the final Git push step. The publish checkout does not persist credentials, and the built-in job `GITHUB_TOKEN` remains read-only.
+
+This dependency is preferred over repository-owned JWT and installation-token code because it is the smallest maintained route for short-lived GitHub App authentication. The rejected alternatives are the recurring manual approval path, a long-lived personal token, a custom token service, or custom cryptographic token-generation code. Pin updates require an ordinary dependency review and CI run.
 
 ## Transfer payload
 
@@ -273,6 +288,8 @@ The comment is re-read and compared immediately before deletion. GitHub's issue-
 
 A failed publication preserves the unchanged exact transfer branch for targeted repair. When the manifest already contains the intended size and SHA-256 for a part that was uploaded incorrectly, replace only that part, commit the corrected transfer branch, and place a new `/publish-patch` command. The manifest and its command digest remain unchanged. The new command binds the retry to the branch's new commit SHA, while any older run is unable to delete the changed ref. When the manifest itself is wrong, regenerate it and use its new digest in the new command.
 
+When the token-creation step fails, verify that the App remains installed on this repository, that its installation has both required repository permissions, and that `PATCH_PUBLISHER_CLIENT_ID` and `PATCH_PUBLISHER_PRIVATE_KEY` still exist with the exact expected values. Do not paste either value into logs or discussion. A failed token step occurs before the target push, so the target branch remains unchanged and the normal retry-preservation rules apply.
+
 A malformed or unauthorized command fails before accepting a transfer ref and is not deleted; remove that unused branch manually. Automatic expiry for abandoned or never-authorized transfer branches is not part of this protocol.
 
 ## Reproducible local verification
@@ -282,7 +299,7 @@ python3 -B tools/local-agent/test-patch-publication.py
 bash tools/local-agent/test-patch-publication-workflow.sh
 ```
 
-The first suite covers the multipart format, compact deterministic byte-fallback and UTF-8 boundary regressions, token-bounded splitting through an injected deterministic counter, the exact PR #174 splitter regression with the optional local tokenizer, minimum-part preservation while preferring readable boundaries, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote for transfer cleanup and executes the exact trusted repository request, preparation, cleanup, and summary scripts against mocked GitHub API responses. It covers retry preservation, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, separated permissions, successful HTTP-204 deletion, already-absent comments before either the read or delete call, changed or mismatched identities, visible deletion failures, the 12-KiB workflow upload budget, and immutable Action pins. Live GitHub event permissions, actual comment deletion, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
+The first suite covers the multipart format, compact deterministic byte-fallback and UTF-8 boundary regressions, token-bounded splitting through an injected deterministic counter, the exact PR #174 splitter regression with the optional local tokenizer, minimum-part preservation while preferring readable boundaries, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote for transfer cleanup and executes the exact trusted repository request, preparation, cleanup, and summary scripts against mocked GitHub API responses. It covers retry preservation, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, separated permissions, successful HTTP-204 deletion, already-absent comments before either the read or delete call, changed or mismatched identities, visible deletion failures, the 12-KiB workflow upload budget, immutable Action pins, read-only built-in publish permissions, non-persisted checkout credentials, exact App variable and secret routing, current-repository token scope, explicit App-token permissions, post-verification token creation, and App-authenticated push wiring. Live GitHub App installation behavior, actual workflow triggering, comment deletion, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
 
 ## Current limits and follow-ups
 
@@ -290,6 +307,6 @@ A small patch uses a single format-version-2 part; larger patches use multiple p
 
 The format does not accept Base64. The protocol limits it to 1,024 parts, 256 KiB per part, and a 64 MiB reconstructed patch as bounded publication-tooling guards rather than TeaseScript content limits. The local tokenizer vocabulary and `tiktoken` installation belong in the reusable offline agent-toolchain archive, not in Git or source artifacts.
 
-The publish job currently uses the repository `GITHUB_TOKEN`. GitHub may require manual approval before a subsequent pull-request workflow runs after that token updates the PR branch. Replacing only the isolated publish credential with a repository-scoped GitHub App installation token is a separate operational follow-up; prepare and test jobs must remain read-only and must not receive the App private key.
+The publish job uses the dedicated repository-scoped GitHub App token described above. Prepare and test remain read-only and never receive the App private key or installation token. A live ordinary publication and a harmless workflow-file publication remain the final environment-specific proofs that pull-request checks start normally and workflow-file updates no longer hit the missing-`workflows` rejection.
 
 All external Actions used by the write-capable workflow are pinned to reviewed immutable commit SHAs. Updating a pin requires a normal dependency review and CI run.
