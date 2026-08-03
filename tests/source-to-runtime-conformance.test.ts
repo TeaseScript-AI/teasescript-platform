@@ -49,6 +49,7 @@ test("executes source output, speaker provenance, collection copies, and control
     "for value in 1..=3 { if value == 2 { continue }\ntotal = total + value }",
     "say `Total ${total}: ${values.first}`",
     "say source[0]",
+    "say as vera \"Override\"",
   ].join("\n"));
 
   const result = run(plan, createFreshRuntimeSnapshot(plan, { seed: 7 }));
@@ -59,7 +60,11 @@ test("executes source output, speaker provenance, collection copies, and control
       event.speaker?.identifier,
       event.speaker?.displayName,
     ]),
-    [["Total 4: first", "vera", "vera"], ["1", "vera", "vera"]],
+    [
+      ["Total 4: first", "vera", "vera"],
+      ["1", "vera", "vera"],
+      ["Override", "vera", "vera"],
+    ],
   );
   assert.deepEqual(
     result.events.filter((event) => event.kind === "developerWarning").map((event) => event.code),

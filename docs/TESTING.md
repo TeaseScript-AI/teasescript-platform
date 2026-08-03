@@ -315,10 +315,10 @@ No private configuration or unpublished helper is required. Record any failure's
 
 The current behavior-oriented corpus lives in focused `tests/*.test.ts` files
 next to the behavior they cover, with `tests/source-to-runtime-conformance.test.ts`
-exercising representative public-package scenarios. Each case starts with real
-`.tease` source, calls the root `compileSource(...)` API, and asserts only the
-relevant observable diagnostic/span, event/order/provenance, status, selected
-binding, structured failure, or checkpoint/replay result.
+exercising representative public-package scenarios. New representative cases
+start with real `.tease` source, call the root `compileSource(...)` API, and
+assert only the relevant observable diagnostic/span, event/order/provenance,
+status, selected binding, structured failure, or checkpoint/replay result.
 
 The shared resume-equivalence helper compiles through the same root API and
 checks every completed instruction boundary by creating a real JSON checkpoint,
