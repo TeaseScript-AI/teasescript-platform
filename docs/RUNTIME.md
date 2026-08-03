@@ -276,7 +276,7 @@ Implementation must preserve ADR 0015 and ADR 0016:
 - settlement and continuation remain separate inspectable runtime boundaries;
 - every required plan, snapshot, and checkpoint schema change is explicitly versioned before implementation merge.
 
-The selected behavior is fully lowered into the instruction plan. The issue #74 exact library token is not added to plan/checkpoint data, no implicit latest lookup occurs, and no migration is included.
+The selected behavior is fully lowered into the instruction plan. No package or library identity lookup is added to plan/checkpoint data, restore does not select an implicit latest implementation, and no migration is included.
 
 ## Current runtime
 

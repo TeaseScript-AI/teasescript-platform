@@ -74,7 +74,12 @@
 
 The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). The implemented pending-action foundation supports compiler-owned blocking `wait` delays and one generic typed foreground-interaction action family. Result-bearing completion uses a short atomic commit into an ordinary runtime destination plus one nullable single-use handoff authority that survives settlement replacement only until the first canonical consume, transfer, return, discard, or exit instruction succeeds. The record is then removed immediately; no settlement-result live/released state or whole-plan interaction liveness analysis remains. Author-facing interaction syntax, smart-autoplay pacing, and Player UI remain unimplemented; background actions remain intentionally empty.
 
-The implemented ADR 0017 infrastructure slice provides a tooling-only exact-identity in-memory library catalog and deterministic static metadata for the documented narrow TypeScript export subset. Its external boundaries use stable capture, a bounded source-text limit before parsing, and bounded retained metadata text before canonicalization. These internal POC identities and metadata shapes are not final package manifests, import syntax, library bindings, or checkpoint data; neither the tooling surface nor privileged adapter internals are exported from the runtime root entry point.
+Issue #179 removed the temporary exact-token library catalog, TypeScript-export
+extractor, external metadata validator, and tooling facade. They had no
+selected runtime, compiler, editor, or package consumer. Future package
+identity, linkage, metadata transport, validation, and library-aware editor
+integration require a concrete producer and consumer; they are not current
+infrastructure.
 
 ## Verification expected before merge
 

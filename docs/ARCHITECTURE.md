@@ -55,7 +55,12 @@ An official TeaseScript construct may compile to:
 - one public Standard Library export;
 - or a fixed compiler-owned composition.
 
-Ordinary library exports use normal function-call syntax and generated type/editor metadata. Libraries may not add grammar productions, keywords, command forms, or parser hooks. New special syntax requires an explicit language/compiler decision.
+Ordinary library exports use normal function-call syntax when linkage is
+implemented. Libraries may not add grammar productions, keywords, command
+forms, or parser hooks. New special syntax requires an explicit
+language/compiler decision. Package identity, linkage, metadata transport, and
+library-aware editor support remain future consumer-driven work; grammar-aware
+support for official syntax is parser/compiler-owned.
 
 Accepted V30 forms and current implementation behavior remain authoritative until a later accepted decision supersedes them. ADR 0017 does not by itself remove current `say` instructions or alter ADR 0016 pending-action semantics.
 
@@ -102,10 +107,8 @@ execute instructions without duplicating operation logic. Whole-snapshot
 construction, cloning, validation, and cross-state invariants remain in
 `src/runtime/state.ts`.
 
-Library catalog and metadata tooling lives under `src/library-tooling/`.
-Privileged adapter placeholders live under `src/platform-internal/` and are
-not part of the runtime root export. No `src/standard-library/` shell was
-created because no real Standard Library implementation is present.
+No `src/standard-library/` shell was created because no real Standard Library
+implementation is present.
 
 The technical playground workspace controller lives at
 `playground/workspace/controller.ts`; the existing entry path remains a
@@ -117,7 +120,6 @@ added.
 | Old path | Canonical path | Exposed symbols or responsibility | Known repository consumers | External-support status | Owner | Removal condition |
 | --- | --- | --- | --- | --- | --- | --- |
 | `src/instructions.ts` | `src/plan/*` | Plan model, capture, and validation symbols; compiler/lowering exports were removed by issue #176 | Compatibility test and legacy-import checker only | Repository migration only; old deep imports are not a public compatibility contract | Compiler/runtime owners | Remove under issue #180 after current consumers use canonical paths |
-| `src/libraries/public.ts` | `src/library-tooling/public.ts` | Catalog and metadata tooling | Compatibility test and legacy-import checker only | Repository migration only; old deep imports are not a public compatibility contract | Library tooling owner | Remove consistently with issues #179 and #180 |
 | `playground/workspace.ts` | `playground/workspace/controller.ts` | Technical workspace compile/run/decode controller | Compatibility tests and legacy-import checker only; browser/server use canonical path | Repository migration only; old deep imports are not a public compatibility contract | Workspace owner | Remove under issue #180 after current consumers use the canonical controller |
 | `src/runtime/validation-testing.ts` | `src/validation-testing.ts` | Test-only validation instrumentation | Compatibility test and legacy-import checker only; production and ordinary tests use the canonical path | Repository migration only; not a root public export or public compatibility contract | Runtime validation owner | Remove under issue #180 after current tests use the canonical path |
 

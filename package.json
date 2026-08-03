@@ -10,7 +10,6 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test:compiled": "node ./tools/test-output-filter.mjs dist/tests/*.test.js",
-    "check:libraries": "npm run build && node ./tools/test-output-filter.mjs dist/tests/library-catalog-metadata.test.js dist/tests/library-export-boundary.test.js dist/tests/library-validation-pipeline.test.js",
     "test": "npm run build && npm run test:compiled",
     "check:legacy-imports": "node tools/check-legacy-imports.mjs",
     "check": "npm run check:legacy-imports && npm test",
@@ -24,7 +23,6 @@
   "devDependencies": {
     "@types/node": "24.13.3",
     "@typescript/native": "npm:typescript@7.0.2",
-    "typescript": "npm:@typescript/typescript6@6.0.2",
     "ts-morph": "28.0.0"
   }
 }

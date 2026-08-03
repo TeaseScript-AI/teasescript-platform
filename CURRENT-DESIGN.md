@@ -13,13 +13,12 @@
 
 The current source layout uses shared plan contracts under `src/plan/`,
 compiler seams under `src/compiler/`, pure runtime action helpers under
-`src/runtime/actions/`, runtime operation entrypoints under
-`src/runtime/operations/`, tooling under `src/library-tooling/`, and
-privileged adapters under `src/platform-internal/`. Temporary source-layout
-facades remain during migration, but they are not public compatibility
-contracts. `src/instructions.ts` now re-exports only plan model, capture, and
-validation symbols; AST lowering remains internal to the compiler. This layout
-refactor does not change format versions.
+`src/runtime/actions/`, and runtime operation entrypoints under
+`src/runtime/operations/`. Temporary source-layout facades remain during
+migration, but they are not public compatibility contracts.
+`src/instructions.ts` now re-exports only plan model, capture, and validation
+symbols; AST lowering remains internal to the compiler. This layout refactor
+does not change format versions.
 
 ## TeaseScript authority
 
@@ -59,7 +58,11 @@ Ordinary TypeScript library code may run synchronously, but may not suspend invi
 
 A plan/checkpoint must contain lowered library behavior or bind to an exact compatible Standard Library identity/version. Restore against an implicit latest implementation is not allowed.
 
-Generated TypeScript signatures and editor metadata provide the intended path for autocomplete, parameter hints, hover documentation, and diagnostics for ordinary library calls. Libraries must not mutate TeaseScript grammar; special command or block syntax remains an explicit language/compiler decision.
+Libraries must not mutate TeaseScript grammar; special command or block syntax
+remains an explicit language/compiler decision. Package identity, linkage,
+metadata transport, and library-aware editor support remain future
+consumer-driven work; grammar-aware support for official syntax is owned by
+the parser/compiler.
 
 ## Accepted first Standard Library POC contract
 

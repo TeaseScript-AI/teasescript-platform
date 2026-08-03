@@ -16,13 +16,17 @@ Every edit increments a source revision and invalidates the plan, snapshot, tran
 
 A production editor should build on the versioned parser/runtime interfaces after the host/player boundary is specified. Debugger history may snapshot selected boundaries; it should not imply that production execution persists every internal instruction.
 
-The current library-infrastructure POC can deterministically derive JSON-safe public metadata from a narrow set of ordinary named TypeScript exports. It records export names, kinds, ordered parameters, available type-display text, documentation, deprecation, and an exact owning-library token. The separate tooling module captures external input and rejects source text over 100,000 characters before parsing; it is not part of the runtime root entry point. Editor transport, `.tease` linkage, and the permanent metadata format remain open.
+The temporary TypeScript-export metadata POC has been removed. Editor
+transport, `.tease` linkage, metadata format and validation, automatic export
+discovery, and library-aware completion remain future consumer-driven work.
 
 ## Accepted library-aware tooling boundary
 
-Under accepted ADR 0017, Standard Library and package-library functions use ordinary TeaseScript call syntax and receive editor support from generated declarations and metadata rather than parser extensions.
+Under accepted ADR 0017, Standard Library and package-library functions use
+ordinary TeaseScript call syntax when linkage is implemented. Future editor
+support must not require parser extensions from libraries.
 
-The metadata pipeline should support at least:
+A future metadata pipeline should support at least:
 
 - completion items for exported functions and types;
 - parameter names, defaults, types, and signature help;
@@ -36,7 +40,9 @@ Special command, block, keyword, and token syntax remains parser-owned. A librar
 
 ## Accepted first Standard Library POC tooling
 
-ADR 0018 accepts parser-owned compact forms for `showButton`, `askText`, `askNumber`, `choose`, and `say` pacing in addition to ordinary library metadata. The editor must combine generated Standard Library information with grammar-aware support for those official forms.
+ADR 0018 accepts parser-owned compact forms for `showButton`, `askText`,
+`askNumber`, `choose`, and `say` pacing. Grammar-aware support for those
+official forms is parser/compiler-owned.
 
 The first implementation should provide:
 
@@ -55,6 +61,6 @@ The first implementation should provide:
 
 The editor may preview the Player application's dynamic choice presentation, but button rows versus dropdown are not canonical runtime state. Buttons may use one or two rows; exact layout measurements and breakpoints remain Player UI work.
 
-Editor metadata must not imply that issue #74's opaque catalog token is a final package version or that the first POC supports imports, package manifests, Standard Library replacement, or checkpoint migration.
+Editor metadata must not imply that the first POC supports imports, package manifests, Standard Library replacement, or checkpoint migration.
 
 The advanced detailed-result option, `showButton` timeout/elapsed return, typing-indicator options, accessibility override field, concrete limit values, LLM interpretation options, and exact choice-layout thresholds remain deferred and must not appear as accepted completion suggestions before their contracts are approved.
