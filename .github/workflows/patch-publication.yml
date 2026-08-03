@@ -10,7 +10,7 @@ jobs:
   prepare:
     if: startsWith(github.event.comment.body, '/publish-patch ')
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: read
       issues: read
@@ -100,7 +100,7 @@ jobs:
   test:
     needs: prepare
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:

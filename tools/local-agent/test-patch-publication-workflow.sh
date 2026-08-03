@@ -71,7 +71,7 @@ assert "needs.request" not in text
 assert "needs.prepare.outputs.request_validated == 'true'" in text
 assert "cancel-in-progress: true" in ci_text
 assert "runs-on: ubuntu-24.04" in ci_text
-assert "timeout-minutes: 10" in ci_text
+assert "timeout-minutes: 5" in ci_text
 assert "run: bash tools/local-agent/check-local-agent.sh" in ci_text
 assert "run: npm ci --no-audit --no-fund" in ci_text
 
