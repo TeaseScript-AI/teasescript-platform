@@ -130,6 +130,11 @@ practical. Follow `docs/TESTING.md` and the assigned issue for property or
 mutation testing; do not add unrelated fuzzing infrastructure, dependencies,
 or production hooks.
 
+New author-facing TeaseScript syntax and source-reachable observable behavior
+require representative source-to-runtime coverage through the public package
+path. Runtime-only primitives without a source route retain focused
+public/trusted-boundary coverage until one exists; see `docs/TESTING.md`.
+
 ## Before substantive coding
 
 State briefly:
@@ -156,6 +161,8 @@ The owner or designated coordinator confirms the execution model. An issue autho
 ## Verification
 
 Run all configured formatting, linting, type checking, build, relevant unit/integration tests, playground smoke tests, and diff checks. Report the exact commands and remaining failures or risks. If a check is not configured or could not be run, state that rather than inventing success.
+
+`npm run check` is the normal complete configured test-suite verification. Do not follow a successful run with `npm run check:full-output`; use the full-output variant only when a failure or a specific debugging investigation requires the complete test listing.
 
 ## Git workflow
 

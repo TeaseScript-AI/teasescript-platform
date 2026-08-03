@@ -1,22 +1,18 @@
 import assert from "node:assert/strict";
 
-import { compileSource } from "../../src/compiler.js";
-import { validateInstructionPlan } from "../../src/plan/validation.js";
 import {
+  compileSource,
   createCheckpoint,
+  createFreshRuntimeSnapshot,
   deserializeCheckpoint,
-  serializeCheckpoint,
-} from "../../src/runtime/checkpoint.js";
-import {
   executeInstruction,
   run,
-} from "../../src/runtime/engine.js";
-import type { InterpreterEvent } from "../../src/runtime/events.js";
-import {
-  createFreshRuntimeSnapshot,
+  serializeCheckpoint,
   validateRuntimeSnapshot,
+  validateInstructionPlan,
+  type InterpreterEvent,
   type RuntimeSnapshot,
-} from "../../src/runtime/state.js";
+} from "../../src/index.js";
 
 const DEFAULT_EQUIVALENCE_SEED = 0x1234_5678;
 const DEFAULT_INSTRUCTION_GUARD = 2_000;

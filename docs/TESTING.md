@@ -17,7 +17,7 @@ The current repository uses:
 - real source-to-runtime tests where public behavior crosses parser, compiler, instruction-plan, and runtime boundaries;
 - deterministic RNG seeds, JSON checkpoint round trips, and runtime resume-equivalence coverage;
 - playground HTTP and static-path security tests;
-- a repository-owned deterministic Phase 1 mutation/property harness for plan and runtime-state boundaries.
+- a small repository-owned deterministic property campaign for runtime and source-pipeline boundaries.
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
@@ -30,7 +30,7 @@ lexer/parser/semantic unit tests
 source-to-runtime contract tests
 runtime invariant and checkpoint tests
 external-data validation and corruption tests
-deterministic property and mutation tests
+deterministic property and bounded source-fuzz tests
 player/host integration tests
 browser E2E tests
 performance benchmarks
@@ -178,113 +178,65 @@ The canonical self-contained checkpoint guarantee uses the serialized runtime RN
 
 JSON-safe runtime state at every instruction boundary does not mean production execution must persist after every instruction.
 
-## Implemented Phase 1 property and mutation harness
+## Implemented Phase 1 deterministic property harness
 
-Issue #120 implements a deterministic, test-owned harness around the current public plan, snapshot, pending-action, completion, checkpoint, restore, and resume boundaries. It uses Node's built-in test runner and adds no dependency or production-only hook.
+The repository keeps one small deterministic campaign around the current public
+plan, runtime, completion, checkpoint, restore, and external-data boundaries.
+It is test-owned, uses Node's built-in runner, and adds no dependency or
+production hook. It complements focused regressions and source-to-runtime
+tests; it is not a second runtime model or a compatibility contract for its
+private runner implementation.
 
 ### Layout and discovery
 
 ```text
 tests/property.test.ts
 tests/property/
-  prng.ts
-  fixtures.ts
-  mutations.ts
-  invariants.ts
   replay.ts
+  source-fuzz.ts
 ```
 
-`tests/property.test.ts` is a root test entrypoint, so the existing `dist/tests/*.test.js` compiled-test discovery executes the smoke campaign through the normal `npm run check` path. Helper modules remain test-owned and import the public exports from `src/index.ts`.
+`tests/property.test.ts` is a root test entrypoint, so normal compiled-test
+discovery executes the required 128-case campaign through `npm run check`.
+The replay implementation imports only public exports from `src/index.ts`.
 
 ### Commands and budgets
 
-```shell
-npm run test:property -- --profile smoke --seed 1364229357 --runs 128
-npm run test:property:extended -- --seed 1591436852 --runs 10000
-```
-
-The required smoke profile defaults to seed `1364229357` and `128` cases. The current mandatory catalog contains `102` ordered cases, all executed at the start of every smoke run; the remaining cases use the repeatable deterministic schedule. The extended profile defaults to seed `1591436852` and `10,000` cases. A moderate implementation-verification budget is `2,000` cases.
-
-Both commands compile the repository before invoking the same `dist/tests/property/replay.js` campaign implementation. After one successful build, independent larger processes may safely use the compiled entrypoint directly with separate seeds:
+The required campaign defaults to seed `1364229357` and 128 cases. For a
+larger local campaign, use the same implementation with an explicit seed and
+run count:
 
 ```shell
-node dist/tests/property/replay.js --profile extended --seed 1591436852 --runs 100000
+npm run test:property -- --seed 1591436852 --runs 2000
 ```
 
-Do not run several build-producing npm commands concurrently against one checkout. Separate compiled processes are read-only and may run in parallel.
+After one successful build, the compiled entrypoint may be run directly. The
+global run cap is 100,000 cases; there are no real waits, network calls, or
+unbounded generated inputs.
 
 ### CLI and replay contract
 
-Supported options are:
-
-- `--profile smoke|extended`;
-- `--seed` as a decimal integer from `1` through `4294967295`;
-- `--runs` as a decimal integer from `1` through `1000000`;
-- `--case` as one zero-based case index below the configured run count;
-- `--progress-every` from `0` through `1000000`.
-
-Signs, fractions, exponents, non-finite text, unsafe values, unsupported ranges, duplicate options, unknown options, and missing values fail clearly. Argument failures return exit status `2`; property or infrastructure failures return `1`; success returns `0`.
-
-Every property failure reports the seed, run budget, case index, mutation/operation ID, property, first boundary, case-specific fixture/state context, generated variant, cause, and an exact command such as:
+The command accepts `--seed`, `--runs`, and optional zero-based `--case`.
+`--case` replays one generated case from the stated campaign on the same
+repository revision and campaign implementation. The small internal property
+ordering is not a compatibility contract. Every failure reports seed, run
+count, case number, property ID, boundary, property-specific context, the
+generated source when applicable, cause, and a working replay command such as:
 
 ```shell
-npm run test:property:extended -- --seed 12345 --runs 250 --case 17
+npm run test:property -- --seed 12345 --runs 250 --case 17
 ```
-
-Progress is concise and periodic. Progress and success lines report the exact accumulated case work units as well as case counts. Successful large campaigns produce one final signature line. The same seed and budget reproduce the same cases, variants, operation order, observations, work-unit total, and signature.
-
-Composite invariant helpers wrap each direct public stage. Failure output therefore reports the first failing stage, such as `createCheckpoint`, `serializeCheckpoint`, `deserializeCheckpoint`, `completeAction:uninterrupted`, or `run:resumed-remainder`, instead of only a composite descriptor label.
-
-### Explicit generation bounds
-
-The harness permits at most:
-
-- `1,000,000` cases;
-- at most three controlled field mutations per case;
-- sixteen conservative direct-public-boundary work units per case;
-- a declared maximum generated graph depth of `64`;
-- `16,000,000` total case-execution work units.
-
-Every case definition declares a conservative `workUnits` ceiling. One measured unit represents one direct call to a documented public validation, runtime, completion, checkpoint, serialization, deserialization, or restore boundary. The harness instruments these calls during execution, rejects a case that performs no public boundary, and fails when measured calls exceed the declared ceiling. Composite resume-equivalence cases currently declare twelve units. Module initialization rejects missing, unsafe, zero, or over-sixteen metadata. Before fixture construction, the campaign derives the exact selected schedule, sums its ceilings, and rejects a total above the configured bound. Progress and final output report the measured executed total; the configured ceiling remains available for comparison. Deterministic schedule-generation overhead and the fixed fixture-catalog setup are bounded separately from public-operation work and do not vary per executed boundary.
-
-Each case also declares a conservative controlled-mutation count from zero through three. Module initialization rejects invalid metadata, the selected schedule is summed before execution, and progress/final output report the accumulated declared mutation count.
-
-Technical boundary cases use the accepted interaction limits: at most the exact accepted string/collection boundary for valid fixtures and one unit over it for rejection fixtures. There is no real-time sleep, network access, process-global generator state, or unpublished homelab implementation.
-
-### Fixtures and mutation domains
-
-Fixture construction prefers real public compile and runtime paths. Because author-facing interaction syntax is not implemented yet, interaction fixtures replace a compiled `wait` instruction with the current public interaction instruction shape and must pass `validateInstructionPlan(...)` before execution. Every baseline plan and snapshot is validated before mutation.
-
-The catalog covers fresh, running, waiting, continuation-ready, halted, and failed snapshots; delay and generic interaction actions; settlements; valid, invalid, duplicate, stale, and unknown completions; checkpoints; JSON round trips; speakers; scopes; loops; calls; and temporaries. Builders assert the exact lifecycle status, pending-action kind, interaction kind, settlement, and active frame structures promised by each fixture name before the catalog is frozen.
-
-The complete fixture catalog is recursively frozen. Every case receives that same immutable catalog, and the campaign verifies the freeze before and after execution. A required regression also proves that a case observed inside a full campaign has the exact same trace entry as isolated `--case` replay.
-
-Controlled mutations cover:
-
-- missing, extra, and wrong-typed fields according to each documented boundary;
-- zero, negative zero, exact numeric boundaries, unsafe integers, and non-finite numbers;
-- action/event, speaker, scope, loop, call-frame, and temporary identities;
-- instruction targets, continuation ownership, destinations, settlement/result relationships, and status chronology;
-- unsupported plan, snapshot, and checkpoint versions;
-- exact-limit and over-limit strings and option collections;
-- sparse arrays, cycles, throwing accessors, non-plain objects, and prototype-sensitive own keys.
-
-Unknown extra fields are observed according to the current contract; the harness does not assume they must be rejected. For the current version-1 completion request boundary, an unknown top-level field is accepted and ignored: the harness compares the complete operation result with the same completion request without that field.
 
 ### Executable properties
 
-The shared assertions enforce:
+The bounded campaign keeps only these durable properties:
 
 ```text
 accepted plan + valid snapshot + successful public runtime operation
 => result snapshot passes the public validator
-=> input plan and input snapshot remain unchanged
 
 invalid or duplicate completion
 => complete canonical state and emitted events remain unchanged
-
-checkpoint creation
-=> checkpoint plan and snapshot equal the original canonical inputs
 
 checkpoint -> JSON -> restore
 => complete canonical plan and snapshot equality with those original inputs
@@ -292,79 +244,84 @@ checkpoint -> JSON -> restore
 restore then continue
 => complete event and final-snapshot equality with uninterrupted execution
 
-mutated external plan/snapshot/checkpoint/request
-=> documented structured acceptance or rejection without incidental native failure,
-   hang, partial mutation, or hidden continuation
+malformed external plan/snapshot/checkpoint data
+=> structured rejection at the public or trusted boundary
 
-same seed + same budget
-=> same complete trace of cases, variants, measured boundary order, mutations, and observations
-=> same SHA-256 signature
+same source + same inputs/time observations + same seed
+=> identical result
 ```
 
-The mandatory catalog is pinned by ordered case ID and count, rejects duplicate IDs, and must fit inside the smoke budget. Known PRNG vectors, a seed/index descriptor vector, and the complete 128-case smoke SHA-256 signature are pinned. The required smoke test captures and compares the exact trace twice; the CLI prints only the compact digest.
-
-A genuine internal programming defect is not concealed. Each confirmed production defect must be reduced to a focused named regression test and handled in the owning repair issue or a separate blocker rather than by weakening the property.
-
-### Large-campaign handoff
-
-A practical first Codex/homelab campaign is `100,000` cases for each of several explicit seeds, for example `1591436852`, `1`, `305419896`, and `3735928559`. On Node `24.18.0`, the strengthened implementation measured `2,000` direct cases in about `1.58` seconds after build with approximately `149` MB maximum resident memory. The complete required suite passed `505` tests in about `7.40` seconds including build with approximately `446` MB maximum resident memory. These measurements are environment-specific; use progress output for unattended runs and derive revised estimates from the target machine.
-
-No private configuration or unpublished helper is required. Record any failure's seed, runs, case, property, boundary, state summary, and replay command on the implementation pull request. Rerun the exact case after every harness repair. Convert confirmed production defects to permanent focused regressions and separate issues where the repair is unrelated or substantial.
+The campaign deliberately does not pin an ordered catalog/count, PRNG vectors,
+successful signatures, complete traces, work/mutation accounting, fixture
+identity, profiles, or CLI compatibility. Exact technical limits, hostile-data
+shapes, interaction variants, and confirmed defects remain in their focused
+runtime/checkpoint/corruption/regression suites. Convert a confirmed product
+defect to a focused permanent regression; do not preserve private harness
+bookkeeping as evidence.
 
 ## Source-to-runtime conformance corpus
 
-A future small behavior-oriented corpus should use a stable layout such as:
+The current behavior-oriented corpus lives in focused `tests/*.test.ts` files
+next to the behavior they cover, with `tests/source-to-runtime-conformance.test.ts`
+exercising representative public-package scenarios. New representative cases
+start with real `.tease` source, call the root `compileSource(...)` API, and
+assert only the relevant observable diagnostic/span, event/order/provenance,
+status, selected binding, structured failure, or checkpoint/replay result.
 
-```text
-tests/cases/
-  collections/
-  control-flow/
-  functions/
-  diagnostics/
-  checkpoint/
-  security-boundaries/
-```
+The shared resume-equivalence helper compiles through the same root API and
+checks every completed instruction boundary by creating a real JSON checkpoint,
+restoring it through the public boundary, and comparing complete events and the
+final snapshot with uninterrupted execution. Use it whenever a representative
+scenario crosses a resumable instruction boundary. Pending-action suites retain
+their focused fake-time and checkpoint cases because completion is a separate
+public operation.
 
-A case may define:
+Prefer behavior-oriented local tests over a generic case schema, fixture
+registry, or broad instruction-plan snapshots. Inspect lowering only in focused
+compiler tests where lowering itself is the subject. The bounded coverage model
+for a consolidation/review lives in the active pull request rather than as a
+second language specification or permanent test catalog.
 
-- `.tease` source;
-- expected diagnostic codes and spans;
-- expected public events;
-- expected final status;
-- selected final values;
-- whether full resume-equivalence is required.
+## Implemented bounded source fuzzing
 
-Prefer assertions on public behavior. Do not use complete instruction-plan snapshots as broad golden files. Assert internal instruction structure only when that structure is itself an accepted contract or when a focused lowering test requires it.
+The same required deterministic campaign includes two classifications through
+the package-root `compileSource(...)` boundary: six valid families and six
+targeted near-valid families. Each family uses a few bounded seed/case-derived
+choices, so larger explicit-seed campaigns explore additional meaningful source
+strings. This is not a grammar framework or an arbitrary-token fuzzer.
 
-## Future Phase 2 source and model-based testing
+- Valid source templates cover literals, unary/binary expressions, ranges and
+  templates; variables, lexical scope, lists, objects, scalar sets and `for`;
+  conditions, `repeat`, `while`, `break` and `continue`; defaults, named calls
+  and bounded recursion; speaker output and `say as`; and deterministic random
+  built-ins.
+- Near-valid templates apply one targeted current diagnostic mutation: a missing
+  declaration identifier or template expression, out-of-loop `break`, unknown
+  name, duplicate function parameter, or composite set element.
 
-Future Phase 2 fuzz and property tests must use fixed seeds and report the failing seed and generated input. Initial implementation should use existing tools unless a demonstrated need justifies a dependency.
+Every valid case is at most 512 source characters, uses nesting at most three,
+collections and loop/recursion counts at most four, and runs with a 200
+instruction budget. It compiles without diagnostics, validates its public plan,
+runs to a valid halted snapshot, and is independently compiled and executed a
+second time with the same seed before comparing the complete observable result.
+Near-valid cases compile the same prepared source twice and must return the
+same ordered diagnostic codes and spans with no executable plan. There are no
+generated waits, real sleeping, network input, filesystem corpus,
+process-global generator state, or external service.
 
-Useful generated inputs include:
+The default 128-case campaign reaches every template family and at least two
+source strings per family. Larger explicit-seed campaigns use the same bounded
+choices to explore more source shapes. Exact replay remains revision-scoped:
+the same repository revision, campaign implementation, seed, run count, and
+case reproduce the source and outcome; internal ordering and the generated
+corpus are not compatibility contracts. A source failure prints its
+valid/near-valid classification, family, selected variant or mutation, and
+exact bounded source before the replay command.
 
-- short token sequences;
-- nested templates and interpolations;
-- bounded nested collections;
-- expressions and calls;
-- Unicode and unusual identifiers;
-- incomplete strings, comments, and blocks;
-- deeply nested but otherwise valid source structures, including parentheses, unary expressions, lists, templates, and interpolations;
-- bounded deeply nested source structures that exercise parser and compiler limits.
-
-Required properties include:
-
-- lexer and parser termination;
-- invalid input produces diagnostics rather than an uncontrolled crash;
-- accepted plans and snapshots are JSON-safe;
-- documented public validation boundaries remain structured;
-- the same seed reproduces the same input and result;
-- failing input, seed, and first failing boundary are reported;
-- generated depth, input size, and total work are bounded;
-- deeply nested valid source either succeeds or reaches a documented bounded rejection rather than an incidental native stack overflow.
-
-This strategy does not assert that deeply nested valid source currently has a confirmed defect. A bug issue requires a repository reproduction that identifies the first failing public boundary.
-
-Phase 1 does not select `fast-check` or another dependency. Phase 2 may propose one only after concrete implementation evidence and the normal dependency review.
+This is deliberately not a complete grammar, abstract runtime model, reducer,
+dependency, browser/Laravel/device fuzzing route, or self-hosted untrusted-PR
+runner. Focused parser, compiler, checkpoint, corruption, and source-to-runtime
+tests remain the evidence for their detailed boundaries.
 
 ## Interactive runtime state-machine testing
 

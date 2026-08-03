@@ -1,549 +1,319 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { compileSource } from "../src/index.js";
 import {
-  MAX_PROPERTY_GRAPH_DEPTH,
-  MAX_PROPERTY_STRING_UTF8_BYTES,
-  assertPropertyFixtureBounds,
-  createPropertyFixtureCatalog,
-  type PropertyFixtureCatalog,
-} from "./property/fixtures.js";
-import {
-  PropertyBoundaryFailure,
-  assertResumeEquivalent,
-  atPropertyBoundary,
-} from "./property/invariants.js";
-import {
-  propertyCases,
-  type PropertyCaseDefinition,
-  type PropertyCaseVariant,
-} from "./property/mutations.js";
-import {
-  createPropertyPrng,
-  nextPropertyUint32,
-} from "./property/prng.js";
-import {
-  MAX_PROPERTY_TOTAL_MUTATIONS,
-  MAX_PROPERTY_TOTAL_WORK_UNITS,
-  MAX_PROPERTY_WORK_UNITS_PER_CASE,
-  PROPERTY_SMOKE_RUNS,
-  PROPERTY_SMOKE_SEED,
-  PropertyCampaignFailure,
-  calculateConfiguredMutationCount,
-  calculateConfiguredWorkUnits,
-  createReplayCommand,
+  createPropertyDefinitions,
   defaultPropertyCampaignConfig,
-  describePropertyCase,
   parsePropertyCliArguments,
-  propertyCliUsage,
+  PropertyCampaignFailure,
   runPropertyCampaign,
-  runPropertyCli,
-  validatePropertyDefinitions,
-  type PropertyCampaignConfig,
-  type PropertyCampaignResult,
-  type PropertyCliIo,
 } from "./property/replay.js";
+import {
+  createNearValidSourceCase,
+  createValidSourceCase,
+  NEAR_VALID_SOURCE_FAMILIES,
+  selectSourceFamily,
+  VALID_SOURCE_FAMILIES,
+} from "./property/source-fuzz.js";
 
-const EXPECTED_PROPERTY_CASE_IDS = Object.freeze([
-  "runtime-run-closes-over-validator",
-  "runtime-execute-instruction-closes-over-validator",
-  "delay-observation-closes-over-validator",
-  "delay-completion-request-closes-over-validator",
-  "interaction-completion-closes-over-validator",
-  "invalid-completion-preserves-state",
-  "duplicate-completion-preserves-state",
-  "checkpoint-json-roundtrip-equivalent",
-  "delay-restore-resume-equivalent",
-  "interaction-restore-resume-equivalent",
-  "plan-missing-format",
-  "plan-extra-root-field",
-  "plan-wrong-version",
-  "plan-wrong-instructions-type",
-  "plan-non-finite-temporary-count",
-  "plan-unsafe-root-end",
-  "plan-negative-zero-boundary",
-  "plan-invalid-jump-target",
-  "plan-invalid-result-destination",
-  "plan-exact-string-limit-accepted",
-  "plan-over-string-limit-structured",
-  "plan-exact-option-limit-accepted",
-  "plan-over-option-limit-structured",
-  "plan-over-aggregate-string-limit-structured",
-  "plan-sparse-instructions",
-  "plan-cycle",
-  "plan-accessor",
-  "plan-non-plain-object",
-  "plan-prototype-sensitive-own-key",
-  "plan-exact-depth-boundary-accepted",
-  "plan-over-depth-boundary-structured",
-  "plan-exact-work-boundary-accepted",
-  "plan-over-work-boundary-structured",
-  "snapshot-missing-status",
-  "snapshot-extra-root-field",
-  "snapshot-wrong-version",
-  "snapshot-wrong-frames-type",
-  "snapshot-unsafe-event-sequence",
-  "snapshot-exact-numeric-boundaries-accepted",
-  "snapshot-zero-session-time",
-  "snapshot-negative-zero-action-id",
-  "snapshot-negative-zero-request-sequence",
-  "snapshot-duplicate-speaker-id",
-  "snapshot-duplicate-scope-id",
-  "snapshot-invalid-loop-id",
-  "snapshot-invalid-call-frame-id",
-  "snapshot-invalid-temporary-id",
-  "snapshot-invalid-instruction-target",
-  "snapshot-invalid-continuation-owner",
-  "snapshot-missing-pending-destination",
-  "snapshot-settlement-result-mismatch",
-  "snapshot-status-action-chronology",
-  "snapshot-settlement-chronology",
-  "snapshot-sparse-frames",
-  "snapshot-cycle",
-  "snapshot-accessor",
-  "snapshot-non-plain-object",
-  "snapshot-prototype-sensitive-own-key",
-  "snapshot-exact-depth-boundary-structured",
-  "snapshot-over-depth-boundary-structured",
-  "snapshot-exact-work-boundary-structured",
-  "snapshot-over-work-boundary-structured",
-  "checkpoint-wrong-version",
-  "checkpoint-nested-plan-version",
-  "checkpoint-nested-snapshot-version",
-  "checkpoint-plan-snapshot-mismatch",
-  "checkpoint-extra-root-field",
-  "checkpoint-prototype-sensitive-own-key",
-  "checkpoint-non-finite-number",
-  "checkpoint-cycle",
-  "checkpoint-accessor",
-  "checkpoint-non-plain-object",
-  "checkpoint-exact-depth-boundary-structured",
-  "checkpoint-over-depth-boundary-structured",
-  "checkpoint-exact-work-boundary-structured",
-  "checkpoint-over-work-boundary-structured",
-  "completion-missing-action-id",
-  "completion-extra-field",
-  "completion-wrong-primitive-type",
-  "completion-unsafe-action-id",
-  "completion-non-finite-action-id",
-  "completion-negative-zero-action-id",
-  "completion-wrong-action-kind",
-  "completion-unknown-action-id",
-  "completion-stale-action-id",
-  "completion-exact-multibyte-text-limit",
-  "completion-over-limit-text",
-  "completion-cycle",
-  "completion-accessor",
-  "completion-non-plain-object",
-  "runtime-malformed-plan-structured",
-  "runtime-malformed-snapshot-structured",
-  "runtime-hostile-plan-accessor-structured",
-  "runtime-hostile-plan-non-plain-structured",
-  "runtime-hostile-plan-cycle-structured",
-  "runtime-hostile-snapshot-accessor-structured",
-  "runtime-hostile-snapshot-non-plain-structured",
-  "runtime-hostile-snapshot-cycle-structured",
-  "interaction-event-capacity-exact-operation",
-  "interaction-event-capacity-exhausted-operation",
-  "delay-event-capacity-exact-operation",
-  "action-id-capacity-operation",
-] as const);
+test("required deterministic property campaign preserves durable runtime invariants", () => {
+  const first = runPropertyCampaign(defaultPropertyCampaignConfig());
+  const second = runPropertyCampaign(defaultPropertyCampaignConfig());
 
-const PINNED_SMOKE_SIGNATURE =
-  "60c046e112942e245387310d06837aa3f37dbae429cba5a24e7f87c6745dd094";
-
-const malformedArguments: readonly (readonly string[])[] = Object.freeze([
-  Object.freeze(["--seed", "0"]),
-  Object.freeze(["--seed", "-1"]),
-  Object.freeze(["--seed", "1.5"]),
-  Object.freeze(["--seed", "1e3"]),
-  Object.freeze(["--seed", "NaN"]),
-  Object.freeze(["--seed", "Infinity"]),
-  Object.freeze(["--seed", "4294967296"]),
-  Object.freeze(["--runs", "0"]),
-  Object.freeze(["--runs", "-1"]),
-  Object.freeze(["--runs", "1.5"]),
-  Object.freeze(["--runs", "1e3"]),
-  Object.freeze(["--runs", "1000001"]),
-  Object.freeze(["--case", "128"]),
-  Object.freeze(["--unknown", "1"]),
-  Object.freeze(["--seed"]),
-  Object.freeze(["--seed", "1", "--seed", "2"]),
-  Object.freeze(["position"]),
-]);
-
-test("property registry pins the complete mandatory Phase 1 catalog", () => {
-  const definitions = propertyCases();
-  const identifiers = definitions.map((definition) => definition.id);
-
-  assert.deepEqual(identifiers, EXPECTED_PROPERTY_CASE_IDS);
-  assert.equal(new Set(identifiers).size, identifiers.length);
-  assert.equal(definitions.length, 102);
-  assert.ok(definitions.length <= PROPERTY_SMOKE_RUNS);
-  assert.doesNotThrow(() => validatePropertyDefinitions(definitions));
-
-  const duplicate = Object.freeze([
-    definitions[0]!,
-    Object.freeze({ ...definitions[0]! }),
-  ]);
-  assert.throws(
-    () => validatePropertyDefinitions(duplicate),
-    /Duplicate property case ID/,
-  );
-  assert.throws(
-    () => validatePropertyDefinitions(Object.freeze([
-      Object.freeze({ ...definitions[0]!, workUnits: MAX_PROPERTY_WORK_UNITS_PER_CASE + 1 }),
-    ])),
-    /invalid workUnits/,
-  );
-  assert.throws(
-    () => validatePropertyDefinitions(Object.freeze([
-      Object.freeze({ ...definitions[0]!, mutationCount: 4 }),
-    ])),
-    /invalid mutationCount/,
-  );
-});
-
-test("fixture bounds revisit shared aliases and inspect own descriptors safely", () => {
-  const shared: Record<string, unknown> = { value: "ok" };
-  let deep: Record<string, unknown> = shared;
-  for (let index = 0; index < MAX_PROPERTY_GRAPH_DEPTH; index += 1) {
-    deep = { next: deep };
-  }
-  assert.throws(
-    () => assertPropertyFixtureBounds({ shallow: shared, deep }),
-    /exceeds property fixture depth/,
-  );
-
-  const nonEnumerable: Record<string, unknown> = {};
-  Object.defineProperty(nonEnumerable, "hidden", {
-    value: "é".repeat(Math.ceil((MAX_PROPERTY_STRING_UTF8_BYTES + 1) / 2)),
-    enumerable: false,
-    configurable: true,
-  });
-  assert.throws(
-    () => assertPropertyFixtureBounds(nonEnumerable),
-    /exceeds property fixture string bytes/,
-  );
-
-  let getterCalls = 0;
-  const accessor: Record<string, unknown> = {};
-  Object.defineProperty(accessor, "hostile", {
-    get(): never {
-      getterCalls += 1;
-      throw new Error("fixture bound getter must not run");
-    },
-    enumerable: true,
-    configurable: true,
-  });
-  assert.throws(
-    () => assertPropertyFixtureBounds(accessor),
-    /must not contain an accessor fixture property/,
-  );
-  assert.equal(getterCalls, 0);
-});
-
-test("deep-frozen fixtures prevent campaign poisoning", () => {
-  const poisoningCase: PropertyCaseDefinition = Object.freeze({
-    id: "synthetic-fixture-poisoning",
-    property: "fixture catalog isolation",
-    boundary: "fixture-immutability",
-    workUnits: 1,
-    mutationCount: 0,
-    repeatable: true,
-    describe: (_fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) =>
-      JSON.stringify({ caseId: "synthetic-fixture-poisoning", fixture: "fresh", variant }),
-    execute(fixtures: PropertyFixtureCatalog) {
-      const mutableSnapshot = fixtures.fresh.snapshot as unknown as { status: string };
-      mutableSnapshot.status = "failed";
-      return { detail: "unreachable", fixtureSummary: "fresh" };
-    },
-  });
-  const config: PropertyCampaignConfig = Object.freeze({
-    profile: "extended",
-    seed: 12345,
-    runs: 1,
-    progressEvery: 0,
-  });
-
-  assert.throws(
-    () => runPropertyCampaign(config, { caseDefinitions: [poisoningCase] }),
-    (error: unknown) => {
-      assert.ok(error instanceof PropertyCampaignFailure);
-      assert.equal(error.caseId, "synthetic-fixture-poisoning");
-      assert.equal(error.boundary, "fixture-immutability");
-      return true;
-    },
-  );
-
-  const replay = runPropertyCampaign(config);
-  assert.equal(replay.executed, 1);
-});
-
-test("required property smoke campaign is exact, deterministic, and bounded", () => {
-  const config = defaultPropertyCampaignConfig("smoke");
-  const first = runPropertyCampaign(config, { captureTrace: true });
-  const second = runPropertyCampaign(config, { captureTrace: true });
-  const configuredWork = calculateConfiguredWorkUnits(config);
-  const configuredMutations = calculateConfiguredMutationCount(config);
-
-  assert.equal(config.seed, PROPERTY_SMOKE_SEED);
-  assert.equal(config.runs, PROPERTY_SMOKE_RUNS);
-  assert.equal(first.executed, PROPERTY_SMOKE_RUNS);
-  assert.ok(first.totalWorkUnits <= configuredWork);
-  assert.ok(first.totalWorkUnits <= MAX_PROPERTY_TOTAL_WORK_UNITS);
-  assert.ok(first.totalMutations <= configuredMutations);
-  assert.ok(first.totalMutations <= MAX_PROPERTY_TOTAL_MUTATIONS);
-  assert.ok(
-    Math.max(...propertyCases().map((definition) => definition.workUnits)) <=
-      MAX_PROPERTY_WORK_UNITS_PER_CASE,
-  );
-  assert.equal(first.signature, PINNED_SMOKE_SIGNATURE);
-  assert.equal(first.trace?.length, PROPERTY_SMOKE_RUNS);
+  assert.equal(first.executed, 128);
   assert.deepEqual(second, first);
 });
 
-test("property PRNG and recorded replay vectors are pinned", () => {
-  let state = createPropertyPrng(1);
-  const values: number[] = [];
-  for (let index = 0; index < 5; index += 1) {
-    const step = nextPropertyUint32(state);
-    values.push(step.value);
-    state = step.state;
+test("property replay selects the same generated case by seed and case number", () => {
+  const config = parsePropertyCliArguments(["--seed", "12345", "--runs", "40"]);
+  const full = runPropertyCampaign(config);
+  const replay = runPropertyCampaign({ ...config, caseIndex: 17 });
+
+  assert.equal(replay.executed, 1);
+  assert.equal(replay.firstCase.index, 17);
+  assert.deepEqual(full, runPropertyCampaign(config));
+});
+
+test("property campaign wraps preparation failures with replay evidence", () => {
+  const cause = new Error("synthetic generator failure");
+  const config = sourceCaseConfig("valid");
+  const definitions = createPropertyDefinitions({
+    createValidSourceCase: () => {
+      throw cause;
+    },
+  });
+
+  assert.throws(
+    () => runPropertyCampaign(config, definitions),
+    (error: unknown) => {
+      assert.ok(error instanceof PropertyCampaignFailure);
+      assert.equal(error.cause, cause);
+      assert.equal(error.result.id, "valid-source-pipeline");
+      assert.equal(error.result.boundary, "package-root compile/run");
+      assert.equal(error.result.context, "preparation-failure context=unavailable");
+      assert.equal(error.result.source, undefined);
+      assert.match(error.message, /seed=/);
+      assert.match(error.message, /runs=/);
+      assert.match(error.message, /case=/);
+      assert.match(error.message, /replay=npm run test:property --/);
+      assert.match(error.message, /cause=Error: synthetic generator failure/);
+      return true;
+    },
+  );
+});
+
+test("valid source determinism independently compiles the prepared source", () => {
+  const config = sourceCaseConfig("valid");
+  let compilationCount = 0;
+  const definitions = createPropertyDefinitions({
+    compileSource: (source) => {
+      compilationCount += 1;
+      return compilationCount === 1
+        ? compileSource(source)
+        : compileSource('say "different"\nexit');
+    },
+  });
+
+  assert.throws(
+    () => runPropertyCampaign(config, definitions),
+    PropertyCampaignFailure,
+  );
+  assert.equal(compilationCount, 2);
+});
+
+test("near-valid source determinism rejects a plan from either compilation", () => {
+  const config = sourceCaseConfig("near-valid");
+  const executable = compileSource("exit");
+  assert.notEqual(executable.plan, null);
+  let compilationCount = 0;
+  const definitions = createPropertyDefinitions({
+    compileSource: (source) => {
+      compilationCount += 1;
+      const rejected = compileSource(source);
+      return compilationCount === 1
+        ? rejected
+        : { ...rejected, plan: executable.plan };
+    },
+  });
+
+  assert.throws(
+    () => runPropertyCampaign(config, definitions),
+    PropertyCampaignFailure,
+  );
+  assert.equal(compilationCount, 2);
+});
+
+test("source scenarios are prepared once for reporting and execution", () => {
+  assertSinglePreparedScenario("valid");
+  assertSinglePreparedScenario("near-valid");
+});
+
+test("exact generated scenarios include metadata as well as source", () => {
+  const config = sourceCaseConfig("near-valid");
+  const scenario = createNearValidSourceCase(config.seed, config.caseIndex!);
+  let generationCount = 0;
+
+  assert.throws(() => assertExactGeneratedScenario(
+    config.seed,
+    config.caseIndex!,
+    () => ({
+      ...scenario,
+      variant: generationCount++ === 0 ? scenario.variant : "metadata-changed",
+    }),
+  ));
+});
+
+test("source family selection uses the selected family collection", () => {
+  assert.equal(selectSourceFamily(["valid-a", "valid-b"], 1, 4), "valid-b");
+  assert.equal(selectSourceFamily(["near-a", "near-b", "near-c"], 1, 4), "near-c");
+});
+
+test("required campaign reaches retained variants and varied source-fuzz families", () => {
+  const config = defaultPropertyCampaignConfig();
+  const cases = Array.from({ length: config.runs }, (_, index) =>
+    runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
+  );
+  const contexts = cases.map((result) => result.context);
+
+  for (const operation of [
+    "run",
+    "executeInstruction",
+    "observeTime",
+    "completeAction",
+  ]) {
+    assert.ok(contexts.some((context) => context.includes(`operation=${operation}`)));
   }
-  assert.deepEqual(values, [270369, 67634689, 2647435461, 307599695, 2398689233]);
-
-  assert.deepEqual(describePropertyCase(12345, 211), {
-    index: 211,
-    id: "delay-restore-resume-equivalent",
-    property: "restored execution equals uninterrupted execution",
-    boundary: "checkpoint/observeTime/run",
-    workUnits: 12,
-    mutationCount: 0,
-    variant: {
-      first: 1555439958,
-      second: 2332626456,
-      third: 4085331165,
-    },
-  });
-});
-
-test("a case from a full campaign is identical to isolated replay", () => {
-  const fullConfig: PropertyCampaignConfig = Object.freeze({
-    profile: "extended",
-    seed: 12345,
-    runs: 40,
-    progressEvery: 0,
-  });
-  const isolatedConfig: PropertyCampaignConfig = Object.freeze({
-    ...fullConfig,
-    caseIndex: 17,
-  });
-  const full = runPropertyCampaign(fullConfig, { captureTrace: true });
-  const isolated = runPropertyCampaign(isolatedConfig, { captureTrace: true });
-
-  assert.equal(full.trace?.[17], isolated.trace?.[0]);
-  assert.deepEqual(full.trace?.slice(17, 18), isolated.trace);
-  assert.equal(isolated.executed, 1);
-  assert.equal(
-    createReplayCommand(isolatedConfig, isolatedConfig.caseIndex!),
-    "npm run test:property:extended -- --seed 12345 --runs 40 --case 17",
-  );
-});
-
-test("property CLI accepts explicit safe seed and run controls", () => {
-  assert.deepEqual(
-    parsePropertyCliArguments([
-      "--profile",
-      "extended",
-      "--seed",
-      "12345",
-      "--runs",
-      "250",
-      "--case",
-      "211",
-      "--progress-every",
-      "10",
-    ]),
-    {
-      profile: "extended",
-      seed: 12345,
-      runs: 250,
-      caseIndex: 211,
-      progressEvery: 10,
-    },
-  );
-});
-
-test("documented npm wrappers match the profile argument contract", () => {
-  const packageJson = JSON.parse(
-    readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-  ) as { readonly scripts: Readonly<Record<string, string>> };
-
-  assert.equal(
-    packageJson.scripts["test:property"],
-    "npm run build && node dist/tests/property/replay.js",
-  );
-  assert.equal(
-    packageJson.scripts["test:property:extended"],
-    "npm run build && node dist/tests/property/replay.js --profile extended",
-  );
-  assert.match(propertyCliUsage(), /generic wrapper to override/);
-});
-
-test("property CLI rejects malformed, negative, unsafe, and unsupported controls", () => {
-  for (const argumentsValue of malformedArguments) {
-    assert.throws(
-      () => parsePropertyCliArguments(argumentsValue),
-      { name: "PropertyCliArgumentError" },
-      argumentsValue.join(" "),
+  for (const variant of ["not-due", "duplicate-settlement"]) {
+    assert.ok(
+      contexts.some((context) => context.includes(`rejected-completion=${variant}`)),
     );
   }
-  assert.match(propertyCliUsage(), /--seed/);
-});
+  for (const malformed of ["plan", "snapshot", "checkpoint"]) {
+    assert.ok(contexts.some((context) => context.includes(`malformed=${malformed}`)));
+  }
 
-test("the real campaign loop wraps a failing case with replay context", () => {
-  const syntheticCase: PropertyCaseDefinition = Object.freeze({
-    id: "synthetic-campaign-failure",
-    property: "synthetic campaign wrapping",
-    boundary: "synthetic-static-boundary",
-    workUnits: 1,
-    mutationCount: 0,
-    repeatable: true,
-    describe: (_fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) => JSON.stringify({
-      caseId: "synthetic-campaign-failure",
-      fixture: "synthetic-fixture",
-      variant,
-    }),
-    execute: () => atPropertyBoundary("synthetic:first-boundary", () => {
-      throw new Error("synthetic failure");
-    }),
-  });
-  const config: PropertyCampaignConfig = Object.freeze({
-    profile: "extended",
-    seed: 12345,
-    runs: 1,
-    progressEvery: 0,
-  });
+  assertSourceFamilyCoverage(cases, "valid", VALID_SOURCE_FAMILIES);
+  assertSourceFamilyCoverage(cases, "near-valid", NEAR_VALID_SOURCE_FAMILIES);
 
-  assert.throws(
-    () => runPropertyCampaign(config, { caseDefinitions: [syntheticCase] }),
-    (error: unknown) => {
-      assert.ok(error instanceof PropertyCampaignFailure);
-      assert.equal(error.seed, 12345);
-      assert.equal(error.runs, 1);
-      assert.equal(error.caseIndex, 0);
-      assert.equal(error.caseId, "synthetic-campaign-failure");
-      assert.equal(error.boundary, "synthetic:first-boundary");
-      assert.match(error.fixtureSummary, /synthetic-fixture/);
-      assert.equal(
-        error.replayCommand,
-        "npm run test:property:extended -- --seed 12345 --runs 1 --case 0",
-      );
-      return true;
-    },
+  const replayed = runPropertyCampaign({ ...config, caseIndex: 5 }).firstCase;
+  assert.deepEqual(replayed, cases[5]);
+
+  const changedValidSeed = createValidSourceCase(config.seed + 1, 5);
+  const changedNearValidSeed = createNearValidSourceCase(config.seed + 1, 6);
+  assert.notEqual(changedValidSeed.source, createValidSourceCase(config.seed, 5).source);
+  assert.notEqual(
+    changedNearValidSeed.source,
+    createNearValidSourceCase(config.seed, 6).source,
   );
 
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const io: PropertyCliIo = {
-    stdout: (text) => stdout.push(text),
-    stderr: (text) => stderr.push(text),
-  };
-  const status = runPropertyCli(
-    ["--profile", "extended", "--seed", "12345", "--runs", "1"],
-    io,
-    (cliConfig) => runPropertyCampaign(cliConfig, {
-      caseDefinitions: [syntheticCase],
-    }),
-  );
-  assert.equal(status, 1);
-  assert.deepEqual(stdout, []);
-  assert.match(stderr.join(""), /boundary=synthetic:first-boundary/);
-  assert.match(stderr.join(""), /fixture=.*synthetic-fixture/);
-  assert.match(stderr.join(""), /--case 0/);
+  const functionsCase = Array.from(
+    { length: VALID_SOURCE_FAMILIES.length },
+    (_, index) => createValidSourceCase(1, index),
+  ).find(({ family }) => family === "functions-defaults-calls-and-recursion");
+  assert.ok(functionsCase);
+  assert.match(functionsCase.source, /return `\$\{prefix\}:\$\{value\}`/);
 });
 
-test("campaign accounting rejects a case that reaches no public boundary", () => {
-  const noBoundaryCase: PropertyCaseDefinition = Object.freeze({
-    id: "synthetic-no-boundary",
-    property: "synthetic accounting regression",
-    boundary: "synthetic-static-boundary",
-    workUnits: 1,
-    mutationCount: 0,
-    repeatable: true,
-    describe: (_fixtures: PropertyFixtureCatalog, variant: PropertyCaseVariant) => JSON.stringify({
-      caseId: "synthetic-no-boundary",
-      fixture: "synthetic-fixture",
-      variant,
-    }),
-    execute: () => Object.freeze({ detail: "no-boundary", fixtureSummary: "synthetic-fixture" }),
-  });
-  const config: PropertyCampaignConfig = Object.freeze({
-    profile: "extended",
-    seed: 12345,
-    runs: 1,
-    progressEvery: 0,
+function assertSourceFamilyCoverage(
+  cases: readonly {
+    readonly index: number;
+    readonly context: string;
+    readonly source?: string;
+  }[],
+  classification: "valid" | "near-valid",
+  families: readonly string[],
+): void {
+  for (const family of families) {
+    const sources = cases
+      .filter((result) => (
+        result.context.includes(`classification=${classification}`)
+        && result.context.includes(`family=${family}`)
+      ))
+      .map((result) => result.source);
+
+    assert.ok(sources.length >= 2, `${classification}/${family} must be reached twice`);
+    assert.equal(
+      new Set(sources).size >= 2,
+      true,
+      `${classification}/${family} must vary source`,
+    );
+
+    const result = cases.find((caseResult) => (
+      caseResult.context.includes(`classification=${classification}`)
+      && caseResult.context.includes(`family=${family}`)
+    ));
+    assert.ok(result);
+    assertExactSourceReplay(result, classification);
+  }
+}
+
+function assertSinglePreparedScenario(
+  classification: "valid" | "near-valid",
+): void {
+  const config = sourceCaseConfig(classification);
+  const expected = createSourceCase(config.seed, config.caseIndex!, classification);
+  let preparedCount = 0;
+  const definitions = createPropertyDefinitions({
+    ...(classification === "valid"
+      ? {
+        createValidSourceCase: (seed, index) => {
+          preparedCount += 1;
+          assert.equal(preparedCount, 1, "valid source must not be generated twice");
+          return createValidSourceCase(seed, index);
+        },
+      }
+      : {
+        createNearValidSourceCase: (seed, index) => {
+          preparedCount += 1;
+          assert.equal(preparedCount, 1, "near-valid source must not be generated twice");
+          return createNearValidSourceCase(seed, index);
+        },
+      }),
   });
 
-  assert.throws(
-    () => runPropertyCampaign(config, { caseDefinitions: [noBoundaryCase] }),
-    (error: unknown) => {
-      assert.ok(error instanceof PropertyCampaignFailure);
-      assert.equal(error.boundary, "work-accounting");
-      assert.match(error.message, /executed no documented public boundary/);
-      assert.match(error.fixtureSummary, /synthetic-fixture/);
-      return true;
-    },
+  const replay = runPropertyCampaign(config, definitions);
+  assert.equal(preparedCount, 1);
+  assert.equal(replay.firstCase.source, expected.source);
+}
+
+function assertExactSourceReplay(
+  result: { readonly index: number; readonly source?: string },
+  classification: "valid" | "near-valid",
+): void {
+  const config = defaultPropertyCampaignConfig();
+  const replayConfig = { ...config, caseIndex: result.index };
+  const expected = assertExactGeneratedScenario(
+    config.seed,
+    result.index,
+    (seed, index) => createSourceCase(seed, index, classification),
   );
-});
-
-test("composite invariants preserve the exact first failing stage", () => {
-  const fixtures = createPropertyFixtureCatalog();
-  assert.throws(
-    () => assertResumeEquivalent(
-      fixtures.waitingDelay.plan,
-      fixtures.waitingDelay.snapshot,
-      () => {
-        throw new Error("synthetic continue failure");
-      },
-      "observeTime",
+  let preparedCount = 0;
+  const replay = runPropertyCampaign(
+    replayConfig,
+    createPropertyDefinitions(
+      classification === "valid"
+        ? {
+          createValidSourceCase: (seed, index) => {
+            preparedCount += 1;
+            assert.equal(preparedCount, 1, "valid replay must reuse its prepared source");
+            return createValidSourceCase(seed, index);
+          },
+        }
+        : {
+          createNearValidSourceCase: (seed, index) => {
+            preparedCount += 1;
+            assert.equal(preparedCount, 1, "near-valid replay must reuse its prepared source");
+            return createNearValidSourceCase(seed, index);
+          },
+        },
     ),
-    (error: unknown) => {
-      assert.ok(error instanceof PropertyBoundaryFailure);
-      assert.equal(error.boundary, "observeTime:uninterrupted");
-      return true;
-    },
-  );
-});
-
-test("property CLI returns zero and concise output for a successful campaign", () => {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const io: PropertyCliIo = {
-    stdout: (text) => stdout.push(text),
-    stderr: (text) => stderr.push(text),
-  };
-  const result: PropertyCampaignResult = Object.freeze({
-    seed: 12345,
-    runs: 2,
-    executed: 2,
-    totalWorkUnits: 4,
-    totalMutations: 2,
-    signature: "1234abcd",
-    firstCase: describePropertyCase(12345, 0),
-    lastCase: describePropertyCase(12345, 1),
-  });
-  const status = runPropertyCli(
-    ["--seed", "12345", "--runs", "2"],
-    io,
-    () => result,
   );
 
-  assert.equal(status, 0);
-  assert.deepEqual(stderr, []);
-  assert.deepEqual(stdout, [
-    "property campaign passed seed=12345 runs=2 executed=2 work=4 mutations=2 signature=1234abcd\n",
-  ]);
+  assert.equal(preparedCount, 1);
+  assert.equal(result.source, expected.source);
+  assert.deepEqual(replay.firstCase, result);
+}
+
+function assertExactGeneratedScenario<T>(
+  seed: number,
+  index: number,
+  createScenario: (seed: number, index: number) => T,
+): T {
+  const first = createScenario(seed, index);
+  const second = createScenario(seed, index);
+  assert.deepEqual(second, first);
+  return first;
+}
+
+function createSourceCase(
+  seed: number,
+  index: number,
+  classification: "valid" | "near-valid",
+) {
+  return classification === "valid"
+    ? createValidSourceCase(seed, index)
+    : createNearValidSourceCase(seed, index);
+}
+
+function sourceCaseConfig(
+  classification: "valid" | "near-valid",
+) {
+  const config = defaultPropertyCampaignConfig();
+  const result = Array.from({ length: config.runs }, (_, index) =>
+    runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
+  ).find((caseResult) =>
+    caseResult.context.includes(`classification=${classification}`),
+  );
+  assert.ok(result, `expected a ${classification} source case`);
+  return { ...config, caseIndex: result.index };
+}
+
+test("property command accepts only seed, run count, and exact replay case", () => {
+  assert.deepEqual(
+    parsePropertyCliArguments(["--seed", "12345", "--runs", "2000", "--case", "17"]),
+    { seed: 12345, runs: 2000, caseIndex: 17 },
+  );
+  assert.throws(() => parsePropertyCliArguments(["--profile", "smoke"]));
+  assert.throws(() => parsePropertyCliArguments(["--runs", "0"]));
 });
