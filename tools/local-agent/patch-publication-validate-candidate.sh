@@ -39,33 +39,9 @@ validate_profile() {
       ;;
 
     full)
-      echo "Full validation: run workflow/local-agent security regressions and repository build/tests in parallel. This prevents transport, permission, cleanup, candidate-verification, source, build, and runtime regressions."
-      log_root=${RUNNER_TEMP:-/tmp}/patch-publication-validation
-      mkdir -p "$log_root"
-      tooling_log="$log_root/tooling.log"
-      repository_log="$log_root/repository.log"
-
-      set +e
-      bash tools/local-agent/check-local-agent.sh >"$tooling_log" 2>&1 &
-      tooling_pid=$!
-      run_repository_checks >"$repository_log" 2>&1 &
-      repository_pid=$!
-
-      wait "$tooling_pid"
-      tooling_status=$?
-      wait "$repository_pid"
-      repository_status=$?
-      set -e
-
-      echo "--- workflow and local-agent validation ---"
-      cat "$tooling_log"
-      echo "--- repository build and tests ---"
-      cat "$repository_log"
-
-      if ((tooling_status != 0 || repository_status != 0)); then
-        echo "Candidate validation failed: tooling_status=$tooling_status repository_status=$repository_status" >&2
-        exit 1
-      fi
+      echo "Full validation: first run workflow/local-agent security regressions, then repository build/tests. This prevents transport, permission, cleanup, candidate-verification, source, build, and runtime regressions."
+      bash tools/local-agent/check-local-agent.sh
+      run_repository_checks
       ;;
 
     *)

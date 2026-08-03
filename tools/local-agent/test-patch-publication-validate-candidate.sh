@@ -16,21 +16,12 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 work="$tmp/work"
 bin="$tmp/bin"
-sync="$tmp/sync"
-mkdir -p "$work/tools/local-agent" "$bin" "$sync"
+mkdir -p "$work/tools/local-agent" "$bin"
 
 cat > "$work/tools/local-agent/check-local-agent.sh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'tooling\n' >> "$CALLS"
-if [[ ${EXPECT_PARALLEL:-0} == 1 ]]; then
-  touch "$SYNC/tooling-start"
-  for _ in {1..100}; do
-    [[ -e "$SYNC/repository-start" ]] && break
-    sleep 0.01
-  done
-  [[ -e "$SYNC/repository-start" ]]
-fi
 exit "${TOOLING_STATUS:-0}"
 STUB
 chmod +x "$work/tools/local-agent/check-local-agent.sh"
@@ -40,17 +31,7 @@ cat > "$bin/npm" <<'STUB'
 set -euo pipefail
 printf 'npm %s\n' "$*" >> "$CALLS"
 case "$*" in
-  'ci --no-audit --no-fund')
-    if [[ ${EXPECT_PARALLEL:-0} == 1 ]]; then
-      touch "$SYNC/repository-start"
-      for _ in {1..100}; do
-        [[ -e "$SYNC/tooling-start" ]] && break
-        sleep 0.01
-      done
-      [[ -e "$SYNC/tooling-start" ]]
-    fi
-    exit "${CI_STATUS:-0}"
-    ;;
+  'ci --no-audit --no-fund') exit "${CI_STATUS:-0}" ;;
   'run check') exit "${CHECK_STATUS:-0}" ;;
   *) exit 64 ;;
 esac
@@ -63,7 +44,7 @@ run_profile() {
   shift
   (
     cd "$work"
-    env PATH="$bin:$PATH" RUNNER_TEMP="$tmp/runner" CALLS="$calls" SYNC="$sync" "$@" \
+    env PATH="$bin:$PATH" RUNNER_TEMP="$tmp/runner" CALLS="$calls" "$@" \
       bash "$runner" validate-profile "$profile"
   )
 }
@@ -107,35 +88,37 @@ run_profile docs >/dev/null
 test ! -s "$calls"
 
 : > "$calls"
-rm -f "$sync"/*
 run_profile source >/dev/null
 test "$(cat "$calls")" = $'npm ci --no-audit --no-fund\nnpm run check'
 
 : > "$calls"
-rm -f "$sync"/*
-run_profile full EXPECT_PARALLEL=1 >/dev/null
-grep -qx 'tooling' "$calls"
-grep -qx 'npm ci --no-audit --no-fund' "$calls"
-grep -qx 'npm run check' "$calls"
+run_profile full >/dev/null
+test "$(cat "$calls")" = $'tooling\nnpm ci --no-audit --no-fund\nnpm run check'
 
 : > "$calls"
-rm -f "$sync"/*
 set +e
-failure=$(run_profile full EXPECT_PARALLEL=1 TOOLING_STATUS=7 CHECK_STATUS=9 2>&1)
+run_profile full TOOLING_STATUS=7 >/dev/null 2>&1
 status=$?
 set -e
-test "$status" -eq 1
-grep -q 'tooling_status=7 repository_status=9' <<<"$failure"
+test "$status" -eq 7
+test "$(cat "$calls")" = 'tooling'
 
 : > "$calls"
-rm -f "$sync"/*
 set +e
-failure=$(run_profile full EXPECT_PARALLEL=1 CI_STATUS=8 2>&1)
+run_profile full CI_STATUS=8 >/dev/null 2>&1
 status=$?
 set -e
-test "$status" -eq 1
-grep -q 'tooling_status=0 repository_status=8' <<<"$failure"
+test "$status" -eq 8
+test "$(cat "$calls")" = $'tooling\nnpm ci --no-audit --no-fund'
 test "$(grep -c '^npm run check$' "$calls" || true)" -eq 0
+
+: > "$calls"
+set +e
+run_profile full CHECK_STATUS=9 >/dev/null 2>&1
+status=$?
+set -e
+test "$status" -eq 9
+test "$(cat "$calls")" = $'tooling\nnpm ci --no-audit --no-fund\nnpm run check'
 
 if run_profile unknown >/dev/null 2>&1; then
   echo 'unknown validation profile unexpectedly succeeded' >&2

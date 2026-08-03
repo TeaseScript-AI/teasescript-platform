@@ -78,9 +78,10 @@ assert "run: npm ci --no-audit --no-fund" not in test_job
 assert 'case "$mode" in' in validator_text
 assert 'verify-identity) verify_identity' in validator_text
 assert 'validate-profile) validate_profile' in validator_text
-assert 'wait "$tooling_pid"' in validator_text
-assert 'wait "$repository_pid"' in validator_text
-assert "tooling_status != 0 || repository_status != 0" in validator_text
+assert 'bash tools/local-agent/check-local-agent.sh' in validator_text
+assert 'run_repository_checks' in validator_text
+assert 'tooling_pid' not in validator_text
+assert 'repository_pid' not in validator_text
 assert "Documentation-only validation" in validator_text
 assert "Repository validation" in validator_text
 assert "Full validation" in validator_text

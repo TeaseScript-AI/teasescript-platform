@@ -112,8 +112,8 @@ Their tests cover different contracts:
 - `test-patch-publication.py` prevents transfer reconstruction, candidate commit,
   result-tree, metadata, and bundle identity mismatches;
 - `test-patch-publication-validate-candidate.sh` proves documentation, source,
-  and full profiles select the intended commands, that full validation actually
-  overlaps both suites, and that either failure remains fatal;
+  and full profiles select the intended commands, preserve fail-fast ordering,
+  and treat every required suite failure as fatal;
 - `test-patch-publication-workflow.sh` prevents weakened workflow permissions,
   mutable action pins, unsafe job ordering, cleanup regressions, and broken local
   Git integration.
