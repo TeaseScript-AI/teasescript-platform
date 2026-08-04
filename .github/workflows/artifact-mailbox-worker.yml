@@ -1,9 +1,7 @@
-name: Source bundle artifact request
-run-name: Source bundle artifact request ${{ github.event.comment.id }}
+name: Artifact mailbox worker
 
 on:
-  issue_comment:
-    types: [created]
+  workflow_call:
 
 permissions: {}
 

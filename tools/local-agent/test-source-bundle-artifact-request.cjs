@@ -237,7 +237,7 @@ function artifactFixture({ artifactId, runId, sourceSha, current = false, expire
         full_name: REPOSITORY,
       },
       path: current
-        ? '.github/workflows/artifact-mailbox.yml'
+        ? '.github/workflows/patch-publication.yml'
         : '.github/workflows/source-bundle.yml',
       status: current ? 'in_progress' : 'completed',
       conclusion: current ? null : 'success',

@@ -16,7 +16,8 @@ workflow="$root/.github/workflows/source-bundle.yml"
 request_workflow="$root/.github/workflows/source-bundle-request.yml"
 processor_workflow="$root/.github/workflows/source-bundle-request-processor.yml"
 index_workflow="$root/.github/workflows/source-bundle-index.yml"
-artifact_request_workflow="$root/.github/workflows/artifact-mailbox.yml"
+artifact_router_workflow="$root/.github/workflows/patch-publication.yml"
+artifact_request_workflow="$root/.github/workflows/artifact-mailbox-worker.yml"
 chatgpt_workflow="$root/docs/CHATGPT-GITHUB-WORKFLOW.md"
 development_workflow="$root/docs/DEVELOPMENT-WORKFLOW.md"
 agents_file="$root/AGENTS.md"
@@ -33,6 +34,7 @@ python3 - \
   "$request_workflow" \
   "$processor_workflow" \
   "$index_workflow" \
+  "$artifact_router_workflow" \
   "$artifact_request_workflow" \
   "$chatgpt_workflow" \
   "$development_workflow" \
@@ -45,10 +47,11 @@ automatic = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 gate = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
 processor = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 index = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
-artifact_request = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8")
-chatgpt = pathlib.Path(sys.argv[6]).read_text(encoding="utf-8")
-development = pathlib.Path(sys.argv[7]).read_text(encoding="utf-8")
-agents = pathlib.Path(sys.argv[8]).read_text(encoding="utf-8")
+artifact_router = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8")
+artifact_request = pathlib.Path(sys.argv[6]).read_text(encoding="utf-8")
+chatgpt = pathlib.Path(sys.argv[7]).read_text(encoding="utf-8")
+development = pathlib.Path(sys.argv[8]).read_text(encoding="utf-8")
+agents = pathlib.Path(sys.argv[9]).read_text(encoding="utf-8")
 
 refs = re.findall(
     r"^\s*uses:\s*([^\s#]+)",
@@ -168,7 +171,15 @@ assert "core.setFailed" in index
 assert "runs-on: ubuntu-24.04" in index
 assert "timeout-minutes: 3" in index
 
-assert re.search(r"^  issue_comment:\n    types: \[created\]", artifact_request, re.MULTILINE)
+assert re.search(r"^  issue_comment:\n    types: \[created\]", artifact_router, re.MULTILINE)
+assert "permissions: {}" in artifact_router
+artifact_route = artifact_router.split("  mailbox:\n", 1)[1].split("\n  prepare:\n", 1)[0]
+assert "uses: ./.github/workflows/artifact-mailbox-worker.yml" in artifact_route
+assert "pull-requests: read" in artifact_route
+assert "pull-requests: write" not in artifact_route
+assert "author_association" not in artifact_route
+assert re.search(r"^  workflow_call:\n", artifact_request, re.MULTILINE)
+assert "issue_comment:" not in artifact_request
 assert "permissions: {}" in artifact_request
 assert "github.event.issue.number == 235" in artifact_request
 assert "startsWith(github.event.comment.body, '/artifact source ')" in artifact_request

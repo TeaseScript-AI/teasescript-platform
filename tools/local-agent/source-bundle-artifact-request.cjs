@@ -24,6 +24,8 @@ const TRUSTED_PRODUCER_PATHS = new Set([
   '.github/workflows/source-bundle-request-processor.yml',
   '.github/workflows/source-bundle-artifact-request.yml',
   '.github/workflows/artifact-mailbox.yml',
+  '.github/workflows/artifact-mailbox-worker.yml',
+  '.github/workflows/patch-publication.yml',
 ]);
 
 class ArtifactRequestError extends Error {
@@ -710,7 +712,11 @@ async function verifyArtifactMetadata({
   const currentRunAllowed =
     allowCurrentRun &&
     run.id === context.runId &&
-    run.path === '.github/workflows/artifact-mailbox.yml' &&
+    [
+      '.github/workflows/artifact-mailbox.yml',
+      '.github/workflows/artifact-mailbox-worker.yml',
+      '.github/workflows/patch-publication.yml',
+    ].includes(run.path) &&
     ['queued', 'in_progress'].includes(run.status);
   if (!currentRunAllowed && !(run.status === 'completed' && run.conclusion === 'success')) {
     throw new ArtifactRequestError('The artifact producer workflow has not completed successfully.');
