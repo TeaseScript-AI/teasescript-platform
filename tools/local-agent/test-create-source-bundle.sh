@@ -16,8 +16,7 @@ workflow="$root/.github/workflows/source-bundle.yml"
 request_workflow="$root/.github/workflows/source-bundle-request.yml"
 processor_workflow="$root/.github/workflows/source-bundle-request-processor.yml"
 index_workflow="$root/.github/workflows/source-bundle-index.yml"
-artifact_router_workflow="$root/.github/workflows/patch-publication.yml"
-artifact_request_workflow="$root/.github/workflows/artifact-mailbox-worker.yml"
+artifact_request_workflow="$root/.github/workflows/artifact-mailbox.yml"
 chatgpt_workflow="$root/docs/CHATGPT-GITHUB-WORKFLOW.md"
 development_workflow="$root/docs/DEVELOPMENT-WORKFLOW.md"
 agents_file="$root/AGENTS.md"
@@ -34,7 +33,6 @@ python3 - \
   "$request_workflow" \
   "$processor_workflow" \
   "$index_workflow" \
-  "$artifact_router_workflow" \
   "$artifact_request_workflow" \
   "$chatgpt_workflow" \
   "$development_workflow" \
@@ -47,11 +45,10 @@ automatic = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 gate = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
 processor = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 index = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
-artifact_router = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8")
-artifact_request = pathlib.Path(sys.argv[6]).read_text(encoding="utf-8")
-chatgpt = pathlib.Path(sys.argv[7]).read_text(encoding="utf-8")
-development = pathlib.Path(sys.argv[8]).read_text(encoding="utf-8")
-agents = pathlib.Path(sys.argv[9]).read_text(encoding="utf-8")
+artifact_request = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8")
+chatgpt = pathlib.Path(sys.argv[6]).read_text(encoding="utf-8")
+development = pathlib.Path(sys.argv[7]).read_text(encoding="utf-8")
+agents = pathlib.Path(sys.argv[8]).read_text(encoding="utf-8")
 
 refs = re.findall(
     r"^\s*uses:\s*([^\s#]+)",
@@ -171,15 +168,7 @@ assert "core.setFailed" in index
 assert "runs-on: ubuntu-24.04" in index
 assert "timeout-minutes: 3" in index
 
-assert re.search(r"^  issue_comment:\n    types: \[created\]", artifact_router, re.MULTILINE)
-assert "permissions: {}" in artifact_router
-artifact_route = artifact_router.split("  mailbox:\n", 1)[1].split("\n  prepare:\n", 1)[0]
-assert "uses: ./.github/workflows/artifact-mailbox-worker.yml" in artifact_route
-assert "pull-requests: read" in artifact_route
-assert "pull-requests: write" not in artifact_route
-assert "author_association" not in artifact_route
-assert re.search(r"^  workflow_call:\n", artifact_request, re.MULTILINE)
-assert "issue_comment:" not in artifact_request
+assert re.search(r"^  issue_comment:\n    types: \[created\]", artifact_request, re.MULTILINE)
 assert "permissions: {}" in artifact_request
 assert "github.event.issue.number == 235" in artifact_request
 assert "startsWith(github.event.comment.body, '/artifact source ')" in artifact_request
@@ -201,8 +190,6 @@ assert artifact_request.count("uses: actions/checkout@") == 2
 assert "ref: ${{ github.workflow_sha }}" in artifact_request
 assert "repository: ${{ steps.resolve.outputs.source_repository }}" in artifact_request
 assert "ref: ${{ steps.resolve.outputs.source_sha }}" in artifact_request
-production_guard = "steps.resolve.outputs.resolved == 'true' && steps.resolve.outputs.cache_hit == 'false'"
-assert artifact_request.count(production_guard) == 5
 assert artifact_request.count("persist-credentials: false") == 2
 assert "source-bundle-artifact-request.cjs" in artifact_request
 assert "request.resolveRequest" in artifact_request
@@ -216,16 +203,13 @@ assert "sourceSha: process.env.SOURCE_SHA" in artifact_request
 assert "runs-on: ubuntu-24.04" in artifact_request
 assert "timeout-minutes: 8" in artifact_request
 
-assert "use mailbox\n#235 for a confirmed miss" in agents
-assert "Download a valid hit immediately" in agents
-assert "90-second wait\ndoes not apply to the mailbox" in agents
+assert "Artifact mailbox #235" in agents
+assert "valid hit is downloaded immediately" in agents
+assert "Do not invent a mailbox delay" in " ".join(agents.split())
 assert "Issue [#235]" in chatgpt
 assert "Commands elsewhere are ignored" in chatgpt
 assert "A valid hit starts no workflow, posts no comment, and requires no wait" in chatgpt
 assert "Do not copy the compatibility route's 90-second wait" in chatgpt
-assert "complete resolved identity and artifact match" in chatgpt
-assert "at most ten total request correlations" in development
-assert "Fixed-index failure replaces only that" in development
 assert "Issue `#235` is the sole Artifact mailbox" in development
 assert "skipped for every other issue or pull request" in development
 assert "A valid hit allocates no runner, starts no workflow, posts no comment, and waits" in development

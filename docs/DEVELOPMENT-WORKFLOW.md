@@ -372,8 +372,8 @@ The mailbox contains one authoritative `github-actions[bot]` registry comment,
 user ID `41898282`, with a stable hidden marker. Each update:
 
 - removes expired ready entries;
-- keeps newest entries first and at most ten total request correlations;
-- merges only the same complete resolved identity and artifact;
+- keeps newest entries first and at most ten entries;
+- merges equivalent source/artifact results while retaining all exact request IDs;
 - preserves PR head repository/ref, base SHA, and merge-base SHA;
 - emits compact connector arguments and a fully populated trusted preparation
   command;
@@ -382,12 +382,10 @@ user ID `41898282`, with a stable hidden marker. Each update:
 
 Whole-workflow serialization prevents concurrent read-modify-write loss. The
 registry is the only persistent result comment; no request creates its own bot
-comment. After a terminal entry is safely persisted, the workflow attempts to
-delete only the exact revalidated command. For a produced artifact, fixed-index
-publication is last. Cleanup failure emits a warning without failing the
-producer or invalidating the ready result. Fixed-index failure replaces only that
-producer's ready correlation with failed state. A redelivery whose command and
-retained terminal entry are both absent is a no-op rather than new failure state.
+comment. After a ready or failed entry is safely persisted, the workflow deletes
+only the exact revalidated command comment. Redelivery is idempotent after that
+deletion. Cleanup is retried without replacing a usable ready entry, and cleanup
+failure remains visible as a workflow failure.
 
 ### Phase 1 timing evidence and Phase 2 gate
 
