@@ -109,6 +109,17 @@ The shared project folder should contain only material useful across chat sessio
 - historical project packages and superseded design documents;
 - dated audit and review reports when retained for evidence.
 
+Stable shared routing and bootstrap guidance are controlled derivatives rather
+than second editable workflow owners. Their maintainable sources live in
+`tools/local-agent/shared-project/` and `docs/LOCAL-AGENT-BOOTSTRAP.md`.
+`tools/local-agent/prepare-shared-project.py` validates those sources against a
+specific bootstrap archive and stages the exact stable replacement set. The
+large archive and generated replacement directory remain outside Git.
+
+Replace the shared routing/bootstrap files as one set. Remove older suffixed or
+versioned current copies before upload, and record the manual project-folder
+synchronization separately; a repository merge alone does not prove it occurred.
+
 Research and historical material must be explicitly labeled non-authoritative. It may inform design but cannot silently define syntax, architecture, or implementation status.
 
 ## Material intentionally excluded from GitHub

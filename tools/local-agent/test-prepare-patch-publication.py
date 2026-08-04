@@ -924,6 +924,16 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertIn("--reset-publication-stage", instructions)
         self.assertIn("never requires manual placeholder substitution", instructions)
         self.assertIn("Do not Base64-encode", instructions)
+        self.assertIn("Do not pre-open or manually regenerate parts", instructions)
+        self.assertIn(
+            "do not substitute\n  complete changed files for generated patch parts",
+            instructions,
+        )
+        self.assertIn(
+            "Do not perform another repository write until that exact match\n"
+            "has been recorded",
+            instructions,
+        )
 
 
 if __name__ == "__main__":

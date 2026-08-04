@@ -54,6 +54,7 @@ work.
 - `PHASE-STATUS.md`: current milestone status and verification evidence.
 - `AGENTS.md`: coding, review, and Git rules for every agent.
 - `docs/DEVELOPMENT-WORKFLOW.md`: coordinator, executor, pull-request, documentation, and final-verification workflow.
+- `docs/LOCAL-AGENT-BOOTSTRAP.md`: canonical distributed-bootstrap contract and shared-project staging route.
 - `docs/README.md`: documentation map.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
 - `docs/specifications/`: accepted consolidated specifications.

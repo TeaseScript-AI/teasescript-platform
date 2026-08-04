@@ -162,6 +162,13 @@ small edit when verified patch publication is required. That retransmits the
 complete file and bypasses the compact, exact patch handoff. Prepare and publish
 the tested local Git change through this route instead.
 
+Low-level connector blob, tree, commit, and branch actions are permitted here
+only as the exact currently exposed helper-generated action for the declared
+`.agent-patch-publication/` transfer payload. Do not use them to upload ordinary
+source or documentation files, a complete manually assembled patch, manually
+encoded fragments, or an ad hoc repository tree. Do not substitute complete
+changed files for generated patch parts.
+
 ### Sequential connector upload
 
 Do not print every part or use a command that emits all escaped chunks. Ask the helper for exactly one pending upload:
@@ -176,7 +183,7 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
 `--show-next-action`; both names invoke the same implementation and print the
 same next action.
 
-The command verifies the local file again and prints one connector-ready argument object for the GitHub action that creates a UTF-8 Git blob from text, currently `GitHub.create_blob`. Call that connector immediately. Compare its returned Git blob SHA with `expectedGitBlobSha`, then record the result:
+The command verifies the local file again and prints one connector-ready argument object for the GitHub action that creates a UTF-8 Git blob from text, currently `GitHub.create_blob`. Call that connector immediately. Do not Base64-encode, pre-open, or manually regenerate the part. Compare its returned Git blob SHA with `expectedGitBlobSha`, record the result, and do not perform another repository write until the match is recorded:
 
 ```shell
 python3 -B tools/local-agent/prepare-patch-publication.py \
