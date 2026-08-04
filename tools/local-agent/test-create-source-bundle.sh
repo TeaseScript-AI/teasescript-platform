@@ -172,13 +172,13 @@ assert re.search(r"^  issue_comment:\n    types: \[created\]", artifact_request,
 assert "permissions: {}" in artifact_request
 assert "github.event.issue.number == 235" in artifact_request
 assert "startsWith(github.event.comment.body, '/artifact source ')" in artifact_request
-assert "OWNER" in artifact_request and "MEMBER" in artifact_request and "COLLABORATOR" in artifact_request
 assert "group: source-bundle-artifact-request" in artifact_request
 assert "queue:" not in artifact_request
 assert "pull-requests: read" in artifact_request
 assert "pull-requests: write" not in artifact_request
 assert "cancel-in-progress: false" in artifact_request
 job_prefix = artifact_request.split("    runs-on:", 1)[0]
+assert "author_association" not in job_prefix
 assert job_prefix.index("    if:") < job_prefix.index("    concurrency:")
 assert "actions: read" in artifact_request
 assert "contents: read" in artifact_request
