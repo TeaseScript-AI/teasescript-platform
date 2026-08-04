@@ -1,0 +1,216 @@
++++ b/docs/DOCUMENTATION-OWNERSHIP.md
+@@ -109,16 +109,13 @@ The shared project folder should contain only material useful across chat sessio
+ - historical project packages and superseded design documents;
+ - dated audit and review reports when retained for evidence.
+ 
+-Stable shared routing and bootstrap guidance are controlled derivatives rather
+-than second editable workflow owners. Their maintainable sources live in
+-`tools/local-agent/shared-project/` and `docs/LOCAL-AGENT-BOOTSTRAP.md`.
+-`tools/local-agent/prepare-shared-project.py` validates those sources against a
+-specific bootstrap archive and stages the exact stable replacement set. The
+-large archive and generated replacement directory remain outside Git.
+-
+-Replace the shared routing/bootstrap files as one set. Remove older suffixed or
+-versioned current copies before upload, and record the manual project-folder
+-synchronization separately; a repository merge alone does not prove it occurred.
++Shared routing and bootstrap files are controlled derivatives, not editable
++workflow owners. Their sources are `tools/local-agent/shared-project/` and
++`docs/LOCAL-AGENT-BOOTSTRAP.md`; `prepare-shared-project.py` validates them
++against an archive and stages the exact stable set. The archive and generated
++output remain outside Git. Replace the files together, remove old
++suffixed/versioned copies, and record the manual project-folder synchronization
++because a merge does not prove it occurred.
+ 
+ Research and historical material must be explicitly labeled non-authoritative. It may inform design but cannot silently define syntax, architecture, or implementation status.
+ 
+diff --git a/docs/LOCAL-AGENT-BOOTSTRAP.md b/docs/LOCAL-AGENT-BOOTSTRAP.md
+index 064bdc1ff72b514fa10f56e2f27d6750274dbb99..66991f57115fe7350989c38253ba27e0e3739375 100644
+--- a/docs/LOCAL-AGENT-BOOTSTRAP.md
++++ b/docs/LOCAL-AGENT-BOOTSTRAP.md
+@@ -14,21 +14,11 @@ maintain a second editable copy.
+ 
+ ## Stable distribution names
+ 
+-The shared project contains exactly one current archive named:
+-
+-```text
+-teasescript-agent-bootstrap-linux-x64.tar.zst
+-```
+-
+-The archive extracts exactly one directory named:
+-
+-```text
+-teasescript-agent-bootstrap-linux-x64/
+-```
+-
+-Release identity belongs in the extracted `MANIFEST.json`, not in either stable
+-name. Remove an older extracted directory before extracting a replacement; do
+-not overlay bootstrap releases.
++The shared project contains one current
++`teasescript-agent-bootstrap-linux-x64.tar.zst` archive, which extracts exactly
++one `teasescript-agent-bootstrap-linux-x64/` directory. Release identity belongs
++in `MANIFEST.json`; remove the old directory before extraction and never overlay
++releases.
+ 
+ ## Normal connector-local route
+ 
+diff --git a/docs/PATCH-PUBLICATION.md b/docs/PATCH-PUBLICATION.md
+index 1734cb630b44af7de9bec942e635f5ea744f2117..b6c376a3c7f420ef04ff178e820289b3eb4a800d 100644
+--- a/docs/PATCH-PUBLICATION.md
++++ b/docs/PATCH-PUBLICATION.md
+@@ -162,12 +162,11 @@ small edit when verified patch publication is required. That retransmits the
+ complete file and bypasses the compact, exact patch handoff. Prepare and publish
+ the tested local Git change through this route instead.
+ 
+-Low-level connector blob, tree, commit, and branch actions are permitted here
+-only as the exact currently exposed helper-generated action for the declared
+-`.agent-patch-publication/` transfer payload. Do not use them to upload ordinary
+-source or documentation files, a complete manually assembled patch, manually
+-encoded fragments, or an ad hoc repository tree. Do not substitute complete
+-changed files for generated patch parts.
++Low-level connector blob, tree, commit, and branch actions are allowed only as
++the exact helper-generated next action for the declared
++`.agent-patch-publication/` payload. Never use them for ordinary source or
++documentation files, manually assembled patches, encoded fragments, ad hoc
++trees, or full-file substitutes for generated parts.
+ 
+ ### Sequential connector upload
+ 
+@@ -183,7 +182,10 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
+ `--show-next-action`; both names invoke the same implementation and print the
+ same next action.
+ 
+-The command verifies the local file again and prints one connector-ready argument object for the GitHub action that creates a UTF-8 Git blob from text, currently `GitHub.create_blob`. Call that connector immediately. Do not Base64-encode, pre-open, or manually regenerate the part. Compare its returned Git blob SHA with `expectedGitBlobSha`, record the result, and do not perform another repository write until the match is recorded:
++The command revalidates the file and prints one connector-ready UTF-8 blob
++action, currently `GitHub.create_blob`. Call it immediately; do not
++Base64-encode, pre-open, or manually regenerate the part. Match the returned SHA
++to `expectedGitBlobSha`, record it, and perform no further write until then:
+ 
+ ```shell
+ python3 -B tools/local-agent/prepare-patch-publication.py \
+diff --git a/tools/local-agent/README.md b/tools/local-agent/README.md
+index 5997db84337a8e27e38b140578e9836fe5187900..d8ff63b5b6b72df36fa594f42397349c06f03df6 100644
+--- a/tools/local-agent/README.md
++++ b/tools/local-agent/README.md
+@@ -63,7 +63,7 @@ specific boundary.
+ 
+ Do not redirect failures to `/dev/null` merely to reduce output. Compact successful output and retain actionable failures.
+ 
+-## Prepare a verified source review checkout
++## Source-review extraction primitive
+ 
+ `prepare-source-review.py` converts one already downloaded source-bundle ZIP into an exact clean local checkout. It verifies the GitHub artifact digest, ZIP safety and payload shape, internal checksums, manifest repository/head/tree identities, complete bundle history, optional expected merge-base ancestry, `git fsck`, and clean worktree. The requested output is exposed atomically only after every check succeeds.
+ 
+@@ -79,7 +79,11 @@ python3 tools/local-agent/prepare-source-review.py \
+ 
+ For pull-request review, pass the merge base reported by `compare_commits`, not the current base-branch tip. The helper requires that commit to exist in the bundle and be an ancestor of the exact head.
+ 
+-The resulting checkout has no `origin` remote. Connector-based agents should use this artifact route instead of trying network `git clone` or reading the repository file by file through the connector. The extractor rejects artifacts above 128 MiB uncompressed and metadata files above 1 MiB. See `docs/CHATGPT-GITHUB-WORKFLOW.md`.
++The resulting checkout has no `origin` remote. This helper is the source-review
++primitive used inside the distributed bootstrap; connector-local agents use
++`bin/prepare-agent-workspace.sh` as the sole normal entry point. The extractor
++rejects artifacts above 128 MiB uncompressed and metadata files above 1 MiB.
++See `docs/LOCAL-AGENT-BOOTSTRAP.md` and `docs/CHATGPT-GITHUB-WORKFLOW.md`.
+ 
+ Tests:
+ 
+@@ -87,6 +91,34 @@ Tests:
+ python3 -B tools/local-agent/test-prepare-source-review.py
+ ```
+ 
++## Source-bundle artifact request logic
++
++Trusted default-branch `source-bundle-artifact-request.cjs` pins selectors,
++authorizes collaborators, validates index and producer metadata, binds one
++authenticated result to the request, and emits exact download and preparation
++instructions without executing selected source.
++
++Focused tests:
++
++```bash
++node tools/local-agent/test-source-bundle-artifact-request.cjs
++```
++
++## Prepare the shared-project replacement
++
++`prepare-shared-project.py` validates the three canonical shared routing sources
++against the accepted Linux x86_64 bootstrap release and stages exactly those
++files plus one stable archive name. It rejects retired routes, unstable names,
++wrong release identity, missing documented entry-point options, and output
++overlays.
++
++```bash
++python3 -B tools/local-agent/prepare-shared-project.py \
++  --bootstrap-archive /path/to/current-bootstrap.tar.zst \
++  --output-directory /tmp/teasescript-shared-project-replacement
++python3 -B tools/local-agent/test-prepare-shared-project.py
++```
++
+ ## Prepare multipart patch publication
+ 
+ `prepare-patch-publication.py` creates a verified raw Git patch between an exact base commit and the tested current `HEAD`, splits it into UTF-8 parts, writes the V2 manifest, proves reconstruction, and creates a local sequential upload plan. It never merges, rebases, squashes, commits, or pushes.
+@@ -107,6 +139,8 @@ Their tests cover different contracts:
+ - `test-prepare-source-review.py` prevents unsafe or identity-mismatched source
+   artifact extraction, including path traversal, checksum, tree, and ancestry
+   failures;
++- `test-prepare-shared-project.py` prevents stale routing, unstable names,
++  release-contract drift, missing entry-point options, and output overlays;
+ - `test-prepare-patch-publication.py` prevents malformed patch splitting,
+   manifests, connector upload plans, and broken resumable handoff state;
+ - `test-patch-publication.py` prevents transfer reconstruction, candidate commit,
+diff --git a/tools/local-agent/check-local-agent.sh b/tools/local-agent/check-local-agent.sh
+index 38168708770c2b135959571f31f2804aee26a48f..706a8db963fe6f9f08c469ecf4d2d30f0c4b9c16 100755
+--- a/tools/local-agent/check-local-agent.sh
++++ b/tools/local-agent/check-local-agent.sh
+@@ -12,7 +12,9 @@ bash "$script_dir/run-compact.sh" \
+   --log "$log_dir/source-bundle-workflow.log" \
+   -- env TEASESCRIPT_COMPACT_TEST_INNER=1 \
+     bash "$script_dir/test-create-source-bundle.sh"
++node "$script_dir/test-source-bundle-artifact-request.cjs"
+ python3 -B "$script_dir/test-prepare-source-review.py"
++python3 -B "$script_dir/test-prepare-shared-project.py"
+ python3 -B "$script_dir/test-prepare-patch-publication.py"
+ python3 -B "$script_dir/test-patch-publication.py"
+ bash "$script_dir/test-patch-publication-validate-candidate.sh"
+diff --git a/tools/local-agent/shared-project/README-FIRST.md b/tools/local-agent/shared-project/README-FIRST.md
+index afa197998635b4db5ceed19e28b740a4d2308ec7..55371fd1b5388029c483bafd9d0efcb6bfee8496 100644
+--- a/tools/local-agent/shared-project/README-FIRST.md
++++ b/tools/local-agent/shared-project/README-FIRST.md
+@@ -23,17 +23,11 @@ for explicitly non-authoritative capability or historical research.
+ 
+ ## Source of truth
+ 
+-The GitHub repository `TeaseScript-AI/teasescript-platform` owns:
+-
+-- current implementation and tests;
+-- exact architecture and implementation status;
+-- accepted specifications and ADRs;
+-- current topic documents and unresolved decisions;
+-- active planning and `WISHES.xml`;
+-- executable tested examples and repository workflow.
+-
+-Do not infer current implementation from an older shared-project file, audit,
+-research archive, or repository snapshot.
++GitHub owns current code, tests, architecture and status, accepted
++specifications and ADRs, topic documents, unresolved decisions, current
++planning, `WISHES.xml`, executable tested examples, and repository workflow.
++Shared files, audits, research, and snapshots are non-authoritative; do not
++infer current implementation from them.
+ 
+ ## Stable shared files
+ 
+diff --git a/tools/local-agent/source-bundle-artifact-request.cjs b/tools/local-agent/source-bundle-artifact-request.cjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..4839697b7196df3c56677974180033f1c301dc69
+--- /dev/null
++++ b/tools/local-agent/source-bundle-artifact-request.cjs
+@@ -0,0 +1,845 @@
++'use strict';
++
++const crypto = require('node:crypto');
++
++const ARTIFACT_KIND = 'source';
++const STATUS_CONTEXT = 'source-bundle/artifact-v1';
++const RESULT_MARKER_VERSION = 1;
++const COMMAND_PATTERN = /^\/artifact source (main|pr:[1-9][0-9]*|sha:[0-9a-f]{40})$/;
++const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/;

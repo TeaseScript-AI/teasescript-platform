@@ -1,0 +1,294 @@
++const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
++const ARTIFACT_ID_PATTERN = /^[1-9][0-9]*$/;
++const ALLOWED_PERMISSIONS = new Set(['write', 'admin']);
++const RESULT_BOT_LOGIN = 'github-actions[bot]';
++const RESULT_BOT_ID = 41898282;
++const PREPARATION_HELPER =
++  '/mnt/data/teasescript-agent-bootstrap-linux-x64/bin/prepare-agent-workspace.sh';
++const TRUSTED_PRODUCER_PATHS = new Set([
++  '.github/workflows/source-bundle.yml',
++  '.github/workflows/source-bundle-request-processor.yml',
++  '.github/workflows/source-bundle-artifact-request.yml',
++]);
++
++class ArtifactRequestError extends Error {
++  constructor(message) {
++    super(message);
++    this.name = 'ArtifactRequestError';
++  }
++}
++
++function requireFullSha(value, label) {
++  if (!FULL_SHA_PATTERN.test(value || '')) {
++    throw new ArtifactRequestError(`${label} did not resolve to a full lowercase commit SHA.`);
++  }
++  return value;
++}
++
++function parseCommand(body) {
++  const normalized = typeof body === 'string' ? body.trim() : '';
++  const match = COMMAND_PATTERN.exec(normalized);
++  if (!match) {
++    throw new ArtifactRequestError(
++      'Invalid command. Use exactly `/artifact source main`, `/artifact source pr:<number>`, or `/artifact source sha:<full-40-character-sha>`.',
++    );
++  }
++
++  const selector = match[1];
++  if (selector === 'main') {
++    return { selector, selectorType: 'main' };
++  }
++  if (selector.startsWith('pr:')) {
++    const pullNumber = Number.parseInt(selector.slice(3), 10);
++    if (!Number.isSafeInteger(pullNumber)) {
++      throw new ArtifactRequestError('The pull-request number is outside the supported integer range.');
++    }
++    return {
++      selector,
++      selectorType: 'pr',
++      pullNumber,
++    };
++  }
++  return {
++    selector,
++    selectorType: 'sha',
++    sourceSha: selector.slice(4),
++  };
++}
++
++function normalizeDigest(value) {
++  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
++  if (DIGEST_PATTERN.test(normalized)) {
++    return normalized;
++  }
++  if (normalized.startsWith('sha256:') && DIGEST_PATTERN.test(normalized.slice(7))) {
++    return normalized.slice(7);
++  }
++  throw new ArtifactRequestError('Artifact metadata did not contain a valid SHA-256 digest.');
++}
++
++function hashRequestBody(body) {
++  return crypto.createHash('sha256').update(body, 'utf8').digest('hex');
++}
++
++function escapeRegExp(value) {
++  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
++}
++
++function parseArtifactTargetUrl(targetUrl, context) {
++  const expectedPrefix = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
++  const pattern = new RegExp(
++    `^${escapeRegExp(expectedPrefix)}/actions/runs/([1-9][0-9]*)/artifacts/([1-9][0-9]*)$`,
++  );
++  const match = pattern.exec(targetUrl || '');
++  if (!match) {
++    throw new ArtifactRequestError('The fixed source-bundle status did not point to an exact repository artifact URL.');
++  }
++  const runId = Number.parseInt(match[1], 10);
++  const artifactId = Number.parseInt(match[2], 10);
++  if (!Number.isSafeInteger(runId) || !Number.isSafeInteger(artifactId)) {
++    throw new ArtifactRequestError('The indexed artifact URL contains an unsupported numeric identity.');
++  }
++  return { runId, artifactId };
++}
++
++function verifyAutomaticProducerSource(run, repositoryId, sourceSha) {
++  if (run.event === 'push') {
++    if (
++      run.head_repository?.id !== repositoryId ||
++      run.head_sha !== sourceSha
++    ) {
++      throw new ArtifactRequestError('The automatic push producer did not match the indexed source SHA.');
++    }
++    return;
++  }
++
++  if (run.event === 'pull_request') {
++    const matchingPulls = (run.pull_requests || []).filter(
++      (pull) =>
++        pull.base?.repo?.id === repositoryId &&
++        run.head_repository?.id === pull.head?.repo?.id &&
++        run.head_branch === pull.head?.ref &&
++        pull.head?.sha === sourceSha,
++    );
++    if (matchingPulls.length === 0) {
++      throw new ArtifactRequestError('The automatic pull-request producer did not match the indexed source SHA.');
++    }
++    return;
++  }
++
++  throw new ArtifactRequestError('The automatic Source-bundle producer event was not supported.');
++}
++
++function resultMarker(commentId) {
++  return `<!-- source-bundle-artifact-result:v${RESULT_MARKER_VERSION} request-comment:${commentId} -->`;
++}
++
++function requestSuffix(requestCommentId) {
++  if (!Number.isSafeInteger(requestCommentId) || requestCommentId <= 0) {
++    throw new ArtifactRequestError('The result request-comment identity is invalid.');
++  }
++  return `request-${requestCommentId}`;
++}
++
++function artifactFileName(sourceSha, requestCommentId) {
++  return `teasescript-source-${sourceSha}-${requestSuffix(requestCommentId)}.zip`;
++}
++
++function workspaceName(sourceSha, requestCommentId) {
++  return `source-${sourceSha.slice(0, 12)}-${requestSuffix(requestCommentId)}`;
++}
++
++function formatDownloadInstruction(result) {
++  return [
++    'GitHub.download_workflow_artifact',
++    JSON.stringify(
++      {
++        repo_full_name: result.repository,
++        artifact_id: result.artifactId,
++        file_name: artifactFileName(result.sourceSha, result.requestCommentId),
++      },
++      null,
++      2,
++    ),
++  ].join('\n');
++}
++
++function formatPreparationCommand(result) {
++  const lines = [
++    `${PREPARATION_HELPER} \\`,
++    `  --artifact /mnt/data/${artifactFileName(result.sourceSha, result.requestCommentId)} \\`,
++    `  --artifact-sha256 ${result.artifactDigest} \\`,
++    `  --expected-repository ${result.repository} \\`,
++    `  --expected-head ${result.sourceSha} \\`,
++  ];
++  if (result.mergeBaseSha) {
++    lines.push(`  --expected-merge-base ${result.mergeBaseSha} \\`);
++  }
++  lines.push(`  --output /mnt/data/${workspaceName(result.sourceSha, result.requestCommentId)}`);
++  return lines.join('\n');
++}
++
++function formatReadyComment(result) {
++  const lines = [
++    resultMarker(result.requestCommentId),
++    '## Artifact ready',
++    '',
++    `- Kind: \`${ARTIFACT_KIND}\``,
++    `- Requested: \`${result.selector}\``,
++    `- Resolved SHA: \`${result.sourceSha}\``,
++    `- Source repository: \`${result.sourceRepository}\``,
++    `- Source ref: \`${result.sourceRef}\``,
++  ];
++
++  if (result.pullNumber) {
++    lines.push(
++      `- Pull request: \`#${result.pullNumber}\``,
++      `- PR head: \`${result.headRepository}:${result.headRef}\``,
++      `- PR base SHA: \`${result.baseSha}\``,
++      `- PR merge-base SHA: \`${result.mergeBaseSha}\``,
++    );
++  }
++
++  lines.push(
++    `- Artifact ID: \`${result.artifactId}\``,
++    `- Artifact name: \`${result.artifactName}\``,
++    `- SHA-256: \`${result.artifactDigest}\``,
++    `- Producer run: \`${result.producerRunId}\``,
++    `- Artifact URL: ${result.artifactUrl}`,
++    `- Expires: \`${result.expiresAt || 'unavailable'}\``,
++    `- Request comment: \`${result.requestCommentId}\``,
++    '',
++    '### Connector download',
++    '',
++    '```text',
++    formatDownloadInstruction(result),
++    '```',
++    '',
++    '### Local preparation',
++    '',
++    '```shell',
++    formatPreparationCommand(result),
++    '```',
++  );
++
++  return lines.join('\n');
++}
++
++function formatFailureComment({ requestCommentId, selector, message, runUrl }) {
++  return [
++    resultMarker(requestCommentId),
++    '## Artifact request failed',
++    '',
++    `- Requested: \`${selector || 'unresolved'}\``,
++    `- Request comment: \`${requestCommentId}\``,
++    `- Reason: ${message}`,
++    `- Producer run: ${runUrl}`,
++    '',
++    'No authoritative artifact result was published for this request.',
++  ].join('\n');
++}
++
++async function listAllIssueComments(github, context, issueNumber) {
++  return github.paginate(
++    github.rest.issues.listComments,
++    {
++      owner: context.repo.owner,
++      repo: context.repo.repo,
++      issue_number: issueNumber,
++      per_page: 100,
++    },
++    (response) => response.data,
++  );
++}
++
++function hasExpectedResultAuthor(comment) {
++  return (
++    comment?.user?.login === RESULT_BOT_LOGIN &&
++    comment.user.type === 'Bot' &&
++    comment.user.id === RESULT_BOT_ID
++  );
++}
++
++function requireExpectedResultAuthor(comment) {
++  if (!hasExpectedResultAuthor(comment)) {
++    throw new ArtifactRequestError(
++      `The result comment was not authored by the expected ${RESULT_BOT_LOGIN} identity.`,
++    );
++  }
++  return comment;
++}
++
++async function upsertResultComment({ github, context, issueNumber, requestCommentId, body }) {
++  const marker = resultMarker(requestCommentId);
++  const comments = await listAllIssueComments(github, context, issueNumber);
++  const matching = comments
++    .filter(
++      (comment) =>
++        hasExpectedResultAuthor(comment) &&
++        typeof comment.body === 'string' &&
++        comment.body.startsWith(marker),
++    )
++    .sort((left, right) => right.id - left.id);
++
++  if (matching.length > 0) {
++    const updated = await github.rest.issues.updateComment({
++      owner: context.repo.owner,
++      repo: context.repo.repo,
++      comment_id: matching[0].id,
++      body,
++    });
++    return requireExpectedResultAuthor(updated.data);
++  }
++
++  const created = await github.rest.issues.createComment({
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    issue_number: issueNumber,
++    body,
++  });
++  return requireExpectedResultAuthor(created.data);
++}
++
++async function getLiveRequestComment({ github, context, requestCommentId, expectedAuthor, expectedBodyHash }) {
++  const response = await github.rest.issues.getComment({

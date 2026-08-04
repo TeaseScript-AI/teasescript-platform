@@ -1,0 +1,261 @@
++        },
++        async getWorkflowRun({ run_id }) {
++          const run = runs.get(run_id);
++          if (!run) throw httpError(404, 'run not found');
++          return { data: run };
++        },
++      },
++    },
++  };
++
++  return github;
++}
++
++function artifactFixture({ artifactId, runId, sourceSha, current = false }) {
++  return {
++    artifact: {
++      id: artifactId,
++      name: `teasescript-source-${sourceSha}`,
++      expired: false,
++      expires_at: '2099-01-01T00:00:00Z',
++      digest: `sha256:${DIGEST}`,
++      workflow_run: { id: runId },
++    },
++    run: {
++      id: runId,
++      repository: {
++        id: 1309933950,
++        full_name: REPOSITORY,
++      },
++      path: current
++        ? '.github/workflows/source-bundle-artifact-request.yml'
++        : '.github/workflows/source-bundle.yml',
++      status: current ? 'in_progress' : 'completed',
++      conclusion: current ? null : 'success',
++      event: current ? 'issue_comment' : 'push',
++      head_sha: current ? '9'.repeat(40) : sourceSha,
++      head_branch: current ? 'main' : 'main',
++      head_repository: { id: 1309933950 },
++      pull_requests: [],
++    },
++    url: `https://github.com/${REPOSITORY}/actions/runs/${runId}/artifacts/${artifactId}`,
++  };
++}
++
++async function testCommandGrammar() {
++  assert.deepEqual(request.parseCommand('/artifact source main'), {
++    selector: 'main',
++    selectorType: 'main',
++  });
++  assert.deepEqual(request.parseCommand('/artifact source pr:225'), {
++    selector: 'pr:225',
++    selectorType: 'pr',
++    pullNumber: 225,
++  });
++  assert.equal(
++    request.parseCommand(`/artifact source sha:${EXACT_SHA}`).sourceSha,
++    EXACT_SHA,
++  );
++  for (const invalid of [
++    '/artifact source pr:0',
++    '/artifact source pr:01',
++    `/artifact source pr:${'9'.repeat(30)}`,
++    `/artifact source sha:${'a'.repeat(40).toUpperCase()}`,
++    '/artifact source branch:main',
++    '/artifact  source main',
++    '/artifact source',
++  ]) {
++    assert.throws(() => request.parseCommand(invalid), request.ArtifactRequestError);
++  }
++}
++
++async function testMainResolution() {
++  const context = makeContext('/artifact source main');
++  const github = makeGithub(context);
++  const core = makeCore();
++  await request.resolveRequest({ github, context, core });
++
++  assert.deepEqual(core.failures, []);
++  assert.equal(core.outputs.resolved, 'true');
++  assert.equal(core.outputs.cache_hit, 'false');
++  assert.equal(core.outputs.source_sha, MAIN_SHA);
++  assert.equal(core.outputs.source_repository, REPOSITORY);
++  assert.equal(core.outputs.source_ref, 'main');
++  assert.equal(github.state.createdComments, 0);
++}
++
++async function testPullResolution() {
++  const context = makeContext('/artifact source pr:225');
++  const github = makeGithub(context);
++  const core = makeCore();
++  await request.resolveRequest({ github, context, core });
++
++  assert.deepEqual(core.failures, []);
++  assert.equal(core.outputs.source_sha, PR_HEAD_SHA);
++  assert.equal(core.outputs.source_repository, 'Contributor/teasescript-platform');
++  assert.equal(core.outputs.source_ref, 'feature/source-bundle');
++  assert.equal(core.outputs.pull_number, '225');
++  assert.equal(core.outputs.base_sha, PR_BASE_SHA);
++  assert.equal(core.outputs.merge_base_sha, PR_MERGE_BASE_SHA);
++}
++
++async function testExactShaResolution() {
++  const context = makeContext(`/artifact source sha:${EXACT_SHA}`);
++  const github = makeGithub(context);
++  const core = makeCore();
++  await request.resolveRequest({ github, context, core });
++
++  assert.deepEqual(core.failures, []);
++  assert.equal(core.outputs.source_sha, EXACT_SHA);
++  assert.equal(core.outputs.source_ref, EXACT_SHA);
++}
++
++async function testInvalidAndMissingRequests() {
++  const invalidContext = makeContext('/artifact source ref:main');
++  const invalidGithub = makeGithub(invalidContext);
++  const invalidCore = makeCore();
++  await request.resolveRequest({ github: invalidGithub, context: invalidContext, core: invalidCore });
++  assert.equal(invalidCore.failures.length, 1);
++  assert.match(invalidGithub.state.comments.at(-1).body, /Invalid command/);
++  assert.equal(invalidGithub.state.selectorCalls, 0);
++
++  const missingPullContext = makeContext('/artifact source pr:225');
++  const missingPullGithub = makeGithub(missingPullContext, { missingPull: true });
++  const missingPullCore = makeCore();
++  await request.resolveRequest({
++    github: missingPullGithub,
++    context: missingPullContext,
++    core: missingPullCore,
++  });
++  assert.equal(missingPullCore.failures.length, 1);
++  assert.match(missingPullGithub.state.comments.at(-1).body, /does not exist/);
++
++  const missingShaContext = makeContext(`/artifact source sha:${EXACT_SHA}`);
++  const missingShaGithub = makeGithub(missingShaContext, { missingCommit: true });
++  const missingShaCore = makeCore();
++  await request.resolveRequest({ github: missingShaGithub, context: missingShaContext, core: missingShaCore });
++  assert.equal(missingShaCore.failures.length, 1);
++  assert.match(missingShaGithub.state.comments.at(-1).body, /does not exist/);
++}
++
++async function testAuthorizationRejection() {
++  const context = makeContext('/artifact source main');
++  const github = makeGithub(context, { permission: 'read' });
++  const core = makeCore();
++  await request.resolveRequest({ github, context, core });
++
++  assert.equal(core.failures.length, 1);
++  assert.match(github.state.comments.at(-1).body, /Write, Maintain, or Admin/);
++  assert.equal(github.state.selectorCalls, 0);
++}
++
++async function testCacheHitAndDuplicateDelivery() {
++  const artifactId = 8101;
++  const runId = 9101;
++  const fixture = artifactFixture({ artifactId, runId, sourceSha: MAIN_SHA });
++  const context = makeContext('/artifact source main');
++  const github = makeGithub(context, {
++    statuses: [
++      {
++        context: request.STATUS_CONTEXT,
++        state: 'success',
++        target_url: fixture.url,
++      },
++    ],
++    artifacts: [[artifactId, fixture.artifact]],
++    runs: [[runId, fixture.run]],
++  });
++
++  const firstCore = makeCore();
++  await request.resolveRequest({ github, context, core: firstCore });
++  assert.equal(firstCore.outputs.cache_hit, 'true');
++  assert.equal(github.state.createdComments, 1);
++  assert.match(github.state.comments.at(-1).body, /## Artifact ready/);
++  assert.ok(github.state.comments.at(-1).body.includes(`Artifact ID: \`${artifactId}\``));
++  assert.match(github.state.comments.at(-1).body, /prepare-agent-workspace\.sh/);
++  assert.match(github.state.comments.at(-1).body, /GitHub\.download_workflow_artifact/);
++  assert.match(github.state.comments.at(-1).body, /"artifact_id": 8101/);
++  assert.match(github.state.comments.at(-1).body, /request-501\.zip/);
++  assert.match(github.state.comments.at(-1).body, /source-111111111111-request-501/);
++
++  const secondCore = makeCore();
++  await request.resolveRequest({ github, context, core: secondCore });
++  assert.equal(secondCore.outputs.cache_hit, 'true');
++  assert.equal(github.state.createdComments, 1);
++  assert.equal(github.state.updatedComments, 1);
++  assert.equal(
++    github.state.comments.filter((comment) => comment.user?.login === request.RESULT_BOT_LOGIN).length,
++    1,
++  );
++}
++
++async function testSpoofedBotCannotClaimAuthoritativeResult() {
++  const artifactId = 8111;
++  const runId = 9111;
++  const context = makeContext('/artifact source main');
++  const marker = request.resultMarker(context.payload.comment.id);
++  const spoofed = {
++    id: 900,
++    body: `${marker}\nspoofed`,
++    user: { login: 'unrelated-app[bot]', id: 99001, type: 'Bot' },
++  };
++  const fixture = artifactFixture({ artifactId, runId, sourceSha: MAIN_SHA });
++  const github = makeGithub(context, {
++    comments: [spoofed],
++    statuses: [
++      {
++        context: request.STATUS_CONTEXT,
++        state: 'success',
++        target_url: fixture.url,
++      },
++    ],
++    artifacts: [[artifactId, fixture.artifact]],
++    runs: [[runId, fixture.run]],
++  });
++
++  const firstCore = makeCore();
++  await request.resolveRequest({ github, context, core: firstCore });
++  assert.deepEqual(firstCore.failures, []);
++  assert.equal(github.state.createdComments, 1);
++  assert.equal(github.state.updatedComments, 0);
++  assert.equal(spoofed.body, `${marker}\nspoofed`);
++  const authoritative = github.state.comments.find(
++    (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
++  );
++  assert.ok(authoritative);
++  assert.equal(authoritative.user.id, request.RESULT_BOT_ID);
++  assert.match(authoritative.body, /## Artifact ready/);
++
++  const secondCore = makeCore();
++  await request.resolveRequest({ github, context, core: secondCore });
++  assert.deepEqual(secondCore.failures, []);
++  assert.equal(github.state.createdComments, 1);
++  assert.equal(github.state.updatedComments, 1);
++  assert.equal(spoofed.body, `${marker}\nspoofed`);
++}
++
++async function testDistinctRequestsForSameShaUseDistinctLocalPaths() {
++  const artifactId = 8121;
++  const runId = 9121;
++  const fixture = artifactFixture({ artifactId, runId, sourceSha: MAIN_SHA });
++  const makeCachedGithub = (context) =>
++    makeGithub(context, {
++      statuses: [
++        {
++          context: request.STATUS_CONTEXT,
++          state: 'success',
++          target_url: fixture.url,
++        },
++      ],
++      artifacts: [[artifactId, fixture.artifact]],
++      runs: [[runId, fixture.run]],
++    });
++
++  const firstContext = makeContext('/artifact source main', { commentId: 501 });
++  const firstGithub = makeCachedGithub(firstContext);
++  await request.resolveRequest({ github: firstGithub, context: firstContext, core: makeCore() });
++  const firstBody = firstGithub.state.comments.at(-1).body;
++
++  const secondContext = makeContext('/artifact source main', { commentId: 502 });
++  const secondGithub = makeCachedGithub(secondContext);
++  await request.resolveRequest({ github: secondGithub, context: secondContext, core: makeCore() });

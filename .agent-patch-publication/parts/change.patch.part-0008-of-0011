@@ -1,0 +1,294 @@
+
++  const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
++  await upsertResultComment({
++    github,
++    context,
++    issueNumber,
++    requestCommentId,
++    body: formatFailureComment({ requestCommentId, selector, message, runUrl }),
++  });
++}
++
++async function resolveRequest({ github, context, core }) {
++  const eventComment = context.payload.comment;
++  const eventIssue = context.payload.issue;
++  const request = {
++    commentId: Number(eventComment?.id),
++    issueNumber: Number(eventIssue?.number),
++    author: eventComment?.user?.login || '',
++    body: eventComment?.body || '',
++  };
++  request.bodyHash = hashRequestBody(request.body);
++  let selector = null;
++
++  try {
++    if (!Number.isSafeInteger(request.commentId) || !Number.isSafeInteger(request.issueNumber) || !request.author) {
++      throw new ArtifactRequestError('The issue-comment event did not contain a complete request identity.');
++    }
++    const liveComment = await getLiveRequestComment({
++      github,
++      context,
++      requestCommentId: request.commentId,
++      expectedAuthor: request.author,
++      expectedBodyHash: request.bodyHash,
++    });
++    await authorizeRequest({ github, context, author: request.author });
++    const parsed = parseCommand(liveComment.body);
++    selector = parsed.selector;
++    const identity = await resolveSelector({ github, context, parsed });
++    setIdentityOutputs(core, identity, request);
++
++    const cached = await findCachedArtifact({ github, context, sourceSha: identity.sourceSha });
++    if (cached) {
++      core.setOutput('cache_hit', 'true');
++      await upsertResultComment({
++        github,
++        context,
++        issueNumber: request.issueNumber,
++        requestCommentId: request.commentId,
++        body: formatReadyComment(resultFromIdentity({ context, request, identity, artifact: cached })),
++      });
++    }
++  } catch (error) {
++    const message = error instanceof Error ? error.message : String(error);
++    core.setOutput('resolved', 'false');
++    if (Number.isSafeInteger(request.commentId) && Number.isSafeInteger(request.issueNumber)) {
++      await publishFailure({
++        github,
++        context,
++        issueNumber: request.issueNumber,
++        requestCommentId: request.commentId,
++        selector,
++        message,
++      });
++    }
++    core.setFailed(message);
++  }
++}
++
++function identityFromInput(input) {
++  const parsed = parseCommand(`/artifact source ${input.selector || ''}`);
++  if (parsed.selectorType !== input.selectorType) {
++    throw new ArtifactRequestError('The resolved selector type is inconsistent.');
++  }
++
++  const sourceSha = requireFullSha(input.sourceSha, 'The resolved source');
++  if (!input.sourceRepository || !input.sourceRef) {
++    throw new ArtifactRequestError('The resolved source repository or ref is missing.');
++  }
++
++  if (parsed.selectorType === 'sha' && parsed.sourceSha !== sourceSha) {
++    throw new ArtifactRequestError('The exact selector no longer matches the resolved source SHA.');
++  }
++
++  if (parsed.selectorType === 'pr') {
++    const pullNumber = Number.parseInt(input.pullNumber, 10);
++    if (
++      pullNumber !== parsed.pullNumber ||
++      !input.headRepository ||
++      !input.headRef ||
++      input.sourceRepository !== input.headRepository ||
++      input.sourceRef !== input.headRef
++    ) {
++      throw new ArtifactRequestError('The resolved pull-request identity is inconsistent.');
++    }
++    return {
++      selector: parsed.selector,
++      selectorType: parsed.selectorType,
++      sourceSha,
++      sourceRepository: input.sourceRepository,
++      sourceRef: input.sourceRef,
++      pullNumber,
++      headRepository: input.headRepository,
++      headRef: input.headRef,
++      baseSha: requireFullSha(input.baseSha, 'The resolved pull-request base'),
++      mergeBaseSha: requireFullSha(input.mergeBaseSha, 'The resolved pull-request merge base'),
++    };
++  }
++
++  if (
++    input.pullNumber ||
++    input.headRepository ||
++    input.headRef ||
++    input.baseSha ||
++    input.mergeBaseSha
++  ) {
++    throw new ArtifactRequestError('A non-PR selector contained pull-request identity fields.');
++  }
++
++  return {
++    selector: parsed.selector,
++    selectorType: parsed.selectorType,
++    sourceSha,
++    sourceRepository: input.sourceRepository,
++    sourceRef: input.sourceRef,
++    pullNumber: null,
++    headRepository: null,
++    headRef: null,
++    baseSha: null,
++    mergeBaseSha: null,
++  };
++}
++
++function requestFromInput(input) {
++  const commentId = Number.parseInt(input.requestCommentId, 10);
++  const issueNumber = Number.parseInt(input.issueNumber, 10);
++  if (!Number.isSafeInteger(commentId) || !Number.isSafeInteger(issueNumber)) {
++    throw new ArtifactRequestError('The resolved request identity is invalid.');
++  }
++  if (!DIGEST_PATTERN.test(input.requestBodySha256 || '')) {
++    throw new ArtifactRequestError('The request body identity is invalid.');
++  }
++  if (!input.requestAuthor) {
++    throw new ArtifactRequestError('The request author identity is invalid.');
++  }
++  return {
++    commentId,
++    issueNumber,
++    author: input.requestAuthor,
++    bodyHash: input.requestBodySha256,
++  };
++}
++
++async function completeRequest({ github, context, input }) {
++  const request = requestFromInput(input);
++  const identity = identityFromInput(input);
++  await getLiveRequestComment({
++    github,
++    context,
++    requestCommentId: request.commentId,
++    expectedAuthor: request.author,
++    expectedBodyHash: request.bodyHash,
++  });
++  if (context.actor !== request.author) {
++    throw new ArtifactRequestError('The workflow actor no longer matches the request comment author.');
++  }
++
++  const expectedArtifactId = Number.parseInt(input.artifactId, 10);
++  if (!ARTIFACT_ID_PATTERN.test(input.artifactId || '') || !Number.isSafeInteger(expectedArtifactId)) {
++    throw new ArtifactRequestError('The upload step did not return a valid artifact ID.');
++  }
++
++  const artifact = await verifyArtifactMetadata({
++    github,
++    context,
++    sourceSha: identity.sourceSha,
++    targetUrl: input.artifactUrl,
++    expectedArtifactId,
++    expectedDigest: input.artifactDigest,
++    allowCurrentRun: true,
++  });
++
++  await github.rest.repos.createCommitStatus({
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    sha: identity.sourceSha,
++    state: 'success',
++    context: STATUS_CONTEXT,
++    description: `artifact ${artifact.artifactId} sha256:${artifact.artifactDigest}`,
++    target_url: artifact.artifactUrl,
++  });
++
++  await upsertResultComment({
++    github,
++    context,
++    issueNumber: request.issueNumber,
++    requestCommentId: request.commentId,
++    body: formatReadyComment(resultFromIdentity({ context, request, identity, artifact })),
++  });
++}
++
++async function reportProductionFailure({ github, context, input }) {
++  const request = requestFromInput(input);
++  await getLiveRequestComment({
++    github,
++    context,
++    requestCommentId: request.commentId,
++    expectedAuthor: request.author,
++    expectedBodyHash: request.bodyHash,
++  });
++  await publishFailure({
++    github,
++    context,
++    issueNumber: request.issueNumber,
++    requestCommentId: request.commentId,
++    selector: input.selector,
++    message: 'Source-bundle production or result publication failed. Inspect the linked workflow run for the exact failing step.',
++  });
++}
++
++module.exports = {
++  ARTIFACT_KIND,
++  RESULT_BOT_ID,
++  RESULT_BOT_LOGIN,
++  STATUS_CONTEXT,
++  ArtifactRequestError,
++  completeRequest,
++  findCachedArtifact,
++  formatFailureComment,
++  formatPreparationCommand,
++  formatReadyComment,
++  normalizeDigest,
++  parseArtifactTargetUrl,
++  parseCommand,
++  reportProductionFailure,
++  resolveRequest,
++  resolveSelector,
++  resultMarker,
++  verifyArtifactMetadata,
++};
+\ No newline at end of file
+diff --git a/tools/local-agent/test-create-source-bundle.sh b/tools/local-agent/test-create-source-bundle.sh
+index 60039cf1706e7bf0a4c91450f86652ffc031e4c8..c52d5040275f9e10a4d285458bcb6c0a2124586b 100644
+--- a/tools/local-agent/test-create-source-bundle.sh
++++ b/tools/local-agent/test-create-source-bundle.sh
+@@ -15,6 +15,8 @@ helper="$script_dir/create-source-bundle.sh"
+ workflow="$root/.github/workflows/source-bundle.yml"
+ request_workflow="$root/.github/workflows/source-bundle-request.yml"
+ processor_workflow="$root/.github/workflows/source-bundle-request-processor.yml"
++index_workflow="$root/.github/workflows/source-bundle-index.yml"
++artifact_request_workflow="$root/.github/workflows/source-bundle-artifact-request.yml"
+ temp_root=$(mktemp -d)
+ trap 'rm -rf "$temp_root"' EXIT
+ 
+@@ -23,7 +25,12 @@ fail() {
+   exit 1
+ }
+ 
+-python3 - "$workflow" "$request_workflow" "$processor_workflow" <<'PYWORKFLOW'
++python3 - \
++  "$workflow" \
++  "$request_workflow" \
++  "$processor_workflow" \
++  "$index_workflow" \
++  "$artifact_request_workflow" <<'PYWORKFLOW'
+ import pathlib
+ import re
+ import sys
+@@ -31,8 +38,14 @@ import sys
+ automatic = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+ gate = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+ processor = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
++index = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
++artifact_request = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8")
+ 
+-refs = re.findall(r"^\s*uses:\s*([^\s#]+)", automatic + "\n" + processor, re.MULTILINE)
++refs = re.findall(
++    r"^\s*uses:\s*([^\s#]+)",
++    automatic + "\n" + processor + "\n" + index + "\n" + artifact_request,
++    re.MULTILINE,
++)
+ assert refs and all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in refs)
+ 
+ assert "workflow_dispatch" not in automatic
+@@ -50,6 +63,8 @@ assert "--output ../source-artifact" in automatic
+ assert "steps.source.outputs.sha" in automatic
+ assert "name: teasescript-source-${{ steps.source.outputs.sha }}" in automatic
+ assert "cancel-in-progress: true" in automatic
++assert "retention-days: 7" in automatic
++assert "retention-days: 1" not in automatic
+ assert "runs-on: ubuntu-24.04" in automatic
+ assert "timeout-minutes: 5" in automatic
+ 
+@@ -90,10 +105,21 @@ assert "artifact_digest: ${{ steps.upload.outputs.artifact-digest }}" in process
+ assert "request_validated: ${{ steps.request.outputs.validated }}" 

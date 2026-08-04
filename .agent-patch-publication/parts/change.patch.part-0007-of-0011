@@ -1,0 +1,304 @@
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    comment_id: requestCommentId,
++  });
++  const comment = response.data;
++  if (comment.id !== requestCommentId || comment.user?.login !== expectedAuthor) {
++    throw new ArtifactRequestError('The request comment identity no longer matches the triggering event.');
++  }
++  if (hashRequestBody(comment.body || '') !== expectedBodyHash) {
++    throw new ArtifactRequestError('The request comment changed while the artifact request was running.');
++  }
++  return comment;
++}
++
++async function authorizeRequest({ github, context, author }) {
++  if (context.actor !== author) {
++    throw new ArtifactRequestError('The workflow actor does not match the request comment author.');
++  }
++  const response = await github.rest.repos.getCollaboratorPermissionLevel({
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    username: author,
++  });
++  const permission = response.data.permission;
++  if (!ALLOWED_PERMISSIONS.has(permission)) {
++    throw new ArtifactRequestError('Artifact regeneration requires Write, Maintain, or Admin repository access.');
++  }
++  return permission;
++}
++
++async function resolveSelector({ github, context, parsed }) {
++  const repositoryName = `${context.repo.owner}/${context.repo.repo}`;
++
++  if (parsed.selectorType === 'main') {
++    const repository = await github.rest.repos.get({
++      owner: context.repo.owner,
++      repo: context.repo.repo,
++    });
++    const defaultBranch = repository.data.default_branch;
++    const reference = await github.rest.git.getRef({
++      owner: context.repo.owner,
++      repo: context.repo.repo,
++      ref: `heads/${defaultBranch}`,
++    });
++    if (reference.data.object.type !== 'commit') {
++      throw new ArtifactRequestError('The default branch did not resolve to a commit.');
++    }
++    const sourceSha = requireFullSha(reference.data.object.sha, 'The default branch');
++    return {
++      selector: parsed.selector,
++      selectorType: parsed.selectorType,
++      sourceSha,
++      sourceRepository: repositoryName,
++      sourceRef: defaultBranch,
++      pullNumber: null,
++      headRepository: null,
++      headRef: null,
++      baseSha: null,
++      mergeBaseSha: null,
++    };
++  }
++
++  if (parsed.selectorType === 'pr') {
++    let pull;
++    try {
++      pull = await github.rest.pulls.get({
++        owner: context.repo.owner,
++        repo: context.repo.repo,
++        pull_number: parsed.pullNumber,
++      });
++    } catch (error) {
++      if (error.status === 404) {
++        throw new ArtifactRequestError(`Pull request #${parsed.pullNumber} does not exist.`);
++      }
++      throw error;
++    }
++
++    const sourceSha = requireFullSha(pull.data.head.sha, 'The pull-request head');
++    const baseSha = requireFullSha(pull.data.base.sha, 'The pull-request base');
++    const headRepository = pull.data.head.repo?.full_name;
++    const headRef = pull.data.head.ref;
++    if (!headRepository || !headRef) {
++      throw new ArtifactRequestError('The pull-request head repository or ref is unavailable.');
++    }
++
++    const comparison = await github.rest.repos.compareCommitsWithBasehead({
++      owner: context.repo.owner,
++      repo: context.repo.repo,
++      basehead: `${baseSha}...${sourceSha}`,
++    });
++    const mergeBaseSha = requireFullSha(
++      comparison.data.merge_base_commit?.sha,
++      'The pull-request merge base',
++    );
++
++    return {
++      selector: parsed.selector,
++      selectorType: parsed.selectorType,
++      sourceSha,
++      sourceRepository: headRepository,
++      sourceRef: headRef,
++      pullNumber: parsed.pullNumber,
++      headRepository,
++      headRef,
++      baseSha,
++      mergeBaseSha,
++    };
++  }
++
++  const sourceSha = requireFullSha(parsed.sourceSha, 'The exact selector');
++  try {
++    const commit = await github.rest.git.getCommit({
++      owner: context.repo.owner,
++      repo: context.repo.repo,
++      commit_sha: sourceSha,
++    });
++    if (commit.data.sha !== sourceSha) {
++      throw new ArtifactRequestError('The exact commit selector did not resolve identically.');
++    }
++  } catch (error) {
++    if (error.status === 404) {
++      throw new ArtifactRequestError(`Commit ${sourceSha} does not exist in this repository.`);
++    }
++    throw error;
++  }
++
++  return {
++    selector: parsed.selector,
++    selectorType: parsed.selectorType,
++    sourceSha,
++    sourceRepository: repositoryName,
++    sourceRef: sourceSha,
++    pullNumber: null,
++    headRepository: null,
++    headRef: null,
++    baseSha: null,
++    mergeBaseSha: null,
++  };
++}
++
++async function getCombinedStatuses(github, context, sourceSha) {
++  const statuses = [];
++  for (let page = 1; page <= 10; page += 1) {
++    let response;
++    try {
++      response = await github.rest.repos.getCombinedStatusForRef({
++        owner: context.repo.owner,
++        repo: context.repo.repo,
++        ref: sourceSha,
++        per_page: 100,
++        page,
++      });
++    } catch (error) {
++      if (error.status === 404) {
++        return [];
++      }
++      throw error;
++    }
++    const pageStatuses = response.data.statuses || [];
++    statuses.push(...pageStatuses);
++    if (pageStatuses.length < 100) {
++      break;
++    }
++  }
++  return statuses;
++}
++
++async function verifyArtifactMetadata({
++  github,
++  context,
++  sourceSha,
++  targetUrl,
++  expectedArtifactId = null,
++  expectedDigest = null,
++  allowCurrentRun = false,
++}) {
++  const parsedTarget = parseArtifactTargetUrl(targetUrl, context);
++  if (expectedArtifactId !== null && parsedTarget.artifactId !== expectedArtifactId) {
++    throw new ArtifactRequestError('The artifact URL did not contain the expected artifact ID.');
++  }
++
++  const artifactResponse = await github.rest.actions.getArtifact({
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    artifact_id: parsedTarget.artifactId,
++  });
++  const artifact = artifactResponse.data;
++  const expectedName = `teasescript-source-${sourceSha}`;
++  if (artifact.id !== parsedTarget.artifactId || artifact.name !== expectedName) {
++    throw new ArtifactRequestError('Artifact metadata did not match the requested source identity.');
++  }
++  if (artifact.expired === true) {
++    throw new ArtifactRequestError('The indexed source artifact has expired.');
++  }
++  const expiresAt = artifact.expires_at || null;
++  if (expiresAt) {
++    const expiresAtMs = Date.parse(expiresAt);
++    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
++      throw new ArtifactRequestError('The indexed source artifact is no longer within its retention window.');
++    }
++  }
++
++  const artifactDigest = normalizeDigest(artifact.digest);
++  if (expectedDigest !== null && artifactDigest !== normalizeDigest(expectedDigest)) {
++    throw new ArtifactRequestError('Artifact API metadata did not match the upload digest.');
++  }
++  if (artifact.workflow_run?.id !== parsedTarget.runId) {
++    throw new ArtifactRequestError('Artifact metadata did not match the producer run in the indexed URL.');
++  }
++
++  const runResponse = await github.rest.actions.getWorkflowRun({
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    run_id: parsedTarget.runId,
++  });
++  const run = runResponse.data;
++  if (run.id !== parsedTarget.runId || run.repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
++    throw new ArtifactRequestError('The artifact producer run did not belong to this repository.');
++  }
++  if (!TRUSTED_PRODUCER_PATHS.has(run.path)) {
++    throw new ArtifactRequestError('The artifact producer workflow is not a trusted Source-bundle producer.');
++  }
++  if (run.path === '.github/workflows/source-bundle.yml') {
++    verifyAutomaticProducerSource(run, run.repository.id, sourceSha);
++  }
++  const currentRunAllowed =
++    allowCurrentRun &&
++    run.id === context.runId &&
++    run.path === '.github/workflows/source-bundle-artifact-request.yml' &&
++    ['queued', 'in_progress'].includes(run.status);
++  if (!currentRunAllowed && !(run.status === 'completed' && run.conclusion === 'success')) {
++    throw new ArtifactRequestError('The artifact producer workflow has not completed successfully.');
++  }
++
++  return {
++    artifactId: artifact.id,
++    artifactName: artifact.name,
++    artifactDigest,
++    producerRunId: run.id,
++    artifactUrl: targetUrl,
++    expiresAt,
++  };
++}
++
++async function findCachedArtifact({ github, context, sourceSha }) {
++  const statuses = await getCombinedStatuses(github, context, sourceSha);
++  const candidates = statuses.filter(
++    (status) => status.context === STATUS_CONTEXT && status.state === 'success',
++  );
++
++  for (const status of candidates) {
++    try {
++      return await verifyArtifactMetadata({
++        github,
++        context,
++        sourceSha,
++        targetUrl: status.target_url,
++      });
++    } catch (error) {
++      if (error.status === 404 || error instanceof ArtifactRequestError) {
++        continue;
++      }
++      throw error;
++    }
++  }
++  return null;
++}
++
++function setIdentityOutputs(core, identity, request) {
++  core.setOutput('resolved', 'true');
++  core.setOutput('cache_hit', 'false');
++  core.setOutput('request_comment_id', String(request.commentId));
++  core.setOutput('request_author', request.author);
++  core.setOutput('request_body_sha256', request.bodyHash);
++  core.setOutput('selector', identity.selector);
++  core.setOutput('selector_type', identity.selectorType);
++  core.setOutput('source_sha', identity.sourceSha);
++  core.setOutput('source_repository', identity.sourceRepository);
++  core.setOutput('source_ref', identity.sourceRef);
++  core.setOutput('pull_number', identity.pullNumber ? String(identity.pullNumber) : '');
++  core.setOutput('head_repository', identity.headRepository || '');
++  core.setOutput('head_ref', identity.headRef || '');
++  core.setOutput('base_sha', identity.baseSha || '');
++  core.setOutput('merge_base_sha', identity.mergeBaseSha || '');
++}
++
++function resultFromIdentity({ context, request, identity, artifact }) {
++  return {
++    repository: `${context.repo.owner}/${context.repo.repo}`,
++    requestCommentId: request.commentId,
++    selector: identity.selector,
++    sourceSha: identity.sourceSha,
++    sourceRepository: identity.sourceRepository,
++    sourceRef: identity.sourceRef,
++    pullNumber: identity.pullNumber,
++    headRepository: identity.headRepository,
++    headRef: identity.headRef,
++    baseSha: identity.baseSha,
++    mergeBaseSha: identity.mergeBaseSha,
++    ...artifact,
++  };
++}
++
++async function publishFailure({ github, context, issueNumber, requestCommentId, selector, message }) {

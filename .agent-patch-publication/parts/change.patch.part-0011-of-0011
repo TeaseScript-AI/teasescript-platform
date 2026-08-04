@@ -1,0 +1,287 @@
++  const secondBody = secondGithub.state.comments.at(-1).body;
++
++  assert.match(firstBody, /teasescript-source-[0-9a-f]{40}-request-501\.zip/);
++  assert.match(secondBody, /teasescript-source-[0-9a-f]{40}-request-502\.zip/);
++  assert.match(firstBody, /source-111111111111-request-501/);
++  assert.match(secondBody, /source-111111111111-request-502/);
++  assert.notEqual(firstBody, secondBody);
++}
++
++async function testForkPullRequestCacheHitUsesPullHeadIdentity() {
++  const artifactId = 8151;
++  const runId = 9151;
++  const fixture = artifactFixture({ artifactId, runId, sourceSha: PR_HEAD_SHA });
++  fixture.run.event = 'pull_request';
++  fixture.run.head_repository = { id: 22002 };
++  fixture.run.head_branch = 'feature/source-bundle';
++  fixture.run.head_sha = 'f'.repeat(40);
++  fixture.run.pull_requests = [
++    {
++      base: { repo: { id: 1309933950 } },
++      head: {
++        repo: { id: 22002 },
++        ref: 'feature/source-bundle',
++        sha: PR_HEAD_SHA,
++      },
++    },
++  ];
++  const context = makeContext('/artifact source pr:225');
++  const github = makeGithub(context, {
++    statuses: [
++      {
++        context: request.STATUS_CONTEXT,
++        state: 'success',
++        target_url: fixture.url,
++      },
++    ],
++    artifacts: [[artifactId, fixture.artifact]],
++    runs: [[runId, fixture.run]],
++  });
++  const core = makeCore();
++  await request.resolveRequest({ github, context, core });
++
++  assert.deepEqual(core.failures, []);
++  assert.equal(core.outputs.cache_hit, 'true');
++  const body = github.state.comments.at(-1).body;
++  assert.match(body, /Requested: `pr:225`/);
++  assert.match(body, /PR head: `Contributor\/teasescript-platform:feature\/source-bundle`/);
++}
++
++async function testStaleOrUntrustedIndexBecomesCacheMiss() {
++  const expiredArtifactId = 8401;
++  const expiredRunId = 9401;
++  const expired = artifactFixture({
++    artifactId: expiredArtifactId,
++    runId: expiredRunId,
++    sourceSha: MAIN_SHA,
++  });
++  expired.artifact.expired = true;
++
++  const untrustedArtifactId = 8402;
++  const untrustedRunId = 9402;
++  const untrusted = artifactFixture({
++    artifactId: untrustedArtifactId,
++    runId: untrustedRunId,
++    sourceSha: MAIN_SHA,
++  });
++  untrusted.run.path = '.github/workflows/untrusted.yml';
++
++  const wrongHeadArtifactId = 8403;
++  const wrongHeadRunId = 9403;
++  const wrongHead = artifactFixture({
++    artifactId: wrongHeadArtifactId,
++    runId: wrongHeadRunId,
++    sourceSha: MAIN_SHA,
++  });
++  wrongHead.run.head_sha = EXACT_SHA;
++
++  const context = makeContext('/artifact source main');
++  const github = makeGithub(context, {
++    statuses: [
++      {
++        context: request.STATUS_CONTEXT,
++        state: 'success',
++        target_url: `https://github.com/${REPOSITORY}/actions/runs/9999/artifacts/9999`,
++      },
++      {
++        context: request.STATUS_CONTEXT,
++        state: 'success',
++        target_url: expired.url,
++      },
++      {
++        context: request.STATUS_CONTEXT,
++        state: 'success',
++        target_url: untrusted.url,
++      },
++      {
++        context: request.STATUS_CONTEXT,
++        state: 'success',
++        target_url: wrongHead.url,
++      },
++    ],
++    artifacts: [
++      [expiredArtifactId, expired.artifact],
++      [untrustedArtifactId, untrusted.artifact],
++      [wrongHeadArtifactId, wrongHead.artifact],
++    ],
++    runs: [
++      [expiredRunId, expired.run],
++      [untrustedRunId, untrusted.run],
++      [wrongHeadRunId, wrongHead.run],
++    ],
++  });
++  const core = makeCore();
++  await request.resolveRequest({ github, context, core });
++
++  assert.deepEqual(core.failures, []);
++  assert.equal(core.outputs.cache_hit, 'false');
++  assert.equal(github.state.createdComments, 0);
++}
++
++async function testUnexpectedArtifactApiFailureIsNotTreatedAsMiss() {
++  const context = makeContext('/artifact source main');
++  const github = makeGithub(context, {
++    statuses: [
++      {
++        context: request.STATUS_CONTEXT,
++        state: 'success',
++        target_url: `https://github.com/${REPOSITORY}/actions/runs/9501/artifacts/8501`,
++      },
++    ],
++  });
++  github.rest.actions.getArtifact = async () => {
++    throw httpError(500, 'artifact service unavailable');
++  };
++  const core = makeCore();
++  await request.resolveRequest({ github, context, core });
++
++  assert.equal(core.failures.length, 1);
++  assert.match(github.state.comments.at(-1).body, /artifact service unavailable/);
++}
++
++async function testMissingStatusRefIsACacheMiss() {
++  const context = makeContext('/artifact source main');
++  const github = makeGithub(context, { statusError: httpError(404, 'status ref not found') });
++  const core = makeCore();
++  await request.resolveRequest({ github, context, core });
++
++  assert.deepEqual(core.failures, []);
++  assert.equal(core.outputs.cache_hit, 'false');
++  assert.equal(github.state.createdComments, 0);
++}
++
++async function testCompletionPublishesFixedStatusAndExactResult() {
++  const artifactId = 8201;
++  const context = makeContext('/artifact source pr:225', { runId: 9201 });
++  const fixture = artifactFixture({
++    artifactId,
++    runId: context.runId,
++    sourceSha: PR_HEAD_SHA,
++    current: true,
++  });
++  const github = makeGithub(context, {
++    artifacts: [[artifactId, fixture.artifact]],
++    runs: [[context.runId, fixture.run]],
++  });
++  const core = makeCore();
++  await request.resolveRequest({ github, context, core });
++  assert.deepEqual(core.failures, []);
++  assert.equal(core.outputs.cache_hit, 'false');
++
++  await request.completeRequest({
++    github,
++    context,
++    input: {
++      requestCommentId: core.outputs.request_comment_id,
++      requestAuthor: core.outputs.request_author,
++      requestBodySha256: core.outputs.request_body_sha256,
++      issueNumber: String(context.payload.issue.number),
++      selector: core.outputs.selector,
++      selectorType: core.outputs.selector_type,
++      sourceSha: core.outputs.source_sha,
++      sourceRepository: core.outputs.source_repository,
++      sourceRef: core.outputs.source_ref,
++      pullNumber: core.outputs.pull_number,
++      headRepository: core.outputs.head_repository,
++      headRef: core.outputs.head_ref,
++      baseSha: core.outputs.base_sha,
++      mergeBaseSha: core.outputs.merge_base_sha,
++      artifactId: String(artifactId),
++      artifactUrl: fixture.url,
++      artifactDigest: DIGEST,
++    },
++  });
++
++  assert.equal(github.state.createdStatuses.length, 1);
++  assert.deepEqual(github.state.createdStatuses[0], {
++    owner: 'TeaseScript-AI',
++    repo: 'teasescript-platform',
++    sha: PR_HEAD_SHA,
++    state: 'success',
++    context: request.STATUS_CONTEXT,
++    description: `artifact ${artifactId} sha256:${DIGEST}`,
++    target_url: fixture.url,
++  });
++  const resultBody = github.state.comments.at(-1).body;
++  assert.match(resultBody, /Requested: `pr:225`/);
++  assert.ok(resultBody.includes(`PR merge-base SHA: \`${PR_MERGE_BASE_SHA}\``));
++  assert.match(resultBody, new RegExp(`--expected-merge-base ${PR_MERGE_BASE_SHA}`));
++  assert.match(resultBody, new RegExp(`"artifact_id": ${artifactId}`));
++  assert.ok(resultBody.includes(`SHA-256: \`${DIGEST}\``));
++  assert.match(
++    resultBody,
++    /teasescript-agent-bootstrap-linux-x64\/bin\/prepare-agent-workspace\.sh/,
++  );
++  assert.equal(github.state.permissionCalls, 1);
++}
++
++async function testChangedRequestCannotFinalize() {
++  const artifactId = 8301;
++  const context = makeContext('/artifact source main', { runId: 9301 });
++  const fixture = artifactFixture({
++    artifactId,
++    runId: context.runId,
++    sourceSha: MAIN_SHA,
++    current: true,
++  });
++  const github = makeGithub(context, {
++    artifacts: [[artifactId, fixture.artifact]],
++    runs: [[context.runId, fixture.run]],
++  });
++  const core = makeCore();
++  await request.resolveRequest({ github, context, core });
++  github.state.comments[0].body = '/artifact source pr:225';
++
++  await assert.rejects(
++    request.completeRequest({
++      github,
++      context,
++      input: {
++        requestCommentId: core.outputs.request_comment_id,
++        requestAuthor: core.outputs.request_author,
++        requestBodySha256: core.outputs.request_body_sha256,
++        issueNumber: String(context.payload.issue.number),
++        selector: core.outputs.selector,
++        selectorType: core.outputs.selector_type,
++        sourceSha: core.outputs.source_sha,
++        sourceRepository: core.outputs.source_repository,
++        sourceRef: core.outputs.source_ref,
++        pullNumber: '',
++        headRepository: '',
++        headRef: '',
++        baseSha: '',
++        mergeBaseSha: '',
++        artifactId: String(artifactId),
++        artifactUrl: fixture.url,
++        artifactDigest: DIGEST,
++      },
++    }),
++    /changed while the artifact request was running/,
++  );
++  assert.equal(github.state.createdStatuses.length, 0);
++}
++
++async function main() {
++  await testCommandGrammar();
++  await testMainResolution();
++  await testPullResolution();
++  await testExactShaResolution();
++  await testInvalidAndMissingRequests();
++  await testAuthorizationRejection();
++  await testCacheHitAndDuplicateDelivery();
++  await testSpoofedBotCannotClaimAuthoritativeResult();
++  await testDistinctRequestsForSameShaUseDistinctLocalPaths();
++  await testForkPullRequestCacheHitUsesPullHeadIdentity();
++  await testStaleOrUntrustedIndexBecomesCacheMiss();
++  await testUnexpectedArtifactApiFailureIsNotTreatedAsMiss();
++  await testMissingStatusRefIsACacheMiss();
++  await testCompletionPublishesFixedStatusAndExactResult();
++  await testChangedRequestCannotFinalize();
++  console.log('test-source-bundle-artifact-request: PASS');
++}
++
++main().catch((error) => {
++  console.error(error);
++  process.exitCode = 1;
++});
+\ No newline at end of file

@@ -1,0 +1,170 @@
+diff --git a/.github/workflows/source-bundle-artifact-request.yml b/.github/workflows/source-bundle-artifact-request.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..8e07e8c96b20c854877031d53ec1370400d51555
+--- /dev/null
++++ b/.github/workflows/source-bundle-artifact-request.yml
+@@ -0,0 +1,163 @@
++name: Source bundle artifact request
++run-name: Source bundle artifact request ${{ github.event.comment.id }}
++
++on:
++  issue_comment:
++    types: [created]
++
++permissions: {}
++
++jobs:
++  regenerate:
++    if: >-
++      startsWith(github.event.comment.body, '/artifact') &&
++      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
++    concurrency:
++      group: source-bundle-artifact-request
++      queue: max
++      cancel-in-progress: false
++    runs-on: ubuntu-24.04
++    timeout-minutes: 8
++    permissions:
++      actions: read
++      contents: read
++      issues: write
++      pull-requests: read
++      statuses: write
++    steps:
++      - name: Check out trusted artifact tooling
++        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
++        with:
++          ref: ${{ github.workflow_sha }}
++          path: tooling
++          fetch-depth: 1
++          persist-credentials: false
++          show-progress: false
++
++      - name: Authorize, resolve, and recheck the artifact index
++        id: resolve
++        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
++        with:
++          script: |
++            const request = require('./tooling/tools/local-agent/source-bundle-artifact-request.cjs');
++            await request.resolveRequest({ github, context, core });
++
++      - name: Check out exact selected source as data
++        if: ${{ steps.resolve.outputs.cache_hit == 'false' }}
++        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
++        with:
++          repository: ${{ steps.resolve.outputs.source_repository }}
++          ref: ${{ steps.resolve.outputs.source_sha }}
++          path: source
++          fetch-depth: 0
++          persist-credentials: false
++          show-progress: false
++
++      - name: Verify exact selected source
++        if: ${{ steps.resolve.outputs.cache_hit == 'false' }}
++        working-directory: source
++        env:
++          SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}
++        run: test "$(git rev-parse --verify HEAD)" = "$SOURCE_SHA"
++
++      - name: Create verified source bundle
++        if: ${{ steps.resolve.outputs.cache_hit == 'false' }}
++        env:
++          SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}
++          SOURCE_REF: ${{ steps.resolve.outputs.source_ref }}
++        run: |
++          cd source
++          bash ../tooling/tools/local-agent/create-source-bundle.sh \
++            --output ../source-artifact \
++            --repository "${{ github.repository }}" \
++            --source-sha "$SOURCE_SHA" \
++            --source-ref "$SOURCE_REF" \
++            --event-name source-bundle-artifact-request
++
++      - name: Upload source artifact
++        if: ${{ steps.resolve.outputs.cache_hit == 'false' }}
++        id: upload
++        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
++        with:
++          name: teasescript-source-${{ steps.resolve.outputs.source_sha }}
++          path: source-artifact/
++          if-no-files-found: error
++          retention-days: 7
++          compression-level: 0
++
++      - name: Verify and publish the authoritative result
++        if: ${{ steps.resolve.outputs.cache_hit == 'false' }}
++        id: finalize
++        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
++        env:
++          REQUEST_COMMENT_ID: ${{ steps.resolve.outputs.request_comment_id }}
++          REQUEST_AUTHOR: ${{ steps.resolve.outputs.request_author }}
++          REQUEST_BODY_SHA256: ${{ steps.resolve.outputs.request_body_sha256 }}
++          ISSUE_NUMBER: ${{ github.event.issue.number }}
++          SELECTOR: ${{ steps.resolve.outputs.selector }}
++          SELECTOR_TYPE: ${{ steps.resolve.outputs.selector_type }}
++          SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}
++          SOURCE_REPOSITORY: ${{ steps.resolve.outputs.source_repository }}
++          SOURCE_REF: ${{ steps.resolve.outputs.source_ref }}
++          PULL_NUMBER: ${{ steps.resolve.outputs.pull_number }}
++          HEAD_REPOSITORY: ${{ steps.resolve.outputs.head_repository }}
++          HEAD_REF: ${{ steps.resolve.outputs.head_ref }}
++          BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
++          MERGE_BASE_SHA: ${{ steps.resolve.outputs.merge_base_sha }}
++          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
++          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
++          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
++        with:
++          script: |
++            const request = require('./tooling/tools/local-agent/source-bundle-artifact-request.cjs');
++            await request.completeRequest({
++              github,
++              context,
++              input: {
++                requestCommentId: process.env.REQUEST_COMMENT_ID,
++                requestAuthor: process.env.REQUEST_AUTHOR,
++                requestBodySha256: process.env.REQUEST_BODY_SHA256,
++                issueNumber: process.env.ISSUE_NUMBER,
++                selector: process.env.SELECTOR,
++                selectorType: process.env.SELECTOR_TYPE,
++                sourceSha: process.env.SOURCE_SHA,
++                sourceRepository: process.env.SOURCE_REPOSITORY,
++                sourceRef: process.env.SOURCE_REF,
++                pullNumber: process.env.PULL_NUMBER,
++                headRepository: process.env.HEAD_REPOSITORY,
++                headRef: process.env.HEAD_REF,
++                baseSha: process.env.BASE_SHA,
++                mergeBaseSha: process.env.MERGE_BASE_SHA,
++                artifactId: process.env.ARTIFACT_ID,
++                artifactUrl: process.env.ARTIFACT_URL,
++                artifactDigest: process.env.ARTIFACT_DIGEST,
++              },
++            });
++
++      - name: Report a failed production attempt
++        if: >-
++          always() &&
++          steps.resolve.outputs.resolved == 'true' &&
++          steps.resolve.outputs.cache_hit == 'false' &&
++          steps.finalize.outcome != 'success'
++        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
++        env:
++          REQUEST_COMMENT_ID: ${{ steps.resolve.outputs.request_comment_id }}
++          REQUEST_AUTHOR: ${{ steps.resolve.outputs.request_author }}
++          REQUEST_BODY_SHA256: ${{ steps.resolve.outputs.request_body_sha256 }}
++          ISSUE_NUMBER: ${{ github.event.issue.number }}
++          SELECTOR: ${{ steps.resolve.outputs.selector }}
++        with:
++          script: |
++            const request = require('./tooling/tools/local-agent/source-bundle-artifact-request.cjs');
++            await request.reportProductionFailure({
++              github,
++              context,
++              input: {
++                requestCommentId: process.env.REQUEST_COMMENT_ID,
++                requestAuthor: process.env.REQUEST_AUTHOR,
++                requestBodySha256: process.env.REQUEST_BODY_SHA256,
++                issueNumber: process.env.ISSUE_NUMBER,
++                selector: process.env.SELECTOR,
++              },
++            });
+\ No newline at end of file

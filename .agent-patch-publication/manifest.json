@@ -1,0 +1,66 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "docs/issue-210-bootstrap-routing-and-write-guard",
+  "expectedBaseSha": "c56cc2f4bbb16c6d7f6b6b1c3970178421879b10",
+  "expectedResultTreeSha": "eb826c4a4c27536a947a19ea7e1ede12e20aad7e",
+  "patchSizeBytes": 113214,
+  "patchSha256": "eebb6ae8f60eb360bfecd09238ae97cdf3488685be87ef1cdb8fcee976c70a25",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0011",
+      "sizeBytes": 7451,
+      "sha256": "eabf555928c7c6c6027d7b60935f5f1a4ae7f56e6650bb0b2bbf956c902e242b"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0011",
+      "sizeBytes": 10868,
+      "sha256": "8a47a7ce546c94b5550453581f44a1603252d9eece4ca910257085adfe416d99"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0011",
+      "sizeBytes": 10220,
+      "sha256": "4fe9ac39e3e73552f22561337e2537eb000e9e0615fa53b6999d86120f3b491c"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0011",
+      "sizeBytes": 12282,
+      "sha256": "c8d77e2d7a68e40c1dd6f575c5f28de090567027839538c6780b950714ff9bf5"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0011",
+      "sizeBytes": 11776,
+      "sha256": "007d59bf0ebea678c1ba63436cf98514141c3f4c7ecc791f63083cd6baf64ff9"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0006-of-0011",
+      "sizeBytes": 9536,
+      "sha256": "d49ca648508d9586025ea1be1bf96160f2a5313f680bdc267f4dd315cd989bc7"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0007-of-0011",
+      "sizeBytes": 10632,
+      "sha256": "82a83e0e38243fff2b5adfb33c8f3e74e2c83c199f6e386afd9314e12a3adedc"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0008-of-0011",
+      "sizeBytes": 10338,
+      "sha256": "c29d30116542d311e6385020c88ae13c9b61ed80be0c86505df96b70b8663e6d"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0009-of-0011",
+      "sizeBytes": 10320,
+      "sha256": "256f23006aa2bee7b9f1c5d1caca9a967fe5595b8e8850281250d92943869416"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0010-of-0011",
+      "sizeBytes": 9986,
+      "sha256": "bd618c6424fe342b8f9abd5bdebda76e4249a379848e04edcca083b6198f86e3"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0011-of-0011",
+      "sizeBytes": 9805,
+      "sha256": "d0873816d708c6f7f3bde02513ff427463d542298834023dbc620cec59e157b4"
+    }
+  ],
+  "commitMessage": "Synchronize merged source acquisition and finalize bootstrap routing"
+}
