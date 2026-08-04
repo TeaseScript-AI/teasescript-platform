@@ -24,8 +24,6 @@ const TRUSTED_PRODUCER_PATHS = new Set([
   '.github/workflows/source-bundle-request-processor.yml',
   '.github/workflows/source-bundle-artifact-request.yml',
   '.github/workflows/artifact-mailbox.yml',
-  '.github/workflows/artifact-mailbox-worker.yml',
-  '.github/workflows/patch-publication.yml',
 ]);
 
 class ArtifactRequestError extends Error {
@@ -188,16 +186,12 @@ function normalizeRequestIds(value) {
     throw new ArtifactRequestError('A registry entry did not contain a request-comment identity.');
   }
   const ids = [];
-  const seen = new Set();
   for (const item of value) {
     const id = Number(item);
     if (!Number.isSafeInteger(id) || id <= 0) {
       throw new ArtifactRequestError('A registry entry contained an invalid request-comment identity.');
     }
-    if (!seen.has(id)) {
-      seen.add(id);
-      ids.push(id);
-    }
+    if (!ids.includes(id)) ids.push(id);
   }
   return ids;
 }
@@ -383,33 +377,6 @@ function sameReadyArtifact(left, right) {
   );
 }
 
-function sameResolvedIdentity(left, right) {
-  return (
-    left.selector === right.selector &&
-    left.sourceSha === right.sourceSha &&
-    left.sourceRepository === right.sourceRepository &&
-    left.sourceRef === right.sourceRef &&
-    left.pullNumber === right.pullNumber &&
-    left.headRepository === right.headRepository &&
-    left.headRef === right.headRef &&
-    left.baseSha === right.baseSha &&
-    left.mergeBaseSha === right.mergeBaseSha
-  );
-}
-
-function boundRegistryEntries(entries) {
-  let remaining = REGISTRY_LIMIT;
-  const bounded = [];
-  for (const entry of entries) {
-    if (remaining === 0) break;
-    const requestCommentIds = entry.requestCommentIds.slice(0, remaining);
-    if (requestCommentIds.length === 0) continue;
-    bounded.push({ ...entry, requestCommentIds });
-    remaining -= requestCommentIds.length;
-  }
-  return bounded;
-}
-
 function mergeRegistryEntries(existingEntries, incomingEntry, now = new Date()) {
   const nowMs = now.getTime();
   const incoming = normalizeRegistryEntry(incomingEntry);
@@ -420,9 +387,7 @@ function mergeRegistryEntries(existingEntries, incomingEntry, now = new Date()) 
     .filter((entry) => !entry.requestCommentIds.some((id) => incomingIds.has(id)));
 
   if (incoming.state === 'ready') {
-    const equivalentIndex = retained.findIndex(
-      (entry) => sameReadyArtifact(entry, incoming) && sameResolvedIdentity(entry, incoming),
-    );
+    const equivalentIndex = retained.findIndex((entry) => sameReadyArtifact(entry, incoming));
     if (equivalentIndex >= 0) {
       const equivalent = retained.splice(equivalentIndex, 1)[0];
       incoming.requestCommentIds = normalizeRequestIds([
@@ -432,11 +397,9 @@ function mergeRegistryEntries(existingEntries, incomingEntry, now = new Date()) 
     }
   }
 
-  return boundRegistryEntries(
-    [incoming, ...retained].sort(
-      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
-    ),
-  );
+  return [incoming, ...retained]
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+    .slice(0, REGISTRY_LIMIT);
 }
 
 async function listAllIssueComments(github, context, issueNumber) {
@@ -747,12 +710,7 @@ async function verifyArtifactMetadata({
   const currentRunAllowed =
     allowCurrentRun &&
     run.id === context.runId &&
-    [
-      '.github/workflows/source-bundle-artifact-request.yml',
-      '.github/workflows/artifact-mailbox.yml',
-      '.github/workflows/artifact-mailbox-worker.yml',
-      '.github/workflows/patch-publication.yml',
-    ].includes(run.path) &&
+    run.path === '.github/workflows/artifact-mailbox.yml' &&
     ['queued', 'in_progress'].includes(run.status);
   if (!currentRunAllowed && !(run.status === 'completed' && run.conclusion === 'success')) {
     throw new ArtifactRequestError('The artifact producer workflow has not completed successfully.');
@@ -882,16 +840,6 @@ async function cleanupRequestComment({ github, context, request }) {
   return true;
 }
 
-async function cleanupRequestCommentBestEffort({ github, context, request, core }) {
-  try {
-    return await cleanupRequestComment({ github, context, request });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    core?.warning?.(`Artifact result is available, but request-comment cleanup failed: ${message}`);
-    return false;
-  }
-}
-
 async function publishFailure({ github, context, request, selector, sourceSha, message }) {
   return upsertRegistryEntry({
     github,
@@ -952,23 +900,8 @@ async function resolveRequest({ github, context, core }) {
           core.setOutput('cache_hit', persisted.state === 'ready' ? 'true' : 'false');
           return;
         }
-        core.setOutput('resolved', 'false');
-        core.setOutput('cache_hit', 'false');
-        return;
       }
       throw error;
-    }
-
-    const persisted = await registryEntryForRequest({
-      github,
-      context,
-      requestCommentId: request.commentId,
-    });
-    if (persisted) {
-      core.setOutput('resolved', 'false');
-      core.setOutput('cache_hit', persisted.state === 'ready' ? 'true' : 'false');
-      await cleanupRequestCommentBestEffort({ github, context, request, core });
-      return;
     }
 
     await authorizeRequest({ github, context, author: request.author });
@@ -986,7 +919,7 @@ async function resolveRequest({ github, context, core }) {
         context,
         entry: resultFromIdentity({ context, request, identity, artifact: cached }),
       });
-      await cleanupRequestCommentBestEffort({ github, context, request, core });
+      await cleanupRequestComment({ github, context, request });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1109,7 +1042,7 @@ function requestFromInput(input) {
   };
 }
 
-async function completeRequest({ github, context, core, input }) {
+async function completeRequest({ github, context, input }) {
   const request = requestFromInput(input);
   const identity = identityFromInput(input);
   try {
@@ -1156,8 +1089,6 @@ async function completeRequest({ github, context, core, input }) {
     entry: resultFromIdentity({ context, request, identity, artifact }),
   });
 
-  await cleanupRequestCommentBestEffort({ github, context, request, core });
-
   await github.rest.repos.createCommitStatus({
     owner: context.repo.owner,
     repo: context.repo.repo,
@@ -1168,9 +1099,10 @@ async function completeRequest({ github, context, core, input }) {
     target_url: artifact.artifactUrl,
   });
 
+  await cleanupRequestComment({ github, context, request });
 }
 
-async function reportProductionFailure({ github, context, core, input }) {
+async function reportProductionFailure({ github, context, input }) {
   const request = requestFromInput(input);
   const existing = await registryEntryForRequest({
     github,
@@ -1178,32 +1110,17 @@ async function reportProductionFailure({ github, context, core, input }) {
     requestCommentId: request.commentId,
   });
   if (existing) {
-    if (existing.state === 'ready' && existing.producerRunId === context.runId) {
-      await publishFailure({
-        github,
-        context,
-        request,
-        selector: input.selector,
-        sourceSha: input.sourceSha || null,
-        message: 'Source-bundle production or fixed-index publication failed. Inspect the linked workflow run for the exact failing step.',
-      });
-    }
-    await cleanupRequestCommentBestEffort({ github, context, request, core });
+    await cleanupRequestComment({ github, context, request });
     return;
   }
 
-  try {
-    await getLiveRequestComment({
-      github,
-      context,
-      requestCommentId: request.commentId,
-      expectedAuthor: request.author,
-      expectedBodyHash: request.bodyHash,
-    });
-  } catch (error) {
-    if (error.status === 404) return;
-    throw error;
-  }
+  await getLiveRequestComment({
+    github,
+    context,
+    requestCommentId: request.commentId,
+    expectedAuthor: request.author,
+    expectedBodyHash: request.bodyHash,
+  });
 
   await publishFailure({
     github,
@@ -1213,7 +1130,7 @@ async function reportProductionFailure({ github, context, core, input }) {
     sourceSha: input.sourceSha || null,
     message: 'Source-bundle production or result publication failed. Inspect the linked workflow run for the exact failing step.',
   });
-  await cleanupRequestCommentBestEffort({ github, context, request, core });
+  await cleanupRequestComment({ github, context, request });
 }
 
 module.exports = {
