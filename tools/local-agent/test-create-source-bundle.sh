@@ -16,7 +16,7 @@ workflow="$root/.github/workflows/source-bundle.yml"
 request_workflow="$root/.github/workflows/source-bundle-request.yml"
 processor_workflow="$root/.github/workflows/source-bundle-request-processor.yml"
 index_workflow="$root/.github/workflows/source-bundle-index.yml"
-artifact_request_workflow="$root/.github/workflows/source-bundle-artifact-request.yml"
+artifact_request_workflow="$root/.github/workflows/artifact-mailbox.yml"
 chatgpt_workflow="$root/docs/CHATGPT-GITHUB-WORKFLOW.md"
 development_workflow="$root/docs/DEVELOPMENT-WORKFLOW.md"
 agents_file="$root/AGENTS.md"
@@ -173,7 +173,7 @@ assert "permissions: {}" in artifact_request
 assert "github.event.issue.number == 235" in artifact_request
 assert "startsWith(github.event.comment.body, '/artifact source ')" in artifact_request
 assert "group: source-bundle-artifact-request" in artifact_request
-assert "queue:" not in artifact_request
+assert "queue: max" in artifact_request
 assert "pull-requests: read" in artifact_request
 assert "pull-requests: write" not in artifact_request
 assert "cancel-in-progress: false" in artifact_request
