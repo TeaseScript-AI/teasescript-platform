@@ -185,12 +185,16 @@ function normalizeRequestIds(value) {
     throw new ArtifactRequestError('A registry entry did not contain a request-comment identity.');
   }
   const ids = [];
+  const seen = new Set();
   for (const item of value) {
     const id = Number(item);
     if (!Number.isSafeInteger(id) || id <= 0) {
       throw new ArtifactRequestError('A registry entry contained an invalid request-comment identity.');
     }
-    if (!ids.includes(id)) ids.push(id);
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
   }
   return ids;
 }
@@ -376,6 +380,33 @@ function sameReadyArtifact(left, right) {
   );
 }
 
+function sameResolvedIdentity(left, right) {
+  return (
+    left.selector === right.selector &&
+    left.sourceSha === right.sourceSha &&
+    left.sourceRepository === right.sourceRepository &&
+    left.sourceRef === right.sourceRef &&
+    left.pullNumber === right.pullNumber &&
+    left.headRepository === right.headRepository &&
+    left.headRef === right.headRef &&
+    left.baseSha === right.baseSha &&
+    left.mergeBaseSha === right.mergeBaseSha
+  );
+}
+
+function boundRegistryEntries(entries) {
+  let remaining = REGISTRY_LIMIT;
+  const bounded = [];
+  for (const entry of entries) {
+    if (remaining === 0) break;
+    const requestCommentIds = entry.requestCommentIds.slice(0, remaining);
+    if (requestCommentIds.length === 0) continue;
+    bounded.push({ ...entry, requestCommentIds });
+    remaining -= requestCommentIds.length;
+  }
+  return bounded;
+}
+
 function mergeRegistryEntries(existingEntries, incomingEntry, now = new Date()) {
   const nowMs = now.getTime();
   const incoming = normalizeRegistryEntry(incomingEntry);
@@ -386,7 +417,9 @@ function mergeRegistryEntries(existingEntries, incomingEntry, now = new Date()) 
     .filter((entry) => !entry.requestCommentIds.some((id) => incomingIds.has(id)));
 
   if (incoming.state === 'ready') {
-    const equivalentIndex = retained.findIndex((entry) => sameReadyArtifact(entry, incoming));
+    const equivalentIndex = retained.findIndex(
+      (entry) => sameReadyArtifact(entry, incoming) && sameResolvedIdentity(entry, incoming),
+    );
     if (equivalentIndex >= 0) {
       const equivalent = retained.splice(equivalentIndex, 1)[0];
       incoming.requestCommentIds = normalizeRequestIds([
@@ -396,9 +429,11 @@ function mergeRegistryEntries(existingEntries, incomingEntry, now = new Date()) 
     }
   }
 
-  return [incoming, ...retained]
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-    .slice(0, REGISTRY_LIMIT);
+  return boundRegistryEntries(
+    [incoming, ...retained].sort(
+      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+    ),
+  );
 }
 
 async function listAllIssueComments(github, context, issueNumber) {
@@ -839,6 +874,16 @@ async function cleanupRequestComment({ github, context, request }) {
   return true;
 }
 
+async function cleanupRequestCommentBestEffort({ github, context, request, core }) {
+  try {
+    return await cleanupRequestComment({ github, context, request });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    core?.warning?.(`Artifact result is available, but request-comment cleanup failed: ${message}`);
+    return false;
+  }
+}
+
 async function publishFailure({ github, context, request, selector, sourceSha, message }) {
   return upsertRegistryEntry({
     github,
@@ -899,6 +944,9 @@ async function resolveRequest({ github, context, core }) {
           core.setOutput('cache_hit', persisted.state === 'ready' ? 'true' : 'false');
           return;
         }
+        core.setOutput('resolved', 'false');
+        core.setOutput('cache_hit', 'false');
+        return;
       }
       throw error;
     }
@@ -918,7 +966,7 @@ async function resolveRequest({ github, context, core }) {
         context,
         entry: resultFromIdentity({ context, request, identity, artifact: cached }),
       });
-      await cleanupRequestComment({ github, context, request });
+      await cleanupRequestCommentBestEffort({ github, context, request, core });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1041,7 +1089,7 @@ function requestFromInput(input) {
   };
 }
 
-async function completeRequest({ github, context, input }) {
+async function completeRequest({ github, context, core, input }) {
   const request = requestFromInput(input);
   const identity = identityFromInput(input);
   try {
@@ -1060,6 +1108,7 @@ async function completeRequest({ github, context, input }) {
         requestCommentId: request.commentId,
       });
       if (persisted?.state === 'ready') return;
+      return;
     }
     throw error;
   }
@@ -1088,6 +1137,8 @@ async function completeRequest({ github, context, input }) {
     entry: resultFromIdentity({ context, request, identity, artifact }),
   });
 
+  await cleanupRequestCommentBestEffort({ github, context, request, core });
+
   await github.rest.repos.createCommitStatus({
     owner: context.repo.owner,
     repo: context.repo.repo,
@@ -1098,7 +1149,6 @@ async function completeRequest({ github, context, input }) {
     target_url: artifact.artifactUrl,
   });
 
-  await cleanupRequestComment({ github, context, request });
 }
 
 async function reportProductionFailure({ github, context, input }) {
@@ -1113,13 +1163,18 @@ async function reportProductionFailure({ github, context, input }) {
     return;
   }
 
-  await getLiveRequestComment({
-    github,
-    context,
-    requestCommentId: request.commentId,
-    expectedAuthor: request.author,
-    expectedBodyHash: request.bodyHash,
-  });
+  try {
+    await getLiveRequestComment({
+      github,
+      context,
+      requestCommentId: request.commentId,
+      expectedAuthor: request.author,
+      expectedBodyHash: request.bodyHash,
+    });
+  } catch (error) {
+    if (error.status === 404) return;
+    throw error;
+  }
 
   await publishFailure({
     github,
