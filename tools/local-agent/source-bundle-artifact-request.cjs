@@ -296,6 +296,15 @@ function compactFailureReason(value) {
   return `${compact.slice(0, FAILURE_REASON_LIMIT - 1)}…`;
 }
 
+function formatInlineCode(value) {
+  const text = String(value);
+  const runs = text.match(/`+/g) || [];
+  const longestRun = runs.reduce((longest, run) => Math.max(longest, run.length), 0);
+  const fence = '`'.repeat(longestRun + 1);
+  const padding = text.startsWith('`') || text.endsWith('`') ? ' ' : '';
+  return `${fence}${padding}${text}${padding}${fence}`;
+}
+
 function formatRegistryEntry(entry) {
   const resolved = entry.sourceSha || 'unresolved';
   const lines = [
@@ -316,7 +325,10 @@ function formatRegistryEntry(entry) {
   );
   if (entry.pullNumber) {
     lines.push(
-      `\`PR #${entry.pullNumber}\` · \`head ${entry.headRepository}:${entry.headRef}\` · \`base ${entry.baseSha}\` · \`merge-base ${entry.mergeBaseSha}\``,
+      `\`PR #${entry.pullNumber}\`` +
+        ` · head ${formatInlineCode(`${entry.headRepository}:${entry.headRef}`)}` +
+        ` · base ${formatInlineCode(entry.baseSha)}` +
+        ` · merge-base ${formatInlineCode(entry.mergeBaseSha)}`,
     );
   }
   lines.push(
@@ -1134,6 +1146,7 @@ module.exports = {
   completeRequest,
   findCachedArtifact,
   findRegistryEntry,
+  formatInlineCode,
   formatPreparationCommand,
   formatRegistryComment,
   mergeRegistryEntries,

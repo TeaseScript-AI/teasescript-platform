@@ -467,6 +467,36 @@ async function testSpoofedRegistryCannotClaimAuthority() {
   assert.equal(authoritative[0].user.id, request.RESULT_BOT_ID);
 }
 
+async function testRegistryEscapesUntrustedPullHeadRef() {
+  const entry = readyEntry({
+    requestId: 500,
+    sourceSha: PR_HEAD_SHA,
+    artifactId: 8199,
+    runId: 9199,
+    updatedAt: '2026-08-04T09:59:00.000Z',
+  });
+  Object.assign(entry, {
+    selector: 'pr:225',
+    sourceRepository: 'Contributor/teasescript-platform',
+    sourceRef: 'feature/x`</code><b>pwn</b>',
+    pullNumber: 225,
+    headRepository: 'Contributor/teasescript-platform',
+    headRef: 'feature/x`</code><b>pwn</b>',
+    baseSha: PR_BASE_SHA,
+    mergeBaseSha: PR_MERGE_BASE_SHA,
+  });
+
+  const body = request.formatRegistryComment([entry]);
+  assert.match(
+    body,
+    /head ``Contributor\/teasescript-platform:feature\/x`<\/code><b>pwn<\/b>``/,
+  );
+  assert.equal(
+    request.formatInlineCode('feature/x`</code><b>pwn</b>'),
+    '``feature/x`</code><b>pwn</b>``',
+  );
+}
+
 async function testEquivalentArtifactsDeduplicateAndPreserveRequestIds() {
   const first = readyEntry({
     requestId: 501,
@@ -747,6 +777,7 @@ async function main() {
   await testCacheHitCreatesOneRegistryAndCleansExactRequest();
   await testDeletedRequestRedeliveryIsIdempotent();
   await testSpoofedRegistryCannotClaimAuthority();
+  await testRegistryEscapesUntrustedPullHeadRef();
   await testEquivalentArtifactsDeduplicateAndPreserveRequestIds();
   await testSerializedDistinctUpdatesPreserveBothEntries();
   await testRegistryPrunesExpiryOrdersNewestAndBoundsTen();
