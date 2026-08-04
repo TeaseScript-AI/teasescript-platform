@@ -35,38 +35,30 @@ This is both simpler and more context-efficient than requesting complete files o
 
 ## Obtain the exact source artifact
 
-Issue #228 adds a fixed exact-SHA artifact index and a collaborator-gated
-regeneration command. The rollout is additive until its default-branch live
-proof is complete; the request-branch procedure remains a compatibility path in
-`DEVELOPMENT-WORKFLOW.md` during that period.
+Use the fixed index first; the request-branch route in
+`DEVELOPMENT-WORKFLOW.md` remains a temporary rollout fallback.
 
 ### Preferred fixed-index lookup
 
-Resolve one immutable identity first:
+1. Resolve one identity: `main` to the current tip; `sha:<full-sha>` to that
+   commit; or `pr:<number>` to its head SHA, head repository/ref, current base
+   SHA, and `compare_commits.merge_base_commit.sha`.
+2. Call `get_commit_combined_status` for the source SHA and select a successful
+   `source-bundle/artifact-v1` status whose `target_url` is this repository's
+   exact artifact URL.
+3. Parse its run and artifact IDs, call `fetch_workflow_run_artifacts`, and
+   require the exact ID, name `teasescript-source-<source-sha>`, digest,
+   producer run/repository identity, and an unexpired artifact.
+4. Download that numeric ID and run the trusted preparation helper with the
+   exact source SHA and optional PR merge base.
 
-- `main`: the current default-branch tip;
-- `pr:<number>`: the current PR head SHA plus head repository/ref, current base
-  SHA, and `compare_commits.merge_base_commit.sha`;
-- `sha:<full-sha>`: that exact existing commit.
-
-Then call `get_commit_combined_status` for the exact source SHA and inspect only
-a successful status with context `source-bundle/artifact-v1`. Its `target_url`
-must be the exact artifact URL for this repository. Use the run and artifact IDs
-from that URL to call `fetch_workflow_run_artifacts`; require one unexpired
-artifact whose ID and name `teasescript-source-<source-sha>` match, whose digest
-is present, and whose workflow-run repository and run identity match. Download
-that numeric artifact ID once, verify the reported digest locally, and run the
-trusted preparation helper with the exact head and optional PR merge base.
-
-A valid lookup starts no workflow and posts no comment. Treat a missing fixed
-status, failed download, expired artifact, malformed URL, wrong ID/name/digest,
-wrong producer identity, or other metadata mismatch as a cache miss. Never use
-an artifact from another pull request or another SHA merely because it contains
-similar files.
+A valid hit starts no workflow and posts no comment. Missing status, failed
+download, expiry, malformed URL, or any ID, name, digest, or producer mismatch
+is a cache miss; never substitute an artifact from another PR or SHA.
 
 ### Regenerate only after a confirmed miss
 
-Post exactly one of these commands on an issue or pull request:
+Post exactly one command on an issue or pull request:
 
 ```text
 /artifact source main
@@ -75,31 +67,16 @@ Post exactly one of these commands on an issue or pull request:
 ```
 
 Only Write, Maintain, or Admin collaborators may allocate regeneration compute.
-The workflow serializes requests, resolves and pins the selected identity,
-rechecks the index after entering the queue, and either returns the now-existing
-artifact or creates one seven-day Source bundle. Consume only the result bound
-to the exact request-comment ID and authored by the exact GitHub Actions bot
-identity `github-actions[bot]` (user ID `41898282`); another App or bot is not an
-authoritative result source. The result contains the complete resolved identity,
-artifact metadata, exact `download_workflow_artifact` arguments, and local
-preparation command. Download filenames and workspace paths also include the
-request-comment ID so separate acquisitions of one exact SHA do not collide.
+The workflow queues without cancelling, resolves and pins the selector after
+admission, rechecks the index, and returns or creates a seven-day bundle.
+Consume only the result for the exact request-comment ID from
+`github-actions[bot]` user ID `41898282`. It provides the resolved identity,
+artifact metadata, exact `download_workflow_artifact` arguments, and preparation
+command; file and workspace paths include the request-comment ID. Use the
+returned identity as a unit if `main` or the PR moves while waiting.
 
-The returned identity is authoritative for that request. When `main` or a PR
-moves while the request waits, do not combine the result with a head, base, or
-merge base resolved earlier; either use the complete returned identity or
-request the already-resolved exact SHA.
-
-Normal agent guidance after live rollout is:
-
-> Acquire exact repository source through the fixed
-> `source-bundle/artifact-v1` index, and use `/artifact source <selector>` only
-> on a confirmed miss. Do not use network Git, workflow run numbers, manually
-> constructed request branches, or artifacts from unrelated pull requests.
-
-Until the issue #228 live-proof gate is complete and `AGENTS.md` is switched,
-the documented request-branch fallback remains supported. Do not search for a
-`workflow_dispatch` route; the connector does not expose one.
+Until default-branch live proof is complete and `AGENTS.md` changes, the
+request-branch fallback remains supported. No `workflow_dispatch` route exists.
 
 ## Prepare the local checkout
 

@@ -89,12 +89,10 @@ python3 -B tools/local-agent/test-prepare-source-review.py
 
 ## Source-bundle artifact request logic
 
-`source-bundle-artifact-request.cjs` is trusted default-branch logic for the
-strict `/artifact source <selector>` regeneration workflow. It resolves and
-pins `main`, PR, and exact-SHA selectors, enforces collaborator authorization,
-validates the fixed artifact index and producer metadata, correlates one bot
-result with the exact request comment, and emits fully populated download and
-preparation instructions. It does not execute selected source content.
+Trusted default-branch `source-bundle-artifact-request.cjs` pins selectors,
+authorizes collaborators, validates index and producer metadata, binds one
+authenticated result to the request, and emits exact download and preparation
+instructions without executing selected source.
 
 Focused tests:
 
