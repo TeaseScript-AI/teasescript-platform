@@ -1,0 +1,36 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "agent/issue-228-artifact-acquisition-v2",
+  "expectedBaseSha": "13adc1317e638e78bf1e5b2f77c2c8295a785a2e",
+  "expectedResultTreeSha": "1b9fc961d8b1013d762f28f801ca09ffbbef6d13",
+  "patchSizeBytes": 56047,
+  "patchSha256": "3f51dd2908f70483194e5a618fb8be36cb3d271ed7256ae9dac7566883cae616",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0005",
+      "sizeBytes": 11771,
+      "sha256": "cb15ec2dc088bd680beaa7f7bac0eb318bc78dfb634abb734be69386375af7b5"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0005",
+      "sizeBytes": 11074,
+      "sha256": "e1a3b20bf3a6951eac9387f113d419051b52a577a2defab5930021e2a80b3fb8"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0005",
+      "sizeBytes": 12283,
+      "sha256": "4d2c24d3fd9f474e7015cabd929fe330cba64baf564894c9f8363693ec5f3864"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0005",
+      "sizeBytes": 12285,
+      "sha256": "71ecd1dfc1dc5b1b8bd9d788bf9b758c533f77baad1565089aadd7cf94736ed7"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0005",
+      "sizeBytes": 8634,
+      "sha256": "84562f09c6fc51eec0f2859337adfd19bb83645e1c29b59b52050edeb2dd7731"
+    }
+  ],
+  "commitMessage": "Implement exact source artifact acquisition"
+}

@@ -1,0 +1,400 @@
++  try {
++    cachedArtifact = await findCachedArtifact({ github, context, identity });
++  } catch (_error) {
++    return { ok: false, error: 'Existing Source bundle metadata could not be checked safely.' };
++  }
++
++  return {
++    ok: true,
++    identity,
++    cachedArtifact,
++    request: {
++      commentId: comment.id,
++      issueNumber: context.payload.issue.number,
++      author,
++      body: comment.body,
++    },
++  };
++}
++
++async function finalizeUploadedArtifact({
++  github,
++  context,
++  identity,
++  artifactId,
++  artifactUrl,
++  artifactDigest,
++}) {
++  if (!/^[1-9][0-9]*$/.test(String(artifactId || ''))) {
++    throw new Error('The upload action did not return a valid artifact ID.');
++  }
++  const numericArtifactId = Number.parseInt(String(artifactId), 10);
++  const parsedTarget = parseArtifactTargetUrl(
++    artifactUrl,
++    context.serverUrl,
++    `${context.repo.owner}/${context.repo.repo}`
++  );
++  if (
++    !parsedTarget ||
++    parsedTarget.artifactId !== numericArtifactId ||
++    parsedTarget.runId !== Number(context.runId)
++  ) {
++    throw new Error('The upload action returned an unexpected artifact URL.');
++  }
++  const rawDigest = String(artifactDigest || '');
++  if (!isRawDigest(rawDigest)) {
++    throw new Error('The upload action did not return a valid artifact digest.');
++  }
++  const digest = `sha256:${rawDigest}`;
++
++  const response = await github.rest.actions.getArtifact({
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    artifact_id: numericArtifactId,
++  });
++  const artifact = response.data;
++  if (
++    artifact.id !== numericArtifactId ||
++    artifact.name !== artifactNameFor(identity.sourceSha) ||
++    artifact.expired !== false ||
++    artifact.digest !== digest ||
++    artifact.workflow_run?.id !== Number(context.runId)
++  ) {
++    throw new Error('Uploaded Source bundle metadata did not match the pinned source and producer run.');
++  }
++
++  await github.rest.repos.createCommitStatus({
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    sha: identity.sourceSha,
++    state: 'success',
++    context: FIXED_STATUS_CONTEXT,
++    description: `artifact ${numericArtifactId} ${digest}`.slice(0, 140),
++    target_url: artifactUrl,
++  });
++
++  return {
++    artifactId: numericArtifactId,
++    artifactName: artifact.name,
++    artifactDigest: rawDigest,
++    artifactUrl,
++    producerRunId: Number(context.runId),
++    expiresAt: artifact.expires_at || null,
++    reused: false,
++  };
++}
++
++function preparationCommand(repositoryFullName, identity, artifact) {
++  const zipName = `${artifact.artifactName}.zip`;
++  const lines = [
++    'python3 tools/local-agent/prepare-source-review.py \\',
++    `  --artifact /mnt/data/${zipName} \\`,
++    `  --artifact-sha256 ${artifact.artifactDigest} \\`,
++    `  --expected-repository ${repositoryFullName} \\`,
++    `  --expected-head ${identity.sourceSha} \\`,
++  ];
++  if (identity.selectorKind === 'pr') {
++    lines.push(`  --expected-merge-base ${identity.mergeBaseSha} \\`);
++  }
++  lines.push(`  --output /mnt/data/source-review-${identity.sourceSha.slice(0, 12)}`);
++  return lines.join('\n');
++}
++
++function formatSuccessComment({ repositoryFullName, requestCommentId, identity, artifact }) {
++  const details = [
++    resultMarker(requestCommentId),
++    '## Artifact ready',
++    '',
++    '- Kind: `source`',
++    `- Requested: \`${identity.requested}\``,
++    `- Resolved SHA: \`${identity.sourceSha}\``,
++  ];
++  if (identity.selectorKind === 'pr') {
++    details.push(
++      `- Pull request: \`#${identity.pullRequestNumber}\``,
++      `- Head repository/ref: \`${identity.headRepository}:${identity.headRef}\``,
++      `- Base SHA: \`${identity.baseSha}\``,
++      `- Merge-base SHA: \`${identity.mergeBaseSha}\``
++    );
++  }
++  details.push(
++    `- Artifact ID: \`${artifact.artifactId}\``,
++    `- Artifact name: \`${artifact.artifactName}\``,
++    `- SHA-256: \`${artifact.artifactDigest}\``,
++    `- Producer run: \`${artifact.producerRunId}\``,
++    `- Expires: \`${artifact.expiresAt || 'unavailable'}\``,
++    `- Reused existing artifact: \`${artifact.reused ? 'yes' : 'no'}\``,
++    '',
++    'Download with the GitHub connector:',
++    '',
++    '```text',
++    `download_workflow_artifact(repo_full_name="${repositoryFullName}", artifact_id=${artifact.artifactId}, file_name="${artifact.artifactName}.zip")`,
++    '```',
++    '',
++    'Then run exactly:',
++    '',
++    '```shell',
++    preparationCommand(repositoryFullName, identity, artifact),
++    '```'
++  );
++  return details.join('\n');
++}
++
++function formatFailureComment({ requestCommentId, error, runUrl }) {
++  return [
++    resultMarker(requestCommentId),
++    '## Artifact request failed',
++    '',
++    String(error || 'The request failed before a verified Source bundle was available.'),
++    '',
++    `Producer run: ${runUrl}`,
++  ].join('\n');
++}
++
++async function revalidateRequestComment({ github, context, request }) {
++  const response = await github.rest.issues.getComment({
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    comment_id: request.commentId,
++  });
++  const current = response.data;
++  if (
++    current.id !== request.commentId ||
++    current.user?.login !== request.author ||
++    current.body !== request.body
++  ) {
++    throw new Error('The request comment changed while the workflow was running.');
++  }
++}
++
++async function upsertResultComment({ github, context, request, body }) {
++  await revalidateRequestComment({ github, context, request });
++  const marker = resultMarker(request.commentId);
++  const comments = await github.paginate(github.rest.issues.listComments, {
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    issue_number: request.issueNumber,
++    per_page: 100,
++  });
++  const existing = comments.find(
++    (comment) => comment.user?.type === 'Bot' && String(comment.body || '').includes(marker)
++  );
++  if (existing) {
++    await github.rest.issues.updateComment({
++      owner: context.repo.owner,
++      repo: context.repo.repo,
++      comment_id: existing.id,
++      body,
++    });
++    return { action: 'updated', commentId: existing.id };
++  }
++  const created = await github.rest.issues.createComment({
++    owner: context.repo.owner,
++    repo: context.repo.repo,
++    issue_number: request.issueNumber,
++    body,
++  });
++  return { action: 'created', commentId: created.data.id };
++}
++
++module.exports = {
++  FIXED_STATUS_CONTEXT,
++  SOURCE_ARTIFACT_PREFIX,
++  TRUSTED_PRODUCER_PATHS,
++  artifactNameFor,
++  finalizeUploadedArtifact,
++  findCachedArtifact,
++  formatFailureComment,
++  formatSuccessComment,
++  isAuthorizedPermission,
++  parseArtifactTargetUrl,
++  parseCommand,
++  preparationCommand,
++  resolveRequest,
++  resolveSelector,
++  resultMarker,
++  upsertResultComment,
++};
+diff --git a/tools/local-agent/test-source-bundle-artifact-request.cjs b/tools/local-agent/test-source-bundle-artifact-request.cjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..0b8ba7e37b01c30fd1630d8c2d3cb2a34a783616
+--- /dev/null
++++ b/tools/local-agent/test-source-bundle-artifact-request.cjs
+@@ -0,0 +1,349 @@
++'use strict';
++
++const assert = require('node:assert/strict');
++const helper = require('./source-bundle-artifact-request.cjs');
++
++const SHA = '1'.repeat(40);
++const BASE = '2'.repeat(40);
++const MERGE_BASE = '3'.repeat(40);
++const RAW_DIGEST = 'a'.repeat(64);
++const REPOSITORY = 'TeaseScript-AI/teasescript-platform';
++
++function context(overrides = {}) {
++  return {
++    actor: 'Dropje97',
++    repo: { owner: 'TeaseScript-AI', repo: 'teasescript-platform' },
++    serverUrl: 'https://github.com',
++    runId: 1234,
++    payload: {
++      repository: { id: 1309933950 },
++      issue: { number: 228 },
++      comment: {
++        id: 99,
++        body: '/artifact source main',
++        user: { login: 'Dropje97' },
++      },
++    },
++    ...overrides,
++  };
++}
++
++async function assertRejectsMessage(action, pattern) {
++  await assert.rejects(action, pattern);
++}
++
++async function main() {
++  assert.deepEqual(helper.parseCommand('/artifact source main'), {
++    kind: 'source',
++    selector: 'main',
++    selectorKind: 'main',
++  });
++  assert.equal(helper.parseCommand('/artifact source pr:225').pullRequestNumber, 225);
++  assert.equal(helper.parseCommand(`/artifact source sha:${SHA}`).sourceSha, SHA);
++  for (const invalid of [
++    '/artifact source',
++    '/artifact source pr:0',
++    '/artifact source pr:01',
++    `/artifact source sha:${'a'.repeat(40).toUpperCase()}`,
++    '/artifact logs main',
++  ]) {
++    assert.throws(() => helper.parseCommand(invalid), /Invalid artifact command/);
++  }
++  assert.equal(helper.isAuthorizedPermission('write'), true);
++  assert.equal(helper.isAuthorizedPermission('admin'), true);
++  assert.equal(helper.isAuthorizedPermission('read'), false);
++
++  const mainIdentity = await helper.resolveSelector({
++    github: {
++      rest: {
++        repos: { get: async () => ({ data: { default_branch: 'main' } }) },
++        git: {
++          getRef: async (args) => {
++            assert.equal(args.ref, 'heads/main');
++            return { data: { object: { type: 'commit', sha: SHA } } };
++          },
++        },
++      },
++    },
++    context: context(),
++    parsed: helper.parseCommand('/artifact source main'),
++  });
++  assert.equal(mainIdentity.sourceSha, SHA);
++  assert.equal(mainIdentity.sourceRef, 'main');
++
++  const exactIdentity = await helper.resolveSelector({
++    github: {
++      rest: {
++        repos: {},
++        git: {
++          getCommit: async (args) => {
++            assert.equal(args.commit_sha, SHA);
++            return { data: { sha: SHA } };
++          },
++        },
++      },
++    },
++    context: context(),
++    parsed: helper.parseCommand(`/artifact source sha:${SHA}`),
++  });
++  assert.equal(exactIdentity.requested, `sha:${SHA}`);
++
++  const prIdentity = await helper.resolveSelector({
++    github: {
++      rest: {
++        pulls: {
++          get: async () => ({
++            data: {
++              head: {
++                sha: SHA,
++                ref: 'feature',
++                repo: { full_name: 'fork/example' },
++              },
++              base: { sha: BASE },
++            },
++          }),
++        },
++        repos: {
++          compareCommitsWithBasehead: async (args) => {
++            assert.equal(args.basehead, `${BASE}...${SHA}`);
++            return { data: { merge_base_commit: { sha: MERGE_BASE } } };
++          },
++        },
++      },
++    },
++    context: context(),
++    parsed: helper.parseCommand('/artifact source pr:225'),
++  });
++  assert.deepEqual(
++    {
++      number: prIdentity.pullRequestNumber,
++      head: prIdentity.headRepository,
++      ref: prIdentity.headRef,
++      base: prIdentity.baseSha,
++      mergeBase: prIdentity.mergeBaseSha,
++    },
++    {
++      number: 225,
++      head: 'fork/example',
++      ref: 'feature',
++      base: BASE,
++      mergeBase: MERGE_BASE,
++    }
++  );
++
++  await assertRejectsMessage(
++    () =>
++      helper.resolveSelector({
++        github: {
++          rest: {
++            pulls: {
++              get: async () => {
++                const error = new Error('not found');
++                error.status = 404;
++                throw error;
++              },
++            },
++          },
++        },
++        context: context(),
++        parsed: helper.parseCommand('/artifact source pr:999'),
++      }),
++    /Pull request #999 does not exist/
++  );
++
++  const actorMismatch = await helper.resolveRequest({
++    github: { rest: {} },
++    context: context({ actor: 'someone-else' }),
++  });
++  assert.equal(actorMismatch.ok, false);
++  assert.match(actorMismatch.error, /actor must match/);
++
++  const permissionRejected = await helper.resolveRequest({
++    github: {
++      rest: {
++        repos: {
++          getCollaboratorPermissionLevel: async () => ({ data: { permission: 'read' } }),
++        },
++      },
++    },
++    context: context(),
++  });
++  assert.equal(permissionRejected.ok, false);
++  assert.match(permissionRejected.error, /Write, Maintain, or Admin/);
++
++  const artifactUrl = `https://github.com/${REPOSITORY}/actions/runs/77/artifacts/88`;
++  const cached = await helper.findCachedArtifact({
++    github: {
++      rest: {

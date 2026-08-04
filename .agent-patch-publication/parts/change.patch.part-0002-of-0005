@@ -1,0 +1,193 @@
+diff --git a/.github/workflows/source-bundle-request-processor.yml b/.github/workflows/source-bundle-request-processor.yml
+index 32f0205d229fdcd58b429a0d28bbd9dd3520ce4b..9a62ec5735ea6c3ae6438850241f8ad2f64490ec 100644
+--- a/.github/workflows/source-bundle-request-processor.yml
++++ b/.github/workflows/source-bundle-request-processor.yml
+@@ -146,7 +146,7 @@ jobs:
+           name: teasescript-source-${{ steps.request.outputs.source_sha }}
+           path: source-artifact/
+           if-no-files-found: error
+-          retention-days: 1
++          retention-days: 7
+           compression-level: 0
+ 
+   publish-result:
+@@ -181,6 +181,18 @@ jobs:
+               ? `artifact ${artifactId} sha256:${artifactDigest}`
+               : `source bundle failed; run ${context.runId}`;
+ 
++            if (succeeded) {
++              await github.rest.repos.createCommitStatus({
++                owner: context.repo.owner,
++                repo: context.repo.repo,
++                sha: process.env.SOURCE_SHA,
++                state: 'success',
++                context: 'source-bundle/artifact-v1',
++                description: `artifact ${artifactId} sha256:${artifactDigest}`,
++                target_url: artifactUrl,
++              });
++            }
++
+             await github.rest.repos.createCommitStatus({
+               owner: context.repo.owner,
+               repo: context.repo.repo,
+diff --git a/.github/workflows/source-bundle.yml b/.github/workflows/source-bundle.yml
+index 825ef20dc4b5dbf79840467810284e274867a7f7..b91e13e9e937f4864bd36136706be94c21007b60 100644
+--- a/.github/workflows/source-bundle.yml
++++ b/.github/workflows/source-bundle.yml
+@@ -65,5 +65,5 @@ jobs:
+           name: teasescript-source-${{ steps.source.outputs.sha }}
+           path: source-artifact/
+           if-no-files-found: error
+-          retention-days: 1
++          retention-days: 7
+           compression-level: 0
+diff --git a/docs/CHATGPT-GITHUB-WORKFLOW.md b/docs/CHATGPT-GITHUB-WORKFLOW.md
+index 5939e0affaaf7917814cdb3e062a402ccdf07707..5cca9ffb8afe2e599165f583275c4f4f2bcf8307 100644
+--- a/docs/CHATGPT-GITHUB-WORKFLOW.md
++++ b/docs/CHATGPT-GITHUB-WORKFLOW.md
+@@ -11,7 +11,7 @@ The connector is the GitHub control plane: use it for exact repository metadata,
+ For substantial implementation, review, debugging, or verification:
+ 
+ 1. use `get_pr_info` for a pull request, or another narrow metadata/status action when an exact commit SHA is already known, to resolve the current head and base;
+-2. locate an unexpired source-bundle artifact bound to that exact head;
++2. locate an unexpired source-bundle artifact bound to that exact head, preferring fixed status `source-bundle/artifact-v1` on the exact source SHA during the issue #228 additive rollout;
+ 3. download the artifact once;
+ 4. run `tools/local-agent/prepare-source-review.py` against the downloaded ZIP;
+ 5. inspect and test the resulting checkout with local Git, shell, search, editor, and test tools;
+@@ -45,9 +45,56 @@ This is both simpler and more context-efficient than requesting complete files o
+ 6. Call `download_workflow_artifact` once.
+ 7. Pass the returned local ZIP path, GitHub artifact digest, and expected merge base to the trusted preparation helper.
+ 
+-### Implementation from `main`, older source, or missing/expired artifact
++### Indexed zero-compute acquisition during the issue #228 rollout
+ 
+-For new implementation work, obtain an exact artifact for the selected `main` commit rather than trying to network-clone the repository. The current connector may not expose push-triggered source-bundle runs through commit-run discovery, so use the connector-native request branch when the automatic artifact cannot be located. The same route regenerates older or expired source. It is defined in `DEVELOPMENT-WORKFLOW.md`:
++After resolving the immutable source SHA, read successful commit status
++`source-bundle/artifact-v1` on that exact SHA. Its target URL must have the
++exact repository artifact shape:
++
++```text
++https://github.com/<owner>/<repository>/actions/runs/<run-id>/artifacts/<artifact-id>
++```
++
++Fetch that artifact by ID and require:
++
++- name `teasescript-source-<resolved-sha>`;
++- a valid SHA-256 digest;
++- the run ID named by the status target;
++- the expected repository;
++- `expired: false`.
++
++When those checks pass, download the artifact directly and run the trusted
++preparation helper. This cache-hit path starts no workflow and allocates no
++Actions runner. A missing status or an unavailable, expired, malformed, or
++identity-mismatched artifact is a cache miss.
++
++On a confirmed miss, a Write, Maintain, or Admin collaborator may post exactly
++one of these commands on an issue or pull request:
++
++```text
++/artifact source main
++/artifact source pr:225
++/artifact source sha:<full-lowercase-40-character-sha>
++```
++
++The bot result is authoritative for the selector resolution performed inside
++that run. Do not combine an earlier PR head, base, or merge base with a later
++result. For a selector that may move, either consume the complete newly reported
++identity or request the already resolved exact SHA. The result supplies the
++artifact ID, name, digest, producer run, expiry, exact connector download call,
++and complete `prepare-source-review.py` command.
++
++The request workflow rechecks the fixed status after authorization and global
++serialization. A waiting duplicate therefore reuses the first completed
++artifact rather than rebuilding it under normal operation.
++
++### Compatibility fallback for older or missing/expired source
++
++For new implementation work, obtain an exact artifact for the selected `main`
++commit rather than trying to network-clone the repository. The existing
++connector-native request branch remains available during rollout when the fixed
++index or comment route cannot yet be used. It is defined in
++`DEVELOPMENT-WORKFLOW.md`:
+ 
+ 1. resolve the exact requested source SHA and exact current `main` SHA;
+ 2. create `source-bundle-request/<source-sha>/<nonce>` at current `main`;
+@@ -57,7 +104,10 @@ For new implementation work, obtain an exact artifact for the selected `main` co
+ 6. download the reported artifact ID and verify its digest;
+ 7. confirm the temporary request branch was removed.
+ 
+-The connector cannot start `workflow_dispatch`; do not spend calls looking for a dispatch route that is not exposed.
++Do not use workflow run numbers, manually reconstruct `main` from unrelated PR
++artifacts, or attempt network Git. The connector cannot start
++`workflow_dispatch`; do not spend calls looking for a dispatch route that is not
++exposed.
+ 
+ ## Prepare the local checkout
+ 
+diff --git a/docs/DEVELOPMENT-WORKFLOW.md b/docs/DEVELOPMENT-WORKFLOW.md
+index ae6bfdcf310885090bd7a55e2d6963b9064ec57a..6a3f15a0b083c6c11d11a488211ea5bc42a7d7f7 100644
+--- a/docs/DEVELOPMENT-WORKFLOW.md
++++ b/docs/DEVELOPMENT-WORKFLOW.md
+@@ -337,7 +337,51 @@ The source-bundle workflows produce short-lived, verifiable Git artifacts when a
+ - every pull-request update, using the exact pull-request head rather than GitHub's synthetic merge commit;
+ - every push to `main`, using the exact pushed commit.
+ 
+-To regenerate an artifact for an older or expired source revision through the GitHub connector:
++Source bundle artifacts are retained for seven days. Every successful trusted
++producer publishes commit status `source-bundle/artifact-v1` on the exact source
++commit. The status target is the exact Actions artifact URL; the artifact API
++remains authoritative for its ID, name, digest, producer run, repository, and
++expiry.
++
++During the additive issue #228 rollout, connector agents may use the indexed
++zero-compute path when that fixed status is present:
++
++1. resolve `main`, `pr:<number>`, or `sha:<full-sha>` to one exact source SHA;
++2. read successful status `source-bundle/artifact-v1` on that SHA;
++3. parse its exact artifact URL and fetch that artifact's metadata;
++4. require name `teasescript-source-<source-sha>`, a valid SHA-256 digest, the
++   referenced producer run, the same repository, and a non-expired artifact;
++5. download it and use the normal trusted local preparation helper.
++
++A missing, malformed, deleted, expired, wrong-name, wrong-run, or otherwise
++unverifiable indexed artifact is a cache miss. Do not start Actions merely to
++reconfirm a valid cache hit.
++
++On a confirmed miss, a repository collaborator with Write, Maintain, or Admin
++access may post one strict request command on an issue or pull request:
++
++```text
++/artifact source main
++/artifact source pr:225
++/artifact source sha:<full-lowercase-40-character-sha>
++```
++
++The default-branch `issue_comment` workflow applies an association prefilter,
++then verifies the exact comment author with
++`repos.getCollaboratorPermissionLevel`. It resolves and pins the selector,
++serializes request processing, rechecks the fixed status, and produces a new
++bundle only on a confirmed miss. The selected source is checked out separately
++and treated only as data; only trusted default-branch bundle tooling runs. The
++bot result is bound to the original request-comment identity and returns the
++resolved immutable identity, artifact metadata, connector download arguments,
++and fully populated local preparation command. Re-running the same request
++updates that authoritative result instead of creating a second result comment.
++
++This comment route does not replace the existing request-branch route until the
++default-branch live proof and rollout gate in issue #228 are complete.
++
++Compatibility fallback: to regenerate an artifact through the existing
++request-branch route:
+ 
+ 1. Resolve the full lowercase 40-character source commit SHA and the exact current `main` SHA.
+ 2. Choose a nonce matching lowercase `[a-z0-9][a-z0-9-]{0,31}`; for example, `agent-149-1`.
+@@ -373,7 +417,7 @@ The helper validates the outer digest, ZIP paths and exact payload, internal che
+ 
+ Connector-based ChatGPT agents must use the local-first route in `CHATGPT-GITHUB-WORKFLOW.md`. In that environment, do not try `git clone` or repeated connector file reads as the normal repository acquisition path; download one exact source artifact, prepare it locally, and reserve the connector for live GitHub state and writes.
+ 
+-A source artifact contains committed repository files and reachable Git history for the selected commit. It does not contain issues, pull-request comments or reviews, Actions history, repository settings, secrets, credentials, `node_modules`, or uncommitted local changes. Artifacts expire after one day; create a new request branch when a fresh copy is required.
++A source artifact contains committed repository files and reachable Git history for the selected commit. It does not contain issues, pull-request comments or reviews, Actions history, repository settings, secrets, credentials, `node_modules`, or uncommitted local changes. Artifacts expire after seven days; use a verified indexed artifact while it remains available, or request a fresh artifact after a confirmed miss.
+ 
+ ## Coordinated multi-agent model
+ 

@@ -1,0 +1,256 @@
++        repos: {
++          getCombinedStatusForRef: async () => ({
++            data: {
++              statuses: [
++                {
++                  context: helper.FIXED_STATUS_CONTEXT,
++                  state: 'success',
++                  target_url: artifactUrl,
++                },
++              ],
++            },
++          }),
++        },
++        actions: {
++          getArtifact: async () => ({
++            data: {
++              id: 88,
++              name: helper.artifactNameFor(SHA),
++              expired: false,
++              digest: `sha256:${RAW_DIGEST}`,
++              expires_at: '2026-08-11T00:00:00Z',
++              workflow_run: {
++                id: 77,
++                repository_id: 1309933950,
++                head_sha: SHA,
++              },
++            },
++          }),
++          getWorkflowRun: async () => ({
++            data: {
++              id: 77,
++              path: '.github/workflows/source-bundle.yml',
++              event: 'push',
++              head_sha: SHA,
++              conclusion: 'success',
++              repository: { id: 1309933950 },
++              pull_requests: [],
++            },
++          }),
++        },
++      },
++    },
++    context: context(),
++    identity: { sourceSha: SHA },
++  });
++  assert.equal(cached.artifactId, 88);
++  assert.equal(cached.artifactDigest, RAW_DIGEST);
++  assert.equal(cached.reused, true);
++
++  const stale = await helper.findCachedArtifact({
++    github: {
++      rest: {
++        repos: {
++          getCombinedStatusForRef: async () => ({
++            data: {
++              statuses: [
++                {
++                  context: helper.FIXED_STATUS_CONTEXT,
++                  state: 'success',
++                  target_url: artifactUrl,
++                },
++              ],
++            },
++          }),
++        },
++        actions: {
++          getArtifact: async () => {
++            const error = new Error('expired');
++            error.status = 404;
++            throw error;
++          },
++        },
++      },
++    },
++    context: context(),
++    identity: { sourceSha: SHA },
++  });
++  assert.equal(stale, null);
++
++  const createdStatuses = [];
++  const produced = await helper.finalizeUploadedArtifact({
++    github: {
++      rest: {
++        actions: {
++          getArtifact: async () => ({
++            data: {
++              id: 88,
++              name: helper.artifactNameFor(SHA),
++              expired: false,
++              digest: `sha256:${RAW_DIGEST}`,
++              expires_at: '2026-08-11T00:00:00Z',
++              workflow_run: { id: 1234 },
++            },
++          }),
++        },
++        repos: {
++          createCommitStatus: async (args) => createdStatuses.push(args),
++        },
++      },
++    },
++    context: context(),
++    identity: { sourceSha: SHA },
++    artifactId: '88',
++    artifactUrl: `https://github.com/${REPOSITORY}/actions/runs/1234/artifacts/88`,
++    artifactDigest: RAW_DIGEST,
++  });
++  assert.equal(produced.reused, false);
++  assert.equal(createdStatuses.length, 1);
++  assert.equal(createdStatuses[0].context, helper.FIXED_STATUS_CONTEXT);
++  assert.equal(createdStatuses[0].state, 'success');
++
++  const success = helper.formatSuccessComment({
++    repositoryFullName: REPOSITORY,
++    requestCommentId: 99,
++    identity: prIdentity,
++    artifact: cached,
++  });
++  assert.match(success, /Requested: `pr:225`/);
++  assert.ok(success.includes(`Merge-base SHA: \`${MERGE_BASE}\``));
++  assert.match(success, /download_workflow_artifact/);
++  assert.match(success, new RegExp(`--expected-head ${SHA}`));
++  assert.match(success, new RegExp(`--expected-merge-base ${MERGE_BASE}`));
++
++  const updated = [];
++  const created = [];
++  const request = {
++    commentId: 99,
++    issueNumber: 228,
++    author: 'Dropje97',
++    body: '/artifact source main',
++  };
++  const upsert = await helper.upsertResultComment({
++    github: {
++      paginate: async () => [
++        {
++          id: 500,
++          user: { type: 'Bot' },
++          body: `${helper.resultMarker(99)}\nold`,
++        },
++      ],
++      rest: {
++        issues: {
++          getComment: async () => ({
++            data: {
++              id: 99,
++              user: { login: 'Dropje97' },
++              body: '/artifact source main',
++            },
++          }),
++          listComments: async () => {
++            throw new Error('paginate should own listing');
++          },
++          updateComment: async (args) => updated.push(args),
++          createComment: async (args) => created.push(args),
++        },
++      },
++    },
++    context: context(),
++    request,
++    body: 'new body',
++  });
++  assert.deepEqual(upsert, { action: 'updated', commentId: 500 });
++  assert.equal(updated.length, 1);
++  assert.equal(created.length, 0);
++
++  console.log('source-bundle-artifact-request: PASS');
++}
++
++main().catch((error) => {
++  console.error(error);
++  process.exitCode = 1;
++});
+diff --git a/tools/local-agent/test-source-bundle-artifact-workflows.sh b/tools/local-agent/test-source-bundle-artifact-workflows.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..84cdfe32d242ec8eccfba879ce37f1d11953bee6
+--- /dev/null
++++ b/tools/local-agent/test-source-bundle-artifact-workflows.sh
+@@ -0,0 +1,78 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
++root="$(cd "$script_dir/../.." && pwd)"
++
++python3 - \
++  "$root/.github/workflows/source-bundle.yml" \
++  "$root/.github/workflows/source-bundle-request-processor.yml" \
++  "$root/.github/workflows/source-bundle-artifact-request.yml" \
++  "$root/.github/workflows/source-bundle-index.yml" \
++  "$root/tools/local-agent/source-bundle-artifact-request.cjs" <<'PY'
++import pathlib
++import re
++import sys
++
++automatic_path, legacy_path, request_path, index_path, helper_path = map(pathlib.Path, sys.argv[1:])
++automatic = automatic_path.read_text(encoding="utf-8")
++legacy = legacy_path.read_text(encoding="utf-8")
++request = request_path.read_text(encoding="utf-8")
++index = index_path.read_text(encoding="utf-8")
++helper = helper_path.read_text(encoding="utf-8")
++
++assert "retention-days: 7" in automatic
++assert "retention-days: 1" not in automatic
++assert "retention-days: 7" in legacy
++assert "retention-days: 1" not in legacy
++assert "context: 'source-bundle/artifact-v1'" in legacy
++assert "if (succeeded)" in legacy
++
++assert "issue_comment:" in request
++assert "types: [created]" in request
++assert "startsWith(github.event.comment.body, '/artifact source ')" in request
++for association in ["OWNER", "MEMBER", "COLLABORATOR"]:
++    assert association in request
++assert "group: source-bundle-artifact-request" in request
++assert "cancel-in-progress: false" in request
++assert "actions: read" in request
++assert "contents: read" in request
++assert "issues: write" in request
++assert "statuses: write" in request
++for forbidden in ["contents: write", "workflows: write", "administration: write"]:
++    assert forbidden not in request
++assert "ref: ${{ env.TOOLING_REF }}" in request
++assert "TOOLING_REF: ${{ github.workflow_sha }}" in request
++assert request.count("persist-credentials: false") == 2
++assert "source-bundle-artifact-request.cjs" in request
++assert "getCollaboratorPermissionLevel" in helper
++assert "context.actor" in helper
++assert "permission === 'write' || permission === 'admin'" in helper
++assert "TRUSTED_PRODUCER_PATHS" in helper
++assert "getWorkflowRun" in helper
++assert "steps.request.outputs.cached_artifact_json == ''" in request
++assert "retention-days: 7" in request
++assert "Verify and index produced artifact" in request
++assert "Publish authoritative request result" in request
++assert "Fail rejected or incomplete request" in request
++
++assert "workflow_run:" in index
++assert "workflows: [Source bundle]" in index
++assert "actions: read" in index
++assert "statuses: write" in index
++for forbidden in ["contents: read", "contents: write", "actions/checkout", "downloadArtifact"]:
++    assert forbidden not in index
++assert "run.pull_requests[0].head.sha" in index
++assert "artifact.workflow_run?.head_sha !== run.head_sha" in index
++assert "artifact.workflow_run?.repository_id !== context.payload.repository.id" in index
++assert "context: 'source-bundle/artifact-v1'" in index
++assert "state: 'success'" in index
++assert "state: 'failure'" not in index
++
++for text in [request, index]:
++    for match in re.finditer(r"(?m)^\s+uses:\s+([^\s#]+)", text):
++        ref = match.group(1)
++        assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", ref), ref
++
++print("source-bundle-artifact-workflows: PASS")
++PY

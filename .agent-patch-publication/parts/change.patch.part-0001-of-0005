@@ -1,0 +1,275 @@
+diff --git a/.github/workflows/source-bundle-artifact-request.yml b/.github/workflows/source-bundle-artifact-request.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..5bd590a8ae59af6254119367ccf633a6244c3bf4
+--- /dev/null
++++ b/.github/workflows/source-bundle-artifact-request.yml
+@@ -0,0 +1,183 @@
++name: Source bundle artifact request
++run-name: Source bundle artifact request ${{ github.event.comment.id }}
++
++on:
++  issue_comment:
++    types: [created]
++
++permissions: {}
++
++concurrency:
++  group: source-bundle-artifact-request
++  cancel-in-progress: false
++
++jobs:
++  request:
++    if: >-
++      startsWith(github.event.comment.body, '/artifact source ') &&
++      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
++    runs-on: ubuntu-24.04
++    timeout-minutes: 7
++    permissions:
++      actions: read
++      contents: read
++      issues: write
++      statuses: write
++    env:
++      TOOLING_REF: ${{ github.workflow_sha }}
++    steps:
++      - name: Check out trusted request tooling
++        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
++        with:
++          ref: ${{ env.TOOLING_REF }}
++          path: tooling
++          fetch-depth: 1
++          persist-credentials: false
++          show-progress: false
++
++      - name: Authorize, resolve, and recheck exact source
++        id: request
++        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
++        with:
++          script: |
++            const helper = require(`${process.env.GITHUB_WORKSPACE}/tooling/tools/local-agent/source-bundle-artifact-request.cjs`);
++            const result = await helper.resolveRequest({ github, context });
++            core.setOutput('ok', result.ok ? 'true' : 'false');
++            if (!result.ok) {
++              core.setOutput('error', result.error);
++              core.setOutput('request_json', JSON.stringify({
++                commentId: context.payload.comment.id,
++                issueNumber: context.payload.issue.number,
++                author: context.payload.comment.user.login,
++                body: context.payload.comment.body,
++              }));
++              return;
++            }
++            core.setOutput('source_sha', result.identity.sourceSha);
++            core.setOutput('source_ref', result.identity.sourceRef);
++            core.setOutput('identity_json', JSON.stringify(result.identity));
++            core.setOutput('request_json', JSON.stringify(result.request));
++            core.setOutput('cached_artifact_json', result.cachedArtifact ? JSON.stringify(result.cachedArtifact) : '');
++
++      - name: Check out selected source as data
++        if: >-
++          steps.request.outputs.ok == 'true' &&
++          steps.request.outputs.cached_artifact_json == ''
++        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
++        with:
++          ref: ${{ steps.request.outputs.source_sha }}
++          path: source
++          fetch-depth: 0
++          persist-credentials: false
++          show-progress: false
++
++      - name: Verify exact selected source
++        if: >-
++          steps.request.outputs.ok == 'true' &&
++          steps.request.outputs.cached_artifact_json == ''
++        working-directory: source
++        env:
++          SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
++        run: test "$(git rev-parse --verify HEAD)" = "$SOURCE_SHA"
++
++      - name: Create verified source bundle
++        if: >-
++          steps.request.outputs.ok == 'true' &&
++          steps.request.outputs.cached_artifact_json == ''
++        env:
++          SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
++          SOURCE_REF: ${{ steps.request.outputs.source_ref }}
++        run: |
++          cd source
++          bash ../tooling/tools/local-agent/create-source-bundle.sh \
++            --output ../source-artifact \
++            --repository "${{ github.repository }}" \
++            --source-sha "$SOURCE_SHA" \
++            --source-ref "$SOURCE_REF" \
++            --event-name source-bundle-artifact-request
++
++      - name: Upload source artifact
++        id: upload
++        if: >-
++          steps.request.outputs.ok == 'true' &&
++          steps.request.outputs.cached_artifact_json == ''
++        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
++        with:
++          name: teasescript-source-${{ steps.request.outputs.source_sha }}
++          path: source-artifact/
++          if-no-files-found: error
++          retention-days: 7
++          compression-level: 0
++
++      - name: Verify and index produced artifact
++        id: finalize
++        if: >-
++          steps.request.outputs.ok == 'true' &&
++          steps.request.outputs.cached_artifact_json == '' &&
++          steps.upload.outcome == 'success'
++        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
++        env:
++          IDENTITY_JSON: ${{ steps.request.outputs.identity_json }}
++          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
++          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
++          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
++        with:
++          script: |
++            const helper = require(`${process.env.GITHUB_WORKSPACE}/tooling/tools/local-agent/source-bundle-artifact-request.cjs`);
++            const artifact = await helper.finalizeUploadedArtifact({
++              github,
++              context,
++              identity: JSON.parse(process.env.IDENTITY_JSON),
++              artifactId: process.env.ARTIFACT_ID,
++              artifactUrl: process.env.ARTIFACT_URL,
++              artifactDigest: process.env.ARTIFACT_DIGEST,
++            });
++            core.setOutput('artifact_json', JSON.stringify(artifact));
++
++      - name: Publish authoritative request result
++        if: ${{ always() && steps.request.outputs.request_json != '' }}
++        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
++        env:
++          REQUEST_OK: ${{ steps.request.outputs.ok }}
++          REQUEST_ERROR: ${{ steps.request.outputs.error }}
++          REQUEST_JSON: ${{ steps.request.outputs.request_json }}
++          IDENTITY_JSON: ${{ steps.request.outputs.identity_json }}
++          CACHED_ARTIFACT_JSON: ${{ steps.request.outputs.cached_artifact_json }}
++          PRODUCED_ARTIFACT_JSON: ${{ steps.finalize.outputs.artifact_json }}
++        with:
++          script: |
++            const helper = require(`${process.env.GITHUB_WORKSPACE}/tooling/tools/local-agent/source-bundle-artifact-request.cjs`);
++            const request = JSON.parse(process.env.REQUEST_JSON);
++            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
++            let body;
++            if (process.env.REQUEST_OK !== 'true') {
++              body = helper.formatFailureComment({
++                requestCommentId: request.commentId,
++                error: process.env.REQUEST_ERROR,
++                runUrl,
++              });
++            } else {
++              const artifactJson = process.env.CACHED_ARTIFACT_JSON || process.env.PRODUCED_ARTIFACT_JSON;
++              if (!artifactJson) {
++                body = helper.formatFailureComment({
++                  requestCommentId: request.commentId,
++                  error: 'Source bundle production failed before a verified artifact was available.',
++                  runUrl,
++                });
++              } else {
++                body = helper.formatSuccessComment({
++                  repositoryFullName: `${context.repo.owner}/${context.repo.repo}`,
++                  requestCommentId: request.commentId,
++                  identity: JSON.parse(process.env.IDENTITY_JSON),
++                  artifact: JSON.parse(artifactJson),
++                });
++              }
++            }
++            await helper.upsertResultComment({ github, context, request, body });
++
++      - name: Fail rejected or incomplete request
++        if: >-
++          always() &&
++          (steps.request.outputs.ok != 'true' ||
++          (steps.request.outputs.cached_artifact_json == '' && steps.finalize.outcome != 'success'))
++        run: exit 1
+diff --git a/.github/workflows/source-bundle-index.yml b/.github/workflows/source-bundle-index.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..04c2e5868e8a1d690342575a7e17f532975eb9e5
+--- /dev/null
++++ b/.github/workflows/source-bundle-index.yml
+@@ -0,0 +1,80 @@
++name: Index source bundle artifact
++
++on:
++  workflow_run:
++    workflows: [Source bundle]
++    types: [completed]
++
++permissions: {}
++
++jobs:
++  index:
++    if: >-
++      github.event.workflow_run.conclusion == 'success' &&
++      github.event.workflow_run.repository.id == github.event.repository.id
++    runs-on: ubuntu-24.04
++    timeout-minutes: 3
++    permissions:
++      actions: read
++      statuses: write
++    steps:
++      - name: Validate metadata and publish fixed source index
++        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
++        with:
++          script: |
++            const run = context.payload.workflow_run;
++            let sourceSha;
++            if (run.event === 'push') {
++              sourceSha = run.head_sha;
++            } else if (run.event === 'pull_request') {
++              if (!Array.isArray(run.pull_requests) || run.pull_requests.length !== 1) {
++                core.setFailed('Pull-request Source bundle run has no unique immutable PR identity.');
++                return;
++              }
++              sourceSha = run.pull_requests[0].head.sha;
++            } else {
++              core.setFailed(`Unsupported Source bundle event: ${run.event}`);
++              return;
++            }
++            if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
++              core.setFailed('Source bundle run did not resolve to a full lowercase source SHA.');
++              return;
++            }
++
++            const artifacts = await github.paginate(
++              github.rest.actions.listWorkflowRunArtifacts,
++              {
++                owner: context.repo.owner,
++                repo: context.repo.repo,
++                run_id: run.id,
++                per_page: 100,
++              }
++            );
++            const expectedName = `teasescript-source-${sourceSha}`;
++            const matches = artifacts.filter((artifact) => artifact.name === expectedName);
++            if (matches.length !== 1) {
++              core.setFailed(`Expected exactly one ${expectedName} artifact, found ${matches.length}.`);
++              return;
++            }
++            const artifact = matches[0];
++            if (
++              artifact.expired !== false ||
++              !/^sha256:[0-9a-f]{64}$/.test(artifact.digest || '') ||
++              artifact.workflow_run?.id !== run.id ||
++              artifact.workflow_run?.head_sha !== run.head_sha ||
++              artifact.workflow_run?.repository_id !== context.payload.repository.id
++            ) {
++              core.setFailed('Source bundle artifact metadata did not match its trusted producer run.');
++              return;
++            }
++
++            const artifactUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}/artifacts/${artifact.id}`;
++            await github.rest.repos.createCommitStatus({
++              owner: context.repo.owner,
++              repo: context.repo.repo,
++              sha: sourceSha,
++              state: 'success',
++              context: 'source-bundle/artifact-v1',
++              description: `artifact ${artifact.id} ${artifact.digest}`.slice(0, 140),
++              target_url: artifactUrl,
++            });

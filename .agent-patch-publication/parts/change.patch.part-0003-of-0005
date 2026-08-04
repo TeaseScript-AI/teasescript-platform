@@ -1,0 +1,390 @@
+diff --git a/tools/local-agent/README.md b/tools/local-agent/README.md
+index 5997db84337a8e27e38b140578e9836fe5187900..bdcef31a5d75fdda9a634cd49587a5257e5e0d1b 100644
+--- a/tools/local-agent/README.md
++++ b/tools/local-agent/README.md
+@@ -63,6 +63,13 @@ specific boundary.
+ 
+ Do not redirect failures to `/dev/null` merely to reduce output. Compact successful output and retain actionable failures.
+ 
++`source-bundle-artifact-request.cjs` owns the strict `/artifact source`
++selector grammar, immutable source resolution, collaborator permission check,
++fixed-status cache validation, uploaded-artifact verification, exact result
++formatting, and request-comment-bound result upsert used by the trusted
++comment-request workflow. Its focused Node test and the workflow-structure test
++run through `check-local-agent.sh`.
++
+ ## Prepare a verified source review checkout
+ 
+ `prepare-source-review.py` converts one already downloaded source-bundle ZIP into an exact clean local checkout. It verifies the GitHub artifact digest, ZIP safety and payload shape, internal checksums, manifest repository/head/tree identities, complete bundle history, optional expected merge-base ancestry, `git fsck`, and clean worktree. The requested output is exposed atomically only after every check succeeds.
+diff --git a/tools/local-agent/check-local-agent.sh b/tools/local-agent/check-local-agent.sh
+index 38168708770c2b135959571f31f2804aee26a48f..be32fbeb4284cdb6a5bb2f37712ce555518f4baf 100755
+--- a/tools/local-agent/check-local-agent.sh
++++ b/tools/local-agent/check-local-agent.sh
+@@ -12,6 +12,8 @@ bash "$script_dir/run-compact.sh" \
+   --log "$log_dir/source-bundle-workflow.log" \
+   -- env TEASESCRIPT_COMPACT_TEST_INNER=1 \
+     bash "$script_dir/test-create-source-bundle.sh"
++node "$script_dir/test-source-bundle-artifact-request.cjs"
++bash "$script_dir/test-source-bundle-artifact-workflows.sh"
+ python3 -B "$script_dir/test-prepare-source-review.py"
+ python3 -B "$script_dir/test-prepare-patch-publication.py"
+ python3 -B "$script_dir/test-patch-publication.py"
+diff --git a/tools/local-agent/source-bundle-artifact-request.cjs b/tools/local-agent/source-bundle-artifact-request.cjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..f2060cfffd570977ced299a3715381984115b5ae
+--- /dev/null
++++ b/tools/local-agent/source-bundle-artifact-request.cjs
+@@ -0,0 +1,570 @@
++'use strict';
++
++const FIXED_STATUS_CONTEXT = 'source-bundle/artifact-v1';
++const RESULT_MARKER_PREFIX = 'source-bundle-artifact-result request-comment:';
++const SOURCE_ARTIFACT_PREFIX = 'teasescript-source-';
++const TRUSTED_PRODUCER_PATHS = new Set([
++  '.github/workflows/source-bundle.yml',
++  '.github/workflows/source-bundle-request-processor.yml',
++  '.github/workflows/source-bundle-artifact-request.yml',
++]);
++
++function parseCommand(body) {
++  const command = String(body || '').trim();
++  const match = /^\/artifact source (main|pr:[1-9][0-9]*|sha:[0-9a-f]{40})$/.exec(command);
++  if (!match) {
++    throw new Error(
++      'Invalid artifact command. Use exactly `/artifact source main`, ' +
++        '`/artifact source pr:<number>`, or `/artifact source sha:<40-character-sha>`.'
++    );
++  }
++
++  const selector = match[1];
++  if (selector === 'main') {
++    return { kind: 'source', selector, selectorKind: 'main' };
++  }
++  if (selector.startsWith('pr:')) {
++    return {
++      kind: 'source',
++      selector,
++      selectorKind: 'pr',
++      pullRequestNumber: Number.parseInt(selector.slice(3), 10),
++    };
++  }
++  return {
++    kind: 'source',
++    selector,
++    selectorKind: 'sha',
++    sourceSha: selector.slice(4),
++  };
++}
++
++function isAuthorizedPermission(permission) {
++  return permission === 'write' || permission === 'admin';
++}
++
++function isFullSha(value) {
++  return /^[0-9a-f]{40}$/.test(String(value || ''));
++}
++
++function isDigest(value) {
++  return /^sha256:[0-9a-f]{64}$/.test(String(value || ''));
++}
++
++function isRawDigest(value) {
++  return /^[0-9a-f]{64}$/.test(String(value || ''));
++}
++
++function parseArtifactTargetUrl(targetUrl, serverUrl, repositoryFullName) {
++  const escaped = `${serverUrl}/${repositoryFullName}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
++  const match = new RegExp(
++    `^${escaped}/actions/runs/([1-9][0-9]*)/artifacts/([1-9][0-9]*)$`
++  ).exec(String(targetUrl || ''));
++  if (!match) {
++    return null;
++  }
++  return {
++    runId: Number.parseInt(match[1], 10),
++    artifactId: Number.parseInt(match[2], 10),
++  };
++}
++
++function artifactNameFor(sourceSha) {
++  return `${SOURCE_ARTIFACT_PREFIX}${sourceSha}`;
++}
++
++function resultMarker(commentId) {
++  return `<!-- ${RESULT_MARKER_PREFIX}${commentId} -->`;
++}
++
++function normalizeDigest(digest) {
++  const value = String(digest || '');
++  if (!isDigest(value)) {
++    throw new Error('Source artifact digest is missing or malformed.');
++  }
++  return value.slice('sha256:'.length);
++}
++
++function isNotFound(error) {
++  return error && (error.status === 404 || error.response?.status === 404);
++}
++
++async function resolveSelector({ github, context, parsed }) {
++  const owner = context.repo.owner;
++  const repo = context.repo.repo;
++
++  if (parsed.selectorKind === 'main') {
++    const repository = await github.rest.repos.get({ owner, repo });
++    const defaultBranch = repository.data.default_branch;
++    const ref = await github.rest.git.getRef({
++      owner,
++      repo,
++      ref: `heads/${defaultBranch}`,
++    });
++    const sourceSha = ref.data.object?.sha;
++    if (ref.data.object?.type !== 'commit' || !isFullSha(sourceSha)) {
++      throw new Error('The default branch did not resolve to one exact commit.');
++    }
++    return {
++      kind: 'source',
++      requested: parsed.selector,
++      selectorKind: 'main',
++      sourceSha,
++      sourceRef: defaultBranch,
++      defaultBranch,
++    };
++  }
++
++  if (parsed.selectorKind === 'sha') {
++    try {
++      const commit = await github.rest.git.getCommit({
++        owner,
++        repo,
++        commit_sha: parsed.sourceSha,
++      });
++      if (commit.data.sha !== parsed.sourceSha) {
++        throw new Error('The requested commit did not resolve exactly.');
++      }
++    } catch (error) {
++      if (isNotFound(error)) {
++        throw new Error(`Commit ${parsed.sourceSha} does not exist in this repository.`);
++      }
++      throw error;
++    }
++    return {
++      kind: 'source',
++      requested: parsed.selector,
++      selectorKind: 'sha',
++      sourceSha: parsed.sourceSha,
++      sourceRef: parsed.sourceSha,
++    };
++  }
++
++  let pull;
++  try {
++    pull = await github.rest.pulls.get({
++      owner,
++      repo,
++      pull_number: parsed.pullRequestNumber,
++    });
++  } catch (error) {
++    if (isNotFound(error)) {
++      throw new Error(`Pull request #${parsed.pullRequestNumber} does not exist.`);
++    }
++    throw error;
++  }
++
++  const sourceSha = pull.data.head?.sha;
++  const baseSha = pull.data.base?.sha;
++  const headRepository = pull.data.head?.repo?.full_name;
++  const headRef = pull.data.head?.ref;
++  if (
++    !isFullSha(sourceSha) ||
++    !isFullSha(baseSha) ||
++    typeof headRepository !== 'string' ||
++    !headRepository ||
++    typeof headRef !== 'string' ||
++    !headRef
++  ) {
++    throw new Error(`Pull request #${parsed.pullRequestNumber} has incomplete source identity.`);
++  }
++
++  const comparison = await github.rest.repos.compareCommitsWithBasehead({
++    owner,
++    repo,
++    basehead: `${baseSha}...${sourceSha}`,
++  });
++  const mergeBaseSha = comparison.data.merge_base_commit?.sha;
++  if (!isFullSha(mergeBaseSha)) {
++    throw new Error(`Pull request #${parsed.pullRequestNumber} has no exact merge base.`);
++  }
++
++  return {
++    kind: 'source',
++    requested: parsed.selector,
++    selectorKind: 'pr',
++    sourceSha,
++    sourceRef: headRef,
++    pullRequestNumber: parsed.pullRequestNumber,
++    headRepository,
++    headRef,
++    baseSha,
++    mergeBaseSha,
++  };
++}
++
++async function findCachedArtifact({ github, context, identity }) {
++  const owner = context.repo.owner;
++  const repo = context.repo.repo;
++  let combined;
++  try {
++    combined = await github.rest.repos.getCombinedStatusForRef({
++      owner,
++      repo,
++      ref: identity.sourceSha,
++      per_page: 100,
++    });
++  } catch (error) {
++    if (isNotFound(error)) {
++      return null;
++    }
++    throw error;
++  }
++
++  const status = (combined.data.statuses || []).find(
++    (candidate) =>
++      candidate.context === FIXED_STATUS_CONTEXT && candidate.state === 'success'
++  );
++  if (!status) {
++    return null;
++  }
++
++  const target = parseArtifactTargetUrl(
++    status.target_url,
++    context.serverUrl,
++    `${owner}/${repo}`
++  );
++  if (!target) {
++    return null;
++  }
++
++  let artifactResponse;
++  try {
++    artifactResponse = await github.rest.actions.getArtifact({
++      owner,
++      repo,
++      artifact_id: target.artifactId,
++    });
++  } catch (error) {
++    if (isNotFound(error)) {
++      return null;
++    }
++    throw error;
++  }
++
++  const artifact = artifactResponse.data;
++  if (
++    artifact.id !== target.artifactId ||
++    artifact.name !== artifactNameFor(identity.sourceSha) ||
++    artifact.expired !== false ||
++    !isDigest(artifact.digest) ||
++    artifact.workflow_run?.id !== target.runId ||
++    (artifact.workflow_run?.repository_id != null &&
++      context.payload.repository?.id != null &&
++      artifact.workflow_run.repository_id !== context.payload.repository.id)
++  ) {
++    return null;
++  }
++
++  let runResponse;
++  try {
++    runResponse = await github.rest.actions.getWorkflowRun({
++      owner,
++      repo,
++      run_id: target.runId,
++    });
++  } catch (error) {
++    if (isNotFound(error)) {
++      return null;
++    }
++    throw error;
++  }
++  const producer = runResponse.data;
++  if (
++    producer.id !== target.runId ||
++    producer.repository?.id !== context.payload.repository?.id ||
++    producer.conclusion !== 'success' ||
++    !TRUSTED_PRODUCER_PATHS.has(producer.path) ||
++    artifact.workflow_run?.head_sha !== producer.head_sha
++  ) {
++    return null;
++  }
++  if (producer.path === '.github/workflows/source-bundle.yml') {
++    let producedSourceSha;
++    if (producer.event === 'push') {
++      producedSourceSha = producer.head_sha;
++    } else if (
++      producer.event === 'pull_request' &&
++      Array.isArray(producer.pull_requests) &&
++      producer.pull_requests.length === 1
++    ) {
++      producedSourceSha = producer.pull_requests[0].head?.sha;
++    }
++    if (producedSourceSha !== identity.sourceSha) {
++      return null;
++    }
++  }
++
++  return {
++    artifactId: artifact.id,
++    artifactName: artifact.name,
++    artifactDigest: normalizeDigest(artifact.digest),
++    artifactUrl: status.target_url,
++    producerRunId: target.runId,
++    expiresAt: artifact.expires_at || null,
++    reused: true,
++  };
++}
++
++async function resolveRequest({ github, context }) {
++  const comment = context.payload.comment;
++  if (!comment || !context.payload.issue) {
++    return { ok: false, error: 'Artifact requests must be issue or pull-request comments.' };
++  }
++
++  const actor = context.actor;
++  const author = comment.user?.login;
++  if (!actor || !author || actor !== author) {
++    return { ok: false, error: 'The workflow actor must match the request comment author.' };
++  }
++
++  let permission;
++  try {
++    const response = await github.rest.repos.getCollaboratorPermissionLevel({
++      owner: context.repo.owner,
++      repo: context.repo.repo,
++      username: author,
++    });
++    permission = response.data.permission;
++  } catch (_error) {
++    return { ok: false, error: 'Repository permission could not be verified.' };
++  }
++  if (!isAuthorizedPermission(permission)) {
++    return {
++      ok: false,
++      error: 'Only repository collaborators with Write, Maintain, or Admin access may regenerate a missing Source bundle.',
++    };
++  }
++
++  let parsed;
++  try {
++    parsed = parseCommand(comment.body);
++  } catch (error) {
++    return { ok: false, error: error.message };
++  }
++
++  let identity;
++  try {
++    identity = await resolveSelector({ github, context, parsed });
++  } catch (error) {
++    return { ok: false, error: error.message || 'The requested source could not be resolved.' };
++  }
++
++  let cachedArtifact;
