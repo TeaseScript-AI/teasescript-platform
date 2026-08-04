@@ -77,10 +77,13 @@ Post exactly one of these commands on an issue or pull request:
 Only Write, Maintain, or Admin collaborators may allocate regeneration compute.
 The workflow serializes requests, resolves and pins the selected identity,
 rechecks the index after entering the queue, and either returns the now-existing
-artifact or creates one seven-day Source bundle. Consume only the bot-authored
-result bound to the exact request-comment ID. The result contains the complete
-resolved identity, artifact metadata, exact `download_workflow_artifact`
-arguments, and local preparation command.
+artifact or creates one seven-day Source bundle. Consume only the result bound
+to the exact request-comment ID and authored by the exact GitHub Actions bot
+identity `github-actions[bot]` (user ID `41898282`); another App or bot is not an
+authoritative result source. The result contains the complete resolved identity,
+artifact metadata, exact `download_workflow_artifact` arguments, and local
+preparation command. Download filenames and workspace paths also include the
+request-comment ID so separate acquisitions of one exact SHA do not collide.
 
 The returned identity is authoritative for that request. When `main` or a PR
 moves while the request waits, do not combine the result with a head, base, or

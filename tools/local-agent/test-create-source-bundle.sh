@@ -164,6 +164,7 @@ assert "permissions: {}" in artifact_request
 assert "startsWith(github.event.comment.body, '/artifact')" in artifact_request
 assert "OWNER" in artifact_request and "MEMBER" in artifact_request and "COLLABORATOR" in artifact_request
 assert "group: source-bundle-artifact-request" in artifact_request
+assert "queue: max" in artifact_request
 assert "cancel-in-progress: false" in artifact_request
 job_prefix = artifact_request.split("    runs-on:", 1)[0]
 assert job_prefix.index("    if:") < job_prefix.index("    concurrency:")

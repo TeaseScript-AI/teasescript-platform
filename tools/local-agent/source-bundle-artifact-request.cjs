@@ -10,6 +10,8 @@ const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const ARTIFACT_ID_PATTERN = /^[1-9][0-9]*$/;
 const ALLOWED_PERMISSIONS = new Set(['write', 'admin']);
+const RESULT_BOT_LOGIN = 'github-actions[bot]';
+const RESULT_BOT_ID = 41898282;
 const PREPARATION_HELPER =
   '/mnt/data/teasescript-agent-bootstrap-linux-x64/bin/prepare-agent-workspace.sh';
 const TRUSTED_PRODUCER_PATHS = new Set([
@@ -131,12 +133,19 @@ function resultMarker(commentId) {
   return `<!-- source-bundle-artifact-result:v${RESULT_MARKER_VERSION} request-comment:${commentId} -->`;
 }
 
-function artifactFileName(sourceSha) {
-  return `teasescript-source-${sourceSha}.zip`;
+function requestSuffix(requestCommentId) {
+  if (!Number.isSafeInteger(requestCommentId) || requestCommentId <= 0) {
+    throw new ArtifactRequestError('The result request-comment identity is invalid.');
+  }
+  return `request-${requestCommentId}`;
 }
 
-function workspaceName(sourceSha) {
-  return `source-${sourceSha.slice(0, 12)}`;
+function artifactFileName(sourceSha, requestCommentId) {
+  return `teasescript-source-${sourceSha}-${requestSuffix(requestCommentId)}.zip`;
+}
+
+function workspaceName(sourceSha, requestCommentId) {
+  return `source-${sourceSha.slice(0, 12)}-${requestSuffix(requestCommentId)}`;
 }
 
 function formatDownloadInstruction(result) {
@@ -146,7 +155,7 @@ function formatDownloadInstruction(result) {
       {
         repo_full_name: result.repository,
         artifact_id: result.artifactId,
-        file_name: artifactFileName(result.sourceSha),
+        file_name: artifactFileName(result.sourceSha, result.requestCommentId),
       },
       null,
       2,
@@ -157,7 +166,7 @@ function formatDownloadInstruction(result) {
 function formatPreparationCommand(result) {
   const lines = [
     `${PREPARATION_HELPER} \\`,
-    `  --artifact /mnt/data/${artifactFileName(result.sourceSha)} \\`,
+    `  --artifact /mnt/data/${artifactFileName(result.sourceSha, result.requestCommentId)} \\`,
     `  --artifact-sha256 ${result.artifactDigest} \\`,
     `  --expected-repository ${result.repository} \\`,
     `  --expected-head ${result.sourceSha} \\`,
@@ -165,7 +174,7 @@ function formatPreparationCommand(result) {
   if (result.mergeBaseSha) {
     lines.push(`  --expected-merge-base ${result.mergeBaseSha} \\`);
   }
-  lines.push(`  --output /mnt/data/${workspaceName(result.sourceSha)}`);
+  lines.push(`  --output /mnt/data/${workspaceName(result.sourceSha, result.requestCommentId)}`);
   return lines.join('\n');
 }
 
@@ -242,13 +251,30 @@ async function listAllIssueComments(github, context, issueNumber) {
   );
 }
 
+function hasExpectedResultAuthor(comment) {
+  return (
+    comment?.user?.login === RESULT_BOT_LOGIN &&
+    comment.user.type === 'Bot' &&
+    comment.user.id === RESULT_BOT_ID
+  );
+}
+
+function requireExpectedResultAuthor(comment) {
+  if (!hasExpectedResultAuthor(comment)) {
+    throw new ArtifactRequestError(
+      `The result comment was not authored by the expected ${RESULT_BOT_LOGIN} identity.`,
+    );
+  }
+  return comment;
+}
+
 async function upsertResultComment({ github, context, issueNumber, requestCommentId, body }) {
   const marker = resultMarker(requestCommentId);
   const comments = await listAllIssueComments(github, context, issueNumber);
   const matching = comments
     .filter(
       (comment) =>
-        comment.user?.type === 'Bot' &&
+        hasExpectedResultAuthor(comment) &&
         typeof comment.body === 'string' &&
         comment.body.startsWith(marker),
     )
@@ -261,7 +287,7 @@ async function upsertResultComment({ github, context, issueNumber, requestCommen
       comment_id: matching[0].id,
       body,
     });
-    return updated.data;
+    return requireExpectedResultAuthor(updated.data);
   }
 
   const created = await github.rest.issues.createComment({
@@ -270,7 +296,7 @@ async function upsertResultComment({ github, context, issueNumber, requestCommen
     issue_number: issueNumber,
     body,
   });
-  return created.data;
+  return requireExpectedResultAuthor(created.data);
 }
 
 async function getLiveRequestComment({ github, context, requestCommentId, expectedAuthor, expectedBodyHash }) {
@@ -799,6 +825,8 @@ async function reportProductionFailure({ github, context, input }) {
 
 module.exports = {
   ARTIFACT_KIND,
+  RESULT_BOT_ID,
+  RESULT_BOT_LOGIN,
   STATUS_CONTEXT,
   ArtifactRequestError,
   completeRequest,

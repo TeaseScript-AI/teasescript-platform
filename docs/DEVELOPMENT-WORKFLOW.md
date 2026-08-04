@@ -399,21 +399,27 @@ GitHub maps Maintain to legacy `write`. Read-only, unknown, missing, and API
 failure results are rejected. This authorization protects Actions compute and
 artifact storage, not public source confidentiality.
 
-Authorized requests share one queued, non-cancelling regeneration concurrency
-group. After entering that production slot, the workflow resolves and pins the
-complete immutable identity, rechecks the fixed status, and returns an existing
-valid artifact when another producer already completed. On a remaining miss it
-checks out trusted tooling from `github.workflow_sha`, checks out the exact
-selected source separately with `persist-credentials: false`, verifies `HEAD`,
-and invokes only the trusted `create-source-bundle.sh`. Selected source is data:
-no selected-source action, script, dependency, hook, build, submodule, or
-configuration is executed.
+Authorized requests share one `queue: max`, non-cancelling regeneration
+concurrency group, allowing up to GitHub's supported queue limit instead of
+replacing an earlier pending request. After entering that production slot, the
+workflow resolves and pins the complete immutable identity, rechecks the fixed
+status, and returns an existing valid artifact when another producer already
+completed. On a remaining miss it checks out trusted tooling from
+`github.workflow_sha`, checks out the exact selected source separately with
+`persist-credentials: false`, verifies `HEAD`, and invokes only the trusted
+`create-source-bundle.sh`. Selected source is data: no selected-source action,
+script, dependency, hook, build, submodule, or configuration is executed.
 
-The bot result is bound to the exact request-comment ID, author, and body hash.
-It reports the original selector, resolved immutable identity, artifact ID/name,
-digest, producer run, expiration, exact connector download arguments, and a
-fully populated local preparation command. A repeated delivery updates the one
-authoritative bot result for that request. For `pr:`, the result also includes
+The bot result is bound to the exact request-comment ID, author, and body hash,
+and must be authored by the exact GitHub Actions bot identity
+`github-actions[bot]` (user ID `41898282`). A marker posted by another App or bot
+is never selected as the authoritative result. The result reports the original
+selector, resolved immutable identity, artifact ID/name, digest, producer run,
+expiration, exact connector download arguments, and a fully populated local
+preparation command. Its download filename and workspace path include the
+request-comment ID so independent acquisitions of one SHA remain non-colliding.
+A repeated delivery updates the one authoritative GitHub Actions bot result for
+that request. For `pr:`, the result also includes
 the pinned head repository/ref, base SHA, and merge-base SHA. If a semantic
 selector moves while a request waits, use the complete identity in the returned
 result; do not combine it with an earlier independently resolved head or merge

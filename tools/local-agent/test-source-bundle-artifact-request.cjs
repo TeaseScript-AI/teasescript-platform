@@ -11,6 +11,11 @@ const PR_MERGE_BASE_SHA = '4'.repeat(40);
 const EXACT_SHA = '5'.repeat(40);
 const DIGEST = 'a'.repeat(64);
 const REPOSITORY = 'TeaseScript-AI/teasescript-platform';
+const RESULT_BOT_USER = {
+  login: request.RESULT_BOT_LOGIN,
+  id: request.RESULT_BOT_ID,
+  type: 'Bot',
+};
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -89,7 +94,7 @@ function makeGithub(context, overrides = {}) {
           const comment = {
             id: nextCommentId++,
             body,
-            user: { login: 'github-actions[bot]', type: 'Bot' },
+            user: { ...RESULT_BOT_USER },
           };
           state.comments.push(comment);
           return { data: comment };
@@ -340,6 +345,8 @@ async function testCacheHitAndDuplicateDelivery() {
   assert.match(github.state.comments.at(-1).body, /prepare-agent-workspace\.sh/);
   assert.match(github.state.comments.at(-1).body, /GitHub\.download_workflow_artifact/);
   assert.match(github.state.comments.at(-1).body, /"artifact_id": 8101/);
+  assert.match(github.state.comments.at(-1).body, /request-501\.zip/);
+  assert.match(github.state.comments.at(-1).body, /source-111111111111-request-501/);
 
   const secondCore = makeCore();
   await request.resolveRequest({ github, context, core: secondCore });
@@ -347,9 +354,88 @@ async function testCacheHitAndDuplicateDelivery() {
   assert.equal(github.state.createdComments, 1);
   assert.equal(github.state.updatedComments, 1);
   assert.equal(
-    github.state.comments.filter((comment) => comment.user.type === 'Bot').length,
+    github.state.comments.filter((comment) => comment.user?.login === request.RESULT_BOT_LOGIN).length,
     1,
   );
+}
+
+async function testSpoofedBotCannotClaimAuthoritativeResult() {
+  const artifactId = 8111;
+  const runId = 9111;
+  const context = makeContext('/artifact source main');
+  const marker = request.resultMarker(context.payload.comment.id);
+  const spoofed = {
+    id: 900,
+    body: `${marker}\nspoofed`,
+    user: { login: 'unrelated-app[bot]', id: 99001, type: 'Bot' },
+  };
+  const fixture = artifactFixture({ artifactId, runId, sourceSha: MAIN_SHA });
+  const github = makeGithub(context, {
+    comments: [spoofed],
+    statuses: [
+      {
+        context: request.STATUS_CONTEXT,
+        state: 'success',
+        target_url: fixture.url,
+      },
+    ],
+    artifacts: [[artifactId, fixture.artifact]],
+    runs: [[runId, fixture.run]],
+  });
+
+  const firstCore = makeCore();
+  await request.resolveRequest({ github, context, core: firstCore });
+  assert.deepEqual(firstCore.failures, []);
+  assert.equal(github.state.createdComments, 1);
+  assert.equal(github.state.updatedComments, 0);
+  assert.equal(spoofed.body, `${marker}\nspoofed`);
+  const authoritative = github.state.comments.find(
+    (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
+  );
+  assert.ok(authoritative);
+  assert.equal(authoritative.user.id, request.RESULT_BOT_ID);
+  assert.match(authoritative.body, /## Artifact ready/);
+
+  const secondCore = makeCore();
+  await request.resolveRequest({ github, context, core: secondCore });
+  assert.deepEqual(secondCore.failures, []);
+  assert.equal(github.state.createdComments, 1);
+  assert.equal(github.state.updatedComments, 1);
+  assert.equal(spoofed.body, `${marker}\nspoofed`);
+}
+
+async function testDistinctRequestsForSameShaUseDistinctLocalPaths() {
+  const artifactId = 8121;
+  const runId = 9121;
+  const fixture = artifactFixture({ artifactId, runId, sourceSha: MAIN_SHA });
+  const makeCachedGithub = (context) =>
+    makeGithub(context, {
+      statuses: [
+        {
+          context: request.STATUS_CONTEXT,
+          state: 'success',
+          target_url: fixture.url,
+        },
+      ],
+      artifacts: [[artifactId, fixture.artifact]],
+      runs: [[runId, fixture.run]],
+    });
+
+  const firstContext = makeContext('/artifact source main', { commentId: 501 });
+  const firstGithub = makeCachedGithub(firstContext);
+  await request.resolveRequest({ github: firstGithub, context: firstContext, core: makeCore() });
+  const firstBody = firstGithub.state.comments.at(-1).body;
+
+  const secondContext = makeContext('/artifact source main', { commentId: 502 });
+  const secondGithub = makeCachedGithub(secondContext);
+  await request.resolveRequest({ github: secondGithub, context: secondContext, core: makeCore() });
+  const secondBody = secondGithub.state.comments.at(-1).body;
+
+  assert.match(firstBody, /teasescript-source-[0-9a-f]{40}-request-501\.zip/);
+  assert.match(secondBody, /teasescript-source-[0-9a-f]{40}-request-502\.zip/);
+  assert.match(firstBody, /source-111111111111-request-501/);
+  assert.match(secondBody, /source-111111111111-request-502/);
+  assert.notEqual(firstBody, secondBody);
 }
 
 async function testForkPullRequestCacheHitUsesPullHeadIdentity() {
@@ -614,6 +700,8 @@ async function main() {
   await testInvalidAndMissingRequests();
   await testAuthorizationRejection();
   await testCacheHitAndDuplicateDelivery();
+  await testSpoofedBotCannotClaimAuthoritativeResult();
+  await testDistinctRequestsForSameShaUseDistinctLocalPaths();
   await testForkPullRequestCacheHitUsesPullHeadIdentity();
   await testStaleOrUntrustedIndexBecomesCacheMiss();
   await testUnexpectedArtifactApiFailureIsNotTreatedAsMiss();
