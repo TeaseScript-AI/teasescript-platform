@@ -41,7 +41,7 @@ jobs:
             await request.resolveRequest({ github, context, core });
 
       - name: Check out exact selected source as data
-        if: ${{ steps.resolve.outputs.cache_hit == 'false' }}
+        if: ${{ steps.resolve.outputs.resolved == 'true' && steps.resolve.outputs.cache_hit == 'false' }}
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: ${{ steps.resolve.outputs.source_repository }}
@@ -52,14 +52,14 @@ jobs:
           show-progress: false
 
       - name: Verify exact selected source
-        if: ${{ steps.resolve.outputs.cache_hit == 'false' }}
+        if: ${{ steps.resolve.outputs.resolved == 'true' && steps.resolve.outputs.cache_hit == 'false' }}
         working-directory: source
         env:
           SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}
         run: test "$(git rev-parse --verify HEAD)" = "$SOURCE_SHA"
 
       - name: Create verified source bundle
-        if: ${{ steps.resolve.outputs.cache_hit == 'false' }}
+        if: ${{ steps.resolve.outputs.resolved == 'true' && steps.resolve.outputs.cache_hit == 'false' }}
         env:
           SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}
           SOURCE_REF: ${{ steps.resolve.outputs.source_ref }}
@@ -73,7 +73,7 @@ jobs:
             --event-name source-bundle-artifact-request
 
       - name: Upload source artifact
-        if: ${{ steps.resolve.outputs.cache_hit == 'false' }}
+        if: ${{ steps.resolve.outputs.resolved == 'true' && steps.resolve.outputs.cache_hit == 'false' }}
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -84,7 +84,7 @@ jobs:
           compression-level: 0
 
       - name: Verify and publish the authoritative result
-        if: ${{ steps.resolve.outputs.cache_hit == 'false' }}
+        if: ${{ steps.resolve.outputs.resolved == 'true' && steps.resolve.outputs.cache_hit == 'false' }}
         id: finalize
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
@@ -111,6 +111,7 @@ jobs:
             await request.completeRequest({
               github,
               context,
+              core,
               input: {
                 requestCommentId: process.env.REQUEST_COMMENT_ID,
                 requestAuthor: process.env.REQUEST_AUTHOR,
@@ -152,6 +153,7 @@ jobs:
             await request.reportProductionFailure({
               github,
               context,
+              core,
               input: {
                 requestCommentId: process.env.REQUEST_COMMENT_ID,
                 requestAuthor: process.env.REQUEST_AUTHOR,

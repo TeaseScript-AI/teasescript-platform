@@ -71,18 +71,20 @@ permission, selector identity, and fixed index. It either reuses a valid artifac
 or creates one without executing selected source.
 
 The mailbox keeps one authoritative `github-actions[bot]` registry comment,
-user ID `41898282`. Locate the compact entry containing the exact request ID,
-then use its connector JSON and preparation command. Equivalent requests can
-share one artifact entry while retaining every correlated request ID. A request
-comment is deleted only after its ready or failed registry entry is safely
-written; a cleanup failure does not invalidate a ready entry.
+user ID `41898282`. Locate the exact request ID and verify its selector, resolved
+SHA, PR identity when applicable, artifact ID/name/digest/run/repository, and
+expiry before using the connector JSON and preparation command. Requests share
+an entry only when their complete resolved identity and artifact match. At most
+ten request correlations remain. The workflow publishes the terminal registry,
+tries exact command cleanup, then publishes the fixed index. Cleanup failure is
+a warning: the ready result and producer success remain usable.
 
 Phase 1 is additive while issue #234 gathers default-branch timing and
 concurrency evidence. Do not copy the compatibility route's 90-second wait or
 invent a replacement. The measured initial wait, 10-second request-ID polling,
 and overall timeout become mandatory only in Phase 2 after the evidence is
-recorded. Until then, the request-branch route in `DEVELOPMENT-WORKFLOW.md`
-remains a supported fallback when the mailbox route itself is unavailable.
+recorded. Until then, the request-branch route in `DEVELOPMENT-WORKFLOW.md` is
+an exceptional compatibility fallback only when the mailbox is unavailable.
 
 ## Prepare the local checkout
 

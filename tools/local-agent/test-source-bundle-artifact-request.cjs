@@ -28,11 +28,15 @@ function makeCore() {
   return {
     outputs: {},
     failures: [],
+    warnings: [],
     setOutput(name, value) {
       this.outputs[name] = String(value);
     },
     setFailed(message) {
       this.failures.push(String(message));
+    },
+    warning(message) {
+      this.warnings.push(String(message));
     },
   };
 }
@@ -80,6 +84,7 @@ function makeGithub(context, overrides = {}) {
   const artifacts = new Map(overrides.artifacts || []);
   const runs = new Map(overrides.runs || []);
   const statuses = [...(overrides.statuses || [])];
+  state.statuses = statuses;
 
   const github = {
     state,
@@ -304,6 +309,18 @@ function readyEntry({
   };
 }
 
+function failedEntry({ requestId, sourceSha = null, updatedAt = '2026-08-04T10:00:00.000Z' }) {
+  return {
+    state: 'failed',
+    requestCommentIds: [requestId],
+    selector: sourceSha ? `sha:${sourceSha}` : 'unresolved',
+    sourceSha,
+    updatedAt,
+    reason: 'Artifact request failed.',
+    runUrl: 'https://github.com/TeaseScript-AI/teasescript-platform/actions/runs/7001',
+  };
+}
+
 function authoritativeRegistry(entries, id = 900) {
   return {
     id,
@@ -372,6 +389,28 @@ async function testSelectorResolutionAndMissOutputs() {
   }
 }
 
+async function testInvalidAndMissingSelectorsFailWithoutProduction() {
+  for (const [body, overrides, pattern] of [
+    ['/artifact source ref:main', {}, /Invalid command/],
+    ['/artifact source pr:225', { missingPull: true }, /does not exist/],
+    [`/artifact source sha:${EXACT_SHA}`, { missingCommit: true }, /does not exist/],
+  ]) {
+    const context = makeContext(body);
+    const github = makeGithub(context, overrides);
+    const core = makeCore();
+    await request.resolveRequest({ github, context, core });
+    assert.equal(core.failures.length, 1);
+    const registryComment = github.state.comments.find(
+      (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
+    );
+    assert.ok(registryComment);
+    const entries = request.parseRegistryComment(registryComment.body);
+    assert.equal(entries[0].state, 'failed');
+    assert.match(entries[0].reason, pattern);
+    assert.equal(core.outputs.resolved, 'false');
+  }
+}
+
 async function testAuthorizationFailureIsRegisteredAndCleaned() {
   const context = makeContext('/artifact source main');
   const github = makeGithub(context, { permission: 'read' });
@@ -419,6 +458,133 @@ async function testCacheHitCreatesOneRegistryAndCleansExactRequest() {
   assert.doesNotMatch(botComments[0].body, /## Artifact ready|Artifact URL:|Source repository:/);
 }
 
+async function testCacheHitCleanupFailureIsNonFatal() {
+  const artifactId = 8103;
+  const runId = 9103;
+  const fixture = artifactFixture({ artifactId, runId, sourceSha: MAIN_SHA });
+  const context = makeContext('/artifact source main');
+  const github = makeGithub(context, {
+    statuses: [{ context: request.STATUS_CONTEXT, state: 'success', target_url: fixture.url }],
+    artifacts: [[artifactId, fixture.artifact]],
+    runs: [[runId, fixture.run]],
+    deleteCommentError: httpError(500, 'cleanup unavailable'),
+  });
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+
+  assert.deepEqual(core.failures, []);
+  assert.equal(core.outputs.cache_hit, 'true');
+  assert.equal(core.warnings.length, 1);
+  assert.match(core.warnings[0], /cleanup failed/);
+  assert.deepEqual(github.state.deletedCommentIds, []);
+  const registryComment = github.state.comments.find(
+    (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
+  );
+  assert.equal(request.parseRegistryComment(registryComment.body)[0].state, 'ready');
+}
+
+async function testForkPullRequestCacheHitPreservesExactPullIdentity() {
+  const artifactId = 8102;
+  const runId = 9102;
+  const fixture = artifactFixture({ artifactId, runId, sourceSha: PR_HEAD_SHA });
+  fixture.run.event = 'pull_request';
+  fixture.run.head_repository = { id: 22002 };
+  fixture.run.head_branch = 'feature/source-bundle';
+  fixture.run.head_sha = 'f'.repeat(40);
+  fixture.run.pull_requests = [
+    {
+      base: { repo: { id: 1309933950 } },
+      head: {
+        repo: { id: 22002 },
+        ref: 'feature/source-bundle',
+        sha: PR_HEAD_SHA,
+      },
+    },
+  ];
+  const context = makeContext('/artifact source pr:225');
+  const github = makeGithub(context, {
+    statuses: [{ context: request.STATUS_CONTEXT, state: 'success', target_url: fixture.url }],
+    artifacts: [[artifactId, fixture.artifact]],
+    runs: [[runId, fixture.run]],
+  });
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+
+  assert.deepEqual(core.failures, []);
+  assert.equal(core.outputs.cache_hit, 'true');
+  const entry = request.parseRegistryComment(
+    github.state.comments.find((comment) => comment.user?.login === request.RESULT_BOT_LOGIN).body,
+  )[0];
+  assert.equal(entry.selector, 'pr:225');
+  assert.equal(entry.headRepository, 'Contributor/teasescript-platform');
+  assert.equal(entry.headRef, 'feature/source-bundle');
+  assert.equal(entry.baseSha, PR_BASE_SHA);
+  assert.equal(entry.mergeBaseSha, PR_MERGE_BASE_SHA);
+}
+
+async function testStaleOrUntrustedIndexIsAConfirmedMiss() {
+  const expired = artifactFixture({ artifactId: 8401, runId: 9401, sourceSha: MAIN_SHA });
+  expired.artifact.expired = true;
+  const untrusted = artifactFixture({ artifactId: 8402, runId: 9402, sourceSha: MAIN_SHA });
+  untrusted.run.path = '.github/workflows/untrusted.yml';
+  const wrongHead = artifactFixture({ artifactId: 8403, runId: 9403, sourceSha: MAIN_SHA });
+  wrongHead.run.head_sha = EXACT_SHA;
+  const context = makeContext('/artifact source main');
+  const github = makeGithub(context, {
+    statuses: [
+      { context: request.STATUS_CONTEXT, state: 'success', target_url: expired.url },
+      { context: request.STATUS_CONTEXT, state: 'success', target_url: untrusted.url },
+      { context: request.STATUS_CONTEXT, state: 'success', target_url: wrongHead.url },
+    ],
+    artifacts: [
+      [expired.artifact.id, expired.artifact],
+      [untrusted.artifact.id, untrusted.artifact],
+      [wrongHead.artifact.id, wrongHead.artifact],
+    ],
+    runs: [
+      [expired.run.id, expired.run],
+      [untrusted.run.id, untrusted.run],
+      [wrongHead.run.id, wrongHead.run],
+    ],
+  });
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+  assert.deepEqual(core.failures, []);
+  assert.equal(core.outputs.cache_hit, 'false');
+  assert.equal(github.state.createdComments, 0);
+}
+
+async function testUnexpectedArtifactApiFailureIsNotTreatedAsMiss() {
+  const context = makeContext('/artifact source main');
+  const github = makeGithub(context, {
+    statuses: [{
+      context: request.STATUS_CONTEXT,
+      state: 'success',
+      target_url: `https://github.com/${REPOSITORY}/actions/runs/9501/artifacts/8501`,
+    }],
+  });
+  github.rest.actions.getArtifact = async () => {
+    throw httpError(500, 'artifact service unavailable');
+  };
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+  assert.equal(core.failures.length, 1);
+  const registryComment = github.state.comments.find(
+    (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
+  );
+  assert.match(request.parseRegistryComment(registryComment.body)[0].reason, /artifact service unavailable/);
+}
+
+async function testMissingStatusRefIsAConfirmedMiss() {
+  const context = makeContext('/artifact source main');
+  const github = makeGithub(context, { statusError: httpError(404, 'status ref not found') });
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+  assert.deepEqual(core.failures, []);
+  assert.equal(core.outputs.cache_hit, 'false');
+  assert.equal(github.state.createdComments, 0);
+}
+
 async function testDeletedRequestRedeliveryIsIdempotent() {
   const artifactId = 8111;
   const runId = 9111;
@@ -439,6 +605,83 @@ async function testDeletedRequestRedeliveryIsIdempotent() {
   assert.equal(github.state.createdComments, 1);
   assert.equal(github.state.updatedComments, 0);
   assert.equal(github.state.comments.at(-1).body, firstBody);
+}
+
+async function testPrunedDeletedRequestRedeliveryIsANoop() {
+  const context = makeContext('/artifact source main');
+  const entries = Array.from({ length: request.REGISTRY_LIMIT }, (_, index) => readyEntry({
+    requestId: 600 + index,
+    sourceSha: String(index + 1).repeat(40).slice(0, 40),
+    artifactId: 8600 + index,
+    runId: 9600 + index,
+    updatedAt: `2026-08-04T10:${String(index).padStart(2, '0')}:00.000Z`,
+  }));
+  const registry = authoritativeRegistry(entries);
+  const github = makeGithub(context, { comments: [registry] });
+  github.state.comments = github.state.comments.filter((comment) => comment.id !== 501);
+  const before = registry.body;
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+  assert.deepEqual(core.failures, []);
+  assert.equal(core.outputs.resolved, 'false');
+  assert.equal(core.outputs.cache_hit, 'false');
+  assert.equal(registry.body, before);
+  assert.deepEqual(github.state.operations, []);
+}
+
+async function testLiveTerminalRequestRedeliveryRetriesCleanupWithoutProduction() {
+  for (const entry of [
+    readyEntry({
+      requestId: 501,
+      artifactId: 8112,
+      runId: 9112,
+      updatedAt: '2026-08-04T10:00:00.000Z',
+    }),
+    failedEntry({ requestId: 501 }),
+  ]) {
+    const context = makeContext('/artifact source main');
+    const registry = authoritativeRegistry([entry]);
+    const github = makeGithub(context, { comments: [registry] });
+    const before = registry.body;
+    const core = makeCore();
+
+    await request.resolveRequest({ github, context, core });
+
+    assert.deepEqual(core.failures, []);
+    assert.equal(core.outputs.resolved, 'false');
+    assert.equal(core.outputs.cache_hit, entry.state === 'ready' ? 'true' : 'false');
+    assert.equal(github.state.permissionCalls, 0);
+    assert.equal(github.state.selectorCalls, 0);
+    assert.deepEqual(github.state.deletedCommentIds, [501]);
+    assert.equal(registry.body, before);
+    assert.deepEqual(github.state.operations, ['delete-comment']);
+  }
+}
+
+async function testMissingCommandBeforeFirstTerminalPublicationFailsClosed() {
+  const artifactId = 8113;
+  const context = makeContext('/artifact source main', { runId: 9113 });
+  const fixture = artifactFixture({ artifactId, runId: context.runId, sourceSha: MAIN_SHA, current: true });
+  const github = makeGithub(context, {
+    artifacts: [[artifactId, fixture.artifact]],
+    runs: [[context.runId, fixture.run]],
+  });
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+  github.state.comments = github.state.comments.filter((comment) => comment.id !== 501);
+
+  await assert.rejects(
+    request.completeRequest({
+      github,
+      context,
+      core,
+      input: inputFromCore(core, context, artifactId, fixture.url),
+    }),
+    /comment not found/,
+  );
+  assert.equal(github.state.createdComments, 0);
+  assert.equal(github.state.updatedComments, 0);
+  assert.deepEqual(github.state.createdStatuses, []);
 }
 
 async function testSpoofedRegistryCannotClaimAuthority() {
@@ -507,7 +750,6 @@ async function testEquivalentArtifactsDeduplicateAndPreserveRequestIds() {
   const second = {
     ...first,
     requestCommentIds: [502],
-    selector: 'main',
     updatedAt: '2026-08-04T10:01:00.000Z',
   };
   const merged = request.mergeRegistryEntries([first], second, new Date('2026-08-04T10:02:00Z'));
@@ -519,6 +761,45 @@ async function testEquivalentArtifactsDeduplicateAndPreserveRequestIds() {
   assert.equal((body.match(/^### /gm) || []).length, 1);
   assert.equal(request.findRegistryEntry(merged, 501).artifactId, 8201);
   assert.equal(request.findRegistryEntry(merged, 502).artifactId, 8201);
+}
+
+async function testDifferentResolvedIdentitiesDoNotDeduplicate() {
+  const pull = readyEntry({
+    requestId: 503,
+    sourceSha: PR_HEAD_SHA,
+    artifactId: 8202,
+    runId: 9202,
+    updatedAt: '2026-08-04T10:00:00.000Z',
+  });
+  Object.assign(pull, {
+    selector: 'pr:225',
+    sourceRepository: 'Contributor/teasescript-platform',
+    sourceRef: 'feature/source-bundle',
+    pullNumber: 225,
+    headRepository: 'Contributor/teasescript-platform',
+    headRef: 'feature/source-bundle',
+    baseSha: PR_BASE_SHA,
+    mergeBaseSha: PR_MERGE_BASE_SHA,
+  });
+  const exact = {
+    ...pull,
+    requestCommentIds: [504],
+    selector: `sha:${PR_HEAD_SHA}`,
+    sourceRepository: REPOSITORY,
+    sourceRef: PR_HEAD_SHA,
+    pullNumber: null,
+    headRepository: null,
+    headRef: null,
+    baseSha: null,
+    mergeBaseSha: null,
+    updatedAt: '2026-08-04T10:01:00.000Z',
+  };
+
+  const merged = request.mergeRegistryEntries([pull], exact, new Date('2026-08-04T10:02:00Z'));
+  assert.equal(merged.length, 2);
+  assert.equal(request.findRegistryEntry(merged, 503).pullNumber, 225);
+  assert.equal(request.findRegistryEntry(merged, 503).mergeBaseSha, PR_MERGE_BASE_SHA);
+  assert.equal(request.findRegistryEntry(merged, 504).pullNumber, null);
 }
 
 async function testSerializedDistinctUpdatesPreserveBothEntries() {
@@ -581,6 +862,30 @@ async function testRegistryPrunesExpiryOrdersNewestAndBoundsTen() {
   for (let index = 1; index < merged.length; index += 1) {
     assert.ok(Date.parse(merged[index - 1].updatedAt) >= Date.parse(merged[index].updatedAt));
   }
+  assert.equal(
+    merged.reduce((count, entry) => count + entry.requestCommentIds.length, 0),
+    request.REGISTRY_LIMIT,
+  );
+}
+
+async function testEquivalentArtifactRequestIdsAreGloballyBounded() {
+  const existing = readyEntry({
+    requestId: 800,
+    artifactId: 9800,
+    runId: 10800,
+    updatedAt: '2026-08-04T10:00:00.000Z',
+  });
+  existing.requestCommentIds = Array.from({ length: 100 }, (_, index) => 800 + index);
+  const incoming = {
+    ...existing,
+    requestCommentIds: [999],
+    updatedAt: '2026-08-04T10:01:00.000Z',
+  };
+  const merged = request.mergeRegistryEntries([existing], incoming, new Date('2026-08-04T10:02:00Z'));
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].requestCommentIds.length, request.REGISTRY_LIMIT);
+  assert.equal(merged[0].requestCommentIds[0], 999);
+  assert.ok(request.formatRegistryComment(merged).length < 20_000);
 }
 
 async function testMultipleAuthoritativeRegistriesFailClosed() {
@@ -600,7 +905,7 @@ async function testMultipleAuthoritativeRegistriesFailClosed() {
   );
 }
 
-async function testCompletionPublishesRegistryThenStatusThenCleanup() {
+async function testCompletionPublishesRegistryThenCleanupThenStatus() {
   const artifactId = 8301;
   const context = makeContext('/artifact source pr:225', { runId: 9301 });
   const fixture = artifactFixture({ artifactId, runId: context.runId, sourceSha: PR_HEAD_SHA, current: true });
@@ -613,10 +918,11 @@ async function testCompletionPublishesRegistryThenStatusThenCleanup() {
   await request.completeRequest({
     github,
     context,
+    core,
     input: inputFromCore(core, context, artifactId, fixture.url),
   });
 
-  assert.deepEqual(github.state.operations, ['create-comment', 'create-status', 'delete-comment']);
+  assert.deepEqual(github.state.operations, ['create-comment', 'delete-comment', 'create-status']);
   assert.deepEqual(github.state.deletedCommentIds, [501]);
   assert.equal(github.state.createdStatuses.length, 1);
   const registryComment = github.state.comments.find((comment) => comment.user?.login === request.RESULT_BOT_LOGIN);
@@ -653,7 +959,7 @@ async function testRegistryFailureCannotPublishStatusOrDeleteCommand() {
   assert.deepEqual(github.state.operations, []);
 }
 
-async function testStatusFailurePreservesReadyRegistryAndAllowsCleanup() {
+async function testStatusFailureReplacesCurrentRunReadyEntry() {
   const artifactId = 8321;
   const context = makeContext('/artifact source main', { runId: 9321 });
   const fixture = artifactFixture({ artifactId, runId: context.runId, sourceSha: MAIN_SHA, current: true });
@@ -664,17 +970,58 @@ async function testStatusFailurePreservesReadyRegistryAndAllowsCleanup() {
   });
   const core = makeCore();
   await request.resolveRequest({ github, context, core });
+  const oldStatus = {
+    context: request.STATUS_CONTEXT,
+    state: 'success',
+    target_url: 'https://github.com/TeaseScript-AI/teasescript-platform/actions/runs/8000/artifacts/8001',
+  };
+  github.state.statuses.push(oldStatus);
   const input = inputFromCore(core, context, artifactId, fixture.url);
-  await assert.rejects(request.completeRequest({ github, context, input }), /status write denied/);
-  const readyBody = github.state.comments.find((comment) => comment.user?.login === request.RESULT_BOT_LOGIN).body;
-  assert.match(readyBody, /· ready ·/);
-  assert.deepEqual(github.state.deletedCommentIds, []);
 
-  await request.reportProductionFailure({ github, context, input });
+  await assert.rejects(request.completeRequest({ github, context, core, input }), /status write denied/);
+  const readyRegistry = github.state.comments.find(
+    (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
+  );
+  assert.equal(request.parseRegistryComment(readyRegistry.body)[0].state, 'ready');
   assert.deepEqual(github.state.deletedCommentIds, [501]);
-  const after = github.state.comments.find((comment) => comment.user?.login === request.RESULT_BOT_LOGIN).body;
-  assert.equal(after, readyBody);
-  assert.doesNotMatch(after, /· failed ·/);
+
+  await request.reportProductionFailure({ github, context, core, input });
+  const entries = request.parseRegistryComment(readyRegistry.body);
+  assert.equal(entries[0].state, 'failed');
+  assert.equal(entries[0].requestCommentIds[0], 501);
+  assert.match(entries[0].reason, /fixed-index publication failed/);
+  assert.deepEqual(github.state.createdStatuses, []);
+  assert.deepEqual(github.state.statuses, [oldStatus]);
+}
+
+async function testOlderReadyEntrySurvivesCurrentRunStatusFailure() {
+  const artifactId = 8322;
+  const context = makeContext('/artifact source main', { runId: 9322 });
+  const fixture = artifactFixture({ artifactId, runId: context.runId, sourceSha: MAIN_SHA, current: true });
+  const older = readyEntry({
+    requestId: 777,
+    sourceSha: EXACT_SHA,
+    artifactId: 7001,
+    runId: 7002,
+    updatedAt: '2026-08-04T09:00:00.000Z',
+  });
+  const registry = authoritativeRegistry([older]);
+  const github = makeGithub(context, {
+    comments: [registry],
+    artifacts: [[artifactId, fixture.artifact]],
+    runs: [[context.runId, fixture.run]],
+    statusWriteError: httpError(403, 'status write denied'),
+  });
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+  const input = inputFromCore(core, context, artifactId, fixture.url);
+  await assert.rejects(request.completeRequest({ github, context, core, input }), /status write denied/);
+  await request.reportProductionFailure({ github, context, core, input });
+
+  const entries = request.parseRegistryComment(registry.body);
+  assert.equal(request.findRegistryEntry(entries, 501).state, 'failed');
+  assert.equal(request.findRegistryEntry(entries, 777).state, 'ready');
+  assert.equal(request.findRegistryEntry(entries, 777).producerRunId, 7002);
 }
 
 async function testCleanupFailureNeverOverwritesUsableReadyEntry() {
@@ -689,12 +1036,13 @@ async function testCleanupFailureNeverOverwritesUsableReadyEntry() {
   const core = makeCore();
   await request.resolveRequest({ github, context, core });
   const input = inputFromCore(core, context, artifactId, fixture.url);
-  await assert.rejects(request.completeRequest({ github, context, input }), /cleanup unavailable/);
+  await request.completeRequest({ github, context, core, input });
   const readyBody = github.state.comments.find((comment) => comment.user?.login === request.RESULT_BOT_LOGIN).body;
   assert.match(readyBody, /· ready ·/);
   assert.equal(github.state.createdStatuses.length, 1);
+  assert.equal(core.warnings.length, 1);
+  assert.match(core.warnings[0], /cleanup failed/);
 
-  await assert.rejects(request.reportProductionFailure({ github, context, input }), /cleanup unavailable/);
   const after = github.state.comments.find((comment) => comment.user?.login === request.RESULT_BOT_LOGIN).body;
   assert.equal(after, readyBody);
   assert.doesNotMatch(after, /· failed ·/);
@@ -773,18 +1121,30 @@ async function main() {
   await testCommandGrammar();
   await testCommandsOutsideMailboxCreateNothing();
   await testSelectorResolutionAndMissOutputs();
+  await testInvalidAndMissingSelectorsFailWithoutProduction();
   await testAuthorizationFailureIsRegisteredAndCleaned();
   await testCacheHitCreatesOneRegistryAndCleansExactRequest();
+  await testCacheHitCleanupFailureIsNonFatal();
+  await testForkPullRequestCacheHitPreservesExactPullIdentity();
+  await testStaleOrUntrustedIndexIsAConfirmedMiss();
+  await testUnexpectedArtifactApiFailureIsNotTreatedAsMiss();
+  await testMissingStatusRefIsAConfirmedMiss();
   await testDeletedRequestRedeliveryIsIdempotent();
+  await testPrunedDeletedRequestRedeliveryIsANoop();
+  await testLiveTerminalRequestRedeliveryRetriesCleanupWithoutProduction();
+  await testMissingCommandBeforeFirstTerminalPublicationFailsClosed();
   await testSpoofedRegistryCannotClaimAuthority();
   await testRegistryEscapesUntrustedPullHeadRef();
   await testEquivalentArtifactsDeduplicateAndPreserveRequestIds();
+  await testDifferentResolvedIdentitiesDoNotDeduplicate();
   await testSerializedDistinctUpdatesPreserveBothEntries();
   await testRegistryPrunesExpiryOrdersNewestAndBoundsTen();
+  await testEquivalentArtifactRequestIdsAreGloballyBounded();
   await testMultipleAuthoritativeRegistriesFailClosed();
-  await testCompletionPublishesRegistryThenStatusThenCleanup();
+  await testCompletionPublishesRegistryThenCleanupThenStatus();
   await testRegistryFailureCannotPublishStatusOrDeleteCommand();
-  await testStatusFailurePreservesReadyRegistryAndAllowsCleanup();
+  await testStatusFailureReplacesCurrentRunReadyEntry();
+  await testOlderReadyEntrySurvivesCurrentRunStatusFailure();
   await testCleanupFailureNeverOverwritesUsableReadyEntry();
   await testFailureEntryIsCompactBoundedAndCleaned();
   await testChangedRequestCannotFinalizeOrDelete();
