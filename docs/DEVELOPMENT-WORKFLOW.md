@@ -82,12 +82,24 @@ Use words such as `must`, `exact`, `versioned`, `authoritative`, and
 boundary, or owner decision that requires that strength. A stricter
 implementation being technically possible is not sufficient.
 
+Before declaring a project limitation, proposing infrastructure, or presenting
+owner options, verify the relevant existing capability through the smallest
+authoritative evidence set. Do not generalize one API action, connector method,
+helper, or environment limitation to the complete supported workflow. Report a
+material shared-workflow failure instead of silently working around it.
+
+Do not invent project-wide policy, numeric thresholds, style or readability
+limits, naming rules, compatibility promises, mandatory tools, or workflow
+gates. Until a durable rule has evidence, owner approval, and synchronization
+into its canonical owner, use configured tooling, current authority, and
+task-proportional judgment.
+
 ### KISS, pragmatic YAGNI, and DRY
 
 Once the current requirement and its authority are established, choose the
 simplest complete approach that safely satisfies that requirement and its real
-boundaries. Assess simplicity across implementation, evidence, workflow, and
-maintenance cost. The smallest individual patch is not automatically the
+boundaries. Assess simplicity across design, implementation, evidence, workflow,
+and maintenance cost. The smallest individual patch is not automatically the
 simplest overall solution.
 
 Pragmatic YAGNI applies this rule to future-facing complexity. Implement only
@@ -119,11 +131,12 @@ process. Recording a proposal preserves it without accepting, scheduling, or
 authorizing implementation and without turning it into production maintenance
 surface.
 
-Use DRY when one canonical implementation, rule, or explanation plus references
-is clearer and simpler across the complete maintenance lifecycle. Use limited
-local repetition when that is the clearer KISS solution. Do not force either
-choice when it creates indirection, competing authority, duplicated moving
-facts, speculative abstraction, or unnecessary recurring context cost. For the
+DRY is subordinate to KISS and pragmatic YAGNI. Use one canonical
+implementation, rule, or explanation plus references only when that is clearer
+and simpler across the complete maintenance lifecycle. Use limited local
+repetition when that is the clearer KISS solution. Do not force DRY when it
+creates indirection, competing authority, duplicated moving facts, speculative
+abstraction, or unnecessary recurring context cost. For the
 documentation-specific application, follow
 [`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md).
 
@@ -149,6 +162,25 @@ Classify every actionable finding in plain language:
 
 Labels such as `bug`, `contract violation`, `security issue`, or `missing edge
 case` do not establish severity without the concrete reason.
+
+### Proportional review lenses
+
+Select only lenses relevant to the changed behavior: accepted behavior, issue
+scope, and scope expansion; correctness and failure handling; architecture,
+ownership, dependency direction, coherent file boundaries, and real security
+or trust boundaries; determinism, serialization, ordering, persistence, and
+compatibility; test quality and evidence, including negative paths;
+maintainability and readability,
+including over-compression and needless fragmentation; KISS, pragmatic YAGNI,
+useful DRY, and dependency cost; documentation accuracy, stale or conflicting
+text, and current-status impact; complete-diff collateral changes, generated
+files, debug code, and secrets; and convergence or remaining uncertainty. Ask
+whether a reasonable future maintainer could understand and safely change the
+result.
+
+This is not a rigid checklist: not every lens applies, and a preference is not
+a blocker. Use the finding classes and blocking-evidence rules below for
+severity and evidence.
 
 ### Blocking evidence
 
@@ -245,6 +277,34 @@ to dismiss reproducible defects or weaken accepted syntax/semantics,
 deterministic execution, serializable checkpoint requirements, or validation at
 external, host, checkpoint, persistence, package, and security boundaries.
 
+A small related low-risk repair may ride in the current pull request only when
+it is needed for reliable execution or verification, stays within the same
+ownership area, is explicitly disclosed and proportionately checked, and does
+not change architecture, language behavior, security boundaries, product scope,
+or public compatibility.
+
+## Execution discipline
+
+For longer work, coherent milestones and an orchestrator-supplied temporary
+checklist may be used. Before claiming completion, the executor must reread the
+checklist and verify every item against the actual diff and relevant files.
+Store long editable drafts in temporary files outside the repository rather
+than disposable chat blocks, unless the file is an intended deliverable.
+
+If required input cannot be obtained in the current environment, stop repeating
+equivalent impossible variants, record the exact missing input and checked
+alternatives, and request the smallest concrete owner action that can unblock
+the work.
+
+Tool, command, option, file, branch, issue, and workflow names describe durable
+purpose rather than temporary cleanup history or the latest review complaint.
+
+Use full-file create or replacement actions only for genuinely new files or an
+intentional complete replacement. When existing content must survive, use the
+normal Git route or verified patch publication. Do not switch to full-file
+replacement midway through a preservation edit merely because it appears
+simpler.
+
 ## Default single-agent flow
 
 For a normal issue:
@@ -259,6 +319,8 @@ For a normal issue:
 8. Merge after approval and passing checks, then delete the branch.
 
 The pull request is the implementation handoff record. A separate coordinator report, integration branch, or milestone orchestrator is not required.
+
+Make small logical commits with concise English imperative messages.
 
 A single-agent pull request that completes its issue may use:
 

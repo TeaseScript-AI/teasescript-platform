@@ -21,6 +21,15 @@ The current repository uses:
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
+## Normal and diagnostic verification
+
+`npm run check` is the normal complete configured suite and preserves actionable
+failure information. `npm run test:full-output` and `npm run check:full-output`
+are diagnostic reruns only when compact output is insufficient for a failure or
+specific investigation. Do not run a normal and full-output variant by default
+for the same revision. Focused checks remain appropriate when they supply
+distinct task-relevant evidence.
+
 Workflow and connector tooling has one canonical complete validation command:
 
 ```shell
@@ -57,6 +66,11 @@ performance benchmarks
 ```
 
 Focused tests isolate syntax, diagnostics, lowering, validators, and runtime operations. Source-to-runtime tests prove that the public compilation and execution path preserves the accepted behavior. Runtime invariant and corruption tests cover explicit serializable state and restore boundaries. Future integration and browser tests cover concrete player/host surfaces after those surfaces exist.
+
+New author-facing syntax and source-reachable observable behavior require
+representative source-to-runtime coverage. Runtime-only primitives without a
+source route retain focused public or trusted-boundary coverage until one
+exists.
 
 End-to-end testing does not replace focused unit, validator, and invariant tests.
 

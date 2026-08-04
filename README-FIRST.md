@@ -44,6 +44,12 @@ This does not mean that the complete V30 language, static type system, timers, i
 
 ## Documentation routing
 
+Start with applicable `AGENTS.md` instructions and the assigned issue or pull
+request. Then use this route to load only task-controlling sources. Read
+`CURRENT-DESIGN.md` for architecture-affecting or broad cross-component work and
+`PHASE-STATUS.md` for milestone, gate, integration-status, or current-capability
+work.
+
 - `CURRENT-DESIGN.md`: current architecture and implementation boundaries.
 - `PHASE-STATUS.md`: current milestone status and verification evidence.
 - `AGENTS.md`: coding, review, and Git rules for every agent.
@@ -52,6 +58,7 @@ This does not mean that the complete V30 language, static type system, timers, i
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
 - `docs/specifications/`: accepted consolidated specifications.
 - `docs/decisions/`: accepted and proposed ADRs.
+- `docs/OPEN-DECISIONS.md`: unresolved choices; read it only when the task depends on a gap that current authority does not resolve.
 - `docs/planning/POC-TO-ALPHA-BACKLOG.md`: selected work required before a stated POC, pre-alpha, or alpha gate, but not automatically scheduled.
 - `docs/planning/`: other non-authoritative proposals, gap analysis, and legacy backlog material.
 - `docs/reference/`: routing notices for research intentionally stored outside this repository.
