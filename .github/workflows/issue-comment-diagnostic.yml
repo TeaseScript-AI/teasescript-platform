@@ -1,0 +1,90 @@
+name: Issue comment diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/issue-comment-diagnostic.yml
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  confirm-load:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      statuses: write
+    steps:
+      - name: Publish workflow-load receipt
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'issue-comment/diagnostic-load-v1',
+              description: 'Diagnostic workflow loaded on main.',
+              target_url: runUrl,
+            });
+
+  confirm-comment:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.number == 235 &&
+      startsWith(github.event.comment.body, '/diagnose issue-comment ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      issues: write
+      statuses: write
+    steps:
+      - name: Publish issue-comment dispatch receipt
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const body = context.payload.comment?.body ?? '';
+            const match = body.match(/^\/diagnose issue-comment ([A-Za-z0-9._-]{1,32})$/);
+            if (!match) {
+              throw new Error('Expected /diagnose issue-comment followed by one 1-32 character nonce.');
+            }
+
+            const nonce = match[1];
+            const commentId = context.payload.comment.id;
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: commentId,
+              content: 'eyes',
+            });
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              context: 'issue-comment/diagnostic-event-v1',
+              description: `request ${commentId}; nonce ${nonce}`,
+              target_url: runUrl,
+            });
+
+            core.notice(JSON.stringify({
+              eventName: context.eventName,
+              issueNumber: context.issue.number,
+              commentId,
+              actor: context.actor,
+              nonce,
+              runId: context.runId,
+              runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+              workflow: context.workflow,
+              workflowRef: process.env.GITHUB_WORKFLOW_REF,
+              workflowSha: process.env.GITHUB_WORKFLOW_SHA,
+              sha: context.sha,
+            }));
