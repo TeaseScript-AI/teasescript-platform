@@ -76,6 +76,7 @@ assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transf
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
 assert text.count("runs-on: ubuntu-24.04") == 5
+assert "uses: ./.github/workflows/artifact-mailbox-worker.yml" in text
 assert "timeout-minutes: 30" not in text
 assert "validation_profile: ${{ steps.prepare.outputs.validation_profile }}" in text
 test_job = text.split("  test:\n", 1)[1].split("\n  publish:\n", 1)[0]
@@ -183,7 +184,7 @@ def parse_plain_mapping_entry(value, scope, job_name, source_line):
     return key, scalar
 
 
-def parse_uses_scalar(scalar, job_name, source_line):
+def parse_uses_scalar(scalar, job_name, source_line, allow_local_workflow=False):
     scalar_patterns = [
         r"(?P<ref>[^\\\s#'\"|>\[\]{},]+)(?:[ \t]+#.*)?",
         r"'(?P<ref>[^']+)'(?:[ \t]+#.*)?",
@@ -194,6 +195,11 @@ def parse_uses_scalar(scalar, job_name, source_line):
         if not match:
             continue
         ref = match.group("ref")
+        if allow_local_workflow and re.fullmatch(
+            r"\./\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml",
+            ref,
+        ):
+            return ref
         action_match = re.fullmatch(
             r"(?P<path>[^@\\\s]+)@(?P<pin>[0-9a-f]{40})",
             ref,
@@ -345,7 +351,7 @@ def collect_job_level_refs(job_lines, job_name, properties):
         f"workflow job {job_name} cannot combine job-level uses with steps"
     )
     index, scalar = uses_headers[0]
-    return [parse_uses_scalar(scalar, job_name, job_lines[index])]
+    return [parse_uses_scalar(scalar, job_name, job_lines[index], allow_local_workflow=True)]
 
 
 def assert_job_contents_access(job_lines, job_name, properties):
@@ -539,12 +545,21 @@ reusable_job = "\n".join(
     ]
 )
 assert assert_checkout_jobs_have_contents_access(reusable_job) == [reusable_ref]
-for unpinned_reusable_ref in [
-    "example/repository/.github/workflows/reusable.yml@main",
-    "./.github/workflows/reusable.yml",
+assert_rejected(
+    reusable_job.replace(reusable_ref, "example/repository/.github/workflows/reusable.yml@main"),
+    "one immutable 40-hex pin",
+)
+local_reusable_ref = "./.github/workflows/reusable.yml"
+assert assert_checkout_jobs_have_contents_access(
+    reusable_job.replace(reusable_ref, local_reusable_ref)
+) == [local_reusable_ref]
+for invalid_local_reusable_ref in [
+    "./.github/workflows/../reusable.yml",
+    "./other/reusable.yml",
+    "./.github/workflows/reusable.yml@main",
 ]:
     assert_rejected(
-        reusable_job.replace(reusable_ref, unpinned_reusable_ref),
+        reusable_job.replace(reusable_ref, invalid_local_reusable_ref),
         "one immutable 40-hex pin",
     )
 assert_rejected(

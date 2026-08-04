@@ -99,15 +99,13 @@ syntax and source-reachable observable behavior require representative
 source-to-runtime coverage. Follow `docs/TESTING.md`; do not add unrelated
 fuzzing infrastructure, dependencies, or production hooks.
 
-## Connector source acquisition rollout
+## Connector source acquisition
 
-Connector agents validate `source-bundle/artifact-v1` before requesting work. A
-valid hit is downloaded immediately without a comment, workflow run, or wait.
-During issue #234 Phase 1, a confirmed miss may use only Artifact mailbox #235
-and the exact request ID in its single authenticated bot registry. Do not invent
-a mailbox delay or remove the request-branch fallback until default-branch proof
-selects and documents the measured initial wait, 10-second polling cadence, and
-overall timeout.
+Validate `source-bundle/artifact-v1` first. Download a valid hit immediately;
+do not comment, start a workflow, or wait. During issue #234 Phase 1, use mailbox
+#235 for a confirmed miss and correlate the exact request ID. Use the temporary
+request-branch fallback only when the mailbox is unavailable; its 90-second wait
+does not apply to the mailbox. Phase 2 timing requires recorded live evidence.
 
 ## Verification and Git
 
