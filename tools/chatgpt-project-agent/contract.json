@@ -1,0 +1,31 @@
+{
+  "formatVersion": 1,
+  "platform": "linux-x64",
+  "installationRoot": "chatgpt-project-agent-linux-x64",
+  "toolsArchiveName": "chatgpt-project-agent-tools-linux-x64.tar.zst",
+  "runtimeArchiveName": "chatgpt-project-agent-runtime-linux-x64.tar.zst",
+  "setupScriptName": "setup-chatgpt-project-agent.sh",
+  "projectReadmeName": "README-FIRST.md",
+  "normalEntryPoint": "bin/prepare-agent-workspace.sh",
+  "toolsCompressionLevel": 22,
+  "runtimeCompressionLevel": 10,
+  "runtimeContract": {
+    "formatVersion": 1,
+    "layout": "split-preexpanded-runtime-and-cache",
+    "node": {
+      "authoritative": "24.18.0",
+      "compatibility": "26.5.0"
+    },
+    "requiredPaths": [
+      "runtime/node-v24.18.0-linux-x64/bin/node",
+      "runtime/node-v24.18.0-linux-x64/bin/npm",
+      "runtime/node-v26.5.0-linux-x64/bin/node",
+      "runtime/node-v26.5.0-linux-x64/bin/npm",
+      "npm-cache-seed/_cacache",
+      "optional-tools/ts-morph",
+      "optional-tools/tiktoken-cp313-linux-x86_64",
+      "CACHE-SEED-ID",
+      "PACKAGE-INVENTORY.json"
+    ]
+  }
+}
