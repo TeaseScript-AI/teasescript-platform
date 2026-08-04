@@ -20,7 +20,7 @@ tools archive. ChatGPT-specific shell scripts and project sources live here.
 - `project/README-FIRST.md`: compact project-folder startup document;
 - `project/CODEX-MODEL-SELECTION.md`: stable model-routing source copied into the
   tools archive;
-- `project/SYSTEM-PROMPT.md`: canonical source for the separate ChatGPT project
+- `project/PROJECT-INSTRUCTIONS.txt`: canonical source for the separate ChatGPT project
   settings field; never included in project-folder files or archives;
 - `bootstrap/`: canonical shell and small documentation sources for the installed
   pre-checkout toolset;

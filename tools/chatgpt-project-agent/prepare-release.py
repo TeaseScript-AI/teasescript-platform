@@ -471,7 +471,7 @@ def stage_project(
     print(
         "prepare-chatgpt-project-agent: PASS "
         f"kind=project output={output_directory} files={len(list(output_directory.iterdir()))} "
-        f"system_prompt_source={SCRIPT_DIR / 'project' / 'SYSTEM-PROMPT.md'}"
+        f"system_prompt_source={SCRIPT_DIR / 'project' / 'PROJECT-INSTRUCTIONS.txt'}"
     )
 
 

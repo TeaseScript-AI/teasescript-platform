@@ -122,7 +122,7 @@ class ChatGptProjectAgentTests(unittest.TestCase):
         names = self.archive_names(first)
         self.assertIn(f"{INSTALL_ROOT}/tools/prepare-source-review.py", names)
         self.assertIn(f"{INSTALL_ROOT}/docs/CODEX-MODEL-SELECTION.md", names)
-        self.assertFalse(any("SYSTEM-PROMPT" in name for name in names))
+        self.assertFalse(any("PROJECT-INSTRUCTIONS" in name for name in names))
         self.assertFalse(any(name.endswith("README-FIRST.md") for name in names))
 
     def test_runtime_archive_is_deterministic(self) -> None:
@@ -298,7 +298,7 @@ class ChatGptProjectAgentTests(unittest.TestCase):
                 "setup-chatgpt-project-agent.sh",
             ],
         )
-        self.assertFalse(any("SYSTEM-PROMPT" in name for name in names))
+        self.assertFalse(any("PROJECT-INSTRUCTIONS" in name for name in names))
 
 
 if __name__ == "__main__":
