@@ -35,29 +35,68 @@ This is both simpler and more context-efficient than requesting complete files o
 
 ## Obtain the exact source artifact
 
-### Current pull-request head
+Issue #228 adds a fixed exact-SHA artifact index and a collaborator-gated
+regeneration command. The rollout is additive until its default-branch live
+proof is complete; the request-branch procedure remains a compatibility path in
+`DEVELOPMENT-WORKFLOW.md` during that period.
 
-1. Call `get_pr_info` and record the exact head SHA and exact current base-tip SHA.
-2. Call `compare_commits` with those two exact SHAs and record `merge_base_commit.sha`. This merge base is stable in the head history even when the base branch later advances.
-3. Call `fetch_commit_workflow_runs` for the exact head.
-4. Select a successful `Source bundle` run for that head.
-5. Call `fetch_workflow_run_artifacts` and require an unexpired artifact named `teasescript-source-<head-sha>` whose workflow metadata has the same head SHA.
-6. Call `download_workflow_artifact` once.
-7. Pass the returned local ZIP path, GitHub artifact digest, and expected merge base to the trusted preparation helper.
+### Preferred fixed-index lookup
 
-### Implementation from `main`, older source, or missing/expired artifact
+Resolve one immutable identity first:
 
-For new implementation work, obtain an exact artifact for the selected `main` commit rather than trying to network-clone the repository. The current connector may not expose push-triggered source-bundle runs through commit-run discovery, so use the connector-native request branch when the automatic artifact cannot be located. The same route regenerates older or expired source. It is defined in `DEVELOPMENT-WORKFLOW.md`:
+- `main`: the current default-branch tip;
+- `pr:<number>`: the current PR head SHA plus head repository/ref, current base
+  SHA, and `compare_commits.merge_base_commit.sha`;
+- `sha:<full-sha>`: that exact existing commit.
 
-1. resolve the exact requested source SHA and exact current `main` SHA;
-2. create `source-bundle-request/<source-sha>/<nonce>` at current `main`;
-3. wait 90 seconds before the first status lookup;
-4. if absent, wait 30 seconds before each later lookup;
-5. read status `source-bundle/request/<nonce>` from the requested source commit;
-6. download the reported artifact ID and verify its digest;
-7. confirm the temporary request branch was removed.
+Then call `get_commit_combined_status` for the exact source SHA and inspect only
+a successful status with context `source-bundle/artifact-v1`. Its `target_url`
+must be the exact artifact URL for this repository. Use the run and artifact IDs
+from that URL to call `fetch_workflow_run_artifacts`; require one unexpired
+artifact whose ID and name `teasescript-source-<source-sha>` match, whose digest
+is present, and whose workflow-run repository and run identity match. Download
+that numeric artifact ID once, verify the reported digest locally, and run the
+trusted preparation helper with the exact head and optional PR merge base.
 
-The connector cannot start `workflow_dispatch`; do not spend calls looking for a dispatch route that is not exposed.
+A valid lookup starts no workflow and posts no comment. Treat a missing fixed
+status, failed download, expired artifact, malformed URL, wrong ID/name/digest,
+wrong producer identity, or other metadata mismatch as a cache miss. Never use
+an artifact from another pull request or another SHA merely because it contains
+similar files.
+
+### Regenerate only after a confirmed miss
+
+Post exactly one of these commands on an issue or pull request:
+
+```text
+/artifact source main
+/artifact source pr:225
+/artifact source sha:<full-lowercase-40-character-sha>
+```
+
+Only Write, Maintain, or Admin collaborators may allocate regeneration compute.
+The workflow serializes requests, resolves and pins the selected identity,
+rechecks the index after entering the queue, and either returns the now-existing
+artifact or creates one seven-day Source bundle. Consume only the bot-authored
+result bound to the exact request-comment ID. The result contains the complete
+resolved identity, artifact metadata, exact `download_workflow_artifact`
+arguments, and local preparation command.
+
+The returned identity is authoritative for that request. When `main` or a PR
+moves while the request waits, do not combine the result with a head, base, or
+merge base resolved earlier; either use the complete returned identity or
+request the already-resolved exact SHA.
+
+Normal agent guidance after live rollout is:
+
+> Acquire exact repository source through the fixed
+> `source-bundle/artifact-v1` index, and use `/artifact source <selector>` only
+> on a confirmed miss. Do not use network Git, workflow run numbers, manually
+> constructed request branches, or artifacts from unrelated pull requests.
+
+Until the issue #228 live-proof gate is complete and `AGENTS.md` is switched,
+the documented request-branch fallback remains supported. Do not search for a
+`workflow_dispatch` route; the connector does not expose one.
 
 ## Prepare the local checkout
 

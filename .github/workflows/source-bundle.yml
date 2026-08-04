@@ -65,5 +65,5 @@ jobs:
           name: teasescript-source-${{ steps.source.outputs.sha }}
           path: source-artifact/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
           compression-level: 0

@@ -146,7 +146,7 @@ jobs:
           name: teasescript-source-${{ steps.request.outputs.source_sha }}
           path: source-artifact/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
           compression-level: 0
 
   publish-result:
@@ -155,6 +155,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     permissions:
+      actions: read
       statuses: write
     steps:
       - name: Publish connector-readable result status
@@ -168,27 +169,91 @@ jobs:
           ARTIFACT_DIGEST: ${{ needs.bundle.outputs.artifact_digest }}
         with:
           script: |
-            const artifactId = process.env.ARTIFACT_ID || '';
+            const artifactIdText = process.env.ARTIFACT_ID || '';
             const artifactUrl = process.env.ARTIFACT_URL || '';
             const artifactDigest = process.env.ARTIFACT_DIGEST || '';
-            const succeeded =
-              process.env.BUNDLE_RESULT === 'success' &&
-              /^[0-9]+$/.test(artifactId) &&
-              /^[0-9a-f]{64}$/.test(artifactDigest) &&
-              artifactUrl.startsWith(`${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/`);
+            const sourceSha = process.env.SOURCE_SHA || '';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            let validationError = null;
+
+            if (
+              process.env.BUNDLE_RESULT !== 'success' ||
+              !/^[1-9][0-9]*$/.test(artifactIdText) ||
+              !/^[0-9a-f]{64}$/.test(artifactDigest) ||
+              !/^[0-9a-f]{40}$/.test(sourceSha)
+            ) {
+              validationError = 'Source-bundle production did not return complete artifact metadata.';
+            }
+
+            const artifactId = Number.parseInt(artifactIdText, 10);
+            const expectedArtifactUrl = `${runUrl}/artifacts/${artifactIdText}`;
+            if (!validationError && (!Number.isSafeInteger(artifactId) || artifactUrl !== expectedArtifactUrl)) {
+              validationError = 'The upload result did not contain the exact expected artifact URL.';
+            }
+
+            if (!validationError) {
+              try {
+                const artifactResponse = await github.rest.actions.getArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifactId,
+                });
+                const artifact = artifactResponse.data;
+                const expiresAtMs = Date.parse(artifact.expires_at || '');
+                const producerResponse = await github.rest.actions.getWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: context.runId,
+                });
+                const producer = producerResponse.data;
+                if (
+                  artifact.id !== artifactId ||
+                  artifact.name !== `teasescript-source-${sourceSha}` ||
+                  artifact.expired === true ||
+                  artifact.digest !== `sha256:${artifactDigest}` ||
+                  artifact.workflow_run?.id !== context.runId ||
+                  !Number.isFinite(expiresAtMs) ||
+                  expiresAtMs <= Date.now() ||
+                  producer.id !== context.runId ||
+                  producer.repository?.full_name !== `${context.repo.owner}/${context.repo.repo}` ||
+                  producer.path !== '.github/workflows/source-bundle-request-processor.yml' ||
+                  !['queued', 'in_progress'].includes(producer.status)
+                ) {
+                  validationError = 'Uploaded Source-bundle metadata did not match the trusted producer result.';
+                }
+              } catch (error) {
+                validationError = `Source-bundle metadata verification failed: ${error.message}`;
+              }
+            }
+
+            const succeeded = validationError === null;
             const description = succeeded
-              ? `artifact ${artifactId} sha256:${artifactDigest}`
+              ? `artifact ${artifactIdText} sha256:${artifactDigest}`
               : `source bundle failed; run ${context.runId}`;
 
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: process.env.SOURCE_SHA,
+              sha: sourceSha,
               state: succeeded ? 'success' : 'failure',
               context: process.env.STATUS_CONTEXT,
               description,
               target_url: succeeded ? artifactUrl : runUrl,
+            });
+
+            if (!succeeded) {
+              core.setFailed(validationError);
+              return;
+            }
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: sourceSha,
+              state: 'success',
+              context: 'source-bundle/artifact-v1',
+              description,
+              target_url: artifactUrl,
             });
 
   cleanup-request:

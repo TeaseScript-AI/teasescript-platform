@@ -87,6 +87,21 @@ Tests:
 python3 -B tools/local-agent/test-prepare-source-review.py
 ```
 
+## Source-bundle artifact request logic
+
+`source-bundle-artifact-request.cjs` is trusted default-branch logic for the
+strict `/artifact source <selector>` regeneration workflow. It resolves and
+pins `main`, PR, and exact-SHA selectors, enforces collaborator authorization,
+validates the fixed artifact index and producer metadata, correlates one bot
+result with the exact request comment, and emits fully populated download and
+preparation instructions. It does not execute selected source content.
+
+Focused tests:
+
+```bash
+node tools/local-agent/test-source-bundle-artifact-request.cjs
+```
+
 ## Prepare multipart patch publication
 
 `prepare-patch-publication.py` creates a verified raw Git patch between an exact base commit and the tested current `HEAD`, splits it into UTF-8 parts, writes the V2 manifest, proves reconstruction, and creates a local sequential upload plan. It never merges, rebases, squashes, commits, or pushes.
