@@ -7,6 +7,7 @@ mkdir -p "$log_dir"
 
 python3 -B "$script_dir/test-compact-unittest.py"
 bash "$script_dir/test-run-compact.sh"
+bash "$script_dir/test-issue-comment-diagnostic-workflow.sh"
 bash "$script_dir/run-compact.sh" \
   --label source-bundle-workflow \
   --log "$log_dir/source-bundle-workflow.log" \
