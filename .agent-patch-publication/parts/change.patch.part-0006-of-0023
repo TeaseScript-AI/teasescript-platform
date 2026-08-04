@@ -1,0 +1,220 @@
+diff --git a/tools/chatgpt-project-agent/build-tools-bundle.py b/tools/chatgpt-project-agent/build-tools-bundle.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..a8a5ec5ba40cbfa635bc7f087fdd011efbd244c1
+--- /dev/null
++++ b/tools/chatgpt-project-agent/build-tools-bundle.py
+@@ -0,0 +1,214 @@
++#!/usr/bin/env python3
++"""Build the deterministic ChatGPT project-agent tools tar.zst derivative."""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++import tarfile
++import tempfile
++
++REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
++SOURCE_ROOT = Path(__file__).resolve().parent
++TOOLS_SOURCE_ROOT = SOURCE_ROOT / "tools-root"
++BUNDLE_DIRECTORY = SOURCE_ROOT / "bundle"
++ARCHIVE_NAME = "teasescript-chatgpt-project-agent-tools-linux-x64.tar.zst"
++ARCHIVE_ROOT = "teasescript-chatgpt-project-agent-tools"
++COMPATIBILITY_ID = "teasescript-chatgpt-project-agent-linux-x64-v1"
++DEFAULT_OUTPUT = BUNDLE_DIRECTORY / ARCHIVE_NAME
++
++SOURCE_FILES = {
++    "README.md": TOOLS_SOURCE_ROOT / "README.md",
++    "bin/prepare-chatgpt-project-workspace.sh": (
++        TOOLS_SOURCE_ROOT / "bin/prepare-chatgpt-project-workspace.sh"
++    ),
++    "bin/setup-workspace.sh": TOOLS_SOURCE_ROOT / "bin/setup-workspace.sh",
++    "bin/install-ts-morph-offline.sh": (
++        TOOLS_SOURCE_ROOT / "bin/install-ts-morph-offline.sh"
++    ),
++    "bin/install-tiktoken-offline.sh": (
++        TOOLS_SOURCE_ROOT / "bin/install-tiktoken-offline.sh"
++    ),
++    "tools/prepare-source-review.py": (
++        REPOSITORY_ROOT / "tools/local-agent/prepare-source-review.py"
++    ),
++}
++
++
++class BuildError(RuntimeError):
++    """Expected deterministic build failure."""
++
++
++def fail(message: str) -> BuildError:
++    return BuildError(message)
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
++    return parser.parse_args()
++
++
++def absolute_path(path: Path) -> Path:
++    return Path(os.path.abspath(os.fspath(path.expanduser())))
++
++
++def sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def copy_sources(root: Path) -> list[dict[str, str]]:
++    sources: list[dict[str, str]] = []
++    for archive_path, repository_path in sorted(SOURCE_FILES.items()):
++        if not repository_path.is_file():
++            raise fail(f"missing source file: {repository_path}")
++        target = root / archive_path
++        target.parent.mkdir(parents=True, exist_ok=True)
++        shutil.copyfile(repository_path, target)
++        executable = os.access(repository_path, os.X_OK) or repository_path.suffix in {
++            ".sh",
++            ".py",
++        }
++        target.chmod(0o755 if executable else 0o644)
++        sources.append(
++            {
++                "archivePath": archive_path,
++                "repositoryPath": str(repository_path.relative_to(REPOSITORY_ROOT)),
++                "sha256": sha256_file(target),
++            }
++        )
++    return sources
++
++
++def write_manifest(root: Path, sources: list[dict[str, str]]) -> None:
++    manifest = {
++        "formatVersion": 1,
++        "platform": "linux-x64",
++        "layout": "chatgpt-project-agent-tools",
++        "compatibilityId": COMPATIBILITY_ID,
++        "normalEntryPoint": "bin/prepare-chatgpt-project-workspace.sh",
++        "runtimeFormatVersion": 1,
++        "compression": {
++            "format": "tar.zst",
++            "zstdLevel": 22,
++            "threads": 1,
++        },
++        "sources": sources,
++    }
++    (root / "TOOLS-MANIFEST.json").write_text(
++        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
++    )
++
++
++def write_checksums(root: Path) -> None:
++    paths = sorted(
++        path for path in root.rglob("*") if path.is_file() and path.name != "TOOLS-SHA256SUMS"
++    )
++    lines = [f"{sha256_file(path)}  {path.relative_to(root).as_posix()}" for path in paths]
++    (root / "TOOLS-SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
++
++
++def add_directory(archive: tarfile.TarFile, name: str) -> None:
++    info = tarfile.TarInfo(name.rstrip("/") + "/")
++    info.type = tarfile.DIRTYPE
++    info.mode = 0o755
++    info.uid = info.gid = 0
++    info.uname = info.gname = ""
++    info.mtime = 0
++    archive.addfile(info)
++
++
++def create_tar(root: Path, output: Path) -> None:
++    with tarfile.open(output, mode="w", format=tarfile.USTAR_FORMAT) as archive:
++        add_directory(archive, ARCHIVE_ROOT)
++        directories = sorted(path for path in root.rglob("*") if path.is_dir())
++        files = sorted(path for path in root.rglob("*") if path.is_file())
++        for directory in directories:
++            relative = directory.relative_to(root).as_posix()
++            add_directory(archive, f"{ARCHIVE_ROOT}/{relative}")
++        for path in files:
++            relative = path.relative_to(root).as_posix()
++            info = tarfile.TarInfo(f"{ARCHIVE_ROOT}/{relative}")
++            info.size = path.stat().st_size
++            info.mode = 0o755 if os.access(path, os.X_OK) else 0o644
++            info.uid = info.gid = 0
++            info.uname = info.gname = ""
++            info.mtime = 0
++            with path.open("rb") as stream:
++                archive.addfile(info, stream)
++
++
++def compress(tar_path: Path, output: Path) -> None:
++    output.parent.mkdir(parents=True, exist_ok=True)
++    with tempfile.NamedTemporaryFile(
++        prefix=f".{output.name}.tmp-", dir=output.parent, delete=False
++    ) as stream:
++        temporary = Path(stream.name)
++    completed = subprocess.run(
++        [
++            "zstd",
++            "--quiet",
++            "--ultra",
++            "-22",
++            "--threads=1",
++            "--no-progress",
++            "--force",
++            str(tar_path),
++            "-o",
++            str(temporary),
++        ],
++        text=True,
++        stdout=subprocess.PIPE,
++        stderr=subprocess.PIPE,
++        check=False,
++    )
++    if completed.returncode != 0:
++        temporary.unlink(missing_ok=True)
++        detail = completed.stderr.strip() or completed.stdout.strip() or "no output"
++        raise fail(f"zstd compression failed: {detail}")
++    os.replace(temporary, output)
++
++
++def build(output: Path) -> str:
++    output = absolute_path(output)
++    if output.is_symlink():
++        raise fail(f"output may not be a symlink: {output}")
++    with tempfile.TemporaryDirectory(prefix="chatgpt-project-tools-build-") as name:
++        temporary = Path(name)
++        root = temporary / ARCHIVE_ROOT
++        root.mkdir()
++        sources = copy_sources(root)
++        write_manifest(root, sources)
++        write_checksums(root)
++        tar_path = temporary / "tools.tar"
++        create_tar(root, tar_path)
++        compress(tar_path, output)
++    return sha256_file(output)
++
++
++def main() -> int:
++    args = parse_args()
++    digest = build(args.output)
++    print(
++        "build-chatgpt-project-tools: PASS "
++        f"output={args.output.resolve()} sha256={digest}"
++    )
++    return 0
++
++
++if __name__ == "__main__":
++    try:
++        raise SystemExit(main())
++    except BuildError as exc:
++        print(f"build-chatgpt-project-tools: FAIL: {exc}", file=sys.stderr)
++        raise SystemExit(1)

@@ -1,0 +1,211 @@
++MAX_MEMBER_COUNT = 50_000
++MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
++MAX_METADATA_BYTES = 4 * 1024 * 1024
++INSTALL_MARKER = ".chatgpt-project-agent-install.json"
++ENTRYPOINT_OPTIONS = (
++    "--artifact",
++    "--artifact-sha256",
++    "--expected-head",
++    "--expected-merge-base",
++    "--expected-repository",
++    "--output",
++    "--node",
++    "--with-ts-morph",
++    "--with-tiktoken",
++    "--check",
++)
++
++
++class SetupError(RuntimeError):
++    """Expected validation or installation failure."""
++
++
++def fail(message: str) -> SetupError:
++    return SetupError(message)
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(
++        description=(
++            "Validate and atomically assemble the TeaseScript ChatGPT "
++            "project-agent tools and Linux x64 runtime payloads."
++        )
++    )
++    parser.add_argument(
++        "--project-directory",
++        type=Path,
++        default=Path(__file__).resolve().parent,
++        help="directory containing README-FIRST.md and both payloads",
++    )
++    parser.add_argument(
++        "--output-directory",
++        type=Path,
++        default=Path("/mnt/data") / INSTALL_DIRECTORY_NAME,
++    )
++    parser.add_argument(
++        "--replace",
++        action="store_true",
++        help="atomically replace an installation created by this script",
++    )
++    parser.add_argument(
++        "--check-only",
++        action="store_true",
++        help="validate both payloads without exposing an installation",
++    )
++    return parser.parse_args()
++
++
++def absolute_path(path: Path) -> Path:
++    return Path(os.path.abspath(os.fspath(path.expanduser())))
++
++
++def sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def load_artifact_metadata(readme: Path) -> dict[str, Any]:
++    try:
++        text = readme.read_text(encoding="utf-8")
++    except (OSError, UnicodeError) as exc:
++        raise fail(f"cannot read {README_NAME}: {exc}") from exc
++    if text.count(METADATA_BEGIN) != 1 or text.count(METADATA_END) != 1:
++        raise fail(f"{README_NAME} must contain exactly one artifact metadata block")
++    begin = text.find(METADATA_BEGIN)
++    end = text.find(METADATA_END)
++    if end <= begin:
++        raise fail(f"{README_NAME} artifact metadata markers are out of order")
++    payload = text[begin + len(METADATA_BEGIN) : end].strip()
++    try:
++        value = json.loads(payload)
++    except json.JSONDecodeError as exc:
++        raise fail(f"{README_NAME} artifact metadata is invalid JSON: {exc}") from exc
++    if not isinstance(value, dict) or value.get("formatVersion") != 1:
++        raise fail("unsupported project artifact metadata formatVersion")
++    expected = {
++        "tools": TOOLS_ARCHIVE_NAME,
++        "runtime": RUNTIME_ARCHIVE_NAME,
++    }
++    for key, expected_name in expected.items():
++        item = value.get(key)
++        if not isinstance(item, dict):
++            raise fail(f"artifact metadata field {key!r} must be an object")
++        if item.get("file") != expected_name:
++            raise fail(f"artifact metadata {key}.file must be {expected_name}")
++        digest = item.get("sha256")
++        if not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None:
++            raise fail(f"artifact metadata {key}.sha256 is invalid")
++    return value
++
++
++def copy_and_verify(source: Path, destination: Path, expected_sha256: str) -> None:
++    try:
++        source_stat = source.lstat()
++    except OSError as exc:
++        raise fail(f"payload is not accessible: {source}: {exc}") from exc
++    if stat.S_ISLNK(source_stat.st_mode) or not stat.S_ISREG(source_stat.st_mode):
++        raise fail(f"payload must be a regular non-symlink file: {source}")
++    digest = hashlib.sha256()
++    try:
++        with source.open("rb") as input_stream, destination.open("xb") as output_stream:
++            for chunk in iter(lambda: input_stream.read(1024 * 1024), b""):
++                digest.update(chunk)
++                output_stream.write(chunk)
++    except OSError as exc:
++        raise fail(f"cannot copy payload {source}: {exc}") from exc
++    actual = digest.hexdigest()
++    if actual != expected_sha256:
++        raise fail(
++            f"payload SHA-256 mismatch for {source.name}: "
++            f"expected {expected_sha256}, got {actual}"
++        )
++
++
++def safe_member_path(name: str, expected_root: str) -> PurePosixPath:
++    if not name or "\\" in name or name.startswith("/") or "\x00" in name:
++        raise fail(f"unsafe archive member name: {name!r}")
++    path = PurePosixPath(name.rstrip("/"))
++    if not path.parts or any(part in {"", ".", ".."} for part in path.parts):
++        raise fail(f"unsafe archive member name: {name!r}")
++    if path.parts[0] != expected_root:
++        raise fail(
++            f"archive member is outside expected root {expected_root!r}: {name!r}"
++        )
++    return path
++
++
++def resolve_link_target(member: PurePosixPath, linkname: str, *, symbolic: bool) -> str:
++    if not linkname or "\\" in linkname or "\x00" in linkname:
++        raise fail(f"unsafe archive link target for {member}: {linkname!r}")
++    if linkname.startswith("/"):
++        raise fail(f"absolute archive link target for {member}: {linkname!r}")
++    base = str(member.parent) if symbolic else ""
++    normalized = posixpath.normpath(posixpath.join(base, linkname))
++    if normalized == "." or normalized.startswith("../") or "/../" in normalized:
++        raise fail(f"archive link escapes payload root for {member}: {linkname!r}")
++    if PurePosixPath(normalized).parts[0] != member.parts[0]:
++        raise fail(f"archive link escapes payload root for {member}: {linkname!r}")
++    return normalized
++
++
++def inspect_archive(archive: Path, expected_root: str) -> None:
++    try:
++        process = subprocess.Popen(
++            ["zstd", "-dc", "--", str(archive)],
++            stdout=subprocess.PIPE,
++            stderr=subprocess.PIPE,
++        )
++    except OSError as exc:
++        raise fail(f"cannot start zstd: {exc}") from exc
++    assert process.stdout is not None
++    assert process.stderr is not None
++    names: set[str] = set()
++    total = 0
++    count = 0
++    error: Exception | None = None
++    try:
++        with tarfile.open(fileobj=process.stdout, mode="r|") as stream:
++            for member in stream:
++                count += 1
++                if count > MAX_MEMBER_COUNT:
++                    raise fail("archive exceeds the member-count safety limit")
++                path = safe_member_path(member.name, expected_root)
++                normalized = str(path)
++                if normalized in names:
++                    raise fail(f"duplicate archive member: {member.name!r}")
++                names.add(normalized)
++                if member.isdir():
++                    continue
++                if member.isreg():
++                    if member.size < 0:
++                        raise fail(f"archive member has negative size: {member.name!r}")
++                    total += member.size
++                    if total > MAX_UNCOMPRESSED_BYTES:
++                        raise fail("archive exceeds the uncompressed-size safety limit")
++                    if path.name.endswith(("MANIFEST.json", "SHA256SUMS")) and (
++                        member.size > MAX_METADATA_BYTES
++                    ):
++                        raise fail(f"archive metadata is unexpectedly large: {member.name}")
++                    continue
++                if member.issym():
++                    resolve_link_target(path, member.linkname, symbolic=True)
++                    continue
++                if member.islnk():
++                    resolve_link_target(path, member.linkname, symbolic=False)
++                    continue
++                raise fail(f"unsupported archive member type: {member.name!r}")
++    except (SetupError, tarfile.TarError, OSError, EOFError) as exc:
++        error = exc
++    finally:
++        process.stdout.close()
++    stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
++    process.stderr.close()
++    return_code = process.wait()
++    if error is not None:
++        if isinstance(error, SetupError):
++            raise error
++        raise fail(f"cannot inspect archive {archive.name}: {error}") from error
++    if return_code != 0:

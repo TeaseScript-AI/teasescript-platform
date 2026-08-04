@@ -1,0 +1,222 @@
+alized:
+-            fail("staged bootstrap archive lost its normal entry point")
+-
+-        actual_inventory = {path.name for path in staged.iterdir()}
+-        expected_inventory = set(SHARED_FILES) | {STABLE_ARCHIVE_NAME}
+-        if actual_inventory != expected_inventory:
+-            fail("staged replacement inventory is incomplete or contains extra files")
+-
+-        os.replace(staged, output_directory)
+-
+-    return manifest
+-
+-
+-def parser() -> argparse.ArgumentParser:
+-    result = argparse.ArgumentParser(
+-        description=(
+-            "Validate canonical shared-project routing and stage the exact stable "
+-            "bootstrap replacement set."
+-        )
+-    )
+-    result.add_argument("--bootstrap-archive", required=True, type=Path)
+-    result.add_argument("--output-directory", required=True, type=Path)
+-    return result
+-
+-
+-def main() -> int:
+-    args = parser().parse_args()
+-    try:
+-        manifest = prepare_replacement(
+-            bootstrap_archive=args.bootstrap_archive,
+-            output_directory=args.output_directory,
+-        )
+-    except PreparationError as exc:
+-        print(f"prepare-shared-project: FAIL: {exc}", file=os.sys.stderr)
+-        return 1
+-
+-    print(f"prepare-shared-project: PASS output={args.output_directory.resolve()}")
+-    print(
+-        "files="
+-        + ",".join(sorted(set(SHARED_FILES) | {STABLE_ARCHIVE_NAME}))
+-    )
+-    print(f"bootstrapFormatVersion={manifest.get('formatVersion')}")
+-    print(f"bootstrapNormalEntryPoint={manifest.get('normalEntryPoint')}")
+-    return 0
+-
+-
+-if __name__ == "__main__":
+-    raise SystemExit(main())
+diff --git a/tools/local-agent/shared-project/README-FIRST.md b/tools/local-agent/shared-project/README-FIRST.md
+deleted file mode 100644
+index afa197998635b4db5ceed19e28b740a4d2308ec7..0000000000000000000000000000000000000000
+--- a/tools/local-agent/shared-project/README-FIRST.md
++++ /dev/null
+@@ -1,71 +0,0 @@
+-# TeaseScript AI shared project context
+-
+-Start here when a new connector-local agent has no prior project context. This
+-shared folder provides stable routing, trusted offline tooling, and separate
+-research context. It is not the source of truth for current implementation,
+-accepted syntax, ADRs, or runtime behavior.
+-
+-## Reading and startup route
+-
+-1. Read `PROJECT-INSTRUCTIONS.txt` for stable product and architecture boundaries.
+-2. Read `TEASESCRIPT-AI-DEVELOPMENT-WORKFLOW-CONTEXT.md` for the applicable GitHub and publication route.
+-3. For substantial Linux x86_64 implementation, review, debugging, or verification, read `LOCAL-AGENT-BOOTSTRAP.md` and use `teasescript-agent-bootstrap-linux-x64.tar.zst` immediately after obtaining one exact source artifact.
+-4. In the verified local checkout, read the repository's `README-FIRST.md`, applicable `AGENTS.md`, assigned issue or pull request, and only the controlling task documents and ADRs.
+-
+-When the trusted local bootstrap is present, do not start with network Git,
+-repeated connector file reads, or the candidate repository copy of the source
+-preparation helper. The connector is the GitHub control plane; local shell and
+-the bootstrap are the repository inspection and execution route.
+-
+-Use `codex-model-reasoning-selection-v13.md` only when selecting a Codex model or
+-writing a Codex execution prompt. Use `TeaseScript-AI-Research-Archive.zip` only
+-for explicitly non-authoritative capability or historical research.
+-
+-## Source of truth
+-
+-The GitHub repository `TeaseScript-AI/teasescript-platform` owns:
+-
+-- current implementation and tests;
+-- exact architecture and implementation status;
+-- accepted specifications and ADRs;
+-- current topic documents and unresolved decisions;
+-- active planning and `WISHES.xml`;
+-- executable tested examples and repository workflow.
+-
+-Do not infer current implementation from an older shared-project file, audit,
+-research archive, or repository snapshot.
+-
+-## Stable shared files
+-
+-Keep one current unsuffixed copy of each routing/bootstrap file:
+-
+-```text
+-README-FIRST.md
+-TEASESCRIPT-AI-DEVELOPMENT-WORKFLOW-CONTEXT.md
+-LOCAL-AGENT-BOOTSTRAP.md
+-teasescript-agent-bootstrap-linux-x64.tar.zst
+-```
+-
+-The archive must extract to
+-`teasescript-agent-bootstrap-linux-x64/`. Internal release identity belongs in
+-its `MANIFEST.json`.
+-
+-Before installing a replacement set, remove the older copies that the project
+-UI renamed with suffixes such as `(1)` or `(2)`, and remove any archive or
+-extracted-directory name carrying an internal revision. Do not overlay or
+-manually merge generated shared files.
+-
+-GitHub's `tools/local-agent/prepare-shared-project.py` stages this exact set from
+-canonical repository sources plus the current bootstrap archive. A repository
+-merge does not prove the project folder was updated; record the manual
+-replacement separately.
+-
+-## Local execution tool
+-
+-Use the direct shell/container facility for extraction, filesystem inspection,
+-Git, Bash, Node, and npm. Python execution remains appropriate when the task is
+-the repository-owned Python helper itself.
+-
+-A generic client/service error before command output starts is not proof of
+-archive corruption. Retry a minimal direct-shell check and report the actual
+-failing layer.
+diff --git a/tools/local-agent/shared-project/TEASESCRIPT-AI-DEVELOPMENT-WORKFLOW-CONTEXT.md b/tools/local-agent/shared-project/TEASESCRIPT-AI-DEVELOPMENT-WORKFLOW-CONTEXT.md
+deleted file mode 100644
+index 47e80b45ac3087dff574184d8fabee49f6a8aaea..0000000000000000000000000000000000000000
+--- a/tools/local-agent/shared-project/TEASESCRIPT-AI-DEVELOPMENT-WORKFLOW-CONTEXT.md
++++ /dev/null
+@@ -1,68 +0,0 @@
+-# TeaseScript AI development workflow context
+-
+-**Purpose:** Stable routing context for connector-local ChatGPT sessions.
+-**Authority:** GitHub is canonical. The verified checkout's `AGENTS.md`,
+-`docs/DEVELOPMENT-WORKFLOW.md`, and focused capability guide control the exact
+-current process.
+-
+-## Default implementation workflow
+-
+-Use one coherent issue, one owning agent, one short-lived branch, one pull
+-request, independent review, CI, squash merge, and branch deletion by default.
+-A preselected batch of small related issues is acceptable only when the combined
+-implementation and review are simpler and the pull request lists every included
+-issue explicitly.
+-
+-The implementing agent reads the smallest authoritative source set, states the
+-expected files, acceptance criteria, and risks, works in verifiable increments,
+-updates directly affected documentation, and keeps the pull-request description
+-aligned with the actual result.
+-
+-## Connector-local source and execution route
+-
+-For substantial work:
+-
+-1. resolve and download one exact verified source artifact through the current repository connector workflow;
+-2. use the stable `teasescript-agent-bootstrap-linux-x64.tar.zst` package;
+-3. run its sole normal entry point, `bin/prepare-agent-workspace.sh`;
+-4. inspect, edit, test, and review locally;
+-5. return to the connector only for live GitHub state and GitHub writes.
+-
+-Do not attempt network Git, read the repository file by file, invent another
+-bootstrap self-test, or execute the candidate copy of source-preparation tooling
+-from the artifact under review. Read `LOCAL-AGENT-BOOTSTRAP.md` for the compact
+-command route and the repository's `docs/CHATGPT-GITHUB-WORKFLOW.md` for current
+-artifact acquisition details.
+-
+-## Publication route
+-
+-Immediately before a repository-content or ref write, classify the action:
+-
+-- normal authenticated Git branch/commit/push; or
+-- verified patch publication through `docs/PATCH-PUBLICATION.md` because normal push is unavailable.
+-
+-Do not use low-level blob, tree, commit, branch, or full-file connector actions
+-as an ad hoc source publication route. In verified patch publication, use only
+-the exact next action generated by the repository helper for the declared
+-`.agent-patch-publication/` transfer payload. Do not Base64-wrap ordinary UTF-8
+-patch text or substitute complete changed files.
+-
+-## Ownership and coordination
+-
+-The product owner decides product scope, priorities, gates, and unresolved
+-product or architecture choices. A designated coordinator may sequence work,
+-resolve dependencies, and review cross-issue consistency. Ordinary issues do
+-not require an integration branch or coordinator-controlled implementation.
+-
+-Temporary work breakdowns and chat notes remain outside GitHub. Accepted
+-outcomes and implemented behavior must be synchronized into the applicable
+-canonical repository owners.
+-
+-## Shared-project synchronization
+-
+-The repository owns the maintainable shared routing sources and staging helper.
+-The shared project is a controlled derivative, not a second editable workflow
+-owner. Generate a fresh exact replacement set, remove suffixed/versioned current
+-copies from the project folder, upload the stable replacements, and record that
+-manual synchronization. Do not restore the retired work-package workflow or
+-invent a replacement handoff system.
+diff --git a/tools/local-agent/test-prepare-shared-project.py b/tools/local-agent/test-prepare-shared-project.py
+deleted file mode 100755
+index b0b328975f7c057bd2a0b9d8575fb3c54845b222..0000000000000000000000000000000000000000
+--- a/tools/local-agent/test-prepare-shared-project.py
++++ /dev/null
+@@ -1,246 +0,0 @@
+-#!/usr/bin/env python3
+-"""Focused tests for the shared-project bootstrap staging helper."""
+-
+-from __future__ import annotations
+-
+-import importlib.util
+-import json
+-import os
+-from pathlib import Path
+-import subprocess
+-import tempfile
+-import unittest
+-
+-from compact_unittest import run_compact_unittest
+-
+-SCRIPT = Path(__file__).with_name("prepare-shared-project.py")
+-SPEC = importlib.util.

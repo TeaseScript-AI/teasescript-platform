@@ -1,0 +1,191 @@
+gz"
++  "$tool_dir/packages/balanced-match-4.0.1.tgz"
++)
++
++(
++  cd -- "$stage_dir"
++  npm install --offline --ignore-scripts --no-audit --no-fund \
++    --package-lock=false --save=false "${packages[@]}" >/dev/null
++)
++
++installed_packages=(
++  "@isaacs/balanced-match"
++  "@isaacs/brace-expansion"
++  "@ts-morph/common"
++  "code-block-writer"
++  "fdir"
++  "minimatch"
++  "path-browserify"
++  "picomatch"
++  "tinyglobby"
++  "ts-morph"
++)
++
++mkdir -p -- "$repo_dir/node_modules"
++for package_name in "${installed_packages[@]}"; do
++  source_path="$stage_dir/node_modules/$package_name"
++  target_path="$repo_dir/node_modules/$package_name"
++  [[ -d "$source_path" ]] || {
++    printf 'install-ts-morph-offline: FAIL: staged package missing: %s\n' "$package_name" >&2
++    exit 1
++  }
++  mkdir -p -- "$(dirname -- "$target_path")"
++  rm -rf -- "$target_path"
++  cp -a -- "$source_path" "$target_path"
++done
++rm -f -- "$repo_dir/node_modules/.package-lock.json"
++
++printf 'install-ts-morph-offline: PASS repo=%s version=28.0.0 packages=10\n' "$repo_dir"
+diff --git a/tools/chatgpt-project-agent/tools-root/bin/prepare-chatgpt-project-workspace.sh b/tools/chatgpt-project-agent/tools-root/bin/prepare-chatgpt-project-workspace.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..a9f51ea0d09f0721b8524f9e5197711b485edd7b
+--- /dev/null
++++ b/tools/chatgpt-project-agent/tools-root/bin/prepare-chatgpt-project-workspace.sh
+@@ -0,0 +1,67 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++usage() {
++  cat <<'USAGE'
++Usage: prepare-chatgpt-project-workspace.sh \
++  --artifact FILE --artifact-sha256 SHA256 --expected-head SHA \
++  [--expected-merge-base SHA] [--expected-repository OWNER/REPO] \
++  --output DIRECTORY [--node 24|26] [--with-ts-morph] [--with-tiktoken] [--check]
++
++Normal ChatGPT project-agent entry point. Verify a downloaded Source Bundle,
++create the exact clean checkout, run npm ci offline, and prepare exact Node
++runners. Full repository checks run only with --check.
++USAGE
++}
++
++artifact=
++digest=
++repository=TeaseScript-AI/teasescript-platform
++head=
++merge_base=
++output=
++node_major=24
++with_ts_morph=0
++with_tiktoken=0
++run_check=0
++
++while (($#)); do
++  case "$1" in
++    --artifact) artifact=${2-}; shift 2 ;;
++    --artifact-sha256) digest=${2-}; shift 2 ;;
++    --expected-repository) repository=${2-}; shift 2 ;;
++    --expected-head) head=${2-}; shift 2 ;;
++    --expected-merge-base) merge_base=${2-}; shift 2 ;;
++    --output) output=${2-}; shift 2 ;;
++    --node) node_major=${2-}; shift 2 ;;
++    --with-ts-morph) with_ts_morph=1; shift ;;
++    --with-tiktoken) with_tiktoken=1; shift ;;
++    --check) run_check=1; shift ;;
++    -h|--help) usage; exit 0 ;;
++    *) echo "prepare-chatgpt-project-workspace: FAIL: unknown or incomplete argument: $1" >&2; exit 2 ;;
++  esac
++done
++
++[[ -n "$artifact" && -n "$digest" && -n "$head" && -n "$output" ]] || {
++  usage >&2
++  exit 2
++}
++script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
++bundle_dir=$(cd -- "$script_dir/.." && pwd)
++prepare=(
++  python3 "$bundle_dir/tools/prepare-source-review.py"
++  --artifact "$artifact"
++  --artifact-sha256 "$digest"
++  --expected-repository "$repository"
++  --expected-head "$head"
++  --output "$output"
++)
++[[ -z "$merge_base" ]] || prepare+=(--expected-merge-base "$merge_base")
++"${prepare[@]}"
++
++setup=("$script_dir/setup-workspace.sh" --node "$node_major")
++((with_ts_morph == 0)) || setup+=(--with-ts-morph)
++((with_tiktoken == 0)) || setup+=(--with-tiktoken)
++((run_check == 0)) || setup+=(--check)
++setup+=("$output")
++"${setup[@]}"
+diff --git a/tools/chatgpt-project-agent/tools-root/bin/setup-workspace.sh b/tools/chatgpt-project-agent/tools-root/bin/setup-workspace.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..0ea7f8fb3b1d8158d51eefa0f4919065ba791157
+--- /dev/null
++++ b/tools/chatgpt-project-agent/tools-root/bin/setup-workspace.sh
+@@ -0,0 +1,157 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++usage() {
++  cat <<'USAGE'
++Usage: setup-workspace.sh [--node 24|26] [--with-ts-morph] [--with-tiktoken] [--check] REPOSITORY
++
++Prepare an existing TeaseScript checkout using the bundled Node runtime and
++npm cache. Runs npm ci fully offline. Full repository checks run only with
++--check. --with-ts-morph adds the optional local ts-morph tool when the
++repository does not already install ts-morph 28.0.0 itself. --with-tiktoken
++installs the optional CPython 3.13 patch-sizing toolchain in Git-local state.
++USAGE
++}
++
++node_major=24
++run_check=0
++with_ts_morph=0
++with_tiktoken=0
++repo=
++while (($#)); do
++  case "$1" in
++    --node)
++      (($# >= 2)) || { echo "setup-workspace: FAIL: --node needs 24 or 26" >&2; exit 2; }
++      node_major=$2; shift 2 ;;
++    --with-ts-morph) with_ts_morph=1; shift ;;
++    --with-tiktoken) with_tiktoken=1; shift ;;
++    --check) run_check=1; shift ;;
++    -h|--help) usage; exit 0 ;;
++    --*) echo "setup-workspace: FAIL: unknown option: $1" >&2; exit 2 ;;
++    *)
++      [[ -z "$repo" ]] || { echo "setup-workspace: FAIL: only one repository path is allowed" >&2; exit 2; }
++      repo=$1; shift ;;
++  esac
++done
++
++[[ "$node_major" == 24 || "$node_major" == 26 ]] || {
++  echo "setup-workspace: FAIL: --node must be 24 or 26" >&2; exit 2;
++}
++[[ -n "$repo" ]] || { usage >&2; exit 2; }
++
++script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
++bundle_dir=$(cd -- "$script_dir/.." && pwd)
++repo=$(cd -- "$repo" && pwd)
++
++[[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
++  echo "setup-workspace: FAIL: this bundle supports Linux x86_64 only" >&2; exit 1;
++}
++[[ -f "$repo/package.json" && -f "$repo/package-lock.json" ]] || {
++  echo "setup-workspace: FAIL: repository lacks package.json or package-lock.json" >&2; exit 1;
++}
++git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
++  echo "setup-workspace: FAIL: repository is not a Git worktree" >&2; exit 1;
++}
++(
++  cd "$bundle_dir"
++  sha256sum --check --quiet TOOLS-SHA256SUMS
++  sha256sum --check --quiet RUNTIME-SHA256SUMS
++) || {
++  echo "setup-workspace: FAIL: ChatGPT project-agent payload verification failed" >&2; exit 1;
++}
++
++case "$node_major" in
++  24) node_version=24.18.0 ;;
++  26) node_version=26.5.0 ;;
++esac
++node_dir="$bundle_dir/runtime/node-v${node_version}-linux-x64"
++cache_seed="$bundle_dir/npm-cache-seed"
++[[ -x "$node_dir/bin/node" && -x "$node_dir/bin/npm" ]] || {
++  echo "setup-workspace: FAIL: bundled Node runtime is incomplete: $node_dir" >&2; exit 1;
++}
++[[ -d "$cache_seed/_cacache" && -f "$bundle_dir/CACHE-SEED-ID" ]] || {
++  echo "setup-workspace: FAIL: bundled npm cache seed is incomplete" >&2; exit 1;
++}

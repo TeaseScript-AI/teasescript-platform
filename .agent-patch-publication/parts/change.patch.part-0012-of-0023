@@ -1,0 +1,208 @@
++    normalized: set[str] = set()
++    total = 0
++    count = 0
++    manifest_bytes: bytes | None = None
++    error: Exception | None = None
++    try:
++        with tarfile.open(fileobj=process.stdout, mode="r|") as stream:
++            for member in stream:
++                count += 1
++                if count > MAX_MEMBER_COUNT:
++                    raise fail("bootstrap archive exceeds the member-count safety limit")
++                path = validate_member_name(member.name)
++                roots.add(path.parts[0])
++                key = str(path)
++                if key in normalized:
++                    raise fail(f"duplicate bootstrap archive member: {member.name}")
++                normalized.add(key)
++                if member.isdir():
++                    continue
++                if member.isreg():
++                    if member.size < 0:
++                        raise fail(f"bootstrap member has negative size: {member.name!r}")
++                    total += member.size
++                    if total > MAX_UNCOMPRESSED_BYTES:
++                        raise fail("bootstrap archive exceeds the uncompressed-size safety limit")
++                    if len(path.parts) == 2 and path.name == "MANIFEST.json":
++                        if manifest_bytes is not None:
++                            raise fail("bootstrap archive contains multiple root manifests")
++                        if member.size > MAX_METADATA_BYTES:
++                            raise fail("bootstrap MANIFEST.json is unexpectedly large")
++                        extracted = stream.extractfile(member)
++                        if extracted is None:
++                            raise fail("bootstrap MANIFEST.json cannot be read")
++                        manifest_bytes = extracted.read(MAX_METADATA_BYTES + 1)
++                        if len(manifest_bytes) != member.size:
++                            raise fail("bootstrap MANIFEST.json is truncated")
++                    continue
++                if member.issym():
++                    resolve_link_target(path, member.linkname, symbolic=True)
++                    continue
++                if member.islnk():
++                    resolve_link_target(path, member.linkname, symbolic=False)
++                    continue
++                raise fail(f"unsupported bootstrap archive member type: {member.name!r}")
++    except (RuntimePreparationError, tarfile.TarError, OSError, EOFError) as exc:
++        error = exc
++    finally:
++        process.stdout.close()
++    stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
++    process.stderr.close()
++    return_code = process.wait()
++    if error is not None:
++        if isinstance(error, RuntimePreparationError):
++            raise error
++        raise fail(f"cannot inspect bootstrap archive: {error}") from error
++    if return_code != 0:
++        detail = f": {stderr}" if stderr else ""
++        raise fail(f"zstd rejected bootstrap archive{detail}")
++    if len(roots) != 1:
++        raise fail("bootstrap archive must contain one top-level directory")
++    root = next(iter(roots))
++    if manifest_bytes is None:
++        raise fail("bootstrap archive lacks root MANIFEST.json")
++    try:
++        manifest = json.loads(manifest_bytes.decode("utf-8"))
++    except (UnicodeError, json.JSONDecodeError) as exc:
++        raise fail(f"bootstrap MANIFEST.json is invalid: {exc}") from exc
++    if not isinstance(manifest, dict):
++        raise fail("bootstrap MANIFEST.json must be an object")
++    required = {
++        "formatVersion": 5,
++        "platform": "linux-x64",
++        "layout": "single-extract-preexpanded-runtime-and-cache",
++    }
++    for field, expected in required.items():
++        if manifest.get(field) != expected:
++            raise fail(f"bootstrap manifest {field} must be {expected!r}")
++    for name in SELECTED_NAMES:
++        prefix = f"{root}/{name}"
++        if prefix not in normalized and not any(item.startswith(prefix + "/") for item in normalized):
++            raise fail(f"bootstrap archive lacks required payload: {name}")
++    return root, manifest
++
++
++def write_runtime_manifest(root: Path, source_manifest: dict[str, object], level: int) -> None:
++    manifest = {
++        "formatVersion": 1,
++        "platform": "linux-x64",
++        "layout": "chatgpt-project-agent-runtime",
++        "compatibilityId": COMPATIBILITY_ID,
++        "compression": {"format": "tar.zst", "zstdLevel": level, "threads": 1},
++        "node": source_manifest.get("node"),
++        "typescript": source_manifest.get("typescript"),
++        "tsMorph": source_manifest.get("tsMorph"),
++        "tiktoken": source_manifest.get("tiktoken"),
++        "sourceBootstrap": {
++            "formatVersion": source_manifest.get("formatVersion"),
++            "layout": source_manifest.get("layout"),
++        },
++    }
++    (root / "RUNTIME-MANIFEST.json").write_text(
++        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
++    )
++
++
++def write_checksums(root: Path) -> None:
++    lines: list[str] = []
++    for relative in CRITICAL_PATHS:
++        path = root / relative
++        if not path.is_file():
++            raise fail(f"runtime payload lacks critical file: {relative}")
++        lines.append(f"{sha256_file(path)}  {relative}")
++    (root / "RUNTIME-SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
++
++
++def create_archive(root: Path, output: Path, level: int) -> None:
++    output.parent.mkdir(parents=True, exist_ok=True)
++    with tempfile.NamedTemporaryFile(
++        prefix=f".{output.name}.tmp-", dir=output.parent, delete=False
++    ) as stream:
++        temporary = Path(stream.name)
++    tar_command = [
++        "tar",
++        "--sort=name",
++        "--owner=0",
++        "--group=0",
++        "--numeric-owner",
++        "--mtime=@0",
++        "--format=posix",
++        "--pax-option=delete=atime,delete=ctime",
++        "--no-xattrs",
++        "--no-acls",
++        "--no-selinux",
++        "-cf",
++        "-",
++        "-C",
++        str(root.parent),
++        root.name,
++    ]
++    zstd_command = [
++        "zstd",
++        "--quiet",
++        f"-{level}",
++        "--threads=1",
++        "--no-progress",
++        "--force",
++        "-o",
++        str(temporary),
++    ]
++    tar_process = subprocess.Popen(tar_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
++    assert tar_process.stdout is not None
++    zstd_process = subprocess.Popen(
++        zstd_command,
++        stdin=tar_process.stdout,
++        stdout=subprocess.DEVNULL,
++        stderr=subprocess.PIPE,
++    )
++    tar_process.stdout.close()
++    _, zstd_stderr = zstd_process.communicate()
++    tar_stderr = tar_process.stderr.read() if tar_process.stderr is not None else b""
++    if tar_process.stderr is not None:
++        tar_process.stderr.close()
++    tar_code = tar_process.wait()
++    if tar_code != 0 or zstd_process.returncode != 0:
++        temporary.unlink(missing_ok=True)
++        detail = (tar_stderr + zstd_stderr).decode("utf-8", errors="replace").strip()
++        raise fail(f"runtime archive creation failed: {detail or 'no output'}")
++    os.replace(temporary, output)
++
++
++def prepare(archive: Path, output: Path, expected_digest: str | None, level: int) -> str:
++    archive = absolute_path(archive)
++    output = absolute_path(output)
++    if archive.is_symlink() or not archive.is_file():
++        raise fail("--bootstrap-archive must be a regular non-symlink file")
++    if output.is_symlink():
++        raise fail("--output may not be a symlink")
++    if output == archive:
++        raise fail("--output must differ from --bootstrap-archive")
++    actual_digest = sha256_file(archive)
++    if expected_digest is not None:
++        if SHA256_RE.fullmatch(expected_digest) is None:
++            raise fail("--bootstrap-sha256 must be 64 lowercase hexadecimal characters")
++        if actual_digest != expected_digest:
++            raise fail(
++                f"bootstrap archive SHA-256 mismatch: expected {expected_digest}, got {actual_digest}"
++            )
++    source_root, source_manifest = inspect_bootstrap(archive)
++    with tempfile.TemporaryDirectory(prefix="chatgpt-project-runtime-") as name:
++        temporary = Path(name)
++        extracted = temporary / "extracted"
++        extracted.mkdir()
++        selected = [f"{source_root}/{item}" for item in SELECTED_NAMES]
++        run(["tar", "--zstd", "-xf", str(archive), "-C", str(extracted), *selected])
++        source = extracted / source_root
++        target = temporary / ARCHIVE_ROOT
++        target.mkdir()
++        for item in SELECTED_NAMES:
++            os.replace(source / item, target / item)
++        write_runtime_manifest(target, source_manifest, level)
++        write_checksums(target)
++        create_archive(target, output, level)
++    return sha256_file(output)
++
++
++def main() -> int:
++    args = parse_args()
++    digest = prepare(

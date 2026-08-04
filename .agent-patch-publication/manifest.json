@@ -1,0 +1,126 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "docs/issue-210-bootstrap-routing-and-write-guard",
+  "expectedBaseSha": "d511c41b545900751944417a123a4d5442906871",
+  "expectedResultTreeSha": "c837200d76e92210e188b53ff316bd34fe59c762",
+  "patchSizeBytes": 182514,
+  "patchSha256": "21ce602d5d1ecada36baad628831577036f7d6c36fcedd125a89fed1f1c89fd0",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0023",
+      "sizeBytes": 7458,
+      "sha256": "b5bafc1fd45be04b78c6d09eec79e136f85d6ec37518b1deea5ae39646e1eecc"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0023",
+      "sizeBytes": 9698,
+      "sha256": "b8f238200380e65b05ea0ced40696012b47f5d2d9e5166783a3126f635755689"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0023",
+      "sizeBytes": 11478,
+      "sha256": "a0d4369895a49ce2d0e4df734920e67d54178e6e1aead8aa5c3a4a995b9da477"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0023",
+      "sizeBytes": 12153,
+      "sha256": "c183f5cd77d83294162fc3efb3f5539a1a2bae8dc9a02ae1f31d2e3d2607644d"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0023",
+      "sizeBytes": 9879,
+      "sha256": "7b334cd6672733ef486c9672b7096a62c9e1af7b8f9e6b491fcbe6599821daea"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0006-of-0023",
+      "sizeBytes": 7562,
+      "sha256": "8dda2937194cfbb101b0b1c0851d21e22bdee45ac92f054bc2cc658093663296"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0007-of-0023",
+      "sizeBytes": 3356,
+      "sha256": "be5c217d7cc1bf16adc349d2f4167d88bf513d5c9a5deceb1223f36962ed85dd"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0008-of-0023",
+      "sizeBytes": 3149,
+      "sha256": "69b40adfdb97bc4347293fe5a314b2a7e0c843efb7b8d6ebd77fbc9c9ae4e132"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0009-of-0023",
+      "sizeBytes": 3149,
+      "sha256": "3fb31c300ae28c1c5f7a55879f1b59072da366aa75a85263230b5fa94cf51cc4"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0010-of-0023",
+      "sizeBytes": 4961,
+      "sha256": "3099db9d3b10e7d3a5a0d265486e206eb24bfde7658d8bb7815bc77ea80ada27"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0011-of-0023",
+      "sizeBytes": 8198,
+      "sha256": "c42c6f7b7ef660926d1c2573401e111d1ad1aa2d67c363856e31606147d0f887"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0012-of-0023",
+      "sizeBytes": 8933,
+      "sha256": "b8a2ac9521096c29f810a2976e7183fa22e50de408f84bfb9907791b85c21a91"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0013-of-0023",
+      "sizeBytes": 9288,
+      "sha256": "eaaf5e7dcfb9562837d1fbe6c2aca20c7812edd41bc3fbd022953e3a102eb789"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0014-of-0023",
+      "sizeBytes": 8501,
+      "sha256": "a457266837f8ed6f5c8176255523a66b78c9d41e69e8f57efc4b564ad7338753"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0015-of-0023",
+      "sizeBytes": 8476,
+      "sha256": "85a2ac3abc9f5eb0d0528142fadfc146d944df60cd261d6b577d40c51b946faa"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0016-of-0023",
+      "sizeBytes": 8302,
+      "sha256": "fbdad169cb096bb9a1bcbcc83acd1bee624114315bc907b5d621770fe7956a2e"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0017-of-0023",
+      "sizeBytes": 8865,
+      "sha256": "ad0409ade4bc2910abdee2bd6fe5e7fe671e9c07ec003f815c496ba306f329c0"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0018-of-0023",
+      "sizeBytes": 7170,
+      "sha256": "4d82e068fed229057d742b41201b4a4752ce9f501265ece9a53291a30ba7c062"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0019-of-0023",
+      "sizeBytes": 6658,
+      "sha256": "7cef1812b46f7031a117e390ec70a247cd5a3608d70afcfd89d96c88e1e367fe"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0020-of-0023",
+      "sizeBytes": 7689,
+      "sha256": "29891d4a34a2021907487404ddfb7d38cdb7249f02aded8ba4ed67aea1d46653"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0021-of-0023",
+      "sizeBytes": 8676,
+      "sha256": "316d55783d56bddbb34d9453a13e9e506b834c5569e0729a901e6312fabc2f40"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0022-of-0023",
+      "sizeBytes": 9759,
+      "sha256": "9981f08c2e0bbe54302134fb207747d9fee2dce517ee23ef899fcb05107c7af0"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0023-of-0023",
+      "sizeBytes": 9156,
+      "sha256": "c2b15455b6322807b9fec1426f637b2a4b47d5ddd6b8d8bc560e75d76ab4ac0d"
+    }
+  ],
+  "commitMessage": "Add ChatGPT project-agent split bootstrap"
+}

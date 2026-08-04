@@ -1,0 +1,212 @@
+diff --git a/docs/LOCAL-AGENT-BOOTSTRAP.md b/docs/LOCAL-AGENT-BOOTSTRAP.md
+index 064bdc1ff72b514fa10f56e2f27d6750274dbb99..c5f05ace91569b729f76d04b20c010bab6cd139d 100644
+--- a/docs/LOCAL-AGENT-BOOTSTRAP.md
++++ b/docs/LOCAL-AGENT-BOOTSTRAP.md
+@@ -1,47 +1,84 @@
+-# Local agent bootstrap
++# ChatGPT project-agent bootstrap
+ 
+ ## Purpose and authority
+ 
+-This is the canonical guide for the distributed Linux x86_64 agent bootstrap.
+-GitHub remains authoritative for repository code, scripts, tests, and workflow.
+-The bootstrap is trusted local tooling used to verify one downloaded source
+-artifact, create an exact clean checkout, and install the committed dependency
+-graph offline.
++This is the canonical repository guide for the Linux x86_64 tools distributed
++to agents running inside the TeaseScript ChatGPT project. The external project
++folder is only a startup, acquisition, and routing layer. After an exact
++checkout exists, repository `README-FIRST.md`, applicable `AGENTS.md`, the
++assigned issue or pull request, current design/status documents, and relevant
++accepted decisions are authoritative.
+ 
+-The shared-project derivative is named `LOCAL-AGENT-BOOTSTRAP.md`. Generate it
+-from this file through `tools/local-agent/prepare-shared-project.py`; do not
+-maintain a second editable copy.
++The maintained sources live under `tools/chatgpt-project-agent/`. Do not edit a
++project-folder copy or generated archive independently.
+ 
+-## Stable distribution names
++## External ChatGPT project inventory
+ 
+-The shared project contains exactly one current archive named:
++Keep at most these five stable current files:
+ 
+ ```text
+-teasescript-agent-bootstrap-linux-x64.tar.zst
++README-FIRST.md
++teasescript-chatgpt-project-agent-tools-linux-x64.tar.zst
++teasescript-chatgpt-project-agent-runtime-linux-x64.tar.zst
++setup-teasescript-chatgpt-project-agent.py
++TeaseScript-AI-Research-Archive.zip        # optional non-authoritative research
+ ```
+ 
+-The archive extracts exactly one directory named:
++Remove numbered, versioned, or superseded current copies before uploading a
++replacement. Internal release identity belongs in archive manifests and the
++artifact digests embedded in `README-FIRST.md`, not in external filenames.
+ 
+-```text
+-teasescript-agent-bootstrap-linux-x64/
+-```
++`tools/chatgpt-project-agent/PROJECT-SYSTEM-PROMPT.txt` is copied manually into
++the separate ChatGPT project instruction/system-prompt field. It is not a
++project-folder file and must be absent from both archives and generated
++`README-FIRST.md`.
++
++## Split payload contract
+ 
+-Release identity belongs in the extracted `MANIFEST.json`, not in either stable
+-name. Remove an older extracted directory before extracting a replacement; do
+-not overlay bootstrap releases.
++The small committed tools archive contains reviewable bootstrap and exact-source
++preparation scripts. Its loose GitHub sources are canonical; the archive is a
++deterministic generated derivative.
+ 
+-## Normal connector-local route
++The approximately 100 MB runtime archive contains Node 24, Node 26, the offline
++npm cache, and optional offline tooling. It remains outside Git and changes only
++when those runtimes, dependencies, caches, or binary assets change. Updating
++instructions or small scripts must not require replacing it.
+ 
+-Use a direct shell or container executor for archive, filesystem, Git, Bash,
+-Node, and npm operations. Do not wrap ordinary shell commands in a notebook or
+-Python execution tool merely to invoke the shell.
++Both archives use `tar.zst`. The small tools archive uses zstd ultra level 22
++because its input is tiny. Runtime preparation defaults to zstd level 9, which
++keeps compression practical while retaining a high compression ratio. XZ is not a distribution format. On the current small tools input it saves only
++9 bytes versus `tar.zst`; adding a second archive format and costly
++large-payload compression is not justified.
++
++## Install or validate
++
++Use the direct shell/container executor:
+ 
+ ```bash
+-rm -rf /mnt/data/teasescript-agent-bootstrap-linux-x64
+-tar --zstd -xf /mnt/data/teasescript-agent-bootstrap-linux-x64.tar.zst \
+-  -C /mnt/data
++python3 /mnt/data/setup-teasescript-chatgpt-project-agent.py
++```
++
++The installer:
++
++1. reads the exact outer archive digests from `README-FIRST.md`;
++2. copies and verifies both archives before extraction;
++3. rejects unsafe paths, unsupported file types, escaping links, duplicate
++   entries, oversized payloads, incompatible manifests, and checksum failures;
++4. assembles tools and runtime in a temporary directory;
++5. exposes `/mnt/data/teasescript-chatgpt-project-agent/` only after complete
++   validation.
++
++It refuses to overlay an existing installation. Use `--replace` only for an
++installation previously created by this installer; a failed replacement keeps
++the existing valid installation intact. Use `--check-only` to validate without
++exposing a new installation.
++
++## Normal exact-source route
++
++The sole normal entry point is:
+ 
+-/mnt/data/teasescript-agent-bootstrap-linux-x64/bin/prepare-agent-workspace.sh \
++```bash
++/mnt/data/teasescript-chatgpt-project-agent/bin/prepare-chatgpt-project-workspace.sh \
+   --artifact /mnt/data/source-bundle.zip \
+   --artifact-sha256 <github-artifact-sha256> \
+   --expected-head <40-character-head-sha> \
+@@ -50,67 +87,58 @@ tar --zstd -xf /mnt/data/teasescript-agent-bootstrap-linux-x64.tar.zst \
+   --output /mnt/data/source-work
+ ```
+ 
+-`bin/prepare-agent-workspace.sh` is the sole normal bootstrap entry point. Do
+-not require or invent a separate bootstrap self-test before or after it.
++It verifies one exact Source Bundle, creates a clean checkout, verifies the
++bundled runtime/cache, and runs `npm ci --offline`. Optional flags select Node
++26, optional ts-morph/TikToken installation, or repository checks. Do not add a
++separate bootstrap self-test, network-clone as a workaround, execute the
++candidate preparation helper from the artifact under review, or revive the
++removed work-package route.
+ 
+-The normal entry point performs the required boundary work in order:
++## Known long actions and tool timeouts
+ 
+-```text
+-trusted bootstrap and artifact inputs
+--> bootstrap critical-file verification
+--> source-artifact digest, ZIP, manifest, history, identity, and Git checks
+--> exact clean checkout
+--> bundled runtime and npm-cache validation
+--> npm ci --offline
+--> usable workspace release
+-```
++Set an explicit extended execution timeout before starting aggregate
++local-agent validation, `npm run check`, workspace preparation with `--check`,
++or archive generation/compression. Normally allow at least 120 seconds for the
++aggregate local-agent suite. Use a larger timeout for measured full checks or
++runtime recompression. Do not accept a short default timeout and then repeat the
++same expensive command unnecessarily.
+ 
+-Optional flags:
++## Build and verification
+ 
+-- `--check`: run the repository's configured checks after setup;
+-- `--node 26`: select the bundled compatibility runtime instead of authoritative Node 24;
+-- `--with-ts-morph`: install the bundled optional codemod tool in Git-local state;
+-- `--with-tiktoken`: install the bundled optional CPython/TikToken toolchain for repository-owned patch-publication preparation.
+-
+-After setup, run commands through:
++From a verified checkout:
+ 
+ ```bash
+-.git/teasescript-agent/run npm run check
++python3 -B tools/chatgpt-project-agent/build-tools-bundle.py
++python3 -B tools/chatgpt-project-agent/test-chatgpt-project-agent.py
+ ```
+ 
+-For an interactive shell, source `.git/teasescript-agent/activate.sh`. With
+-TikToken enabled, use `.git/teasescript-agent/run-python313` or source
+-`.git/teasescript-agent/activate-tiktoken.sh`.
+-
+-## Failure classification
++The test proves deterministic tools/runtime generation on fixtures, safe archive
++validation, five-file staging, successful assembly, and preservation of an
++existing installation when a replacement is invalid.
+ 
+-A generic tool-client failure before command output begins is not evidence that
+-the archive is corrupt. Retry the smallest direct-shell check, then identify the
+-actual failing layer:
++Prepare the rarely changed runtime from a verified legacy bootstrap archive:
+ 
+-- archive presence or extraction;
+-- bootstrap critical-file verification;
+-- source-artifact verification;
+-- exact checkout preparation;
+-- offline dependency installation;
+-- optional repository checks.
+-
+-Do not bypass an available trusted bootstrap by attempting network Git, reading
+-the repository file by file through the connector, or executing the candidate
+-copy of a source-preparation helper from the artifact under review.
+-
+-## Shared-project release preparation
++```bash
++python3 -B tools/chatgpt-project-agent/prepare-runtime-payload.py \
++  --bootstrap-archive /path/to/teasescript-agent-bootstrap-linux-x64.tar.zst \
++  --bootstrap-sha256 <sha256> \
++  --output /tmp/teasescript-chatgpt-project-agent-runtime-linux-x64.tar.zst
++```
+ 
+-From a verified repository checkout, stage the exact replacement files with:
++Stage the exact external project files:
+ 
+ ```bash
+-python3 -B tools/local-agent/prepare-shared-project.py \
+-  --bootstrap-archive /path/to/current-bootstrap.tar.zst \
+-  --output-directory /tmp/teasescript-shared-project-replacement
++python3 -B tools/chatgpt-project-agent/prepare-project-files.py \
++  --runtime-archive /tmp/teasescript-chatgpt-project-agent-runtime-linux-x64.tar.zst \
++  --research-archive /path/to/TeaseScript-AI-Research-Archive.zip \
++  --output-directory /tmp/teasescript-chatgpt-project-files
+ ```
+ 
+-The command validates the canonical shared routing sources, the archive layout,

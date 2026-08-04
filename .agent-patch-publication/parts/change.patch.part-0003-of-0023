@@ -1,0 +1,151 @@
+-`MANIFEST.json`, the normal entry point, executable help, and internal
+-`SHA256SUMS`. It emits only the stable replacement files and normalizes the
+-archive's top-level directory to the stable extracted name. It does not upload
+-or modify the ChatGPT project folder.
++The small binary tools archive is committed through normal Git or the existing
++verified Python patch-publication route. Publish the normal generated archive;
++do not invent a second project-visible transport representation or setup-time
++decoding step.
++
++A repository merge does not prove that the external project folder or separate
++system-prompt field was synchronized. The final handoff and issue #208 must list
++and record the exact manual replacements.
+diff --git a/docs/README.md b/docs/README.md
+index 75460791cfc6a44110dd19840bb979d2f257e35c..f1b8ee6844e4e54ef7af34cf4896fafcbae43725 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -32,7 +32,7 @@ These files provide concise current routing and must not duplicate or override a
+ 
+ - `DEVELOPMENT-WORKFLOW.md` defines the GitHub-native issue, agent, branch, pull-request, coordinated-work, automatic and connector-requested verified source-artifact, documentation, and final-verification process.
+ - `CHATGPT-GITHUB-WORKFLOW.md` defines the connector-specific local-first route: obtain one exact source artifact, prepare a verified local checkout, work with local tools, and reserve connector reads and writes for live GitHub state or operations that must happen on GitHub.
+-- `LOCAL-AGENT-BOOTSTRAP.md` defines the canonical distributed-bootstrap entry point, stable shared names, verification boundary, and exact shared-project staging command.
++- `LOCAL-AGENT-BOOTSTRAP.md` defines the canonical ChatGPT project-agent split payloads, safe installer, exact-source entry point, stable external names, timeout guidance, and synchronization command.
+ - `PATCH-PUBLICATION.md` defines the verified raw-patch publication fallback for network-restricted agents, including token-aware sequential multipart preparation, single-file compatibility, connector upload guidance, its command, manifest, trust boundary, validation, exact cleanup, retry, and current limits.
+ - `../AGENTS.md` contains the mandatory task, coding, review, and Git rules for every agent.
+ 
+diff --git a/tools/chatgpt-project-agent/CODEX-MODEL-REASONING-SELECTION.md b/tools/chatgpt-project-agent/CODEX-MODEL-REASONING-SELECTION.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4d8efbffd9dd4c147f3f2af27ff698ab9bce3aba
+--- /dev/null
++++ b/tools/chatgpt-project-agent/CODEX-MODEL-REASONING-SELECTION.md
+@@ -0,0 +1,238 @@
++## Codex Task Routing, Model Selection, and Prompting
++
++Before assigning repository work, choose the lowest-cost executor likely to produce an accepted result. When Codex is selected, choose its lowest-cost model and reasoning level, then provide only task guidance that materially improves execution.
++
++Optimize for expected total cost, including prompt transfer, retries, debugging, review corrections, CI failures, unnecessary repository exploration, publication friction, context or usage limits, and human intervention. Do not automatically select Codex, the strongest model, or the highest reasoning level.
++
++### Step 0: Select the executor
++
++A **Sol agent** is a ChatGPT project agent with the shared local environment and GitHub connector; **Codex Sol** is the strongest Codex model tier below. Prefer a Sol agent when reading, review, architecture, diagnosis, or difficult semantic reasoning dominates; when the current session already holds the useful context; or when a separate Codex handoff would cost more than direct execution. Prefer Codex when direct `git` and `gh` materially reduce publication friction, many related edits must remain consistent, or a well-specified Luna or Terra task can be strongly verified.
++
++Diff size is one factor, not the rule: a Sol agent may publish a large diff through the connector route, while a small Codex-suitable change should stay with the current Sol agent when handoff costs more than direct execution. When Codex is selected, let it obtain current repository and GitHub state through normal `git` and `gh`; do not supply Source artifacts, copied canonical documents, or broad context packages without a concrete identity, availability, trust, or task-specific reason.
++
++### Model and reasoning are separate choices
++
++Use model strength for semantic capability:
++
++- **Luna:** mechanical, localized, repetitive, and strongly verifiable work.
++- **Terra:** repository-aware implementation, accepted-architecture integration, compatibility work, and moderately complex debugging.
++- **Sol:** selecting or reconciling architecture, altering behavior-critical canonical state, or resolving ambiguity across difficult-to-verify invariants.
++
++Use reasoning effort for the amount of exploration, strategy comparison, diagnosis, and verification still required. More reasoning does not make a smaller model equivalent to a stronger model.
++
++### Step 1: Classify the task
++
++Classify using six dimensions:
++
++- **Mechanical scope:** how deterministic and repetitive is the work?
++- **Semantic complexity:** must boundaries be followed or discovered?
++- **Verification strength:** how reliably will incorrect work be detected?
++- **Failure impact:** how costly or hidden would a subtle error be?
++- **Ambiguity:** are behavior, ownership, and implementation strategy resolved?
++- **Execution volume:** will the required reading, implementation, verification, diff review, and publication fit comfortably in one Codex execution?
++
++Task size, file count, architectural vocabulary, and large diffs do not by themselves increase conceptual complexity, but execution volume still determines whether the work fits one run. A task may be Terra-level yet require several bounded execution phases. Strong verification permits a cheaper configuration only when it covers the relevant risks. Green tests are insufficient when ownership, compatibility, API leakage, ordering, or other important properties are not tested.
++
++### Step 2: Select the model
++
++#### Select Luna when
++
++Use Luna when most of the following are true:
++
++- the change is mechanical or repetitive;
++- paths, ownership, and edit patterns are explicit;
++- little architectural interpretation is required;
++- failures are detected reliably by tooling;
++- the work can be divided into deterministic operations.
++
++Typical examples include file moves, import migrations, compatibility facades, documentation updates, straightforward fixtures, and running established verification.
++
++#### Select Terra when
++
++Use Terra when one or more of the following are true:
++
++- several related modules must be understood;
++- accepted architecture or ownership boundaries must be implemented, connected, tested, or audited rather than invented;
++- existing code must be extracted, integrated, or repaired without redesigning canonical behavior;
++- a prescribed canonical-state, transactional, atomicity, or serialization repair preserves the accepted state model, serialized representation, and public contracts;
++- dependency direction, compatibility, public surfaces, or private helpers require care;
++- tooling, UI adapters, test harnesses, or acceptance layers consume an already defined engine or compiler contract;
++- several precise corrections must remain mutually consistent;
++- failures are detectable through focused tests, conformance checks, diff review, or independent review.
++
++Typical examples include specified ownership extraction, accepted-architecture integration, presentation or tooling connected to authoritative APIs, compatibility and facade audits, grammar-aware tooling, deterministic test harnesses, vertical acceptance work with narrow repairs, and behavior-neutral repository refactors.
++
++#### Select Sol when
++
++Select Sol when at least one capability-specific Sol trigger applies:
++
++- the agent must choose, redesign, or reconcile an architectural boundary;
++- a canonical state model, transition semantics, event-ordering contract, continuation model, transaction contract, or atomicity contract must be designed, extended, or reconciled;
++- serialization requires choosing a new behavioral representation or provenance model rather than applying a prescribed repair or schema update;
++- materially different strategies have different correctness or compatibility consequences;
++- subtle nonlocal failures require independent diagnosis because the important invariants or failure mechanism have not already been identified and made testable;
++- final review must detect plausible cross-boundary semantic inconsistencies that cheaper models may miss.
++
++High impact, broad scope, many invariants, checkpoints, several layers, or expensive rework are not sufficient alone. When the authoritative design is fixed and the task mainly implements, connects, tests, or documents it, Terra is usually sufficient.
++
++Typical Sol work includes new canonical runtime state models, changed transition or ordering contracts, new continuation or transaction semantics, lifecycle or state-machine redesign, unresolved module boundaries, subtle nonlocal behavioral regressions, and high-risk semantic audits.
++
++### Step 3: Select reasoning effort
++
++#### Low reasoning
++
++Use Low when the task is deterministic, the path is well bounded, relevant files and expected results are known, little repository exploration is needed, and errors are immediately visible through tooling.
++
++Use Terra Low when Terra's semantic capability is needed but the implementation direction, relevant boundaries, affected files, expected behavior, and focused verification are already explicit.
++
++Do not use Low merely because the code change is small.
++
++#### Medium reasoning
++
++Use Medium as the default, including for difficult cross-layer work when behavior and architecture are specified, the model mainly implements an accepted design, tests are reasonably strong, and no major strategy remains unresolved.
++
++This includes high-risk review repairs when the defect, required semantics, permitted implementation boundary, stop conditions, and verification are already explicit.
++
++Cross-layer scope, high impact, canonical-state mutation, transactionality, many acceptance criteria, or internal planning do not by themselves justify High. Prefer a stronger model on Medium when the task needs better semantic judgment rather than more searching.
++
++#### High reasoning
++
++Use High only when Medium is likely insufficient because a specific burden remains:
++
++- important boundaries or dependencies are genuinely unclear;
++- materially different strategies must be compared;
++- verification is incomplete for the highest-risk invariants;
++- failures require nonlocal or iterative diagnosis;
++- architecture must be discovered rather than implemented;
++- a well-specified Medium attempt exposed a genuine reasoning or debugging limit.
++
++Do not select High merely because the task is large, high-risk, touches canonical state, requires atomicity, or must be completed coherently. State the unresolved uncertainty, strategy comparison, or diagnostic burden that requires it.
++
++### Default configurations
++
++```text
++Mechanical, explicit, strongly verified:
++Luna Low or Luna Medium
++
++Repository exploration within a deterministic pattern:
++Luna Medium
++
++Bounded repository-aware semantic work with explicit implementation

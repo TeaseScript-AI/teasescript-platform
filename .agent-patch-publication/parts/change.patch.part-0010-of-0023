@@ -1,0 +1,114 @@
+zOi%60eF%dNlt?J5bP_mk&;E>+$d~yal{m_HZ#g>uI34)Q?ajNMiZ+03*(WH*yii;u
+zx1$lLRakKs6WOkW?l67^UM}_3q0jBGFbtO-<eGTEDbOs=-%+<85TzFyU~?$e01R-a
+ze1(s(8d1$eK|fP!iQVhMHBcQepOJx1WWxcwnf4Two5Ll6sgy3Ryu&$D(I{4vYNc-T
+zB-_u?vac_|3fwmN$la-sA?MeU^Lmt3ibzPkRjs@<Z-+x~;zoVF4wju4Q<&Ds1t$f2
+z-Yr~<$i9b3F)<Qc-YqoYYl$1AhgWlNU{>hr2Lp=s-{nQ!Yc6mDdCv+HcRtYeq(N%K
+zTVH@k!2KL}X`JAOfc?SM;1hXg!=O2u+>OG54DuHU2t!jGe+h1;v&Eor$$$nK6XMFV
+zhD9J1MtvRt(+kwZvYenr$U*wrI;nJpO!3{vNTBB3+H;jC3CkteWOl$L&~i6e!{l>f
+zvjgmgDTEQyx72gy#qbk<8zs~rMgemzu{f~0{<EuS3hp#(D>J&xkN00k8jIJ=W~aB8
+zGZegV!lETI=|mM%O*6VLQDLW^#gQ#GJl<3Vu!hK5w4wxvTT&|66p`+Lz{M5OSfkL?
+zITnv<cmRl~YUh2Z0Ki_Y*rW*p!7U!-%tmx^W={95!S|Xq!1y@=hsUIhxkVqrpOF$0
+zhbefv6p=hoF~}(qQ|w+G=>)c~UBiEnurO<M=A#bK?s9YYV?fk{4h0v9FD1q#3e%j@
+znttCSXZV`TP?`QI^6i(IZd6=Qj$w7jV+!O`G%g@^9Jos1>fr}Bf%rJRjn32iuc8=c
+zI=p5ID4%MtvJG-KZs|lq>ma{<?3K&jSkil0m&F$+`Tcd%G9_<rZT3p7fc}7rms%R)
+z@u%h;K9_b&3Sbm@^>uoTTH!jDWhtT__@^H-t(%jiXmTe=fOvcy3`UhGhvoi+r62jN
+z06kz_(#CM0!6Z;EZux31XV7px3u;!P#8R07wm?%M#~3n<yY$VKyw9Rsc5AY4gA6#=
+z<Xo-}4~#i-Qw^#P4Mb*@xS_w}U-MkgRZ_rKP8^V#sE*FRW<R(FBNA#Cj)A9Nx43AF
+zyv^fV;l+i<g<WIVCDvop5OdRNt?#U#VOl@0DHSICrXNKOkTu@3Pae656t--V@;zDr
+z1*e>m3H_Mo0935z{bsO!*s`oi^YK0r*US4|8j%B=Xl0MFXo1jzlMp!BQlMx>Lm^a>
+zH(VlIk+L!$fvdv_p=7A`Y?l4qZ(aAMeiKs!1>P3WaQzpmO&p?CF}@^wxiU7w0;|xc
+zRc$KUR|L&La5pSlx#O_>@(OcK;)R)Mb~0Erm#ZMiv?P@w`ND#tvE2DqP~x`#aQ(7T
+zcF@@j!U+JEuBMw6cTqw%V8R{uMFwzgN0SB30ifQRvHWOW>7?nnQ?LEaip3Yush)Mi
+z%*jeg&RB?n(p28-LXpOL;+Ve1`+l8l20m}bY?yw)9O6<6+?AFY_qzmI4!}?jWl>WG
+z1b?&hG(5d0xUM9Z4%c2fzxhawraMx|HI(-hoDK>?!q-^bc<bLMzI*7*$@)K8==57n
+z-cuv!{WPJ>_<2anz3&FJf~n+pXS+`TtXG23`_>ai%zFU;W1imFHuhgu=J0d2)%Mdf
+zGy-G}Fn%G6iZ)qQSS9}lgYlBjk)Hm%XrlO)u`mh=ALc>=JS@<@7N7}^@e4f7>LZ?}
+z5m4&Q`R>v8v_35gVi5w~=D}uwJ00Bd!jW&@>XMo^v78X6TqI#Zg<Thc?pu;x2aC<{
+z@wU4BG(hsMks89MBzcfsZ_~43*6}gZzviODGX4V=LZ6zyc3a5wRI=9g4v!ycZ-X#W
+zv1t&OFBppUG2OyX#$G#D5x~k|#G!|sgrg?HDjpxNel7loL3*`a&hxQN<aBoyYLNhu
+zZg8NHQdufy>-DP+hWOcipN##XIDM1%%vlNj24-`c&?5zMOb(3Qf)OOfH%nG>MyA&=
+rCkLJxO)qwQe?W$QPL4Sii4utKCo}5E1Czj4NbsWnZ@c>gg`0b|?6=t3
+
+literal 0
+HcmV?d00001
+
+diff --git a/tools/chatgpt-project-agent/prepare-project-files.py b/tools/chatgpt-project-agent/prepare-project-files.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..69906ad675a6b4f5b973b7e55cf9cc51acf5a702
+--- /dev/null
++++ b/tools/chatgpt-project-agent/prepare-project-files.py
+@@ -0,0 +1,154 @@
++#!/usr/bin/env python3
++"""Stage the compact ChatGPT project-folder replacement set."""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++import tempfile
++
++ROOT = Path(__file__).resolve().parent
++README_TEMPLATE = ROOT / "project-files/README-FIRST.template.md"
++TOOLS_ARCHIVE = ROOT / "bundle/teasescript-chatgpt-project-agent-tools-linux-x64.tar.zst"
++SETUP_SCRIPT = ROOT / "setup-teasescript-chatgpt-project-agent.py"
++TOOLS_NAME = "teasescript-chatgpt-project-agent-tools-linux-x64.tar.zst"
++RUNTIME_NAME = "teasescript-chatgpt-project-agent-runtime-linux-x64.tar.zst"
++SETUP_NAME = "setup-teasescript-chatgpt-project-agent.py"
++RESEARCH_NAME = "TeaseScript-AI-Research-Archive.zip"
++PLACEHOLDER = "{{ARTIFACT_METADATA_JSON}}"
++
++
++class PreparationError(RuntimeError):
++    """Expected project-file preparation failure."""
++
++
++def fail(message: str) -> PreparationError:
++    return PreparationError(message)
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--runtime-archive", required=True, type=Path)
++    parser.add_argument("--output-directory", required=True, type=Path)
++    parser.add_argument("--research-archive", type=Path)
++    return parser.parse_args()
++
++
++def absolute_path(path: Path) -> Path:
++    return Path(os.path.abspath(os.fspath(path.expanduser())))
++
++
++def sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def require_regular(path: Path, description: str) -> Path:
++    path = absolute_path(path)
++    if path.is_symlink() or not path.is_file():
++        raise fail(f"{description} must be a regular non-symlink file: {path}")
++    return path
++
++
++def prepare(runtime: Path, output: Path, research: Path | None) -> dict[str, object]:
++    runtime = require_regular(runtime, "runtime archive")
++    output = absolute_path(output)
++    tools = require_regular(TOOLS_ARCHIVE, "generated tools archive")
++    setup = require_regular(SETUP_SCRIPT, "setup script")
++    template = require_regular(README_TEMPLATE, "README template")
++    if output.exists() or output.is_symlink():
++        raise fail(f"output directory already exists: {output}")
++    output.parent.mkdir(parents=True, exist_ok=True)
++    output.mkdir(mode=0o700)
++    try:
++        metadata = {
++            "formatVersion": 1,

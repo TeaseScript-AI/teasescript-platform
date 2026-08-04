@@ -1,0 +1,117 @@
+diff --git a/README-FIRST.md b/README-FIRST.md
+index 9231dc73ca10b1eb2ef8281b8ccbeddaaf11d31b..36e68c20c536482f794a5936fb440b900f9c9ddb 100644
+--- a/README-FIRST.md
++++ b/README-FIRST.md
+@@ -54,7 +54,7 @@ work.
+ - `PHASE-STATUS.md`: current milestone status and verification evidence.
+ - `AGENTS.md`: coding, review, and Git rules for every agent.
+ - `docs/DEVELOPMENT-WORKFLOW.md`: coordinator, executor, pull-request, documentation, and final-verification workflow.
+-- `docs/LOCAL-AGENT-BOOTSTRAP.md`: canonical distributed-bootstrap contract and shared-project staging route.
++- `docs/LOCAL-AGENT-BOOTSTRAP.md`: canonical ChatGPT project-agent payload, installation, exact-source, and synchronization contract.
+ - `docs/README.md`: documentation map.
+ - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
+ - `docs/specifications/`: accepted consolidated specifications.
+diff --git a/docs/CHATGPT-GITHUB-WORKFLOW.md b/docs/CHATGPT-GITHUB-WORKFLOW.md
+index 846fd619a38043c89feff276c70d934962d91633..33ef0155fff1bcb3061c4a1f5d11eed2106c7024 100644
+--- a/docs/CHATGPT-GITHUB-WORKFLOW.md
++++ b/docs/CHATGPT-GITHUB-WORKFLOW.md
+@@ -133,10 +133,10 @@ Do not hide failures merely to save context. The objective is to remove successf
+ 
+ ## Distributed local bootstrap
+ 
+-For substantial connector-local work, use the trusted shared
+-`teasescript-agent-bootstrap-linux-x64.tar.zst` only through
+-`bin/prepare-agent-workspace.sh`. It is the sole normal bootstrap entry point:
+-do not require a separate self-test, execute the candidate helper from the
+-downloaded artifact, or revive the removed work-package route. Stable names,
+-options, and shared-project staging are defined in
+-`docs/LOCAL-AGENT-BOOTSTRAP.md`.
++For substantial connector-local work, install the split ChatGPT project-agent
++payloads through `setup-teasescript-chatgpt-project-agent.py`, then use
++`bin/prepare-chatgpt-project-workspace.sh` as the sole normal exact-source entry
++point. Do not require a separate self-test, execute the candidate helper from
++the downloaded artifact, or revive the removed work-package route. Stable names,
++verification, timeout guidance, and external project-folder staging are defined
++in `docs/LOCAL-AGENT-BOOTSTRAP.md`.
+diff --git a/docs/DEVELOPMENT-WORKFLOW.md b/docs/DEVELOPMENT-WORKFLOW.md
+index 80a11bb952bd6be5cbb482c3e2275fcdce8a134c..3fe18598c4aea4823dd8bc6aa37f4246ec740ce1 100644
+--- a/docs/DEVELOPMENT-WORKFLOW.md
++++ b/docs/DEVELOPMENT-WORKFLOW.md
+@@ -566,9 +566,11 @@ When the gate passes, open one final pull request from the integration branch to
+ 
+ ## Connector-local bootstrap
+ 
+-For substantial connector-based work, the distributed bootstrap's
+-`bin/prepare-agent-workspace.sh` is the sole normal local entry point. It
+-verifies one exact source artifact, creates the clean checkout, and installs the
+-committed dependency graph offline. The canonical bootstrap and shared-project
+-staging contract is `docs/LOCAL-AGENT-BOOTSTRAP.md`; do not add a routine
+-separate self-test or restore the removed work-package route.
++For substantial connector-based work, assemble the split ChatGPT project-agent
++payloads with `setup-teasescript-chatgpt-project-agent.py`, then use
++`bin/prepare-chatgpt-project-workspace.sh` as the sole normal local entry point.
++It verifies one exact source artifact, creates the clean checkout, and installs
++the committed dependency graph offline. The canonical payload, installation,
++timeout, and external synchronization contract is
++`docs/LOCAL-AGENT-BOOTSTRAP.md`; do not add a routine separate self-test or
++restore the removed work-package route.
+diff --git a/docs/DOCUMENTATION-OWNERSHIP.md b/docs/DOCUMENTATION-OWNERSHIP.md
+index 46b0fce7409dc6c6ba963615fe24d8693474c8e6..a8f4a67bc7ed2b82d06f2f0a23cb8819c23ccf61 100644
+--- a/docs/DOCUMENTATION-OWNERSHIP.md
++++ b/docs/DOCUMENTATION-OWNERSHIP.md
+@@ -98,29 +98,27 @@ The selected backlog, temporary coordination, and implementation status have dif
+ 
+ Do not keep completed items in the open backlog merely as history; Git already preserves their earlier state.
+ 
+-## Shared project folder: durable context and non-authoritative research
++## ChatGPT project folder: controlled startup derivative
+ 
+-The shared project folder should contain only material useful across chat sessions that is not appropriate as canonical repository documentation:
++The ChatGPT project folder is a compact startup, acquisition, and routing layer,
++not a second workflow or implementation authority. Its maintainable sources live
++under `tools/chatgpt-project-agent/`; `docs/LOCAL-AGENT-BOOTSTRAP.md` owns the
++payload, installation, and synchronization contract.
+ 
+-- a stable project instruction/context file;
+-- a short routing file pointing to the repository as source of truth;
+-- capability research about Tease AI, SexScripts/Groovy, Milovana EOS, and VirMst/CyberDom;
+-- raw or archived third-party script examples;
+-- historical project packages and superseded design documents;
+-- dated audit and review reports when retained for evidence.
++The external folder contains at most one generated `README-FIRST.md`, one small
++generated tools archive, one separately managed large runtime archive, one setup
++script, and the optional non-authoritative research archive. The canonical
++system-prompt text remains a separate GitHub source copied into the ChatGPT
++project settings field and is absent from the folder and both archives.
+ 
+-Stable shared routing and bootstrap guidance are controlled derivatives rather
+-than second editable workflow owners. Their maintainable sources live in
+-`tools/local-agent/shared-project/` and `docs/LOCAL-AGENT-BOOTSTRAP.md`.
+-`tools/local-agent/prepare-shared-project.py` validates those sources against a
+-specific bootstrap archive and stages the exact stable replacement set. The
+-large archive and generated replacement directory remain outside Git.
++Replace affected external files explicitly and remove older suffixed or
++versioned current copies. A repository merge does not prove the project folder
++or system-prompt field was synchronized; record those manual actions separately
++in issue #208.
+ 
+-Replace the shared routing/bootstrap files as one set. Remove older suffixed or
+-versioned current copies before upload, and record the manual project-folder
+-synchronization separately; a repository merge alone does not prove it occurred.
+-
+-Research and historical material must be explicitly labeled non-authoritative. It may inform design but cannot silently define syntax, architecture, or implementation status.
++Research and historical material must be explicitly labeled non-authoritative.
++It may inform design but cannot silently define syntax, architecture, or
++implementation status.
+ 
+ ## Material intentionally excluded from GitHub
+ 
+@@ -130,7 +128,7 @@ Do not add the following merely to make the repository self-contained:
+ - copied legacy engine/script archives;
+ - chat scratchpads or temporary research notes;
+ - temporary coordinator work breakdowns, executor assignments, or integration logs;
+-- generated package manifests/checksum lists for shared-project ZIPs;
++- temporary generated project-folder inventories or handoff packages;
+ - duplicate historical versions of canonical documents;
+ - PR-specific audit reports after their relevant conclusions are incorporated into current docs and tests.
+ 

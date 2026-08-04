@@ -1,0 +1,208 @@
+)
++    for command in ("tar", "zstd"):
++        if shutil.which(command) is None:
++            raise fail(f"required command is unavailable: {command}")
++    project = absolute_path(args.project_directory)
++    output = absolute_path(args.output_directory)
++    if project.is_symlink() or not project.is_dir():
++        raise fail("project directory must be a directory and may not be a symlink")
++    if output.is_symlink():
++        raise fail(f"output directory may not be a symlink: {output}")
++    if output.name != INSTALL_DIRECTORY_NAME:
++        raise fail(f"output directory name must be {INSTALL_DIRECTORY_NAME}")
++    metadata = load_artifact_metadata(project / README_NAME)
++    tools_input = project / TOOLS_ARCHIVE_NAME
++    runtime_input = project / RUNTIME_ARCHIVE_NAME
++    output.parent.mkdir(parents=True, exist_ok=True)
++
++    with tempfile.TemporaryDirectory(
++        prefix=".teasescript-chatgpt-project-agent-", dir=output.parent
++    ) as temporary_name:
++        temporary = Path(temporary_name)
++        tools_copy = temporary / TOOLS_ARCHIVE_NAME
++        runtime_copy = temporary / RUNTIME_ARCHIVE_NAME
++        copy_and_verify(tools_input, tools_copy, metadata["tools"]["sha256"])
++        copy_and_verify(runtime_input, runtime_copy, metadata["runtime"]["sha256"])
++        inspect_archive(tools_copy, TOOLS_ROOT)
++        inspect_archive(runtime_copy, RUNTIME_ROOT)
++        tools_extract = temporary / "tools-extract"
++        runtime_extract = temporary / "runtime-extract"
++        extract_archive(tools_copy, tools_extract)
++        extract_archive(runtime_copy, runtime_extract)
++        tools_root = tools_extract / TOOLS_ROOT
++        runtime_root = runtime_extract / RUNTIME_ROOT
++        tools_manifest, runtime_manifest = verify_payloads(tools_root, runtime_root)
++        assembled = temporary / INSTALL_DIRECTORY_NAME
++        assemble(tools_root, runtime_root, assembled)
++        marker = {
++            "formatVersion": 1,
++            "toolsArchive": metadata["tools"],
++            "runtimeArchive": metadata["runtime"],
++            "toolsManifest": tools_manifest,
++            "runtimeManifest": runtime_manifest,
++        }
++        (assembled / INSTALL_MARKER).write_text(
++            json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8"
++        )
++        if args.check_only:
++            print(
++                "setup-chatgpt-project-agent: PASS "
++                f"mode=check tools={metadata['tools']['sha256']} "
++                f"runtime={metadata['runtime']['sha256']}"
++            )
++            return 0
++        expose_installation(assembled, output, replace=args.replace)
++    print(
++        "setup-chatgpt-project-agent: PASS "
++        f"output={output} tools={metadata['tools']['sha256']} "
++        f"runtime={metadata['runtime']['sha256']}"
++    )
++    return 0
++
++
++if __name__ == "__main__":
++    try:
++        raise SystemExit(main())
++    except SetupError as exc:
++        print(f"setup-chatgpt-project-agent: FAIL: {exc}", file=sys.stderr)
++        raise SystemExit(1)
+diff --git a/tools/chatgpt-project-agent/test-chatgpt-project-agent.py b/tools/chatgpt-project-agent/test-chatgpt-project-agent.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..7ac43071d348be4080656936be7fa3de82b353f6
+--- /dev/null
++++ b/tools/chatgpt-project-agent/test-chatgpt-project-agent.py
+@@ -0,0 +1,374 @@
++#!/usr/bin/env python3
++"""Focused tests for the ChatGPT project-agent distribution."""
++
++from __future__ import annotations
++
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import tarfile
++import tempfile
++import unittest
++
++REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
++LOCAL_AGENT_ROOT = REPOSITORY_ROOT / "tools/local-agent"
++sys.path.insert(0, str(LOCAL_AGENT_ROOT))
++from compact_unittest import run_compact_unittest  # noqa: E402
++
++ROOT = Path(__file__).resolve().parent
++
++
++def load_module(name: str, path: Path):
++    spec = importlib.util.spec_from_file_location(name, path)
++    assert spec and spec.loader
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++BUILD = load_module("chatgpt_build_tools", ROOT / "build-tools-bundle.py")
++RUNTIME = load_module("chatgpt_prepare_runtime", ROOT / "prepare-runtime-payload.py")
++PROJECT = load_module("chatgpt_prepare_project", ROOT / "prepare-project-files.py")
++SETUP = load_module("chatgpt_setup", ROOT / "setup-teasescript-chatgpt-project-agent.py")
++
++
++def sha256(path: Path) -> str:
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def run(command: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
++    completed = subprocess.run(
++        command,
++        cwd=cwd,
++        text=True,
++        stdout=subprocess.PIPE,
++        stderr=subprocess.PIPE,
++        check=False,
++    )
++    if completed.returncode != 0:
++        raise AssertionError(
++            f"command failed: {' '.join(command)}\n"
++            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
++        )
++    return completed
++
++
++def add_tree_to_tar(source: Path, tar_path: Path) -> None:
++    with tarfile.open(tar_path, "w", format=tarfile.USTAR_FORMAT) as archive:
++        for path in sorted([source, *source.rglob("*")], key=lambda item: item.as_posix()):
++            relative = path.relative_to(source.parent).as_posix()
++            info = archive.gettarinfo(str(path), arcname=relative)
++            info.uid = info.gid = 0
++            info.uname = info.gname = ""
++            info.mtime = 0
++            if info.isfile():
++                with path.open("rb") as stream:
++                    archive.addfile(info, stream)
++            else:
++                archive.addfile(info)
++
++
++def compress_tar(tar_path: Path, output: Path, *, level: int = 1) -> None:
++    run(
++        [
++            "zstd",
++            "--quiet",
++            f"-{level}",
++            "--threads=1",
++            "--force",
++            str(tar_path),
++            "-o",
++            str(output),
++        ]
++    )
++
++
++def write_file(path: Path, text: str, *, executable: bool = False) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(text, encoding="utf-8")
++    path.chmod(0o755 if executable else 0o644)
++
++
++class ChatGPTProjectAgentTests(unittest.TestCase):
++    def setUp(self) -> None:
++        self.temporary = tempfile.TemporaryDirectory(prefix="chatgpt-project-agent-test-")
++        self.root = Path(self.temporary.name)
++
++    def tearDown(self) -> None:
++        self.temporary.cleanup()
++
++    def create_bootstrap_fixture(self) -> Path:
++        root = self.root / "legacy" / "teasescript-agent-bootstrap-linux-x64-v5"
++        root.mkdir(parents=True)
++        manifest = {
++            "formatVersion": 5,
++            "platform": "linux-x64",
++            "layout": "single-extract-preexpanded-runtime-and-cache",
++            "node": {"authoritative": "24.18.0", "compatibility": "26.5.0"},
++            "typescript": {"authoritativeCompiler": "fixture"},
++            "tsMorph": {"version": "28.0.0"},
++            "tiktoken": {"version": "0.13.0"},
++        }
++        write_file(root / "MANIFEST.json", json.dumps(manifest, sort_keys=True) + "\n")
++        write_file(root / "CACHE-SEED-ID", "fixture-seed\n")
++        write_file(root / "PACKAGE-INVENTORY.json", "{}\n")
++        write_file(root / "npm-cache-seed/_cacache/marker", "cache\n")
++
++        for version in ("24.18.0", "26.5.0"):
++            node_root = root / f"runtime/node-v{version}-linux-x64"
++            write_file(node_root / "bin/node", "#!/usr/bin/env sh\necho fixture\n", executable=True)
++            write_file(
++                node_root / "lib/node_modules/npm/bin/npm-cli.js",
++                "#!/usr/bin/env node\n",
++                executable=True,
++            )
++            (node_root / "bin").mkdir(parents=True, exist_ok=True)
++            os.symlink("../lib/node_modules/npm/bin/npm-cli.js", node_root / "bin/npm")
++
++        write_file(root / "optional-tools/ts-morph/README.md", "fixture\n")
++        write_file(root / "optional-tools/ts-morph/SHA256SUMS", "fixture\n")
++        tik = root / "optional-tools/tiktoken-cp313-li

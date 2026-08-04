@@ -1,0 +1,184 @@
++actual=$($node_dir/bin/node --version)
++[[ "$actual" == "v${node_version}" ]] || {
++  echo "setup-workspace: FAIL: bundled Node version mismatch: $actual" >&2; exit 1;
++}
++
++git_dir=$(git -C "$repo" rev-parse --absolute-git-dir)
++state_dir="$git_dir/teasescript-agent"
++cache_dir="$state_dir/npm-cache"
++seed_id=$(cat "$bundle_dir/CACHE-SEED-ID")
++mkdir -p "$state_dir"
++
++if [[ ! -f "$cache_dir/.teasescript-seed-id" ]] || [[ "$(cat "$cache_dir/.teasescript-seed-id" 2>/dev/null || true)" != "$seed_id" ]]; then
++  temp_cache=$(mktemp -d "$state_dir/.npm-cache.tmp-XXXXXX")
++  trap 'rm -rf -- "${temp_cache:-}"' EXIT
++  cp -a --reflink=auto "$cache_seed/." "$temp_cache/"
++  printf '%s\n' "$seed_id" > "$temp_cache/.teasescript-seed-id"
++  rm -rf -- "$cache_dir"
++  mv -- "$temp_cache" "$cache_dir"
++  temp_cache=
++  trap - EXIT
++fi
++
++write_runner() {
++  local major=$1 version=$2
++  local runtime="$bundle_dir/runtime/node-v${version}-linux-x64"
++  local runner="$state_dir/run-node${major}"
++  cat > "$runner" <<RUNNER
++#!/usr/bin/env bash
++set -euo pipefail
++export PATH=$(printf '%q' "$runtime/bin"):\$PATH
++export npm_config_cache=$(printf '%q' "$cache_dir")
++export npm_config_audit=false
++export npm_config_fund=false
++export npm_config_update_notifier=false
++exec "\$@"
++RUNNER
++  chmod +x "$runner"
++  cat > "$state_dir/activate-node${major}.sh" <<ACTIVATE
++export PATH=$(printf '%q' "$runtime/bin"):\$PATH
++export npm_config_cache=$(printf '%q' "$cache_dir")
++export npm_config_audit=false
++export npm_config_fund=false
++export npm_config_update_notifier=false
++ACTIVATE
++}
++write_runner 24 24.18.0
++write_runner 26 26.5.0
++ln -sfn "run-node${node_major}" "$state_dir/run"
++ln -sfn "activate-node${node_major}.sh" "$state_dir/activate.sh"
++runner="$state_dir/run-node${node_major}"
++
++if [[ "$node_major" == 26 ]]; then
++  echo "setup-workspace: INFO: Node 26 compatibility run; npm EBADENGINE warning is expected" >&2
++fi
++"$runner" npm cache verify >/dev/null
++(
++  cd "$repo"
++  "$runner" npm ci --offline --no-audit --no-fund
++)
++
++if ((with_ts_morph)); then
++  installed_version=$(
++    "$runner" node -e 'const fs=require("fs"); try { const p=JSON.parse(fs.readFileSync("node_modules/ts-morph/package.json","utf8")); process.stdout.write(p.version||""); } catch { process.stdout.write(""); }' \
++      2>/dev/null || true
++  )
++  if [[ "$installed_version" != "28.0.0" ]]; then
++    "$runner" bash "$script_dir/install-ts-morph-offline.sh" "$repo"
++  fi
++fi
++
++if ((with_tiktoken)); then
++  "$script_dir/install-tiktoken-offline.sh" "$repo"
++fi
++
++if ((run_check)); then
++  (
++    cd "$repo"
++    "$runner" bash -c 'npm run check && git diff --check'
++  )
++fi
++
++printf 'setup-workspace: PASS repo=%s node=%s check=%s ts_morph=%s tiktoken=%s run=%s activate=%s\n' \
++  "$repo" "$actual" "$run_check" "$with_ts_morph" "$with_tiktoken" "$state_dir/run" "$state_dir/activate.sh"
+diff --git a/tools/local-agent/README.md b/tools/local-agent/README.md
+index 57bd7d3d8c391ae8f6f044bce7c9d7c54c1a5881..71c9a08b0d2fcac32cd928d23d93dbacddcbb554 100644
+--- a/tools/local-agent/README.md
++++ b/tools/local-agent/README.md
+@@ -125,13 +125,10 @@ For the token-efficient route, keep `tiktoken` and `o200k_base.tiktoken` in the
+ 
+ After preparation, use the canonical `--show-next-action` to expose exactly one connector action at a time; `--show-next-upload` remains an exact compatibility alias. Record blob, tree, and commit SHAs, then record the returned transfer-branch name before the helper exposes one read-only exact branch comparison. Record its `identical` status before publishing. The helper verifies every blob, the payload-only transfer tree, and the final branch target; an interruption after branch creation resumes at the comparison read rather than repeating the write. Use `--reset-upload-index` when a blob must be resent, or `--reset-publication-stage tree|commit|branch` to correct only a post-upload stage while preserving verified blobs. Never print all parts in advance. See `docs/PATCH-PUBLICATION.md` for the complete protocol and examples.
+ 
+-## Prepare the shared project replacement set
++## ChatGPT project-agent distribution
+ 
+-`prepare-shared-project.py` validates the repository-owned shared routing
+-sources against the accepted Linux x86_64 bootstrap release and stages exactly
+-the stable bootstrap archive plus three routing documents. It does not upload
+-or modify the ChatGPT project folder. See `docs/LOCAL-AGENT-BOOTSTRAP.md`.
+-
+-```bash
+-python3 -B tools/local-agent/test-prepare-shared-project.py
+-```
++The ChatGPT-specific split tools/runtime payload, safe installer, generated
++project-folder files, and focused tests are owned by
++`tools/chatgpt-project-agent/`. Generic exact-source and patch-publication
++helpers remain here and are included in the small generated tools payload where
++needed. See `docs/LOCAL-AGENT-BOOTSTRAP.md`.
+diff --git a/tools/local-agent/check-local-agent.sh b/tools/local-agent/check-local-agent.sh
+index 80ef605127eb2c671c0407ed9baeebea936fe511..09c6b1bb4f6cb9813c0a5f89502ca143da8b60f8 100755
+--- a/tools/local-agent/check-local-agent.sh
++++ b/tools/local-agent/check-local-agent.sh
+@@ -13,7 +13,7 @@ bash "$script_dir/run-compact.sh" \
+   -- env TEASESCRIPT_COMPACT_TEST_INNER=1 \
+     bash "$script_dir/test-create-source-bundle.sh"
+ python3 -B "$script_dir/test-prepare-source-review.py"
+-python3 -B "$script_dir/test-prepare-shared-project.py"
++python3 -B "$script_dir/../chatgpt-project-agent/test-chatgpt-project-agent.py"
+ python3 -B "$script_dir/test-prepare-patch-publication.py"
+ python3 -B "$script_dir/test-patch-publication.py"
+ bash "$script_dir/test-patch-publication-validate-candidate.sh"
+diff --git a/tools/local-agent/prepare-shared-project.py b/tools/local-agent/prepare-shared-project.py
+deleted file mode 100755
+index 51115039b782a2c0b74a5a6a910824c8ec133d55..0000000000000000000000000000000000000000
+--- a/tools/local-agent/prepare-shared-project.py
++++ /dev/null
+@@ -1,322 +0,0 @@
+-#!/usr/bin/env python3
+-"""Validate and stage the stable shared-project bootstrap replacement set."""
+-
+-from __future__ import annotations
+-
+-import argparse
+-import json
+-import os
+-from pathlib import Path, PurePosixPath
+-import re
+-import subprocess
+-import tempfile
+-
+-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+-SHARED_SOURCE_DIRECTORY = REPOSITORY_ROOT / "tools/local-agent/shared-project"
+-BOOTSTRAP_GUIDE = REPOSITORY_ROOT / "docs/LOCAL-AGENT-BOOTSTRAP.md"
+-
+-STABLE_ARCHIVE_NAME = "teasescript-agent-bootstrap-linux-x64.tar.zst"
+-STABLE_DIRECTORY_NAME = "teasescript-agent-bootstrap-linux-x64"
+-NORMAL_ENTRY_POINT = "bin/prepare-agent-workspace.sh"
+-EXPECTED_BOOTSTRAP_MANIFEST = {
+-    "formatVersion": 5,
+-    "platform": "linux-x64",
+-    "layout": "single-extract-preexpanded-runtime-and-cache",
+-    "normalEntryPoint": NORMAL_ENTRY_POINT,
+-}
+-EXPECTED_ENTRY_POINT_OPTIONS = {
+-    "--artifact",
+-    "--artifact-sha256",
+-    "--expected-head",
+-    "--expected-merge-base",
+-    "--expected-repository",
+-    "--output",
+-    "--check",
+-    "--node",
+-    "--with-ts-morph",
+-    "--with-tiktoken",
+-}
+-
+-SHARED_FILES = {
+-    "README-FIRST.md": SHARED_SOURCE_DIRECTORY / "README-FIRST.md",
+-    "TEASESCRIPT-AI-DEVELOPMENT-WORKFLOW-CONTEXT.md": (
+-        SHARED_SOURCE_DIRECTORY / "TEASESCRIPT-AI-DEVELOPMENT-WORKFLOW-CONTEXT.md"
+-    ),
+-    "LOCAL-AGENT-BOOTSTRAP.md": BOOTSTRAP_GUIDE,
+-}
+-
+-FORBIDDEN_SHARED_TEXT = (
+-    "tools/work-packages/",
+-    "bin/self-test.sh",
+-    "teasescript-agent-bootstrap-linux-x64-v",
+-    "README-FIRST(",
+-    "LOCAL-AGENT-BOOTSTRAP(",
+-    "TEASESCRIPT-AI-DEVELOPMENT-WORKFLOW-CONTEXT(",
+-)
+-
+-
+-class PreparationError(RuntimeError)

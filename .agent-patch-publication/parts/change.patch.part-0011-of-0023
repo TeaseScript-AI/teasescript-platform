@@ -1,0 +1,213 @@
++            "tools": {"file": TOOLS_NAME, "sha256": sha256_file(tools)},
++            "runtime": {"file": RUNTIME_NAME, "sha256": sha256_file(runtime)},
++        }
++        template_text = template.read_text(encoding="utf-8")
++        if template_text.count(PLACEHOLDER) != 1:
++            raise fail("README template must contain exactly one metadata placeholder")
++        rendered = template_text.replace(
++            PLACEHOLDER, json.dumps(metadata, indent=2, sort_keys=True)
++        )
++        (output / "README-FIRST.md").write_text(rendered, encoding="utf-8")
++        shutil.copy2(tools, output / TOOLS_NAME)
++        shutil.copy2(runtime, output / RUNTIME_NAME)
++        shutil.copy2(setup, output / SETUP_NAME)
++        (output / SETUP_NAME).chmod(0o755)
++        if research is not None:
++            research = require_regular(research, "research archive")
++            shutil.copy2(research, output / RESEARCH_NAME)
++        inventory = sorted(path.name for path in output.iterdir())
++        expected = {
++            "README-FIRST.md",
++            TOOLS_NAME,
++            RUNTIME_NAME,
++            SETUP_NAME,
++        }
++        if research is not None:
++            expected.add(RESEARCH_NAME)
++        if set(inventory) != expected or len(inventory) > 5:
++            raise fail(f"project-folder inventory mismatch: {inventory}")
++        with tempfile.TemporaryDirectory(
++            prefix=f".{output.name}-install-check-", dir=output.parent
++        ) as check_name:
++            check_output = Path(check_name)
++            command = [
++                sys.executable,
++                str(output / SETUP_NAME),
++                "--project-directory",
++                str(output),
++                "--output-directory",
++                str(check_output / "teasescript-chatgpt-project-agent"),
++                "--check-only",
++            ]
++            completed = subprocess.run(
++                command,
++                text=True,
++                stdout=subprocess.PIPE,
++                stderr=subprocess.PIPE,
++                check=False,
++            )
++        if completed.returncode != 0:
++            detail = completed.stderr.strip() or completed.stdout.strip() or "no output"
++            raise fail(f"prepared project files failed setup validation: {detail}")
++        return {
++            "inventory": inventory,
++            "metadata": metadata,
++            "files": {
++                path.name: {"size": path.stat().st_size, "sha256": sha256_file(path)}
++                for path in sorted(output.iterdir())
++            },
++        }
++    except Exception:
++        shutil.rmtree(output, ignore_errors=True)
++        raise
++
++
++def main() -> int:
++    args = parse_args()
++    result = prepare(args.runtime_archive, args.output_directory, args.research_archive)
++    print(
++        "prepare-chatgpt-project-files: PASS "
++        f"output={args.output_directory.resolve()} inventory={','.join(result['inventory'])}"
++    )
++    return 0
++
++
++if __name__ == "__main__":
++    try:
++        raise SystemExit(main())
++    except PreparationError as exc:
++        print(f"prepare-chatgpt-project-files: FAIL: {exc}", file=sys.stderr)
++        raise SystemExit(1)
+diff --git a/tools/chatgpt-project-agent/prepare-runtime-payload.py b/tools/chatgpt-project-agent/prepare-runtime-payload.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..96ca497078b328700bda962a58dd2132feb07eed
+--- /dev/null
++++ b/tools/chatgpt-project-agent/prepare-runtime-payload.py
+@@ -0,0 +1,353 @@
++#!/usr/bin/env python3
++"""Split the external runtime payload from a verified legacy bootstrap archive."""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path, PurePosixPath
++import posixpath
++import re
++import subprocess
++import sys
++import tarfile
++import tempfile
++
++ARCHIVE_NAME = "teasescript-chatgpt-project-agent-runtime-linux-x64.tar.zst"
++ARCHIVE_ROOT = "teasescript-chatgpt-project-agent-runtime-linux-x64"
++COMPATIBILITY_ID = "teasescript-chatgpt-project-agent-linux-x64-v1"
++SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
++MAX_MEMBER_COUNT = 50_000
++MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
++MAX_METADATA_BYTES = 4 * 1024 * 1024
++SELECTED_NAMES = (
++    "runtime",
++    "npm-cache-seed",
++    "optional-tools",
++    "CACHE-SEED-ID",
++    "PACKAGE-INVENTORY.json",
++)
++CRITICAL_PATHS = (
++    "RUNTIME-MANIFEST.json",
++    "PACKAGE-INVENTORY.json",
++    "CACHE-SEED-ID",
++    "optional-tools/ts-morph/README.md",
++    "optional-tools/ts-morph/SHA256SUMS",
++    "optional-tools/tiktoken-cp313-linux-x86_64/MANIFEST.json",
++    "optional-tools/tiktoken-cp313-linux-x86_64/SHA256SUMS",
++    "optional-tools/tiktoken-cp313-linux-x86_64/install-offline.sh",
++    "optional-tools/tiktoken-cp313-linux-x86_64/tokenizer/o200k_base.tiktoken",
++    "runtime/node-v24.18.0-linux-x64/bin/node",
++    "runtime/node-v24.18.0-linux-x64/lib/node_modules/npm/bin/npm-cli.js",
++    "runtime/node-v26.5.0-linux-x64/bin/node",
++    "runtime/node-v26.5.0-linux-x64/lib/node_modules/npm/bin/npm-cli.js",
++)
++
++
++class RuntimePreparationError(RuntimeError):
++    """Expected runtime preparation failure."""
++
++
++def fail(message: str) -> RuntimePreparationError:
++    return RuntimePreparationError(message)
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--bootstrap-archive", required=True, type=Path)
++    parser.add_argument("--bootstrap-sha256")
++    parser.add_argument("--output", required=True, type=Path)
++    parser.add_argument("--zstd-level", type=int, default=9, choices=range(1, 23))
++    return parser.parse_args()
++
++
++def absolute_path(path: Path) -> Path:
++    return Path(os.path.abspath(os.fspath(path.expanduser())))
++
++
++def sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def run(command: list[str], *, cwd: Path | None = None) -> str:
++    completed = subprocess.run(
++        command,
++        cwd=cwd,
++        text=True,
++        stdout=subprocess.PIPE,
++        stderr=subprocess.PIPE,
++        check=False,
++    )
++    if completed.returncode != 0:
++        detail = completed.stderr.strip() or completed.stdout.strip() or "no output"
++        raise fail(f"command failed ({' '.join(command)}): {detail}")
++    return completed.stdout
++
++
++def validate_member_name(name: str) -> PurePosixPath:
++    if not name or name.startswith("/") or "\\" in name:
++        raise fail(f"unsafe bootstrap archive member: {name!r}")
++    path = PurePosixPath(name.rstrip("/"))
++    if not path.parts or any(part in {"", ".", ".."} for part in path.parts):
++        raise fail(f"unsafe bootstrap archive member: {name!r}")
++    return path
++
++
++def resolve_link_target(member: PurePosixPath, linkname: str, *, symbolic: bool) -> str:
++    if not linkname or "\\" in linkname or "\x00" in linkname:
++        raise fail(f"unsafe bootstrap link target for {member}: {linkname!r}")
++    if linkname.startswith("/"):
++        raise fail(f"absolute bootstrap link target for {member}: {linkname!r}")
++    base = str(member.parent) if symbolic else ""
++    normalized = posixpath.normpath(posixpath.join(base, linkname))
++    if normalized == "." or normalized.startswith("../") or "/../" in normalized:
++        raise fail(f"bootstrap link escapes archive root for {member}: {linkname!r}")
++    if PurePosixPath(normalized).parts[0] != member.parts[0]:
++        raise fail(f"bootstrap link escapes archive root for {member}: {linkname!r}")
++    return normalized
++
++
++def inspect_bootstrap(archive: Path) -> tuple[str, dict[str, object]]:
++    try:
++        process = subprocess.Popen(
++            ["zstd", "-dc", "--", str(archive)],
++            stdout=subprocess.PIPE,
++            stderr=subprocess.PIPE,
++        )
++    except OSError as exc:
++        raise fail(f"cannot start zstd: {exc}") from exc
++    assert process.stdout is not None
++    assert process.stderr is not None
++    roots: set[str] = set()

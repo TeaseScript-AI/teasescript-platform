@@ -1,0 +1,211 @@
++        args.bootstrap_archive,
++        args.output,
++        args.bootstrap_sha256,
++        args.zstd_level,
++    )
++    print(
++        "prepare-chatgpt-project-runtime: PASS "
++        f"output={args.output.resolve()} sha256={digest} zstd_level={args.zstd_level}"
++    )
++    return 0
++
++
++if __name__ == "__main__":
++    try:
++        raise SystemExit(main())
++    except RuntimePreparationError as exc:
++        print(f"prepare-chatgpt-project-runtime: FAIL: {exc}", file=sys.stderr)
++        raise SystemExit(1)
+diff --git a/tools/chatgpt-project-agent/project-files/README-FIRST.template.md b/tools/chatgpt-project-agent/project-files/README-FIRST.template.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..ae24bca485f7407c7a034b16a88e21ac0c813e16
+--- /dev/null
++++ b/tools/chatgpt-project-agent/project-files/README-FIRST.template.md
+@@ -0,0 +1,149 @@
++# TeaseScript AI — ChatGPT project agent
++
++This ChatGPT project folder is a compact startup and acquisition layer. GitHub
++repository `TeaseScript-AI/teasescript-platform` is authoritative after a
++verified checkout exists. Do not treat this file, the research archive, or an
++older source artifact as current implementation authority.
++
++## Project boundaries
++
++Build a browser-first community platform and TeaseScript language for
++deterministic interactive teases, BDSM scenes, persistent personalities,
++roleplay adventures, and community packages. Source code, identifiers,
++TeaseScript keywords, APIs, comments, documentation, package metadata, editor
++text, and website UI use English.
++
++Keep these accepted boundaries unless current repository authority says
++otherwise:
++
++- Laravel with PostgreSQL is the only public backend.
++- Parser/runtime code is TypeScript compiled to JavaScript.
++- Regular executable content uses `.tease`; reusable advanced code uses real
++  TypeScript in `.ts`; `main.tease` is the package entry point.
++- Keep one deterministic engine, state model, and save/checkpoint format.
++- Runtime behavior that survives pause/resume uses validated versioned JSON-safe
++  plans and explicit state, not a suspended JavaScript call stack. JSON-safe
++  instruction boundaries do not require persisting after every instruction.
++- Player and package code run inside a sandboxed cross-origin iframe and have no
++  unrestricted external network access.
++- Start mobile as a responsive PWA. Do not add microservices, Kubernetes, Redis,
++  WebRTC, Electron, or native apps without a documented need and decision.
++
++## Project-folder inventory
++
++Keep no more than these five current unsuffixed files:
++
++```text
++README-FIRST.md
++teasescript-chatgpt-project-agent-tools-linux-x64.tar.zst
++teasescript-chatgpt-project-agent-runtime-linux-x64.tar.zst
++setup-teasescript-chatgpt-project-agent.py
++TeaseScript-AI-Research-Archive.zip        # optional non-authoritative research
++```
++
++The ChatGPT project system prompt is stored canonically in GitHub but belongs in
++the separate project-instructions field, not in this folder or either archive.
++Remove numbered, versioned, or superseded current copies instead of overlaying
++or manually merging them.
++
++## Install the local tools
++
++Use the direct shell/container executor. Do not wrap ordinary archive, Git,
++shell, Node, or npm commands in a notebook merely to invoke the shell.
++
++```bash
++python3 /mnt/data/setup-teasescript-chatgpt-project-agent.py
++```
++
++The installer verifies the exact outer archive digests recorded below, validates
++archive paths, file types, links, manifests, checksums, platform compatibility,
++and conflicts, then atomically exposes:
++
++```text
++/mnt/data/teasescript-chatgpt-project-agent/
++```
++
++Use `--replace` only to replace an existing valid installation after the new
++payloads have been fully validated and assembled.
++
++<!-- TEASESCRIPT_CHATGPT_PROJECT_ARTIFACTS_V1
++{{ARTIFACT_METADATA_JSON}}
++TEASESCRIPT_CHATGPT_PROJECT_ARTIFACTS_V1 -->
++
++## Obtain and prepare exact source
++
++For substantial implementation, review, debugging, or verification:
++
++1. Resolve the exact GitHub head and merge base and download the matching
++   verified Source Bundle artifact once.
++2. Run the installed normal entry point:
++
++```bash
++/mnt/data/teasescript-chatgpt-project-agent/bin/prepare-chatgpt-project-workspace.sh \
++  --artifact /mnt/data/source-bundle.zip \
++  --artifact-sha256 <github-artifact-sha256> \
++  --expected-head <40-character-head-sha> \
++  --expected-merge-base <40-character-merge-base-sha> \
++  --expected-repository TeaseScript-AI/teasescript-platform \
++  --output /mnt/data/source-work
++```
++
++3. In the verified checkout, read its `README-FIRST.md`, applicable `AGENTS.md`,
++   assigned issue or pull request, `CURRENT-DESIGN.md` for broad architecture,
++   `PHASE-STATUS.md` for current gates/status, and only the controlling task
++   documents and accepted ADRs.
++   Unless a later accepted ADR or explicitly recorded post-V30 owner decision
++   supersedes a specific point, `docs/specifications/accepted-syntaxes-v30.md`
++   remains the accepted syntax and semantics baseline.
++4. Use local Git, search, editing, and tests. Return to the connector only for
++   live GitHub state and writes.
++
++Do not network-clone from a connector-restricted agent, read the repository file
++by file through the connector, execute the candidate source-preparation helper
++from the artifact under review, invent a separate bootstrap self-test, or revive
++the removed work-package route.
++
++## Work and publication
++
++Use one coherent issue, one owner, one short-lived branch, one pull request,
++independent review, CI, squash merge, and branch deletion by default. Before
++substantive edits state expected files, acceptance criteria, and risks. Do not
++silently alter architecture, semantics, security boundaries, or scope.
++
++Immediately before a repository write choose either normal authenticated Git or
++the verified patch-publication route from the checkout's
++`docs/PATCH-PUBLICATION.md`. Publish generated binary files through that normal
++route without inventing a separate project-visible transport artifact.
++
++## Timeouts for known long actions
++
++Set an explicit extended tool timeout *before* starting aggregate local-agent
++validation, `npm run check`, workspace preparation with `--check`, or archive
++generation/compression. Normally allow at least 120 seconds for aggregate
++checks, and more when measured compression or CI-equivalent work requires it.
++Do not rely on a short default timeout and then repeat the same command.
++
++## Codex routing
++
++Choose the lowest-cost executor likely to produce an accepted result, including
++handoff, retries, review corrections, CI, and publication cost:
++
++- Keep work with a ChatGPT project agent when repository reading, review,
++  architecture, diagnosis, or existing-session context dominates.
++- Prefer Codex when direct `git`/`gh` materially reduces publication friction or
++  a bounded implementation is strongly verifiable.
++- Luna: mechanical/localized work with explicit edits and strong checks.
++- Terra: repository-aware implementation of fixed accepted boundaries.
++- Sol: unresolved architecture, canonical state/ordering/serialization design,
++  difficult nonlocal diagnosis, or independent semantic audit.
++
++Select reasoning separately: Low for deterministic work, Medium for bounded
++repository exploration/integration, High only for unresolved strategy or subtle
++cross-boundary diagnosis. The verified checkout's current workflow and model
++routing sources override this compact startup summary.
++
++## Research boundary
++
++`TeaseScript-AI-Research-Archive.zip` is optional, separate, and
++non-authoritative. It may inform capability research but does not define current
++syntax, architecture, status, or implementation.
+diff --git a/tools/chatgpt-project-agent/setup-teasescript-chatgpt-project-agent.py b/tools/chatgpt-project-agent/setup-teasescript-chatgpt-project-agent.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..38aa78ef05e72093a1e2181a45e2acfbc3972839
+--- /dev/null
++++ b/tools/chatgpt-project-agent/setup-teasescript-chatgpt-project-agent.py
+@@ -0,0 +1,508 @@
++#!/usr/bin/env python3
++"""Safely assemble the TeaseScript ChatGPT project-agent tools and runtime."""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path, PurePosixPath
++import posixpath
++import platform
++import re
++import shutil
++import stat
++import subprocess
++import sys
++import tarfile
++import tempfile
++from typing import Any
++
++README_NAME = "README-FIRST.md"
++TOOLS_ARCHIVE_NAME = "teasescript-chatgpt-project-agent-tools-linux-x64.tar.zst"
++RUNTIME_ARCHIVE_NAME = "teasescript-chatgpt-project-agent-runtime-linux-x64.tar.zst"
++INSTALL_DIRECTORY_NAME = "teasescript-chatgpt-project-agent"
++TOOLS_ROOT = "teasescript-chatgpt-project-agent-tools"
++RUNTIME_ROOT = "teasescript-chatgpt-project-agent-runtime-linux-x64"
++METADATA_BEGIN = "<!-- TEASESCRIPT_CHATGPT_PROJECT_ARTIFACTS_V1"
++METADATA_END = "TEASESCRIPT_CHATGPT_PROJECT_ARTIFACTS_V1 -->"
++COMPATIBILITY_ID = "teasescript-chatgpt-project-agent-linux-x64-v1"
++SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
++CHECKSUM_LINE_RE = re.compile(r"([0-9a-f]{64})  ([A-Za-z0-9@._/+\-]+)")

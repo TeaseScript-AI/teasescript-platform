@@ -1,0 +1,50 @@
+diff --git a/tools/chatgpt-project-agent/bundle/teasescript-chatgpt-project-agent-tools-linux-x64.tar.zst b/tools/chatgpt-project-agent/bundle/teasescript-chatgpt-project-agent-tools-linux-x64.tar.zst
+new file mode 100644
+index 0000000000000000000000000000000000000000..daea4afe1828d876649479a59a7b227bcc56a680
+GIT binary patch
+literal 8769
+zcmV-HBEH=ywJ-f-0LPsX0Se8WCM|%Fm3hq_2%>dMhg2irE4~jqfxTUP_9Tg&@9mZV
+z2sn}S%iHHLO!s+^>VJDx0&4<U0#x@|mNwC9hE1yK`i?kxyzTfrp)|_(VUzEYe3Z-5
+zx{38oDps*c?Wl{=c~nKAWD-g;(KN}|NhH+MC<&#)B;vSV)5)b#uJ<s?#G_ZmG|E$y
+zS{J3(kD|3^RWivuI+4&$!!!xSvb^f4_E)7{5(*`$lyCA?6$P`Z>R}W5X%wycx~oz;
+zta{X|6on&Z97>up=_VI8p;YueO?&!vf@RcaRi9C??!zQmHmMRx&7OK{l69XZu_TkO
+z)-1cU@59o44!k++miDA736*tLW_1$EqkP_^YE<*;=Y1bW!QSgGth=Z+`HJFQUPd*I
+zdR->@s7d!lHpW?sbTZynW6q`+8Wfv?BF5#8xI@92AHv77!0&hmwbGS-=J?hcrcC#D
+zvDNxBWL6!L1WvEais@_%+Rkn&hS;0#(xX)wWm(iExmaVEG?@zp#==q|WgJ{wXaLAj
+zJU}=3!voKeyca({;(%wEMLAj$t%j+SB6QOl**A=Qc4sO{?y`b&^z<GTHAluCljLaH
+zUAS;T$_f^}lRaY#DW?v&z0bD#cUX>>skHTd<Lh|BC#|su_HJCTtpcAuwEK?Puk6D=
+z#%mqO&9!>;Jz@^;Ii7>m!=Ps>e!bKmtanV{@8uC^e0%ic{V(>;XY+T+`hQ(p8afEl
+zQ2TSX>uc%0*z-y;*rB4=-!#8#%h5>buE9_s;Teq!pd7%ZQ5r^7*Ok?9x>QV9E*Y7o
+zNwUbb9e_-?9sytupt3To!Z3{j5YZsUTiW+GRNCHSz**dE%JHNv+U)7q^mp&k+-23&
+z={gK<I@j*1(jGW>5><uv+E5~?r2N}v52=&BQml!Z8a8{{w3MG8^RCS4d5C->QY8a3
+zfl;CHY&??Ts38qTzFB{B?-+*Sb*(Q4$8$7t(p~is=g;+9?|!{6e)a2mTh}8fQq#n8
+zEW<1bg>6nv)Yjp8z?R8aFr@r2;1!1)Pfi356{frQGUH-l@gO70xKO}YTpC<xxCR%T
+z1_P5Jk-20n7tP0^Ld8JE<4_@b$S`1kyu4^E5HK1EONZSajgV4D=)Q$ngOPCYhxw5z
+zUzR+~4=&OiO$m}1?rGu(GZw?&8hlw_+7@Um7_&;#MTsMnbLu#b*I+xDf@9YqXGG43
+z9`JcP{Y_-KB>f&itUIbDpAwSWjf^-SSv}ke9_|qJvmG;ht~kJ0D7^CEUluC@5!QGk
+z9bY36K07WArHTb60cUZsKr;cu<FIj}oL9zW6G<fzy@<n{rbskD8<fUHBIChDhFg%a
+zB=CGlFC?StAvys9J}Zam)q@<iY%3=}5Eg+5_f!I;{Uqhve*A^l*l-ctu)#T!Z<~Ll
+z%H!Y~8va=+C+b<S8%2rZ?MywW<eknt;Kg2FkFKq6jGTT;cwejGuo{<Clf*CP><)&6
+zgY;s%MU0VhLdJy#lexg~$^-duQDDhDcsOvtH}xV&k5Yn`elJ?l@%WN^$Nj9wNB|1U
+zBpG#G(p^e-=`P)+J610(v#QSf2_@^Qr!Y;^ypK*W%jzVxdfDWAtdn$IN1@W4l2lfv
+z;z7o;AR|9=WAdM-(JaHRNk?T^N5MX=!mg^asLQG-^}G6#$Fxklu-{i%El4~3GG`^q
+zfHKbc;#yNMVqim>I1Lh|AX%<VM$_R#U7n3kq7;eJurM<;eZFLHl|^HjuxKt7mqk@x
+zz$aFvnUElpxny8eTu4|v;3QZo8c2NRwDo`X(r`LtPLFS%;U+E^5-!qe0PWZ5M$qn&
+zqw|N=7z4v07#e#t>@3LHWGVH=_tMZh$9*0*C*@S1-aKmNoKm7ySw&p{=EL{d>JRQo
+z_VfHRH*A<hXxbyLTTfcQHz(g7CuBn2?PMOb6qEj-$>JizU=!Ul^*5nSe~!He|0s&2
+z-CTP!_3(=YMuEj;!jj+uQMsV7z{vTTem^bw1*K;ncklC8af~+hyV&DC9*3>s=8TBU
+z3Gb0^9G|%@K($hUs9H|W$SX4f>F5&}Y2tEOAYqZ99v7+FeoRTK|C*E1$K%i;O_OT6
+zE=xw23XDejYPJ0;Esom5NRQC{&cn>1z6W+~t(jRmvV4nh*I>1tKJfLn);r+iDs`>Y
+zW#`j(%<zeBeK9JHvM@_V6a+z=lrn-g0~#VJ-MSvt@0D=$-w$5v8T;k9<8;jN-lGCk
+zw1MMM<&j4odE}8t5D;$p{wzm3#7D9`y4H&#0S*x44_c0g<fx6)o0FHdWsHH!jgy<i
+zSftHXxl#C}^IvHJaqB@YebD1<|4l!85>mf9h2YZ$XIqcV+HhGeaoLDOxbO{)ivtYB
+zg<Ti`NmY~li!0SObco>U5Z7`Ue{$*vNA6CKQf(1%pA7^W-$6A<zs<jG>qsShrO)_o
+ztRy3;zIQ1|u?u^4%A^mo`qBVo1a13q$#5LUaU2)r7qM?&O}e8u2<3O%wg@ERDs#^K
+zn~)3hwcn)iwHupp$NY`M4G^T8uFrADs$;v>ljgWR4o`mue178w*+k0$KX=p}ICx+I
+z;WDxD@mTms8uR1zn;(ybi$O2U(=@;Bb(#{AbZsZi?Zb-Dgl3Wu2!y$4MvysSxh$BF
+zMg>CU6WWNRx$S0ZKoH2(5k38r;r9KG|2}`8@lQFK%_|6}KLP0peCWNaEi`tX1L8J3
+z8&4&gHverWheVreKw2De-b@hBwc37mM%)CsN6^gGw)K?%zYE99$xp@J2N35F&sH6d
+z5yi!&K4xPJ2ark=Y@EG;Ko~mQ5kDp*;#)*f8m2bS2KjiliX=Id@q?7^4<qO^w+$_L
+zM^9iY-XmUv)tmvSQgq|}diu(JAe7`;5O<KKf`X&?pqzk5S>+KCp7*BQCkObbzT;<3
+z)AT@{ORGrlSs_D{Zy3>1m?{wdAT#2?oQ9^&t3#m4X$wtSR+2<rPPu66{F#Q<%N#U)
+z2Z*ETVMj}sg5!oNxMV;LEF5GoTxNQ(vmOLa`Sn<*=~`|>W84);|Ht!*EXFW-rf2^A

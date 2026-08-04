@@ -1,0 +1,200 @@
+nux-x86_64"
++        write_file(tik / "MANIFEST.json", "{}\n")
++        write_file(tik / "SHA256SUMS", "fixture\n")
++        write_file(tik / "install-offline.sh", "#!/usr/bin/env sh\n", executable=True)
++        write_file(tik / "tokenizer/o200k_base.tiktoken", "fixture\n")
++
++        tar_path = self.root / "legacy.tar"
++        archive = self.root / "legacy.tar.zst"
++        add_tree_to_tar(root, tar_path)
++        compress_tar(tar_path, archive)
++        return archive
++
++    def prepare_runtime_fixture(self, name: str = "runtime.tar.zst") -> Path:
++        bootstrap = self.create_bootstrap_fixture()
++        output = self.root / name
++        RUNTIME.prepare(bootstrap, output, sha256(bootstrap), 9)
++        return output
++
++    def test_tools_bundle_is_deterministic_and_matches_committed_derivative(self) -> None:
++        first = self.root / "tools-1.tar.zst"
++        second = self.root / "tools-2.tar.zst"
++        BUILD.build(first)
++        BUILD.build(second)
++        self.assertEqual(first.read_bytes(), second.read_bytes())
++        first_tar = subprocess.run(
++            ["zstd", "-q", "-d", "-c", str(first)],
++            check=True,
++            stdout=subprocess.PIPE,
++        ).stdout
++        committed_tar = subprocess.run(
++            ["zstd", "-q", "-d", "-c", str(BUILD.DEFAULT_OUTPUT)],
++            check=True,
++            stdout=subprocess.PIPE,
++        ).stdout
++        self.assertEqual(first_tar, committed_tar)
++
++        names = run(["tar", "--zstd", "-tf", str(first)]).stdout.splitlines()
++        self.assertIn(f"{BUILD.ARCHIVE_ROOT}/TOOLS-MANIFEST.json", names)
++        self.assertNotIn("PROJECT-SYSTEM-PROMPT.txt", "\n".join(names))
++
++    def test_runtime_derivative_is_deterministic_at_practical_compression(self) -> None:
++        bootstrap = self.create_bootstrap_fixture()
++        first = self.root / "runtime-1.tar.zst"
++        second = self.root / "runtime-2.tar.zst"
++        expected = sha256(bootstrap)
++        RUNTIME.prepare(bootstrap, first, expected, 9)
++        RUNTIME.prepare(bootstrap, second, expected, 9)
++        self.assertEqual(first.read_bytes(), second.read_bytes())
++        manifest = json.loads(
++            run(
++                [
++                    "tar",
++                    "--zstd",
++                    "-xOf",
++                    str(first),
++                    f"{RUNTIME.ARCHIVE_ROOT}/RUNTIME-MANIFEST.json",
++                ]
++            ).stdout
++        )
++        self.assertEqual(manifest["compression"]["zstdLevel"], 9)
++        self.assertEqual(manifest["compatibilityId"], BUILD.COMPATIBILITY_ID)
++
++    def test_project_files_prepare_and_install_with_five_file_inventory(self) -> None:
++        runtime = self.prepare_runtime_fixture()
++        research = self.root / PROJECT.RESEARCH_NAME
++        research.write_bytes(b"research fixture")
++        project = self.root / "project-files"
++        result = PROJECT.prepare(runtime, project, research)
++        self.assertEqual(len(result["inventory"]), 5)
++        self.assertEqual(
++            set(result["inventory"]),
++            {
++                "README-FIRST.md",
++                PROJECT.TOOLS_NAME,
++                PROJECT.RUNTIME_NAME,
++                PROJECT.SETUP_NAME,
++                PROJECT.RESEARCH_NAME,
++            },
++        )
++        readme = (project / "README-FIRST.md").read_text(encoding="utf-8")
++        self.assertIn("at least 120 seconds", readme)
++        self.assertNotIn("PROJECT-SYSTEM-PROMPT", readme)
++
++        install = self.root / SETUP.INSTALL_DIRECTORY_NAME
++        completed = run(
++            [
++                sys.executable,
++                str(project / PROJECT.SETUP_NAME),
++                "--project-directory",
++                str(project),
++                "--output-directory",
++                str(install),
++            ]
++        )
++        self.assertIn("setup-chatgpt-project-agent: PASS", completed.stdout)
++        marker = json.loads((install / SETUP.INSTALL_MARKER).read_text(encoding="utf-8"))
++        self.assertEqual(marker["toolsManifest"]["compatibilityId"], BUILD.COMPATIBILITY_ID)
++        self.assertTrue((install / "bin/prepare-chatgpt-project-workspace.sh").is_file())
++        self.assertTrue((install / "runtime/node-v24.18.0-linux-x64/bin/node").is_file())
++
++    def test_project_preparation_preserves_unrelated_legacy_check_directory(self) -> None:
++        runtime = self.prepare_runtime_fixture()
++        project = self.root / "project-files"
++        unrelated = self.root / ".project-files-install-check"
++        unrelated.mkdir()
++        marker = unrelated / "keep.txt"
++        marker.write_text("keep\n", encoding="utf-8")
++        PROJECT.prepare(runtime, project, None)
++        self.assertEqual(marker.read_text(encoding="utf-8"), "keep\n")
++
++    def test_failed_replacement_preserves_existing_valid_installation(self) -> None:
++        runtime = self.prepare_runtime_fixture()
++        project = self.root / "project-files"
++        PROJECT.prepare(runtime, project, None)
++        install = self.root / SETUP.INSTALL_DIRECTORY_NAME
++        run(
++            [
++                sys.executable,
++                str(project / PROJECT.SETUP_NAME),
++                "--project-directory",
++                str(project),
++                "--output-directory",
++                str(install),
++            ]
++        )
++        marker_before = (install / SETUP.INSTALL_MARKER).read_bytes()
++        tools = project / PROJECT.TOOLS_NAME
++        data = bytearray(tools.read_bytes())
++        data[len(data) // 2] ^= 0x01
++        tools.write_bytes(data)
++        completed = subprocess.run(
++            [
++                sys.executable,
++                str(project / PROJECT.SETUP_NAME),
++                "--project-directory",
++                str(project),
++                "--output-directory",
++                str(install),
++                "--replace",
++            ],
++            text=True,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.PIPE,
++            check=False,
++        )
++        self.assertNotEqual(completed.returncode, 0)
++        self.assertEqual((install / SETUP.INSTALL_MARKER).read_bytes(), marker_before)
++
++    def test_rejects_unsafe_archive_member_before_extraction(self) -> None:
++        tar_path = self.root / "unsafe.tar"
++        archive = self.root / "unsafe.tar.zst"
++        with tarfile.open(tar_path, "w", format=tarfile.USTAR_FORMAT) as stream:
++            info = tarfile.TarInfo(f"{SETUP.TOOLS_ROOT}/../escape")
++            info.size = 1
++            stream.addfile(info, fileobj=__import__("io").BytesIO(b"x"))
++        compress_tar(tar_path, archive)
++        with self.assertRaisesRegex(SETUP.SetupError, "unsafe archive member"):
++            SETUP.inspect_archive(archive, SETUP.TOOLS_ROOT)
++
++
++    def test_runtime_split_rejects_escaping_legacy_symlink(self) -> None:
++        root_name = "teasescript-agent-bootstrap-linux-x64-v5"
++        tar_path = self.root / "unsafe-legacy.tar"
++        archive = self.root / "unsafe-legacy.tar.zst"
++        with tarfile.open(tar_path, "w", format=tarfile.USTAR_FORMAT) as stream:
++            root = tarfile.TarInfo(root_name + "/")
++            root.type = tarfile.DIRTYPE
++            stream.addfile(root)
++            link = tarfile.TarInfo(root_name + "/runtime")
++            link.type = tarfile.SYMTYPE
++            link.linkname = "../../escape"
++            stream.addfile(link)
++        compress_tar(tar_path, archive)
++        with self.assertRaisesRegex(RUNTIME.RuntimePreparationError, "escapes archive root"):
++            RUNTIME.inspect_bootstrap(archive)
++
++    def test_installer_rejects_entrypoint_help_missing_documented_option(self) -> None:
++        entrypoint = self.root / "entrypoint.sh"
++        write_file(entrypoint, "#!/usr/bin/env sh\necho --artifact\n", executable=True)
++        with self.assertRaisesRegex(SETUP.SetupError, "lacks documented options"):
++            SETUP.verify_entrypoint_help(entrypoint)
++
++
++    def test_runtime_split_rejects_symlink_bootstrap_input(self) -> None:
++        bootstrap = self.create_bootstrap_fixture()
++        symlink = self.root / "legacy-link.tar.zst"
++        symlink.symlink_to(bootstrap)
++        with self.assertRaisesRegex(
++            RUNTIME.RuntimePreparationError, "regular non-symlink"
++        ):
++            RUNTIME.prepare(
++                symlink, self.root / "runtime-from-link.tar.zst", sha256(bootstrap), 9
++            )
++
++    def test_project_preparation_rejects_symlink_runtime_input(self) -> None:
++        runtime = self.prepare_runtime_fixture()
++        symlink = self.root / "runtime-link.tar.zst"
++        symlink.symlink_to(runtime)
++        with self.assertRaisesRegex(PROJECT.PreparationError, "regular non-symlink"):
++            PROJECT.prepare(symlink, self.root / "project-from-link"

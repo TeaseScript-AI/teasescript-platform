@@ -1,0 +1,198 @@
++        detail = f": {stderr}" if stderr else ""
++        raise fail(f"zstd rejected archive {archive.name}{detail}")
++    if expected_root not in names:
++        raise fail(f"archive lacks expected root directory: {expected_root}")
++
++
++def run(command: list[str], *, cwd: Path | None = None) -> None:
++    try:
++        completed = subprocess.run(
++            command,
++            cwd=cwd,
++            text=True,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.PIPE,
++            check=False,
++        )
++    except OSError as exc:
++        raise fail(f"cannot run {command[0]}: {exc}") from exc
++    if completed.returncode != 0:
++        detail = completed.stderr.strip() or completed.stdout.strip() or "no output"
++        raise fail(f"command failed ({' '.join(command)}): {detail}")
++
++
++def extract_archive(archive: Path, destination: Path) -> None:
++    destination.mkdir(mode=0o700)
++    run(
++        [
++            "tar",
++            "--zstd",
++            "--extract",
++            "--file",
++            str(archive),
++            "--directory",
++            str(destination),
++            "--no-same-owner",
++        ]
++    )
++
++
++def load_json_object(path: Path, description: str) -> dict[str, Any]:
++    try:
++        value = json.loads(path.read_text(encoding="utf-8"))
++    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
++        raise fail(f"cannot read {description}: {exc}") from exc
++    if not isinstance(value, dict):
++        raise fail(f"{description} must contain a JSON object")
++    return value
++
++
++def verify_checksums(root: Path, filename: str) -> None:
++    checksum_path = root / filename
++    try:
++        lines = checksum_path.read_text(encoding="utf-8").splitlines()
++    except (OSError, UnicodeError) as exc:
++        raise fail(f"cannot read {filename}: {exc}") from exc
++    if not lines:
++        raise fail(f"{filename} is empty")
++    names: set[str] = set()
++    for line_number, line in enumerate(lines, start=1):
++        match = CHECKSUM_LINE_RE.fullmatch(line)
++        if match is None:
++            raise fail(f"invalid {filename} line {line_number}")
++        expected, relative_name = match.groups()
++        relative = PurePosixPath(relative_name)
++        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
++            raise fail(f"unsafe {filename} path: {relative_name!r}")
++        if relative_name in names:
++            raise fail(f"duplicate {filename} entry: {relative_name}")
++        names.add(relative_name)
++        target = root.joinpath(*relative.parts)
++        try:
++            target_stat = target.lstat()
++        except OSError as exc:
++            raise fail(f"missing checksummed file {relative_name}: {exc}") from exc
++        if stat.S_ISLNK(target_stat.st_mode) or not stat.S_ISREG(target_stat.st_mode):
++            raise fail(f"checksummed path is not a regular file: {relative_name}")
++        actual = sha256_file(target)
++        if actual != expected:
++            raise fail(
++                f"SHA-256 mismatch for {relative_name}: expected {expected}, got {actual}"
++            )
++
++
++def verify_entrypoint_help(entrypoint: Path) -> None:
++    try:
++        completed = subprocess.run(
++            ["bash", str(entrypoint), "--help"],
++            text=True,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.PIPE,
++            check=False,
++        )
++    except OSError as exc:
++        raise fail(f"cannot execute normal entry point help: {exc}") from exc
++    if completed.returncode != 0:
++        detail = completed.stderr.strip() or completed.stdout.strip() or "no output"
++        raise fail(f"normal entry point --help failed: {detail}")
++    help_text = completed.stdout + completed.stderr
++    missing = [option for option in ENTRYPOINT_OPTIONS if option not in help_text]
++    if missing:
++        raise fail(f"normal entry point help lacks documented options: {missing}")
++
++
++def verify_payloads(tools_root: Path, runtime_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
++    tools_manifest = load_json_object(tools_root / "TOOLS-MANIFEST.json", "TOOLS-MANIFEST.json")
++    runtime_manifest = load_json_object(
++        runtime_root / "RUNTIME-MANIFEST.json", "RUNTIME-MANIFEST.json"
++    )
++    required_tools = {
++        "formatVersion": 1,
++        "platform": "linux-x64",
++        "layout": "chatgpt-project-agent-tools",
++        "compatibilityId": COMPATIBILITY_ID,
++        "normalEntryPoint": "bin/prepare-chatgpt-project-workspace.sh",
++    }
++    required_runtime = {
++        "formatVersion": 1,
++        "platform": "linux-x64",
++        "layout": "chatgpt-project-agent-runtime",
++        "compatibilityId": COMPATIBILITY_ID,
++    }
++    for field, expected in required_tools.items():
++        if tools_manifest.get(field) != expected:
++            raise fail(f"TOOLS-MANIFEST.json {field} must be {expected!r}")
++    for field, expected in required_runtime.items():
++        if runtime_manifest.get(field) != expected:
++            raise fail(f"RUNTIME-MANIFEST.json {field} must be {expected!r}")
++    if tools_manifest.get("runtimeFormatVersion") != runtime_manifest.get("formatVersion"):
++        raise fail("tools and runtime manifest format versions are incompatible")
++    verify_checksums(tools_root, "TOOLS-SHA256SUMS")
++    verify_checksums(runtime_root, "RUNTIME-SHA256SUMS")
++    required_paths = (
++        tools_root / "bin/prepare-chatgpt-project-workspace.sh",
++        tools_root / "bin/setup-workspace.sh",
++        tools_root / "tools/prepare-source-review.py",
++        runtime_root / "runtime/node-v24.18.0-linux-x64/bin/node",
++        runtime_root / "runtime/node-v24.18.0-linux-x64/bin/npm",
++        runtime_root / "runtime/node-v26.5.0-linux-x64/bin/node",
++        runtime_root / "runtime/node-v26.5.0-linux-x64/bin/npm",
++        runtime_root / "npm-cache-seed/_cacache",
++        runtime_root / "CACHE-SEED-ID",
++    )
++    for path in required_paths:
++        if not path.exists():
++            raise fail(f"payload lacks required path: {path.relative_to(path.parents[1])}")
++    for executable in (
++        tools_root / "bin/prepare-chatgpt-project-workspace.sh",
++        tools_root / "bin/setup-workspace.sh",
++        runtime_root / "runtime/node-v24.18.0-linux-x64/bin/node",
++        runtime_root / "runtime/node-v24.18.0-linux-x64/bin/npm",
++        runtime_root / "runtime/node-v26.5.0-linux-x64/bin/node",
++        runtime_root / "runtime/node-v26.5.0-linux-x64/bin/npm",
++    ):
++        if not executable.is_file() or not os.access(executable, os.X_OK):
++            raise fail(f"required executable is absent or not executable: {executable}")
++    verify_entrypoint_help(tools_root / "bin/prepare-chatgpt-project-workspace.sh")
++    return tools_manifest, runtime_manifest
++
++
++def assemble(tools_root: Path, runtime_root: Path, destination: Path) -> None:
++    destination.mkdir(mode=0o700)
++    seen: set[str] = set()
++    for root in (tools_root, runtime_root):
++        for child in sorted(root.iterdir(), key=lambda item: item.name):
++            if child.name in seen:
++                raise fail(f"tools/runtime top-level conflict: {child.name}")
++            seen.add(child.name)
++            os.replace(child, destination / child.name)
++
++
++def expose_installation(assembled: Path, output: Path, *, replace: bool) -> None:
++    output_parent = output.parent
++    output_parent.mkdir(parents=True, exist_ok=True)
++    if output.is_symlink():
++        raise fail(f"output directory may not be a symlink: {output}")
++    if not output.exists():
++        os.replace(assembled, output)
++        return
++    if not replace:
++        raise fail(f"output directory already exists; use --replace: {output}")
++    if not output.is_dir() or not (output / INSTALL_MARKER).is_file():
++        raise fail("--replace refuses a directory not created by this installer")
++    backup = output_parent / f".{output.name}.previous-{os.getpid()}"
++    if backup.exists():
++        raise fail(f"temporary replacement backup already exists: {backup}")
++    os.replace(output, backup)
++    try:
++        os.replace(assembled, output)
++    except Exception:
++        os.replace(backup, output)
++        raise
++    shutil.rmtree(backup)
++
++
++def main() -> int:
++    args = parse_args()
++    if sys.platform != "linux" or platform.machine() not in {"x86_64", "AMD64"}:
++        raise fail("this installer supports Linux x86_64 only"

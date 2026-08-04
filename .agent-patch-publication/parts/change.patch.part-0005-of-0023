@@ -1,0 +1,144 @@
++The target language for source code, identifiers, TeaseScript keywords, API names, comments, documentation, package metadata, editor text, and website UI is English. Existing Dutch project documents are legacy and should be translated incrementally when substantially revised. Conversation with the user may remain Dutch.
++
++HOW TO USE THE PROJECT FILES
++These instructions provide project context, priorities, and routing. Exact syntax, schemas, algorithms, and unresolved choices belong in the package documents.
++
++For every substantial task:
++1. Read the ChatGPT project `README-FIRST.md` and use its verified acquisition route.
++2. In the verified checkout, read repository `README-FIRST.md`, `CURRENT-DESIGN.md`, `PHASE-STATUS.md`, applicable `AGENTS.md`, the assigned issue or pull request, and the task-specific documents.
++3. Read relevant ADRs in `docs/decisions/` before changing architecture or semantics.
++4. After checkout, repository-local instructions are authoritative. The ChatGPT project derivative is only a startup, acquisition, and routing layer.
++
++Authority and status:
++- An accepted ADR is authoritative for its decision and overrides older descriptive text within its scope.
++- Unless a later accepted ADR or explicitly recorded post-V30 owner decision supersedes a specific point, `docs/specifications/accepted-syntaxes-v30.md` controls accepted syntax and semantics.
++- A proposed ADR or open question is not a final decision.
++- `WISHES.xml` records product intent and history. An active wish is not automatically an accepted implementation decision; ignore superseded wishes.
++- `docs/references/` and source examples are capability research, not required architectures or runtimes.
++- Historical or analysis files are non-authoritative unless a current specification explicitly adopts them.
++- When files conflict, identify the exact conflict and do not silently resolve a product or architecture decision.
++
++DOCUMENT MAP
++- Scope and releases: `docs/PRODUCT.md`
++- Architecture and component boundaries: `docs/ARCHITECTURE.md`
++- TeaseScript and modules: `docs/TEASESCRIPT.md`
++- Runtime, scheduler, media, views, save/resume: `docs/RUNTIME.md`
++- Data model and APIs: `docs/DATA-AND-API.md`
++- TypeScript and Standard Library: `docs/LIBRARIES.md`
++- Isolation, network, validation, privacy: `docs/SECURITY.md`
++- Persistent personalities: `docs/CONTINUOUS-PERSONALITIES.md`
++- Editor, simulator, debugger: `docs/CODE-EDITOR.md`
++- LLM/vision: `docs/LLM-INTEGRATION.md`
++- Expressions and math.js proposal: `docs/MATH-EXPRESSIONS.md`
++- Capability research: `docs/CAPABILITY-MATRIX.md`, `docs/references/`
++- Decisions: `docs/decisions/`
++- Product intent/history: `WISHES.xml`
++
++CORE ARCHITECTURE
++- Follow KISS: choose the simplest solution that meets the current need.
++- Backend: PHP 8 + Laravel; database: PostgreSQL.
++- Laravel is the only public backend and owns accounts, forum, catalog, publishing, moderation, persistent state, media metadata, and APIs.
++- The parser/runtime core is TypeScript compiled to JavaScript. Laravel may invoke a local Node/TypeScript CLI; do not add a second public Node server.
++- Use one engine, one state model, and one save format for finite sessions and long-running personalities.
++- Mobile starts as a responsive PWA. Add a small headless helper only for concrete browser limitations.
++- Do not introduce microservices, Kubernetes, Redis, WebRTC, Electron, native apps, or similar complexity without a documented need and decision.
++
++PLAYER AND PACKAGE BOUNDARIES
++- The complete player, engine, Standard Library, package libraries, standard UI, and custom UI run inside a sandboxed cross-origin iframe, preferably on a separate player origin.
++- Main-site cookies are host-only and unavailable to the player.
++- Pass only selected validated data across parent/player and server boundaries.
++- Package libraries may use HTML, CSS, canvas, DOM APIs, and optional Shadow DOM inside the player iframe, but cannot access the parent DOM, account cookies, forum state, or internal site data.
++- Package code has no unrestricted external network access. Published media uses platform storage/CDN. Future third-party APIs use platform-managed typed integrations.
++
++LANGUAGE AND RUNTIME MODEL
++- Regular content uses `.tease`; advanced libraries use real TypeScript in `.ts`.
++- `main.tease` is the fixed package entry point. Blocks are explicit; indentation is cosmetic.
++- Keep three layers: TeaseScript syntax, small engine primitives, and a reusable Standard Library.
++- Modules are executable `.tease` content; `.ts` libraries are never random content modules.
++- Keep execution deterministic, testable, debuggable, pausable, and resumable.
++- Runtime-managed actions, state, events, handles, and serializable plans must represent behavior that survives pause/resume; do not rely on a saved JavaScript call stack.
++- JSON-safe instruction boundaries do not require persisting after every instruction.
++- math.js remains a proposed restricted expression evaluator unless ADR 0004 is accepted.
++- The deterministic engine remains authoritative. LLMs may provide constrained dialogue or typed results but may not silently rewrite canonical state, bypass rules, or directly control the main site, OS, or devices.
++
++WORKING RULES
++- Do not silently change architecture, language semantics, security boundaries, or product scope.
++- Do not turn open questions into decisions without user approval and the appropriate ADR/status update.
++- Do not invent unrequested properties, systems, or product decisions.
++- Explain unfamiliar terms briefly and use concrete examples; the user knows Arduino C++ and some Python.
++- Add dependencies only after explaining need, alternatives, maintenance impact, and security implications.
++- Keep stable document names; update canonical specifications rather than creating repeated v2/final copies.
++- Work in small verifiable steps. Run formatting, linting, type checking, and relevant tests. Do not weaken tests to hide failures.
++- Before substantial coding, state files to change, major risks, and acceptance criteria.
+diff --git a/tools/chatgpt-project-agent/README.md b/tools/chatgpt-project-agent/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc7445fdc9e442cf26af649b3af67a6ec07f3d76
+--- /dev/null
++++ b/tools/chatgpt-project-agent/README.md
+@@ -0,0 +1,66 @@
++# ChatGPT project-agent distribution
++
++This directory owns the reviewable sources and generated small tools payload for
++agents running inside the TeaseScript ChatGPT project. It does not define Codex
++or generic local-agent policy. After an exact checkout exists, repository-local
++instructions are authoritative.
++
++## Canonical sources
++
++- `project-files/README-FIRST.template.md` is the stable canonical successor for
++  the former project-folder `PROJECT-INSTRUCTIONS.txt`, workflow-context, and
++  bootstrap-guide files. The generated project `README-FIRST.md` consolidates
++  those startup concerns to keep the external folder below the five-file limit.
++- `CODEX-MODEL-REASONING-SELECTION.md` owns the complete model/reasoning guide;
++  the generated project README carries its compact startup summary.
++- `PROJECT-SYSTEM-PROMPT.txt` is the canonical text copied manually into the
++  separate ChatGPT project instruction/system-prompt field. It is deliberately
++  absent from project-folder files and both archives.
++- `tools-root/` and the repository files named by `SOURCE_FILES` in
++  `build-tools-bundle.py` are the editable tools-bundle sources.
++- `bundle/teasescript-chatgpt-project-agent-tools-linux-x64.tar.zst` is a
++  committed deterministic derivative. Do not edit it directly.
++- `setup-teasescript-chatgpt-project-agent.py` safely assembles that tools bundle
++  with the separately managed large runtime payload.
++
++The external runtime payload is not committed to Git because it is about 100 MB
++and changes rarely. `prepare-runtime-payload.py` derives it from a verified
++legacy bootstrap release. Small text or script changes never require rebuilding
++or replacing that runtime.
++
++## Build and verify
++
++```bash
++python3 -B tools/chatgpt-project-agent/build-tools-bundle.py
++python3 -B tools/chatgpt-project-agent/test-chatgpt-project-agent.py
++```
++
++The tools bundle uses deterministic `tar.zst` with zstd ultra level 22 because
++its input is small. Runtime preparation defaults to zstd level 9: still high
++compression, but practical for the approximately 100 MB binary/cache payload.
++XZ is not a distribution format: the current tools benchmark saves only 9
++bytes versus `tar.zst`, while a second archive format and its costly large-payload
++compression would add complexity without a useful project-folder benefit.
++
++Known aggregate checks and archive work can exceed short harness defaults. Set
++an explicit extended timeout before invoking them; normally allow at least 120
++seconds for the aggregate local-agent suite and more for measured runtime
++compression or full repository verification.
++
++## Prepare the external project files
++
++```bash
++python3 -B tools/chatgpt-project-agent/prepare-runtime-payload.py \
++  --bootstrap-archive /path/to/teasescript-agent-bootstrap-linux-x64.tar.zst \
++  --bootstrap-sha256 <sha256> \
++  --output /tmp/teasescript-chatgpt-project-agent-runtime-linux-x64.tar.zst
++
++python3 -B tools/chatgpt-project-agent/prepare-project-files.py \
++  --runtime-archive /tmp/teasescript-chatgpt-project-agent-runtime-linux-x64.tar.zst \
++  --research-archive /path/to/TeaseScript-AI-Research-Archive.zip \
++  --output-directory /tmp/teasescript-chatgpt-project-files
++```
++
++The resulting folder contains at most five stable files. Uploading those files
++and copying `PROJECT-SYSTEM-PROMPT.txt` into the separate project settings field
++remain explicit manual synchronization steps recorded in issue #208.

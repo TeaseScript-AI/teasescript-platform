@@ -1,0 +1,195 @@
+, None)
++
++    def test_installer_rejects_symlink_output_directory(self) -> None:
++        runtime = self.prepare_runtime_fixture()
++        project = self.root / "project-files"
++        PROJECT.prepare(runtime, project, None)
++        target = self.root / "existing-target"
++        target.mkdir()
++        output = self.root / SETUP.INSTALL_DIRECTORY_NAME
++        output.symlink_to(target, target_is_directory=True)
++        completed = subprocess.run(
++            [
++                sys.executable,
++                str(project / PROJECT.SETUP_NAME),
++                "--project-directory",
++                str(project),
++                "--output-directory",
++                str(output),
++            ],
++            text=True,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.PIPE,
++            check=False,
++        )
++        self.assertNotEqual(completed.returncode, 0)
++        self.assertIn("may not be a symlink", completed.stderr)
++        self.assertTrue(target.is_dir())
++
++    def test_rejects_duplicate_artifact_metadata_blocks(self) -> None:
++        readme = self.root / "README-FIRST.md"
++        block = (
++            f"{SETUP.METADATA_BEGIN}\n"
++            '{"formatVersion":1}\n'
++            f"{SETUP.METADATA_END}\n"
++        )
++        readme.write_text(block + block, encoding="utf-8")
++        with self.assertRaisesRegex(SETUP.SetupError, "exactly one"):
++            SETUP.load_artifact_metadata(readme)
++
++
++if __name__ == "__main__":
++    run_compact_unittest("chatgpt-project-agent")
+diff --git a/tools/chatgpt-project-agent/tools-root/README.md b/tools/chatgpt-project-agent/tools-root/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..da257e6b2d5cd13474b3e5b3b49f48128bc67f53
+--- /dev/null
++++ b/tools/chatgpt-project-agent/tools-root/README.md
+@@ -0,0 +1,17 @@
++# TeaseScript ChatGPT project-agent tools
++
++This generated tools payload contains the small maintained scripts needed to
++verify one exact Source Bundle and prepare a local checkout using the separate
++Linux x64 runtime payload. GitHub owns the loose sources. Do not edit this
++archive directly.
++
++Normal entry point:
++
++```bash
++./bin/prepare-chatgpt-project-workspace.sh \
++  --artifact /mnt/data/source-bundle.zip \
++  --artifact-sha256 <sha256> \
++  --expected-head <head-sha> \
++  --expected-merge-base <merge-base-sha> \
++  --output /mnt/data/source-work
++```
+diff --git a/tools/chatgpt-project-agent/tools-root/bin/install-tiktoken-offline.sh b/tools/chatgpt-project-agent/tools-root/bin/install-tiktoken-offline.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..531c49283c3aa456cd87983aed02283e94310ac0
+--- /dev/null
++++ b/tools/chatgpt-project-agent/tools-root/bin/install-tiktoken-offline.sh
+@@ -0,0 +1,65 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++usage() {
++  cat <<'USAGE'
++Usage: install-tiktoken-offline.sh REPOSITORY
++
++Install the optional CPython 3.13 TikToken toolchain into Git-local agent state.
++It is used only by repository-owned token-aware patch-publication tooling.
++USAGE
++}
++
++if [[ ${1-} == -h || ${1-} == --help ]]; then
++  usage
++  exit 0
++fi
++[[ $# == 1 ]] || { usage >&2; exit 2; }
++repo_dir=$(cd -- "$1" && pwd)
++script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
++bundle_dir=$(cd -- "$script_dir/.." && pwd)
++tool_dir="$bundle_dir/optional-tools/tiktoken-cp313-linux-x86_64"
++python_bin=${PYTHON_BIN:-python3.13}
++
++command -v "$python_bin" >/dev/null 2>&1 || {
++  printf 'install-tiktoken-offline: FAIL: CPython 3.13 is required; set PYTHON_BIN when needed\n' >&2
++  exit 1
++}
++python_path=$(command -v "$python_bin")
++git_dir=$(git -C "$repo_dir" rev-parse --absolute-git-dir 2>/dev/null) || {
++  printf 'install-tiktoken-offline: FAIL: target is not a Git worktree: %s\n' "$repo_dir" >&2
++  exit 1
++}
++state_dir="$git_dir/teasescript-agent"
++target="$state_dir/python-cp313"
++vocabulary="$tool_dir/tokenizer/o200k_base.tiktoken"
++mkdir -p "$state_dir"
++
++if [[ -d "$target" ]]; then
++  PYTHONPATH="$target" "$python_path" "$tool_dir/verify-installed.py" "$vocabulary" >/dev/null
++else
++  temporary=$(mktemp -d "$state_dir/.python-cp313.tmp-XXXXXX")
++  trap 'rm -rf -- "${temporary:-}"' EXIT
++  rmdir "$temporary"
++  PYTHON_BIN="$python_path" "$tool_dir/install-offline.sh" "$temporary" >/dev/null
++  mv -- "$temporary" "$target"
++  temporary=
++  trap - EXIT
++fi
++
++cat > "$state_dir/activate-tiktoken.sh" <<ACTIVATE
++export PYTHONPATH=$(printf '%q' "$target")\${PYTHONPATH:+:\$PYTHONPATH}
++export TEASESCRIPT_O200K_TOKENIZER=$(printf '%q' "$vocabulary")
++export TEASESCRIPT_PYTHON313=$(printf '%q' "$python_path")
++ACTIVATE
++cat > "$state_dir/run-python313" <<RUNNER
++#!/usr/bin/env bash
++set -euo pipefail
++export PYTHONPATH=$(printf '%q' "$target")\${PYTHONPATH:+:\$PYTHONPATH}
++export TEASESCRIPT_O200K_TOKENIZER=$(printf '%q' "$vocabulary")
++exec $(printf '%q' "$python_path") "\$@"
++RUNNER
++chmod +x "$state_dir/run-python313"
++
++printf 'install-tiktoken-offline: PASS repo=%s python=%s version=0.13.0 activate=%s run=%s\n' \
++  "$repo_dir" "$($python_path --version 2>&1)" "$state_dir/activate-tiktoken.sh" "$state_dir/run-python313"
+diff --git a/tools/chatgpt-project-agent/tools-root/bin/install-ts-morph-offline.sh b/tools/chatgpt-project-agent/tools-root/bin/install-ts-morph-offline.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..80f68d11c501874039c9f57d5fdea62d0076a11e
+--- /dev/null
++++ b/tools/chatgpt-project-agent/tools-root/bin/install-ts-morph-offline.sh
+@@ -0,0 +1,90 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++usage() {
++  cat <<'USAGE'
++Usage: install-ts-morph-offline.sh REPOSITORY
++
++Install ts-morph 28.0.0 plus its nine dependencies from bundled tarballs.
++The target package.json and root package-lock.json are not passed to npm and
++remain unchanged.
++USAGE
++}
++
++if [[ ${1-} == -h || ${1-} == --help ]]; then
++  usage
++  exit 0
++fi
++[[ $# == 1 ]] || { usage >&2; exit 2; }
++repo_dir=$(cd -- "$1" && pwd)
++script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
++bundle_dir=$(cd -- "$script_dir/.." && pwd)
++tool_dir="$bundle_dir/optional-tools/ts-morph"
++
++command -v npm >/dev/null 2>&1 || {
++  printf 'install-ts-morph-offline: FAIL: npm is required\n' >&2
++  exit 1
++}
++[[ -f "$repo_dir/package.json" ]] || {
++  printf 'install-ts-morph-offline: FAIL: target lacks package.json: %s\n' "$repo_dir" >&2
++  exit 1
++}
++(
++  cd -- "$tool_dir"
++  sha256sum --check --quiet SHA256SUMS
++) || {
++  printf 'install-ts-morph-offline: FAIL: bundled package verification failed\n' >&2
++  exit 1
++}
++
++stage_dir=$(mktemp -d "${TMPDIR:-/tmp}/ts-morph-offline.XXXXXX")
++trap 'rm -rf -- "$stage_dir"' EXIT
++printf '%s\n' '{"private":true}' > "$stage_dir/package.json"
++
++packages=(
++  "$tool_dir/packages/ts-morph-28.0.0.tgz"
++  "$tool_dir/packages/common-0.29.0.tgz"
++  "$tool_dir/packages/code-block-writer-13.0.3.tgz"
++  "$tool_dir/packages/minimatch-10.0.3.tgz"
++  "$tool_dir/packages/path-browserify-1.0.1.tgz"
++  "$tool_dir/packages/tinyglobby-0.2.16.tgz"
++  "$tool_dir/packages/brace-expansion-5.0.1.tgz"
++  "$tool_dir/packages/fdir-6.5.0.tgz"
++  "$tool_dir/packages/picomatch-4.0.5.t
