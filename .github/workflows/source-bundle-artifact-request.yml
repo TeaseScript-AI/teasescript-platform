@@ -11,8 +11,7 @@ jobs:
   regenerate:
     if: >-
       github.event.issue.number == 235 &&
-      startsWith(github.event.comment.body, '/artifact source ') &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      startsWith(github.event.comment.body, '/artifact source ')
     concurrency:
       group: source-bundle-artifact-request
       cancel-in-progress: false
