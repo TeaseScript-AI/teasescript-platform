@@ -130,3 +130,13 @@ Do not prohibit these operations. Use them when their complete result is require
 Successful tests and shell integrations should emit only their concise result. Capture routine Git/helper output and reveal it only on failure. Preserve the failing command, exit status, test identity, traceback or assertion, and useful diagnostic output. For very large shell failures, print a bounded excerpt and retain the complete short-lived CI log artifact.
 
 Do not hide failures merely to save context. The objective is to remove successful and irrelevant output while retaining actionable evidence.
+
+## Distributed local bootstrap
+
+For substantial connector-local work, use the trusted shared
+`teasescript-agent-bootstrap-linux-x64.tar.zst` only through
+`bin/prepare-agent-workspace.sh`. It is the sole normal bootstrap entry point:
+do not require a separate self-test, execute the candidate helper from the
+downloaded artifact, or revive the removed work-package route. Stable names,
+options, and shared-project staging are defined in
+`docs/LOCAL-AGENT-BOOTSTRAP.md`.

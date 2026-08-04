@@ -563,3 +563,12 @@ The final verifier reports:
 - remaining risks.
 
 When the gate passes, open one final pull request from the integration branch to `main`. Prefer squash merge, then delete the milestone and executor branches.
+
+## Connector-local bootstrap
+
+For substantial connector-based work, the distributed bootstrap's
+`bin/prepare-agent-workspace.sh` is the sole normal local entry point. It
+verifies one exact source artifact, creates the clean checkout, and installs the
+committed dependency graph offline. The canonical bootstrap and shared-project
+staging contract is `docs/LOCAL-AGENT-BOOTSTRAP.md`; do not add a routine
+separate self-test or restore the removed work-package route.

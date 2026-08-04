@@ -124,3 +124,14 @@ These are complementary tests, not alternative implementations. The canonical
 For the token-efficient route, keep `tiktoken` and `o200k_base.tiktoken` in the reusable offline toolchain and pass the vocabulary with `--tokenizer` or `TEASESCRIPT_O200K_TOKENIZER`. The conservative default target is 3,000 estimated `o200k_base` tokens per JSON-serialized connector content string, with an independent 12 KiB byte ceiling and fallback.
 
 After preparation, use the canonical `--show-next-action` to expose exactly one connector action at a time; `--show-next-upload` remains an exact compatibility alias. Record blob, tree, and commit SHAs, then record the returned transfer-branch name before the helper exposes one read-only exact branch comparison. Record its `identical` status before publishing. The helper verifies every blob, the payload-only transfer tree, and the final branch target; an interruption after branch creation resumes at the comparison read rather than repeating the write. Use `--reset-upload-index` when a blob must be resent, or `--reset-publication-stage tree|commit|branch` to correct only a post-upload stage while preserving verified blobs. Never print all parts in advance. See `docs/PATCH-PUBLICATION.md` for the complete protocol and examples.
+
+## Prepare the shared project replacement set
+
+`prepare-shared-project.py` validates the repository-owned shared routing
+sources against the accepted Linux x86_64 bootstrap release and stages exactly
+the stable bootstrap archive plus three routing documents. It does not upload
+or modify the ChatGPT project folder. See `docs/LOCAL-AGENT-BOOTSTRAP.md`.
+
+```bash
+python3 -B tools/local-agent/test-prepare-shared-project.py
+```
