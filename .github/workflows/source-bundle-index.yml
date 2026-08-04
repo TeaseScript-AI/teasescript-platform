@@ -68,18 +68,19 @@ jobs:
               [sourceSha] = sourceShas;
             }
 
-            const artifacts = await github.paginate(
-              github.rest.actions.listWorkflowRunArtifacts,
-              {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: run.id,
-                per_page: 100,
-              },
-              (response) => response.data.artifacts,
-            );
+            const artifactResponse = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+              per_page: 100,
+            });
+            const artifacts = artifactResponse.data.artifacts;
+            if (!Array.isArray(artifacts)) {
+              core.setFailed('Producer artifact response did not contain an artifact list.');
+              return;
+            }
             const expectedName = `teasescript-source-${sourceSha}`;
-            const matching = artifacts.filter((artifact) => artifact.name === expectedName);
+            const matching = artifacts.filter((artifact) => artifact?.name === expectedName);
             if (matching.length !== 1) {
               core.setFailed('Producer run did not contain exactly one expected Source-bundle artifact.');
               return;

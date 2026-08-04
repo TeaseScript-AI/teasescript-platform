@@ -7,6 +7,10 @@ on:
 permissions: {}
 
 jobs:
+  mailbox:
+    uses: ./.github/workflows/artifact-mailbox-worker.yml
+    permissions: {actions: read, contents: read, issues: write, pull-requests: read, statuses: write}
+
   prepare:
     if: startsWith(github.event.comment.body, '/publish-patch ')
     runs-on: ubuntu-24.04
