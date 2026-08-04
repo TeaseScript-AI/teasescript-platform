@@ -174,7 +174,7 @@ assert "github.event.issue.number == 235" in artifact_request
 assert "startsWith(github.event.comment.body, '/artifact source ')" in artifact_request
 assert "OWNER" in artifact_request and "MEMBER" in artifact_request and "COLLABORATOR" in artifact_request
 assert "group: source-bundle-artifact-request" in artifact_request
-assert "queue: max" in artifact_request
+assert "queue:" not in artifact_request
 assert "pull-requests: read" in artifact_request
 assert "pull-requests: write" not in artifact_request
 assert "cancel-in-progress: false" in artifact_request
