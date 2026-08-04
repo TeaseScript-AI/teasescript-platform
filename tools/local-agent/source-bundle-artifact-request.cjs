@@ -785,6 +785,14 @@ async function completeRequest({ github, context, input }) {
     allowCurrentRun: true,
   });
 
+  await upsertResultComment({
+    github,
+    context,
+    issueNumber: request.issueNumber,
+    requestCommentId: request.commentId,
+    body: formatReadyComment(resultFromIdentity({ context, request, identity, artifact })),
+  });
+
   await github.rest.repos.createCommitStatus({
     owner: context.repo.owner,
     repo: context.repo.repo,
@@ -793,14 +801,6 @@ async function completeRequest({ github, context, input }) {
     context: STATUS_CONTEXT,
     description: `artifact ${artifact.artifactId} sha256:${artifact.artifactDigest}`,
     target_url: artifact.artifactUrl,
-  });
-
-  await upsertResultComment({
-    github,
-    context,
-    issueNumber: request.issueNumber,
-    requestCommentId: request.commentId,
-    body: formatReadyComment(resultFromIdentity({ context, request, identity, artifact })),
   });
 }
 
@@ -813,6 +813,19 @@ async function reportProductionFailure({ github, context, input }) {
     expectedAuthor: request.author,
     expectedBodyHash: request.bodyHash,
   });
+
+  const marker = resultMarker(request.commentId);
+  const comments = await listAllIssueComments(github, context, request.issueNumber);
+  const readyResultExists = comments.some(
+    (comment) =>
+      hasExpectedResultAuthor(comment) &&
+      typeof comment.body === 'string' &&
+      comment.body.startsWith(`${marker}\n## Artifact ready`),
+  );
+  if (readyResultExists) {
+    return;
+  }
+
   await publishFailure({
     github,
     context,
