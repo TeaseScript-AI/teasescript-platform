@@ -35,29 +35,48 @@ This is both simpler and more context-efficient than requesting complete files o
 
 ## Obtain the exact source artifact
 
-### Current pull-request head
+Use the fixed index first; the request-branch route in
+`DEVELOPMENT-WORKFLOW.md` remains a temporary rollout fallback.
 
-1. Call `get_pr_info` and record the exact head SHA and exact current base-tip SHA.
-2. Call `compare_commits` with those two exact SHAs and record `merge_base_commit.sha`. This merge base is stable in the head history even when the base branch later advances.
-3. Call `fetch_commit_workflow_runs` for the exact head.
-4. Select a successful `Source bundle` run for that head.
-5. Call `fetch_workflow_run_artifacts` and require an unexpired artifact named `teasescript-source-<head-sha>` whose workflow metadata has the same head SHA.
-6. Call `download_workflow_artifact` once.
-7. Pass the returned local ZIP path, GitHub artifact digest, and expected merge base to the trusted preparation helper.
+### Preferred fixed-index lookup
 
-### Implementation from `main`, older source, or missing/expired artifact
+1. Resolve one identity: `main` to the current tip; `sha:<full-sha>` to that
+   commit; or `pr:<number>` to its head SHA, head repository/ref, current base
+   SHA, and `compare_commits.merge_base_commit.sha`.
+2. Call `get_commit_combined_status` for the source SHA and select a successful
+   `source-bundle/artifact-v1` status whose `target_url` is this repository's
+   exact artifact URL.
+3. Parse its run and artifact IDs, call `fetch_workflow_run_artifacts`, and
+   require the exact ID, name `teasescript-source-<source-sha>`, digest,
+   producer run/repository identity, and an unexpired artifact.
+4. Download that numeric ID and run the trusted preparation helper with the
+   exact source SHA and optional PR merge base.
 
-For new implementation work, obtain an exact artifact for the selected `main` commit rather than trying to network-clone the repository. The current connector may not expose push-triggered source-bundle runs through commit-run discovery, so use the connector-native request branch when the automatic artifact cannot be located. The same route regenerates older or expired source. It is defined in `DEVELOPMENT-WORKFLOW.md`:
+A valid hit starts no workflow and posts no comment. Missing status, failed
+download, expiry, malformed URL, or any ID, name, digest, or producer mismatch
+is a cache miss; never substitute an artifact from another PR or SHA.
 
-1. resolve the exact requested source SHA and exact current `main` SHA;
-2. create `source-bundle-request/<source-sha>/<nonce>` at current `main`;
-3. wait 90 seconds before the first status lookup;
-4. if absent, wait 30 seconds before each later lookup;
-5. read status `source-bundle/request/<nonce>` from the requested source commit;
-6. download the reported artifact ID and verify its digest;
-7. confirm the temporary request branch was removed.
+### Regenerate only after a confirmed miss
 
-The connector cannot start `workflow_dispatch`; do not spend calls looking for a dispatch route that is not exposed.
+Post exactly one command on an issue or pull request:
+
+```text
+/artifact source main
+/artifact source pr:225
+/artifact source sha:<full-lowercase-40-character-sha>
+```
+
+Only Write, Maintain, or Admin collaborators may allocate regeneration compute.
+The workflow queues without cancelling, resolves and pins the selector after
+admission, rechecks the index, and returns or creates a seven-day bundle.
+Consume only the result for the exact request-comment ID from
+`github-actions[bot]` user ID `41898282`. It provides the resolved identity,
+artifact metadata, exact `download_workflow_artifact` arguments, and preparation
+command; file and workspace paths include the request-comment ID. Use the
+returned identity as a unit if `main` or the PR moves while waiting.
+
+Until default-branch live proof is complete and `AGENTS.md` changes, the
+request-branch fallback remains supported. No `workflow_dispatch` route exists.
 
 ## Prepare the local checkout
 

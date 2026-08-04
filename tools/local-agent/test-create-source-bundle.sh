@@ -15,6 +15,8 @@ helper="$script_dir/create-source-bundle.sh"
 workflow="$root/.github/workflows/source-bundle.yml"
 request_workflow="$root/.github/workflows/source-bundle-request.yml"
 processor_workflow="$root/.github/workflows/source-bundle-request-processor.yml"
+index_workflow="$root/.github/workflows/source-bundle-index.yml"
+artifact_request_workflow="$root/.github/workflows/source-bundle-artifact-request.yml"
 temp_root=$(mktemp -d)
 trap 'rm -rf "$temp_root"' EXIT
 
@@ -23,7 +25,12 @@ fail() {
   exit 1
 }
 
-python3 - "$workflow" "$request_workflow" "$processor_workflow" <<'PYWORKFLOW'
+python3 - \
+  "$workflow" \
+  "$request_workflow" \
+  "$processor_workflow" \
+  "$index_workflow" \
+  "$artifact_request_workflow" <<'PYWORKFLOW'
 import pathlib
 import re
 import sys
@@ -31,8 +38,14 @@ import sys
 automatic = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 gate = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
 processor = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
+index = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
+artifact_request = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8")
 
-refs = re.findall(r"^\s*uses:\s*([^\s#]+)", automatic + "\n" + processor, re.MULTILINE)
+refs = re.findall(
+    r"^\s*uses:\s*([^\s#]+)",
+    automatic + "\n" + processor + "\n" + index + "\n" + artifact_request,
+    re.MULTILINE,
+)
 assert refs and all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in refs)
 
 assert "workflow_dispatch" not in automatic
@@ -50,6 +63,8 @@ assert "--output ../source-artifact" in automatic
 assert "steps.source.outputs.sha" in automatic
 assert "name: teasescript-source-${{ steps.source.outputs.sha }}" in automatic
 assert "cancel-in-progress: true" in automatic
+assert "retention-days: 7" in automatic
+assert "retention-days: 1" not in automatic
 assert "runs-on: ubuntu-24.04" in automatic
 assert "timeout-minutes: 5" in automatic
 
@@ -90,10 +105,21 @@ assert "artifact_digest: ${{ steps.upload.outputs.artifact-digest }}" in process
 assert "request_validated: ${{ steps.request.outputs.validated }}" in processor
 assert "needs.bundle.outputs.request_validated == 'true'" in processor
 assert "statuses: write" in processor
+assert "actions: read" in processor
 assert "github.rest.repos.createCommitStatus" in processor
+assert "github.rest.actions.getArtifact" in processor
+assert "github.rest.actions.getWorkflowRun" in processor
 assert "/^[0-9a-f]{64}$/.test(artifactDigest)" in processor
 assert "/^sha256:[0-9a-f]{64}$/.test(artifactDigest)" not in processor
-assert "`artifact ${artifactId} sha256:${artifactDigest}`" in processor
+assert "artifact.digest !== `sha256:${artifactDigest}`" in processor
+assert "artifact.name !== `teasescript-source-${sourceSha}`" in processor
+assert "producer.path !== '.github/workflows/source-bundle-request-processor.yml'" in processor
+assert "artifactUrl !== expectedArtifactUrl" in processor
+assert "`artifact ${artifactIdText} sha256:${artifactDigest}`" in processor
+assert "context: 'source-bundle/artifact-v1'" in processor
+assert "if (!succeeded)" in processor
+assert "retention-days: 7" in processor
+assert "retention-days: 1" not in processor
 artifact_digest = "a" * 64
 assert re.fullmatch(r"[0-9a-f]{64}", artifact_digest)
 status_description = f"artifact 8758008910 sha256:{artifact_digest}"
@@ -105,6 +131,64 @@ assert processor.count("timeout-minutes:") == 3
 assert "contents: write" in processor
 assert '--force-with-lease="${request_ref}:${EXPECTED_REQUEST_SHA}"' in processor
 assert "github.rest.git.deleteRef" not in processor
+
+assert re.search(
+    r"^  workflow_run:\n    workflows: \[Source bundle\]\n    types: \[completed\]",
+    index,
+    re.MULTILINE,
+)
+assert "permissions: {}" in index
+assert "actions: read" in index
+assert "statuses: write" in index
+assert "contents:" not in index
+assert "actions/checkout@" not in index
+assert "actions/download-artifact@" not in index
+assert "github.rest.actions.listWorkflowRunArtifacts" in index
+assert "run.pull_requests || []" in index
+assert "new Set(matchingPulls.map((pull) => pull.head.sha))" in index
+assert "pull.head.sha" in index
+assert "run.head_sha" in index
+assert "run.path !== '.github/workflows/source-bundle.yml'" in index
+assert "run.conclusion !== 'success'" in index
+assert "run.repository?.id !== repository.id" in index
+assert "artifact.workflow_run?.id !== run.id" in index
+assert "artifact.expires_at" in index
+assert "context: 'source-bundle/artifact-v1'" in index
+assert "state: 'success'" in index
+assert "core.setFailed" in index
+assert "runs-on: ubuntu-24.04" in index
+assert "timeout-minutes: 3" in index
+
+assert re.search(r"^  issue_comment:\n    types: \[created\]", artifact_request, re.MULTILINE)
+assert "permissions: {}" in artifact_request
+assert "startsWith(github.event.comment.body, '/artifact')" in artifact_request
+assert "OWNER" in artifact_request and "MEMBER" in artifact_request and "COLLABORATOR" in artifact_request
+assert "group: source-bundle-artifact-request" in artifact_request
+assert "queue: max" in artifact_request
+assert "cancel-in-progress: false" in artifact_request
+job_prefix = artifact_request.split("    runs-on:", 1)[0]
+assert job_prefix.index("    if:") < job_prefix.index("    concurrency:")
+assert "actions: read" in artifact_request
+assert "contents: read" in artifact_request
+assert "issues: write" in artifact_request
+assert "pull-requests: read" in artifact_request
+assert "statuses: write" in artifact_request
+assert "contents: write" not in artifact_request
+assert "workflows: write" not in artifact_request
+assert artifact_request.count("uses: actions/checkout@") == 2
+assert "ref: ${{ github.workflow_sha }}" in artifact_request
+assert "repository: ${{ steps.resolve.outputs.source_repository }}" in artifact_request
+assert "ref: ${{ steps.resolve.outputs.source_sha }}" in artifact_request
+assert artifact_request.count("persist-credentials: false") == 2
+assert "source-bundle-artifact-request.cjs" in artifact_request
+assert "request.resolveRequest" in artifact_request
+assert "request.completeRequest" in artifact_request
+assert "request.reportProductionFailure" in artifact_request
+assert "--event-name source-bundle-artifact-request" in artifact_request
+assert "retention-days: 7" in artifact_request
+assert "steps.finalize.outcome != 'success'" in artifact_request
+assert "runs-on: ubuntu-24.04" in artifact_request
+assert "timeout-minutes: 8" in artifact_request
 
 branch_pattern = re.compile(r"^source-bundle-request/([0-9a-f]{40})/([a-z0-9][a-z0-9-]{0,31})$")
 valid_sha = "9a" * 20

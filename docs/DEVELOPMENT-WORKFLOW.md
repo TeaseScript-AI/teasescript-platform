@@ -330,34 +330,102 @@ Closes #123
 
 ## Verified source artifacts for review and handoff
 
-The source-bundle workflows produce short-lived, verifiable Git artifacts when a reviewer, verifier, or network-restricted agent needs an exact repository snapshot with Git history.
+`Source bundle` creates seven-day, verifiable Git artifacts with reachable
+history for each pull-request head update (not the synthetic merge commit) and
+push to `main`.
 
-`Source bundle` runs automatically for:
+Each trusted producer publishes only a successful `source-bundle/artifact-v1`
+status on the bundled source SHA. Its `target_url` is the exact repository
+artifact URL; the artifact API, not the status description, is authoritative
+for numeric ID, exact name `teasescript-source-<source-sha>`, digest, producer
+run/repository, and expiration. The automatic producer's default-branch
+`workflow_run` indexer has only `actions: read` and `statuses: write`; it derives
+the SHA from trusted event identity and validates metadata without checking out
+or downloading content. Branch and comment regenerators validate uploads before
+publishing the same status. Never publish fixed-context `pending` or `failure`,
+which could hide an older valid success.
 
-- every pull-request update, using the exact pull-request head rather than GitHub's synthetic merge commit;
-- every push to `main`, using the exact pushed commit.
+### Zero-compute connector cache path
 
-To regenerate an artifact for an older or expired source revision through the GitHub connector:
+For `main`, `pr:<number>`, or `sha:<full-sha>`:
 
-1. Resolve the full lowercase 40-character source commit SHA and the exact current `main` SHA.
-2. Choose a nonce matching lowercase `[a-z0-9][a-z0-9-]{0,31}`; for example, `agent-149-1`.
-3. Create `source-bundle-request/<source-sha>/<nonce>` at that exact `main` SHA with the connector's `create_branch` action. Do not create an empty commit or add request files.
-4. Wait 90 seconds before the first status lookup, then poll the requested source commit for context `source-bundle/request/<nonce>`.
-   If it is still absent, wait 30 seconds before each retry. These delays reduce unnecessary connector calls but are not completion guarantees because GitHub Actions queue time varies.
-5. On success, parse the status description `artifact <artifact-id> sha256:<artifact-digest>` and pass the numeric ID to `download_workflow_artifact`.
-6. Verify the downloaded artifact and confirm that the temporary request branch was removed.
+1. Resolve one immutable exact source SHA; for `pr:`, retain the PR number,
+   head repository/ref, current base SHA, and exact
+   `compare_commits.merge_base_commit.sha`.
+2. Select that SHA's successful fixed status and parse its exact artifact URL
+   for run and artifact IDs.
+3. Require exact matching artifact ID/name, SHA-256 digest, producer
+   run/repository, and unexpired metadata.
+4. Download by numeric ID and run the trusted preparation command.
 
-The request branch runs only a permissionless gate. A separate `workflow_run` processor loaded from the default branch revalidates the strict branch name, unchanged request SHA, default-branch ancestry even if `main` advances after branch creation, and requested source commit. Revalidation and bundling share one `contents: read` job to avoid an unnecessary runner boundary; the source is still checked out separately and treated only as data. Status publication remains a separate job with only `statuses: write`; cleanup remains a separate job with only `contents: write`, checks out no repository content, and deletes the request ref only through an exact-SHA `--force-with-lease` from an empty temporary Git directory. Creating the repository branch is the request authorization; GitHub continues to enforce repository and artifact access for private repositories.
+Missing status, failed download, or deleted, expired, malformed, mismatched, or
+otherwise unverifiable metadata is a cache miss. A valid hit allocates no
+runner, starts no workflow, posts no comment, and needs no nonce, request branch,
+or run-number search.
 
-The downloaded ZIP contains:
+This route remains additive until default-branch proofs cover same-repository
+and fork PRs, `main`, exact SHA, stale artifacts, concurrent misses, and clean
+workspaces. Do not make it the sole `AGENTS.md` path before then.
+
+### Collaborator-gated regeneration on a confirmed miss
+
+After a confirmed miss, post one strict command on an issue or pull request:
 
 ```text
-repository.bundle
-manifest.json
-SHA256SUMS
+/artifact source main
+/artifact source pr:225
+/artifact source sha:<full-lowercase-40-character-sha>
 ```
 
-Turn the downloaded ZIP into a verified local checkout with a trusted preinstalled copy of the repository-owned helper. For pull-request review, obtain `<review-merge-base-sha>` from `compare_commits.merge_base_commit.sha`, not from the current base-branch tip:
+Before allocating a runner, the default-branch `issue_comment` workflow requires
+OWNER, MEMBER, or COLLABORATOR association. It then requires actor/comment-author
+equality and legacy permission `write` or `admin` (Maintain maps to `write`).
+Read-only, unknown, missing, and API-failure results are rejected. This protects
+compute and storage, not public-source confidentiality.
+
+Authorized requests share one `queue: max`, non-cancelling group up to GitHub's
+supported queue limit. After admission, the workflow pins the selector identity,
+rechecks the fixed status, and returns any valid artifact produced while waiting.
+On a remaining miss, it loads tooling from `github.workflow_sha`, checks out the
+pinned source separately with `persist-credentials: false`, verifies `HEAD`, and
+runs only trusted `create-source-bundle.sh`. Source is data: none of its actions,
+scripts, dependencies, hooks, builds, submodules, or configuration executes.
+
+The result is bound to the exact request-comment ID, author, and body hash and
+must come from the exact `github-actions[bot]` identity, user ID `41898282`;
+other bot/App markers are not authoritative. It returns the original selector,
+resolved identity, artifact ID/name, digest, producer run, expiration, exact
+connector download
+arguments, and preparation command. Paths include the request-comment ID;
+redelivery updates the one authoritative result; `pr:` also returns pinned head
+repository/ref, base SHA, and merge-base SHA. Use the returned identity as a unit
+if the selector moves. This route creates no temporary Git ref.
+
+### Compatibility request-branch fallback
+
+The request-branch route remains an internal rollout fallback, not the normal
+path when the fixed index or collaborator command is available. For an exact
+source SHA:
+
+1. Resolve its full lowercase 40-character SHA and exact current `main` SHA;
+   choose a nonce matching `[a-z0-9][a-z0-9-]{0,31}`.
+2. Create `source-bundle-request/<source-sha>/<nonce>` at that `main` SHA.
+3. Wait 90 seconds, then poll `source-bundle/request/<nonce>` on the source SHA
+   every 30 seconds.
+4. On success, download the reported artifact ID, verify its digest, and confirm
+   deletion of the exact unchanged request ref.
+
+The permissionless create-event gate and default-branch processor revalidate the
+strict name, unchanged request SHA, default-branch ancestry, and requested
+commit. Bundling has only `contents: read`; dynamic/fixed status publication
+has `actions: read` plus `statuses: write`; cleanup checks out no content and
+deletes only the unchanged ref with `--force-with-lease` and `contents: write`.
+
+### Local verification boundary
+
+The ZIP contains exactly `repository.bundle`, `manifest.json`, and
+`SHA256SUMS`. Use the trusted preinstalled repository helper and, for PR review,
+`compare_commits.merge_base_commit.sha` rather than the base-branch tip:
 
 ```shell
 python3 tools/local-agent/prepare-source-review.py \
@@ -369,11 +437,16 @@ python3 tools/local-agent/prepare-source-review.py \
   --output /mnt/data/source-review
 ```
 
-The helper validates the outer digest, ZIP paths and exact payload, internal checksums, manifest identities, complete bundle, expected head and optional merge-base ancestry, checked-out tree, `git fsck`, and clean worktree. It exposes the output path only after every check succeeds and removes the temporary `origin` remote so the result cannot be mistaken for a network clone.
+The helper verifies the outer digest, ZIP paths/payload, internal checksums,
+manifest identities, complete bundle, expected head and optional merge-base
+ancestry, checked-out tree, `git fsck`, and clean worktree. It exposes output
+only after success and removes temporary `origin`.
 
-Connector-based ChatGPT agents must use the local-first route in `CHATGPT-GITHUB-WORKFLOW.md`. In that environment, do not try `git clone` or repeated connector file reads as the normal repository acquisition path; download one exact source artifact, prepare it locally, and reserve the connector for live GitHub state and writes.
-
-A source artifact contains committed repository files and reachable Git history for the selected commit. It does not contain issues, pull-request comments or reviews, Actions history, repository settings, secrets, credentials, `node_modules`, or uncommitted local changes. Artifacts expire after one day; create a new request branch when a fresh copy is required.
+Connector agents follow `CHATGPT-GITHUB-WORKFLOW.md`; do not substitute network
+Git, run-number searches, undocumented request branches, or unrelated-PR
+artifacts. A source artifact contains committed files and reachable history for
+the selected commit, not issues, PR comments/reviews, Actions history, settings,
+secrets, credentials, `node_modules`, or uncommitted changes.
 
 ## Coordinated multi-agent model
 

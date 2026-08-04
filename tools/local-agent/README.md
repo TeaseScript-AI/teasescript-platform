@@ -87,6 +87,19 @@ Tests:
 python3 -B tools/local-agent/test-prepare-source-review.py
 ```
 
+## Source-bundle artifact request logic
+
+Trusted default-branch `source-bundle-artifact-request.cjs` pins selectors,
+authorizes collaborators, validates index and producer metadata, binds one
+authenticated result to the request, and emits exact download and preparation
+instructions without executing selected source.
+
+Focused tests:
+
+```bash
+node tools/local-agent/test-source-bundle-artifact-request.cjs
+```
+
 ## Prepare multipart patch publication
 
 `prepare-patch-publication.py` creates a verified raw Git patch between an exact base commit and the tested current `HEAD`, splits it into UTF-8 parts, writes the V2 manifest, proves reconstruction, and creates a local sequential upload plan. It never merges, rebases, squashes, commits, or pushes.
