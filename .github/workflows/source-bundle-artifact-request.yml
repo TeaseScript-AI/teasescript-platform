@@ -10,7 +10,8 @@ permissions: {}
 jobs:
   regenerate:
     if: >-
-      startsWith(github.event.comment.body, '/artifact') &&
+      github.event.issue.number == 235 &&
+      startsWith(github.event.comment.body, '/artifact source ') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     concurrency:
       group: source-bundle-artifact-request
@@ -22,7 +23,7 @@ jobs:
       actions: read
       contents: read
       issues: write
-      pull-requests: write
+      pull-requests: read
       statuses: write
     steps:
       - name: Check out trusted artifact tooling
@@ -147,6 +148,7 @@ jobs:
           REQUEST_BODY_SHA256: ${{ steps.resolve.outputs.request_body_sha256 }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           SELECTOR: ${{ steps.resolve.outputs.selector }}
+          SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}
         with:
           script: |
             const request = require('./tooling/tools/local-agent/source-bundle-artifact-request.cjs');
@@ -159,5 +161,6 @@ jobs:
                 requestBodySha256: process.env.REQUEST_BODY_SHA256,
                 issueNumber: process.env.ISSUE_NUMBER,
                 selector: process.env.SELECTOR,
+                sourceSha: process.env.SOURCE_SHA,
               },
             });

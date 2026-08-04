@@ -17,6 +17,9 @@ request_workflow="$root/.github/workflows/source-bundle-request.yml"
 processor_workflow="$root/.github/workflows/source-bundle-request-processor.yml"
 index_workflow="$root/.github/workflows/source-bundle-index.yml"
 artifact_request_workflow="$root/.github/workflows/source-bundle-artifact-request.yml"
+chatgpt_workflow="$root/docs/CHATGPT-GITHUB-WORKFLOW.md"
+development_workflow="$root/docs/DEVELOPMENT-WORKFLOW.md"
+agents_file="$root/AGENTS.md"
 temp_root=$(mktemp -d)
 trap 'rm -rf "$temp_root"' EXIT
 
@@ -30,7 +33,10 @@ python3 - \
   "$request_workflow" \
   "$processor_workflow" \
   "$index_workflow" \
-  "$artifact_request_workflow" <<'PYWORKFLOW'
+  "$artifact_request_workflow" \
+  "$chatgpt_workflow" \
+  "$development_workflow" \
+  "$agents_file" <<'PYWORKFLOW'
 import pathlib
 import re
 import sys
@@ -40,6 +46,9 @@ gate = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
 processor = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 index = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
 artifact_request = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8")
+chatgpt = pathlib.Path(sys.argv[6]).read_text(encoding="utf-8")
+development = pathlib.Path(sys.argv[7]).read_text(encoding="utf-8")
+agents = pathlib.Path(sys.argv[8]).read_text(encoding="utf-8")
 
 refs = re.findall(
     r"^\s*uses:\s*([^\s#]+)",
@@ -161,11 +170,13 @@ assert "timeout-minutes: 3" in index
 
 assert re.search(r"^  issue_comment:\n    types: \[created\]", artifact_request, re.MULTILINE)
 assert "permissions: {}" in artifact_request
-assert "startsWith(github.event.comment.body, '/artifact')" in artifact_request
+assert "github.event.issue.number == 235" in artifact_request
+assert "startsWith(github.event.comment.body, '/artifact source ')" in artifact_request
 assert "OWNER" in artifact_request and "MEMBER" in artifact_request and "COLLABORATOR" in artifact_request
 assert "group: source-bundle-artifact-request" in artifact_request
 assert "queue: max" in artifact_request
-assert "pull-requests: write" in artifact_request
+assert "pull-requests: read" in artifact_request
+assert "pull-requests: write" not in artifact_request
 assert "cancel-in-progress: false" in artifact_request
 job_prefix = artifact_request.split("    runs-on:", 1)[0]
 assert job_prefix.index("    if:") < job_prefix.index("    concurrency:")
@@ -187,8 +198,26 @@ assert "request.reportProductionFailure" in artifact_request
 assert "--event-name source-bundle-artifact-request" in artifact_request
 assert "retention-days: 7" in artifact_request
 assert "steps.finalize.outcome != 'success'" in artifact_request
+assert "SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}" in artifact_request
+assert "sourceSha: process.env.SOURCE_SHA" in artifact_request
 assert "runs-on: ubuntu-24.04" in artifact_request
 assert "timeout-minutes: 8" in artifact_request
+
+assert "Artifact mailbox #235" in agents
+assert "valid hit is downloaded immediately" in agents
+assert "Do not invent a mailbox delay" in " ".join(agents.split())
+assert "Issue [#235]" in chatgpt
+assert "Commands elsewhere are ignored" in chatgpt
+assert "A valid hit starts no workflow, posts no comment, and requires no wait" in chatgpt
+assert "Do not copy the compatibility route's 90-second wait" in chatgpt
+assert "Issue `#235` is the sole Artifact mailbox" in development
+assert "skipped for every other issue or pull request" in development
+assert "A valid hit allocates no runner, starts no workflow, posts no comment, and waits" in development
+assert "Do not inherit the fallback's 90-second delay" in development
+assert "every 10 seconds" in development
+for document in (chatgpt, development, agents):
+    for match in re.finditer(r"poll(?:ing)?[^\n]{0,80}?(\d+)[ -]second", document, re.IGNORECASE):
+        assert int(match.group(1)) >= 10, match.group(0)
 
 branch_pattern = re.compile(r"^source-bundle-request/([0-9a-f]{40})/([a-z0-9][a-z0-9-]{0,31})$")
 valid_sha = "9a" * 20

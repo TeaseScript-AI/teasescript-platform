@@ -4,7 +4,12 @@ const crypto = require('node:crypto');
 
 const ARTIFACT_KIND = 'source';
 const STATUS_CONTEXT = 'source-bundle/artifact-v1';
-const RESULT_MARKER_VERSION = 1;
+const MAILBOX_ISSUE_NUMBER = 235;
+const REGISTRY_VERSION = 1;
+const REGISTRY_LIMIT = 10;
+const REGISTRY_MARKER = `<!-- source-bundle-artifact-registry:v${REGISTRY_VERSION} -->`;
+const REGISTRY_STATE_PREFIX = `<!-- source-bundle-artifact-registry-state:v${REGISTRY_VERSION}:`;
+const FAILURE_REASON_LIMIT = 240;
 const COMMAND_PATTERN = /^\/artifact source (main|pr:[1-9][0-9]*|sha:[0-9a-f]{40})$/;
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -35,7 +40,7 @@ function requireFullSha(value, label) {
 }
 
 function parseCommand(body) {
-  const normalized = typeof body === 'string' ? body.trim() : '';
+  const normalized = typeof body === 'string' ? body : '';
   const match = COMMAND_PATTERN.exec(normalized);
   if (!match) {
     throw new ArtifactRequestError(
@@ -129,10 +134,6 @@ function verifyAutomaticProducerSource(run, repositoryId, sourceSha) {
   throw new ArtifactRequestError('The automatic Source-bundle producer event was not supported.');
 }
 
-function resultMarker(commentId) {
-  return `<!-- source-bundle-artifact-result:v${RESULT_MARKER_VERSION} request-comment:${commentId} -->`;
-}
-
 function requestSuffix(requestCommentId) {
   if (!Number.isSafeInteger(requestCommentId) || requestCommentId <= 0) {
     throw new ArtifactRequestError('The result request-comment identity is invalid.');
@@ -148,25 +149,19 @@ function workspaceName(sourceSha, requestCommentId) {
   return `source-${sourceSha.slice(0, 12)}-${requestSuffix(requestCommentId)}`;
 }
 
-function formatDownloadInstruction(result) {
-  return [
-    'GitHub.download_workflow_artifact',
-    JSON.stringify(
-      {
-        repo_full_name: result.repository,
-        artifact_id: result.artifactId,
-        file_name: artifactFileName(result.sourceSha, result.requestCommentId),
-      },
-      null,
-      2,
-    ),
-  ].join('\n');
+function formatDownloadArguments(result) {
+  return {
+    repo_full_name: result.repository,
+    artifact_id: result.artifactId,
+    file_name: artifactFileName(result.sourceSha, result.requestCommentIds[0]),
+  };
 }
 
 function formatPreparationCommand(result) {
+  const requestCommentId = result.requestCommentIds[0];
   const lines = [
     `${PREPARATION_HELPER} \\`,
-    `  --artifact /mnt/data/${artifactFileName(result.sourceSha, result.requestCommentId)} \\`,
+    `  --artifact /mnt/data/${artifactFileName(result.sourceSha, requestCommentId)} \\`,
     `  --artifact-sha256 ${result.artifactDigest} \\`,
     `  --expected-repository ${result.repository} \\`,
     `  --expected-head ${result.sourceSha} \\`,
@@ -174,68 +169,236 @@ function formatPreparationCommand(result) {
   if (result.mergeBaseSha) {
     lines.push(`  --expected-merge-base ${result.mergeBaseSha} \\`);
   }
-  lines.push(`  --output /mnt/data/${workspaceName(result.sourceSha, result.requestCommentId)}`);
+  lines.push(`  --output /mnt/data/${workspaceName(result.sourceSha, requestCommentId)}`);
   return lines.join('\n');
 }
 
-function formatReadyComment(result) {
-  const lines = [
-    resultMarker(result.requestCommentId),
-    '## Artifact ready',
-    '',
-    `- Kind: \`${ARTIFACT_KIND}\``,
-    `- Requested: \`${result.selector}\``,
-    `- Resolved SHA: \`${result.sourceSha}\``,
-    `- Source repository: \`${result.sourceRepository}\``,
-    `- Source ref: \`${result.sourceRef}\``,
-  ];
+function normalizeTimestamp(value, label) {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+    throw new ArtifactRequestError(`${label} did not contain a valid UTC timestamp.`);
+  }
+  return new Date(value).toISOString();
+}
 
-  if (result.pullNumber) {
+function normalizeRequestIds(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ArtifactRequestError('A registry entry did not contain a request-comment identity.');
+  }
+  const ids = [];
+  for (const item of value) {
+    const id = Number(item);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new ArtifactRequestError('A registry entry contained an invalid request-comment identity.');
+    }
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function normalizeRegistryEntry(entry) {
+  if (!entry || typeof entry !== 'object' || !['ready', 'failed'].includes(entry.state)) {
+    throw new ArtifactRequestError('The Artifact mailbox registry contained an invalid entry state.');
+  }
+  const normalized = {
+    state: entry.state,
+    requestCommentIds: normalizeRequestIds(entry.requestCommentIds),
+    selector: typeof entry.selector === 'string' && entry.selector ? entry.selector : 'unresolved',
+    sourceSha: entry.sourceSha || null,
+    updatedAt: normalizeTimestamp(entry.updatedAt, 'A registry entry'),
+  };
+
+  if (entry.sourceSha !== null && entry.sourceSha !== undefined) {
+    normalized.sourceSha = requireFullSha(entry.sourceSha, 'A registry source identity');
+  }
+
+  if (entry.state === 'failed') {
+    normalized.reason = compactFailureReason(entry.reason || 'Artifact request failed.');
+    normalized.runUrl = typeof entry.runUrl === 'string' ? entry.runUrl : '';
+    return normalized;
+  }
+
+  const artifactId = Number(entry.artifactId);
+  const producerRunId = Number(entry.producerRunId);
+  if (!Number.isSafeInteger(artifactId) || artifactId <= 0) {
+    throw new ArtifactRequestError('A ready registry entry contained an invalid artifact ID.');
+  }
+  if (!Number.isSafeInteger(producerRunId) || producerRunId <= 0) {
+    throw new ArtifactRequestError('A ready registry entry contained an invalid producer run ID.');
+  }
+  if (!normalized.sourceSha) {
+    throw new ArtifactRequestError('A ready registry entry did not contain a resolved source SHA.');
+  }
+
+  Object.assign(normalized, {
+    repository: entry.repository,
+    sourceRepository: entry.sourceRepository,
+    sourceRef: entry.sourceRef,
+    pullNumber: entry.pullNumber || null,
+    headRepository: entry.headRepository || null,
+    headRef: entry.headRef || null,
+    baseSha: entry.baseSha || null,
+    mergeBaseSha: entry.mergeBaseSha || null,
+    artifactId,
+    artifactName: entry.artifactName,
+    artifactDigest: normalizeDigest(entry.artifactDigest),
+    producerRunId,
+    artifactUrl: entry.artifactUrl,
+    expiresAt: entry.expiresAt ? normalizeTimestamp(entry.expiresAt, 'A registry expiry') : null,
+  });
+  if (!normalized.repository || !normalized.sourceRepository || !normalized.sourceRef || !normalized.artifactUrl) {
+    throw new ArtifactRequestError('A ready registry entry was incomplete.');
+  }
+  if (normalized.pullNumber) {
+    normalized.pullNumber = Number(normalized.pullNumber);
+    if (!Number.isSafeInteger(normalized.pullNumber) || normalized.pullNumber <= 0) {
+      throw new ArtifactRequestError('A ready registry entry contained an invalid pull-request number.');
+    }
+    normalized.baseSha = requireFullSha(normalized.baseSha, 'A registry pull-request base');
+    normalized.mergeBaseSha = requireFullSha(normalized.mergeBaseSha, 'A registry pull-request merge base');
+    if (!normalized.headRepository || !normalized.headRef) {
+      throw new ArtifactRequestError('A ready registry entry contained an incomplete pull-request head identity.');
+    }
+  }
+  return normalized;
+}
+
+function encodeRegistryState(entries) {
+  return Buffer.from(JSON.stringify({ entries }), 'utf8').toString('base64url');
+}
+
+function parseRegistryComment(body) {
+  if (typeof body !== 'string' || !body.startsWith(`${REGISTRY_MARKER}\n${REGISTRY_STATE_PREFIX}`)) {
+    throw new ArtifactRequestError('The Artifact mailbox registry marker was invalid.');
+  }
+  const stateLine = body.split('\n', 3)[1];
+  if (!stateLine.endsWith(' -->')) {
+    throw new ArtifactRequestError('The Artifact mailbox registry state marker was invalid.');
+  }
+  const encoded = stateLine.slice(REGISTRY_STATE_PREFIX.length, -4);
+  let decoded;
+  try {
+    decoded = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+  } catch {
+    throw new ArtifactRequestError('The Artifact mailbox registry state could not be decoded.');
+  }
+  if (!decoded || !Array.isArray(decoded.entries)) {
+    throw new ArtifactRequestError('The Artifact mailbox registry state was incomplete.');
+  }
+  return decoded.entries.map(normalizeRegistryEntry);
+}
+
+function compactFailureReason(value) {
+  const compact = String(value || 'Artifact request failed.')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (compact.length <= FAILURE_REASON_LIMIT) return compact;
+  return `${compact.slice(0, FAILURE_REASON_LIMIT - 1)}…`;
+}
+
+function formatInlineCode(value) {
+  const text = String(value);
+  const runs = text.match(/`+/g) || [];
+  const longestRun = runs.reduce((longest, run) => Math.max(longest, run.length), 0);
+  const fence = '`'.repeat(longestRun + 1);
+  const padding = text.startsWith('`') || text.endsWith('`') ? ' ' : '';
+  return `${fence}${padding}${text}${padding}${fence}`;
+}
+
+function formatRegistryEntry(entry) {
+  const resolved = entry.sourceSha || 'unresolved';
+  const lines = [
+    `### \`${entry.selector}\` -> \`${resolved}\` · ${entry.state} · \`${entry.updatedAt}\``,
+    '',
+  ];
+  if (entry.state === 'failed') {
     lines.push(
-      `- Pull request: \`#${result.pullNumber}\``,
-      `- PR head: \`${result.headRepository}:${result.headRef}\``,
-      `- PR base SHA: \`${result.baseSha}\``,
-      `- PR merge-base SHA: \`${result.mergeBaseSha}\``,
+      `\`request ${entry.requestCommentIds[0]}\` · run ${entry.runUrl || 'unavailable'}`,
+      '',
+      `Reason: ${entry.reason}`,
     );
+    return lines.join('\n');
   }
 
   lines.push(
-    `- Artifact ID: \`${result.artifactId}\``,
-    `- Artifact name: \`${result.artifactName}\``,
-    `- SHA-256: \`${result.artifactDigest}\``,
-    `- Producer run: \`${result.producerRunId}\``,
-    `- Artifact URL: ${result.artifactUrl}`,
-    `- Expires: \`${result.expiresAt || 'unavailable'}\``,
-    `- Request comment: \`${result.requestCommentId}\``,
+    `\`requests ${entry.requestCommentIds.join(', ')}\` · \`artifact ${entry.artifactId}\` · \`run ${entry.producerRunId}\` · \`expires ${entry.expiresAt || 'unavailable'}\``,
+  );
+  if (entry.pullNumber) {
+    lines.push(
+      `\`PR #${entry.pullNumber}\`` +
+        ` · head ${formatInlineCode(`${entry.headRepository}:${entry.headRef}`)}` +
+        ` · base ${formatInlineCode(entry.baseSha)}` +
+        ` · merge-base ${formatInlineCode(entry.mergeBaseSha)}`,
+    );
+  }
+  lines.push(
     '',
-    '### Connector download',
+    '`GitHub.download_workflow_artifact`',
     '',
-    '```text',
-    formatDownloadInstruction(result),
+    '```json',
+    JSON.stringify(formatDownloadArguments(entry)),
     '```',
-    '',
-    '### Local preparation',
     '',
     '```shell',
-    formatPreparationCommand(result),
+    formatPreparationCommand(entry),
     '```',
   );
-
   return lines.join('\n');
 }
 
-function formatFailureComment({ requestCommentId, selector, message, runUrl }) {
-  return [
-    resultMarker(requestCommentId),
-    '## Artifact request failed',
+function formatRegistryComment(entries) {
+  const normalized = entries.map(normalizeRegistryEntry);
+  const lines = [
+    REGISTRY_MARKER,
+    `${REGISTRY_STATE_PREFIX}${encodeRegistryState(normalized)} -->`,
+    '# Artifact mailbox registry',
     '',
-    `- Requested: \`${selector || 'unresolved'}\``,
-    `- Request comment: \`${requestCommentId}\``,
-    `- Reason: ${message}`,
-    `- Producer run: ${runUrl}`,
-    '',
-    'No authoritative artifact result was published for this request.',
-  ].join('\n');
+    'Newest entries first. Match the exact `request <id>` or `requests <id, ...>` value.',
+  ];
+  for (const entry of normalized) {
+    lines.push('', formatRegistryEntry(entry));
+  }
+  return lines.join('\n');
+}
+
+function isExpiredEntry(entry, nowMs) {
+  return entry.state === 'ready' && entry.expiresAt && Date.parse(entry.expiresAt) <= nowMs;
+}
+
+function sameReadyArtifact(left, right) {
+  return (
+    left.state === 'ready' &&
+    right.state === 'ready' &&
+    left.sourceSha === right.sourceSha &&
+    left.artifactId === right.artifactId &&
+    left.artifactDigest === right.artifactDigest &&
+    left.artifactUrl === right.artifactUrl
+  );
+}
+
+function mergeRegistryEntries(existingEntries, incomingEntry, now = new Date()) {
+  const nowMs = now.getTime();
+  const incoming = normalizeRegistryEntry(incomingEntry);
+  const incomingIds = new Set(incoming.requestCommentIds);
+  const retained = existingEntries
+    .map(normalizeRegistryEntry)
+    .filter((entry) => !isExpiredEntry(entry, nowMs))
+    .filter((entry) => !entry.requestCommentIds.some((id) => incomingIds.has(id)));
+
+  if (incoming.state === 'ready') {
+    const equivalentIndex = retained.findIndex((entry) => sameReadyArtifact(entry, incoming));
+    if (equivalentIndex >= 0) {
+      const equivalent = retained.splice(equivalentIndex, 1)[0];
+      incoming.requestCommentIds = normalizeRequestIds([
+        ...incoming.requestCommentIds,
+        ...equivalent.requestCommentIds,
+      ]);
+    }
+  }
+
+  return [incoming, ...retained]
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+    .slice(0, REGISTRY_LIMIT);
 }
 
 async function listAllIssueComments(github, context, issueNumber) {
@@ -262,41 +425,58 @@ function hasExpectedResultAuthor(comment) {
 function requireExpectedResultAuthor(comment) {
   if (!hasExpectedResultAuthor(comment)) {
     throw new ArtifactRequestError(
-      `The result comment was not authored by the expected ${RESULT_BOT_LOGIN} identity.`,
+      `The registry comment was not authored by the expected ${RESULT_BOT_LOGIN} identity.`,
     );
   }
   return comment;
 }
 
-async function upsertResultComment({ github, context, issueNumber, requestCommentId, body }) {
-  const marker = resultMarker(requestCommentId);
+async function readRegistry({ github, context, issueNumber = MAILBOX_ISSUE_NUMBER }) {
   const comments = await listAllIssueComments(github, context, issueNumber);
-  const matching = comments
-    .filter(
-      (comment) =>
-        hasExpectedResultAuthor(comment) &&
-        typeof comment.body === 'string' &&
-        comment.body.startsWith(marker),
-    )
-    .sort((left, right) => right.id - left.id);
+  const matching = comments.filter(
+    (comment) =>
+      hasExpectedResultAuthor(comment) &&
+      typeof comment.body === 'string' &&
+      comment.body.startsWith(REGISTRY_MARKER),
+  );
+  if (matching.length > 1) {
+    throw new ArtifactRequestError('More than one authoritative Artifact mailbox registry comment exists.');
+  }
+  if (matching.length === 0) return { comment: null, entries: [] };
+  return { comment: matching[0], entries: parseRegistryComment(matching[0].body) };
+}
 
-  if (matching.length > 0) {
-    const updated = await github.rest.issues.updateComment({
+function findRegistryEntry(entries, requestCommentId) {
+  return entries.find((entry) => entry.requestCommentIds.includes(requestCommentId)) || null;
+}
+
+async function upsertRegistryEntry({ github, context, entry }) {
+  const registry = await readRegistry({ github, context });
+  const entries = mergeRegistryEntries(registry.entries, entry);
+  const body = formatRegistryComment(entries);
+  let response;
+  if (registry.comment) {
+    response = await github.rest.issues.updateComment({
       owner: context.repo.owner,
       repo: context.repo.repo,
-      comment_id: matching[0].id,
+      comment_id: registry.comment.id,
       body,
     });
-    return requireExpectedResultAuthor(updated.data);
+  } else {
+    response = await github.rest.issues.createComment({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      issue_number: MAILBOX_ISSUE_NUMBER,
+      body,
+    });
   }
-
-  const created = await github.rest.issues.createComment({
-    owner: context.repo.owner,
-    repo: context.repo.repo,
-    issue_number: issueNumber,
-    body,
-  });
-  return requireExpectedResultAuthor(created.data);
+  requireExpectedResultAuthor(response.data);
+  const persistedEntries = parseRegistryComment(response.data.body);
+  const persisted = findRegistryEntry(persistedEntries, entry.requestCommentIds[0]);
+  if (!persisted || persisted.state !== entry.state) {
+    throw new ArtifactRequestError('The authoritative registry update did not preserve the request result.');
+  }
+  return persisted;
 }
 
 async function getLiveRequestComment({ github, context, requestCommentId, expectedAuthor, expectedBodyHash }) {
@@ -587,10 +767,11 @@ function setIdentityOutputs(core, identity, request) {
   core.setOutput('merge_base_sha', identity.mergeBaseSha || '');
 }
 
-function resultFromIdentity({ context, request, identity, artifact }) {
+function resultFromIdentity({ context, request, identity, artifact, updatedAt = new Date().toISOString() }) {
   return {
+    state: 'ready',
     repository: `${context.repo.owner}/${context.repo.repo}`,
-    requestCommentId: request.commentId,
+    requestCommentIds: [request.commentId],
     selector: identity.selector,
     sourceSha: identity.sourceSha,
     sourceRepository: identity.sourceRepository,
@@ -600,18 +781,75 @@ function resultFromIdentity({ context, request, identity, artifact }) {
     headRef: identity.headRef,
     baseSha: identity.baseSha,
     mergeBaseSha: identity.mergeBaseSha,
+    updatedAt,
     ...artifact,
   };
 }
 
-async function publishFailure({ github, context, issueNumber, requestCommentId, selector, message }) {
-  const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-  await upsertResultComment({
+function failureEntry({ context, requestCommentId, selector, sourceSha = null, message }) {
+  return {
+    state: 'failed',
+    requestCommentIds: [requestCommentId],
+    selector: selector || 'unresolved',
+    sourceSha,
+    updatedAt: new Date().toISOString(),
+    reason: compactFailureReason(message),
+    runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+  };
+}
+
+async function registryEntryForRequest({ github, context, requestCommentId }) {
+  const registry = await readRegistry({ github, context });
+  return findRegistryEntry(registry.entries, requestCommentId);
+}
+
+async function cleanupRequestComment({ github, context, request }) {
+  let live;
+  try {
+    live = await getLiveRequestComment({
+      github,
+      context,
+      requestCommentId: request.commentId,
+      expectedAuthor: request.author,
+      expectedBodyHash: request.bodyHash,
+    });
+  } catch (error) {
+    if (error.status === 404) {
+      const persisted = await registryEntryForRequest({
+        github,
+        context,
+        requestCommentId: request.commentId,
+      });
+      if (persisted) return false;
+    }
+    throw error;
+  }
+  if (live.id !== request.commentId) {
+    throw new ArtifactRequestError('The cleanup target did not match the exact request comment.');
+  }
+  try {
+    await github.rest.issues.deleteComment({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      comment_id: request.commentId,
+    });
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+  return true;
+}
+
+async function publishFailure({ github, context, request, selector, sourceSha, message }) {
+  return upsertRegistryEntry({
     github,
     context,
-    issueNumber,
-    requestCommentId,
-    body: formatFailureComment({ requestCommentId, selector, message, runUrl }),
+    entry: failureEntry({
+      context,
+      requestCommentId: request.commentId,
+      selector,
+      sourceSha,
+      message,
+    }),
   });
 }
 
@@ -626,47 +864,94 @@ async function resolveRequest({ github, context, core }) {
   };
   request.bodyHash = hashRequestBody(request.body);
   let selector = null;
+  let sourceSha = null;
 
   try {
-    if (!Number.isSafeInteger(request.commentId) || !Number.isSafeInteger(request.issueNumber) || !request.author) {
+    if (
+      !Number.isSafeInteger(request.commentId) ||
+      !Number.isSafeInteger(request.issueNumber) ||
+      !request.author
+    ) {
       throw new ArtifactRequestError('The issue-comment event did not contain a complete request identity.');
     }
-    const liveComment = await getLiveRequestComment({
-      github,
-      context,
-      requestCommentId: request.commentId,
-      expectedAuthor: request.author,
-      expectedBodyHash: request.bodyHash,
-    });
+    if (request.issueNumber !== MAILBOX_ISSUE_NUMBER) {
+      throw new ArtifactRequestError(`Artifact requests are accepted only in issue #${MAILBOX_ISSUE_NUMBER}.`);
+    }
+
+    let liveComment;
+    try {
+      liveComment = await getLiveRequestComment({
+        github,
+        context,
+        requestCommentId: request.commentId,
+        expectedAuthor: request.author,
+        expectedBodyHash: request.bodyHash,
+      });
+    } catch (error) {
+      if (error.status === 404) {
+        const persisted = await registryEntryForRequest({
+          github,
+          context,
+          requestCommentId: request.commentId,
+        });
+        if (persisted) {
+          core.setOutput('resolved', 'false');
+          core.setOutput('cache_hit', persisted.state === 'ready' ? 'true' : 'false');
+          return;
+        }
+      }
+      throw error;
+    }
+
     await authorizeRequest({ github, context, author: request.author });
     const parsed = parseCommand(liveComment.body);
     selector = parsed.selector;
     const identity = await resolveSelector({ github, context, parsed });
+    sourceSha = identity.sourceSha;
     setIdentityOutputs(core, identity, request);
 
     const cached = await findCachedArtifact({ github, context, sourceSha: identity.sourceSha });
     if (cached) {
       core.setOutput('cache_hit', 'true');
-      await upsertResultComment({
+      await upsertRegistryEntry({
         github,
         context,
-        issueNumber: request.issueNumber,
-        requestCommentId: request.commentId,
-        body: formatReadyComment(resultFromIdentity({ context, request, identity, artifact: cached })),
+        entry: resultFromIdentity({ context, request, identity, artifact: cached }),
       });
+      await cleanupRequestComment({ github, context, request });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     core.setOutput('resolved', 'false');
-    if (Number.isSafeInteger(request.commentId) && Number.isSafeInteger(request.issueNumber)) {
-      await publishFailure({
-        github,
-        context,
-        issueNumber: request.issueNumber,
-        requestCommentId: request.commentId,
-        selector,
-        message,
-      });
+    if (
+      Number.isSafeInteger(request.commentId) &&
+      Number.isSafeInteger(request.issueNumber) &&
+      request.issueNumber === MAILBOX_ISSUE_NUMBER
+    ) {
+      try {
+        const existing = await registryEntryForRequest({
+          github,
+          context,
+          requestCommentId: request.commentId,
+        });
+        if (!existing) {
+          await publishFailure({
+            github,
+            context,
+            request,
+            selector,
+            sourceSha,
+            message,
+          });
+        }
+        await cleanupRequestComment({ github, context, request });
+      } catch (publicationError) {
+        const publicationMessage = publicationError instanceof Error
+          ? publicationError.message
+          : String(publicationError);
+        core.setFailed(`${message} Result or cleanup publication also failed: ${publicationMessage}`);
+        return;
+      }
     }
     core.setFailed(message);
   }
@@ -739,8 +1024,8 @@ function identityFromInput(input) {
 function requestFromInput(input) {
   const commentId = Number.parseInt(input.requestCommentId, 10);
   const issueNumber = Number.parseInt(input.issueNumber, 10);
-  if (!Number.isSafeInteger(commentId) || !Number.isSafeInteger(issueNumber)) {
-    throw new ArtifactRequestError('The resolved request identity is invalid.');
+  if (!Number.isSafeInteger(commentId) || issueNumber !== MAILBOX_ISSUE_NUMBER) {
+    throw new ArtifactRequestError('The resolved request identity is invalid or outside the Artifact mailbox.');
   }
   if (!DIGEST_PATTERN.test(input.requestBodySha256 || '')) {
     throw new ArtifactRequestError('The request body identity is invalid.');
@@ -759,13 +1044,25 @@ function requestFromInput(input) {
 async function completeRequest({ github, context, input }) {
   const request = requestFromInput(input);
   const identity = identityFromInput(input);
-  await getLiveRequestComment({
-    github,
-    context,
-    requestCommentId: request.commentId,
-    expectedAuthor: request.author,
-    expectedBodyHash: request.bodyHash,
-  });
+  try {
+    await getLiveRequestComment({
+      github,
+      context,
+      requestCommentId: request.commentId,
+      expectedAuthor: request.author,
+      expectedBodyHash: request.bodyHash,
+    });
+  } catch (error) {
+    if (error.status === 404) {
+      const persisted = await registryEntryForRequest({
+        github,
+        context,
+        requestCommentId: request.commentId,
+      });
+      if (persisted?.state === 'ready') return;
+    }
+    throw error;
+  }
   if (context.actor !== request.author) {
     throw new ArtifactRequestError('The workflow actor no longer matches the request comment author.');
   }
@@ -785,12 +1082,10 @@ async function completeRequest({ github, context, input }) {
     allowCurrentRun: true,
   });
 
-  await upsertResultComment({
+  await upsertRegistryEntry({
     github,
     context,
-    issueNumber: request.issueNumber,
-    requestCommentId: request.commentId,
-    body: formatReadyComment(resultFromIdentity({ context, request, identity, artifact })),
+    entry: resultFromIdentity({ context, request, identity, artifact }),
   });
 
   await github.rest.repos.createCommitStatus({
@@ -802,10 +1097,22 @@ async function completeRequest({ github, context, input }) {
     description: `artifact ${artifact.artifactId} sha256:${artifact.artifactDigest}`,
     target_url: artifact.artifactUrl,
   });
+
+  await cleanupRequestComment({ github, context, request });
 }
 
 async function reportProductionFailure({ github, context, input }) {
   const request = requestFromInput(input);
+  const existing = await registryEntryForRequest({
+    github,
+    context,
+    requestCommentId: request.commentId,
+  });
+  if (existing) {
+    await cleanupRequestComment({ github, context, request });
+    return;
+  }
+
   await getLiveRequestComment({
     github,
     context,
@@ -814,45 +1121,43 @@ async function reportProductionFailure({ github, context, input }) {
     expectedBodyHash: request.bodyHash,
   });
 
-  const marker = resultMarker(request.commentId);
-  const comments = await listAllIssueComments(github, context, request.issueNumber);
-  const readyResultExists = comments.some(
-    (comment) =>
-      hasExpectedResultAuthor(comment) &&
-      typeof comment.body === 'string' &&
-      comment.body.startsWith(`${marker}\n## Artifact ready`),
-  );
-  if (readyResultExists) {
-    return;
-  }
-
   await publishFailure({
     github,
     context,
-    issueNumber: request.issueNumber,
-    requestCommentId: request.commentId,
+    request,
     selector: input.selector,
+    sourceSha: input.sourceSha || null,
     message: 'Source-bundle production or result publication failed. Inspect the linked workflow run for the exact failing step.',
   });
+  await cleanupRequestComment({ github, context, request });
 }
 
 module.exports = {
   ARTIFACT_KIND,
+  MAILBOX_ISSUE_NUMBER,
+  REGISTRY_LIMIT,
+  REGISTRY_MARKER,
   RESULT_BOT_ID,
   RESULT_BOT_LOGIN,
   STATUS_CONTEXT,
   ArtifactRequestError,
+  cleanupRequestComment,
+  compactFailureReason,
   completeRequest,
   findCachedArtifact,
-  formatFailureComment,
+  findRegistryEntry,
+  formatInlineCode,
   formatPreparationCommand,
-  formatReadyComment,
+  formatRegistryComment,
+  mergeRegistryEntries,
   normalizeDigest,
   parseArtifactTargetUrl,
   parseCommand,
+  parseRegistryComment,
+  readRegistry,
   reportProductionFailure,
   resolveRequest,
   resolveSelector,
-  resultMarker,
+  upsertRegistryEntry,
   verifyArtifactMetadata,
 };
