@@ -90,12 +90,18 @@ class PrepareSharedProjectTests(unittest.TestCase):
         *,
         normal_entry_point: str = MODULE.NORMAL_ENTRY_POINT,
         include_entry_point: bool = True,
+        format_version: int = 5,
+        platform: str = "linux-x64",
+        layout: str = "single-extract-preexpanded-runtime-and-cache",
+        missing_help_option: str | None = None,
     ) -> Path:
         package_parent = self.root / f"package-{root_name}"
         package_root = package_parent / root_name
         (package_root / "bin").mkdir(parents=True)
         manifest = {
-            "formatVersion": 5,
+            "formatVersion": format_version,
+            "platform": platform,
+            "layout": layout,
             "normalEntryPoint": normal_entry_point,
         }
         (package_root / "MANIFEST.json").write_text(
@@ -106,10 +112,16 @@ class PrepareSharedProjectTests(unittest.TestCase):
         )
         if include_entry_point:
             entry_point = package_root / MODULE.NORMAL_ENTRY_POINT
+            help_options = sorted(
+                MODULE.EXPECTED_ENTRY_POINT_OPTIONS - {missing_help_option}
+                if missing_help_option
+                else MODULE.EXPECTED_ENTRY_POINT_OPTIONS
+            )
             entry_point.write_text(
                 "#!/usr/bin/env bash\n"
                 "if [[ ${1-} == --help ]]; then\n"
                 "  echo 'Normal agent entry point'\n"
+                f"  echo '{' '.join(help_options)}'\n"
                 "  exit 0\n"
                 "fi\n"
                 "exit 2\n",
@@ -181,6 +193,27 @@ class PrepareSharedProjectTests(unittest.TestCase):
             normal_entry_point="bin/other.sh",
         )
         with self.assertRaisesRegex(MODULE.PreparationError, "normalEntryPoint"):
+            MODULE.prepare_replacement(
+                bootstrap_archive=archive,
+                output_directory=self.root / "replacement",
+                shared_files=self.shared_files,
+            )
+
+    def test_rejects_stale_bootstrap_release(self) -> None:
+        archive = self.create_archive("bootstrap-v4", format_version=4)
+        with self.assertRaisesRegex(MODULE.PreparationError, "formatVersion"):
+            MODULE.prepare_replacement(
+                bootstrap_archive=archive,
+                output_directory=self.root / "replacement",
+                shared_files=self.shared_files,
+            )
+
+    def test_rejects_missing_documented_entry_point_option(self) -> None:
+        archive = self.create_archive(
+            "bootstrap-missing-option",
+            missing_help_option="--with-tiktoken",
+        )
+        with self.assertRaisesRegex(MODULE.PreparationError, "--with-tiktoken"):
             MODULE.prepare_replacement(
                 bootstrap_archive=archive,
                 output_directory=self.root / "replacement",

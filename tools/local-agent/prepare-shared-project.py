@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import subprocess
 import tempfile
 
@@ -17,6 +18,24 @@ BOOTSTRAP_GUIDE = REPOSITORY_ROOT / "docs/LOCAL-AGENT-BOOTSTRAP.md"
 STABLE_ARCHIVE_NAME = "teasescript-agent-bootstrap-linux-x64.tar.zst"
 STABLE_DIRECTORY_NAME = "teasescript-agent-bootstrap-linux-x64"
 NORMAL_ENTRY_POINT = "bin/prepare-agent-workspace.sh"
+EXPECTED_BOOTSTRAP_MANIFEST = {
+    "formatVersion": 5,
+    "platform": "linux-x64",
+    "layout": "single-extract-preexpanded-runtime-and-cache",
+    "normalEntryPoint": NORMAL_ENTRY_POINT,
+}
+EXPECTED_ENTRY_POINT_OPTIONS = {
+    "--artifact",
+    "--artifact-sha256",
+    "--expected-head",
+    "--expected-merge-base",
+    "--expected-repository",
+    "--output",
+    "--check",
+    "--node",
+    "--with-ts-morph",
+    "--with-tiktoken",
+}
 
 SHARED_FILES = {
     "README-FIRST.md": SHARED_SOURCE_DIRECTORY / "README-FIRST.md",
@@ -134,11 +153,13 @@ def validate_extracted_bootstrap(root: Path) -> dict[str, object]:
         fail(f"bootstrap MANIFEST.json is invalid: {exc}")
     if not isinstance(manifest, dict):
         fail("bootstrap MANIFEST.json must be an object")
-    if manifest.get("normalEntryPoint") != NORMAL_ENTRY_POINT:
-        fail(
-            "bootstrap normalEntryPoint must be "
-            f"{NORMAL_ENTRY_POINT}, found {manifest.get('normalEntryPoint')!r}"
-        )
+    for field, expected in EXPECTED_BOOTSTRAP_MANIFEST.items():
+        actual = manifest.get(field)
+        if actual != expected:
+            fail(
+                f"bootstrap manifest {field} must be {expected!r}, "
+                f"found {actual!r}"
+            )
 
     entry_point = root / NORMAL_ENTRY_POINT
     if not entry_point.is_file() or not os.access(entry_point, os.X_OK):
@@ -146,6 +167,15 @@ def validate_extracted_bootstrap(root: Path) -> dict[str, object]:
     help_result = run([str(entry_point), "--help"])
     if "Normal agent entry point" not in help_result.stdout:
         fail("bootstrap entry-point help does not identify the normal agent route")
+    documented_options = set(
+        re.findall(r"(?<![A-Za-z0-9_-])--[a-z0-9][a-z0-9-]*", help_result.stdout)
+    )
+    missing_options = sorted(EXPECTED_ENTRY_POINT_OPTIONS - documented_options)
+    if missing_options:
+        fail(
+            "bootstrap entry-point help omits required options: "
+            + ", ".join(missing_options)
+        )
 
     readme_path = root / "README.md"
     if not readme_path.is_file():
