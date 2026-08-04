@@ -67,6 +67,7 @@ function makeGithub(context, overrides = {}) {
     updatedComments: 0,
     selectorCalls: 0,
     permissionCalls: 0,
+    operations: [],
   };
   let nextCommentId = 1000;
 
@@ -90,7 +91,9 @@ function makeGithub(context, overrides = {}) {
           return { data: [...state.comments] };
         },
         async createComment({ body }) {
+          if (overrides.createCommentError) throw overrides.createCommentError;
           state.createdComments += 1;
+          state.operations.push('create-comment');
           const comment = {
             id: nextCommentId++,
             body,
@@ -100,7 +103,9 @@ function makeGithub(context, overrides = {}) {
           return { data: comment };
         },
         async updateComment({ comment_id, body }) {
+          if (overrides.updateCommentError) throw overrides.updateCommentError;
           state.updatedComments += 1;
+          state.operations.push('update-comment');
           const comment = state.comments.find((item) => item.id === comment_id);
           if (!comment) throw httpError(404, 'comment not found');
           comment.body = body;
@@ -127,7 +132,9 @@ function makeGithub(context, overrides = {}) {
           return { data: { statuses } };
         },
         async createCommitStatus(input) {
+          if (overrides.statusWriteError) throw overrides.statusWriteError;
           state.createdStatuses.push(input);
+          state.operations.push('create-status');
           return { data: input };
         },
       },
@@ -624,6 +631,7 @@ async function testCompletionPublishesFixedStatusAndExactResult() {
   });
 
   assert.equal(github.state.createdStatuses.length, 1);
+  assert.deepEqual(github.state.operations.slice(-2), ['create-comment', 'create-status']);
   assert.deepEqual(github.state.createdStatuses[0], {
     owner: 'TeaseScript-AI',
     repo: 'teasescript-platform',
@@ -644,6 +652,113 @@ async function testCompletionPublishesFixedStatusAndExactResult() {
     /teasescript-agent-bootstrap-linux-x64\/bin\/prepare-agent-workspace\.sh/,
   );
   assert.equal(github.state.permissionCalls, 1);
+}
+
+
+async function testResultCommentFailureCannotPublishFixedStatus() {
+  const artifactId = 8211;
+  const context = makeContext('/artifact source main', { runId: 9211, issueNumber: 230 });
+  const fixture = artifactFixture({
+    artifactId,
+    runId: context.runId,
+    sourceSha: MAIN_SHA,
+    current: true,
+  });
+  const github = makeGithub(context, {
+    artifacts: [[artifactId, fixture.artifact]],
+    runs: [[context.runId, fixture.run]],
+    createCommentError: httpError(403, 'Resource not accessible by integration'),
+  });
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+
+  await assert.rejects(
+    request.completeRequest({
+      github,
+      context,
+      input: {
+        requestCommentId: core.outputs.request_comment_id,
+        requestAuthor: core.outputs.request_author,
+        requestBodySha256: core.outputs.request_body_sha256,
+        issueNumber: String(context.payload.issue.number),
+        selector: core.outputs.selector,
+        selectorType: core.outputs.selector_type,
+        sourceSha: core.outputs.source_sha,
+        sourceRepository: core.outputs.source_repository,
+        sourceRef: core.outputs.source_ref,
+        pullNumber: '',
+        headRepository: '',
+        headRef: '',
+        baseSha: '',
+        mergeBaseSha: '',
+        artifactId: String(artifactId),
+        artifactUrl: fixture.url,
+        artifactDigest: DIGEST,
+      },
+    }),
+    /Resource not accessible by integration/,
+  );
+  assert.equal(github.state.createdStatuses.length, 0);
+  assert.deepEqual(github.state.operations, []);
+}
+
+async function testStatusFailurePreservesReadyResult() {
+  const artifactId = 8221;
+  const context = makeContext('/artifact source main', { runId: 9221 });
+  const fixture = artifactFixture({
+    artifactId,
+    runId: context.runId,
+    sourceSha: MAIN_SHA,
+    current: true,
+  });
+  const github = makeGithub(context, {
+    artifacts: [[artifactId, fixture.artifact]],
+    runs: [[context.runId, fixture.run]],
+    statusWriteError: httpError(403, 'status write denied'),
+  });
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+  const input = {
+    requestCommentId: core.outputs.request_comment_id,
+    requestAuthor: core.outputs.request_author,
+    requestBodySha256: core.outputs.request_body_sha256,
+    issueNumber: String(context.payload.issue.number),
+    selector: core.outputs.selector,
+    selectorType: core.outputs.selector_type,
+    sourceSha: core.outputs.source_sha,
+    sourceRepository: core.outputs.source_repository,
+    sourceRef: core.outputs.source_ref,
+    pullNumber: '',
+    headRepository: '',
+    headRef: '',
+    baseSha: '',
+    mergeBaseSha: '',
+    artifactId: String(artifactId),
+    artifactUrl: fixture.url,
+    artifactDigest: DIGEST,
+  };
+
+  await assert.rejects(
+    request.completeRequest({ github, context, input }),
+    /status write denied/,
+  );
+  const readyBody = github.state.comments.at(-1).body;
+  assert.match(readyBody, /## Artifact ready/);
+
+  await request.reportProductionFailure({
+    github,
+    context,
+    input: {
+      requestCommentId: input.requestCommentId,
+      requestAuthor: input.requestAuthor,
+      requestBodySha256: input.requestBodySha256,
+      issueNumber: input.issueNumber,
+      selector: input.selector,
+    },
+  });
+  assert.equal(github.state.comments.at(-1).body, readyBody);
+  assert.equal(github.state.createdComments, 1);
+  assert.equal(github.state.updatedComments, 0);
 }
 
 async function testChangedRequestCannotFinalize() {
@@ -707,6 +822,8 @@ async function main() {
   await testUnexpectedArtifactApiFailureIsNotTreatedAsMiss();
   await testMissingStatusRefIsACacheMiss();
   await testCompletionPublishesFixedStatusAndExactResult();
+  await testResultCommentFailureCannotPublishFixedStatus();
+  await testStatusFailurePreservesReadyResult();
   await testChangedRequestCannotFinalize();
   console.log('test-source-bundle-artifact-request: PASS');
 }
