@@ -99,6 +99,16 @@ syntax and source-reachable observable behavior require representative
 source-to-runtime coverage. Follow `docs/TESTING.md`; do not add unrelated
 fuzzing infrastructure, dependencies, or production hooks.
 
+## Connector source acquisition rollout
+
+Connector agents validate `source-bundle/artifact-v1` before requesting work. A
+valid hit is downloaded immediately without a comment, workflow run, or wait.
+During issue #234 Phase 1, a confirmed miss may use only Artifact mailbox #235
+and the exact request ID in its single authenticated bot registry. Do not invent
+a mailbox delay or remove the request-branch fallback until default-branch proof
+selects and documents the measured initial wait, 10-second polling cadence, and
+overall timeout.
+
 ## Verification and Git
 
 Run configured formatting, linting, type checking, build, relevant tests,

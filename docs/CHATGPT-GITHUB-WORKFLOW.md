@@ -35,10 +35,7 @@ This is both simpler and more context-efficient than requesting complete files o
 
 ## Obtain the exact source artifact
 
-Use the fixed index first; the request-branch route in
-`DEVELOPMENT-WORKFLOW.md` remains a temporary rollout fallback.
-
-### Preferred fixed-index lookup
+### Fixed-index lookup first
 
 1. Resolve one identity: `main` to the current tip; `sha:<full-sha>` to that
    commit; or `pr:<number>` to its head SHA, head repository/ref, current base
@@ -52,13 +49,15 @@ Use the fixed index first; the request-branch route in
 4. Download that numeric ID and run the trusted preparation helper with the
    exact source SHA and optional PR merge base.
 
-A valid hit starts no workflow and posts no comment. Missing status, failed
-download, expiry, malformed URL, or any ID, name, digest, or producer mismatch
-is a cache miss; never substitute an artifact from another PR or SHA.
+A valid hit starts no workflow, posts no comment, and requires no wait. Missing
+status, failed download, expiry, malformed URL, or any ID, name, digest, or
+producer mismatch is a confirmed cache miss; never substitute another SHA's
+artifact.
 
-### Regenerate only after a confirmed miss
+### Phase 1 mailbox route on a confirmed miss
 
-Post exactly one command on an issue or pull request:
+Issue [#235](https://github.com/TeaseScript-AI/teasescript-platform/issues/235)
+is the only Artifact mailbox. Post exactly one supported command there:
 
 ```text
 /artifact source main
@@ -66,17 +65,24 @@ Post exactly one command on an issue or pull request:
 /artifact source sha:<full-lowercase-40-character-sha>
 ```
 
-Only Write, Maintain, or Admin collaborators may allocate regeneration compute.
-The workflow queues without cancelling, resolves and pins the selector after
-admission, rechecks the index, and returns or creates a seven-day bundle.
-Consume only the result for the exact request-comment ID from
-`github-actions[bot]` user ID `41898282`. It provides the resolved identity,
-artifact metadata, exact `download_workflow_artifact` arguments, and preparation
-command; file and workspace paths include the request-comment ID. Use the
-returned identity as a unit if `main` or the PR moves while waiting.
+Record the created command-comment ID. Commands elsewhere are ignored. The
+serialized default-branch workflow revalidates the exact comment, collaborator
+permission, selector identity, and fixed index. It either reuses a valid artifact
+or creates one without executing selected source.
 
-Until default-branch live proof is complete and `AGENTS.md` changes, the
-request-branch fallback remains supported. No `workflow_dispatch` route exists.
+The mailbox keeps one authoritative `github-actions[bot]` registry comment,
+user ID `41898282`. Locate the compact entry containing the exact request ID,
+then use its connector JSON and preparation command. Equivalent requests can
+share one artifact entry while retaining every correlated request ID. A request
+comment is deleted only after its ready or failed registry entry is safely
+written; a cleanup failure does not invalidate a ready entry.
+
+Phase 1 is additive while issue #234 gathers default-branch timing and
+concurrency evidence. Do not copy the compatibility route's 90-second wait or
+invent a replacement. The measured initial wait, 10-second request-ID polling,
+and overall timeout become mandatory only in Phase 2 after the evidence is
+recorded. Until then, the request-branch route in `DEVELOPMENT-WORKFLOW.md`
+remains a supported fallback when the mailbox route itself is unavailable.
 
 ## Prepare the local checkout
 

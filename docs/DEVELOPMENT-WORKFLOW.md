@@ -330,102 +330,103 @@ Closes #123
 
 ## Verified source artifacts for review and handoff
 
-`Source bundle` creates seven-day, verifiable Git artifacts with reachable
-history for each pull-request head update (not the synthetic merge commit) and
-push to `main`.
+`Source bundle` creates seven-day verifiable Git artifacts with reachable
+history for each pull-request head update and push to `main`. Trusted producers
+publish only a successful `source-bundle/artifact-v1` status on the bundled SHA.
+Its exact repository artifact URL indexes metadata that must match the numeric
+ID, name `teasescript-source-<source-sha>`, digest, producer run/repository, and
+expiration. Never publish fixed-context `pending` or `failure`, because either
+could hide an older valid success.
 
-Each trusted producer publishes only a successful `source-bundle/artifact-v1`
-status on the bundled source SHA. Its `target_url` is the exact repository
-artifact URL; the artifact API, not the status description, is authoritative
-for numeric ID, exact name `teasescript-source-<source-sha>`, digest, producer
-run/repository, and expiration. The automatic producer's default-branch
-`workflow_run` indexer has only `actions: read` and `statuses: write`; it derives
-the SHA from trusted event identity and validates metadata without checking out
-or downloading content. Branch and comment regenerators validate uploads before
-publishing the same status. Never publish fixed-context `pending` or `failure`,
-which could hide an older valid success.
-
-### Zero-compute connector cache path
+### Cache-first acquisition
 
 For `main`, `pr:<number>`, or `sha:<full-sha>`:
 
-1. Resolve one immutable exact source SHA; for `pr:`, retain the PR number,
-   head repository/ref, current base SHA, and exact
-   `compare_commits.merge_base_commit.sha`.
-2. Select that SHA's successful fixed status and parse its exact artifact URL
-   for run and artifact IDs.
-3. Require exact matching artifact ID/name, SHA-256 digest, producer
-   run/repository, and unexpired metadata.
-4. Download by numeric ID and run the trusted preparation command.
+1. Resolve one immutable SHA. For a PR, retain its number, head repository/ref,
+   current base SHA, and exact `compare_commits.merge_base_commit.sha`.
+2. Validate the successful fixed status and exact artifact metadata.
+3. On a valid hit, download immediately and run the trusted preparation command.
 
-Missing status, failed download, or deleted, expired, malformed, mismatched, or
-otherwise unverifiable metadata is a cache miss. A valid hit allocates no
-runner, starts no workflow, posts no comment, and needs no nonce, request branch,
-or run-number search.
+A valid hit allocates no runner, starts no workflow, posts no comment, and waits
+zero seconds. Missing, deleted, expired, malformed, mismatched, or otherwise
+unverifiable metadata is a cache miss.
 
-This route remains additive until default-branch proofs cover same-repository
-and fork PRs, `main`, exact SHA, stale artifacts, concurrent misses, and clean
-workspaces. Do not make it the sole `AGENTS.md` path before then.
+### Additive Artifact mailbox rollout
 
-### Collaborator-gated regeneration on a confirmed miss
+Issue `#235` is the sole Artifact mailbox. The default-branch
+`issue_comment` job is skipped for every other issue or pull request. In the
+mailbox it accepts only the strict source commands and still requires OWNER,
+MEMBER, or COLLABORATOR association, actor/comment-author equality, and legacy
+permission `write` or `admin` (Maintain maps to `write`).
 
-After a confirmed miss, post one strict command on an issue or pull request:
-
-```text
-/artifact source main
-/artifact source pr:225
-/artifact source sha:<full-lowercase-40-character-sha>
-```
-
-Before allocating a runner, the default-branch `issue_comment` workflow requires
-OWNER, MEMBER, or COLLABORATOR association. It then requires actor/comment-author
-equality and legacy permission `write` or `admin` (Maintain maps to `write`).
-Read-only, unknown, missing, and API-failure results are rejected. This protects
-compute and storage, not public-source confidentiality.
-
-Authorized requests share one `queue: max`, non-cancelling group up to GitHub's
-supported queue limit. After admission, the workflow pins the selector identity,
-rechecks the fixed status, and returns any valid artifact produced while waiting.
-On a remaining miss, it loads tooling from `github.workflow_sha`, checks out the
-pinned source separately with `persist-credentials: false`, verifies `HEAD`, and
-runs only trusted `create-source-bundle.sh`. Source is data: none of its actions,
+Accepted requests share one non-cancelling serialized concurrency group. After
+admission, the workflow retains and revalidates the exact request ID, author,
+and body hash; resolves and pins the selector; rechecks the fixed index; and
+reuses a valid artifact found while queued. On a remaining miss it loads tooling
+only from `github.workflow_sha`, checks out the selected source separately with
+`persist-credentials: false`, verifies `HEAD`, and runs only trusted
+`create-source-bundle.sh`. Selected source remains data: none of its actions,
 scripts, dependencies, hooks, builds, submodules, or configuration executes.
 
-The result is bound to the exact request-comment ID, author, and body hash and
-must come from the exact `github-actions[bot]` identity, user ID `41898282`;
-other bot/App markers are not authoritative. It returns the original selector,
-resolved identity, artifact ID/name, digest, producer run, expiration, exact
-connector download
-arguments, and preparation command. Paths include the request-comment ID;
-redelivery updates the one authoritative result; `pr:` also returns pinned head
-repository/ref, base SHA, and merge-base SHA. Use the returned identity as a unit
-if the selector moves. This route creates no temporary Git ref.
+The mailbox contains one authoritative `github-actions[bot]` registry comment,
+user ID `41898282`, with a stable hidden marker. Each update:
+
+- removes expired ready entries;
+- keeps newest entries first and at most ten entries;
+- merges equivalent source/artifact results while retaining all exact request IDs;
+- preserves PR head repository/ref, base SHA, and merge-base SHA;
+- emits compact connector arguments and a fully populated trusted preparation
+  command;
+- records failures as one bounded reason plus the correlated run;
+- rejects ambiguous multiple authoritative registries.
+
+Whole-workflow serialization prevents concurrent read-modify-write loss. The
+registry is the only persistent result comment; no request creates its own bot
+comment. After a ready or failed entry is safely persisted, the workflow deletes
+only the exact revalidated command comment. Redelivery is idempotent after that
+deletion. Cleanup is retried without replacing a usable ready entry, and cleanup
+failure remains visible as a workflow failure.
+
+### Phase 1 timing evidence and Phase 2 gate
+
+Phase 1 retains the compatibility route. After the mailbox implementation is on
+`main`, issue #234 requires at least three controlled exact-SHA cache misses,
+plus cache-hit, PR, concurrency, cleanup, stale-index recovery, download, and
+clean-workspace proofs. Record request ID, source SHA, workflow run, artifact ID,
+request timestamp, ready timestamp, elapsed time, and separate queue/production
+time when available. Temporary test refs must be removed.
+
+Do not inherit the fallback's 90-second delay or choose a normal mailbox delay by
+intuition. Use the measured misses to select one round initial wait slightly
+below normal completion. Phase 2 then documents that wait, polls only the exact
+request ID every 10 seconds after it, and sets one overall timeout. Only after
+the Phase 1 evidence passes may Phase 2 make the mailbox mandatory and remove
+the request-branch workflows, helpers, tests, and documentation.
 
 ### Compatibility request-branch fallback
 
-The request-branch route remains an internal rollout fallback, not the normal
-path when the fixed index or collaborator command is available. For an exact
-source SHA:
+During Phase 1 only, the request-branch route remains an internal fallback when
+the fixed index and mailbox route cannot be used. For an exact source SHA:
 
-1. Resolve its full lowercase 40-character SHA and exact current `main` SHA;
-   choose a nonce matching `[a-z0-9][a-z0-9-]{0,31}`.
+1. Resolve its full lowercase SHA and current `main` SHA; choose a nonce matching
+   `[a-z0-9][a-z0-9-]{0,31}`.
 2. Create `source-bundle-request/<source-sha>/<nonce>` at that `main` SHA.
 3. Wait 90 seconds, then poll `source-bundle/request/<nonce>` on the source SHA
    every 30 seconds.
-4. On success, download the reported artifact ID, verify its digest, and confirm
+4. On success, download the reported artifact, verify its digest, and confirm
    deletion of the exact unchanged request ref.
 
-The permissionless create-event gate and default-branch processor revalidate the
-strict name, unchanged request SHA, default-branch ancestry, and requested
-commit. Bundling has only `contents: read`; dynamic/fixed status publication
-has `actions: read` plus `statuses: write`; cleanup checks out no content and
-deletes only the unchanged ref with `--force-with-lease` and `contents: write`.
+That 90-second delay applies only after creating a compatibility request branch.
+It never delays fixed-index validation or a valid cache hit and must not be
+copied into the mailbox route. The fallback processor revalidates the strict
+name, unchanged request SHA, default-branch ancestry, and requested commit;
+cleanup deletes only the unchanged ref with `--force-with-lease`.
 
 ### Local verification boundary
 
 The ZIP contains exactly `repository.bundle`, `manifest.json`, and
-`SHA256SUMS`. Use the trusted preinstalled repository helper and, for PR review,
-`compare_commits.merge_base_commit.sha` rather than the base-branch tip:
+`SHA256SUMS`. Use the trusted preinstalled helper and, for PR review, the exact
+merge base rather than the base-branch tip:
 
 ```shell
 python3 tools/local-agent/prepare-source-review.py \
@@ -437,16 +438,12 @@ python3 tools/local-agent/prepare-source-review.py \
   --output /mnt/data/source-review
 ```
 
-The helper verifies the outer digest, ZIP paths/payload, internal checksums,
+The helper verifies the outer digest, ZIP paths and payload, internal checksums,
 manifest identities, complete bundle, expected head and optional merge-base
 ancestry, checked-out tree, `git fsck`, and clean worktree. It exposes output
-only after success and removes temporary `origin`.
-
-Connector agents follow `CHATGPT-GITHUB-WORKFLOW.md`; do not substitute network
-Git, run-number searches, undocumented request branches, or unrelated-PR
-artifacts. A source artifact contains committed files and reachable history for
-the selected commit, not issues, PR comments/reviews, Actions history, settings,
-secrets, credentials, `node_modules`, or uncommitted changes.
+only after success and removes temporary `origin`. Connector agents follow
+`CHATGPT-GITHUB-WORKFLOW.md`; never substitute network Git, run-number searches,
+or an artifact from another SHA.
 
 ## Coordinated multi-agent model
 
