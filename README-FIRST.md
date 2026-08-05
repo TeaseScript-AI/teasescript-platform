@@ -4,11 +4,12 @@
 
 Use project material in this order:
 
-1. Check whether an accepted ADR or a post-V30 owner decision already synchronized into an accepted specification
-   or controlling current topic document covers the exact issue. Chat, issue, pull-request, test, review, or wish text
-   remains evidence or task context until that synchronization occurs. A later accepted decision overrides V30 only
-   within its stated scope.
-2. Otherwise use `docs/specifications/accepted-syntaxes-v30.md` for accepted TeaseScript syntax and semantics.
+1. Check whether an accepted ADR, accepted specification, or controlling current topic document covers the exact
+   issue. A post-V30 owner decision becomes durable only after it is synchronized into the applicable accepted owner.
+   Chat, issue, pull-request, test, review, or wish text remains evidence or task context until that synchronization
+   occurs.
+2. For TeaseScript syntax and semantics, use `docs/specifications/accepted-syntaxes-v30.md` unless a later accepted
+   ADR or accepted specification update supersedes the exact point within its stated scope.
 3. Use `CURRENT-DESIGN.md` and `PHASE-STATUS.md` for current architecture and implementation status.
 4. Use the task-specific current topic document in `docs/`.
 5. Use `docs/planning/POC-TO-ALPHA-BACKLOG.md` for owner-selected work that remains required before its target gate. Inclusion does not schedule the item and does not define architecture or syntax.
