@@ -74,6 +74,14 @@ Document names describe durable purpose, not a temporary cleanup history or the
 latest review complaint. General tool, command, option, branch, issue, and
 workflow naming is owned by [`DEVELOPMENT-WORKFLOW.md`](DEVELOPMENT-WORKFLOW.md).
 
+### Markdown source wrapping
+
+Hard-wrap ordinary Markdown prose at 120 characters where practical. Do not rewrap unchanged paragraphs solely for
+formatting. When materially editing a paragraph, rewrap that paragraph consistently at the target width.
+
+Code blocks, tables, long links, generated content, and other structures may exceed the target when wrapping
+would reduce clarity, correctness, or maintainability.
+
 ## GitHub repository: canonical and continuously maintained
 
 The repository owns documentation that must change with code, architecture, language semantics, security boundaries, product decisions, or the stable development process:
