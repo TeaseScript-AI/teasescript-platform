@@ -194,7 +194,8 @@ The payload is ready. Do not open or print all parts at once.
 - Sizing mode: {token_text}
 - Connector direction: use the GitHub connector action that creates one UTF-8
   Git blob from text (currently `GitHub.create_blob`). Do not Base64-encode the
-  patch.
+  patch. Do not pre-open or manually regenerate parts, and do not substitute
+  complete changed files for generated patch parts.
 
 For every upload, run this command first:
 
@@ -206,7 +207,8 @@ python3 -B tools/local-agent/prepare-patch-publication.py \\
 
 It prints exactly one pending file and connector-ready arguments. Immediately
 call the connector, compare its returned blob SHA with `expectedGitBlobSha`,
-then record it:
+then record it. Do not perform another repository write until that exact match
+has been recorded:
 
 ```shell
 python3 -B tools/local-agent/prepare-patch-publication.py \\

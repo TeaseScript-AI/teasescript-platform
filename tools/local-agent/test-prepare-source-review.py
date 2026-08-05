@@ -17,7 +17,7 @@ import zipfile
 
 from compact_unittest import run_compact_unittest
 
-SCRIPT = Path(__file__).with_name("prepare-source-review.py")
+SCRIPT = Path(__file__).parents[1] / "chatgpt-project-agent" / "tools" / "prepare-source-review.py"
 REPOSITORY = "TeaseScript-AI/teasescript-platform"
 
 

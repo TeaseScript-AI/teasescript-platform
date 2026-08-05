@@ -14,6 +14,7 @@ bash "$script_dir/run-compact.sh" \
     bash "$script_dir/test-create-source-bundle.sh"
 node "$script_dir/test-source-bundle-artifact-request.cjs"
 python3 -B "$script_dir/test-prepare-source-review.py"
+bash "$script_dir/test-chatgpt-project-agent.sh"
 python3 -B "$script_dir/test-prepare-patch-publication.py"
 python3 -B "$script_dir/test-patch-publication.py"
 bash "$script_dir/test-patch-publication-validate-candidate.sh"

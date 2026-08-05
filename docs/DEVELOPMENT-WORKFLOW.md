@@ -435,7 +435,7 @@ The ZIP contains exactly `repository.bundle`, `manifest.json`, and
 merge base rather than the base-branch tip:
 
 ```shell
-python3 tools/local-agent/prepare-source-review.py \
+python3 /mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py \
   --artifact /mnt/data/source-bundle.zip \
   --artifact-sha256 <github-artifact-sha256> \
   --expected-repository TeaseScript-AI/teasescript-platform \
