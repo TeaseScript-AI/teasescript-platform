@@ -28,7 +28,7 @@ src/runtime/engine.ts
 
 A responsibility-based split may provide:
 
-- smaller context windows for agents and reviewers;
+- less source context for focused agent and reviewer work;
 - fewer merge conflicts when compiler, validator, state, and execution work proceed in parallel;
 - clearer ownership of invariants and their tests;
 - easier navigation and more focused reviews;
@@ -41,7 +41,7 @@ The goal is maintainability and parallel-development safety, not reducing the to
 A split also creates costs:
 
 - a large mechanical diff with little immediate user-visible value;
-- temporary merge conflicts with active runtime hardening;
+- merge conflicts with concurrent work in the same modules;
 - additional files and imports that can become indirection when boundaries are too fine;
 - premature module boundaries that may need to move again;
 
@@ -71,4 +71,5 @@ Consider creating a focused implementation issue only when current evidence iden
 an import/export and test-ownership inventory shows a stable boundary, and the split can be reviewed without bundled
 semantic work.
 
-Prefer one module group and one owning agent per pull request. Sequence the pull requests rather than moving all large modules at once.
+Prefer one module group and one owning agent per pull request. Sequence the pull requests rather than moving all large
+modules at once.

@@ -6,9 +6,9 @@
 - **Do not use for:** Chat pacing, the public timer API, accepted interaction semantics, or current implementation
   status
 
-The predecessor planning document also covered chat pacing and timed work. Those directions were superseded by ADRs
-0016–0018 and the active adjacent planning in `TIMER-AND-RECOVERY-FOLLOW-UPS.md`. This retained planning covers only
-camera, media, and time integrity. It does not schedule implementation or accept final TeaseScript APIs.
+This file covers only camera, media, and time integrity. Chat pacing and timer foundations are owned by ADRs
+0016–0018, current topic documents, and `TIMER-AND-RECOVERY-FOLLOW-UPS.md`. This planning does not schedule
+implementation or accept final TeaseScript APIs.
 
 ## Camera ownership
 
@@ -28,14 +28,13 @@ A camera/media decision must define:
 
 ## Interactive and direct image capture
 
-An interactive image request should remain mandatory until a valid image is accepted. When camera and file sources are
-both allowed, the Player may let the user choose the source. Camera capture may include preview, countdown, accept, and
-retake steps; file input requires validation and retry behavior. A rejected candidate is not yet a TeaseScript value.
+The [accepted V30 baseline](../specifications/accepted-syntaxes-v30.md) defines mandatory `askImage(...)` and nullable
+direct `takePhoto(...)`; this planning does not redefine their names or return contracts. The remaining Player design
+must decide source selection, preview, countdown, accept/retake, validation, permission, retry, and recovery behavior. A
+rejected preview candidate is not runtime-visible.
 
-Direct capture is a separate operation: it uses the selected active stream without a source question, preview,
-countdown, or accept/retake step and returns either an engine-managed reference or a defined failure result. The
-eventual public names, option shapes, result types, transcript behavior, and Standard Library composition require a
-later accepted decision.
+`takePhoto(...)` should use the selected active stream without a source question or interactive acceptance flow. Its
+camera options, transcript behavior, and Standard Library composition require a later accepted camera decision.
 
 ## Multiple cameras
 

@@ -8,7 +8,7 @@ When planning is implemented, superseded, rejected, or useful only as rationale:
 
 - synchronize current facts and accepted decisions into their canonical ADR, specification, topic document, backlog, or
   status owner;
-- retain a historical document only when unique rationale meets the high-value threshold selected in issue #209;
+- retain a historical document only when unique rationale meets the repository's high-value retention threshold;
 - mark retained history non-authoritative and exclude it from default agent reading; or
 - otherwise remove it from the working tree and rely on Git history, issues, pull requests, and reviews.
 
