@@ -14,9 +14,9 @@ checklist, invent requirements, or manufacture hypothetical defects merely to ap
 
 ## Prepare the audit
 
-When assigned to prepare an audit, present the task-specific plan to the owner or coordinator and
-do not execute it until they approve or adjust it. An audit may assess a final candidate or diagnose
-an unfinished or troubled state; identify the exact state and limit every conclusion to it.
+Before executing any audit, present the task-specific plan to the owner or coordinator and do not
+proceed until they approve or adjust it. An audit may assess a final candidate or diagnose an
+unfinished or troubled state; identify the exact state and limit every conclusion to it.
 
 Before executing the audit, create a temporary, task-specific audit plan. Record:
 
@@ -164,10 +164,10 @@ speculative risks are not defects unless they expose a real accepted boundary or
 consequence.
 
 When tests or test infrastructure are within scope, green results alone are insufficient. Where
-the mechanism permits, perform representative temporary defects or negative probes only in a
-disposable local checkout, isolated fixture, or equivalent local test state. Never commit, push,
-or introduce them into shared branches, CI configuration, shared services, or operational external
-state. Confirm that:
+the mechanism permits, introduce representative temporary defects or perform negative probes only
+in a disposable local checkout, isolated fixture, or equivalent local test state. Never commit,
+push, or introduce them into shared branches, CI configuration, shared services, or operational
+external state. Confirm that:
 
 - the intended test, oracle, validator, generator, replay system, matrix, or framework detects
   the defect for the intended reason rather than through an unrelated failure;
