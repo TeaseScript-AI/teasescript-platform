@@ -8,13 +8,30 @@ project_root="$repo_root/tools/chatgpt-project-agent"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/test-chatgpt-project-agent.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 
-python3 - "$project_root/docs/PROJECT-INSTRUCTIONS.txt" "$project_root/bin/setup-workspace.sh" "$project_root/bin/install-tiktoken-offline.sh" <<'PY'
+python3 - \
+  "$project_root/docs/PROJECT-INSTRUCTIONS.txt" \
+  "$project_root/bin/setup-workspace.sh" \
+  "$project_root/bin/install-tiktoken-offline.sh" \
+  "$repo_root/docs/CHATGPT-GITHUB-WORKFLOW.md" \
+  "$repo_root/docs/DEVELOPMENT-WORKFLOW.md" <<'PY'
 from pathlib import Path
 import sys
 
 instructions = Path(sys.argv[1]).read_text()
 setup = Path(sys.argv[2]).read_text()
 installer = Path(sys.argv[3]).read_text()
+connector_workflow = Path(sys.argv[4]).read_text()
+development_workflow = Path(sys.argv[5]).read_text()
+
+installed_source_review = "/mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py"
+for name, guide in (
+    ("connector workflow", connector_workflow),
+    ("development workflow", development_workflow),
+):
+    if "tools/local-agent/prepare-source-review.py" in guide:
+        raise SystemExit(f"{name} still references the deleted source-review helper")
+    if installed_source_review not in guide:
+        raise SystemExit(f"{name} does not reference the installed source-review helper")
 
 required_route = (
     "1. Read applicable `AGENTS.md` files first.\n"

@@ -13,7 +13,7 @@ For substantial implementation, review, debugging, or verification:
 1. use `get_pr_info` for a pull request, or another narrow metadata/status action when an exact commit SHA is already known, to resolve the current head and base;
 2. locate an unexpired source-bundle artifact bound to that exact head;
 3. download the artifact once;
-4. run `tools/local-agent/prepare-source-review.py` against the downloaded ZIP;
+4. run the installed `tools/prepare-source-review.py` against the downloaded ZIP;
 5. inspect and test the resulting checkout with local Git, shell, search, editor, and test tools;
 6. return to the connector only for live GitHub state or GitHub writes.
 
@@ -64,7 +64,7 @@ The connector cannot start `workflow_dispatch`; do not spend calls looking for a
 Example:
 
 ```shell
-python3 tools/local-agent/prepare-source-review.py \
+python3 /mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py \
   --artifact /mnt/data/pr-144-source-bundle.zip \
   --artifact-sha256 6ad5e5af7fd2f9858dd10473fc8ce092a7dc4723e428daba2f2d302b2e1a1bf0 \
   --expected-repository TeaseScript-AI/teasescript-platform \

@@ -360,7 +360,7 @@ SHA256SUMS
 Turn the downloaded ZIP into a verified local checkout with a trusted preinstalled copy of the repository-owned helper. For pull-request review, obtain `<review-merge-base-sha>` from `compare_commits.merge_base_commit.sha`, not from the current base-branch tip:
 
 ```shell
-python3 tools/local-agent/prepare-source-review.py \
+python3 /mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py \
   --artifact /mnt/data/source-bundle.zip \
   --artifact-sha256 <github-artifact-sha256> \
   --expected-repository TeaseScript-AI/teasescript-platform \
