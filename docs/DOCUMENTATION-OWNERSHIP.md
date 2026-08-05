@@ -50,10 +50,10 @@ second moving current-state summary.
 - **Accepted decisions and rationale:** accepted ADRs in [`docs/decisions/`](decisions/).
 - **Accepted syntax and semantics:**
   [`docs/specifications/accepted-syntaxes-v30.md`](specifications/accepted-syntaxes-v30.md), overridden only within
-  the exact scope of a later accepted ADR or synchronized canonical decision.
+  the exact scope of a later accepted ADR or an accepted update to that specification.
 - **Current architecture map and component boundaries:** [`CURRENT-DESIGN.md`](../CURRENT-DESIGN.md) and
   [`docs/ARCHITECTURE.md`](ARCHITECTURE.md); accepted ADRs own the decisions and rationale.
-- **Exact current implementation:** repository code, tests, manifests, and workflows. Current topic documents own
+- **Exact current implementation:** repository code and executable configuration. Current topic documents own
   maintained contracts, while [`PHASE-STATUS.md`](../PHASE-STATUS.md) owns high-level capability state.
 - **Open obligations before a named gate:**
   [`docs/planning/POC-TO-ALPHA-BACKLOG.md`](planning/POC-TO-ALPHA-BACKLOG.md), while
