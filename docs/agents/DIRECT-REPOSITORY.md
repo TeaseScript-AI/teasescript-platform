@@ -29,14 +29,16 @@ capabilities work.
 ## Source acquisition
 
 Use the normal repository remote. Confirm the intended repository, branch, base, and exact head before work.
-Fetch or update through normal Git operations and create a short-lived branch from the assigned base. Do not
-request a source artifact merely because another profile needs one.
+Fetch or update through normal Git operations. For an implementation or repair assignment, create or continue
+the task's short-lived branch from the assigned base. A reviewer stays on the exact review head and comparison
+base without creating or modifying the implementation branch unless a separate repair assignment is accepted.
+Do not request a source artifact merely because another profile needs one.
 
 ## Writes
 
 Use normal Git and `gh` for branches, commits, pushes, draft pull requests, comments, reviews, and metadata
-that the task permits. Do not replace ordinary source publication with ad hoc connector blobs, trees, or
-full-file writes.
+that the task permits. A selected role overlay may further restrict those writes. Do not replace ordinary source
+publication with ad hoc connector blobs, trees, or full-file writes.
 
 ## Verification
 

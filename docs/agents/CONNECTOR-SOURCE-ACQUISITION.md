@@ -44,13 +44,17 @@ During issue #234 Phase 1, issue #235 is the only Artifact mailbox. Post exactly
 /artifact source sha:<full-lowercase-40-character-sha>
 ```
 
-Record the created command-comment ID. Find only that request in the authoritative `github-actions[bot]`
-registry comment and verify its selector, resolved SHA, complete PR identity when applicable, artifact
-ID/name/digest/run/repository, and expiry before using the returned download arguments or preparation command.
-Commands elsewhere are ignored.
+Record the created command-comment ID. Wait 10 seconds, then inspect only that request in the single
+authoritative `github-actions[bot]` registry comment from bot user ID `41898282`. Poll only that exact request ID
+every 10 seconds and stop when it is ready or failed, or when 2 minutes have elapsed since command creation.
+Before using the returned download arguments or preparation command, verify the selector, resolved SHA,
+complete PR identity when applicable, artifact ID/name/digest/run/repository, and expiry. Commands elsewhere
+are ignored.
 
-Do not copy a fixed wait from the compatibility route or invent a mailbox polling policy. Use the current
-measured timing and exact-request polling instructions recorded by #234 when that phase is accepted.
+The registry keeps newest entries first, retains at most ten request correlations, removes expired entries, and
+merges entries only for the same complete resolved identity and artifact. The workflow must persist the terminal
+registry entry before it deletes the exact command comment. Cleanup failure remains a warning and must not
+invalidate a ready result; for a newly produced artifact, fixed-index publication occurs last.
 
 ## Temporary compatibility fallback
 
@@ -60,8 +64,9 @@ index and mailbox route cannot be used. For an exact source SHA:
 1. resolve the full lowercase SHA and current `main` SHA;
 2. create `source-bundle-request/<source-sha>/<nonce>` at that exact `main` SHA, using a nonce matching
    `[a-z0-9][a-z0-9-]{0,31}`;
-3. follow the current request-branch timing and status-correlation contract;
-4. download only the artifact bound to the requested source SHA and verify its digest;
+3. wait 90 seconds, then poll `source-bundle/request/<nonce>` on the source SHA every 30 seconds;
+4. on success, download only the artifact reported by that exact status context and bound to the requested
+   source SHA, then verify its digest;
 5. confirm cleanup of the exact unchanged request ref.
 
 This fallback is not the normal connector-local route. Its workflows, timing, helper behavior, and removal are

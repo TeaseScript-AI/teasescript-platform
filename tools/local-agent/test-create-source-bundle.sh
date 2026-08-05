@@ -222,9 +222,21 @@ assert "runs-on: ubuntu-24.04" in artifact_request
 assert "timeout-minutes: 8" in artifact_request
 
 assert acquisition.startswith("# Connector-local source acquisition\n")
-assert "## Fixed-index lookup first" in acquisition
-assert "## Current regeneration route on a confirmed miss" in acquisition
-assert "## Temporary compatibility fallback" in acquisition
+assert "A valid hit starts no workflow, posts no comment, and requires no wait." in acquisition
+assert "issue #235 is the only Artifact mailbox" in acquisition
+assert "Wait 10 seconds" in acquisition
+assert "Poll only that exact request ID\nevery 10 seconds" in acquisition
+assert "when 2 minutes have elapsed since command creation" in acquisition
+assert "bot user ID `41898282`" in acquisition
+assert "retains at most ten request correlations" in acquisition
+assert "same complete resolved identity and artifact" in acquisition
+registry_write = acquisition.index("persist the terminal\nregistry entry")
+command_cleanup = acquisition.index("deletes the exact command comment")
+fixed_index = acquisition.index("fixed-index publication occurs last")
+assert registry_write < command_cleanup < fixed_index
+assert "wait 90 seconds, then poll `source-bundle/request/<nonce>` on the source SHA every 30 seconds" in acquisition
+assert "artifact reported by that exact status context" in acquisition
+assert "confirm cleanup of the exact unchanged request ref" in acquisition
 assert "## Prepare the local checkout" in acquisition
 for universal in (development, agents):
     for moving_detail in ("/artifact source ", "source-bundle-request/", "90-second", "#235"):

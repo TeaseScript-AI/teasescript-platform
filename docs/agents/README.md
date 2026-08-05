@@ -17,7 +17,9 @@ capabilities and assigned role, not by product, model, or vendor name.
 5. **Is the agent performing an assigned pull-request review?** Add [`REVIEWER.md`](REVIEWER.md).
 
 Select exactly one source/workspace route: direct repository or connector-local. Publication-constrained,
-orchestrator, and reviewer guidance are overlays. Do not load every route by default.
+orchestrator, and reviewer guidance are overlays. An overlay may narrow the selected route's writes but does
+not broaden them; the reviewer overlay remains read-only by default unless a separate repair assignment is
+explicitly accepted. Do not load every route by default.
 
 ## Route summary
 
