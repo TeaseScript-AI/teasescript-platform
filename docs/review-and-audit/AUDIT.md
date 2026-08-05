@@ -5,11 +5,6 @@ exact declared state and scope satisfy all applicable accepted requirements, own
 acceptance criteria, and canonical project rules. It must expose material defects, unjustified
 complexity, weak evidence, and realistic ways the result can fail or be misinterpreted.
 
-Within that scope, `Passed` means the subject is convincingly correct, complete, understandable,
-maintainable, and as simple as its accepted behavior and real boundaries allow. KISS, pragmatic
-YAGNI, useful DRY, proportionate evidence, and justified documentation cost are part of this
-quality; maximal machinery for hypothetical situations is not.
-
 Derive checks from the actual authority and audited subject. Use the hierarchy in
 [`README-FIRST.md`](../../README-FIRST.md), the finding and blocking-evidence rules in
 [`DEVELOPMENT-WORKFLOW.md`](../DEVELOPMENT-WORKFLOW.md), the applicable strategy in
@@ -19,9 +14,9 @@ checklist, invent requirements, or manufacture hypothetical defects merely to ap
 
 ## Prepare the audit
 
-Begin preparation or execution only when explicitly assigned; the assignment may authorize those
-phases separately. An audit may assess a final candidate or diagnose an unfinished or troubled
-state. Identify the exact state being audited and limit every conclusion to that state.
+When assigned to prepare an audit, present the task-specific plan to the owner or coordinator and
+do not execute it until they approve or adjust it. An audit may assess a final candidate or diagnose
+an unfinished or troubled state; identify the exact state and limit every conclusion to it.
 
 Before executing the audit, create a temporary, task-specific audit plan. Record:
 
@@ -30,22 +25,20 @@ Before executing the audit, create a temporary, task-specific audit plan. Record
   boundaries that may be relevant;
 - conceivable audit angles, risks, edge cases, failure modes, indirect effects, and likely
   misinterpretations;
-- the concrete investigations, probes, and evidence needed; and
+- the concrete investigations, probes, and evidence needed;
+- how each applicable minimum focus below will be investigated and evidenced, or the inspected
+  reason it is immaterial; and
 - provisional moving facts that must be refreshed before they support a verdict.
 
 Study the relevant implementation, history, earlier reviews, and current state. Treat earlier
 conclusions, author claims, green test totals, and previous approval as leads to challenge, not
 proof.
 
-Maintain the plan through targeted edits as investigation reveals checks, results, or
-uncertainty. It guides the work but never limits it and is not a permanent repository checklist
-or fixed report form. The focus below is a required minimum: add every subject-specific angle
-and evidence need required by the scope.
+Update the plan as checks, results, and uncertainty emerge; it guides but never limits
+investigation. Add every subject-specific angle and evidence need required by the scope.
 
-Consider every conceivable angle that could affect the subject or confidence in the result.
-Because relevance cannot be known in advance, close an angle as immaterial only after enough
-inspection to justify that conclusion. Stop pursuing nonexistent systems, interfaces, consumers,
-or risks once inspection establishes no material connection to the current subject.
+Consider every potentially material angle, close it only after enough inspection, and stop once
+inspection establishes no material connection to the current subject.
 
 Refresh the audited identity and all material moving facts before issuing the verdict. If the
 audited state changes during execution, determine the impact, update the identity, and repeat
@@ -67,11 +60,10 @@ maintain.
 A narrower audit question may bound the scope when that limitation is explicit, but an informal
 request to “audit the code” does not exclude relevant supporting elements.
 
-Identify every file, module, function, branch, data structure, dependency, test, workflow step,
-configuration item, interface, generated result, documentation passage, and indirect interaction
-that belongs to or can affect the scoped subject. Inspect each candidate element far enough to
-establish its relevance. Investigate every relevant element thoroughly, and close it as
-immaterial only for a defensible reason supported by inspection.
+Identify every potentially relevant implementation element, dependency, test, document, workflow,
+configuration, interface, generated result, and indirect interaction. Inspect each far enough to
+establish relevance; investigate every relevant element thoroughly, and close it as immaterial
+only for a defensible reason supported by inspection.
 
 Repeated or structurally equivalent elements may be assessed as a group only after establishing
 that the evidence represents the complete group and that no material variation is hidden by the
@@ -139,9 +131,10 @@ For every relevant document, establish that:
 
 Documentation may be long when its length carries necessary meaning, but every word, sentence,
 paragraph, heading, list, example, and repeated fact must provide enough semantic or operational
-value to justify its recurring reading and context cost. Treat avoidable documentation growth as
-a material audit defect when the same intent can be preserved more clearly and compactly. Never
-trade away meaning, authority, conditions, ordering, exceptions, execution clarity, or
+value to justify its recurring reading and token/context cost. Treat avoidable documentation
+growth as a material audit defect when the same intent can be preserved more clearly and
+compactly. Never trade away meaning, authority, conditions, ordering, exceptions, execution
+clarity, or
 resistance to misinterpretation merely to reduce length.
 
 ### Security, trust boundaries, performance, and resources
@@ -171,8 +164,10 @@ speculative risks are not defects unless they expose a real accepted boundary or
 consequence.
 
 When tests or test infrastructure are within scope, green results alone are insufficient. Where
-the mechanism permits, introduce representative temporary defects or negative probes and confirm
-that:
+the mechanism permits, perform representative temporary defects or negative probes only in a
+disposable local checkout, isolated fixture, or equivalent local test state. Never commit, push,
+or introduce them into shared branches, CI configuration, shared services, or operational external
+state. Confirm that:
 
 - the intended test, oracle, validator, generator, replay system, matrix, or framework detects
   the defect for the intended reason rather than through an unrelated failure;
@@ -228,13 +223,16 @@ Use exactly one verdict:
 - `Failed`: the result is fundamentally unsound, substantially misses applicable requirements,
   or requires major rework or redesign rather than bounded amendments.
 
-Missing necessary evidence is not a fourth verdict. Obtain the evidence or explicitly adjust and
-disclose the declared scope before issuing a verdict.
+Missing necessary evidence is not a fourth verdict. Obtain it. Adjust scope only when the assignment
+authorizes that change or after owner or coordinator approval; never remove unavailable evidence
+merely to obtain a Pass. Without the evidence or authorization, issue no verdict and report the
+blockage.
 
 Retain the final audit report as dated, non-canonical historical evidence linked to the exact
-audited state, declared scope, verdict, and any later re-audit. Keep it outside default reading
-routes and do not treat it as current project authority. Do not retain the temporary audit plan
-or other preparation material.
+audited state, scope, verdict, and any later re-audit. The applicable workflow selects its durable
+location; do not create a repository document solely for retention. Keep it outside default reading
+routes and do not treat it as current project authority. Do not retain the temporary plan or other
+preparation material.
 
 ## Re-audit
 
