@@ -46,7 +46,7 @@ second moving current-state summary.
 
 ## Canonical owner map
 
-- **Product intent and owner wish history:** [`WISHES.xml`](../WISHES.xml).
+- **Approved product intent and owner wish history:** [`WISHES.xml`](../WISHES.xml).
 - **Accepted decisions and rationale:** accepted ADRs in [`docs/decisions/`](decisions/).
 - **Accepted syntax and semantics:**
   [`docs/specifications/accepted-syntaxes-v30.md`](specifications/accepted-syntaxes-v30.md), overridden only within

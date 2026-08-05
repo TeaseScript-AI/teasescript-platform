@@ -50,10 +50,11 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
 - Static treatment of contextual `speaker` access when control-flow analysis proves no explicit or default speaker is
   available.
-- Compatibility mapping and compact author syntax for the accepted V30 `showButton` timeout and elapsed-time behavior.
+- Compatibility mapping and compact author syntax for invoking the accepted V30 `showButton` timeout and
+  elapsed-time behavior.
 - Detailed interaction result objects, including the author-facing option that selects them.
-- Compatibility mapping and author-facing API for accepted V30 parenthesized input/choice options, richer validation,
-  and custom compact `choose` field hints.
+- Compatibility mapping, names, and option shapes that expose the accepted V30 parenthesized input/choice options
+  and custom compact `choose` field hints without changing their accepted behavior.
 - Advanced accessibility override field for Standard UI and custom UI.
 - Deterministic speaker-aware typing-indicator syntax, formula, defaults, checkpoint state, and relation to smart
   autoplay.
@@ -86,7 +87,7 @@ remain in the [`POC-to-alpha backlog`](planning/POC-TO-ALPHA-BACKLOG.md).
 - Motion detection, sampling, camera resource limits, and scene ownership.
 - Media layering, concurrent ownership, cleanup, recovery, and resource handles.
 - Persistent media identity, labels, timestamps, retrieval, privacy, retention, encryption, export, and quotas.
-- Custom-view author syntax and lifecycle within the accepted custom-view capability.
+- Custom-view author syntax within the accepted custom-view capability.
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
 - Time-integrity logging thresholds and whether a future typed anomaly hook is script-visible.
 
