@@ -58,15 +58,6 @@ git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
   exit 1
 }
 
-(
-  cd "$bundle_dir"
-  sha256sum --check --quiet TOOLS-SHA256SUMS
-  sha256sum --check --quiet RUNTIME-SHA256SUMS
-) || {
-  printf 'setup-workspace: FAIL: installed tools/runtime verification failed\n' >&2
-  exit 1
-}
-
 case "$node_major" in
   24) node_version=24.18.0 ;;
   26) node_version=26.5.0 ;;

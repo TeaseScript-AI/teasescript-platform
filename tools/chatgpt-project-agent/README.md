@@ -1,30 +1,25 @@
-# ChatGPT project-agent tools
+# ChatGPT project-agent maintained files
 
-This directory is the canonical, reviewable content of the small ChatGPT
-project-agent tools bundle. Download this directory and compress the directory
-itself as `chatgpt-project-agent-tools-linux-x64.tar.gz`. No generated tools
-archive is stored in Git.
+This directory is the GitHub-canonical source for the small maintainable part of
+the ChatGPT project-agent environment. Its relative layout should mirror the
+installed environment wherever practical so a path under this directory maps to
+the same path after installation.
 
-The bundle contains the maintained documentation, shell scripts, manifests,
-configuration, and the single Python tool needed by the installed environment.
-Large runtimes, caches, package payloads, TikToken wheels, and tokenizer data
-belong to the separate runtime `tar.zst`.
+Current Git-owned layout:
 
-The standalone `tools/setup-chatgpt-project-agent.sh` is outside this directory.
-It validates and combines the tools and runtime archives into
-`/mnt/data/chatgpt-project-agent-linux-x64`.
-
-Normal use after installation:
-
-```bash
-/mnt/data/chatgpt-project-agent-linux-x64/bin/prepare-agent-workspace.sh \
-  --artifact /mnt/data/source-bundle.zip \
-  --artifact-sha256 <sha256> \
-  --expected-head <head-sha> \
-  --expected-merge-base <merge-base-sha> \
-  --expected-repository TeaseScript-AI/teasescript-platform \
-  --output /mnt/data/source-work
+```text
+bin/      maintained shell entrypoints and installers
+docs/     task-oriented project-agent guidance
+tools/    maintained local helper programs
 ```
 
-TikToken is installed and verified for every prepared workspace. The historical
-`--with-tiktoken` option remains accepted only as a compatibility no-op.
+The external tools `tar.gz` is made from this directory; no generated archive is
+committed to Git. The large runtime `tar.zst` later supplies the heavy paths that
+are intentionally absent here, such as bundled runtimes, caches, package
+payloads, TikToken wheels, and tokenizer data.
+
+This PR establishes the reviewable source layout only. Issue #210 remains open
+for the simple setup script, final runtime split, archive assembly, and end-to-end
+installation verification. Do not add strict per-file SHA inventories, frozen
+full-tree manifests, or a relocation framework merely to package this local
+tooling.

@@ -110,21 +110,17 @@ The shared project folder should contain only material useful across chat sessio
 - dated audit and review reports when retained for evidence.
 
 Stable ChatGPT project routing and bootstrap guidance are controlled
-derivatives rather than second editable workflow owners. Their complete
-maintainable sources live under `tools/chatgpt-project-agent/`. The entire
-`tools/chatgpt-project-agent/` directory maps to the small external tools
-`tar.gz`; no generated tools archive is committed to Git.
+derivatives rather than second editable workflow owners. Maintainable project-agent
+files live under `tools/chatgpt-project-agent/`, whose relative `bin/`, `docs/`,
+and `tools/` layout should mirror the installed environment where practical.
+The external tools `tar.gz` is made from that directory; generated archive
+binaries are not committed. Large runtime-only payloads remain outside Git.
 
-`tools/prepare-chatgpt-project-agent.py refresh` regenerates the tools metadata
-and `docs/chatgpt-project/README-FIRST.md`. That README is the exact ordered
-concatenation of every configured source file without summarizing or omitting
-source text. The standalone setup script and large runtime archive remain
-outside the tools directory.
-
-Replace changed project-folder derivatives as one coherent set. Remove older
-suffixed or versioned current copies before upload, and record the manual
-project-folder synchronization separately; a repository merge alone does not
-prove it occurred.
+`docs/chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder,
+not a concatenation of installed guides. Project-folder synchronization remains
+a separate manual step and is not proven by a repository merge. Issue #210
+remains open until the setup/runtime assembly and end-to-end replacement set are
+finished.
 
 Research and historical material must be explicitly labeled non-authoritative. It may inform design but cannot silently define syntax, architecture, or implementation status.
 
@@ -136,7 +132,7 @@ Do not add the following merely to make the repository self-contained:
 - copied legacy engine/script archives;
 - chat scratchpads or temporary research notes;
 - temporary coordinator work breakdowns, executor assignments, or integration logs;
-- generated archive binaries or temporary staging manifests for ChatGPT project-folder derivatives;
+- generated archive binaries, per-release checksums, or temporary staging manifests for ChatGPT project-folder derivatives;
 - duplicate historical versions of canonical documents;
 - PR-specific audit reports after their relevant conclusions are incorporated into current docs and tests.
 

@@ -54,7 +54,7 @@ work.
 - `PHASE-STATUS.md`: current milestone status and verification evidence.
 - `AGENTS.md`: coding, review, and Git rules for every agent.
 - `docs/DEVELOPMENT-WORKFLOW.md`: coordinator, executor, pull-request, documentation, and final-verification workflow.
-- `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md`: canonical split tools/runtime bootstrap contract and installed workspace route.
+- `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md`: project-agent source layout, current bootstrap route, and remaining #210 migration work.
 - `docs/README.md`: documentation map.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
 - `docs/specifications/`: accepted consolidated specifications.

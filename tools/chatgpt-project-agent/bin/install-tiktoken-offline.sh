@@ -39,14 +39,6 @@ PY
   printf 'install-tiktoken-offline: FAIL: runtime TikToken payload is incomplete\n' >&2
   exit 1
 }
-(
-  cd "$tool_dir"
-  sha256sum --check --quiet SHA256SUMS
-) || {
-  printf 'install-tiktoken-offline: FAIL: runtime TikToken payload verification failed\n' >&2
-  exit 1
-}
-
 git_dir=$(git -C "$repo_dir" rev-parse --absolute-git-dir 2>/dev/null) || {
   printf 'install-tiktoken-offline: FAIL: target is not a Git worktree: %s\n' "$repo_dir" >&2
   exit 1
@@ -59,20 +51,15 @@ mkdir -p "$state_dir"
 verify_install() {
   PYTHONPATH="$target" "$python_path" - "$vocabulary" <<'PY'
 from __future__ import annotations
-import hashlib
 import sys
 from importlib.metadata import version
 from pathlib import Path
-EXPECTED = "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d"
 path = Path(sys.argv[1]).resolve()
-actual = hashlib.sha256(path.read_bytes()).hexdigest()
-if actual != EXPECTED:
-    raise SystemExit(f"vocabulary SHA-256 mismatch: expected {EXPECTED}, found {actual}")
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 if version("tiktoken") != "0.13.0":
     raise SystemExit(f"unexpected tiktoken version: {version('tiktoken')}")
-ranks = load_tiktoken_bpe(str(path), expected_hash=EXPECTED)
+ranks = load_tiktoken_bpe(str(path))
 if not ranks:
     raise SystemExit("tokenizer vocabulary is empty")
 print("verified tiktoken=0.13.0")

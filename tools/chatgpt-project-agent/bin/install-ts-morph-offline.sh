@@ -29,14 +29,6 @@ command -v npm >/dev/null 2>&1 || {
   printf 'install-ts-morph-offline: FAIL: target lacks package.json: %s\n' "$repo_dir" >&2
   exit 1
 }
-(
-  cd -- "$tool_dir"
-  sha256sum --check --quiet SHA256SUMS
-) || {
-  printf 'install-ts-morph-offline: FAIL: bundled package verification failed\n' >&2
-  exit 1
-}
-
 stage_dir=$(mktemp -d "${TMPDIR:-/tmp}/ts-morph-offline.XXXXXX")
 trap 'rm -rf -- "$stage_dir"' EXIT
 printf '%s\n' '{"private":true}' > "$stage_dir/package.json"

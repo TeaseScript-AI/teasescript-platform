@@ -64,38 +64,21 @@ Do not redirect failures to `/dev/null` merely to reduce output. Compact success
 
 ## Prepare a verified source review checkout
 
-The single installed Python tool lives at
-`tools/chatgpt-project-agent/tools/prepare-source-review.py` in GitHub and at
-`/mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py` after
-project-agent setup. It converts one already downloaded source-bundle ZIP into
-an exact clean local checkout. It verifies the GitHub artifact digest, ZIP safety
-and payload shape, internal checksums, manifest repository/head/tree identities,
-complete bundle history, optional expected merge-base ancestry, `git fsck`, and
-clean worktree. The requested output is exposed atomically only after every
-check succeeds. Its fail-closed tests remain here because they are repository
-validation rather than distributed bundle content.
+The canonical helper source now lives at
+`tools/chatgpt-project-agent/tools/prepare-source-review.py` so its relative path
+can match the future installed project-agent layout. Its fail-closed tests remain
+in `tools/local-agent/` because they validate repository tooling rather than
+distributed bundle content.
 
-```bash
-python3 /mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py \
-  --artifact /mnt/data/pr-144-source-bundle.zip \
-  --artifact-sha256 6ad5e5af7fd2f9858dd10473fc8ce092a7dc4723e428daba2f2d302b2e1a1bf0 \
-  --expected-repository TeaseScript-AI/teasescript-platform \
-  --expected-head 1eef336ff0acdfae9913295890ef92828b9ba95b \
-  --expected-merge-base 371bbaaba6d4773c292b69598c521591afcf4330 \
-  --output /mnt/data/review-pr-144
-```
+The helper converts one downloaded source-bundle ZIP into an exact clean local
+checkout. It verifies the external digest, ZIP safety and payload shape, internal
+checksums, manifest identities, complete Git history, optional merge-base
+ancestry, `git fsck`, and a clean worktree.
 
-For pull-request review, pass the merge base reported by
-`compare_commits`, not the current base-branch tip. The helper requires that
-commit to exist in the bundle and be an ancestor of the exact head.
-
-The resulting checkout has no `origin` remote. Connector-based agents should use
-this artifact route instead of trying network `git clone` or reading the
-repository file by file through the connector. The extractor rejects artifacts
-above 128 MiB uncompressed and metadata files above 1 MiB. See
-`docs/CHATGPT-GITHUB-WORKFLOW.md`.
-
-Focused tests:
+Until issue #210 supplies and synchronizes the new setup distribution, use the
+currently trusted preinstalled copy for real connector-local review; do not run
+the candidate helper from the artifact under review. The repository source path
+is used for maintenance and focused tests:
 
 ```bash
 python3 -B tools/local-agent/test-prepare-source-review.py

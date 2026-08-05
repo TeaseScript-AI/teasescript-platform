@@ -13,7 +13,6 @@ bash "$script_dir/run-compact.sh" \
   -- env TEASESCRIPT_COMPACT_TEST_INNER=1 \
     bash "$script_dir/test-create-source-bundle.sh"
 python3 -B "$script_dir/test-prepare-source-review.py"
-python3 -B "$script_dir/../test-prepare-chatgpt-project-agent.py"
 python3 -B "$script_dir/test-prepare-patch-publication.py"
 python3 -B "$script_dir/test-patch-publication.py"
 bash "$script_dir/test-patch-publication-validate-candidate.sh"
