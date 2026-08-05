@@ -20,6 +20,7 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 bundle_dir=$(cd -- "$script_dir/.." && pwd)
 tool_dir="$bundle_dir/dependencies/tiktoken-cp313-linux-x86_64"
 python_bin=${PYTHON_BIN:-python3.13}
+o200k_base_sha256=446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d
 
 command -v "$python_bin" >/dev/null 2>&1 || {
   printf 'install-tiktoken-offline: FAIL: CPython 3.13 is required; set PYTHON_BIN when needed\n' >&2
@@ -46,20 +47,34 @@ git_dir=$(git -C "$repo_dir" rev-parse --absolute-git-dir 2>/dev/null) || {
 state_dir="$git_dir/teasescript-agent"
 target="$state_dir/python-cp313"
 vocabulary="$tool_dir/tokenizer/o200k_base.tiktoken"
+vocabulary_sha256=$("$python_path" - "$vocabulary" <<'PY'
+from __future__ import annotations
+import hashlib
+import sys
+from pathlib import Path
+print(hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest())
+PY
+)
+if [[ "$vocabulary_sha256" != "$o200k_base_sha256" ]]; then
+  printf 'install-tiktoken-offline: FAIL: o200k_base tokenizer SHA-256 mismatch: expected %s, found %s\n' \
+    "$o200k_base_sha256" "$vocabulary_sha256" >&2
+  exit 1
+fi
 mkdir -p "$state_dir"
 
 verify_install() {
-  PYTHONPATH="$target" "$python_path" - "$vocabulary" <<'PY'
+  PYTHONPATH="$target" "$python_path" - "$vocabulary" "$o200k_base_sha256" <<'PY'
 from __future__ import annotations
 import sys
 from importlib.metadata import version
 from pathlib import Path
 path = Path(sys.argv[1]).resolve()
+expected_hash = sys.argv[2]
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 if version("tiktoken") != "0.13.0":
     raise SystemExit(f"unexpected tiktoken version: {version('tiktoken')}")
-ranks = load_tiktoken_bpe(str(path))
+ranks = load_tiktoken_bpe(str(path), expected_hash=expected_hash)
 if not ranks:
     raise SystemExit("tokenizer vocabulary is empty")
 print("verified tiktoken=0.13.0")

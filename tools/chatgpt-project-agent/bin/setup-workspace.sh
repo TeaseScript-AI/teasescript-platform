@@ -135,8 +135,8 @@ fi
 
 if ((with_ts_morph)); then
   installed_version=$(
-    "$runner" node -e 'const fs=require("fs"); try { const p=JSON.parse(fs.readFileSync("node_modules/ts-morph/package.json","utf8")); process.stdout.write(p.version||""); } catch { process.stdout.write(""); }' \
-      2>/dev/null || true
+    "$runner" node -e 'const fs=require("fs"); try { const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(p.version||""); } catch { process.stdout.write(""); }' \
+      "$repo/node_modules/ts-morph/package.json" 2>/dev/null || true
   )
   if [[ "$installed_version" != "28.0.0" ]]; then
     "$runner" bash "$script_dir/install-ts-morph-offline.sh" "$repo"

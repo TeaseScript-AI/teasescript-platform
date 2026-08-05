@@ -18,17 +18,17 @@ The target language for source code, identifiers, TeaseScript keywords, API name
 HOW TO USE THE PROJECT FILES
 These instructions provide project context, priorities, and routing. Exact syntax, schemas, algorithms, and unresolved choices belong in the package documents.
 
-For every substantial task:
-1. Read `README-FIRST.md` and `CURRENT-DESIGN.md`.
-2. Read the task-specific documents listed below.
-3. Read relevant ADRs in `docs/decisions/` before changing architecture or semantics.
-4. Read `AGENTS.md` before coding or modifying repository files.
+For every substantial task in a verified repository checkout:
+1. Read applicable `AGENTS.md` files first.
+2. Read the repository `README-FIRST.md` and the assigned issue or pull request.
+3. Read only the controlling task documents. Read `CURRENT-DESIGN.md` for architecture-affecting or broad cross-component work and `PHASE-STATUS.md` for milestone, gate, integration-status, or current-capability work.
+4. Read relevant ADRs in `docs/decisions/` before changing architecture or semantics.
 
 Authority and status:
 - An accepted ADR is authoritative for its decision and overrides older descriptive text.
 - A proposed ADR or open question is not a final decision.
 - `WISHES.xml` records product intent and history. An active wish is not automatically an accepted implementation decision; ignore superseded wishes.
-- `docs/references/` and `source-examples/` are capability research, not required architectures or runtimes.
+- `docs/reference/` contains routing notices for non-authoritative research stored outside the repository.
 - Historical or analysis files are non-authoritative unless a current specification explicitly adopts them.
 - When files conflict, identify the exact conflict and do not silently resolve a product or architecture decision.
 
@@ -44,7 +44,7 @@ DOCUMENT MAP
 - Editor, simulator, debugger: `docs/CODE-EDITOR.md`
 - LLM/vision: `docs/LLM-INTEGRATION.md`
 - Expressions and math.js proposal: `docs/MATH-EXPRESSIONS.md`
-- Capability research: `docs/CAPABILITY-MATRIX.md`, `docs/references/`
+- Capability research: `docs/CAPABILITY-MATRIX.md`, `docs/reference/`
 - Decisions: `docs/decisions/`
 - Product intent/history: `WISHES.xml`
 
