@@ -6,7 +6,7 @@
 - `specifications/accepted-syntaxes-v30.md`: accepted consolidated syntax baseline.
 - `decisions/`: accepted and proposed ADRs; each file states its status.
 - `../CURRENT-DESIGN.md`: current architecture and implementation boundaries.
-- `../PHASE-STATUS.md`: milestone and verification status.
+- `../PHASE-STATUS.md`: current phase, gate, and high-level implemented-capability status.
 - `../WISHES.xml`: product intent and decision history; wishes are not automatic implementation decisions.
 
 ## Current topic documents

@@ -8,7 +8,7 @@ issues.
 A listed question is not accepted direction. Its linked accepted or current sources constrain the decision without
 deciding the remaining choice.
 
-## Runtime, state, and evolution
+## Runtime hardening and evolution
 
 Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTURE.md),
 [ADR 0015](decisions/0015-serializable-runtime-architecture.md),
@@ -46,23 +46,24 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 - Advanced Standard Library default-prelude opt-out and replacement policy after the first POC.
 - Package-local and published community-library packaging, imports, moderation, compatibility, replacement mappings,
   dependency locks, transitive resolution, cycles, capability propagation, and version conflicts.
-- Representation and semantics for units, date, time, datetime, and duration values.
 - Standard Library string API and signatures beyond the first POC.
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
 - Static treatment of contextual `speaker` access when control-flow analysis proves no explicit or default speaker is
   available.
-- Advanced `showButton` timeout and elapsed-time result contract.
+- Compatibility mapping and compact author syntax for the accepted V30 `showButton` timeout and elapsed-time behavior.
 - Detailed interaction result objects, including the author-facing option that selects them.
-- Advanced parenthesized input/choice forms, richer validation options, and custom compact `choose` field hints.
+- Compatibility mapping and author-facing API for accepted V30 parenthesized input/choice options, richer validation,
+  and custom compact `choose` field hints.
 - Advanced accessibility override field for Standard UI and custom UI.
 - Deterministic speaker-aware typing-indicator syntax, formula, defaults, checkpoint state, and relation to smart
   autoplay.
 - Constrained LLM interpretation contract and author-facing options for natural-language numbers and non-exact choice
   answers.
-- Final timer author API and lifecycle semantics, including handles, pause/resume/stop/restart, repetition,
-  persistence, and visible presentation.
+- Exact button-row/dropdown breakpoints, measurements, and overflow behavior.
+- Whether and how to revise the accepted V30 timer API for explicit handles and final pause/resume/stop/restart,
+  repetition, persistence, and visible-presentation semantics.
 
-## Player, host, media, and interactions
+## Player and interactions
 
 Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
 [`CODE-EDITOR.md`](CODE-EDITOR.md), [ADR 0010](decisions/0010-package-network-policy.md),
@@ -80,7 +81,8 @@ remain in the [`POC-to-alpha backlog`](planning/POC-TO-ALPHA-BACKLOG.md).
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
 - Camera capability declarations, stream ownership, device switching, quality negotiation, restore, privacy
   indicators, and simultaneous-camera policy.
-- `askImage(...)` preview/countdown/retake behavior and direct nullable `takePhoto(...)` capture behavior.
+- Camera UI and lifecycle around accepted `askImage(...)` and nullable `takePhoto(...)`, including preview, countdown,
+  retake, permission, and restore behavior.
 - Motion detection, sampling, camera resource limits, and scene ownership.
 - Media layering, concurrent ownership, cleanup, recovery, and resource handles.
 - Persistent media identity, labels, timestamps, retrieval, privacy, retention, encryption, export, and quotas.
@@ -94,7 +96,8 @@ Current constraints: [`DATA-AND-API.md`](DATA-AND-API.md),
 [`CONTINUOUS-PERSONALITIES.md`](CONTINUOUS-PERSONALITIES.md),
 [`LLM-INTEGRATION.md`](LLM-INTEGRATION.md), and [`SECURITY.md`](SECURITY.md).
 
-- Account, toy, history, locks, global-data, and checkpoint storage contracts.
+- Exact platform/API schemas plus persistence and conflict rules for accepted account, toy, history, lock, global-data,
+  and checkpoint capabilities.
 - Persistent scheduler missed-event behavior, quotas, deduplication, concurrency, and execution location.
 - Continuous-personality lifecycle, assignments, reports, permissions, statuses, and reconnect behavior.
 - Speaker/personality relationships, dynamic LLM prompt assembly, transcript filtering, memory, summaries, and context

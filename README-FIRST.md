@@ -4,9 +4,10 @@
 
 Use project material in this order:
 
-1. Check whether an accepted ADR or a post-V30 owner decision already synchronized into its canonical owner
-   covers the exact issue. Chat, issue, pull-request, test, or review text remains evidence or task context until that
-   synchronization occurs. A later accepted decision overrides V30 only within its stated scope.
+1. Check whether an accepted ADR or a post-V30 owner decision already synchronized into an accepted specification
+   or controlling current topic document covers the exact issue. Chat, issue, pull-request, test, review, or wish text
+   remains evidence or task context until that synchronization occurs. A later accepted decision overrides V30 only
+   within its stated scope.
 2. Otherwise use `docs/specifications/accepted-syntaxes-v30.md` for accepted TeaseScript syntax and semantics.
 3. Use `CURRENT-DESIGN.md` and `PHASE-STATUS.md` for current architecture and implementation status.
 4. Use the task-specific current topic document in `docs/`.
@@ -56,7 +57,7 @@ architecture-affecting or broad cross-component work and `PHASE-STATUS.md` for
 milestone, gate, integration-status, or current-capability work.
 
 - `CURRENT-DESIGN.md`: current architecture and implementation boundaries.
-- `PHASE-STATUS.md`: current milestone status and verification evidence.
+- `PHASE-STATUS.md`: current phase, gate, and high-level implemented-capability status.
 - `AGENTS.md`: coding, review, and Git rules for every agent.
 - `docs/review-and-audit/`: role-based implementation, review, and explicitly
   assigned audit guidance.

@@ -61,9 +61,11 @@ second moving current-state summary.
 - **Unresolved product or technical choices:** [`docs/OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
 - **Concrete execution tasks:** GitHub issues; pull requests are implementation handoffs and review evidence.
 
-An owner decision becomes durable authority only after the canonical owner for its information type is updated. Chat
-messages, issues, pull-request text, tests, CI results, and reviews may prove intent, behavior, or execution state, but
-remain evidence or task context until that synchronization occurs.
+A product or technical owner decision becomes durable implementation authority only after an accepted ADR, accepted
+specification, or controlling current topic document is updated. `WISHES.xml` may preserve approved product intent and
+wish history, but it does not by itself accept an implementation decision. Chat messages, issues, pull-request text,
+tests, CI results, and reviews may prove intent, behavior, or execution state, but remain evidence or task context until
+the required synchronization occurs.
 
 Executable owners retain moving values they directly control: `.nvmrc` owns the required Node runtime selection;
 `package.json` and the lockfile own dependency requirements; bootstrap `MANIFEST.json` files own release payload
