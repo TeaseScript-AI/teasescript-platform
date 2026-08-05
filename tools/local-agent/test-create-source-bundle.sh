@@ -18,7 +18,7 @@ processor_workflow="$root/.github/workflows/source-bundle-request-processor.yml"
 index_workflow="$root/.github/workflows/source-bundle-index.yml"
 artifact_router_workflow="$root/.github/workflows/patch-publication.yml"
 artifact_request_workflow="$root/.github/workflows/artifact-mailbox-worker.yml"
-chatgpt_workflow="$root/docs/CHATGPT-GITHUB-WORKFLOW.md"
+connector_acquisition="$root/docs/agents/CONNECTOR-SOURCE-ACQUISITION.md"
 development_workflow="$root/docs/DEVELOPMENT-WORKFLOW.md"
 agents_file="$root/AGENTS.md"
 temp_root=$(mktemp -d)
@@ -36,7 +36,7 @@ python3 - \
   "$index_workflow" \
   "$artifact_router_workflow" \
   "$artifact_request_workflow" \
-  "$chatgpt_workflow" \
+  "$connector_acquisition" \
   "$development_workflow" \
   "$agents_file" <<'PYWORKFLOW'
 import pathlib
@@ -49,7 +49,7 @@ processor = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 index = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
 artifact_router = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8")
 artifact_request = pathlib.Path(sys.argv[6]).read_text(encoding="utf-8")
-chatgpt = pathlib.Path(sys.argv[7]).read_text(encoding="utf-8")
+acquisition = pathlib.Path(sys.argv[7]).read_text(encoding="utf-8")
 development = pathlib.Path(sys.argv[8]).read_text(encoding="utf-8")
 agents = pathlib.Path(sys.argv[9]).read_text(encoding="utf-8")
 
@@ -221,24 +221,14 @@ assert "sourceSha: process.env.SOURCE_SHA" in artifact_request
 assert "runs-on: ubuntu-24.04" in artifact_request
 assert "timeout-minutes: 8" in artifact_request
 
-assert "use mailbox\n#235 for a confirmed miss" in agents
-assert "Download a valid hit immediately" in agents
-assert "90-second wait\ndoes not apply to the mailbox" in agents
-assert "Issue [#235]" in chatgpt
-assert "Commands elsewhere are ignored" in chatgpt
-assert "A valid hit starts no workflow, posts no comment, and requires no wait" in chatgpt
-assert "Do not copy the compatibility route's 90-second wait" in chatgpt
-assert "complete resolved identity and artifact match" in chatgpt
-assert "at most ten total request correlations" in development
-assert "Fixed-index failure replaces only that" in development
-assert "Issue `#235` is the sole Artifact mailbox" in development
-assert "skipped for every other issue or pull request" in development
-assert "A valid hit allocates no runner, starts no workflow, posts no comment, and waits" in development
-assert "Do not inherit the fallback's 90-second delay" in development
-assert "every 10 seconds" in development
-for document in (chatgpt, development, agents):
-    for match in re.finditer(r"poll(?:ing)?[^\n]{0,80}?(\d+)[ -]second", document, re.IGNORECASE):
-        assert int(match.group(1)) >= 10, match.group(0)
+assert acquisition.startswith("# Connector-local source acquisition\n")
+assert "## Fixed-index lookup first" in acquisition
+assert "## Current regeneration route on a confirmed miss" in acquisition
+assert "## Temporary compatibility fallback" in acquisition
+assert "## Prepare the local checkout" in acquisition
+for universal in (development, agents):
+    for moving_detail in ("/artifact source ", "source-bundle-request/", "90-second", "#235"):
+        assert moving_detail not in universal, (moving_detail, universal[:80])
 
 branch_pattern = re.compile(r"^source-bundle-request/([0-9a-f]{40})/([a-z0-9][a-z0-9-]{0,31})$")
 valid_sha = "9a" * 20

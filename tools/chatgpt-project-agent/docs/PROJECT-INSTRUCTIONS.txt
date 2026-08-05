@@ -21,8 +21,11 @@ These instructions provide project context, priorities, and routing. Exact synta
 For every substantial task in a verified repository checkout:
 1. Read applicable `AGENTS.md` files first.
 2. Read the repository `README-FIRST.md` and the assigned issue or pull request.
-3. Read only the controlling task documents. Read `CURRENT-DESIGN.md` for architecture-affecting or broad cross-component work and `PHASE-STATUS.md` for milestone, gate, integration-status, or current-capability work.
-4. Read relevant ADRs in `docs/decisions/` before changing architecture or semantics.
+3. Select the capability route in `docs/agents/README.md`.
+4. Read only the controlling task documents. Read `CURRENT-DESIGN.md` for
+   architecture-affecting or broad cross-component work and `PHASE-STATUS.md`
+   for milestone, gate, integration-status, or current-capability work.
+5. Read relevant ADRs in `docs/decisions/` before changing architecture or semantics.
 
 Authority and status:
 - An accepted ADR is authoritative for its decision and overrides older descriptive text.

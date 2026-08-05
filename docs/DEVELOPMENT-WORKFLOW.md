@@ -328,266 +328,31 @@ A single-agent pull request that completes its issue may use:
 Closes #123
 ```
 
-## Verified source artifacts for review and handoff
+## Capability-specific execution
 
-`Source bundle` creates seven-day verifiable Git artifacts with reachable
-history for each pull-request head update and push to `main`. Trusted producers
-publish only a successful `source-bundle/artifact-v1` status on the bundled SHA.
-Its exact repository artifact URL indexes metadata that must match the numeric
-ID, name `teasescript-source-<source-sha>`, digest, producer run/repository, and
-expiration. Never publish fixed-context `pending` or `failure`, because either
-could hide an older valid success.
-
-### Cache-first acquisition
-
-For `main`, `pr:<number>`, or `sha:<full-sha>`:
-
-1. Resolve one immutable SHA. For a PR, retain its number, head repository/ref,
-   current base SHA, and exact `compare_commits.merge_base_commit.sha`.
-2. Validate the successful fixed status and exact artifact metadata.
-3. On a valid hit, download immediately and run the trusted preparation command.
-
-A valid hit allocates no runner, starts no workflow, posts no comment, and waits
-zero seconds. Missing, deleted, expired, malformed, mismatched, or otherwise
-unverifiable metadata is a cache miss.
-
-### Additive Artifact mailbox rollout
-
-Issue `#235` is the sole Artifact mailbox. The default-branch
-`issue_comment` job is skipped for every other issue or pull request. In the
-mailbox it accepts only the strict source commands and still requires OWNER,
-MEMBER, or COLLABORATOR association, actor/comment-author equality, and legacy
-permission `write` or `admin` (Maintain maps to `write`).
-
-Accepted requests share one non-cancelling serialized concurrency group. After
-admission, the workflow retains and revalidates the exact request ID, author,
-and body hash; resolves and pins the selector; rechecks the fixed index; and
-reuses a valid artifact found while queued. On a remaining miss it loads tooling
-only from `github.workflow_sha`, checks out the selected source separately with
-`persist-credentials: false`, verifies `HEAD`, and runs only trusted
-`create-source-bundle.sh`. Selected source remains data: none of its actions,
-scripts, dependencies, hooks, builds, submodules, or configuration executes.
-
-The mailbox issue must remain unlocked. GitHub blocks `github-actions[bot]`
-interaction with a locked conversation; the job-level author-association filter
-and the trusted in-job permission check are the authorization boundary.
-
-The mailbox contains one authoritative `github-actions[bot]` registry comment,
-user ID `41898282`, with a stable hidden marker. Each update:
-
-- removes expired ready entries;
-- keeps newest entries first and at most ten total request correlations;
-- merges only the same complete resolved identity and artifact;
-- preserves PR head repository/ref, base SHA, and merge-base SHA;
-- emits compact connector arguments and a fully populated trusted preparation
-  command;
-- records failures as one bounded reason plus the correlated run;
-- rejects ambiguous multiple authoritative registries.
-
-Whole-workflow serialization prevents concurrent read-modify-write loss. The
-registry is the only persistent result comment; no request creates its own bot
-comment. After a terminal entry is safely persisted, the workflow attempts to
-delete only the exact revalidated command. For a produced artifact, fixed-index
-publication is last. Cleanup failure emits a warning without failing the
-producer or invalidating the ready result. Fixed-index failure replaces only that
-producer's ready correlation with failed state. A redelivery whose command and
-retained terminal entry are both absent is a no-op rather than new failure state.
-
-### Phase 1 timing evidence and Phase 2 gate
-
-Phase 1 retains the compatibility route. After the mailbox implementation is on
-`main`, issue #234 requires at least three controlled exact-SHA cache misses,
-plus cache-hit, PR, concurrency, cleanup, stale-index recovery, download, and
-clean-workspace proofs. Record request ID, source SHA, workflow run, artifact ID,
-request timestamp, ready timestamp, elapsed time, and separate queue/production
-time when available. Temporary test refs must be removed.
-
-Do not inherit the fallback's 90-second delay or choose a normal mailbox delay by
-intuition. Use the measured misses to select one round initial wait slightly
-below normal completion. Phase 2 then documents that wait, polls only the exact
-request ID every 10 seconds after it, and sets one overall timeout. Only after
-the Phase 1 evidence passes may Phase 2 make the mailbox mandatory and remove
-the request-branch workflows, helpers, tests, and documentation.
-
-### Compatibility request-branch fallback
-
-During Phase 1 only, the request-branch route remains an internal fallback when
-the fixed index and mailbox route cannot be used. For an exact source SHA:
-
-1. Resolve its full lowercase SHA and current `main` SHA; choose a nonce matching
-   `[a-z0-9][a-z0-9-]{0,31}`.
-2. Create `source-bundle-request/<source-sha>/<nonce>` at that `main` SHA.
-3. Wait 90 seconds, then poll `source-bundle/request/<nonce>` on the source SHA
-   every 30 seconds.
-4. On success, download the reported artifact, verify its digest, and confirm
-   deletion of the exact unchanged request ref.
-
-That 90-second delay applies only after creating a compatibility request branch.
-It never delays fixed-index validation or a valid cache hit and must not be
-copied into the mailbox route. The fallback processor revalidates the strict
-name, unchanged request SHA, default-branch ancestry, and requested commit;
-cleanup deletes only the unchanged ref with `--force-with-lease`.
-
-### Local verification boundary
-
-The ZIP contains exactly `repository.bundle`, `manifest.json`, and
-`SHA256SUMS`. Use the trusted preinstalled helper and, for PR review, the exact
-merge base rather than the base-branch tip:
-
-```shell
-python3 /mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py \
-  --artifact /mnt/data/source-bundle.zip \
-  --artifact-sha256 <github-artifact-sha256> \
-  --expected-repository TeaseScript-AI/teasescript-platform \
-  --expected-head <source-sha> \
-  --expected-merge-base <review-merge-base-sha> \
-  --output /mnt/data/source-review
-```
-
-The helper verifies the outer digest, ZIP paths and payload, internal checksums,
-manifest identities, complete bundle, expected head and optional merge-base
-ancestry, checked-out tree, `git fsck`, and clean worktree. It exposes output
-only after success and removes temporary `origin`. Connector agents follow
-`CHATGPT-GITHUB-WORKFLOW.md`; never substitute network Git, run-number searches,
-or an artifact from another SHA.
-
-## Coordinated multi-agent model
-
-Use this model only after it has been explicitly selected for a complex issue or coordinated milestone:
-
-```text
-coordinator
-    -> integration branch
-executors
-    -> one branch and pull request per workstream
-coordinator
-    -> review, merge order, and canonical documentation
-Codex or another final verifier
-    -> combined clean verification
-integration branch
-    -> final pull request to main
-```
-
-Several unrelated or independently mergeable issues do not need an integration branch merely because they are being worked on at the same time.
-
-### Coordinator
-
-The coordinator:
-
-- confirms that the multi-agent model is justified;
-- divides the accepted issue or milestone into workstreams and records dependencies;
-- creates or names the integration branch;
-- gives each executor its base, target branch, scope, exclusions, acceptance criteria, and documentation ownership;
-- minimizes overlapping file ownership;
-- reviews executor pull requests and assigns cross-workstream findings;
-- controls merge order and authorizes executor pull-request merges;
-- owns the final update of shared status and routing documents;
-- prepares or reviews the final pull request to `main`.
-
-Temporary work breakdowns, executor assignments, merge tracking, and chat notes remain outside the repository. Their accepted decisions and implemented results are synchronized into canonical repository documentation.
-
-### Executor
-
-Each executor starts from the assigned repository state and follows `AGENTS.md`. It:
-
-- works only on its assigned workstream;
-- creates its own branch;
-- implements code, tests, fixtures, examples, and specifically assigned documentation;
-- opens a draft pull request to the assigned integration branch when work begins or as soon as a reviewable skeleton exists;
-- records final behavior, verification, documentation impact, deferred work, and remaining risks in the pull request description;
-- processes review feedback on the same branch and pull request;
-- marks the pull request ready only after its own scope and checks are complete.
-
-The pull request is the executor's handoff record. A separate coordinator report is not required. When a repair changes the result, update the pull request description before merge.
-
-Executors do not merge their own workstream pull requests unless the coordinator explicitly authorizes it.
-
-### Final verifier
-
-Codex or another assigned verifier checks the combined integration branch after executor work and canonical documentation have been merged. It does not silently redesign or repair a failed workstream. Failures are returned to the responsible executor or coordinator unless an explicit repair assignment is made.
-
-## Coordinated branch and pull-request structure
-
-Create one integration branch from current `main`, for example:
-
-```text
-fix/runtime-foundation-hardening
-```
-
-Give every executor a separate branch, for example:
-
-```text
-fix/runtime-hardening-numeric
-fix/runtime-hardening-boundaries
-fix/runtime-hardening-lexer
-```
-
-Executor pull requests target the integration branch, not `main`. GitHub CI runs for every pull request.
-
-Independent workstreams may branch from the same integration commit and proceed in parallel when their file ownership and behavior do not overlap. Dependent work starts from the predecessor's merged integration state. The coordinator must not present dependent work as safely parallel.
-
-Review feedback normally uses pull-request comments or reviews. Do not push to another agent's branch unless ownership has been explicitly handed over or the work has been reassigned. A handoff must remain visible in the pull request.
-
-Executor pull requests should reference their issue without closing it prematurely:
-
-```text
-Refs #123
-```
-
-The final integration pull request to `main` closes the completed issues:
-
-```text
-Closes #123
-Closes #124
-```
-
-## Minimum coordinated assignment
-
-A coordinated executor assignment must identify:
-
-- repository and assigned base state;
-- source branch name and pull-request target branch;
-- exact workstream scope and explicit exclusions;
-- acceptance criteria;
-- relevant accepted specifications, ADRs, open decisions, and backlog IDs;
-- expected checks;
-- files or shared documents reserved for another workstream.
-
-Fresh executor sessions must read the repository documents required by `AGENTS.md`; they should not depend on another chat's history.
+This document owns only rules that apply regardless of agent capability. Before source acquisition or a
+repository write, select the applicable route in [`agents/README.md`](agents/README.md). That router and its
+focused guides own capability-specific source acquisition, permitted writes, role overlays, verification, and
+publication or handoff. Do not copy those procedures into this document.
 
 ## Documentation ownership
 
 Before every non-trivial documentation change or documentation review, read
-[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md). Record material
-ownership or consolidation decisions in the active issue, pull request, or
-review discussion; do not create a separate report unless the task explicitly
-requires one.
+[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md). Record material ownership or consolidation
+decisions in the active issue, pull request, or review discussion; do not create a separate report unless the
+task requires one.
 
-For a single-agent issue, that agent updates documentation affected by the implemented behavior in the same pull request unless the task explicitly reserves a shared document for someone else.
+The agent implementing a change updates documentation affected by the implemented behavior in the same pull
+request unless the task explicitly assigns that owner elsewhere. Every pull request states its documentation
+impact, including when no edit is needed. For explicitly coordinated work, use the assignment and integration
+rules in [`agents/ORCHESTRATOR.md`](agents/ORCHESTRATOR.md).
 
-For coordinated work, executors update documentation local to their assigned behavior. Shared summary and routing documents are coordinator-owned unless explicitly assigned, especially:
-
-```text
-README-FIRST.md
-CURRENT-DESIGN.md
-PHASE-STATUS.md
-README.md
-```
-
-Executor pull requests must state the effect on canonical documentation even when the executor is not assigned to edit those files.
-
-After coordinated implementation pull requests are merged, the coordinator prepares the canonical documentation update from:
-
-- the merged code and tests;
-- the final pull-request descriptions;
-- accepted review outcomes;
-- current repository documentation.
-
-The coordinator records actual implemented behavior, not the original proposal. Deferred work remains explicit.
+Canonical documentation records actual implemented behavior and explicit deferred work, not an obsolete plan.
 
 ## Test expectations by change type
 
-[`TESTING.md`](TESTING.md) defines the detailed repository testing strategy. The minimum verification for a pull request depends on the behavior it changes:
+[`TESTING.md`](TESTING.md) defines the detailed repository testing strategy. The minimum verification for a
+pull request depends on the behavior it changes:
 
 | Change type | Minimum expected verification |
 | --- | --- |
@@ -599,25 +364,15 @@ The coordinator records actual implemented behavior, not the original proposal. 
 | Security boundary | Structured rejection, bounded work, and no uncontrolled host exception at the real documented boundary |
 | Browser host/player behavior | Real browser E2E after the concrete cross-origin boundary exists |
 
-These are relevance-based requirements. A pull request is not required to run or add every test category when the changed behavior does not reach that layer.
-
-## Coordinated review and merge loop
-
-1. Each executor opens a draft pull request to the assigned integration branch.
-2. CI and the coordinator review the workstream in isolation.
-3. Findings are handled by the owning executor on the same pull request, or reassigned explicitly when they cross workstream boundaries.
-4. The executor marks the pull request ready after completing its scope and checks.
-5. The coordinator confirms scope, tests, documentation impact, and merge order.
-6. The coordinator merges or explicitly authorizes merging the executor pull request into the integration branch.
-7. Dependent executors receive the new integration state.
-
-Do not merge a workstream merely because its files do not conflict. Behavioral contracts, checkpoint formats, public types, and shared tests can create dependencies without textual merge conflicts.
+These are relevance-based requirements. A pull request is not required to run or add every test category when
+the changed behavior does not reach that layer.
 
 ## Verification
 
-Every pull request runs its relevant configured checks and reports exact commands and results.
-
-For a coordinated milestone, after all implementation and coordinator documentation changes are on the integration branch, run from a clean install with the exact Node.js version declared in `.nvmrc`. Activate that version with any suitable mechanism. When NVM is available, `nvm use` is one optional activation method; missing NVM, or NVM not seeing a version activated by `actions/setup-node`, a container, or another version manager, is not itself a verification failure. Confirm the effective environment before installing dependencies:
+Every pull request runs its relevant configured checks and reports exact commands and results. Use the exact
+Node.js version declared in `.nvmrc` and confirm the effective environment before installing dependencies.
+Missing NVM is not itself a verification failure when another supported mechanism activated the required
+version.
 
 ```shell
 node --version
@@ -627,15 +382,11 @@ npm run check
 git diff --check
 ```
 
-The canonical compiler is the `@typescript/native` npm alias pinned in `package.json`; build and typecheck use its public `tsc` command. The separately pinned `ts-morph` package is a development-only agent codemod tool. Do not replace either dependency without an explicit dependency migration.
+The canonical compiler is the `@typescript/native` npm alias pinned in `package.json`; build and typecheck use
+its public `tsc` command. The separately pinned `ts-morph` package is a development-only agent codemod tool. Do
+not replace either dependency without an explicit dependency migration.
 
-Also inspect the complete combined diff and run any milestone-specific playground, browser, security, or migration checks.
-
-The final verifier reports:
-
-- exact commands and results;
-- regressions or integration conflicts;
-- stale or contradictory documentation;
-- remaining risks.
-
-When the gate passes, open one final pull request from the integration branch to `main`. Prefer squash merge, then delete the milestone and executor branches.
+Inspect the complete diff and run any change-specific playground, browser, security, migration, or integration
+checks. Report failures, warnings, skipped checks, stale or contradictory documentation, and remaining risks.
+Merge only after the required review and checks pass, then follow the selected capability route for the final
+publication or handoff operation.

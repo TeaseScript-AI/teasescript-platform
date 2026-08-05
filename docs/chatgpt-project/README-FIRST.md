@@ -30,17 +30,19 @@ commands.
 
 1. Use the current supported project bootstrap/setup route documented in
    `docs/LOCAL-AGENT-BOOTSTRAP.md` after the tools are available locally.
-2. Obtain one exact source artifact through the GitHub connector workflow.
+2. Follow `docs/DEVELOPMENT-WORKFLOW-CONTEXT.md` to obtain one exact source
+   artifact through the current canonical connector-local acquisition route.
 3. Use local shell/container tools for extraction, Git inspection, editing, and
    tests; use the connector for live GitHub state and permitted GitHub writes.
 4. In the verified checkout, read applicable `AGENTS.md`, repository
-   `README-FIRST.md`, the assigned issue or pull request, and only the relevant
-   current documents and ADRs.
+   `README-FIRST.md`, the assigned issue or pull request, and select the route in
+   `docs/agents/README.md` before loading task-specific sources or writing.
 
 Installed task guides are deliberately separate and use descriptive names:
 
 - `docs/PROJECT-INSTRUCTIONS.txt`: stable product and architecture boundaries;
-- `docs/DEVELOPMENT-WORKFLOW-CONTEXT.md`: GitHub, review, publication, and coordination route;
+- `docs/DEVELOPMENT-WORKFLOW-CONTEXT.md`: stable connector-local startup and
+  capability-routing context;
 - `docs/LOCAL-AGENT-BOOTSTRAP.md`: local environment and workspace preparation;
 - `docs/CODEX-MODEL-SELECTION.md`: read before selecting Codex or writing a Codex prompt.
 

@@ -45,7 +45,8 @@ This does not mean that the complete V30 language, static type system, timers, i
 ## Documentation routing
 
 Start with applicable `AGENTS.md` instructions and the assigned issue or pull
-request. Then use this route to load only task-controlling sources. Before
+request. Select the capability route in `docs/agents/README.md`, then load only
+the task-controlling sources required by that route. Before
 implementation, final self-review, or an explicitly assigned pull-request review,
 read `docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`. Read
 `docs/review-and-audit/AUDIT.md` only for an explicitly assigned audit; ordinary
@@ -58,7 +59,10 @@ milestone, gate, integration-status, or current-capability work.
 - `AGENTS.md`: coding, review, and Git rules for every agent.
 - `docs/review-and-audit/`: role-based implementation, review, and explicitly
   assigned audit guidance.
-- `docs/DEVELOPMENT-WORKFLOW.md`: coordinator, executor, pull-request, documentation, and final-verification workflow.
+- `docs/DEVELOPMENT-WORKFLOW.md`: universal issue, branch, pull-request,
+  review, documentation, merge, and verification rules.
+- `docs/agents/README.md`: capability router for source acquisition,
+  permitted writes, role overlays, verification, and publication or handoff.
 - `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md`: project-agent source layout, current bootstrap route, and remaining #210 migration work.
 - `docs/README.md`: documentation map.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
