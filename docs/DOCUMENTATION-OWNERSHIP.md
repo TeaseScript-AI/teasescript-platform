@@ -44,6 +44,33 @@ Historical ADR and specification statements may retain exact old values when
 those values explain the recorded decision. Do not convert such history into a
 second moving current-state summary.
 
+## Canonical owner map
+
+- **Product intent and owner wish history:** [`WISHES.xml`](../WISHES.xml).
+- **Accepted decisions and rationale:** accepted ADRs in [`docs/decisions/`](decisions/).
+- **Accepted syntax and semantics:**
+  [`docs/specifications/accepted-syntaxes-v30.md`](specifications/accepted-syntaxes-v30.md), overridden only within
+  the exact scope of a later accepted ADR or synchronized canonical decision.
+- **Current architecture map and component boundaries:** [`CURRENT-DESIGN.md`](../CURRENT-DESIGN.md) and
+  [`docs/ARCHITECTURE.md`](ARCHITECTURE.md); accepted ADRs own the decisions and rationale.
+- **Exact current implementation:** repository code, tests, manifests, and workflows. Current topic documents own
+  maintained contracts, while [`PHASE-STATUS.md`](../PHASE-STATUS.md) owns high-level capability state.
+- **Open obligations before a named gate:**
+  [`docs/planning/POC-TO-ALPHA-BACKLOG.md`](planning/POC-TO-ALPHA-BACKLOG.md), while
+  [`PHASE-STATUS.md`](../PHASE-STATUS.md) records verified current state.
+- **Unresolved product or technical choices:** [`docs/OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
+- **Concrete execution tasks:** GitHub issues; pull requests are implementation handoffs and review evidence.
+
+An owner decision becomes durable authority only after the canonical owner for its information type is updated. Chat
+messages, issues, pull-request text, tests, CI results, and reviews may prove intent, behavior, or execution state, but
+remain evidence or task context until that synchronization occurs.
+
+Executable owners retain moving values they directly control: `.nvmrc` owns the required Node runtime selection;
+`package.json` and the lockfile own dependency requirements; bootstrap `MANIFEST.json` files own release payload
+identity; workflows and live CI own current run results. Retain benchmark or resource measurements in a dated evidence
+record only when they have a concrete current consumer and enough revision, environment, method, workload,
+configuration, result, limitation, and intended-use detail to support comparison.
+
 ## Documentation edit and review workflow
 
 Before every non-trivial documentation edit, the writer must:

@@ -4,7 +4,9 @@
 
 Use project material in this order:
 
-1. Check whether an accepted ADR or an explicitly recorded post-V30 owner decision covers the exact issue. A later accepted decision overrides V30 only within its stated scope.
+1. Check whether an accepted ADR or a post-V30 owner decision already synchronized into its canonical owner
+   covers the exact issue. Chat, issue, pull-request, test, or review text remains evidence or task context until that
+   synchronization occurs. A later accepted decision overrides V30 only within its stated scope.
 2. Otherwise use `docs/specifications/accepted-syntaxes-v30.md` for accepted TeaseScript syntax and semantics.
 3. Use `CURRENT-DESIGN.md` and `PHASE-STATUS.md` for current architecture and implementation status.
 4. Use the task-specific current topic document in `docs/`.
