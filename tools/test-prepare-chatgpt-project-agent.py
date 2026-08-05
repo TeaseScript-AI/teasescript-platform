@@ -224,6 +224,8 @@ class ChatGPTProjectAgentTests(unittest.TestCase):
                 str(malicious),
                 "--runtime-archive",
                 str(runtime),
+                "--output",
+                str(self.root / "unsafe-output"),
                 "--verify-only",
             ]
         )
