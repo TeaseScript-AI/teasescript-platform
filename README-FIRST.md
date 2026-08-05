@@ -45,14 +45,19 @@ This does not mean that the complete V30 language, static type system, timers, i
 ## Documentation routing
 
 Start with applicable `AGENTS.md` instructions and the assigned issue or pull
-request. Then use this route to load only task-controlling sources. Read
-`CURRENT-DESIGN.md` for architecture-affecting or broad cross-component work and
-`PHASE-STATUS.md` for milestone, gate, integration-status, or current-capability
-work.
+request. Then use this route to load only task-controlling sources. Before
+implementation, final self-review, or an explicitly assigned pull-request review,
+read `docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`. Read
+`docs/review-and-audit/AUDIT.md` only for an explicitly assigned audit; ordinary
+work does not load both routes. Read `CURRENT-DESIGN.md` for
+architecture-affecting or broad cross-component work and `PHASE-STATUS.md` for
+milestone, gate, integration-status, or current-capability work.
 
 - `CURRENT-DESIGN.md`: current architecture and implementation boundaries.
 - `PHASE-STATUS.md`: current milestone status and verification evidence.
 - `AGENTS.md`: coding, review, and Git rules for every agent.
+- `docs/review-and-audit/`: role-based implementation, review, and explicitly
+  assigned audit guidance.
 - `docs/DEVELOPMENT-WORKFLOW.md`: coordinator, executor, pull-request, documentation, and final-verification workflow.
 - `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md`: project-agent source layout, current bootstrap route, and remaining #210 migration work.
 - `docs/README.md`: documentation map.

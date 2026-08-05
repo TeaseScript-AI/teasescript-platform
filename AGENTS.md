@@ -5,8 +5,12 @@
 Start with the applicable `AGENTS.md` files, `README-FIRST.md`, and the assigned
 issue or pull request. Use `README-FIRST.md` to load only the controlling topic
 documents, accepted decisions, workflow profile, code, and tests needed for the
-task. Read `CURRENT-DESIGN.md` for architecture-affecting or broad
-cross-component work and `PHASE-STATUS.md` for milestone, gate,
+task. Before implementation, read
+`docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md` and reuse it for final
+self-review or an explicitly assigned pull-request review. Read
+`docs/review-and-audit/AUDIT.md` only for an explicitly assigned audit; do not load
+both routes by default. Read `CURRENT-DESIGN.md` for architecture-affecting or
+broad cross-component work and `PHASE-STATUS.md` for milestone, gate,
 integration-status, or current-capability work.
 
 Planning documents, wishes, research, historical audits, examples, draft ADRs,

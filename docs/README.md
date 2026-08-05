@@ -39,6 +39,15 @@ These files provide concise current routing and must not duplicate or override a
 
 Temporary work breakdowns, executor assignments, and merge tracking remain outside the repository.
 
+## Implementation, review, and audit
+
+- `review-and-audit/README.md` selects one role-based route.
+- `review-and-audit/IMPLEMENTATION-AND-REVIEW.md` is read before implementation
+  and reused for final self-review or an explicitly assigned pull-request review.
+- `review-and-audit/AUDIT.md` is loaded only for an explicitly assigned audit.
+
+Ordinary work does not load both guidance documents by default.
+
 ## Planning
 
 - `planning/POC-TO-ALPHA-BACKLOG.md` lists owner-selected work that remains required before a stated POC, pre-alpha, or alpha gate. An item may remain unscheduled and is not implementation scope until a phase plan or coordinator assignment selects its ID.
