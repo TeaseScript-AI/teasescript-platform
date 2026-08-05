@@ -8,7 +8,7 @@
 
 ## Purpose
 
-This backlog answers a narrower question than `WISHES.xml` or the legacy planning files:
+This backlog answers a narrower question than `WISHES.xml` or other proposal documents:
 
 > Which open outcomes has the owner selected as required before a stated development gate?
 
@@ -186,67 +186,6 @@ Create a measured performance baseline and production optimization plan for the 
 #### Completion of the design item
 
 This item may move to **Ready for phase** after benchmark workloads, measurement commands, acceptance thresholds, and a prioritized optimization plan are owner-approved. Individual optimizations must then be scheduled explicitly.
-
-### POC-ENGINE-004 — Establish a source-to-runtime conformance corpus
-
-- **Track:** Engine core
-- **Target gate:** Before pre-alpha
-- **Planning state:** Ready for phase
-- **Scheduling:** Unscheduled
-
-#### Required outcome
-
-Create a small stable corpus of real `.tease` source cases organized by behavior, with support for:
-
-- expected diagnostic codes and source spans;
-- expected public runtime events;
-- expected final status;
-- selected final values;
-- an optional full resume-equivalence requirement;
-- stable case naming and organization.
-
-#### Boundaries
-
-- Prefer public behavior assertions.
-- Do not use complete instruction-plan snapshots as broad golden files.
-- Assert internal instruction structure only when it is itself an accepted contract or a focused lowering test requires it.
-
-#### Dependencies and references
-
-- [`docs/TESTING.md`](../TESTING.md), section **Source-to-runtime conformance corpus**
-- [`docs/TEASESCRIPT.md`](../TEASESCRIPT.md)
-- [`docs/RUNTIME.md`](../RUNTIME.md)
-
-### POC-ENGINE-005 — Add deterministic fuzz and property testing
-
-- **Track:** Engine core
-- **Target gate:** Before alpha
-- **Planning state:** Ready for phase
-- **Scheduling:** Unscheduled
-
-#### Required outcome
-
-Add fixed-seed, bounded, reproducible generation and property coverage for source and external runtime data, including:
-
-- short token and syntax sequences;
-- malformed and unusual source input;
-- malformed plans and checkpoints;
-- bounded deeply nested valid source structures;
-- bounded deeply nested source structures;
-- termination, JSON-safety, determinism, and structured-boundary properties;
-- failing source, seed, generated input, and first failing boundary in assertion output;
-- explicit depth, input-size, and total-work limits.
-
-#### Boundaries
-
-- This item does not document deeply nested valid source as a confirmed current defect; a bug issue requires a repository reproduction.
-- A valid generated input may succeed or reach a documented bounded rejection, but must not fail through an incidental native stack overflow.
-- Do not select `fast-check` or another dependency until implementation demonstrates the need and documents alternatives, maintenance impact, and security impact.
-
-#### Dependencies and references
-
-- [`docs/TESTING.md`](../TESTING.md), section **Deterministic fuzz and property testing**
-- [`docs/SECURITY.md`](../SECURITY.md)
 
 ### POC-PLAYER-002 — Test resumable pending-action state machines
 
