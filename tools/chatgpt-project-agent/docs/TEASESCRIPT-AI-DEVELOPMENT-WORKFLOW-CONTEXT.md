@@ -23,16 +23,20 @@ aligned with the actual result.
 For substantial work:
 
 1. resolve and download one exact verified source artifact through the current repository connector workflow;
-2. use the stable `teasescript-agent-bootstrap-linux-x64.tar.zst` package;
-3. run its sole normal entry point, `bin/prepare-agent-workspace.sh`;
+2. run the standalone ChatGPT project-agent setup script when the installed environment is absent or must be refreshed;
+3. run the installed sole normal entry point, `bin/prepare-agent-workspace.sh`;
 4. inspect, edit, test, and review locally;
-5. return to the connector only for live GitHub state and GitHub writes.
+5. return to the connector for live GitHub state and permitted GitHub writes.
+
+The setup script combines the small tools `tar.gz` with the large runtime
+`tar.zst`; the installed layout is deliberately independent of the GitHub source
+layout. Read the local-bootstrap section later in the combined project
+`README-FIRST.md` for the exact command route and the repository's
+`docs/CHATGPT-GITHUB-WORKFLOW.md` for current artifact acquisition details.
 
 Do not attempt network Git, read the repository file by file, invent another
 bootstrap self-test, or execute the candidate copy of source-preparation tooling
-from the artifact under review. Read `LOCAL-AGENT-BOOTSTRAP.md` for the compact
-command route and the repository's `docs/CHATGPT-GITHUB-WORKFLOW.md` for current
-artifact acquisition details.
+from the artifact under review.
 
 ## Publication route
 
@@ -58,11 +62,12 @@ Temporary work breakdowns and chat notes remain outside GitHub. Accepted
 outcomes and implemented behavior must be synchronized into the applicable
 canonical repository owners.
 
-## Shared-project synchronization
+## Project-folder synchronization
 
-The repository owns the maintainable shared routing sources and staging helper.
-The shared project is a controlled derivative, not a second editable workflow
-owner. Generate a fresh exact replacement set, remove suffixed/versioned current
-copies from the project folder, upload the stable replacements, and record that
+GitHub owns the maintainable tools directory and all source documents used to
+generate the combined project `README-FIRST.md`. The project folder is a
+controlled derivative, not a second editable workflow owner. Replace the
+combined README, small tools archive, setup script, runtime archive, or research
+archive only when the corresponding source or payload changed, and record the
 manual synchronization. Do not restore the retired work-package workflow or
 invent a replacement handoff system.

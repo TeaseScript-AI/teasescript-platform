@@ -1,16 +1,17 @@
 {
+  "bundleRoot": "chatgpt-project-agent",
+  "combinedReadmeSources": [
+    "docs/README-FIRST.md",
+    "docs/PROJECT-INSTRUCTIONS.txt",
+    "docs/TEASESCRIPT-AI-DEVELOPMENT-WORKFLOW-CONTEXT.md",
+    "docs/LOCAL-AGENT-BOOTSTRAP.md",
+    "docs/CODEX-MODEL-SELECTION.md"
+  ],
   "formatVersion": 2,
-  "platform": "linux-x64",
-  "toolsRoot": "chatgpt-project-agent",
-  "runtimeRoot": "chatgpt-project-agent-runtime-linux-x64",
   "installationRoot": "chatgpt-project-agent-linux-x64",
-  "toolsArchiveName": "chatgpt-project-agent-tools-linux-x64.tar.gz",
-  "runtimeArchiveName": "chatgpt-project-agent-runtime-linux-x64.tar.zst",
-  "setupScriptName": "setup-chatgpt-project-agent.sh",
-  "projectReadmeName": "README-FIRST.md",
+  "kind": "tools",
   "normalEntryPoint": "bin/prepare-agent-workspace.sh",
-  "tiktokenRequired": true,
-  "runtimeCompressionLevel": 10,
+  "platform": "linux-x64",
   "runtimeContract": {
     "formatVersion": 2,
     "layout": "separate-runtime-payload",
@@ -31,11 +32,5 @@
       "PACKAGE-INVENTORY.json"
     ]
   },
-  "combinedReadmeSources": [
-    "docs/README-FIRST.md",
-    "docs/PROJECT-INSTRUCTIONS.txt",
-    "docs/TEASESCRIPT-AI-DEVELOPMENT-WORKFLOW-CONTEXT.md",
-    "docs/LOCAL-AGENT-BOOTSTRAP.md",
-    "docs/CODEX-MODEL-SELECTION.md"
-  ]
+  "tiktokenRequired": true
 }

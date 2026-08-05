@@ -360,7 +360,7 @@ SHA256SUMS
 Turn the downloaded ZIP into a verified local checkout with a trusted preinstalled copy of the repository-owned helper. For pull-request review, obtain `<review-merge-base-sha>` from `compare_commits.merge_base_commit.sha`, not from the current base-branch tip:
 
 ```shell
-python3 tools/local-agent/prepare-source-review.py \
+python3 /mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py \
   --artifact /mnt/data/source-bundle.zip \
   --artifact-sha256 <github-artifact-sha256> \
   --expected-repository TeaseScript-AI/teasescript-platform \
@@ -566,9 +566,12 @@ When the gate passes, open one final pull request from the integration branch to
 
 ## Connector-local bootstrap
 
-For substantial connector-based work, the distributed bootstrap's
-`bin/prepare-agent-workspace.sh` is the sole normal local entry point. It
-verifies one exact source artifact, creates the clean checkout, and installs the
-committed dependency graph offline. The canonical bootstrap and shared-project
-staging contract is `docs/LOCAL-AGENT-BOOTSTRAP.md`; do not add a routine
-separate self-test or restore the removed work-package route.
+For substantial connector-based work, first assemble the ChatGPT project-agent
+environment with the standalone `tools/setup-chatgpt-project-agent.sh` from the
+small tools `tar.gz` and large runtime `tar.zst`. The installed
+`bin/prepare-agent-workspace.sh` is the sole normal workspace entry point. It
+verifies one exact source artifact, creates the clean checkout, installs the
+committed dependency graph offline, and installs mandatory TikToken in Git-local
+state. The canonical bundle and bootstrap sources live under
+`tools/chatgpt-project-agent/`; do not add a routine separate self-test or
+restore the removed work-package route.
