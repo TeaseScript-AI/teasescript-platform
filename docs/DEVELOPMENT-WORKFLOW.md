@@ -332,8 +332,9 @@ Closes #123
 
 This document owns only rules that apply regardless of agent capability. Before source acquisition or a
 repository write, select the applicable route in [`agents/README.md`](agents/README.md). That router and its
-focused guides own capability-specific source acquisition, permitted writes, role overlays, verification, and
-publication or handoff. Do not copy those procedures into this document.
+focused capability guides own capability-specific source acquisition, permitted writes, verification, and
+publication constraints. Explicitly coordinated work may add the focused orchestrator task guide after
+capability selection. Do not copy those procedures into this document.
 
 ## Documentation ownership
 

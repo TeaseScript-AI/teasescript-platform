@@ -20,7 +20,7 @@ selects this route.
 **Conditional**
 
 - `PUBLICATION-CONSTRAINED.md` only when permitted connector writes cannot safely publish the tested result;
-- `ORCHESTRATOR.md` or `REVIEWER.md` when that role is assigned;
+- `ORCHESTRATOR.md` only for explicitly coordinated multi-agent work;
 - `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` for the maintained environment boundary or #210 work.
 
 **Excluded by default**
@@ -49,15 +49,15 @@ not improvise low-level source publication.
 
 ## Verification
 
-Run repository checks and `git diff --check` in the prepared checkout. Before posting a review or publishing a
-change, resolve the live PR state again and stop if the head or relevant base moved.
+Run repository checks and `git diff --check` in the prepared checkout. Before any head-sensitive GitHub write
+or handoff, resolve the live PR state again and stop if the head or relevant base moved.
 
 ## Publication and handoff
 
-Use ordinary permitted connector writes for small GitHub-state operations. When the coherent tested source
-change cannot be published safely through those writes, add `PUBLICATION-CONSTRAINED.md`; do not treat that
-overlay as the default. Record exact head, checks, skips, external dependencies, and remaining manual work in
-the PR or handoff.
+Use ordinary permitted connector writes for the GitHub-state operations authorized by the assigned task. When
+a coherent tested source change cannot be published safely through those writes, add
+`PUBLICATION-CONSTRAINED.md`; do not treat that overlay as the default. Use the handoff surface selected by the
+repository start route.
 
 ## Context-efficient connector use
 

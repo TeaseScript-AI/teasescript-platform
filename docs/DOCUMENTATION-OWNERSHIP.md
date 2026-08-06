@@ -93,8 +93,8 @@ The repository owns documentation that must change with code, architecture, lang
 - `docs/DEVELOPMENT-WORKFLOW.md` for universal issue, branch, pull-request,
   review, documentation, merge, and verification rules;
 - `docs/agents/README.md` and its focused guides for capability-specific
-  source acquisition, writes, role overlays, verification, and publication or
-  handoff;
+  source acquisition, writes, verification, and publication constraints, with
+  separate focused task guidance for explicitly coordinated work;
 - `docs/PATCH-PUBLICATION.md` for the verified patch protocol and security boundary;
 - current open decisions, the selected POC-to-alpha backlog, and deliberately maintained repository planning documents;
 - `WISHES.xml` product intent/history;

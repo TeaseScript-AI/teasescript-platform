@@ -26,22 +26,26 @@ distribution.
 ## After checkout
 
 Read applicable `AGENTS.md`, repository `README-FIRST.md`, and the assigned issue
-or pull request. Select the capability route in `docs/agents/README.md`; normally
-this is `docs/agents/CONNECTOR-LOCAL.md`, with role overlays only when assigned.
-Use local shell, Git, editor, search, and test tools for repository work, and use
+or pull request. Select the technical capability route in `docs/agents/README.md`;
+normally this is `docs/agents/CONNECTOR-LOCAL.md`. For an explicitly assigned
+pull-request review, follow the normal start route to
+`docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`; do not add a reviewer
+capability route. Use local shell, Git, editor, search, and test tools for
+repository work, and use
 the connector only for live GitHub state and permitted writes.
 
 Universal issue, branch, pull-request, review, documentation, merge, and
 verification rules remain in `docs/DEVELOPMENT-WORKFLOW.md`. Do not reproduce
 them here.
 
-## Publication and role changes
+## Publication and task changes
 
 Read `docs/agents/PUBLICATION-CONSTRAINED.md` and then
 `docs/PATCH-PUBLICATION.md` only when a concrete publication constraint exists.
-Add the orchestrator or reviewer route only when that role is assigned. Re-select
-the route when capabilities, task, branch/head, work phase, or permitted writes
-change.
+Add `docs/agents/ORCHESTRATOR.md` only for explicitly coordinated multi-agent
+work. Re-select the capability route when technical capabilities, branch/head,
+or permitted publication writes change; use the repository start route for task
+transitions.
 
 ## Ownership
 

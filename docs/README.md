@@ -41,8 +41,8 @@ These files provide concise current routing and must not duplicate or override a
   replaceable connector artifact acquisition mechanics.
 - `agents/PUBLICATION-CONSTRAINED.md` routes a concrete publication
   constraint to `PATCH-PUBLICATION.md`; it is not a default fallback.
-- `agents/ORCHESTRATOR.md` covers explicitly selected coordinated assignments and integration.
-- `agents/REVIEWER.md` covers exact-head, read-only-by-default pull-request review.
+- `agents/ORCHESTRATOR.md` is task guidance for explicitly selected coordinated assignments after capability
+  selection; it is not another technical capability route.
 - `PATCH-PUBLICATION.md` remains the sole verified patch protocol and security-contract owner.
 - `../tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` defines the
   project-agent source/installed layout and the remaining setup/runtime migration

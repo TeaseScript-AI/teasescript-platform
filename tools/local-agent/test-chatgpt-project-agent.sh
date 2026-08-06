@@ -5,6 +5,11 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/../.." && pwd)
 project_root="$repo_root/tools/chatgpt-project-agent"
 
+if [[ -e "$repo_root/docs/agents/REVIEWER.md" ]]; then
+  printf 'test-chatgpt-project-agent: FAIL: review is still modeled as a capability guide\n' >&2
+  exit 1
+fi
+
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/test-chatgpt-project-agent.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 
@@ -43,11 +48,19 @@ for route in (
     "DIRECT-REPOSITORY.md",
     "CONNECTOR-LOCAL.md",
     "PUBLICATION-CONSTRAINED.md",
-    "ORCHESTRATOR.md",
-    "REVIEWER.md",
 ):
     if route not in capability_router:
         raise SystemExit(f"capability router does not route {route}")
+if "ORCHESTRATOR.md" not in capability_router or "| Orchestrator |" in capability_router:
+    raise SystemExit("orchestrator is not routed as separate task guidance")
+for obsolete_review_route in ("REVIEWER.md", "reviewer overlay", "| Reviewer |", "role overlays"):
+    if any(
+        obsolete_review_route in text
+        for text in (capability_router, installed_context, development_workflow)
+    ):
+        raise SystemExit(f"review remains incorrectly modeled as a capability: {obsolete_review_route}")
+if "IMPLEMENTATION-AND-REVIEW.md" not in capability_router or "IMPLEMENTATION-AND-REVIEW.md" not in installed_context:
+    raise SystemExit("assigned review does not route through the canonical implementation/review guide")
 if "docs/agents/CONNECTOR-SOURCE-ACQUISITION.md" not in installed_context:
     raise SystemExit("installed context does not route to current connector acquisition")
 for moving_detail in ("/artifact source ", "source-bundle-request/", "90-second", "#235"):

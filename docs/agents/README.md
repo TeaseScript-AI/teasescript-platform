@@ -1,39 +1,44 @@
 # Agent capability routes
 
 Use this router after the universal start route in `AGENTS.md` and `README-FIRST.md`. Select by actual
-capabilities and assigned role, not by product, model, or vendor name.
+technical capabilities and environment constraints, not by product, model, vendor, or assigned task role.
 
-## Select the route
+## Select the capability route
 
 1. **Can the agent use a normal repository checkout, shell, networked `git`, and `gh`?**
    Use [`DIRECT-REPOSITORY.md`](DIRECT-REPOSITORY.md).
 2. **Does the agent instead have a GitHub control-plane connector plus local shell/filesystem, but no
    supported network clone or fetch?** Use [`CONNECTOR-LOCAL.md`](CONNECTOR-LOCAL.md).
-3. **Can the selected execution route publish the tested result through its normal permitted writes?**
+3. **Can the selected source/workspace route publish the tested result through its normal permitted writes?**
    If not, and the verified patch route applies, add
    [`PUBLICATION-CONSTRAINED.md`](PUBLICATION-CONSTRAINED.md).
-4. **Is the agent assigning or integrating several explicitly coordinated workstreams?** Add
-   [`ORCHESTRATOR.md`](ORCHESTRATOR.md).
-5. **Is the agent performing an assigned pull-request review?** Add [`REVIEWER.md`](REVIEWER.md).
 
-Select exactly one source/workspace route: direct repository or connector-local. Publication-constrained,
-orchestrator, and reviewer guidance are overlays. An overlay may narrow the selected route's writes but does
-not broaden them; the reviewer overlay remains read-only by default unless a separate repair assignment is
-explicitly accepted. Do not load every route by default.
+Select exactly one source/workspace route: direct repository or connector-local. Add the
+publication-constrained overlay only after a concrete publication restriction is verified. Do not load every
+capability guide by default.
+
+## Task guidance after capability selection
+
+- Explicitly coordinated multi-agent work adds [`ORCHESTRATOR.md`](ORCHESTRATOR.md) after the orchestrator
+  selects its own capability route. Coordination is a task role, not a source/workspace capability.
+- Implementation, final self-review, and explicitly assigned pull-request review follow the normal repository
+  start route to
+  [`IMPLEMENTATION-AND-REVIEW.md`](../review-and-audit/IMPLEMENTATION-AND-REVIEW.md). Review does not add a
+  capability route or overlay; the selected environment guide continues to own source acquisition and any
+  environment-specific publication constraint.
 
 ## Route summary
 
 | Route | Source acquisition | Normal writes | Verification | Publication or handoff |
 | --- | --- | --- | --- | --- |
-| Direct repository | Current normal checkout through `git`/`gh` | Normal branch, commit, push, PR, review, and comment operations | Repository checks in the checkout | Push the branch and maintain the PR |
-| Connector-local | One exact verified source artifact, then local shell/Git | Connector operations permitted for the task | Repository checks in the prepared checkout | Connector write route, optionally with the publication overlay |
-| Publication-constrained | Inherited from the selected source/workspace route | Only the exact verified patch-publication sequence | Tested local result plus the patch candidate gates | Publish to the existing PR branch through `PATCH-PUBLICATION.md` |
-| Orchestrator | Inherited from the orchestrator's own source/workspace route | Coordination and integration writes explicitly assigned to the role | Workstream checks plus combined integration verification | Final integration PR and owner/coordinator handoff |
-| Reviewer | Exact head and comparison/merge base through the selected source/workspace route | Read-only by default; review/comment writes only | Change-scoped evidence and relevant checks | Exact-head review with landing decision |
+| Direct repository | Git/`gh` checkout | Task-permitted authenticated writes | Checkout checks | Normal task handoff |
+| Connector-local | Exact artifact | Connector writes | Local checks | Connector handoff |
+| Publication-constrained | Selected route | Patch sequence only | Candidate gates | Existing PR branch |
 
 ## Shared rules
 
-All routes inherit universal authority, scope, KISS, review, documentation ownership, testing, and Git rules
-from the repository start route. A focused guide must not redefine those rules. When capabilities change,
-the branch/head changes, or the task moves between implementation, review, repair, verification, and
-publication, reselect the applicable route before the next write.
+All capability routes inherit universal authority, scope, KISS, review, documentation ownership, testing, and
+Git rules from the repository start route. A focused guide must not redefine those rules. When technical
+capabilities, branch/head, or permitted publication writes change, reselect the applicable capability route
+before the next write. A task transition such as implementation, review, repair, or coordination loads its
+canonical task guidance without creating another capability route.

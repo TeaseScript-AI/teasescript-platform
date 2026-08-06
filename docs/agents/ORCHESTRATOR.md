@@ -18,7 +18,6 @@ large file count alone does not select this route.
 **Conditional**
 
 - each executor capability guide needed to create a valid assignment;
-- `REVIEWER.md` when the orchestrator performs an assigned workstream review;
 - `PUBLICATION-CONSTRAINED.md` only for a concrete constrained publication step.
 
 **Excluded by default**

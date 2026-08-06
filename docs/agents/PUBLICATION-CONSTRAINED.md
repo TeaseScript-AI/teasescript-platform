@@ -16,7 +16,6 @@ verified patch-publication route must apply to the repository and target pull re
 
 **Conditional**
 
-- `REVIEWER.md` when the assignment is review-only or includes a separately authorized repair;
 - `ORCHESTRATOR.md` when publication is one explicitly assigned coordinated workstream.
 
 **Excluded by default**

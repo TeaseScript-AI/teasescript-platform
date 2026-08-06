@@ -61,8 +61,8 @@ milestone, gate, integration-status, or current-capability work.
   assigned audit guidance.
 - `docs/DEVELOPMENT-WORKFLOW.md`: universal issue, branch, pull-request,
   review, documentation, merge, and verification rules.
-- `docs/agents/README.md`: capability router for source acquisition,
-  permitted writes, role overlays, verification, and publication or handoff.
+- `docs/agents/README.md`: technical capability router for source acquisition,
+  permitted writes, verification, and publication constraints; task guidance is routed separately.
 - `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md`: project-agent source layout, current bootstrap route, and remaining #210 migration work.
 - `docs/README.md`: documentation map.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
