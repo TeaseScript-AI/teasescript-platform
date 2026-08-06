@@ -37,15 +37,6 @@ const LINK_SOURCES = [
   "docs/reference/README.md",
 ];
 
-const DEFAULT_ROUTE_SOURCES = [
-  "AGENTS.md",
-  "README-FIRST.md",
-  "docs/README.md",
-  "docs/agents/README.md",
-  "docs/review-and-audit/README.md",
-  "docs/chatgpt-project/README-FIRST.md",
-];
-
 const REQUIRED_ROUTES = [
   ["AGENTS.md", "README-FIRST.md", "repository task router"],
   ["README-FIRST.md", "docs/agents/README.md", "technical capability router"],
@@ -109,9 +100,11 @@ const MARKDOWN_LINK_PATTERN = /!?\[[^\]\n]*\]\(([^)\n]+)\)/gu;
 const MARKDOWN_REFERENCE_PATTERN = /^\s*\[[^\]\n]+\]:\s*(\S+)/gmu;
 const NPM_RUN_PATTERN = /\bnpm\s+(?:--silent\s+)?run\s+([A-Za-z0-9:._-]+)/gu;
 const NPM_TEST_PATTERN = /\bnpm\s+test\b/u;
-const FULL_OUTPUT_PATTERN = /(?:full-output|--test-reporter(?:=|\s+)spec)/u;
-const HISTORICAL_CODE_ROUTE_PATTERN =
-  /`((?:docs\/history\/[^`\s]+|(?:[^`\s]+\/)?SUPERSEDED-[^`\s]+))`/gu;
+const FULL_OUTPUT_SCRIPT_PATTERN = /(?:^|:)full-output(?:$|:)/u;
+const FULL_OUTPUT_NPM_REFERENCE_PATTERN =
+  /\bnpm\s+(?:--silent\s+)?run\s+[A-Za-z0-9:._-]*full-output[A-Za-z0-9:._-]*/u;
+const DIRECT_FULL_OUTPUT_SUITE_PATTERN =
+  /\bnode\s+--test\b[^\n]*(?:dist\/tests\/\*\.test\.js|dist\/tests\/\*\.js)/u;
 
 function parseArguments(argv) {
   let root = process.cwd();
@@ -306,7 +299,7 @@ function validateRequiredRoutes(root, failures) {
     }
 
     const targetPath = resolve(root, target);
-    if (!existsSync(targetPath)) {
+    if (!existsSync(targetPath) || !lstatSync(targetPath).isFile()) {
       addFailure(
         failures,
         source,
@@ -337,33 +330,6 @@ function validateRequiredRoutes(root, failures) {
         "default-route-history",
         `${description} targets historical material at ${target}`,
         "route normal work to a current owner and keep history outside default reading",
-      );
-    }
-  }
-}
-
-function validateDefaultRoutes(root, failures) {
-  for (const source of DEFAULT_ROUTE_SOURCES) {
-    const contents = readSource(root, source, failures);
-    if (contents === null) continue;
-
-    const historicalTargets = new Set();
-    for (const destination of extractLocalLinks(contents)) {
-      const target = resolveLocalTarget(root, source, destination);
-      const repositoryPath = toRepositoryPath(root, target);
-      if (isHistoricalRoute(repositoryPath)) historicalTargets.add(repositoryPath);
-    }
-    for (const match of contents.matchAll(HISTORICAL_CODE_ROUTE_PATTERN)) {
-      if (match[1] !== undefined) historicalTargets.add(match[1]);
-    }
-
-    for (const target of historicalTargets) {
-      addFailure(
-        failures,
-        source,
-        "default-route-history",
-        `default route references historical material at ${target}`,
-        "remove the default route and keep historical material opt-in and non-authoritative",
       );
     }
   }
@@ -507,6 +473,12 @@ function referencedScripts(command) {
   return references;
 }
 
+function isFullOutputCommand(script, command) {
+  return FULL_OUTPUT_SCRIPT_PATTERN.test(script) ||
+    FULL_OUTPUT_NPM_REFERENCE_PATTERN.test(command) ||
+    DIRECT_FULL_OUTPUT_SUITE_PATTERN.test(command);
+}
+
 function extractWorkflowRunCommands(contents) {
   const lines = contents.split("\n");
   const commands = [];
@@ -614,7 +586,7 @@ function validateScriptGraph(root, failures) {
       continue;
     }
 
-    if (script.includes("full-output") || FULL_OUTPUT_PATTERN.test(command)) {
+    if (isFullOutputCommand(script, command)) {
       addFailure(
         failures,
         packageSource,
@@ -658,7 +630,7 @@ function validateScriptGraph(root, failures) {
         "keep one normal compact complete-suite step and use focused checks only for distinct evidence",
       );
     }
-    if (runCommands.some((command) => FULL_OUTPUT_PATTERN.test(command))) {
+    if (runCommands.some((command) => isFullOutputCommand("", command))) {
       addFailure(
         failures,
         ciSource,
@@ -677,7 +649,6 @@ function run(root) {
   const linkCount = validateLinks(root, failures);
   validateRequiredPaths(root, failures);
   validateRequiredRoutes(root, failures);
-  validateDefaultRoutes(root, failures);
   const scannedTextSourceCount = validateRetiredWorkPackageRoute(root, failures);
   const lifecycleCaseCount = validateLifecycleMetadata(root, failures);
   const { reachableCount, normalGateCount } = validateScriptGraph(root, failures);

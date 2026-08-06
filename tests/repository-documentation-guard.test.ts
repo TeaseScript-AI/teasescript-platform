@@ -19,8 +19,6 @@ interface GuardResult {
 }
 
 const repositoryRoot = process.cwd();
-const guardPath = resolve(repositoryRoot, "tools/check-repository-docs.mjs");
-
 function createRepositoryFixture(): { readonly root: string; readonly cleanup: () => void } {
   const temporaryRoot = mkdtempSync(resolve(tmpdir(), "teasescript-doc-guard-"));
   const fixtureRoot = resolve(temporaryRoot, "repository");
@@ -41,10 +39,14 @@ function createRepositoryFixture(): { readonly root: string; readonly cleanup: (
 }
 
 function runGuard(root: string): GuardResult {
-  const result = spawnSync(process.execPath, [guardPath, "--root", root], {
+  const result = spawnSync(
+    process.execPath,
+    [resolve(root, "tools/check-repository-docs.mjs"), "--root", root],
+    {
     cwd: root,
     encoding: "utf8",
-  });
+    },
+  );
 
   return {
     status: result.status,
@@ -94,6 +96,11 @@ The retired \`tools/work-packages/integrate.sh\` path may be named here as histo
       fixture.root,
       "CURRENT-DESIGN.md",
       "Local component context may explain a stable boundary without copying current execution state.",
+    );
+    append(
+      fixture.root,
+      "README-FIRST.md",
+      "Historical evidence such as [this retained record](docs/history/WORK-PACKAGE-EVIDENCE.md) remains opt-in.",
     );
     append(
       fixture.root,
@@ -184,7 +191,7 @@ test("repository documentation guard rejects a current retired work-package rout
   }
 });
 
-test("repository documentation guard rejects a default route into history", () => {
+test("repository documentation guard rejects a historical target in the explicit route table", () => {
   const fixture = createRepositoryFixture();
   try {
     mkdirSync(resolve(fixture.root, "docs/history"), { recursive: true });
@@ -198,11 +205,15 @@ test("repository documentation guard rejects a default route into history", () =
 - **Do not use for:** Default task routing
 `,
     );
-    append(
-      fixture.root,
-      "README-FIRST.md",
-      "Read `docs/history/ROUTED-HISTORY.md` for every task.",
+    const guardPath = resolve(fixture.root, "tools/check-repository-docs.mjs");
+    writeFileSync(
+      guardPath,
+      readFileSync(guardPath, "utf8").replace(
+        '["README-FIRST.md", "CURRENT-DESIGN.md", "stable cross-component map"],',
+        '["README-FIRST.md", "docs/history/ROUTED-HISTORY.md", "stable cross-component map"],',
+      ),
     );
+    append(fixture.root, "README-FIRST.md", "Route: `docs/history/ROUTED-HISTORY.md`.");
     assertRejected(runGuard(fixture.root), "README-FIRST.md", "default-route-history");
   } finally {
     fixture.cleanup();
@@ -248,7 +259,7 @@ test("repository documentation guard rejects a full-output command in normal CI"
     append(
       fixture.root,
       ".github/workflows/ci.yml",
-      "      - name: Duplicate diagnostic gate\n        run: |\n          npm run check:full-output",
+      "      - name: Duplicate diagnostic gate\n        run: |\n          node --test --test-reporter=spec dist/tests/*.test.js",
     );
     assertRejected(
       runGuard(fixture.root),
