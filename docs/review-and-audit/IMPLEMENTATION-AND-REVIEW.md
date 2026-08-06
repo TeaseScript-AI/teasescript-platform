@@ -44,7 +44,10 @@ order, exceptions, executable detail, and resistance to misinterpretation.
 
 Before handoff, the implementer reviews the exact final diff. For each assigned review or re-review,
 the independent reviewer establishes the exact head, applicable comparison or merge base, scope,
-exclusions, criteria, and authority. Examine the complete current diff and enough surrounding code,
+exclusions, criteria, and authority. An assigned review is read-only by default: post only the review,
+findings, and necessary review comments. Do not push fixes, resolve another reviewer's thread, change
+pull-request state, merge, or modify the implementation branch unless a separate repair assignment is
+accepted and the handoff is visible. Examine the complete current diff and enough surrounding code,
 tests, documentation, and behavior to find every material consequence. Changed-file lists, green CI,
 author claims, and earlier approval are evidence, not proof.
 

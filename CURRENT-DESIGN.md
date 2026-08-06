@@ -19,7 +19,8 @@ This layout refactor does not change format versions.
 
 ## TeaseScript authority
 
-`docs/specifications/accepted-syntaxes-v30.md` is the accepted syntax baseline unless a later accepted ADR or explicitly recorded post-V30 decision supersedes a specific point.
+`docs/specifications/accepted-syntaxes-v30.md` is the accepted syntax baseline unless a later accepted ADR or
+a post-V30 owner decision synchronized into the accepted specification supersedes a specific point.
 
 Accepted post-V30 decisions relevant to the current runtime include:
 

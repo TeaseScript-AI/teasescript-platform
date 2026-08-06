@@ -6,7 +6,7 @@
 - `specifications/accepted-syntaxes-v30.md`: accepted consolidated syntax baseline.
 - `decisions/`: accepted and proposed ADRs; each file states its status.
 - `../CURRENT-DESIGN.md`: current architecture and implementation boundaries.
-- `../PHASE-STATUS.md`: milestone and verification status.
+- `../PHASE-STATUS.md`: current phase, gate, and high-level implemented-capability status.
 - `../WISHES.xml`: product intent and decision history; wishes are not automatic implementation decisions.
 
 ## Current topic documents
@@ -30,14 +30,31 @@ These files provide concise current routing and must not duplicate or override a
 
 ## Development workflow
 
-- `DEVELOPMENT-WORKFLOW.md` defines the GitHub-native issue, agent, branch, pull-request, coordinated-work, automatic and connector-requested verified source-artifact, documentation, and final-verification process.
-- `CHATGPT-GITHUB-WORKFLOW.md` defines the connector-specific local-first route: obtain one exact source artifact, prepare a verified local checkout, work with local tools, and reserve connector reads and writes for live GitHub state or operations that must happen on GitHub.
-- `../tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` defines the project-agent source/installed layout and the remaining setup/runtime migration tracked by #210.
-- `PATCH-PUBLICATION.md` defines the verified raw-patch publication fallback for network-restricted agents, including token-aware sequential multipart preparation, single-file compatibility, connector upload guidance, its command, manifest, trust boundary, validation, exact cleanup, retry, and current limits.
-- `chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder; installed task guides remain separate under `../tools/chatgpt-project-agent/docs/`.
-- `../AGENTS.md` contains the mandatory task, coding, review, and Git rules for every agent.
+- `DEVELOPMENT-WORKFLOW.md` owns universal issue, branch, pull-request,
+  review, documentation, merge, and verification rules.
+- `agents/README.md` selects a capability route without product or model names.
+- `agents/DIRECT-REPOSITORY.md` covers normal repository, shell, networked
+  Git, and authenticated GitHub access.
+- `agents/CONNECTOR-LOCAL.md` covers exact-artifact, local-first work when
+  normal network clone or fetch is unavailable.
+- `agents/CONNECTOR-SOURCE-ACQUISITION.md` is the single owner for the
+  replaceable connector artifact acquisition mechanics.
+- `agents/PUBLICATION-CONSTRAINED.md` routes a concrete publication
+  constraint to `PATCH-PUBLICATION.md`; it is not a default fallback.
+- `agents/ORCHESTRATOR.md` is task guidance for explicitly selected coordinated assignments after capability
+  selection; it is not another technical capability route.
+- `PATCH-PUBLICATION.md` remains the sole verified patch protocol and security-contract owner.
+- `../tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` defines the
+  project-agent source/installed layout and the remaining setup/runtime migration
+  tracked by #210.
+- `chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder;
+  installed task guides remain separate under
+  `../tools/chatgpt-project-agent/docs/`.
+- `../AGENTS.md` contains the short mandatory rules that apply to every agent.
 
-Temporary work breakdowns, executor assignments, and merge tracking remain outside the repository.
+Capability guides reference universal rules rather than copying them.
+Temporary work breakdowns, executor assignments, and merge tracking remain
+outside the repository.
 
 ## Implementation, review, and audit
 

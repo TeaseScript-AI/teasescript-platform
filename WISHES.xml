@@ -1,9 +1,10 @@
 <?xml version='1.0' encoding='utf-8'?>
-<controlsystems_project name="MilovanaAlternative" schema_version="1.0" last_updated="2026-08-02">
+<controlsystems_project name="MilovanaAlternative" schema_version="1.0" last_updated="2026-08-06">
   <wishlist_policy>
     <memory_note>Project memory is disabled. This XML file is the persistent wishlist artifact for this conversation.</memory_note>
     <retention_rule>Never delete a wish. When abandoned or superseded, change its status to retired or superseded and add a dated history note explaining why.</retention_rule>
-    <inference_rule>Add reasonably inferred wishes when they clearly follow from the stated product direction.</inference_rule>
+    <inference_rule>Agents may propose reasonably inferred wishes, but may not add or activate them without explicit owner approval.</inference_rule>
+    <authority_rule>Wishes preserve approved product intent and history. Accepted product scope and implementation authority belong in the applicable accepted ADR, accepted specification, or controlling current topic document.</authority_rule>
   </wishlist_policy>
   <wishes>
     <wish id="W-001" status="active">

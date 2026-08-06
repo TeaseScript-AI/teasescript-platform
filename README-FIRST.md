@@ -4,8 +4,12 @@
 
 Use project material in this order:
 
-1. Check whether an accepted ADR or an explicitly recorded post-V30 owner decision covers the exact issue. A later accepted decision overrides V30 only within its stated scope.
-2. Otherwise use `docs/specifications/accepted-syntaxes-v30.md` for accepted TeaseScript syntax and semantics.
+1. Check whether an accepted ADR, accepted specification, or controlling current topic document covers the exact
+   issue. A post-V30 owner decision becomes durable only after it is synchronized into the applicable accepted owner.
+   Chat, issue, pull-request, test, review, or wish text remains evidence or task context until that synchronization
+   occurs.
+2. For TeaseScript syntax and semantics, use `docs/specifications/accepted-syntaxes-v30.md` unless a later accepted
+   ADR or accepted specification update supersedes the exact point within its stated scope.
 3. Use `CURRENT-DESIGN.md` and `PHASE-STATUS.md` for current architecture and implementation status.
 4. Use the task-specific current topic document in `docs/`.
 5. Use `docs/planning/POC-TO-ALPHA-BACKLOG.md` for owner-selected work that remains required before its target gate. Inclusion does not schedule the item and does not define architecture or syntax.
@@ -45,7 +49,8 @@ This does not mean that the complete V30 language, static type system, timers, i
 ## Documentation routing
 
 Start with applicable `AGENTS.md` instructions and the assigned issue or pull
-request. Then use this route to load only task-controlling sources. Before
+request. Select the capability route in `docs/agents/README.md`, then load only
+the task-controlling sources required by that route. Before
 implementation, final self-review, or an explicitly assigned pull-request review,
 read `docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`. Read
 `docs/review-and-audit/AUDIT.md` only for an explicitly assigned audit; ordinary
@@ -54,11 +59,14 @@ architecture-affecting or broad cross-component work and `PHASE-STATUS.md` for
 milestone, gate, integration-status, or current-capability work.
 
 - `CURRENT-DESIGN.md`: current architecture and implementation boundaries.
-- `PHASE-STATUS.md`: current milestone status and verification evidence.
+- `PHASE-STATUS.md`: current phase, gate, and high-level implemented-capability status.
 - `AGENTS.md`: coding, review, and Git rules for every agent.
 - `docs/review-and-audit/`: role-based implementation, review, and explicitly
   assigned audit guidance.
-- `docs/DEVELOPMENT-WORKFLOW.md`: coordinator, executor, pull-request, documentation, and final-verification workflow.
+- `docs/DEVELOPMENT-WORKFLOW.md`: universal issue, branch, pull-request,
+  review, documentation, merge, and verification rules.
+- `docs/agents/README.md`: technical capability router for source acquisition,
+  permitted writes, verification, and publication constraints; task guidance is routed separately.
 - `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md`: project-agent source layout, current bootstrap route, and remaining #210 migration work.
 - `docs/README.md`: documentation map.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.

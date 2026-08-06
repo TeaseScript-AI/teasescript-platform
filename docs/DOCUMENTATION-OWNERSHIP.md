@@ -44,6 +44,35 @@ Historical ADR and specification statements may retain exact old values when
 those values explain the recorded decision. Do not convert such history into a
 second moving current-state summary.
 
+## Canonical owner map
+
+- **Approved product intent and owner wish history:** [`WISHES.xml`](../WISHES.xml).
+- **Accepted decisions and rationale:** accepted ADRs in [`docs/decisions/`](decisions/).
+- **Accepted syntax and semantics:**
+  [`docs/specifications/accepted-syntaxes-v30.md`](specifications/accepted-syntaxes-v30.md), overridden only within
+  the exact scope of a later accepted ADR or an accepted update to that specification.
+- **Current architecture map and component boundaries:** [`CURRENT-DESIGN.md`](../CURRENT-DESIGN.md) and
+  [`docs/ARCHITECTURE.md`](ARCHITECTURE.md); accepted ADRs own the decisions and rationale.
+- **Exact current implementation:** repository code and executable configuration. Current topic documents own
+  maintained contracts, while [`PHASE-STATUS.md`](../PHASE-STATUS.md) owns high-level capability state.
+- **Open obligations before a named gate:**
+  [`docs/planning/POC-TO-ALPHA-BACKLOG.md`](planning/POC-TO-ALPHA-BACKLOG.md), while
+  [`PHASE-STATUS.md`](../PHASE-STATUS.md) records verified current state.
+- **Unresolved product or technical choices:** [`docs/OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
+- **Concrete execution tasks:** GitHub issues; pull requests are implementation handoffs and review evidence.
+
+A product or technical owner decision becomes durable implementation authority only after an accepted ADR, accepted
+specification, or controlling current topic document is updated. `WISHES.xml` may preserve approved product intent and
+wish history, but it does not by itself accept an implementation decision. Chat messages, issues, pull-request text,
+tests, CI results, and reviews may prove intent, behavior, or execution state, but remain evidence or task context until
+the required synchronization occurs.
+
+Executable owners retain moving values they directly control: `.nvmrc` owns the required Node runtime selection;
+`package.json` and the lockfile own dependency requirements; bootstrap `MANIFEST.json` files own release payload
+identity; workflows and live CI own current run results. Retain benchmark or resource measurements in a dated evidence
+record only when they have a concrete current consumer and enough revision, environment, method, workload,
+configuration, result, limitation, and intended-use detail to support comparison.
+
 ## Documentation edit and review workflow
 
 Before every non-trivial documentation edit, the writer must:
@@ -90,7 +119,12 @@ The repository owns documentation that must change with code, architecture, lang
 - accepted syntax specifications;
 - ADRs;
 - concise current topic documents in `docs/`;
-- `docs/DEVELOPMENT-WORKFLOW.md` and other stable repository workflow rules;
+- `docs/DEVELOPMENT-WORKFLOW.md` for universal issue, branch, pull-request,
+  review, documentation, merge, and verification rules;
+- `docs/agents/README.md` and its focused guides for capability-specific
+  source acquisition, writes, verification, and publication constraints, with
+  separate focused task guidance for explicitly coordinated work;
+- `docs/PATCH-PUBLICATION.md` for the verified patch protocol and security boundary;
 - current open decisions, the selected POC-to-alpha backlog, and deliberately maintained repository planning documents;
 - `WISHES.xml` product intent/history;
 - executable, tested examples under `examples/`.
@@ -105,6 +139,11 @@ The selected backlog, temporary coordination, and implementation status have dif
 - accepted decisions and implemented results from temporary coordination are synchronized back into the relevant ADRs, specifications, current topic documents, and `PHASE-STATUS.md`.
 
 Do not keep completed items in the open backlog merely as history; Git already preserves their earlier state.
+
+Capability routing follows the same ownership rule. `docs/agents/README.md` owns selection and composition;
+each focused guide owns only its profile procedure. Replaceable connector artifact mechanics live only in
+`docs/agents/CONNECTOR-SOURCE-ACQUISITION.md`. Universal documents and controlled project-agent derivatives link
+to those owners instead of copying moving workflow details.
 
 ## Shared project folder: durable context and non-authoritative research
 
