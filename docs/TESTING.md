@@ -23,12 +23,14 @@ The repository currently has no browser-automation dependency and no external pr
 
 ## Normal and diagnostic verification
 
+<!-- repository-doc-guard: begin normal-and-diagnostic-verification -->
 `npm run check` is the normal complete configured suite and preserves actionable
 failure information. `npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
 distinct task-relevant evidence.
+<!-- repository-doc-guard: end normal-and-diagnostic-verification -->
 
 ### Repository documentation drift guard
 
@@ -42,6 +44,9 @@ The guard intentionally does not interpret every code span as a path, validate e
 lifecycle from prose, lint style, or inspect generated project-agent archives, setup behavior, manifests, installation,
 or external project-folder synchronization. Historical records may name retired routes, and full-output commands may
 remain in diagnostic documentation, provided neither becomes a current/default route or normal verification gate.
+Within the three selected default routers, a direct history target requires
+`<!-- repository-doc-guard: allow-opt-in-history-reference -->` on the immediately preceding line. The marked policy
+block above keeps the normal-suite versus diagnostic-full-output contract objective without interpreting other prose.
 
 After an intentional reviewed route or lifecycle change, update the guard's explicit sources, route table, or selected
 metadata cases together with its controlled-mutation tests. A failure names the source, objective invariant, and likely

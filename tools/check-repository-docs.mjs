@@ -37,6 +37,15 @@ const LINK_SOURCES = [
   "docs/reference/README.md",
 ];
 
+const DEFAULT_ROUTER_SOURCES = [
+  "README-FIRST.md",
+  "docs/agents/README.md",
+  "docs/review-and-audit/README.md",
+];
+
+const OPT_IN_HISTORY_REFERENCE_MARKER =
+  "<!-- repository-doc-guard: allow-opt-in-history-reference -->";
+
 const REQUIRED_ROUTES = [
   ["AGENTS.md", "README-FIRST.md", "repository task router"],
   ["README-FIRST.md", "docs/agents/README.md", "technical capability router"],
@@ -75,24 +84,42 @@ const REQUIRED_PATHS = [
   ["tools/local-agent/check-local-agent.sh", "canonical local-agent verification command"],
 ];
 
-const LIFECYCLE_CASES = new Map([
-  [
-    "docs/planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md",
-    ["Status", "Authority", "Use when", "Do not use for"],
-  ],
-  [
-    "docs/planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md",
-    ["Status", "Authority", "Use when", "Do not use for"],
-  ],
-  [
-    "docs/planning/MAINTENANCE-CANDIDATES.md",
-    ["Status", "Authority", "Use when", "Do not use for"],
-  ],
-  [
-    "docs/planning/POC-TO-ALPHA-BACKLOG.md",
-    ["Status", "Scope", "Scheduling"],
-  ],
-]);
+const LIFECYCLE_CASES = [
+  {
+    source: "docs/planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md",
+    requiredFields: ["Status", "Authority", "Use when", "Do not use for"],
+    expectedStatus: "Active non-implemented planning",
+  },
+  {
+    source: "docs/planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md",
+    requiredFields: ["Status", "Authority", "Use when", "Do not use for"],
+    expectedStatus: "Active non-implemented planning",
+  },
+  {
+    source: "docs/planning/MAINTENANCE-CANDIDATES.md",
+    requiredFields: ["Status", "Authority", "Use when", "Do not use for"],
+    expectedStatus: "Active unscheduled maintenance candidates",
+  },
+  {
+    source: "docs/planning/POC-TO-ALPHA-BACKLOG.md",
+    requiredFields: ["Status", "Scope", "Scheduling"],
+    expectedStatus: "Canonical selected backlog",
+  },
+];
+
+const DOCUMENTED_VERIFICATION_POLICY_SOURCE = "docs/TESTING.md";
+const DOCUMENTED_VERIFICATION_POLICY_BEGIN =
+  "<!-- repository-doc-guard: begin normal-and-diagnostic-verification -->";
+const DOCUMENTED_VERIFICATION_POLICY_END =
+  "<!-- repository-doc-guard: end normal-and-diagnostic-verification -->";
+const DOCUMENTED_VERIFICATION_POLICY = `
+\`npm run check\` is the normal complete configured suite and preserves actionable
+failure information. \`npm run test:full-output\` and \`npm run check:full-output\`
+are diagnostic reruns only when compact output is insufficient for a failure or
+specific investigation. Do not run a normal and full-output variant by default
+for the same revision. Focused checks remain appropriate when they supply
+distinct task-relevant evidence.
+`;
 
 const RETIRED_WORK_PACKAGE_PATTERN =
   /(?:^|[^A-Za-z0-9_.-])(?:tools\/work-packages(?:\/|\b)|work-packages\/(?:integrate\.sh|PACKAGE\.schema\.json))(?:$|[^A-Za-z0-9_.-])/u;
@@ -105,6 +132,8 @@ const FULL_OUTPUT_NPM_REFERENCE_PATTERN =
   /\bnpm\s+(?:--silent\s+)?run\s+[A-Za-z0-9:._-]*full-output[A-Za-z0-9:._-]*/u;
 const DIRECT_FULL_OUTPUT_SUITE_PATTERN =
   /\bnode\s+--test\b[^\n]*(?:dist\/tests\/\*\.test\.js|dist\/tests\/\*\.js)/u;
+const HISTORICAL_CODE_TARGET_PATTERN =
+  /`((?:docs\/history\/[^`\s]+|(?:[^`\s]+\/)?SUPERSEDED-[^`\s]+))`/gu;
 
 function parseArguments(argv) {
   let root = process.cwd();
@@ -335,6 +364,56 @@ function validateRequiredRoutes(root, failures) {
   }
 }
 
+function historicalTargetsOnLine(root, source, line) {
+  const targets = new Set();
+
+  for (const destination of extractLocalLinks(line)) {
+    const target = resolveLocalTarget(root, source, destination);
+    const repositoryPath = toRepositoryPath(root, target);
+    if (isHistoricalRoute(repositoryPath)) targets.add(repositoryPath);
+  }
+
+  for (const match of line.matchAll(HISTORICAL_CODE_TARGET_PATTERN)) {
+    const target = match[1];
+    if (target === undefined) continue;
+    const repositoryPath = target.startsWith("docs/")
+      ? target
+      : toRepositoryPath(root, resolve(root, dirname(source), target));
+    if (isHistoricalRoute(repositoryPath)) targets.add(repositoryPath);
+  }
+
+  return targets;
+}
+
+function validateDefaultRouterHistory(root, failures) {
+  for (const source of DEFAULT_ROUTER_SOURCES) {
+    const contents = readSource(root, source, failures, "default-route-history");
+    if (contents === null) continue;
+
+    const lines = contents.split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? "";
+      const targets = historicalTargetsOnLine(root, source, line);
+      if (targets.size > 0) {
+        const hasOptInMarker = lines[index - 1]?.trim() === OPT_IN_HISTORY_REFERENCE_MARKER;
+        if (!hasOptInMarker) {
+          for (const target of targets) {
+            addFailure(
+              failures,
+              source,
+              "default-route-history",
+              `default router references historical material at ${target} without an explicit opt-in marker`,
+              `remove the default route or place ${OPT_IN_HISTORY_REFERENCE_MARKER} on the immediately preceding line for a genuinely opt-in historical reference`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  return DEFAULT_ROUTER_SOURCES.length;
+}
+
 function collectTextFiles(root, relativeRoot) {
   const absoluteRoot = resolve(root, relativeRoot);
   if (!existsSync(absoluteRoot)) return [];
@@ -401,7 +480,7 @@ function parseMetadata(contents) {
 
 function validateLifecycleMetadata(root, failures) {
   let caseCount = 0;
-  for (const [source, requiredFields] of LIFECYCLE_CASES) {
+  for (const { source, requiredFields, expectedStatus } of LIFECYCLE_CASES) {
     caseCount += 1;
     const contents = readSource(root, source, failures, "lifecycle-metadata");
     if (contents === null) continue;
@@ -417,6 +496,17 @@ function validateLifecycleMetadata(root, failures) {
           "restore the lightweight field or update the explicit lifecycle case after a reviewed reclassification",
         );
       }
+    }
+
+    const status = metadata.get("status");
+    if (status !== expectedStatus) {
+      addFailure(
+        failures,
+        source,
+        "lifecycle-metadata",
+        `selected planning Status must be ${JSON.stringify(expectedStatus)}; found ${JSON.stringify(status ?? "")}`,
+        "restore the accepted planning classification or update the explicit lifecycle case after a reviewed reclassification",
+      );
     }
   }
 
@@ -462,6 +552,50 @@ function validateLifecycleMetadata(root, failures) {
   }
 
   return caseCount;
+}
+
+function normalizePolicyText(text) {
+  return text.replace(/\s+/gu, " ").trim();
+}
+
+function validateDocumentedVerificationPolicy(root, failures) {
+  const source = DOCUMENTED_VERIFICATION_POLICY_SOURCE;
+  const contents = readSource(root, source, failures, "documented-verification-policy");
+  if (contents === null) return 0;
+
+  const headingMatches = [
+    ...contents.matchAll(/^## Normal and diagnostic verification\s*$/gmu),
+  ];
+  if (headingMatches.length !== 1) {
+    addFailure(
+      failures,
+      source,
+      "documented-verification-policy",
+      `canonical normal and diagnostic verification section must occur once; found ${headingMatches.length}`,
+      "restore the marked diagnostic-only policy section",
+    );
+    return 0;
+  }
+
+  const headingMatch = headingMatches[0];
+  const sectionStart = (headingMatch?.index ?? 0) + (headingMatch?.[0].length ?? 0);
+  const remainder = contents.slice(sectionStart);
+  const nextHeadingMatch = remainder.match(/^#{2,3}\s+.+$/mu);
+  const sectionEnd = nextHeadingMatch?.index ?? remainder.length;
+  const actualSection = remainder.slice(0, sectionEnd);
+  const expectedSection = `${DOCUMENTED_VERIFICATION_POLICY_BEGIN}\n${DOCUMENTED_VERIFICATION_POLICY}\n${DOCUMENTED_VERIFICATION_POLICY_END}`;
+
+  if (normalizePolicyText(actualSection) !== normalizePolicyText(expectedSection)) {
+    addFailure(
+      failures,
+      source,
+      "documented-verification-policy",
+      "canonical normal/full-output policy no longer states one normal compact suite with diagnostic-only full-output reruns",
+      "restore the marked policy block and keep full-output commands out of the normal required gate",
+    );
+  }
+
+  return 1;
 }
 
 function referencedScripts(command) {
@@ -649,8 +783,10 @@ function run(root) {
   const linkCount = validateLinks(root, failures);
   validateRequiredPaths(root, failures);
   validateRequiredRoutes(root, failures);
+  const defaultRouterCount = validateDefaultRouterHistory(root, failures);
   const scannedTextSourceCount = validateRetiredWorkPackageRoute(root, failures);
   const lifecycleCaseCount = validateLifecycleMetadata(root, failures);
+  const documentedPolicyCount = validateDocumentedVerificationPolicy(root, failures);
   const { reachableCount, normalGateCount } = validateScriptGraph(root, failures);
 
   if (failures.length > 0) {
@@ -666,8 +802,9 @@ function run(root) {
   console.log(
     `repository documentation guard: PASS (${LINK_SOURCES.length} link sources, ${linkCount} local links, ` +
       `${REQUIRED_PATHS.length} selected paths, ${scannedTextSourceCount} current text sources, ` +
-      `${lifecycleCaseCount} lifecycle cases, ` +
-      `${reachableCount} normal scripts, ${normalGateCount} CI gate)`,
+      `${defaultRouterCount} default routers, ${lifecycleCaseCount} lifecycle cases, ` +
+      `${documentedPolicyCount} documented policy, ${reachableCount} normal scripts, ` +
+      `${normalGateCount} CI gate)`,
   );
   return 0;
 }

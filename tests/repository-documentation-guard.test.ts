@@ -101,7 +101,7 @@ The retired \`tools/work-packages/integrate.sh\` path may be named here as histo
     append(
       fixture.root,
       "README-FIRST.md",
-      "Historical evidence such as [this retained record](docs/history/WORK-PACKAGE-EVIDENCE.md) remains opt-in.",
+      "<!-- repository-doc-guard: allow-opt-in-history-reference -->\nHistorical evidence such as [this retained record](docs/history/WORK-PACKAGE-EVIDENCE.md) remains opt-in.",
     );
     append(
       fixture.root,
@@ -192,7 +192,7 @@ test("repository documentation guard rejects a current retired work-package rout
   }
 });
 
-test("repository documentation guard rejects a historical target in the explicit route table", () => {
+test("repository documentation guard rejects a default router source entering history", () => {
   const fixture = createRepositoryFixture();
   try {
     mkdirSync(resolve(fixture.root, "docs/history"), { recursive: true });
@@ -206,15 +206,11 @@ test("repository documentation guard rejects a historical target in the explicit
 - **Do not use for:** Default task routing
 `,
     );
-    const guardPath = resolve(fixture.root, "tools/check-repository-docs.mjs");
-    writeFileSync(
-      guardPath,
-      readFileSync(guardPath, "utf8").replace(
-        '["README-FIRST.md", "CURRENT-DESIGN.md", "stable cross-component map"],',
-        '["README-FIRST.md", "docs/history/ROUTED-HISTORY.md", "stable cross-component map"],',
-      ),
+    append(
+      fixture.root,
+      "README-FIRST.md",
+      "Before every task, read [the mandatory historical route](docs/history/ROUTED-HISTORY.md).",
     );
-    append(fixture.root, "README-FIRST.md", "Route: `docs/history/ROUTED-HISTORY.md`.");
     assertRejected(runGuard(fixture.root), "README-FIRST.md", "default-route-history");
   } finally {
     fixture.cleanup();
@@ -231,6 +227,24 @@ test("repository documentation guard rejects missing selected lifecycle metadata
       readFileSync(absolutePath, "utf8").replace(
         "- **Authority:** Non-authoritative and evidence-dependent\n",
         "",
+      ),
+    );
+    assertRejected(runGuard(fixture.root), source, "lifecycle-metadata");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("repository documentation guard rejects a historical selected-planning classification", () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const source = "docs/planning/MAINTENANCE-CANDIDATES.md";
+    const absolutePath = resolve(fixture.root, source);
+    writeFileSync(
+      absolutePath,
+      readFileSync(absolutePath, "utf8").replace(
+        "- **Status:** Active unscheduled maintenance candidates",
+        "- **Status:** Historical retained evidence",
       ),
     );
     assertRejected(runGuard(fixture.root), source, "lifecycle-metadata");
@@ -267,6 +281,24 @@ test("repository documentation guard rejects a full-output command in normal CI"
       ".github/workflows/ci.yml",
       "compact-verification-gate",
     );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("repository documentation guard rejects a documented second normal full-output gate", () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const source = "docs/TESTING.md";
+    const absolutePath = resolve(fixture.root, source);
+    writeFileSync(
+      absolutePath,
+      readFileSync(absolutePath, "utf8").replace(
+        "are diagnostic reruns only when compact output is insufficient for a failure or",
+        "are required second normal gates for every revision, even when compact output is sufficient for a failure or",
+      ),
+    );
+    assertRejected(runGuard(fixture.root), source, "documented-verification-policy");
   } finally {
     fixture.cleanup();
   }
