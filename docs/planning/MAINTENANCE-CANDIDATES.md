@@ -1,10 +1,9 @@
 # Maintenance candidates
 
-**Status:** Non-authoritative maintenance planning
-
-**Scheduling:** Unscheduled
-
-**Gate:** Not currently required for POC, pre-alpha, or alpha
+- **Status:** Active unscheduled maintenance candidates
+- **Authority:** Non-authoritative and evidence-dependent
+- **Use when:** Considering a focused maintainability issue from current repository evidence
+- **Do not use for:** Architecture, product requirements, or scheduled implementation
 
 ## Purpose
 
@@ -29,7 +28,7 @@ src/runtime/engine.ts
 
 A responsibility-based split may provide:
 
-- smaller context windows for agents and reviewers;
+- less source context for focused agent and reviewer work;
 - fewer merge conflicts when compiler, validator, state, and execution work proceed in parallel;
 - clearer ownership of invariants and their tests;
 - easier navigation and more focused reviews;
@@ -42,7 +41,7 @@ The goal is maintainability and parallel-development safety, not reducing the to
 A split also creates costs:
 
 - a large mechanical diff with little immediate user-visible value;
-- temporary merge conflicts with active runtime hardening;
+- merge conflicts with concurrent work in the same modules;
 - additional files and imports that can become indirection when boundaries are too fine;
 - premature module boundaries that may need to move again;
 
@@ -68,10 +67,9 @@ Exact filenames and boundaries must be derived from the repository state at impl
 
 ### When to schedule
 
-Consider creating focused implementation issues after:
+Consider creating a focused implementation issue only when current evidence identifies a concrete maintenance problem,
+an import/export and test-ownership inventory shows a stable boundary, and the split can be reviewed without bundled
+semantic work.
 
-- current overlapping runtime hardening, facade-retirement, and cleanup work has landed;
-- an import/export and test-ownership inventory identifies stable boundaries;
-- the proposed split can be reviewed as a mechanical change without bundled semantic work.
-
-Prefer one module group and one owning agent per pull request. Sequence the pull requests rather than moving all large modules at once.
+Prefer one module group and one owning agent per pull request. Sequence the pull requests rather than moving all large
+modules at once.

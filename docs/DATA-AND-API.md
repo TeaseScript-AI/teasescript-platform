@@ -90,7 +90,10 @@ active foreground/background action
 
 The exact cross-origin envelope, field names, capability-negotiation schema, reconnect protocol, and save acknowledgement remain open. They are not defined by ADR 0016.
 
-Camera and file APIs continue to return engine-managed references rather than browser objects. Package-defined camera roles, player device aliases, long-lived stream ownership, and persistent media collections remain separate follow-up designs recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
+Camera and file APIs continue to return engine-managed references rather than browser objects. Package-defined camera
+roles, player device aliases, long-lived stream ownership, and persistent media collections remain separate follow-up
+designs recorded in
+[`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
 ## Stability and future contracts
 

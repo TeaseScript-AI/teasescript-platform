@@ -13,7 +13,8 @@ Use project material in this order:
 3. Use `CURRENT-DESIGN.md` and `PHASE-STATUS.md` for current architecture and implementation status.
 4. Use the task-specific current topic document in `docs/`.
 5. Use `docs/planning/POC-TO-ALPHA-BACKLOG.md` for owner-selected work that remains required before its target gate. Inclusion does not schedule the item and does not define architecture or syntax.
-6. Use other files in `docs/planning/` for proposals, gap analysis, and legacy backlog material; planning text is not an accepted decision by itself.
+6. Use other files in `docs/planning/` only for active, non-implemented planning. Planning text is non-authoritative,
+   does not schedule implementation, and may not override accepted decisions or current topic owners.
 7. Use `WISHES.xml` for product intent and decision history; an active wish is not automatically an implementation decision or backlog commitment.
 8. Treat capability research, old project packages, audit reports, and source examples as non-authoritative reference material.
 
@@ -74,5 +75,6 @@ milestone, gate, integration-status, or current-capability work.
 - `docs/decisions/`: accepted and proposed ADRs.
 - `docs/OPEN-DECISIONS.md`: unresolved choices; read it only when the task depends on a gap that current authority does not resolve.
 - `docs/planning/POC-TO-ALPHA-BACKLOG.md`: selected work required before a stated POC, pre-alpha, or alpha gate, but not automatically scheduled.
-- `docs/planning/`: other non-authoritative proposals, gap analysis, and legacy backlog material.
+- `docs/planning/`: active, non-implemented planning; read `docs/planning/README.md` for its lifecycle and authority
+  boundary. Entries are non-authoritative and not automatically scheduled.
 - `docs/reference/`: routing notices for research intentionally stored outside this repository.
