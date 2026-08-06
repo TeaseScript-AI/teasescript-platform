@@ -33,7 +33,8 @@ ADRs.
 - `../README-FIRST.md` selects the repository-wide task route.
 - `agents/README.md` selects the direct-repository or connector-local technical capability route and adds the
   publication-constrained overlay only for a concrete restriction.
-- `review-and-audit/README.md` selects normal implementation/review guidance or explicitly assigned audit guidance.
+- `review-and-audit/README.md` mirrors the `../README-FIRST.md` task choice locally and links to normal
+  implementation/review guidance or explicitly assigned audit guidance.
 - `DEVELOPMENT-WORKFLOW.md` owns the universal issue, branch, pull-request, documentation, merge, and verification
   workflow.
 - `PATCH-PUBLICATION.md` owns the verified patch protocol and security contract.
@@ -46,8 +47,9 @@ breakdowns, executor assignments, and merge tracking remain outside the reposito
 
 ## Implementation, review, and audit
 
-`review-and-audit/README.md` maps to the shared implementation/review guide or the separate explicitly assigned audit
-guide. It is the local selector; detailed procedures remain in those two guides.
+`../README-FIRST.md` selects the repository-wide task and routes directly to the shared implementation/review guide or
+the separate explicitly assigned audit guide. `review-and-audit/README.md` mirrors that choice as the local subrouter;
+detailed procedures remain in those two guides.
 
 ## Planning
 
