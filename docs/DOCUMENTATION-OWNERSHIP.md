@@ -165,9 +165,7 @@ binaries are not committed. Large runtime-only payloads remain outside Git.
 
 `docs/chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder,
 not a concatenation of installed guides. Project-folder synchronization remains
-a separate manual step and is not proven by a repository merge. Issue #210
-remains open until the setup/runtime assembly and end-to-end replacement set are
-finished.
+a separate manual step and is not proven by a repository merge.
 
 Research and historical material must be explicitly labeled non-authoritative. It may inform design but cannot silently define syntax, architecture, or implementation status.
 

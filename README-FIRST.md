@@ -20,32 +20,14 @@ Use project material in this order:
 
 When files conflict, identify the exact conflict. Do not silently combine historical syntax, planning proposals, and accepted syntax.
 
-## Current implementation scope
+## Current design and status
 
-The current repository implementation includes:
+Use `CURRENT-DESIGN.md` for the stable cross-component architecture, trust, isolation, persistence, language/library,
+and deterministic-runtime boundaries. Use `PHASE-STATUS.md` for the current phase, gates, implemented capability
+groups, and major exclusions. Load a topic document only when the assignment depends on its detailed contract.
 
-- lexer, parser, immutable AST, source spans, diagnostics, and semantic validation;
-- core values, variables, assignments, speakers, output, collections, expressions, comments, ranges, conditionals, loops, and deterministic random built-ins;
-- versioned JSON-safe instruction plans, runtime snapshots, checkpoints, deterministic RNG state, typed sequenced events, and explicit loop frames;
-- top-level user-defined functions, required/default parameters, positional/named calls, returns, recursion, and explicit serializable call frames;
-- source-order-preserving expression and assignment lowering, checkpoint-safe prepared references, complete suspended-caller temporary validation, and centralized V30 protected-name enforcement;
-- a standalone fixed-example browser playground.
-
-The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). These are POC formats, not permanent public wire-format promises.
-
-This does not mean that the complete V30 language, static type system, timers, input, media, cross-origin player host, Laravel persistence, accounts, publishing, or continuous personalities are implemented.
-
-## Stable architecture boundaries
-
-- Regular executable content uses `.tease`; advanced reusable programming logic uses real TypeScript in `.ts`.
-- `main.tease` is the fixed package entry point.
-- Laravel with PostgreSQL is the only public backend.
-- Parser/runtime code is TypeScript compiled to JavaScript.
-- Keep one deterministic engine, one state model, and one save/checkpoint format.
-- Runtime execution uses validated explicit state and may not depend on a suspended JavaScript call stack.
-- JSON-safe after every instruction boundary does not require persisting after every instruction.
-- The final player and package code run inside a sandboxed cross-origin iframe.
-- Package code has no unrestricted external network access.
+Exact source layout, internal format revisions, dependency versions, test results, and live workflow state belong to
+their executable or topic owners rather than this task router.
 
 ## Documentation routing
 
@@ -68,7 +50,7 @@ milestone, gate, integration-status, or current-capability work.
   review, documentation, merge, and verification rules.
 - `docs/agents/README.md`: technical capability router for source acquisition,
   permitted writes, verification, and publication constraints; task guidance is routed separately.
-- `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md`: project-agent source layout, current bootstrap route, and remaining #210 migration work.
+- `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md`: project-agent source and installed-layout contract.
 - `docs/README.md`: documentation map.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
 - `docs/specifications/`: accepted consolidated specifications.
