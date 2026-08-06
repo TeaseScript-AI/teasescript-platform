@@ -5,6 +5,11 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/../.." && pwd)
 project_root="$repo_root/tools/chatgpt-project-agent"
 
+if [[ -e "$repo_root/docs/agents/REVIEWER.md" ]]; then
+  printf 'test-chatgpt-project-agent: FAIL: unexpected docs/agents/REVIEWER.md\n' >&2
+  exit 1
+fi
+
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/test-chatgpt-project-agent.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 
@@ -12,26 +17,81 @@ python3 - \
   "$project_root/docs/PROJECT-INSTRUCTIONS.txt" \
   "$project_root/bin/setup-workspace.sh" \
   "$project_root/bin/install-tiktoken-offline.sh" \
-  "$repo_root/docs/CHATGPT-GITHUB-WORKFLOW.md" \
-  "$repo_root/docs/DEVELOPMENT-WORKFLOW.md" <<'PY'
+  "$repo_root/README-FIRST.md" \
+  "$repo_root/docs/agents/CONNECTOR-SOURCE-ACQUISITION.md" \
+  "$repo_root/docs/DEVELOPMENT-WORKFLOW.md" \
+  "$repo_root/docs/agents/README.md" \
+  "$project_root/docs/DEVELOPMENT-WORKFLOW-CONTEXT.md" <<'PY'
 from pathlib import Path
 import sys
 
 instructions = Path(sys.argv[1]).read_text()
 setup = Path(sys.argv[2]).read_text()
 installer = Path(sys.argv[3]).read_text()
-connector_workflow = Path(sys.argv[4]).read_text()
-development_workflow = Path(sys.argv[5]).read_text()
+readme_first = Path(sys.argv[4]).read_text()
+connector_acquisition = Path(sys.argv[5]).read_text()
+development_workflow = Path(sys.argv[6]).read_text()
+capability_router = Path(sys.argv[7]).read_text()
+installed_context = Path(sys.argv[8]).read_text()
 
 installed_source_review = "/mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py"
+if "tools/local-agent/prepare-source-review.py" in connector_acquisition:
+    raise SystemExit("connector acquisition still references the deleted source-review helper")
+if installed_source_review not in connector_acquisition:
+    raise SystemExit("connector acquisition does not reference the installed source-review helper")
 for name, guide in (
-    ("connector workflow", connector_workflow),
     ("development workflow", development_workflow),
+    ("capability router", capability_router),
+    ("installed workflow context", installed_context),
 ):
-    if "tools/local-agent/prepare-source-review.py" in guide:
-        raise SystemExit(f"{name} still references the deleted source-review helper")
-    if installed_source_review not in guide:
-        raise SystemExit(f"{name} does not reference the installed source-review helper")
+    if installed_source_review in guide or "tools/local-agent/prepare-source-review.py" in guide:
+        raise SystemExit(f"{name} duplicates a connector-local helper path")
+
+required_capability_links = (
+    "DIRECT-REPOSITORY.md",
+    "CONNECTOR-LOCAL.md",
+    "PUBLICATION-CONSTRAINED.md",
+)
+for route in required_capability_links:
+    if route not in capability_router:
+        raise SystemExit(f"capability router does not route {route}")
+
+route_names = []
+in_route_summary = False
+for line in capability_router.splitlines():
+    if line == "## Route summary":
+        in_route_summary = True
+        continue
+    if in_route_summary and line.startswith("## "):
+        break
+    if not in_route_summary or not line.startswith("|"):
+        continue
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    if cells and cells[0] not in ("Route", "---"):
+        route_names.append(cells[0])
+expected_route_names = [
+    "Direct repository",
+    "Connector-local",
+    "Publication-constrained",
+]
+if route_names != expected_route_names:
+    raise SystemExit(f"unexpected capability route table: {route_names!r}")
+
+if "ORCHESTRATOR.md" not in capability_router or "| Orchestrator |" in capability_router:
+    raise SystemExit("orchestrator is not routed as separate task guidance")
+for task_guide in (
+    "docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md",
+    "docs/review-and-audit/AUDIT.md",
+):
+    if task_guide not in readme_first:
+        raise SystemExit(f"README-FIRST.md does not route {task_guide}")
+if "README-FIRST.md" not in capability_router or "README-FIRST.md" not in installed_context:
+    raise SystemExit("capability or installed routing does not return to README-FIRST.md")
+if "docs/agents/CONNECTOR-SOURCE-ACQUISITION.md" not in installed_context:
+    raise SystemExit("installed context does not route to current connector acquisition")
+for moving_detail in ("/artifact source ", "source-bundle-request/", "90-second", "#235"):
+    if moving_detail in development_workflow or moving_detail in installed_context:
+        raise SystemExit(f"moving acquisition detail escaped its canonical owner: {moving_detail}")
 
 required_route = (
     "1. Read applicable `AGENTS.md` files first.\n"
@@ -39,7 +99,10 @@ required_route = (
 )
 if required_route not in instructions:
     raise SystemExit("project instructions do not preserve the accepted startup order")
-if "Read `CURRENT-DESIGN.md` for architecture-affecting or broad cross-component work" not in instructions:
+if (
+    "Read `CURRENT-DESIGN.md` for" not in instructions
+    or "architecture-affecting or broad cross-component work" not in instructions
+):
     raise SystemExit("project instructions do not use the progressive CURRENT-DESIGN route")
 for obsolete in ("docs/references/", "source-examples/"):
     if obsolete in instructions:

@@ -119,7 +119,12 @@ The repository owns documentation that must change with code, architecture, lang
 - accepted syntax specifications;
 - ADRs;
 - concise current topic documents in `docs/`;
-- `docs/DEVELOPMENT-WORKFLOW.md` and other stable repository workflow rules;
+- `docs/DEVELOPMENT-WORKFLOW.md` for universal issue, branch, pull-request,
+  review, documentation, merge, and verification rules;
+- `docs/agents/README.md` and its focused guides for capability-specific
+  source acquisition, writes, verification, and publication constraints, with
+  separate focused task guidance for explicitly coordinated work;
+- `docs/PATCH-PUBLICATION.md` for the verified patch protocol and security boundary;
 - current open decisions, the selected POC-to-alpha backlog, and deliberately maintained repository planning documents;
 - `WISHES.xml` product intent/history;
 - executable, tested examples under `examples/`.
@@ -134,6 +139,11 @@ The selected backlog, temporary coordination, and implementation status have dif
 - accepted decisions and implemented results from temporary coordination are synchronized back into the relevant ADRs, specifications, current topic documents, and `PHASE-STATUS.md`.
 
 Do not keep completed items in the open backlog merely as history; Git already preserves their earlier state.
+
+Capability routing follows the same ownership rule. `docs/agents/README.md` owns selection and composition;
+each focused guide owns only its profile procedure. Replaceable connector artifact mechanics live only in
+`docs/agents/CONNECTOR-SOURCE-ACQUISITION.md`. Universal documents and controlled project-agent derivatives link
+to those owners instead of copying moving workflow details.
 
 ## Shared project folder: durable context and non-authoritative research
 

@@ -1,38 +1,52 @@
 # ChatGPT project-agent development workflow context
 
-**Purpose:** Compact routing context for connector-local ChatGPT sessions.
-**Authority:** The verified checkout's `AGENTS.md`, repository
-`README-FIRST.md`, `docs/DEVELOPMENT-WORKFLOW.md`, assigned issue or pull request,
-and relevant current documents control the exact work.
+**Purpose:** Stable startup routing for a connector-local session.
+**Authority:** After checkout, the repository's `AGENTS.md`, `README-FIRST.md`,
+`docs/agents/README.md`, assigned issue or pull request, and relevant current
+documents control the exact work.
 
-## Default route
+## Before checkout
 
-Use one coherent issue, one owning agent, one short-lived branch, one pull
-request, independent review, CI, squash merge, and branch deletion by default.
-Work in small verifiable steps, update directly affected documentation, and keep
-the pull-request description aligned with the actual head.
+This environment selects the connector-local source/workspace route by
+capability: it has a GitHub control-plane connector plus local shell/filesystem,
+but no supported network clone or fetch.
 
-For substantial connector-local work:
+1. Use one narrow connector file read from current `main` to obtain
+   `docs/agents/CONNECTOR-SOURCE-ACQUISITION.md`.
+2. Follow that current canonical guide to resolve one exact source artifact and
+   run the trusted installed preparation helper.
+3. Do not copy its fixed-index, mailbox, polling, timing, or compatibility
+   details into this installed derivative; the canonical acquisition owner may replace them.
+4. Continue only from the fully verified local checkout.
 
-1. resolve and download one exact source artifact through the current connector workflow;
-2. prepare and inspect the verified checkout with local shell, Git, editor, and test tools;
-3. use the connector only for live GitHub state and permitted writes;
-4. re-read the controlling documents when the task, head, phase, or publication route changes.
+The setup/runtime migration remains tracked by issue #210. Do not invent a
+missing setup command or treat the structural source layout as a completed
+distribution.
 
-The ChatGPT project-agent setup/runtime migration remains tracked by issue #210.
-Do not invent a missing setup command or treat this structural source layout as a
-completed distribution.
+## After checkout
 
-## Publication
+Read applicable `AGENTS.md`, repository `README-FIRST.md`, and the assigned issue
+or pull request. Select the technical capability route in `docs/agents/README.md`;
+normally this is `docs/agents/CONNECTOR-LOCAL.md`. Use local shell, Git, editor,
+search, and test tools for repository work, and use the connector only for live
+GitHub state and permitted writes. Follow the task documents selected by
+`README-FIRST.md`.
 
-Immediately before a repository write, choose normal authenticated Git or the
-verified patch-publication route in `docs/PATCH-PUBLICATION.md`. Do not improvise
-low-level full-file, blob, tree, commit, or branch publication outside the exact
-permitted route.
+Universal issue, branch, pull-request, review, documentation, merge, and
+verification rules remain in `docs/DEVELOPMENT-WORKFLOW.md`. Do not reproduce
+them here.
+
+## Publication and task changes
+
+Read `docs/agents/PUBLICATION-CONSTRAINED.md` and then
+`docs/PATCH-PUBLICATION.md` only when a concrete publication constraint exists.
+Add `docs/agents/ORCHESTRATOR.md` only for explicitly coordinated multi-agent
+work. Re-select the capability route when technical capabilities, branch/head,
+or permitted publication writes change; use `README-FIRST.md` for task changes.
 
 ## Ownership
 
 The owner decides product scope, priorities, gates, and unresolved product or
-architecture choices. When owner input is required, present the realistic options
-and consequences compactly rather than silently choosing. Temporary chat notes
-stay outside GitHub; accepted results belong in the appropriate canonical file.
+architecture choices. Present realistic options and consequences compactly
+rather than silently choosing. Temporary task state remains outside GitHub;
+accepted results belong in the appropriate canonical owner.
