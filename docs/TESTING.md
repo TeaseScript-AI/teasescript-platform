@@ -30,6 +30,23 @@ specific investigation. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
 distinct task-relevant evidence.
 
+### Repository documentation drift guard
+
+`npm run check:docs` runs the dependency-free Git-canonical documentation guard. It checks an explicit set of
+current Markdown links, selected verification paths, and route targets; current/default sources for the retired
+work-package route; selected planning/history lifecycle metadata; default-route exclusion of history; and the compact
+normal verification graph.
+`npm run check` runs this guard once before the existing build and compiled test suite.
+
+The guard intentionally does not interpret every code span as a path, validate external links or anchors, infer
+lifecycle from prose, lint style, or inspect generated project-agent archives, setup behavior, manifests, installation,
+or external project-folder synchronization. Historical records may name retired routes, and full-output commands may
+remain in diagnostic documentation, provided neither becomes a current/default route or normal verification gate.
+
+After an intentional reviewed route or lifecycle change, update the guard's explicit sources, route table, or selected
+metadata cases together with its controlled-mutation tests. A failure names the source, objective invariant, and likely
+smallest repair; a successful run emits one compact summary line.
+
 Workflow and connector tooling has one canonical complete validation command:
 
 ```shell
