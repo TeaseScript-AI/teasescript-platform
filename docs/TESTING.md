@@ -47,6 +47,9 @@ remain in diagnostic documentation, provided neither becomes a current/default r
 Within the three selected default routers, a direct history target requires
 `<!-- repository-doc-guard: allow-opt-in-history-reference -->` on the immediately preceding line. The marked policy
 block above keeps the normal-suite versus diagnostic-full-output contract objective without interpreting other prose.
+Any additional literal full-output command reference in this owner requires
+`<!-- repository-doc-guard: allow-diagnostic-full-output-reference -->` on the immediately preceding line, making the
+reference explicitly diagnostic rather than a competing normal gate.
 
 After an intentional reviewed route or lifecycle change, update the guard's explicit sources, route table, or selected
 metadata cases together with its controlled-mutation tests. A failure names the source, objective invariant, and likely

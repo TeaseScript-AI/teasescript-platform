@@ -91,7 +91,7 @@ The retired \`tools/work-packages/integrate.sh\` path may be named here as histo
     append(
       fixture.root,
       "docs/TESTING.md",
-      "Diagnostic example: `npm run check:full-output` remains available after a compact failure.",
+      "<!-- repository-doc-guard: allow-diagnostic-full-output-reference -->\nDiagnostic example: `npm run check:full-output` remains available after a compact failure.",
     );
     append(
       fixture.root,
@@ -217,6 +217,31 @@ test("repository documentation guard rejects a default router source entering hi
   }
 });
 
+test("repository documentation guard rejects a relative code-form history route", () => {
+  const fixture = createRepositoryFixture();
+  try {
+    mkdirSync(resolve(fixture.root, "docs/history"), { recursive: true });
+    writeFileSync(
+      resolve(fixture.root, "docs/history/MANDATORY.md"),
+      `# Mandatory old route
+
+- **Status:** Historical retained evidence
+- **Authority:** Non-authoritative
+- **Use when:** Investigating an old route
+- **Do not use for:** Default capability routing
+`,
+    );
+    append(
+      fixture.root,
+      "docs/agents/README.md",
+      "Before connector work, read `../history/MANDATORY.md`.",
+    );
+    assertRejected(runGuard(fixture.root), "docs/agents/README.md", "default-route-history");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("repository documentation guard rejects missing selected lifecycle metadata", () => {
   const fixture = createRepositoryFixture();
   try {
@@ -299,6 +324,20 @@ test("repository documentation guard rejects a documented second normal full-out
       ),
     );
     assertRejected(runGuard(fixture.root), source, "documented-verification-policy");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("repository documentation guard rejects an unmarked competing full-output requirement", () => {
+  const fixture = createRepositoryFixture();
+  try {
+    append(
+      fixture.root,
+      "docs/TESTING.md",
+      "Every revision must also run `npm run check:full-output` as a second normal gate.",
+    );
+    assertRejected(runGuard(fixture.root), "docs/TESTING.md", "documented-verification-policy");
   } finally {
     fixture.cleanup();
   }

@@ -45,6 +45,8 @@ const DEFAULT_ROUTER_SOURCES = [
 
 const OPT_IN_HISTORY_REFERENCE_MARKER =
   "<!-- repository-doc-guard: allow-opt-in-history-reference -->";
+const DIAGNOSTIC_FULL_OUTPUT_REFERENCE_MARKER =
+  "<!-- repository-doc-guard: allow-diagnostic-full-output-reference -->";
 
 const REQUIRED_ROUTES = [
   ["AGENTS.md", "README-FIRST.md", "repository task router"],
@@ -132,8 +134,9 @@ const FULL_OUTPUT_NPM_REFERENCE_PATTERN =
   /\bnpm\s+(?:--silent\s+)?run\s+[A-Za-z0-9:._-]*full-output[A-Za-z0-9:._-]*/u;
 const DIRECT_FULL_OUTPUT_SUITE_PATTERN =
   /\bnode\s+--test\b[^\n]*(?:dist\/tests\/\*\.test\.js|dist\/tests\/\*\.js)/u;
-const HISTORICAL_CODE_TARGET_PATTERN =
-  /`((?:docs\/history\/[^`\s]+|(?:[^`\s]+\/)?SUPERSEDED-[^`\s]+))`/gu;
+const INLINE_CODE_PATTERN = /`([^`\n]+)`/gu;
+const LOCAL_DOCUMENT_CODE_TARGET_PATTERN =
+  /^(?:(?:(?:\.{1,2}\/)+|docs\/)[A-Za-z0-9._/-]+|SUPERSEDED-[A-Za-z0-9._/-]+)(?:[?#][^\s]*)?$/u;
 
 function parseArguments(argv) {
   let root = process.cwd();
@@ -373,12 +376,16 @@ function historicalTargetsOnLine(root, source, line) {
     if (isHistoricalRoute(repositoryPath)) targets.add(repositoryPath);
   }
 
-  for (const match of line.matchAll(HISTORICAL_CODE_TARGET_PATTERN)) {
+  for (const match of line.matchAll(INLINE_CODE_PATTERN)) {
     const target = match[1];
-    if (target === undefined) continue;
-    const repositoryPath = target.startsWith("docs/")
-      ? target
-      : toRepositoryPath(root, resolve(root, dirname(source), target));
+    if (target === undefined || !LOCAL_DOCUMENT_CODE_TARGET_PATTERN.test(target)) continue;
+    const targetPath = target.split(/[?#]/u, 1)[0] ?? target;
+    const repositoryPath = toRepositoryPath(
+      root,
+      targetPath.startsWith("docs/")
+        ? resolve(root, targetPath)
+        : resolve(root, dirname(source), targetPath),
+    );
     if (isHistoricalRoute(repositoryPath)) targets.add(repositoryPath);
   }
 
@@ -593,6 +600,37 @@ function validateDocumentedVerificationPolicy(root, failures) {
       "canonical normal/full-output policy no longer states one normal compact suite with diagnostic-only full-output reruns",
       "restore the marked policy block and keep full-output commands out of the normal required gate",
     );
+  }
+
+  const policyStart = contents.indexOf(DOCUMENTED_VERIFICATION_POLICY_BEGIN);
+  const policyEnd = contents.indexOf(DOCUMENTED_VERIFICATION_POLICY_END);
+  const lines = contents.split("\n");
+  let offset = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const lineStart = offset;
+    const lineEnd = lineStart + line.length;
+    offset = lineEnd + 1;
+
+    if (!FULL_OUTPUT_NPM_REFERENCE_PATTERN.test(line)) continue;
+    const insideCanonicalPolicy =
+      policyStart !== -1 &&
+      policyEnd !== -1 &&
+      lineStart > policyStart &&
+      lineEnd < policyEnd;
+    if (insideCanonicalPolicy) continue;
+
+    const hasDiagnosticMarker =
+      lines[index - 1]?.trim() === DIAGNOSTIC_FULL_OUTPUT_REFERENCE_MARKER;
+    if (!hasDiagnosticMarker) {
+      addFailure(
+        failures,
+        source,
+        "documented-verification-policy",
+        "full-output command appears outside the canonical policy without an explicit diagnostic-reference marker",
+        `remove the competing requirement or place ${DIAGNOSTIC_FULL_OUTPUT_REFERENCE_MARKER} on the immediately preceding line for a diagnostic-only reference`,
+      );
+    }
   }
 
   return 1;
