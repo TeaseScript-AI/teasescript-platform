@@ -19,6 +19,7 @@ interface GuardResult {
 }
 
 const repositoryRoot = process.cwd();
+
 function createRepositoryFixture(): { readonly root: string; readonly cleanup: () => void } {
   const temporaryRoot = mkdtempSync(resolve(tmpdir(), "teasescript-doc-guard-"));
   const fixtureRoot = resolve(temporaryRoot, "repository");
@@ -43,8 +44,8 @@ function runGuard(root: string): GuardResult {
     process.execPath,
     [resolve(root, "tools/check-repository-docs.mjs"), "--root", root],
     {
-    cwd: root,
-    encoding: "utf8",
+      cwd: root,
+      encoding: "utf8",
     },
   );
 
