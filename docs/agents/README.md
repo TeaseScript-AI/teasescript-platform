@@ -17,15 +17,10 @@ Select exactly one source/workspace route: direct repository or connector-local.
 publication-constrained overlay only after a concrete publication restriction is verified. Do not load every
 capability guide by default.
 
-## Task guidance after capability selection
+## Related task guidance
 
-- Explicitly coordinated multi-agent work adds [`ORCHESTRATOR.md`](ORCHESTRATOR.md) after the orchestrator
-  selects its own capability route. Coordination is a task role, not a source/workspace capability.
-- Implementation, final self-review, and explicitly assigned pull-request review follow the normal repository
-  start route to
-  [`IMPLEMENTATION-AND-REVIEW.md`](../review-and-audit/IMPLEMENTATION-AND-REVIEW.md). Review does not add a
-  capability route or overlay; the selected environment guide continues to own source acquisition and any
-  environment-specific publication constraint.
+Task guidance remains in the repository start route. Explicitly coordinated multi-agent work also reads
+[`ORCHESTRATOR.md`](ORCHESTRATOR.md) after the orchestrator selects its own capability route.
 
 ## Route summary
 
@@ -40,5 +35,4 @@ capability guide by default.
 All capability routes inherit universal authority, scope, KISS, review, documentation ownership, testing, and
 Git rules from the repository start route. A focused guide must not redefine those rules. When technical
 capabilities, branch/head, or permitted publication writes change, reselect the applicable capability route
-before the next write. A task transition such as implementation, review, repair, or coordination loads its
-canonical task guidance without creating another capability route.
+before the next write. Task changes follow `README-FIRST.md`.

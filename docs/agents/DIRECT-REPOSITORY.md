@@ -11,7 +11,7 @@ capabilities work.
 **Required**
 
 - applicable `AGENTS.md`, repository `README-FIRST.md`, and the assigned issue or pull request;
-- `docs/DEVELOPMENT-WORKFLOW.md` and `docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`;
+- `docs/DEVELOPMENT-WORKFLOW.md` and the task documents selected by `README-FIRST.md`;
 - only the relevant topic documents, accepted decisions, code, and tests selected by the start route.
 
 **Conditional**
@@ -28,11 +28,10 @@ capabilities work.
 
 ## Source acquisition
 
-Use the normal repository remote. Confirm the intended repository, branch, base, and exact head before work.
-Fetch or update through normal Git operations. For an implementation or repair assignment, create or continue
-the task's short-lived branch from the assigned base. For an assigned review, resolve the exact review head and
-comparison or merge base through normal Git/`gh`; the repository start route owns the review procedure. Do not
-request a source artifact merely because another profile needs one.
+Use the normal repository remote. Confirm the intended repository, branch, base, and exact source state required
+by the assigned task before work. Fetch or update through normal Git operations. For an implementation or repair
+assignment, create or continue the task's short-lived branch from the assigned base. Do not request a source
+artifact merely because another route needs one.
 
 ## Writes
 

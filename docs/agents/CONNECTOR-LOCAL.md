@@ -13,9 +13,9 @@ selects this route.
 - before checkout, the trusted project-agent wayfinder and installed workflow/bootstrap guidance available in
   the environment;
 - [`CONNECTOR-SOURCE-ACQUISITION.md`](CONNECTOR-SOURCE-ACQUISITION.md) while obtaining or refreshing source;
-- after checkout, applicable `AGENTS.md`, repository `README-FIRST.md`, the assigned issue or pull request,
-  `docs/DEVELOPMENT-WORKFLOW.md`, and `docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`;
-- only the relevant topic documents, accepted decisions, code, and tests selected by the checkout route.
+- after checkout, applicable `AGENTS.md`, repository `README-FIRST.md`, the assigned issue or pull request, and
+  `docs/DEVELOPMENT-WORKFLOW.md`;
+- only the relevant task and topic documents, accepted decisions, code, and tests selected by `README-FIRST.md`.
 
 **Conditional**
 

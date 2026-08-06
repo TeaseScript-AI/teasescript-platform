@@ -6,7 +6,7 @@ repo_root=$(cd -- "$script_dir/../.." && pwd)
 project_root="$repo_root/tools/chatgpt-project-agent"
 
 if [[ -e "$repo_root/docs/agents/REVIEWER.md" ]]; then
-  printf 'test-chatgpt-project-agent: FAIL: review is still modeled as a capability guide\n' >&2
+  printf 'test-chatgpt-project-agent: FAIL: unexpected docs/agents/REVIEWER.md\n' >&2
   exit 1
 fi
 
@@ -17,6 +17,7 @@ python3 - \
   "$project_root/docs/PROJECT-INSTRUCTIONS.txt" \
   "$project_root/bin/setup-workspace.sh" \
   "$project_root/bin/install-tiktoken-offline.sh" \
+  "$repo_root/README-FIRST.md" \
   "$repo_root/docs/agents/CONNECTOR-SOURCE-ACQUISITION.md" \
   "$repo_root/docs/DEVELOPMENT-WORKFLOW.md" \
   "$repo_root/docs/agents/README.md" \
@@ -27,10 +28,11 @@ import sys
 instructions = Path(sys.argv[1]).read_text()
 setup = Path(sys.argv[2]).read_text()
 installer = Path(sys.argv[3]).read_text()
-connector_acquisition = Path(sys.argv[4]).read_text()
-development_workflow = Path(sys.argv[5]).read_text()
-capability_router = Path(sys.argv[6]).read_text()
-installed_context = Path(sys.argv[7]).read_text()
+readme_first = Path(sys.argv[4]).read_text()
+connector_acquisition = Path(sys.argv[5]).read_text()
+development_workflow = Path(sys.argv[6]).read_text()
+capability_router = Path(sys.argv[7]).read_text()
+installed_context = Path(sys.argv[8]).read_text()
 
 installed_source_review = "/mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py"
 if "tools/local-agent/prepare-source-review.py" in connector_acquisition:
@@ -44,23 +46,47 @@ for name, guide in (
 ):
     if installed_source_review in guide or "tools/local-agent/prepare-source-review.py" in guide:
         raise SystemExit(f"{name} duplicates a connector-local helper path")
-for route in (
+
+required_capability_links = (
     "DIRECT-REPOSITORY.md",
     "CONNECTOR-LOCAL.md",
     "PUBLICATION-CONSTRAINED.md",
-):
+)
+for route in required_capability_links:
     if route not in capability_router:
         raise SystemExit(f"capability router does not route {route}")
+
+route_names = []
+in_route_summary = False
+for line in capability_router.splitlines():
+    if line == "## Route summary":
+        in_route_summary = True
+        continue
+    if in_route_summary and line.startswith("## "):
+        break
+    if not in_route_summary or not line.startswith("|"):
+        continue
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    if cells and cells[0] not in ("Route", "---"):
+        route_names.append(cells[0])
+expected_route_names = [
+    "Direct repository",
+    "Connector-local",
+    "Publication-constrained",
+]
+if route_names != expected_route_names:
+    raise SystemExit(f"unexpected capability route table: {route_names!r}")
+
 if "ORCHESTRATOR.md" not in capability_router or "| Orchestrator |" in capability_router:
     raise SystemExit("orchestrator is not routed as separate task guidance")
-for obsolete_review_route in ("REVIEWER.md", "reviewer overlay", "| Reviewer |", "role overlays"):
-    if any(
-        obsolete_review_route in text
-        for text in (capability_router, installed_context, development_workflow)
-    ):
-        raise SystemExit(f"review remains incorrectly modeled as a capability: {obsolete_review_route}")
-if "IMPLEMENTATION-AND-REVIEW.md" not in capability_router or "IMPLEMENTATION-AND-REVIEW.md" not in installed_context:
-    raise SystemExit("assigned review does not route through the canonical implementation/review guide")
+for task_guide in (
+    "docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md",
+    "docs/review-and-audit/AUDIT.md",
+):
+    if task_guide not in readme_first:
+        raise SystemExit(f"README-FIRST.md does not route {task_guide}")
+if "README-FIRST.md" not in capability_router or "README-FIRST.md" not in installed_context:
+    raise SystemExit("capability or installed routing does not return to README-FIRST.md")
 if "docs/agents/CONNECTOR-SOURCE-ACQUISITION.md" not in installed_context:
     raise SystemExit("installed context does not route to current connector acquisition")
 for moving_detail in ("/artifact source ", "source-bundle-request/", "90-second", "#235"):
