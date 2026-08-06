@@ -49,6 +49,7 @@ evidence; green CI and author claims are inputs, not proof.
 
 ## Publication and handoff
 
-The review records exact head and comparison base, scope, blockers and non-blocking findings, checks and
-outcomes, failures, warnings, skips, remaining uncertainty, and whether the change can land. A re-review
-re-establishes these facts rather than relying on the previous review.
+Submit the assigned review using the findings and outcome contract in
+[`IMPLEMENTATION-AND-REVIEW.md`](../review-and-audit/IMPLEMENTATION-AND-REVIEW.md). A re-review applies that
+contract to the current head and re-establishes its evidence and landing decision rather than relying on the previous
+review.
