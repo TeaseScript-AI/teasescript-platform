@@ -21,13 +21,14 @@ selects this route.
 
 - `PUBLICATION-CONSTRAINED.md` only when permitted connector writes cannot safely publish the tested result;
 - `ORCHESTRATOR.md` only for explicitly coordinated multi-agent work;
-- `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` for the maintained environment boundary or #210 work.
+- `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` for the maintained environment boundary or explicitly
+  assigned environment setup and distribution work.
 
 **Excluded by default**
 
 - `DIRECT-REPOSITORY.md` and network clone/fetch workarounds;
 - `docs/PATCH-PUBLICATION.md` before a real publication constraint exists;
-- setup, archive/runtime-split, overlay, distribution, or external synchronization work still owned by #210.
+- setup, archive/runtime-split, overlay, distribution, or external synchronization work unless explicitly assigned.
 
 ## Source acquisition
 
