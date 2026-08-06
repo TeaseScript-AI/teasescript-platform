@@ -67,14 +67,16 @@ Ordinary work does not load both guidance documents by default.
 
 ## Planning
 
-- `planning/POC-TO-ALPHA-BACKLOG.md` lists owner-selected work that remains required before a stated POC, pre-alpha, or alpha gate. An item may remain unscheduled and is not implementation scope until a phase plan or coordinator assignment selects its ID.
-- `planning/PROPERTY-AND-FUZZ-TESTING-ROADMAP.md` is a short historical routing note for the superseded #120/#121 direction; `TESTING.md` owns the current strategy.
-- `planning/LANGUAGE-LIBRARY-AND-SESSION-DIRECTIONS.md` records the latest owner-selected language simplicity, Standard Library slice, smart-autoplay, input accessibility, explicit timer-handle, library-scope, pause, and recovery direction. For text pacing and public timer API direction it supersedes the older corresponding sections in the camera/media follow-up file.
-- `planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md` remains the camera, captured-media, and time-integrity planning source. Its older text-pacing and timer-API sections are historical where the newer language/library/session direction explicitly supersedes them.
-- `planning/REPOSITORY-SOURCE-LAYOUT-PROPOSAL.md` records the approved and implemented focused Option A source-layout extraction; `ARCHITECTURE.md` contains the current ownership and public-root policy.
-- `planning/MAINTENANCE-CANDIDATES.md` records unscheduled, non-authoritative repository-maintenance opportunities that require fresh evidence and explicit selection before implementation.
-- `planning/POST-POC-DEVELOPMENT-BACKLOG.md` is a legacy mixed backlog retained for later triage. Its entries are not automatically required.
-- Other files in `planning/` contain proposals and gap analysis. They do not define accepted architecture, syntax, or current implementation scope.
+`planning/README.md` defines the lifecycle and authority boundary for this directory. It contains only active,
+non-implemented planning; entries are non-authoritative and do not schedule themselves.
+
+- `planning/POC-TO-ALPHA-BACKLOG.md` lists owner-selected work that remains required before a stated POC, pre-alpha, or
+  alpha gate.
+- `planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md` retains open timer-handle and advanced recovery-point direction.
+- `planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md` retains open camera ownership, capture, media-lifetime, and
+  browser/server time-integrity direction.
+- `planning/MAINTENANCE-CANDIDATES.md` lists unscheduled repository-maintenance opportunities that require fresh evidence
+  and explicit selection before implementation.
 
 ## Reference
 

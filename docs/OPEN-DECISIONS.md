@@ -8,6 +8,11 @@ issues.
 A listed question is not accepted direction. Its linked accepted or current sources constrain the decision without
 deciding the remaining choice.
 
+Related active planning is retained in
+[`planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md`](planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md) and
+[`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
+Those files are non-authoritative owner-selected direction and do not decide the questions below.
+
 ## Runtime hardening and evolution
 
 Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTURE.md),
