@@ -30,6 +30,12 @@ specific investigation. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
 distinct task-relevant evidence.
 
+CI and tests verify executable code, scripts, configuration, generated artifacts,
+and real machine-checkable boundaries. They must not freeze living documentation
+prose, headings, routing wording, lifecycle wording, or equivalent Markdown
+content as required string assertions. Documentation correctness and ownership
+remain implementation, review, and explicitly assigned audit responsibilities.
+
 Workflow and connector tooling has one canonical complete validation command:
 
 ```shell
