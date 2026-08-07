@@ -22,6 +22,9 @@ SCRIPT = Path(__file__).with_name("patch-publication.py")
 PREPARE_SCRIPT = Path(__file__).with_name("prepare-patch-publication.py")
 TRANSFER_BRANCH = "agent-patch-publication/test-request"
 TARGET_BRANCH = "feat/test-target"
+# The target CLI is intentionally stdlib-only; skip ambient sitecustomize
+# so host-specific packages cannot affect its subprocess boundary or startup cost.
+STDLIB_PYTHON = (sys.executable, "-S")
 
 MODULE_SPEC = importlib.util.spec_from_file_location("patch_publication", SCRIPT)
 assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None
@@ -124,7 +127,7 @@ class PatchPublicationTests(unittest.TestCase):
 
     def command(self, command: str, *extra: str) -> list[str]:
         args = [
-            sys.executable,
+            *STDLIB_PYTHON,
             str(SCRIPT),
             command,
             "--repository",
@@ -227,7 +230,7 @@ class PatchPublicationTests(unittest.TestCase):
         self, manifest: Path, transfer_ref: str, output: Path
     ) -> list[str]:
         return [
-            sys.executable,
+            *STDLIB_PYTHON,
             str(SCRIPT),
             "materialize-patch",
             "--repository",
@@ -273,7 +276,7 @@ class PatchPublicationTests(unittest.TestCase):
         run(["git", "clone", "-q", str(self.repo), str(verify_repo)], cwd=self.root)
         verified = run(
             [
-                sys.executable,
+                *STDLIB_PYTHON,
                 str(SCRIPT),
                 "verify-bundle",
                 "--repository",
@@ -641,6 +644,8 @@ class PatchPublicationTests(unittest.TestCase):
         head = git(repository, "rev-parse", "HEAD")
 
         def generator(*extra: str) -> list[str]:
+            # Keep the normal interpreter here: prepare-patch-publication may load
+            # the installed TikToken package for token-aware splitting.
             return [
                 sys.executable,
                 str(PREPARE_SCRIPT),
@@ -770,7 +775,7 @@ class PatchPublicationTests(unittest.TestCase):
         metadata_path.write_text(json.dumps(metadata) + "\n", encoding="utf-8")
         completed = run(
             [
-                sys.executable,
+                *STDLIB_PYTHON,
                 str(SCRIPT),
                 "verify-bundle",
                 "--repository",
@@ -797,7 +802,7 @@ class PatchPublicationTests(unittest.TestCase):
         metadata_path.write_text(json.dumps(metadata) + "\n", encoding="utf-8")
         invalid = run(
             [
-                sys.executable,
+                *STDLIB_PYTHON,
                 str(SCRIPT),
                 "verify-bundle",
                 "--repository",
@@ -817,7 +822,7 @@ class PatchPublicationTests(unittest.TestCase):
         metadata_path.write_text(json.dumps(metadata) + "\n", encoding="utf-8")
         mismatch = run(
             [
-                sys.executable,
+                *STDLIB_PYTHON,
                 str(SCRIPT),
                 "verify-bundle",
                 "--repository",

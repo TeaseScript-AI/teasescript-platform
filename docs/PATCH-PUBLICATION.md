@@ -321,9 +321,7 @@ own profile. Unknown paths fail closed to `full`.
   because no publication or connector implementation changed.
 - `full` covers `.github/`, `tools/local-agent/`, unknown paths, and mixtures
   containing those paths. It runs the complete local-agent security/workflow
-  regressions followed by the repository build/tests. The two suites remain
-  sequential because benchmarking them concurrently on one runner increased
-  wall-clock time through CPU and I/O contention.
+  regressions followed by the repository build/tests.
 
 This pre-publication check and the later pull-request CI are intentionally
 different gates. The first prevents the publisher from pushing an untested
