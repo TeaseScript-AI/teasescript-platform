@@ -269,8 +269,11 @@ decision.
 
 When owner approval is required, explain in ordinary language what product
 behavior, data risk, security boundary, or maintenance problem the stronger
-contract protects, what happens without it, and what complexity it adds. Do not
-ask the owner to approve an unexplained technical abstraction.
+contract protects, what happens without it, and what complexity it adds. For a
+durable or ADR-level choice, also present viable alternatives, project-wide
+consequences, recurring maintenance cost, difficult-to-reverse effects, and the
+simplest credible option. Do not ask the owner to approve an unexplained
+technical abstraction.
 
 These rules prevent accidental scope escalation. They do not permit reviewers
 to dismiss reproducible defects or weaken accepted syntax/semantics,

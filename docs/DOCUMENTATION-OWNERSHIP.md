@@ -42,7 +42,12 @@ Distinguish these uses:
 
 Historical ADR and specification statements may retain exact old values when
 those values explain the recorded decision. Do not convert such history into a
-second moving current-state summary.
+second moving current-state summary. Retain historical material in the working
+tree only when it preserves unique reasoning likely to answer a concrete future
+question and cannot be reduced without meaningful loss. Mark retained history
+non-authoritative and exclude it from default reading. Git history is the normal
+fallback; deep historical research also checks relevant commits, pull requests,
+and earlier file versions. When retention value is uncertain, rely on Git.
 
 ## Canonical owner map
 
@@ -69,9 +74,11 @@ the required synchronization occurs.
 
 Executable owners retain moving values they directly control: `.nvmrc` owns the required Node runtime selection;
 `package.json` and the lockfile own dependency requirements; bootstrap `MANIFEST.json` files own release payload
-identity; workflows and live CI own current run results. Retain benchmark or resource measurements in a dated evidence
-record only when they have a concrete current consumer and enough revision, environment, method, workload,
-configuration, result, limitation, and intended-use detail to support comparison.
+identity; workflows and live CI own current run results. Truthful dated SHAs, commands, counts, timings, and results in
+issues, pull requests, reviews, CI, or audits remain historical evidence; do not rewrite them merely because the
+repository advanced. Retain benchmark or resource measurements in a dated evidence record only when they have a
+concrete current consumer and enough revision, environment, method, workload, configuration, result, limitation, and
+intended-use detail to support comparison.
 
 ## Documentation edit and review workflow
 

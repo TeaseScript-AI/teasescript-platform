@@ -36,6 +36,17 @@ prose, headings, routing wording, lifecycle wording, or equivalent Markdown
 content as required string assertions. Documentation correctness and ownership
 remain implementation, review, and explicitly assigned audit responsibilities.
 
+Repeat an established verification only when a boundary, transformation,
+transport step, or mutable state can invalidate earlier evidence; otherwise do
+not duplicate the same effective check. Use the smallest representative bounded
+fixture that proves the invariant, and reserve maximum-size or worst-form
+fixtures for cases where size or form is itself under test.
+
+The ChatGPT project-settings prompt has an owner-confirmed hard acceptance limit
+of 8,000 characters. CI may enforce that quantitative external interface
+boundary for `docs/chatgpt-project/SYSTEM-PROMPT.txt`; it must not assert prompt
+wording, headings, routing strings, or other prose content.
+
 Workflow and connector tooling has one canonical complete validation command:
 
 ```shell

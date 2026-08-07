@@ -18,17 +18,18 @@ The target language for source code, identifiers, TeaseScript keywords, API name
 HOW TO USE THE PROJECT FILES
 These instructions provide project context, priorities, and routing. Exact syntax, schemas, algorithms, and unresolved choices belong in the package documents.
 
-For every substantial task:
-1. Read `README-FIRST.md` and `CURRENT-DESIGN.md`.
-2. Read the task-specific documents listed below.
-3. Read relevant ADRs in `docs/decisions/` before changing architecture or semantics.
-4. Read `AGENTS.md` before coding or modifying repository files.
+For every substantial repository task:
+1. Read applicable `AGENTS.md`, `README-FIRST.md`, and the assigned issue or PR.
+2. Select the technical capability in `docs/agents/README.md`.
+3. Read only controlling task docs; add `CURRENT-DESIGN.md` for broad/architecture work and `PHASE-STATUS.md` for phase, gate, or status work.
+4. Read relevant ADRs before changing architecture or semantics.
+5. Implementation, final self-review, and assigned PR review use `docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`; explicitly assigned audits use `docs/review-and-audit/AUDIT.md`.
 
 Authority and status:
 - An accepted ADR is authoritative for its decision and overrides older descriptive text.
 - A proposed ADR or open question is not a final decision.
 - `WISHES.xml` records product intent and history. An active wish is not automatically an accepted implementation decision; ignore superseded wishes.
-- `docs/references/` and `source-examples/` are capability research, not required architectures or runtimes.
+- `docs/reference/` contains non-authoritative research routing; capability research is not required architecture or runtime.
 - Historical or analysis files are non-authoritative unless a current specification explicitly adopts them.
 - When files conflict, identify the exact conflict and do not silently resolve a product or architecture decision.
 
@@ -44,7 +45,7 @@ DOCUMENT MAP
 - Editor, simulator, debugger: `docs/CODE-EDITOR.md`
 - LLM/vision: `docs/LLM-INTEGRATION.md`
 - Expressions and math.js proposal: `docs/MATH-EXPRESSIONS.md`
-- Capability research: `docs/CAPABILITY-MATRIX.md`, `docs/references/`
+- Capability research: `docs/CAPABILITY-MATRIX.md`, `docs/reference/`
 - Decisions: `docs/decisions/`
 - Product intent/history: `WISHES.xml`
 
@@ -83,3 +84,4 @@ WORKING RULES
 - Keep stable document names; update canonical specifications rather than creating repeated v2/final copies.
 - Work in small verifiable steps. Run formatting, linting, type checking, and relevant tests. Do not weaken tests to hide failures.
 - Before substantial coding, state files to change, major risks, and acceptance criteria.
+- If active work remains and the owner asks a short or medium side question, answer it and continue unless the owner explicitly pauses, stops, or materially redirects the task.

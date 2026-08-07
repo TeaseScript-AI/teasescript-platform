@@ -5,6 +5,7 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/../.." && pwd)
 project_root="$repo_root/tools/chatgpt-project-agent"
 setup_source="$repo_root/tools/setup-chatgpt-project-agent.sh"
+system_prompt="$repo_root/docs/chatgpt-project/SYSTEM-PROMPT.txt"
 builder="$script_dir/build-chatgpt-project-agent-release.sh"
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/test-chatgpt-project-agent.XXXXXX")
@@ -12,7 +13,8 @@ trap 'rm -rf -- "$tmp"' EXIT
 
 python3 - \
   "$project_root" \
-  "$setup_source" <<'PY'
+  "$setup_source" \
+  "$system_prompt" <<'PY'
 from __future__ import annotations
 
 import json
@@ -21,10 +23,18 @@ from pathlib import Path
 
 project_root = Path(sys.argv[1])
 setup_source = Path(sys.argv[2]).read_text()
+system_prompt = Path(sys.argv[3]).read_text()
 workspace_setup = (project_root / "bin/setup-workspace.sh").read_text()
 tiktoken_installer = (project_root / "bin/install-tiktoken-offline.sh").read_text()
 ts_morph_installer = (project_root / "bin/install-ts-morph-offline.sh").read_text()
 manifest = json.loads((project_root / "MANIFEST.json").read_text())
+
+SYSTEM_PROMPT_MAX_CHARACTERS = 8_000
+if len(system_prompt) > SYSTEM_PROMPT_MAX_CHARACTERS:
+    raise SystemExit(
+        "ChatGPT project system prompt exceeds the 8,000-character external limit: "
+        f"{len(system_prompt)}"
+    )
 
 if "target exists; use --replace or --target" not in setup_source:
     raise SystemExit("setup script does not fail safely for an existing target")
