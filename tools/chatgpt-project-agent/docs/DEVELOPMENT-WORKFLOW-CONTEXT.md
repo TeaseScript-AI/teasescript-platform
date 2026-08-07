@@ -11,13 +11,12 @@ This environment selects the connector-local source/workspace route by
 capability: it has a GitHub control-plane connector plus local shell/filesystem,
 but no supported network clone or fetch.
 
-1. Use one narrow connector file read from current `main` to obtain
-   `docs/agents/CONNECTOR-SOURCE-ACQUISITION.md`.
-2. Follow that current canonical guide to resolve one exact source artifact and
-   run the trusted installed preparation helper.
-3. Do not copy its fixed-index, mailbox, polling, timing, or compatibility
-   details into this installed derivative; the canonical acquisition owner may replace them.
-4. Continue only from the fully verified local checkout.
+1. Follow the project-folder `README-FIRST.md` to resolve one exact source artifact
+   and run the trusted installed preparation helper.
+2. Continue only from the fully verified local checkout.
+3. After checkout, use the current
+   `docs/agents/CONNECTOR-SOURCE-ACQUISITION.md` for later source refreshes instead
+   of relying on remembered startup mechanics or copying them into this installed derivative.
 
 The project-folder setup has already installed the supported tools/runtime
 environment. Use its entrypoints as documented; do not reconstruct a legacy

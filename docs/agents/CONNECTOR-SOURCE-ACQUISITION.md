@@ -7,9 +7,11 @@ mechanics for obtaining one exact repository source artifact and preparing a tru
 connector-local work, write, verification, and handoff rules remain in
 [`CONNECTOR-LOCAL.md`](CONNECTOR-LOCAL.md).
 
-Issue #234 owns the current fixed-index, mailbox, polling, and compatibility-fallback rollout. Update those
-moving details here rather than in `AGENTS.md`, `README-FIRST.md`, `docs/DEVELOPMENT-WORKFLOW.md`, another
-capability guide, or a project-agent derivative.
+Issue #234 owns the current fixed-index, mailbox, polling, and compatibility-fallback rollout. The compact
+project-folder `README-FIRST.md` intentionally carries the concrete pre-checkout copy needed to obtain the first exact
+source before this guide is locally available. After checkout, update and use the moving acquisition details here for
+later source refreshes rather than copying them into universal documents, another capability guide, or other
+project-agent derivatives.
 
 ## Resolve the exact source identity
 
