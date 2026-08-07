@@ -141,9 +141,11 @@ The selected backlog, temporary coordination, and implementation status have dif
 Do not keep completed items in the open backlog merely as history; Git already preserves their earlier state.
 
 Capability routing follows the same ownership rule. `docs/agents/README.md` owns selection and composition;
-each focused guide owns only its profile procedure. Replaceable connector artifact mechanics live only in
-`docs/agents/CONNECTOR-SOURCE-ACQUISITION.md`. Universal documents and controlled project-agent derivatives link
-to those owners instead of copying moving workflow details.
+each focused guide owns only its profile procedure. After a verified checkout exists, replaceable connector artifact
+mechanics live in `docs/agents/CONNECTOR-SOURCE-ACQUISITION.md`. The compact project-folder `README-FIRST.md` is the
+narrow pre-checkout exception: it carries the concrete startup acquisition steps needed to obtain the first exact
+checkout from an otherwise empty project context. Later source refreshes use the current connector acquisition guide;
+universal documents and other controlled derivatives do not copy those moving mechanics.
 
 ## Shared project folder: durable context and non-authoritative research
 
