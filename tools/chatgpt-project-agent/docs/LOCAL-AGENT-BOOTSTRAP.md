@@ -49,8 +49,9 @@ and tokenizer data, ts-morph tarballs, upstream runtime licenses/documentation, 
 no maintained `bin/`, `docs/`, or `tools/` files.
 
 The installed directory intentionally has no `README-FIRST.md`; the project-folder wayfinder remains beside the
-archives, while the repository-root `README-FIRST.md` becomes authoritative after checkout. The ChatGPT project system
-prompt is separately synchronized from `docs/chatgpt-project/SYSTEM-PROMPT.txt` in Git and is not installed.
+archives, while the repository-root `README-FIRST.md` becomes authoritative after checkout. Git maintains a ChatGPT
+Project Settings prompt candidate at `docs/chatgpt-project/SYSTEM-PROMPT.txt`; it is not installed and does not prove
+the live Project Settings state. Any synchronization is a separate deliberate owner action.
 
 ## Runtime workspace entrypoint
 

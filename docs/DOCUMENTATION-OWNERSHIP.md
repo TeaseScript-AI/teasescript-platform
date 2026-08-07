@@ -165,10 +165,10 @@ installed environment where practical. The external tools archive is made from t
 binaries are not committed. Large runtime-only payloads remain outside Git.
 
 `docs/chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder, not a concatenation of installed guides.
-`docs/chatgpt-project/SYSTEM-PROMPT.txt` is the canonical system-prompt text copied manually into the separate
-ChatGPT project settings field; it is not a project-folder file and is absent from both archives. Repository merge,
-project-folder replacement, and project-settings synchronization are distinct steps and must not be treated as proof of
-one another.
+`docs/chatgpt-project/SYSTEM-PROMPT.txt` is the repository-maintained prompt candidate for deliberate owner-approved
+synchronization into the separate ChatGPT Project Settings field. It is not proof of the live Project Settings state, is
+not a project-folder file, and is absent from both archives. Repository merge, project-folder replacement, and an owner
+change to Project Settings are distinct steps and must not be treated as proof of one another.
 
 Research and historical material must be explicitly labeled non-authoritative. It may inform design but cannot silently define syntax, architecture, or implementation status.
 

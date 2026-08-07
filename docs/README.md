@@ -40,7 +40,8 @@ ADRs.
 - `PATCH-PUBLICATION.md` owns the verified patch protocol and security contract.
 - `../tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` owns the project-agent source and installed-layout
   contract; `chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder; and
-  `chatgpt-project/SYSTEM-PROMPT.txt` is the canonical text copied manually into ChatGPT project settings.
+  `chatgpt-project/SYSTEM-PROMPT.txt` is the repository-maintained prompt candidate for deliberate owner-approved
+  synchronization; it does not prove the live ChatGPT Project Settings state.
 - `../AGENTS.md` contains the short mandatory rules that apply to every agent.
 
 Focused guides contain their own procedure. This map does not duplicate their route tables or steps. Temporary work
