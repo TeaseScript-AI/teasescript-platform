@@ -3,17 +3,21 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: setup-workspace.sh [--node 24|26] [--with-ts-morph] [--with-tiktoken] [--check] REPOSITORY
+Usage: setup-workspace.sh [--node 24|26] [--with-ts-morph] [--with-tiktoken]
+                          [--debug-verify-bootstrap] [--check] REPOSITORY
 
-Prepare an existing TeaseScript checkout using the installed Node runtime and npm
-cache. TikToken is mandatory and is always installed and verified in Git-local
-state. --with-tiktoken remains accepted as a compatibility no-op.
+Prepare an existing TeaseScript checkout using the installed Node runtimes and
+npm cache. TikToken and ts-morph are mandatory. The two --with-* flags remain
+accepted as compatibility no-ops.
+
+--debug-verify-bootstrap runs the slower complete npm-cache verification before
+installation. It is diagnostic, not a routine extra step.
 USAGE
 }
 
 node_major=24
 run_check=0
-with_ts_morph=0
+debug_verify=0
 repo=
 while (($#)); do
   case "$1" in
@@ -22,8 +26,8 @@ while (($#)); do
       node_major=$2
       shift 2
       ;;
-    --with-ts-morph) with_ts_morph=1; shift ;;
-    --with-tiktoken) shift ;;
+    --with-ts-morph|--with-tiktoken) shift ;;
+    --debug-verify-bootstrap) debug_verify=1; shift ;;
     --check) run_check=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --*) printf 'setup-workspace: FAIL: unknown option: %s\n' "$1" >&2; exit 2 ;;
@@ -85,6 +89,7 @@ seed_id=$(cat "$bundle_dir/CACHE-SEED-ID")
 mkdir -p "$state_dir"
 
 if [[ ! -f "$cache_dir/.teasescript-seed-id" ]] || [[ "$(cat "$cache_dir/.teasescript-seed-id" 2>/dev/null || true)" != "$seed_id" ]]; then
+  printf 'setup-workspace: INFO: seeding Git-local npm cache\n' >&2
   temp_cache=$(mktemp -d "$state_dir/.npm-cache.tmp-XXXXXX")
   trap 'rm -rf -- "${temp_cache:-}"' EXIT
   cp -a --reflink=auto "$cache_seed/." "$temp_cache/"
@@ -127,30 +132,35 @@ runner="$state_dir/run-node${node_major}"
 if [[ "$node_major" == 26 ]]; then
   printf 'setup-workspace: INFO: Node 26 compatibility run; npm EBADENGINE warning is expected\n' >&2
 fi
-"$runner" npm cache verify >/dev/null
+if ((debug_verify)); then
+  printf 'setup-workspace: INFO: verifying the complete npm cache (diagnostic mode)\n' >&2
+  "$runner" npm cache verify >/dev/null
+fi
+printf 'setup-workspace: INFO: installing the locked dependency graph offline\n' >&2
 (
   cd "$repo"
   "$runner" npm ci --offline --no-audit --no-fund
 )
 
-if ((with_ts_morph)); then
-  installed_version=$(
-    "$runner" node -e 'const fs=require("fs"); try { const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(p.version||""); } catch { process.stdout.write(""); }' \
-      "$repo/node_modules/ts-morph/package.json" 2>/dev/null || true
-  )
-  if [[ "$installed_version" != "28.0.0" ]]; then
-    "$runner" bash "$script_dir/install-ts-morph-offline.sh" "$repo"
-  fi
+installed_version=$(
+  "$runner" node -e 'const fs=require("fs"); try { const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(p.version||""); } catch { process.stdout.write(""); }' \
+    "$repo/node_modules/ts-morph/package.json" 2>/dev/null || true
+)
+if [[ "$installed_version" != 28.0.0 ]]; then
+  printf 'setup-workspace: INFO: installing bundled ts-morph fallback\n' >&2
+  "$runner" bash "$script_dir/install-ts-morph-offline.sh" "$repo"
 fi
 
+printf 'setup-workspace: INFO: preparing mandatory TikToken tooling\n' >&2
 "$script_dir/install-tiktoken-offline.sh" "$repo"
 
 if ((run_check)); then
+  printf 'setup-workspace: INFO: running repository checks\n' >&2
   (
     cd "$repo"
     "$runner" bash -c 'npm run check && git diff --check'
   )
 fi
 
-printf 'setup-workspace: PASS repo=%s node=%s tiktoken=required check=%d\n' \
-  "$repo" "$node_version" "$run_check"
+printf 'setup-workspace: PASS repo=%s node=%s tiktoken=required ts-morph=required check=%d debug-verify=%d\n' \
+  "$repo" "$node_version" "$run_check" "$debug_verify"

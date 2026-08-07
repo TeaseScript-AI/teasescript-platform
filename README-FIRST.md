@@ -51,6 +51,8 @@ milestone, gate, integration-status, or current-capability work.
 - `docs/agents/README.md`: technical capability router for source acquisition,
   permitted writes, verification, and publication constraints; task guidance is routed separately.
 - `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md`: project-agent source and installed-layout contract.
+- `docs/chatgpt-project/SYSTEM-PROMPT.txt`: canonical ChatGPT project system-prompt text; read only for prompt or
+  project-settings synchronization work.
 - `docs/README.md`: documentation map.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
 - `docs/specifications/`: accepted consolidated specifications.

@@ -147,25 +147,19 @@ to those owners instead of copying moving workflow details.
 
 ## Shared project folder: durable context and non-authoritative research
 
-The shared project folder should contain only material useful across chat sessions that is not appropriate as canonical repository documentation:
+The ChatGPT project folder contains at most the compact `README-FIRST.md`, the small tools `tar.gz`, the large runtime
+`tar.zst`, the standalone setup script, and the optional non-authoritative research archive. Stable routing and
+bootstrap files are controlled derivatives rather than second editable workflow owners.
 
-- a stable project instruction/context file;
-- a short routing file pointing to the repository as source of truth;
-- capability research about Tease AI, SexScripts/Groovy, Milovana EOS, and VirMst/CyberDom;
-- raw or archived third-party script examples;
-- historical project packages and superseded design documents;
-- dated audit and review reports when retained for evidence.
-
-Stable ChatGPT project routing and bootstrap guidance are controlled
-derivatives rather than second editable workflow owners. Maintainable project-agent
-files live under `tools/chatgpt-project-agent/`, whose relative `bin/`, `docs/`,
-and `tools/` layout should mirror the installed environment where practical.
-The external tools `tar.gz` is made from that directory; generated archive
+Maintainable installed project-agent files live under `tools/chatgpt-project-agent/`, whose relative layout mirrors the
+installed environment where practical. The external tools archive is made from that directory; generated archive
 binaries are not committed. Large runtime-only payloads remain outside Git.
 
-`docs/chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder,
-not a concatenation of installed guides. Project-folder synchronization remains
-a separate manual step and is not proven by a repository merge.
+`docs/chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder, not a concatenation of installed guides.
+`docs/chatgpt-project/SYSTEM-PROMPT.txt` is the canonical system-prompt text copied manually into the separate
+ChatGPT project settings field; it is not a project-folder file and is absent from both archives. Repository merge,
+project-folder replacement, and project-settings synchronization are distinct steps and must not be treated as proof of
+one another.
 
 Research and historical material must be explicitly labeled non-authoritative. It may inform design but cannot silently define syntax, architecture, or implementation status.
 

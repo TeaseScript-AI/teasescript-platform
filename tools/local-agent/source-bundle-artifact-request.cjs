@@ -18,7 +18,7 @@ const ALLOWED_PERMISSIONS = new Set(['write', 'admin']);
 const RESULT_BOT_LOGIN = 'github-actions[bot]';
 const RESULT_BOT_ID = 41898282;
 const PREPARATION_HELPER =
-  '/mnt/data/teasescript-agent-bootstrap-linux-x64/bin/prepare-agent-workspace.sh';
+  '/mnt/data/chatgpt-project-agent/bin/prepare-agent-workspace.sh';
 const TRUSTED_PRODUCER_PATHS = new Set([
   '.github/workflows/source-bundle.yml',
   '.github/workflows/source-bundle-request-processor.yml',
