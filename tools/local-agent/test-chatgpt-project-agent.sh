@@ -120,6 +120,20 @@ for stale in (
         raise SystemExit(f"project wayfinder retains stale route: {stale}")
 if "/mnt/data/chatgpt-project-agent" not in project_wayfinder:
     raise SystemExit("project wayfinder lacks the stable installed root")
+for required_fixed_index_detail in (
+    "GitHub.get_commit_combined_status",
+    "GitHub.fetch_workflow_run_artifacts",
+    '"name":"teasescript-source-<source_sha>"',
+    "actions/runs/<run_id>/artifacts/<artifact_id>",
+):
+    if required_fixed_index_detail not in project_wayfinder:
+        raise SystemExit(
+            f"project wayfinder lacks executable fixed-index detail: {required_fixed_index_detail}"
+        )
+if "Its description is" in project_wayfinder:
+    raise SystemExit("project wayfinder still assumes connector status descriptions are exposed")
+if "setup/runtime migration remains tracked" in installed_context:
+    raise SystemExit("installed workflow context still describes the completed distribution as unfinished")
 if "target exists; use --replace or --target" not in setup_source:
     raise SystemExit("setup script does not fail safely for an existing target")
 if "tools/runtime archive path conflict" not in setup_source or "filter=\"data\"" not in setup_source:

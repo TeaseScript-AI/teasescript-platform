@@ -77,8 +77,20 @@ GitHub.get_commit_combined_status
 {"repo_full_name":"TeaseScript-AI/teasescript-platform","commit_sha":"<source_sha>"}
 ```
 
-Accept only a successful `source-bundle/artifact-v1` status bound to that SHA. Its description is
-`artifact <id> sha256:<digest>` and its target must be this repository's exact run/artifact URL.
+Accept only a successful `source-bundle/artifact-v1` status whose target is this repository's exact
+`actions/runs/<run_id>/artifacts/<artifact_id>` URL. Then call:
+
+```text
+GitHub.fetch_workflow_run_artifacts
+{
+  "repo_full_name":"TeaseScript-AI/teasescript-platform",
+  "run_id":<run_id>,
+  "name":"teasescript-source-<source_sha>"
+}
+```
+
+Require the returned artifact ID to match the status target, the exact name above, `expired:false`, and a
+`sha256:<digest>` value. Treat anything missing or mismatched as a cache miss.
 
 On a valid hit, download immediately:
 
@@ -157,4 +169,6 @@ Read completely and apply in this order:
 
 These rules apply to the agent; they are not optional background material. Read installed `LOCAL-AGENT-BOOTSTRAP.md`
 when setup or preparation fails, and `CODEX-MODEL-SELECTION.md` before selecting Codex or writing a Codex prompt. Work
-locally after checkout; reserve the GitHub connector for live state and permitted writes.
+locally after checkout; reserve the GitHub connector for live state and permitted writes. After checkout,
+`docs/agents/CONNECTOR-SOURCE-ACQUISITION.md` is the canonical owner of replaceable acquisition mechanics; re-read it
+before a later source refresh instead of relying on this startup copy.

@@ -19,9 +19,9 @@ but no supported network clone or fetch.
    details into this installed derivative; the canonical acquisition owner may replace them.
 4. Continue only from the fully verified local checkout.
 
-The setup/runtime migration remains tracked by issue #210. Do not invent a
-missing setup command or treat the structural source layout as a completed
-distribution.
+The project-folder setup has already installed the supported tools/runtime
+environment. Use its entrypoints as documented; do not reconstruct a legacy
+bootstrap route from older project files or archives.
 
 ## After checkout
 
