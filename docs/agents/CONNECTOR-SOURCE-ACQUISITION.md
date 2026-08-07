@@ -7,11 +7,11 @@ mechanics for obtaining one exact repository source artifact and preparing a tru
 connector-local work, write, verification, and handoff rules remain in
 [`CONNECTOR-LOCAL.md`](CONNECTOR-LOCAL.md).
 
-Issue #234 owns the current fixed-index, mailbox, polling, and compatibility-fallback rollout. The compact
-project-folder `README-FIRST.md` intentionally carries the concrete pre-checkout copy needed to obtain the first exact
-source before this guide is locally available. After checkout, update and use the moving acquisition details here for
-later source refreshes rather than copying them into universal documents, another capability guide, or other
-project-agent derivatives.
+This guide owns the current fixed-index, Artifact mailbox, and polling mechanics. The compact project-folder
+`README-FIRST.md` intentionally carries the concrete pre-checkout copy needed to obtain the first exact source before
+this guide is locally available. After checkout, update and use the moving acquisition details here for later source
+refreshes rather than copying them into universal documents, another capability guide, or other project-agent
+derivatives.
 
 ## Resolve the exact source identity
 
@@ -36,9 +36,9 @@ substitute a different SHA because its artifact is easier to obtain.
 A valid hit starts no workflow, posts no comment, and requires no wait. Missing, deleted, expired, malformed,
 failed, mismatched, or otherwise unverifiable metadata is a confirmed cache miss.
 
-## Current regeneration route on a confirmed miss
+## Regeneration on a confirmed miss
 
-During issue #234 Phase 1, issue #235 is the only Artifact mailbox. Post exactly one supported command there:
+Issue #235 is the only Artifact mailbox. Post exactly one supported command there:
 
 ```text
 /artifact source main
@@ -58,22 +58,6 @@ merges entries only for the same complete resolved identity and artifact. The wo
 registry entry before it deletes the exact command comment. Cleanup failure remains a warning and must not
 invalidate a ready result; for a newly produced artifact, fixed-index publication occurs last.
 
-## Temporary compatibility fallback
-
-Until #234 Phase 2 retires it, the request-branch route remains an exceptional fallback only when the fixed
-index and mailbox route cannot be used. For an exact source SHA:
-
-1. resolve the full lowercase SHA and current `main` SHA;
-2. create `source-bundle-request/<source-sha>/<nonce>` at that exact `main` SHA, using a nonce matching
-   `[a-z0-9][a-z0-9-]{0,31}`;
-3. wait 90 seconds, then poll `source-bundle/request/<nonce>` on the source SHA every 30 seconds;
-4. on success, download only the artifact reported by that exact status context and bound to the requested
-   source SHA, then verify its digest;
-5. confirm cleanup of the exact unchanged request ref.
-
-This fallback is not the normal connector-local route. Its workflows, timing, helper behavior, and removal are
-owned by #234 and may change without altering the capability router.
-
 ## Trust and failure boundaries
 
 - Accept only a successful fixed-index status and artifact metadata bound to the exact selected SHA, producer,
@@ -88,8 +72,6 @@ owned by #234 and may change without altering the capability router.
   from a different request, selector, or artifact that happens to resolve to the same commit.
 - Treat command cleanup separately from artifact validity. Never replace a verified ready result with an
   unrelated generic failure or continue from a failed production attempt.
-- The compatibility processor must validate the strict request-ref shape, unchanged request SHA,
-  default-branch ancestry, requested source commit, exact result metadata, and lease-bound cleanup.
 
 The workflow implementation and focused tests enforce these boundaries. This guide owns the agent-facing
 procedure; it does not duplicate the workflow code or create a second protocol.

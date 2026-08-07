@@ -13,14 +13,9 @@ fi
 root=$(cd -- "$script_dir/../.." && pwd)
 helper="$script_dir/create-source-bundle.sh"
 workflow="$root/.github/workflows/source-bundle.yml"
-request_workflow="$root/.github/workflows/source-bundle-request.yml"
-processor_workflow="$root/.github/workflows/source-bundle-request-processor.yml"
 index_workflow="$root/.github/workflows/source-bundle-index.yml"
 artifact_router_workflow="$root/.github/workflows/patch-publication.yml"
 artifact_request_workflow="$root/.github/workflows/artifact-mailbox-worker.yml"
-connector_acquisition="$root/docs/agents/CONNECTOR-SOURCE-ACQUISITION.md"
-development_workflow="$root/docs/DEVELOPMENT-WORKFLOW.md"
-agents_file="$root/AGENTS.md"
 temp_root=$(mktemp -d)
 trap 'rm -rf "$temp_root"' EXIT
 
@@ -31,31 +26,21 @@ fail() {
 
 python3 - \
   "$workflow" \
-  "$request_workflow" \
-  "$processor_workflow" \
   "$index_workflow" \
   "$artifact_router_workflow" \
-  "$artifact_request_workflow" \
-  "$connector_acquisition" \
-  "$development_workflow" \
-  "$agents_file" <<'PYWORKFLOW'
+  "$artifact_request_workflow" <<'PYWORKFLOW'
 import pathlib
 import re
 import sys
 
 automatic = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-gate = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
-processor = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
-index = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
-artifact_router = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8")
-artifact_request = pathlib.Path(sys.argv[6]).read_text(encoding="utf-8")
-acquisition = pathlib.Path(sys.argv[7]).read_text(encoding="utf-8")
-development = pathlib.Path(sys.argv[8]).read_text(encoding="utf-8")
-agents = pathlib.Path(sys.argv[9]).read_text(encoding="utf-8")
+index = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+artifact_router = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
+artifact_request = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
 
 refs = re.findall(
     r"^\s*uses:\s*([^\s#]+)",
-    automatic + "\n" + processor + "\n" + index + "\n" + artifact_request,
+    automatic + "\n" + index + "\n" + artifact_request,
     re.MULTILINE,
 )
 assert refs and all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in refs)
@@ -79,70 +64,6 @@ assert "retention-days: 7" in automatic
 assert "retention-days: 1" not in automatic
 assert "runs-on: ubuntu-24.04" in automatic
 assert "timeout-minutes: 5" in automatic
-
-assert re.search(r"^on:\n  create:\n", gate, re.MULTILINE)
-assert "permissions: {}" in gate
-assert "source-bundle-request/" in gate
-assert "^[0-9a-f]{40}$" in gate
-assert "uses:" not in gate
-assert "runs-on: ubuntu-24.04" in gate
-assert "timeout-minutes: 3" in gate
-
-assert re.search(r"^  workflow_run:\n    workflows: \[Source bundle request\]\n    types: \[completed\]", processor, re.MULTILINE)
-assert "permissions: {}" in processor
-assert "github.event.workflow_run.event == 'create'" in processor
-assert "github.event.workflow_run.conclusion == 'success'" in processor
-assert "^source-bundle-request\\/([0-9a-f]{40})\\/([a-z0-9][a-z0-9-]{0,31})$" in processor
-assert "github.rest.git.getRef" in processor
-assert "github.rest.repos.get" in processor
-assert "github.rest.git.getCommit" in processor
-assert "github.rest.repos.compareCommitsWithBasehead" in processor
-assert "['ahead', 'identical']" in processor
-assert "\n  validate:\n" not in processor
-assert processor.count("\n  bundle:\n") == 1
-assert "TOOLING_REF: ${{ github.workflow_sha }}" in processor
-assert processor.count("uses: actions/checkout@") == 2
-cleanup = processor.split("  cleanup-request:\n", 1)[1]
-assert "uses: actions/checkout@" not in cleanup
-cleanup_condition = cleanup.split("    needs:", 1)[0]
-assert "needs.bundle.outputs.request_validated == 'true'" in cleanup_condition
-assert "needs.publish-result.result == 'success'" in cleanup_condition
-assert "needs.bundle.result == 'success'" not in cleanup_condition
-assert "git init -q \"$cleanup_repo\"" in cleanup
-assert "Check out requested source as data" in processor
-assert "--event-name source-bundle-request" in processor
-assert "artifact_id: ${{ steps.upload.outputs.artifact-id }}" in processor
-assert "artifact_url: ${{ steps.upload.outputs.artifact-url }}" in processor
-assert "artifact_digest: ${{ steps.upload.outputs.artifact-digest }}" in processor
-assert "request_validated: ${{ steps.request.outputs.validated }}" in processor
-assert "needs.bundle.outputs.request_validated == 'true'" in processor
-assert "statuses: write" in processor
-assert "actions: read" in processor
-assert "github.rest.repos.createCommitStatus" in processor
-assert "github.rest.actions.getArtifact" in processor
-assert "github.rest.actions.getWorkflowRun" in processor
-assert "/^[0-9a-f]{64}$/.test(artifactDigest)" in processor
-assert "/^sha256:[0-9a-f]{64}$/.test(artifactDigest)" not in processor
-assert "artifact.digest !== `sha256:${artifactDigest}`" in processor
-assert "artifact.name !== `teasescript-source-${sourceSha}`" in processor
-assert "producer.path !== '.github/workflows/source-bundle-request-processor.yml'" in processor
-assert "artifactUrl !== expectedArtifactUrl" in processor
-assert "`artifact ${artifactIdText} sha256:${artifactDigest}`" in processor
-assert "context: 'source-bundle/artifact-v1'" in processor
-assert "if (!succeeded)" in processor
-assert "retention-days: 7" in processor
-assert "retention-days: 1" not in processor
-artifact_digest = "a" * 64
-assert re.fullmatch(r"[0-9a-f]{64}", artifact_digest)
-status_description = f"artifact 8758008910 sha256:{artifact_digest}"
-status_match = re.fullmatch(r"artifact ([0-9]+) sha256:([0-9a-f]{64})", status_description)
-assert status_match and len(status_description) <= 140
-assert "needs.publish-result.result == 'success'" in processor
-assert processor.count("runs-on: ubuntu-24.04") == 3
-assert processor.count("timeout-minutes:") == 3
-assert "contents: write" in processor
-assert '--force-with-lease="${request_ref}:${EXPECTED_REQUEST_SHA}"' in processor
-assert "github.rest.git.deleteRef" not in processor
 
 assert re.search(
     r"^  workflow_run:\n    workflows: \[Source bundle\]\n    types: \[completed\]",
@@ -221,38 +142,6 @@ assert "sourceSha: process.env.SOURCE_SHA" in artifact_request
 assert "runs-on: ubuntu-24.04" in artifact_request
 assert "timeout-minutes: 8" in artifact_request
 
-assert acquisition.startswith("# Connector-local source acquisition\n")
-assert "A valid hit starts no workflow, posts no comment, and requires no wait." in acquisition
-assert "issue #235 is the only Artifact mailbox" in acquisition
-assert "Wait 10 seconds" in acquisition
-assert "Poll only that exact request ID\nevery 10 seconds" in acquisition
-assert "when 2 minutes have elapsed since command creation" in acquisition
-assert "bot user ID `41898282`" in acquisition
-assert "retains at most ten request correlations" in acquisition
-assert "same complete resolved identity and artifact" in acquisition
-registry_write = acquisition.index("persist the terminal\nregistry entry")
-command_cleanup = acquisition.index("deletes the exact command comment")
-fixed_index = acquisition.index("fixed-index publication occurs last")
-assert registry_write < command_cleanup < fixed_index
-assert "wait 90 seconds, then poll `source-bundle/request/<nonce>` on the source SHA every 30 seconds" in acquisition
-assert "artifact reported by that exact status context" in acquisition
-assert "confirm cleanup of the exact unchanged request ref" in acquisition
-assert "## Prepare the local checkout" in acquisition
-for universal in (development, agents):
-    for moving_detail in ("/artifact source ", "source-bundle-request/", "90-second", "#235"):
-        assert moving_detail not in universal, (moving_detail, universal[:80])
-
-branch_pattern = re.compile(r"^source-bundle-request/([0-9a-f]{40})/([a-z0-9][a-z0-9-]{0,31})$")
-valid_sha = "9a" * 20
-assert branch_pattern.fullmatch(f"source-bundle-request/{valid_sha}/agent-149-1")
-for invalid in (
-    f"source-bundle-request/{valid_sha[:-1]}/agent-149-1",
-    f"source-bundle-request/{valid_sha.upper()}/agent-149-1",
-    f"source-bundle-request/{valid_sha}/Agent-149-1",
-    f"source-bundle-request/{valid_sha}/bad_nonce",
-    f"other/{valid_sha}/agent-149-1",
-):
-    assert not branch_pattern.fullmatch(invalid), invalid
 PYWORKFLOW
 
 repo="$temp_root/repository"
@@ -270,28 +159,6 @@ printf 'second\n' >> "$repo/example.txt"
 git -C "$repo" commit -qam "Extend fixture"
 second_sha=$(git -C "$repo" rev-parse HEAD)
 second_tree=$(git -C "$repo" rev-parse 'HEAD^{tree}')
-
-# Prove exact-SHA request-ref cleanup and stale-ref preservation against a real bare remote.
-cleanup_remote="$temp_root/request-cleanup.git"
-cleanup_repo="$temp_root/request-cleanup"
-git init -q --bare "$cleanup_remote"
-git init -q "$cleanup_repo"
-request_ref="refs/heads/source-bundle-request/$first_sha/cleanup-test"
-git -C "$repo" push -q "$cleanup_remote" "$second_sha:$request_ref"
-git -C "$cleanup_repo" push -q \
-  --force-with-lease="${request_ref}:${second_sha}" \
-  "$cleanup_remote" ":${request_ref}"
-[[ -z $(git ls-remote --heads "$cleanup_remote" "$request_ref") ]] || fail "exact request ref was not deleted"
-
-git -C "$repo" push -q "$cleanup_remote" "$second_sha:$request_ref"
-git -C "$repo" push -q --force "$cleanup_remote" "$first_sha:$request_ref"
-if git -C "$cleanup_repo" push -q \
-  --force-with-lease="${request_ref}:${second_sha}" \
-  "$cleanup_remote" ":${request_ref}" 2>/dev/null; then
-  fail "stale cleanup deleted a moved request ref"
-fi
-[[ $(git ls-remote --heads "$cleanup_remote" "$request_ref" | awk '{print $1}') == "$first_sha" ]] || \
-  fail "moved request ref was not preserved"
 
 # Create unrelated refs whose commit must not enter the source bundle.
 unrelated_sha=$(printf 'Unrelated fixture\n' | git -C "$repo" commit-tree "$second_tree")

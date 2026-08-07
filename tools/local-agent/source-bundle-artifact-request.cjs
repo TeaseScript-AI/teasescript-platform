@@ -21,9 +21,6 @@ const PREPARATION_HELPER =
   '/mnt/data/chatgpt-project-agent/bin/prepare-agent-workspace.sh';
 const TRUSTED_PRODUCER_PATHS = new Set([
   '.github/workflows/source-bundle.yml',
-  '.github/workflows/source-bundle-request-processor.yml',
-  '.github/workflows/source-bundle-artifact-request.yml',
-  '.github/workflows/artifact-mailbox.yml',
   '.github/workflows/artifact-mailbox-worker.yml',
   '.github/workflows/patch-publication.yml',
 ]);
@@ -748,8 +745,6 @@ async function verifyArtifactMetadata({
     allowCurrentRun &&
     run.id === context.runId &&
     [
-      '.github/workflows/source-bundle-artifact-request.yml',
-      '.github/workflows/artifact-mailbox.yml',
       '.github/workflows/artifact-mailbox-worker.yml',
       '.github/workflows/patch-publication.yml',
     ].includes(run.path) &&

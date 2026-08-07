@@ -37,7 +37,7 @@ the trusted installed preparation helper. Inspect, edit, search, and test the re
 not use repeated connector file reads as the normal repository-reading strategy and do not execute an
 untrusted helper from the artifact being reviewed to establish its own trust.
 
-The current fixed-index, regeneration, compatibility, timing, and polling details live only in
+The current fixed-index, regeneration, timing, and polling details live only in
 `CONNECTOR-SOURCE-ACQUISITION.md`. That owner may replace them without changing this route, universal workflow,
 or installed derivative summaries.
 
