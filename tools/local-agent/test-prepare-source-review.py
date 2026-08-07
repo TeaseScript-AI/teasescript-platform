@@ -19,6 +19,9 @@ from compact_unittest import run_compact_unittest
 
 SCRIPT = Path(__file__).parents[1] / "chatgpt-project-agent" / "tools" / "prepare-source-review.py"
 REPOSITORY = "TeaseScript-AI/teasescript-platform"
+# The target CLI is intentionally stdlib-only; skip ambient sitecustomize
+# so host-specific packages cannot affect its subprocess boundary or startup cost.
+STDLIB_PYTHON = (sys.executable, "-S")
 
 
 def run(command: list[str], *, cwd: Path | None = None) -> str:
@@ -159,7 +162,7 @@ class PrepareSourceReviewTests(unittest.TestCase):
         actual_artifact = artifact or self.artifact
         actual_output = output or (self.root / "review")
         command = [
-            sys.executable,
+            *STDLIB_PYTHON,
             "-B",
             str(SCRIPT),
             "--artifact",
