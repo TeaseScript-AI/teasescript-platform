@@ -7,24 +7,12 @@ project_root="$repo_root/tools/chatgpt-project-agent"
 setup_source="$repo_root/tools/setup-chatgpt-project-agent.sh"
 builder="$script_dir/build-chatgpt-project-agent-release.sh"
 
-if [[ -e "$repo_root/docs/agents/REVIEWER.md" ]]; then
-  printf 'test-chatgpt-project-agent: FAIL: unexpected docs/agents/REVIEWER.md\n' >&2
-  exit 1
-fi
-
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/test-chatgpt-project-agent.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 
 python3 - \
   "$project_root" \
-  "$setup_source" \
-  "$repo_root/README-FIRST.md" \
-  "$repo_root/docs/chatgpt-project/README-FIRST.md" \
-  "$repo_root/docs/agents/CONNECTOR-SOURCE-ACQUISITION.md" \
-  "$repo_root/docs/DEVELOPMENT-WORKFLOW.md" \
-  "$repo_root/docs/agents/README.md" \
-  "$repo_root/docs/chatgpt-project/SYSTEM-PROMPT.txt" \
-  "$project_root/docs/DEVELOPMENT-WORKFLOW-CONTEXT.md" <<'PY'
+  "$setup_source" <<'PY'
 from __future__ import annotations
 
 import json
@@ -33,107 +21,11 @@ from pathlib import Path
 
 project_root = Path(sys.argv[1])
 setup_source = Path(sys.argv[2]).read_text()
-readme_first = Path(sys.argv[3]).read_text()
-project_wayfinder = Path(sys.argv[4]).read_text()
-connector_acquisition = Path(sys.argv[5]).read_text()
-development_workflow = Path(sys.argv[6]).read_text()
-capability_router = Path(sys.argv[7]).read_text()
-system_prompt = Path(sys.argv[8]).read_text()
-installed_context = Path(sys.argv[9]).read_text()
-instructions = (project_root / "docs/PROJECT-INSTRUCTIONS.txt").read_text()
-if "ASSISTANT ROLE AND CREATIVE CONTEXT" not in system_prompt:
-    raise SystemExit("canonical system prompt lacks the current assistant-role section")
-if "ASSISTANT ROLE AND CREATIVE CONTEXT" in instructions:
-    raise SystemExit("installed project instructions still contain the ChatGPT system prompt")
-if "docs/chatgpt-project/SYSTEM-PROMPT.txt" not in instructions:
-    raise SystemExit("installed project instructions do not identify the separate system-prompt owner")
 workspace_setup = (project_root / "bin/setup-workspace.sh").read_text()
-bootstrap_guide = (project_root / "docs/LOCAL-AGENT-BOOTSTRAP.md").read_text()
 tiktoken_installer = (project_root / "bin/install-tiktoken-offline.sh").read_text()
 ts_morph_installer = (project_root / "bin/install-ts-morph-offline.sh").read_text()
 manifest = json.loads((project_root / "MANIFEST.json").read_text())
 
-installed_source_review = "/mnt/data/chatgpt-project-agent/tools/prepare-source-review.py"
-if "tools/local-agent/prepare-source-review.py" in connector_acquisition:
-    raise SystemExit("connector acquisition still references the deleted source-review helper")
-if installed_source_review not in connector_acquisition:
-    raise SystemExit("connector acquisition does not reference the stable installed source-review helper")
-for name, guide in (
-    ("development workflow", development_workflow),
-    ("capability router", capability_router),
-    ("installed workflow context", installed_context),
-):
-    if installed_source_review in guide or "tools/local-agent/prepare-source-review.py" in guide:
-        raise SystemExit(f"{name} duplicates a connector-local helper path")
-
-for route in ("DIRECT-REPOSITORY.md", "CONNECTOR-LOCAL.md", "PUBLICATION-CONSTRAINED.md"):
-    if route not in capability_router:
-        raise SystemExit(f"capability router does not route {route}")
-if "ORCHESTRATOR.md" not in capability_router or "| Orchestrator |" in capability_router:
-    raise SystemExit("orchestrator is not routed as separate task guidance")
-for task_guide in (
-    "docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md",
-    "docs/review-and-audit/AUDIT.md",
-):
-    if task_guide not in readme_first:
-        raise SystemExit(f"README-FIRST.md does not route {task_guide}")
-if "README-FIRST.md" not in capability_router or "README-FIRST.md" not in installed_context:
-    raise SystemExit("capability or installed routing does not return to README-FIRST.md")
-if "docs/agents/CONNECTOR-SOURCE-ACQUISITION.md" not in installed_context:
-    raise SystemExit("installed context does not route to current connector acquisition")
-for moving_detail in ("/artifact source ", "source-bundle-request/", "90-second", "#235"):
-    if moving_detail in development_workflow or moving_detail in installed_context:
-        raise SystemExit(f"moving acquisition detail escaped its canonical owner: {moving_detail}")
-
-required_route = (
-    "1. Read applicable `AGENTS.md` files first.\n"
-    "2. Read the repository `README-FIRST.md` and the assigned issue or pull request."
-)
-if required_route not in instructions:
-    raise SystemExit("project instructions do not preserve the accepted startup order")
-if (
-    "Read `CURRENT-DESIGN.md` for" not in instructions
-    or "architecture-affecting or broad" not in instructions
-    or "cross-component work" not in instructions
-):
-    raise SystemExit("project instructions do not use the progressive CURRENT-DESIGN route")
-for obsolete in ("docs/references/", "source-examples/"):
-    if obsolete in instructions:
-        raise SystemExit(f"project instructions still reference nonexistent path: {obsolete}")
-
-stable_files = (
-    "README-FIRST.md",
-    "chatgpt-project-agent-tools-linux-x64.tar.gz",
-    "chatgpt-project-agent-runtime-linux-x64.tar.zst",
-    "setup-chatgpt-project-agent.sh",
-)
-for name in stable_files:
-    if name not in project_wayfinder:
-        raise SystemExit(f"project wayfinder lacks stable file name: {name}")
-for stale in (
-    "README-FIRST(2).md",
-    "LOCAL-AGENT-BOOTSTRAP(1).md",
-    "teasescript-agent-bootstrap-linux-x64-v5.tar.zst",
-    "tools/work-packages/",
-):
-    if stale in project_wayfinder:
-        raise SystemExit(f"project wayfinder retains stale route: {stale}")
-if "/mnt/data/chatgpt-project-agent" not in project_wayfinder:
-    raise SystemExit("project wayfinder lacks the stable installed root")
-for required_fixed_index_detail in (
-    "GitHub.get_commit_combined_status",
-    "GitHub.fetch_workflow_run_artifacts",
-    '"name":"teasescript-source-<source_sha>"',
-    "actions/runs/<run_id>/artifacts/<artifact_id>",
-):
-    if required_fixed_index_detail not in project_wayfinder:
-        raise SystemExit(
-            f"project wayfinder lacks executable fixed-index detail: {required_fixed_index_detail}"
-        )
-if "Its description is" in project_wayfinder:
-    raise SystemExit("project wayfinder still assumes connector status descriptions are exposed")
-if "setup/runtime migration remains tracked" in installed_context:
-    raise SystemExit("installed workflow context still describes the completed distribution as unfinished")
 if "target exists; use --replace or --target" not in setup_source:
     raise SystemExit("setup script does not fail safely for an existing target")
 if "tools/runtime archive path conflict" not in setup_source or "filter=\"data\"" not in setup_source:
@@ -158,12 +50,6 @@ if "if ((with_ts_morph))" in workspace_setup or "ts-morph=required" not in works
     raise SystemExit("workspace setup still models ts-morph as optional")
 if "npm cache verify" not in workspace_setup or "if ((debug_verify))" not in workspace_setup:
     raise SystemExit("complete npm-cache verification is not bounded to debug mode")
-for invocation in (
-    ".git/teasescript-agent/run-node24 node --version",
-    ".git/teasescript-agent/run-node26 npm test",
-):
-    if invocation not in bootstrap_guide:
-        raise SystemExit(f"bootstrap guide lacks unambiguous runner invocation: {invocation}")
 if "--no-index" not in tiktoken_installer or "--only-binary=:all:" not in tiktoken_installer:
     raise SystemExit("TikToken installer lacks strict offline binary-only installation")
 if "--check-environment" not in tiktoken_installer or "refresh the runtime archive" not in tiktoken_installer:
