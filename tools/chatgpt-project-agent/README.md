@@ -18,8 +18,9 @@ maintained runtime archive overlays only heavy or rarely changed files at their 
 Node 24/26, the npm cache seed, TikToken wheels/tokenizer data, ts-morph package tarballs, and runtime-owned metadata.
 
 `tools/setup-chatgpt-project-agent.sh` is deliberately outside this directory because it is uploaded as a separate
-project-folder file. It validates and combines both archives before replacing an installation. The canonical project
-system prompt lives separately at `docs/chatgpt-project/SYSTEM-PROMPT.txt` and must not enter this directory or either
+project-folder file. It validates and combines both archives before replacing an installation. A repository-maintained
+ChatGPT Project Settings prompt candidate lives separately at `docs/chatgpt-project/SYSTEM-PROMPT.txt`; it does not
+represent live Project Settings unless the owner deliberately applies it, and it must not enter this directory or either
 archive.
 
 Do not add a frozen full-tree inventory, per-file tools digest list, or exact tools/runtime release lock. The shared

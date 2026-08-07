@@ -77,9 +77,10 @@ bash tools/local-agent/build-chatgpt-project-agent-release.sh \
 
 The command refuses a non-empty output directory and produces exactly `README-FIRST.md`, the tools `tar.gz`, the
 runtime `tar.zst`, and `setup-chatgpt-project-agent.sh`. Generated archives are external derivatives and are not
-committed to Git. The separate system prompt is not release output; its canonical source is
-`docs/chatgpt-project/SYSTEM-PROMPT.txt`. A repository merge does not prove that the ChatGPT project folder or project
-settings have been refreshed; the final handoff must identify the exact files to replace and the prompt text to copy.
+committed to Git. The separate Project Settings prompt is not release output; Git maintains a prompt candidate
+at `docs/chatgpt-project/SYSTEM-PROMPT.txt`, but that file does not prove the live Project Settings state. A repository
+merge does not prove that the ChatGPT project folder or Project Settings have been refreshed; the final handoff must
+identify the exact files to replace and whether an owner-approved prompt synchronization is still required.
 
 ## Prepare a verified source review checkout
 

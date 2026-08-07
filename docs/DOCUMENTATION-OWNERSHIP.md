@@ -42,7 +42,12 @@ Distinguish these uses:
 
 Historical ADR and specification statements may retain exact old values when
 those values explain the recorded decision. Do not convert such history into a
-second moving current-state summary.
+second moving current-state summary. Retain historical material in the working
+tree only when it preserves unique reasoning likely to answer a concrete future
+question and cannot be reduced without meaningful loss. Mark retained history
+non-authoritative and exclude it from default reading. Git history is the normal
+fallback; deep historical research also checks relevant commits, pull requests,
+and earlier file versions. When retention value is uncertain, rely on Git.
 
 ## Canonical owner map
 
@@ -69,9 +74,11 @@ the required synchronization occurs.
 
 Executable owners retain moving values they directly control: `.nvmrc` owns the required Node runtime selection;
 `package.json` and the lockfile own dependency requirements; bootstrap `MANIFEST.json` files own release payload
-identity; workflows and live CI own current run results. Retain benchmark or resource measurements in a dated evidence
-record only when they have a concrete current consumer and enough revision, environment, method, workload,
-configuration, result, limitation, and intended-use detail to support comparison.
+identity; workflows and live CI own current run results. Truthful dated SHAs, commands, counts, timings, and results in
+issues, pull requests, reviews, CI, or audits remain historical evidence; do not rewrite them merely because the
+repository advanced. Retain benchmark or resource measurements in a dated evidence record only when they have a
+concrete current consumer and enough revision, environment, method, workload, configuration, result, limitation, and
+intended-use detail to support comparison.
 
 ## Documentation edit and review workflow
 
@@ -158,10 +165,10 @@ installed environment where practical. The external tools archive is made from t
 binaries are not committed. Large runtime-only payloads remain outside Git.
 
 `docs/chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder, not a concatenation of installed guides.
-`docs/chatgpt-project/SYSTEM-PROMPT.txt` is the canonical system-prompt text copied manually into the separate
-ChatGPT project settings field; it is not a project-folder file and is absent from both archives. Repository merge,
-project-folder replacement, and project-settings synchronization are distinct steps and must not be treated as proof of
-one another.
+`docs/chatgpt-project/SYSTEM-PROMPT.txt` is the repository-maintained prompt candidate for deliberate owner-approved
+synchronization into the separate ChatGPT Project Settings field. It is not proof of the live Project Settings state, is
+not a project-folder file, and is absent from both archives. Repository merge, project-folder replacement, and an owner
+change to Project Settings are distinct steps and must not be treated as proof of one another.
 
 Research and historical material must be explicitly labeled non-authoritative. It may inform design but cannot silently define syntax, architecture, or implementation status.
 

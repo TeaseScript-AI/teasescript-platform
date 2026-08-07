@@ -1,10 +1,10 @@
 PROJECT: Tease Platform & TeaseScript
 
 PURPOSE
-This installed guide is a compact fallback reference for the ChatGPT project-agent environment. The separate ChatGPT
-project system prompt owns assistant role and creative context. Its Git-canonical source is
-`docs/chatgpt-project/SYSTEM-PROMPT.txt`; it is copied manually into ChatGPT project settings and is deliberately absent
-from the project-folder files and both archives.
+This installed guide is a compact fallback reference for the ChatGPT project-agent environment. The active ChatGPT
+Project Settings instructions, when configured, supply assistant role and creative context. Git maintains a repository
+prompt candidate at `docs/chatgpt-project/SYSTEM-PROMPT.txt`, but that file does not prove or override the live Project
+Settings state and is deliberately absent from the project-folder files and both archives.
 
 REPOSITORY AUTHORITY
 After a verified checkout exists, repository-local instructions are authoritative.
