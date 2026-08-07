@@ -60,25 +60,41 @@ success output compact, and preserves complete failure logs for CI artifact
 upload. Run an individual test file only while developing or diagnosing that
 specific boundary.
 
-Do not redirect failures to `/dev/null` merely to reduce output. Compact successful output and retain actionable failures.
+Do not redirect failures to `/dev/null` merely to reduce output. Compact successful output and retain actionable
+failures.
+
+## Build the ChatGPT project-agent release
+
+`build-chatgpt-project-agent-release.sh` creates the four current project-folder files from the Git-maintained tools
+directory and a separately maintained final-layout runtime tree. The runtime root must be named
+`chatgpt-project-agent` and contain only heavy or rarely changed payloads plus runtime-owned metadata.
+
+```bash
+bash tools/local-agent/build-chatgpt-project-agent-release.sh \
+  --runtime-root /path/to/runtime-parent/chatgpt-project-agent \
+  --output /path/to/empty-release-directory
+```
+
+The command refuses a non-empty output directory and produces exactly `README-FIRST.md`, the tools `tar.gz`, the
+runtime `tar.zst`, and `setup-chatgpt-project-agent.sh`. Generated archives are external derivatives and are not
+committed to Git. The separate system prompt is not release output; its canonical source is
+`docs/chatgpt-project/SYSTEM-PROMPT.txt`. A repository merge does not prove that the ChatGPT project folder or project
+settings have been refreshed; the final handoff must identify the exact files to replace and the prompt text to copy.
 
 ## Prepare a verified source review checkout
 
-The canonical helper source now lives at
-`tools/chatgpt-project-agent/tools/prepare-source-review.py` so its relative path
-can match the future installed project-agent layout. Its fail-closed tests remain
-in `tools/local-agent/` because they validate repository tooling rather than
-distributed bundle content.
+The canonical helper source lives at
+`tools/chatgpt-project-agent/tools/prepare-source-review.py`, matching the installed
+`/mnt/data/chatgpt-project-agent/tools/prepare-source-review.py` path. Its fail-closed tests remain in
+`tools/local-agent/` because they validate repository tooling rather than distributed bundle content.
 
 The helper converts one downloaded source-bundle ZIP into an exact clean local
 checkout. It verifies the external digest, ZIP safety and payload shape, internal
 checksums, manifest identities, complete Git history, optional merge-base
 ancestry, `git fsck`, and a clean worktree.
 
-Until issue #210 supplies and synchronizes the new setup distribution, use the
-currently trusted preinstalled copy for real connector-local review; do not run
-the candidate helper from the artifact under review. The repository source path
-is used for maintenance and focused tests:
+For real connector-local work, use the copy installed outside the downloaded source artifact; do not run the
+candidate helper from the artifact under review. The repository source path is used for maintenance and focused tests:
 
 ```bash
 python3 -B tools/local-agent/test-prepare-source-review.py

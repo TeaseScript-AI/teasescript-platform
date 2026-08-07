@@ -100,7 +100,7 @@ trust by extracting and executing the candidate copy from the source being revie
 Example:
 
 ```shell
-python3 /mnt/data/chatgpt-project-agent-linux-x64/tools/prepare-source-review.py \
+python3 /mnt/data/chatgpt-project-agent/tools/prepare-source-review.py \
   --artifact /mnt/data/source-bundle.zip \
   --artifact-sha256 <github-artifact-sha256> \
   --expected-repository TeaseScript-AI/teasescript-platform \
