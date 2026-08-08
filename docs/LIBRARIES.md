@@ -231,7 +231,7 @@ The first POC does not settle:
 - the option name that selects a detailed return type;
 - `showButton` timeout and elapsed return;
 - custom compact `choose` field hints;
-- exact concrete platform limit values;
+- any justified platform guards that later prove necessary;
 - exact dynamic choice-layout breakpoints;
 - the advanced accessibility override field;
 - a deterministic speaker-aware typing indicator;
