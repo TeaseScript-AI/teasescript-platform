@@ -325,15 +325,9 @@ The pull request is the implementation handoff record. A separate coordinator re
 
 Make small logical commits with concise English imperative messages.
 
-Every pull request that fully completes an assigned issue must include the closing reference in its description so
-merging the pull request closes that issue automatically:
+Every pull request that fully completes an assigned issue must include the closing reference: `Closes #123`
 
-```text
-Closes #123
-```
-
-Use `Refs #123` only when the pull request is related to the issue but intentionally does not complete it and the issue
-must remain open after merge.
+Use `Refs #123` only when the pull request is related to the issue but intentionally does not complete it.
 
 ## Capability-specific execution
 
