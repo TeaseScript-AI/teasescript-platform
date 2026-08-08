@@ -16,6 +16,7 @@
 - `ARCHITECTURE.md`
 - `TEASESCRIPT.md`
 - `RUNTIME.md`
+- `RESOURCE-LIMITS.md`: canonical resource-limit inventory, ADR 0019 classification, evidence status, and repair routing.
 - `DATA-AND-API.md`
 - `LIBRARIES.md`
 - `SECURITY.md`

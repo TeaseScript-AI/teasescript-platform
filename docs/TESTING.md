@@ -304,9 +304,12 @@ The campaign deliberately does not pin an ordered catalog/count, PRNG vectors,
 successful signatures, complete traces, work/mutation accounting, fixture
 identity, profiles, or CLI compatibility. Exact technical limits, hostile-data
 shapes, interaction variants, and confirmed defects remain in their focused
-runtime/checkpoint/corruption/regression suites. Convert a confirmed product
-defect to a focused permanent regression; do not preserve private harness
-bookkeeping as evidence.
+runtime/checkpoint/corruption/regression suites. Canonical limit classification,
+evidence status, and coupling/repair routing live in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); an exact-boundary test proves the
+implemented boundary but does not by itself promote a limit to proven capacity.
+Convert a confirmed product defect to a focused permanent regression; do not
+preserve private harness bookkeeping as evidence.
 
 ## Source-to-runtime conformance corpus
 
