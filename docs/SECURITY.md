@@ -35,15 +35,7 @@ ADR 0016 adds these requirements:
 - Time-integrity anomalies are diagnostics, not automatic proof of cheating, until a later policy defines thresholds and script visibility.
 - Restored Standard UI is reconstructed from validated canonical action payloads rather than replaying untrusted host state.
 
-The implemented foreground-interaction boundary captures each completion request through the shared stable
-external-data graph before inspecting it. The current version-1 implementation rejects strings above `65,536` UTF-8
-bytes, actions above `65,536` retained-string UTF-8 bytes, and choices above `4,096` entries. These are current
-implementation guards, not justified source, product, UI, security, or end-to-end capacity targets merely because code
-and tests enforce them. ADR 0019 requires evidence for both the need for each retained bound and its selected value or
-mechanism; a guard that cannot meet that requirement must be removed, replaced, or re-derived. While the guards exist,
-plan and snapshot validation stop UTF-8 encoding after the first per-string or aggregate failure, use set-based
-duplicate checks and bounded linear matching, and reject unknown persisted interaction fields so hidden data cannot
-bypass the byte budget. Over-limit definitions and completions are rejected without truncation or partial mutation.
+The implemented foreground-interaction boundary captures each completion request through the shared stable external-data graph before inspecting it. Version-1 interaction limits permit at most `65,536` UTF-8 bytes per string, `65,536` UTF-8 bytes across retained strings in one action, and `4,096` choice entries. Plan and snapshot validation stop UTF-8 encoding after the first per-string or aggregate failure, use set-based duplicate checks and bounded linear matching, and reject unknown persisted interaction fields so hidden data cannot bypass the byte budget. Over-limit definitions and completions are rejected without truncation or partial mutation. These technical ceilings are not UI length recommendations.
 
 The engine, not the caller, normalizes text, parses numbers, resolves choice labels/text, and derives player transcript content. Successful completion emits `playerTranscript` before `actionCompleted`; invalid or duplicate attempts emit neither event. Interaction result destinations, speaker IDs, target, ownership, options, settlement results, transcript text, and the single-use result handoff are validated against the immutable plan and current snapshot. A result is atomically committed into a prepared ordinary runtime destination. Until the first canonical consume, transfer, return, discard, or exit succeeds, the nullable handoff retains the canonical value independently of `lastSettlement`; afterward it is removed immediately. `lastSettlement` remains bounded replay data and is not a destination-liveness authority.
 

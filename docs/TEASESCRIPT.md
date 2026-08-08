@@ -149,10 +149,7 @@ With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySk
 
 ### Bounded-data boundary
 
-ADR 0018 does not assign separate author-facing character limits to text answers, hints, buttons, or choice labels.
-Interaction definitions and completions remain subject only to versioned platform guards that a real boundary requires
-and that satisfy ADR 0019 justification for both the bound's necessity and its selected value, formula, predicate,
-accepted domain, or mechanism.
+ADR 0018 does not assign separate author-facing character limits to text answers, hints, buttons, or choice labels. Interaction definitions and completions remain subject to concrete versioned platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits selected by implementation.
 
 Over-limit data is rejected deterministically without truncation or partial state mutation. The editor may warn earlier about impractically long labels or large choice sets.
 
