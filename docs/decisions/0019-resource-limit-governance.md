@@ -59,6 +59,14 @@ workstream or technical review alone does not change its status.
    migration, and compatibility decisions described below when applicable.
 7. A provisional POC guard remains provisional until the required evidence and
    decisions promote it. It is not a permanent public compatibility promise.
+8. The repository does not invent an officially supported maximum merely to make
+   a resource dimension finite. A language or product maximum needs a concrete
+   technical, safety, infrastructure, or product reason; otherwise applicable
+   implementation and platform constraints remain separate constraints rather
+   than an arbitrary TeaseScript capacity promise.
+9. Every new production limit or material change to an existing limit is surfaced
+   to the Owner even when no explicit Owner approval is required by the change
+   triggers below.
 
 ## Terminology
 
@@ -103,7 +111,12 @@ dimensions.
 An **officially supported maximum** is a value or formula deliberately offered
 as supported capacity for a documented input class. It is stronger than an
 implementation guard. Where runtime layers apply, it must satisfy the
-end-to-end maximum invariant in this ADR.
+end-to-end maximum invariant in this ADR. Not every resource dimension needs an
+officially supported maximum. When no concrete technical, safety,
+infrastructure, or product reason requires one, the repository leaves that
+capacity unspecified rather than inventing an arbitrary language ceiling.
+Resource exhaustion on a particular machine does not by itself define a
+TeaseScript semantic maximum.
 
 A **structured diagnostic** is the repository's documented bounded error,
 invalid result, or rejection outcome for the relevant boundary. Native stack
@@ -283,7 +296,11 @@ worst-case or Pareto-relevant valid forms for each. No single globally
 materially different forms, such as static and dynamically lowered forms,
 root-owned and function-owned forms, or waiting and completed states, the
 worst-form evidence set covers every form needed to bound those dimensions and
-their downstream expansions.
+their downstream expansions. If the public contract permits independently
+stated maxima to occur together, the evidence must cover that combination or a
+sound bound for it. The repository does not require the Cartesian product of
+unrelated maxima when the accepted input contract does not permit or imply those
+combinations.
 
 A layer or boundary may be marked not applicable only with a concrete reason.
 For example, a tooling-only metadata field that is never compiled, sent to the
@@ -363,8 +380,9 @@ boundary. It requires focused reproduction, measurement, or design work.
 
 `obsolete` means the limit or mechanism no longer protects a reachable current
 boundary, has been replaced, or remains only as dead compatibility residue.
-Removal still requires normal code, test, documentation, and compatibility
-review.
+Uncertainty about whether a limit is still needed is `suspicious`, not
+`obsolete`. Removal still requires normal code, test, documentation, and
+compatibility review.
 
 ### Evidence rules
 
@@ -376,6 +394,13 @@ Public-boundary tests are preferred over private-helper tests.
 Wall-clock time and peak-memory measurements may supplement evidence and help
 select safety margins. They do not independently define correctness because
 they vary by hardware, runtime version, load, and environment.
+
+The evidence burden matches the claim. A local implementation guard may be
+`proven` for its declared boundary and failure mode using focused derivation and
+boundary tests without proving broader engine capacity. An officially supported
+maximum requires the applicable end-to-end evidence in this ADR. Demonstrated
+technical capacity and a deliberately lower product-policy limit are separate
+facts and retain separate rationale and tests.
 
 A status change records its evidence source. Promotion to `proven` is an
 explicit review outcome, not an automatic consequence of adding an exact-boundary
@@ -462,6 +487,16 @@ An explicit Owner decision is required when changing:
 
 Technical approval does not substitute for this Owner decision.
 
+### Owner visibility for other limit changes
+
+A new production limit or a material change to an existing production limit
+that does not trigger explicit Owner approval must still be called out to the
+Owner in the pull-request or issue decision surface before landing. The notice
+identifies the affected boundary, reason, category, current value, predicate or
+formula, evidence status, and material couplings or downstream effects. This is
+an information requirement, not an additional approval gate when none of the
+explicit decision triggers apply.
+
 ### New or amended ADR
 
 A new or amended ADR is required when a change alters:
@@ -534,6 +569,14 @@ Measurements and generated cases must themselves be bounded and reproducible.
 A benchmark result may reveal insufficient margin or inefficient expansion, but
 correctness does not depend on meeting one environment-specific wall-clock
 number unless an accepted performance policy separately defines it.
+
+Routine CI may use focused regression and boundary tests instead of rerunning
+expensive worst-form or end-to-end capacity campaigns on every commit. A heavy
+capacity campaign may run through a separate documented reproducible command or
+gate when proportionate to the claim. Its evidence record must identify how the
+campaign is reproduced and when it must be refreshed; moving an expensive test
+out of routine CI does not weaken the evidence required for an officially
+supported maximum.
 
 ## Relationship to accepted ADRs
 
