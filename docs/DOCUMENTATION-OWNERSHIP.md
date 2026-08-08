@@ -14,8 +14,9 @@ one clear canonical owner. Keep the complete authoritative explanation there.
 Elsewhere, prefer a link or the smallest stable summary needed for the local
 document to remain understandable.
 
-Here, **canonical owner** means the repository source or accepted decision locus
-that maintains the information; it does not mean one persistent human or agent.
+Here, **canonical owner** means the repository source that maintains the
+information or the accepted authority that controls it; it does not mean one
+persistent human or agent.
 Terms such as **product owner**, **coordinator**, or **owning agent** retain their
 literal role meaning only where the text explicitly assigns that role. An owning
 agent is a temporary execution assignment for an issue, branch, or pull request,
