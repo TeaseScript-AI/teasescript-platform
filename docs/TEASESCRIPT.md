@@ -159,7 +159,7 @@ The broader parenthesized V30 input functions are not rejected merely because co
 
 V30 `showButton` timeout and elapsed-time return remain accepted future capability but are not included in the first POC slice.
 
-The exact syntax for detailed result objects, advanced accessibility overrides, a speaker-aware typing indicator, custom `choose` field hints, concrete platform limits, and constrained LLM answer interpretation remains deferred.
+The exact syntax for detailed result objects, advanced accessibility overrides, a speaker-aware typing indicator, custom `choose` field hints, any justified platform guards that later prove necessary, and constrained LLM answer interpretation remains deferred.
 
 ## Currently implemented language subset
 
