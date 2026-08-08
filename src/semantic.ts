@@ -16,6 +16,11 @@ import {
   CORE_RUNTIME_BUILTINS,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
+import {
+  boundedInteractionUtf8ByteLength,
+  MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
+  MAX_INTERACTION_OPTION_ENTRIES,
+} from "./interaction-limits.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -61,6 +66,10 @@ const semanticCode = {
   functionAssignment: "TSV026",
   unsupportedFunctionAnnotation: "TSV027",
   functionValue: "TSV028",
+  invalidInteractionChoice: "TSV029",
+  duplicateInteractionChoice: "TSV030",
+  interactionLimit: "TSV031",
+  unsupportedBlockingContext: "TSV032",
 } as const;
 
 export function validateSemantics(
@@ -94,9 +103,14 @@ class SemanticValidator {
   readonly #protectedNames: ReadonlySet<string>;
   readonly #root = new SemanticScope();
   readonly #functions = new Map<string, FunctionDeclaration>();
+  readonly #invalidConfiguredNames: readonly string[];
   #functionDepth = 0;
 
   public constructor(options: SemanticValidationOptions) {
+    this.#invalidConfiguredNames = Object.freeze([
+      ...(options.globals ?? []),
+      ...(options.builtins ?? []),
+    ].filter((name) => ["showButton", "askText", "askNumber", "choose"].includes(name)));
     this.#builtins = new Set([
       ...CORE_RUNTIME_BUILTINS,
       ...(options.builtins ?? []),
@@ -111,6 +125,13 @@ class SemanticValidator {
   }
 
   public validate(program: Program): void {
+    for (const name of new Set(this.#invalidConfiguredNames)) {
+      this.#report(
+        semanticCode.duplicateDeclaration,
+        `Configured name '${name}' conflicts with a protected TeaseScript name.`,
+        program.span,
+      );
+    }
     for (const statement of program.statements) {
       if (statement.kind !== "functionDeclaration") continue;
       if (this.#functions.has(statement.name.name)) {
@@ -200,6 +221,12 @@ class SemanticValidator {
               ? statement.speaker.name
               : null;
         this.#validateExpression(statement.value, scope, contextualSpeaker);
+        return;
+      }
+      case "showButtonStatement": {
+        const contextualSpeaker = this.#interactionSpeaker(statement.speaker, scope);
+        this.#validateExpression(statement.label, scope, contextualSpeaker);
+        this.#validateStaticInteractionStrings([statement.label], statement.span);
         return;
       }
       case "waitStatement": {
@@ -362,6 +389,14 @@ class SemanticValidator {
     for (let index = 0; index < declaration.parameters.length; index += 1) {
       const parameter = declaration.parameters[index]!;
       if (parameter.defaultValue !== null) {
+        const blockingInteraction = findFirstInteraction(parameter.defaultValue);
+        if (blockingInteraction !== null) {
+          this.#report(
+            semanticCode.unsupportedBlockingContext,
+            "Blocking interactions are not supported in function parameter defaults.",
+            blockingInteraction.span,
+          );
+        }
         const laterNames = new Set(
           declaration.parameters.slice(index + 1).map((item) => item.name.name),
         );
@@ -436,6 +471,16 @@ class SemanticValidator {
       case "numberLiteral":
       case "stringLiteral":
         return;
+      case "interactionExpression": {
+        const contextualSpeaker = this.#interactionSpeaker(expression.speaker, scope);
+        if (expression.interactionKind === "choice") {
+          this.#validateChoice(expression, scope, contextualSpeaker);
+        } else if (expression.hint !== null) {
+          this.#validateExpression(expression.hint, scope, contextualSpeaker);
+          this.#validateStaticInteractionStrings([expression.hint], expression.span);
+        }
+        return;
+      }
       case "identifier":
         if (expression.name === "speaker" && contextualSpeaker !== null) return;
         const binding = scope.resolve(expression.name);
@@ -590,6 +635,85 @@ class SemanticValidator {
     }
   }
 
+  #interactionSpeaker(
+    speaker: Extract<Expression, { kind: "interactionExpression" }>["speaker"],
+    scope: SemanticScope,
+  ): string | null {
+    return speaker === null
+      ? "speaker"
+      : this.#validateSpeakerReference(speaker.name, speaker.span, scope)
+        ? speaker.name
+        : null;
+  }
+
+  #validateChoice(
+    expression: Extract<Expression, { kind: "interactionExpression" }>,
+    scope: SemanticScope,
+    contextualSpeaker: string | null,
+  ): void {
+    if (expression.options.length === 0) {
+      this.#report(semanticCode.invalidInteractionChoice, "A choice requires at least one option.", expression.span);
+      return;
+    }
+    if (expression.options.length > MAX_INTERACTION_OPTION_ENTRIES) {
+      this.#report(semanticCode.interactionLimit, `Compact choice exceeds the current interaction-entry option guard of ${MAX_INTERACTION_OPTION_ENTRIES}.`, expression.span);
+    }
+    const labelled = expression.options.map((option) => option.label !== null);
+    if (labelled.some(Boolean) && labelled.some((value) => !value)) {
+      this.#report(semanticCode.invalidInteractionChoice, "Labelled and unlabelled choice options may not be mixed.", expression.span);
+    }
+    const labelKinds = new Set(expression.options.flatMap((option) => option.label === null ? [] : [option.label.kind]));
+    if (labelKinds.size > 1) {
+      this.#report(semanticCode.invalidInteractionChoice, "Identifier and numeric choice labels may not be mixed.", expression.span);
+    }
+    const labels = new Set<string>();
+    const visible = new Map<string, SourceSpan>();
+    for (const option of expression.options) {
+      this.#validateExpression(option.value, scope, contextualSpeaker);
+      if (option.label !== null) {
+        const key = option.label.kind === "identifier"
+          ? `identifier:${option.label.name}`
+          : `number:${Object.is(option.label.value, -0) ? 0 : option.label.value}`;
+        if (labels.has(key)) {
+          this.#report(semanticCode.duplicateInteractionChoice, "Choice labels must be unique.", option.label.span);
+        }
+        labels.add(key);
+      } else {
+        const text = knownString(option.value);
+        if (text !== undefined) {
+          if (visible.has(text)) {
+            this.#report(semanticCode.duplicateInteractionChoice, "Unlabelled choice text must be unique.", option.value.span);
+          }
+          visible.set(text, option.value.span);
+        }
+      }
+    }
+    this.#validateStaticInteractionStrings(expression.options.map((option) => option.value), expression.span, expression.options.flatMap((option) => option.label?.kind === "identifier" ? [option.label.name] : []));
+  }
+
+  #validateStaticInteractionStrings(
+    expressions: readonly Expression[],
+    span: SourceSpan,
+    extraStrings: readonly string[] = [],
+  ): void {
+    let aggregate = 0;
+    for (const value of [...extraStrings, ...expressions.flatMap((expression) => {
+      const known = knownString(expression);
+      return known === undefined ? [] : [known];
+    })]) {
+      const bytes = boundedInteractionUtf8ByteLength(value);
+      if (bytes === null) {
+        this.#report(semanticCode.interactionLimit, "Interaction text exceeds the shared UTF-8 byte limit.", span);
+        return;
+      }
+      aggregate += bytes;
+      if (aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES) {
+        this.#report(semanticCode.interactionLimit, "Interaction data exceeds the shared aggregate UTF-8 byte limit.", span);
+        return;
+      }
+    }
+  }
+
   #validateFunctionCall(
     expression: Extract<Expression, { kind: "callExpression" }>,
     declaration: FunctionDeclaration,
@@ -718,6 +842,50 @@ function isKnownInteger(expression: Expression): boolean {
   return value === undefined || Number.isInteger(value);
 }
 
+function findFirstInteraction(
+  expression: Expression,
+): Extract<Expression, { kind: "interactionExpression" }> | null {
+  if (expression.kind === "interactionExpression") return expression;
+  const nested: readonly Expression[] = (() => {
+    switch (expression.kind) {
+      case "booleanLiteral":
+      case "nullLiteral":
+      case "numberLiteral":
+      case "stringLiteral":
+      case "identifier":
+        return [];
+      case "parenthesizedExpression":
+        return [expression.expression];
+      case "listLiteral":
+      case "setLiteral":
+        return expression.elements;
+      case "objectLiteral":
+        return expression.properties.map((property) => property.value);
+      case "templateLiteral":
+        return expression.parts.flatMap((part) =>
+          part.kind === "templateInterpolation" ? [part.expression] : []
+        );
+      case "propertyAccessExpression":
+        return [expression.object];
+      case "indexExpression":
+        return [expression.object, expression.index];
+      case "callExpression":
+        return [expression.callee, ...expression.arguments.map((argument) => argument.value)];
+      case "unaryExpression":
+        return [expression.operand];
+      case "binaryExpression":
+        return [expression.left, expression.right];
+      case "rangeExpression":
+        return [expression.start, expression.end];
+    }
+  })();
+  for (const child of nested) {
+    const found = findFirstInteraction(child);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
 function knownNumber(expression: Expression): number | undefined {
   if (expression.kind === "numberLiteral") return expression.value;
   if (expression.kind === "parenthesizedExpression") {
@@ -747,9 +915,53 @@ function knownNumber(expression: Expression): number | undefined {
   return undefined;
 }
 
+function knownString(expression: Expression): string | undefined {
+  switch (expression.kind) {
+    case "stringLiteral":
+      return expression.value;
+    case "numberLiteral":
+      return Number.isFinite(expression.value)
+        ? String(Object.is(expression.value, -0) ? 0 : expression.value)
+        : undefined;
+    case "booleanLiteral":
+      return expression.value ? "true" : "false";
+    case "nullLiteral":
+      return "null";
+    case "parenthesizedExpression":
+      return knownString(expression.expression);
+    case "unaryExpression":
+    case "binaryExpression": {
+      const value = knownNumber(expression);
+      return value !== undefined && Number.isFinite(value)
+        ? String(Object.is(value, -0) ? 0 : value)
+        : undefined;
+    }
+    case "templateLiteral": {
+      const parts: string[] = [];
+      for (const part of expression.parts) {
+        if (part.kind === "templateText") {
+          parts.push(part.value);
+          continue;
+        }
+        const value = knownString(part.expression);
+        if (value === undefined) return undefined;
+        parts.push(value);
+      }
+      return parts.join("");
+    }
+    default:
+      return undefined;
+  }
+}
+
 function isDefinitelyNonNumeric(expression: Expression): boolean {
   if (expression.kind === "parenthesizedExpression") {
     return isDefinitelyNonNumeric(expression.expression);
+  }
+  if (expression.kind === "interactionExpression") {
+    if (expression.interactionKind === "number") return false;
+    if (expression.interactionKind !== "choice") return true;
+    return expression.options[0]?.label?.kind !== "numberLiteral";
   }
   return (
     expression.kind === "stringLiteral" ||
@@ -773,7 +985,8 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     expression.kind === "nullLiteral" ||
     expression.kind === "numberLiteral" ||
     expression.kind === "objectLiteral" ||
-    expression.kind === "templateLiteral"
+    expression.kind === "templateLiteral" ||
+    expression.kind === "interactionExpression"
   );
 }
 
@@ -848,6 +1061,11 @@ function visitExpression(
     case "rangeExpression":
       visitExpression(expression.start, visitor);
       visitExpression(expression.end, visitor);
+      return;
+    case "interactionExpression":
+      if (expression.speaker !== null) visitor(expression.speaker);
+      if (expression.hint !== null) visitExpression(expression.hint, visitor);
+      expression.options.forEach((option) => visitExpression(option.value, visitor));
       return;
   }
 }

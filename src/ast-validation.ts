@@ -197,9 +197,16 @@ export function findNonFiniteNumericLiteralDiagnostics(
     return Object.freeze([capture.diagnostic!]);
   }
 
+  return findNonFiniteNumericLiteralDiagnosticsInStableProgram(capture.program);
+}
+
+/** Internal traversal for parser-owned or already captured AST data. */
+export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
+  program: Program,
+): readonly Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const work = createCapturedArray(0) as unknown[];
-  work.push(capture.program);
+  work.push(program);
   while (work.length > 0) {
     const value = work.pop();
     if (value === null || typeof value !== "object") continue;

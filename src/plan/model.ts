@@ -1,7 +1,7 @@
 import type { SourceSpan } from "../source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 6;
+export const INSTRUCTION_PLAN_VERSION = 7;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
@@ -50,6 +50,7 @@ export type Instruction =
   | LoopStartInstruction
   | LoopControlInstruction
   | StoreTemporaryInstruction
+  | PrepareInteractionSpeakerInstruction
   | ClearTemporaryInstruction
   | CallFunctionInstruction
   | BindSuppliedParameterInstruction
@@ -180,6 +181,12 @@ export interface StoreTemporaryInstruction extends InstructionBase {
   readonly expectBoolean: boolean;
 }
 
+export interface PrepareInteractionSpeakerInstruction extends InstructionBase {
+  readonly kind: "prepareInteractionSpeaker";
+  readonly speaker: string | null;
+  readonly destinationTemporary: number;
+}
+
 export interface ClearTemporaryInstruction extends InstructionBase {
   readonly kind: "clearTemporary";
   readonly temporaryId: number;
@@ -260,11 +267,19 @@ export type InteractionChoiceOption =
   | { readonly text: string; readonly label: number };
 export type InteractionUiPayload =
   | { readonly kind: "button"; readonly buttonLabel: string; readonly accessibleName: InteractionAccessibleName }
-  | { readonly kind: "text" | "number"; readonly hint: string | null; readonly accessibleName: InteractionAccessibleName }
+  | { readonly kind: "text"; readonly hint: string | null; readonly accessibleName: InteractionAccessibleName }
+  | { readonly kind: "number"; readonly hint: string | null; readonly accessibleName: InteractionAccessibleName }
   | { readonly kind: "choice"; readonly labelType: "none" | "identifier" | "number"; readonly options: readonly InteractionChoiceOption[]; readonly accessibleName: InteractionAccessibleName };
 
-/** Compiler/Standard-Library prepared foreground interaction. No source syntax is added by this slice. */
-export interface InteractionInstruction extends InstructionBase {
+export type PreparedInteractionChoiceLabel = string | number;
+export type PreparedInteractionUiPayload =
+  | { readonly kind: "button"; readonly buttonLabelTemporary: number; readonly accessibleName: InteractionAccessibleName }
+  | { readonly kind: "text"; readonly hintTemporary: number | null; readonly accessibleName: InteractionAccessibleName }
+  | { readonly kind: "number"; readonly hintTemporary: number | null; readonly accessibleName: InteractionAccessibleName }
+  | { readonly kind: "choice"; readonly labelType: "none" | "identifier" | "number"; readonly optionsTemporary: number; readonly optionCount: number; readonly labels: readonly PreparedInteractionChoiceLabel[] | null; readonly accessibleName: InteractionAccessibleName };
+
+/** Static compiler/Standard-Library foreground interaction. */
+export interface StaticInteractionInstruction extends InstructionBase {
   readonly kind: "interaction";
   readonly interactionKind: InteractionKind;
   readonly target: "standardChat";
@@ -273,6 +288,19 @@ export interface InteractionInstruction extends InstructionBase {
   readonly expectedResult: InteractionResultDomain;
   readonly ui: InteractionUiPayload;
 }
+
+/** Compact-source interaction whose speaker/UI values were prepared before suspension. */
+export interface PreparedInteractionInstruction extends InstructionBase {
+  readonly kind: "interaction";
+  readonly interactionKind: InteractionKind;
+  readonly target: "standardChat";
+  readonly speakerTemporary: number;
+  readonly destinationTemporary: number | null;
+  readonly expectedResult: InteractionResultDomain;
+  readonly preparedUi: PreparedInteractionUiPayload;
+}
+
+export type InteractionInstruction = StaticInteractionInstruction | PreparedInteractionInstruction;
 
 export interface ExitInstruction extends InstructionBase {
   readonly kind: "exit";

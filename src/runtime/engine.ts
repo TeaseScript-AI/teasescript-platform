@@ -4,7 +4,13 @@ import type {
   ExpressionPlan,
   Instruction,
   InstructionPlan,
+  InteractionUiPayload,
+  PreparedInteractionUiPayload,
 } from "../plan/model.js";
+import {
+  boundedInteractionUtf8ByteLength,
+  MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
+} from "../interaction-limits.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -38,7 +44,7 @@ import type {
   RuntimeFailureEvent,
   SayEvent,
 } from "./events.js";
-import { nextXorShift32, type RandomSource } from "./random.js";
+import { nextXorShift32, type RandomSource, type XorShift32State } from "./random.js";
 import {
   addSerializableSetValue,
   cloneSerializableValue,
@@ -371,6 +377,24 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     }
+    case "prepareInteractionSpeaker": {
+      const speaker = instruction.speaker !== null
+        ? evaluator.speakerByName(instruction.speaker, instruction.span)
+        : snapshot.contextualSpeaker !== null
+          ? evaluator.speakerById(snapshot.contextualSpeaker, instruction.span)
+          : snapshot.defaultSpeaker !== null
+            ? evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
+            : null;
+      setTemporary(
+        snapshot.temporaries,
+        instruction.destinationTemporary,
+        speaker === null
+          ? null
+          : { kind: "speakerReference", speakerId: speaker.id, identifier: speaker.identifier },
+      );
+      advance(snapshot);
+      return;
+    }
     case "clearTemporary": {
       const index = snapshot.temporaries.findIndex(
         (temporary) => temporary.id === instruction.temporaryId,
@@ -461,12 +485,28 @@ function executePlannedInstruction(
       }
       if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
       assertEventSequenceCapacity(snapshot, 3, instruction.span);
-      const speaker = instruction.speaker !== null
-        ? evaluator.speakerByName(instruction.speaker, instruction.span)
-        : snapshot.defaultSpeaker === null
-          ? null
-          : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
-      const sequence = takeSequence(snapshot);
+      const prepared = "preparedUi" in instruction;
+      const speaker = prepared
+        ? preparedInteractionSpeaker(instruction.speakerTemporary, snapshot.temporaries, evaluator, instruction.span)
+        : instruction.speaker !== null
+          ? evaluator.speakerByName(instruction.speaker, instruction.span)
+          : snapshot.defaultSpeaker === null
+            ? null
+            : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
+      const materialized = prepared
+        ? materializeInteractionUi(
+            instruction.preparedUi,
+            snapshot.temporaries,
+            snapshot.rng,
+            evaluator,
+            instruction.span,
+          )
+        : {
+            ui: instruction.ui,
+            stagedWrites: [] as const,
+            rngState: snapshot.rng.state,
+          };
+      const sequence = snapshot.nextEventSequence;
       const action: RuntimeInteractionActionSnapshot = Object.freeze({
         kind: "interaction",
         interactionKind: instruction.interactionKind,
@@ -480,9 +520,14 @@ function executePlannedInstruction(
         expectedResult: instruction.expectedResult,
         target: instruction.target,
         speakerId: speaker?.id ?? null,
-        ui: cloneInteractionUi(instruction.ui),
+        ui: cloneInteractionUi(materialized.ui),
         requestEventSequence: sequence,
       });
+      commitInteractionMaterialization(snapshot, materialized.stagedWrites, materialized.rngState);
+      const committedSequence = takeSequence(snapshot);
+      if (committedSequence !== sequence) {
+        throw new Error("Interaction event-sequence staging drifted unexpectedly.");
+      }
       snapshot.nextActionId += 1;
       snapshot.foregroundAction = action;
       snapshot.status = "waiting";
@@ -506,6 +551,134 @@ function executePlannedInstruction(
         } satisfies ExitEvent),
       );
       return;
+  }
+}
+
+function preparedInteractionSpeaker(
+  temporaryId: number,
+  temporaries: readonly RuntimeTemporarySnapshot[],
+  evaluator: Evaluator,
+  span: SourceSpan,
+): RuntimeSpeakerSnapshot | null {
+  const prepared = readTemporary(temporaries, temporaryId, span);
+  if (prepared === null) return null;
+  if (!isSpeakerReference(prepared)) {
+    throw fault("TSR052", "Prepared interaction speaker is invalid.", span);
+  }
+  return evaluator.speakerById(prepared.speakerId, span);
+}
+
+interface MaterializedInteractionUi {
+  readonly ui: InteractionUiPayload;
+  readonly stagedWrites: readonly { readonly temporaryId: number; readonly value: SerializableRuntimeValue }[];
+  readonly rngState: number;
+}
+
+function materializeInteractionUi(
+  prepared: PreparedInteractionUiPayload,
+  temporaries: RuntimeTemporarySnapshot[],
+  canonicalRng: XorShift32State,
+  evaluator: Evaluator,
+  span: SourceSpan,
+): MaterializedInteractionUi {
+  const stagedRng: XorShift32State = {
+    algorithm: canonicalRng.algorithm,
+    state: canonicalRng.state,
+  };
+  const stagedWrites: Array<{ readonly temporaryId: number; readonly value: SerializableRuntimeValue }> = [];
+  const read = (temporaryId: number): RuntimeTemporarySnapshot => {
+    const temporary = temporaries.find((item) => item.id === temporaryId);
+    if (temporary === undefined) throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
+    return temporary;
+  };
+  const readText = (temporaryId: number): string => {
+    const temporary = read(temporaryId);
+    const text = evaluator.visibleTextWithRng(temporary.value, span, stagedRng);
+    stagedWrites.push({ temporaryId: temporary.id, value: text });
+    return text;
+  };
+
+  let ui: InteractionUiPayload;
+  if (prepared.kind === "button") {
+    ui = { kind: "button", buttonLabel: readText(prepared.buttonLabelTemporary), accessibleName: prepared.accessibleName };
+  } else if (prepared.kind === "text" || prepared.kind === "number") {
+    ui = {
+      kind: prepared.kind,
+      hint: prepared.hintTemporary === null ? null : readText(prepared.hintTemporary),
+      accessibleName: prepared.accessibleName,
+    };
+  } else {
+    const source = read(prepared.optionsTemporary);
+    if (!isList(source.value) || source.value.items.length !== prepared.optionCount) {
+      throw fault("TSR052", "Prepared choice options do not match the canonical option count.", span);
+    }
+    const texts = source.value.items.map((value) => evaluator.visibleTextWithRng(value, span, stagedRng));
+    const labels = prepared.labelType === "none" ? null : prepared.labels;
+    if (prepared.labelType !== "none" && (labels === null || labels.length !== texts.length)) {
+      throw fault("TSR052", "Prepared choice labels do not match the canonical option count.", span);
+    }
+    ui = {
+      kind: "choice",
+      labelType: prepared.labelType,
+      options: texts.map((text, index) => ({ text, label: labels?.[index] ?? null })),
+      accessibleName: prepared.accessibleName,
+    };
+    stagedWrites.push({ temporaryId: source.id, value: createSerializableList(texts) });
+  }
+
+  assertInteractionUiLimits(ui, span);
+  if (ui.kind === "choice" && ui.labelType === "none") {
+    const visible = new Set<string>();
+    for (const option of ui.options) {
+      if (visible.has(option.text)) throw fault("TSR052", "Unlabelled choice text must evaluate to unique strings.", span);
+      visible.add(option.text);
+    }
+  }
+  return Object.freeze({
+    ui,
+    stagedWrites: Object.freeze(stagedWrites.map((staged) => Object.freeze({
+      temporaryId: staged.temporaryId,
+      value: cloneSerializableValue(staged.value),
+    }))),
+    rngState: stagedRng.state,
+  });
+}
+
+function commitInteractionMaterialization(
+  snapshot: RuntimeSnapshot,
+  stagedWrites: readonly { readonly temporaryId: number; readonly value: SerializableRuntimeValue }[],
+  rngState: number,
+): void {
+  for (const staged of stagedWrites) {
+    const temporary = snapshot.temporaries.find((item) => item.id === staged.temporaryId);
+    if (temporary === undefined) {
+      throw new Error(`Prepared interaction temporary '${staged.temporaryId}' disappeared before commit.`);
+    }
+    temporary.value = cloneSerializableValue(staged.value);
+  }
+  snapshot.rng.state = rngState;
+}
+
+function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): void {
+  const strings: string[] = [];
+  if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
+  if (ui.kind === "button") strings.push(ui.buttonLabel);
+  else if (ui.kind === "text" || ui.kind === "number") {
+    if (ui.hint !== null) strings.push(ui.hint);
+  } else {
+    for (const option of ui.options) {
+      strings.push(option.text);
+      if (typeof option.label === "string") strings.push(option.label);
+    }
+  }
+  let aggregate = 0;
+  for (const value of strings) {
+    const bytes = boundedInteractionUtf8ByteLength(value);
+    if (bytes === null) throw fault("TSR052", "Interaction text exceeds the shared UTF-8 byte limit.", span);
+    aggregate += bytes;
+    if (aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES) {
+      throw fault("TSR052", "Interaction data exceeds the shared aggregate UTF-8 byte limit.", span);
+    }
   }
 }
 
@@ -1360,14 +1533,22 @@ class Evaluator {
   }
 
   public visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
+    return this.visibleTextWithRng(value, span, this.snapshot.rng);
+  }
+
+  public visibleTextWithRng(
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+    rng: XorShift32State,
+  ): string {
     if (isList(value)) {
-      const selected = this.#randomItem(value.items, span);
+      const selected = this.#randomItem(value.items, span, rng);
       if (typeof selected === "string") return selected;
-      if (typeof selected === "number" && Number.isFinite(selected)) return String(selected);
+      if (typeof selected === "number" && Number.isFinite(selected)) return String(Object.is(selected, -0) ? 0 : selected);
       throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
     }
     if (typeof value === "string") return value;
-    if (typeof value === "number") return String(value);
+    if (typeof value === "number" && Number.isFinite(value)) return String(Object.is(value, -0) ? 0 : value);
     if (typeof value === "boolean") return value ? "true" : "false";
     if (value === null) return "null";
     throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
@@ -1636,8 +1817,8 @@ class Evaluator {
     return value;
   }
 
-  #findRandom(span: SourceSpan): number {
-    const random = this.capabilities.random?.next() ?? nextXorShift32(this.snapshot.rng);
+  #findRandom(span: SourceSpan, rng = this.snapshot.rng): number {
+    const random = this.capabilities.random?.next() ?? nextXorShift32(rng);
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
       throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
     }
@@ -1715,9 +1896,10 @@ class Evaluator {
   #randomItem(
     items: readonly SerializableRuntimeValue[],
     span: SourceSpan,
+    rng = this.snapshot.rng,
   ): SerializableRuntimeValue {
     if (items.length === 0) throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
-    return items[Math.floor(this.#findRandom(span) * items.length)]!;
+    return items[Math.floor(this.#findRandom(span, rng) * items.length)]!;
   }
 
   #getProperty(value: SerializableRuntimeValue, name: string, span: SourceSpan): SerializableRuntimeValue {
