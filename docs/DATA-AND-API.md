@@ -6,7 +6,7 @@ The player receives only selected validated data across the parent/player and se
 
 ## Current TypeScript POC surfaces
 
-The repository currently exports several TypeScript layers through `src/index.ts`. These support the POC, repository tests, the playground, and compatibility callers; they do not create a second public backend.
+The repository currently exports several TypeScript layers through `src/index.ts`. These support the POC, repository tests, and the playground; they do not create a second public backend.
 
 ### Source frontend
 
@@ -25,7 +25,7 @@ The lower-level `lex(...)` and `parse(...)` functions expose frontend results wi
 
 The lower-level layer includes:
 
-- `compileProgram(...)` and `validateInstructionPlan(...)`;
+- `validateInstructionPlan(...)`;
 - `createFreshRuntimeSnapshot(...)` and `validateRuntimeSnapshot(...)`;
 - `executeInstruction(...)`, `stepToEvent(...)`, and `run(...)`;
 - checkpoint creation, serialization, deserialization, and restore functions;
@@ -41,15 +41,9 @@ source
     -> executeInstruction, stepToEvent, or run
 ```
 
-Low-level functions remain separately exported for tests, tooling, debugging, and controlled integration. Callers that bypass `compileSource(...)` are responsible for composing the documented semantic, plan, snapshot, and checkpoint validation stages. `compileProgram(...)` performs lowering and limited defensive checks; it is not a substitute for semantic validation. It reuses the shared finite-literal AST validation and throws `InstructionCompilationError` with `TSC001` rather than returning a plan containing `NaN`, `Infinity`, or `-Infinity`. `validateInstructionPlan(...)` independently rejects non-JSON-safe plan data.
+Ordinary TeaseScript source is compiled through `compileSource(...)`; the resulting validated instruction plan runs with explicit serializable runtime state. Parser AST data remains available to compiler and authoring tooling, while `compileProgram(...)` is an internal compiler implementation detail rather than a product execution API. `validateInstructionPlan(...)` independently rejects non-JSON-safe plan data.
 
-### Compatibility host boundary
-
-`execute(program, options)` and `Interpreter` form the current direct-AST compatibility/testing boundary. They run shared finite-literal AST validation and semantic validation using configured global and builtin names before lowering. Non-finite literal values and semantic failures are exposed through ordered `InterpreterCompilationError` diagnostics rather than an unstructured runtime crash. Because their current `ExecutionResult` cannot represent a pending execution, a valid compiled plan containing any blocking `wait` is conservatively rejected before runtime state creation with error diagnostic `TSC004` and the first canonical wait span. This temporary behavior covers all program regions, including uncalled functions; it does not make `wait` unsupported in TeaseScript.
-
-The explicit plan/snapshot/runtime API remains the canonical resumable route for waits, including pending actions, checkpoints, completion, and resumption. The compatibility APIs remain unresolved POC surfaces: a future resumable compatibility result or lifecycle decision needs separate owner approval.
-
-Compatibility globals and builtin results cross a serializable-value adapter. Values are copied and validated before entering runtime state. Host `RuntimeSpeaker` objects are not currently supported across this boundary; declared TeaseScript speakers remain runtime-owned values.
+The explicit plan/snapshot/runtime API is the canonical resumable route for waits, including pending actions, checkpoints, completion, and resumption.
 
 Runtime builtins are explicit capabilities. Only own registered properties are callable, core builtins retain precedence, and low-level named arguments use a prototype-free record. These rules prevent inherited JavaScript properties or prototype-mutating names from becoming implicit capabilities.
 
@@ -96,12 +90,15 @@ active foreground/background action
 
 The exact cross-origin envelope, field names, capability-negotiation schema, reconnect protocol, and save acknowledgement remain open. They are not defined by ADR 0016.
 
-Camera and file APIs continue to return engine-managed references rather than browser objects. Package-defined camera roles, player device aliases, long-lived stream ownership, and persistent media collections remain separate follow-up designs recorded in [`planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md`](planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md).
+Camera and file APIs continue to return engine-managed references rather than browser objects. Package-defined camera
+roles, player device aliases, long-lived stream ownership, and persistent media collections remain separate follow-up
+designs recorded in
+[`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
 ## Stability and future contracts
 
-The current TypeScript exports, version-4 instruction plans, and version-5 runtime-snapshot/checkpoint formats are POC implementation surfaces. Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
+The current TypeScript exports and internal instruction-plan, runtime-snapshot, and checkpoint formats are POC implementation surfaces. The current numeric revisions are documented in [`RUNTIME.md`](RUNTIME.md). Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
 
-Implementation of ADR 0016 introduced version-4 instruction plans and pending-action state. Version 5 runtime snapshots and checkpoints add delay-settlement provenance. These remain internal POC format revisions, not product release numbers.
+Implementation of ADR 0016 introduced revision-4 instruction plans and pending-action state. Revision-5 plans and revision-6 runtime snapshots/checkpoints added the generic interaction instruction/action/settlement family and canonical player-transcript event data. Revision-6 plans introduced the local canonical result consume/transfer boundary, and revision-8 runtime snapshots/checkpoints introduced one nullable single-use result handoff that remains authoritative until the first canonical consume, transfer, return, discard, or exit succeeds. That handoff preserves destination/result consistency independently of `lastSettlement`, which remains bounded replay data only. These are historical internal format revisions, not product release numbers.
 
 Exact account, toy, history, global-data, checkpoint storage, host-message, media-persistence, time-integrity, and integration payloads remain open and must be defined as typed contracts before implementation. This document does not resolve their long-term versioning and migration policy.

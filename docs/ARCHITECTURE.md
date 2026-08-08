@@ -55,7 +55,12 @@ An official TeaseScript construct may compile to:
 - one public Standard Library export;
 - or a fixed compiler-owned composition.
 
-Ordinary library exports use normal function-call syntax and generated type/editor metadata. Libraries may not add grammar productions, keywords, command forms, or parser hooks. New special syntax requires an explicit language/compiler decision.
+Ordinary library exports use normal function-call syntax when linkage is
+implemented. Libraries may not add grammar productions, keywords, command
+forms, or parser hooks. New special syntax requires an explicit
+language/compiler decision. Package identity, linkage, metadata transport, and
+library-aware editor support remain future consumer-driven work; grammar-aware
+support for official syntax is parser/compiler-owned.
 
 Accepted V30 forms and current implementation behavior remain authoritative until a later accepted decision supersedes them. ADR 0017 does not by itself remove current `say` instructions or alter ADR 0016 pending-action semantics.
 
@@ -102,27 +107,15 @@ execute instructions without duplicating operation logic. Whole-snapshot
 construction, cloning, validation, and cross-state invariants remain in
 `src/runtime/state.ts`.
 
-Library catalog and metadata tooling lives under `src/library-tooling/`.
-Privileged adapter placeholders live under `src/platform-internal/` and are
-not part of the runtime root export. No `src/standard-library/` shell was
-created because no real Standard Library implementation is present.
+No `src/standard-library/` shell was created because no real Standard Library
+implementation is present.
 
 The technical playground workspace controller lives at
-`playground/workspace/controller.ts`; the existing entry path remains a
-compatibility facade. No speculative Player or shared browser folders were
-added.
+`playground/workspace/controller.ts`. No speculative Player or shared browser
+folders were added.
 
-### Compatibility facade inventory
-
-| Old path | Canonical path | Exposed symbols or responsibility | Known repository consumers | External-support status | Owner | Removal condition |
-| --- | --- | --- | --- | --- | --- | --- |
-| `src/instructions.ts` | `src/plan/*`, `src/compiler/*` | Plan, validation, and compilation symbols | Compatibility test only | Temporarily supported; external status unknown | Compiler/runtime owners | Later cleanup after dependent branches migrate and external direct-import status is decided |
-| `src/libraries/public.ts` | `src/library-tooling/public.ts` | Catalog and metadata tooling | Compatibility test only | Temporarily supported; external status unknown | Library tooling owner | Evidence-based cleanup after repository and dependent consumers migrate |
-| `playground/workspace.ts` | `playground/workspace/controller.ts` | Technical workspace compile/run/decode controller | Compatibility test only; browser/server use canonical path | Repository compatibility only | Workspace owner | Remove after consumers and external-support status are accounted for |
-| `src/runtime/validation-testing.ts` | `src/validation-testing.ts` | Test-only validation instrumentation | Compatibility test only; production and ordinary tests use the canonical path | Repository compatibility only; not a root public export | Runtime validation owner | Remove after direct-import compatibility is no longer required and external-support status is decided |
-
-`tools/check-legacy-imports.mjs` resolves static import/export specifiers to
-repository paths before rejecting legacy paths, including local and deep
-relative forms. Facades, the dedicated compatibility test, and its isolated
-invalid-import fixtures are the narrow documented exceptions; the facades
-remain intentionally retained in this issue.
+`src/index.ts` is the intentional public package/root API. Canonical internal
+paths may change before a published compatibility policy exists; old repository
+deep-import paths are not supported compatibility contracts. Any published
+compatibility commitment must be decided explicitly rather than inferred from
+repository source layout.

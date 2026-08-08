@@ -5,23 +5,21 @@
 - Regular executable content uses `.tease`.
 - Advanced reusable programming logic uses real TypeScript in `.ts`.
 - `.ts` libraries are not randomly selected content modules.
-- Normal TypeScript named exports are the accepted public-library direction; tooling may generate signatures and editor metadata.
+- Normal TypeScript named exports are the accepted public-library direction.
 - Package libraries execute inside the player sandbox and have no unrestricted external network access.
 
-The current POC includes an internal exact-identity catalog and generated, JSON-safe metadata for narrow named TypeScript exports: non-generic function declarations without `this` or rest parameters, plus non-generic type aliases and interfaces. The tooling entry point captures external input without executing accessors, rejects invalid proxy observations, caps source text at 100,000 characters before parsing, and caps retained metadata text at 16,384 characters per field and 100,000 characters in total. It is synchronous infrastructure only: it has no `.tease` import syntax, package manifest, range or `latest` resolution, runtime/checkpoint persistence, execution linkage, or permanent metadata wire format. The catalog uses opaque exact tokens and intentionally makes no final package-versioning decision.
+The temporary exact-token catalog, TypeScript-export extractor, external
+metadata validator, and tooling facade have been removed. They had no selected
+runtime, compiler, editor, or package consumer and do not constrain internal
+TypeScript library code.
 
-This catalog/metadata tooling is intentionally not exported from the runtime root entry point. It imports the TypeScript compiler and remains a separate tooling-only module, so ordinary engine consumers do not load or require that compiler at runtime.
-
-The implementation is canonically located in `src/library-tooling/`:
-`catalog.ts`, `metadata.ts`, and `public.ts`. The old
-`src/libraries/public.ts` path is a temporary re-export facade covered by a
-focused compatibility test. Privileged adapter placeholders are kept in
-`src/platform-internal/` and are not reachable through the runtime root or
-library-tooling public surface.
-
-Public library definitions and metadata are separate from internal privileged platform adapters. Registering a public library accepts inert TypeScript source and metadata only; it does not expose DOM, cookie, network, browser-handle, runtime, or host capabilities.
-
-The exact `.tease` import/linkage syntax, generated metadata format, versioning rules, and complete Standard Library API beyond the accepted first POC remain open. Historical examples using the rejected procedure concept, explicit ordinary-function invocation keywords, or procedure-based scheduling are not authoritative.
+The exact `.tease` import/linkage syntax, package identity and versioning,
+metadata format and transport, validation boundary, automatic export linkage,
+and library-aware editor integration remain future consumer-driven work.
+Ordinary runtime and Player startup paths do not import or bundle TypeScript
+compiler tooling. Historical examples using the rejected procedure concept,
+explicit ordinary-function invocation keywords, or procedure-based scheduling
+are not authoritative.
 
 ## Accepted dependency model
 
@@ -133,7 +131,8 @@ The selected resumable helpers are fully lowered into explicit versioned plan in
 
 A new session may be compiled with a newer compatible Standard Library/compiler, but an active or restored session remains bound to its original plan and captured pacing configuration. No checkpoint migration is included.
 
-The current issue #74 exact token and metadata format remain tooling-only POC infrastructure. ADR 0018 does not add those values to plans/checkpoints and does not treat them as a final package or semver identity.
+ADR 0018 does not add package identity or metadata values to plans/checkpoints
+and does not treat them as a final package or semver identity.
 
 ### Generic interaction wrapper family
 

@@ -8,7 +8,7 @@ Start with [`README-FIRST.md`](README-FIRST.md).
 
 The repository contains the parser/core language, semantic validation, a versioned serializable instruction runtime, explicit loop and call frames, checkpoint save/restore, deterministic control flow and random built-ins, user-defined functions, source-order/checkpoint hardening, and a standalone browser playground.
 
-Instruction plans, runtime snapshots, and checkpoints currently use version 3 and reject unsupported older versions. The wider V30 language and complete static type checking remain out of scope.
+The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). Non-current revisions are rejected. The wider V30 language and complete static type checking remain out of scope.
 
 ## Development
 
@@ -41,12 +41,11 @@ The page offers fixed repository examples for core behavior, control flow, activ
 
 Fresh playground runs use the fixed unsigned seed `0x6d2b79f5` (`1831565813`) with the versioned `xorshift32-v1` runtime RNG. It is deterministic and serializable, not cryptographically secure and not a permanent syntax guarantee.
 
-The POC has two exactly pinned development dependencies:
+The POC uses pinned development dependencies for the TypeScript compiler, agent codemods, and Node.js types.
+[`package.json`](package.json) and [`package-lock.json`](package-lock.json) own their exact package identities and versions.
 
-- `typescript` compiles and statically checks the TypeScript core;
-- `@types/node` supplies types for the Node.js test and development-server harness.
-
-Neither is a runtime package exposed to TeaseScript content.
+The build and typecheck scripts use the public `tsc` command. None of these development dependencies is a runtime
+package exposed to TeaseScript content.
 
 ## Documentation
 

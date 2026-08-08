@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { lex } from "../src/lexer.js";
 import { parse } from "../src/parser.js";
-import { execute } from "../src/runtime/interpreter.js";
+import { compileSource, createFreshRuntimeSnapshot, run } from "../src/index.js";
 import { TokenKind } from "../src/token.js";
 
 const nestedSource = "say `Outer: ${`Hello ${name}`}`";
@@ -97,11 +97,10 @@ test("evaluates interpolation inside a nested template", () => {
     'let name = "Vera"',
     "say `Outer: ${`Hello ${name}`}`",
   ].join("\n");
-  const parsed = parse(source);
-
-  assert.deepEqual(parsed.diagnostics, []);
-  const result = execute(parsed.program, { random: { next: () => 0 } });
-  assert.deepEqual(result.errors, []);
+  const compiled = compileSource(source);
+  assert.deepEqual(compiled.diagnostics, []);
+  assert.notEqual(compiled.plan, null);
+  const result = run(compiled.plan!, createFreshRuntimeSnapshot(compiled.plan!));
   assert.deepEqual(
     result.events
       .filter((event) => event.kind === "say")

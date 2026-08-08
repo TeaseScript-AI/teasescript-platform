@@ -1,6 +1,10 @@
 import type { InstructionPlan } from "../../plan/model.js";
 import { captureExternalData } from "../../external-data-limits.js";
-import { cloneCapturedRuntimeSnapshot, type RuntimeSnapshot } from "../state.js";
+import {
+  cloneCapturedRuntimeSnapshot,
+  type RuntimeInteractionResultHandoffSnapshot,
+  type RuntimeSnapshot,
+} from "../state.js";
 import type { RuntimeActionSettlementSnapshot, RuntimeInteractionActionSnapshot } from "../actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent, PlayerTranscriptEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
@@ -77,9 +81,20 @@ function completeInteraction(
     result: resolved.result,
     transcriptText: resolved.transcriptText,
   });
+  const handoff: RuntimeInteractionResultHandoffSnapshot | null =
+    action.destinationTemporary === null || resolved.result === null
+      ? null
+      : Object.freeze({
+          actionId: action.actionId,
+          owningInstruction: action.owningInstruction,
+          continuationInstruction: action.continuationInstruction,
+          ownerCallFrameId: action.ownerCallFrameId,
+          destinationTemporary: action.destinationTemporary,
+          result: resolved.result,
+        });
   current.foregroundAction = null;
   current.lastSettlement = settlement;
-  current.lastSettlementResultState = action.destinationTemporary === null ? "none" : "live";
+  current.interactionResultHandoff = handoff;
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;

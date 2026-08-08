@@ -4,11 +4,8 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import { lex } from "../src/lexer.js";
 import { parse } from "../src/parser.js";
-import {
-  execute,
-  type BuiltinFunction,
-  type RandomSource,
-} from "../src/runtime/interpreter.js";
+import { createFreshRuntimeSnapshot, run, type RuntimeBuiltinFunction } from "../src/index.js";
+import type { RandomSource } from "../src/runtime/random.js";
 import { TokenKind, type Token } from "../src/token.js";
 
 const random: RandomSource = { next: () => 0 };
@@ -122,8 +119,7 @@ test("parses, compiles, and executes multiline nested interpolation", () => {
     ),
   );
 
-  const execution = execute(parsed.program, { random });
-  assert.deepEqual(execution.errors, []);
+  const execution = executeSource(source);
   assert.deepEqual(
     execution.events
       .filter((event) => event.kind === "say")
@@ -134,7 +130,7 @@ test("parses, compiles, and executes multiline nested interpolation", () => {
 
 test("preserves source order and escapes in a deeper multiline nested template", () => {
   let nextValue = 0;
-  const next: BuiltinFunction = () => {
+  const next: RuntimeBuiltinFunction = () => {
     nextValue += 1;
     return nextValue;
   };
@@ -151,11 +147,7 @@ test("preserves source order and escapes in a deeper multiline nested template",
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
   assert.deepEqual(parsed.diagnostics, []);
-  const execution = execute(parsed.program, {
-    random,
-    builtins: { next },
-  });
-  assert.deepEqual(execution.errors, []);
+  const execution = executeSource(source, { next });
   assert.equal(nextValue, 2);
   assert.deepEqual(
     execution.events
@@ -325,8 +317,7 @@ test("parses, compiles, and executes prototype-sensitive declarations and proper
     ],
   );
 
-  const execution = execute(parsed.program, { random });
-  assert.deepEqual(execution.errors, []);
+  const execution = executeSource(source);
   assert.deepEqual(
     execution.events
       .filter((event) => event.kind === "say")
@@ -340,15 +331,10 @@ test("accepts prototype-sensitive configured globals and builtins", () => {
   const globalCompilation = compileSource(globalSource, {
     globals: ["constructor"],
   });
-  const globalProgram = parse(globalSource).program;
 
   assert.deepEqual(globalCompilation.diagnostics, []);
   assert.notEqual(globalCompilation.plan, null);
-  const globalExecution = execute(globalProgram, {
-    random,
-    globals: { constructor: "global value" },
-  });
-  assert.deepEqual(globalExecution.errors, []);
+  const globalExecution = executeSource(globalSource, undefined, { constructor: "global value" });
   assert.deepEqual(
     globalExecution.events
       .filter((event) => event.kind === "say")
@@ -360,15 +346,11 @@ test("accepts prototype-sensitive configured globals and builtins", () => {
   const builtinCompilation = compileSource(builtinSource, {
     builtins: ["valueOf"],
   });
-  const valueOf: BuiltinFunction = () => "builtin value";
+  const valueOf: RuntimeBuiltinFunction = () => "builtin value";
 
   assert.deepEqual(builtinCompilation.diagnostics, []);
   assert.notEqual(builtinCompilation.plan, null);
-  const builtinExecution = execute(parse(builtinSource).program, {
-    random,
-    builtins: { valueOf },
-  });
-  assert.deepEqual(builtinExecution.errors, []);
+  const builtinExecution = executeSource(builtinSource, { valueOf });
   assert.deepEqual(
     builtinExecution.events
       .filter((event) => event.kind === "say")
@@ -395,6 +377,27 @@ test("preserves unknown-name and protected-name semantic diagnostics", () => {
 
 function tokenValue(token: Token | undefined): string | undefined {
   return token !== undefined && "value" in token ? token.value : undefined;
+}
+
+function executeSource(
+  source: string,
+  builtins?: Readonly<Record<string, RuntimeBuiltinFunction>>,
+  globals?: Readonly<Record<string, string>>,
+) {
+  const compiled = compileSource(source, {
+    builtins: builtins === undefined ? [] : Object.keys(builtins),
+    globals: globals === undefined ? [] : Object.keys(globals),
+  });
+  assert.deepEqual(compiled.diagnostics, []);
+  assert.notEqual(compiled.plan, null);
+  return run(
+    compiled.plan!,
+    createFreshRuntimeSnapshot(
+      compiled.plan!,
+      globals === undefined ? {} : { globals },
+    ),
+    { random, ...(builtins === undefined ? {} : { builtins }) },
+  );
 }
 
 function compactSpan(

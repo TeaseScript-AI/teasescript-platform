@@ -8,7 +8,7 @@
 
 ## Purpose
 
-This backlog answers a narrower question than `WISHES.xml` or the legacy planning files:
+This backlog answers a narrower question than `WISHES.xml` or other proposal documents:
 
 > Which open outcomes has the owner selected as required before a stated development gate?
 
@@ -21,7 +21,7 @@ WISHES.xml or proposal material
     -> explicit owner selection
 POC-TO-ALPHA-BACKLOG.md
     -> explicit coordinator scheduling
-phase plan / work package / issue
+phase plan / issue
     -> implementation and verification
 PHASE-STATUS.md
 ```
@@ -29,7 +29,7 @@ PHASE-STATUS.md
 ## Governance
 
 - Agents may propose entries, but only the owner or designated coordinator may select an item as required, change its target gate, or schedule it for implementation.
-- A backlog item is not implementation scope unless a current phase plan, coordinator assignment, work package, or issue explicitly selects its ID.
+- A backlog item is not implementation scope unless a current phase plan, coordinator assignment, or issue explicitly selects its ID.
 - Ideas that still need product triage remain in `WISHES.xml` or another proposal document.
 - Accepted architecture and language semantics belong in ADRs and specifications, not in this backlog.
 - When an item is implemented and verified, record the result in `PHASE-STATUS.md` and remove it from this open backlog. Git history preserves the completed entry.
@@ -187,68 +187,7 @@ Create a measured performance baseline and production optimization plan for the 
 
 This item may move to **Ready for phase** after benchmark workloads, measurement commands, acceptance thresholds, and a prioritized optimization plan are owner-approved. Individual optimizations must then be scheduled explicitly.
 
-### POC-ENGINE-004 — Establish a source-to-runtime conformance corpus
-
-- **Track:** Engine core
-- **Target gate:** Before pre-alpha
-- **Planning state:** Ready for phase
-- **Scheduling:** Unscheduled
-
-#### Required outcome
-
-Create a small stable corpus of real `.tease` source cases organized by behavior, with support for:
-
-- expected diagnostic codes and source spans;
-- expected public runtime events;
-- expected final status;
-- selected final values;
-- an optional full resume-equivalence requirement;
-- stable case naming and organization.
-
-#### Boundaries
-
-- Prefer public behavior assertions.
-- Do not use complete instruction-plan snapshots as broad golden files.
-- Assert internal instruction structure only when it is itself an accepted contract or a focused lowering test requires it.
-
-#### Dependencies and references
-
-- [`docs/TESTING.md`](../TESTING.md), section **Source-to-runtime conformance corpus**
-- [`docs/TEASESCRIPT.md`](../TEASESCRIPT.md)
-- [`docs/RUNTIME.md`](../RUNTIME.md)
-
-### POC-ENGINE-005 — Add deterministic fuzz and property testing
-
-- **Track:** Engine core
-- **Target gate:** Before alpha
-- **Planning state:** Ready for phase
-- **Scheduling:** Unscheduled
-
-#### Required outcome
-
-Add fixed-seed, bounded, reproducible generation and property coverage for source and external runtime data, including:
-
-- short token and syntax sequences;
-- malformed and unusual source input;
-- malformed plans and checkpoints;
-- bounded deeply nested valid source structures;
-- equivalent bounded direct-AST structures that bypass parsing;
-- termination, JSON-safety, determinism, and structured-boundary properties;
-- failing source, seed, generated input, and first failing boundary in assertion output;
-- explicit depth, input-size, and total-work limits.
-
-#### Boundaries
-
-- This item does not document deeply nested valid source or direct AST input as a confirmed current defect; a bug issue requires a repository reproduction.
-- A valid generated input may succeed or reach a documented bounded rejection, but must not fail through an incidental native stack overflow.
-- Do not select `fast-check` or another dependency until implementation demonstrates the need and documents alternatives, maintenance impact, and security impact.
-
-#### Dependencies and references
-
-- [`docs/TESTING.md`](../TESTING.md), section **Deterministic fuzz and property testing**
-- [`docs/SECURITY.md`](../SECURITY.md)
-
-### POC-PLAYER-002 — Test resumable pending-action state machines
+### POC-PLAYER-002 — Complete pending-action state-machine coverage
 
 - **Track:** Player runtime
 - **Target gate:** Before alpha
@@ -257,26 +196,30 @@ Add fixed-seed, bounded, reproducible generation and property coverage for sourc
 
 #### Required outcome
 
-Add deterministic state-transition coverage for choices, input, waits, timers, and pending actions, including:
+Complete deterministic state-transition coverage for the remaining pre-alpha pending-action surface as its action kinds
+and host delivery paths are implemented. Existing blocking-`wait` and generic foreground-interaction coverage remains
+current evidence in `docs/TESTING.md` and is not reopened by this item.
 
-- normal completion;
-- checkpoint and restore while pending;
-- cancellation;
-- invalid, duplicate, late, timed-out, and wrong-type responses;
-- unknown handles;
+The remaining coverage must include, where applicable:
+
+- action-specific cancellation, timeout, late-response, and wrong-type behavior;
+- checkpoint and restore across foreground and background actions;
 - restore around timeout processing;
-- duplicate host messages;
-- event and handle IDs not being reused after restore;
-- a fake clock or equivalent deterministic time source with no real waiting.
+- duplicate host delivery and active, settled, stale, and unknown action identities;
+- event and action IDs not being reused after restore;
+- deterministic fake-time operation with no real waiting.
 
 #### Boundaries
 
-- This item does not define the pending-action API, handle format, timeout semantics, or host-message schema.
-- Implementation requires an accepted pending-action runtime contract first.
+- ADR 0016 owns the shared pending-action runtime contract; this item does not redefine it.
+- `docs/TESTING.md` owns the shared state-machine matrix and current wait/interaction evidence.
+- Remaining action-specific contracts and the host-delivery schema require their normal accepted-decision routes.
+- Add tests with the feature that makes each path supported; do not create speculative APIs, a duplicate model, or a
+  second test framework through this backlog item.
 
 #### Dependencies and references
 
-- [ADR 0015 — Serializable runtime architecture](../decisions/0015-serializable-runtime-architecture.md)
+- [ADR 0016 — Resumable pending-action runtime contract](../decisions/0016-resumable-pending-action-runtime-contract.md)
 - [`docs/RUNTIME.md`](../RUNTIME.md), section **Remaining runtime work**
 - [`docs/OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), section **Player and interactions**
 - [`docs/TESTING.md`](../TESTING.md), section **Interactive runtime state-machine testing**

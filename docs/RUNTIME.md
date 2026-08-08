@@ -2,7 +2,7 @@
 
 ## Playground execution helper
 
-`playground/workspace/controller.ts` is the DOM-free adapter shared by the browser controller and development automation routes. The old `playground/workspace.ts` path is a compatibility facade. It uses the public compiler and canonical `run`/`stepToEvent` runtime interfaces to create fresh validated snapshots and return JSON-safe diagnostics, events, plan, snapshot, status, and instruction count. It stops on `halted`, `failed`, `waiting`, or the canonical instruction-budget failure and does not use the compatibility `Interpreter.execute(...)` route.
+`playground/workspace/controller.ts` is the DOM-free adapter shared by the browser controller and development automation routes. It uses `compileSource(...)` and canonical `run`/`stepToEvent` runtime interfaces to create fresh validated snapshots and return JSON-safe diagnostics, events, plan, snapshot, status, and instruction count. It stops on `halted`, `failed`, `waiting`, or the canonical instruction-budget failure.
 
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
 
@@ -15,17 +15,15 @@ ADR 0016 accepts the resumable pending-action contract for waits, timers, choice
 ## Implemented runtime ownership
 
 Shared serializable action and settlement contracts are owned by
-`src/runtime/actions/model.ts` and re-exported from `state.ts` for direct-import
-compatibility. Pure interaction normalization and matching live in
+`src/runtime/actions/model.ts`. Pure interaction normalization and matching live in
 `actions/interaction.ts`; delay helpers and replay classification remain
 action-specific. Canonical completion and time-observation transitions are
 implemented in `src/runtime/operations/complete-action.ts` and
 `src/runtime/operations/observe-time.ts`, with a small shared operation support
 module for validated input capture, result construction, and event-sequence
-allocation. `src/runtime/engine.ts` re-exports those operations for direct
-compatibility and remains the execution facade for instructions, expressions,
-`run`, and orchestration. No new action state machine or pacing implementation
-was added.
+allocation. `src/runtime/engine.ts` remains the execution facade for
+instructions, expressions, `run`, and orchestration. No new action state
+machine or pacing implementation was added.
 
 ## Accepted primitive boundary
 
@@ -69,7 +67,7 @@ The engine owns action identity, active state, completion validation, transcript
 
 The selected interactions are mandatory and non-cancellable. Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice, and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or continuation.
 
-Result-bearing text, number, and choice instructions require the destination temporary to be absent on every path that reaches the interaction. Every reachable continuation path must then clear that temporary before natural root completion or discard the active temporary set through `return` or `exit`. While the result remains live, the plan may execute ordinary deterministic instructions and pure function calls, but it may not request another foreground action or overwrite the destination. A literal `wait 0` remains immediate and does not create that conflict. Branches may not merge incompatible live/released states. The plan validator charges this interaction control-flow analysis against a fixed work budget. A result-free button may be the terminal root instruction and uses the existing canonical settled root-end transition.
+Result-bearing text, number, and choice instructions require the destination temporary to be absent when the interaction is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary, records one nullable single-use `interactionResultHandoff` authority, and advances to the next instruction without executing it. The handoff contains only the completed action identity, owning and continuation positions, owner call frame, destination temporary, and canonical result. It remains independent of bounded `lastSettlement` replay data, so a later settlement cannot remove the value-consistency check before consumption. A canonical plan then either discards the temporary directly, returns or exits the owning runtime region, or performs one ordinary local consume/transfer instruction followed immediately by `clearTemporary`. The handoff record is removed after that first instruction succeeds; after a value is copied into an ordinary binding, prepared argument, assignment, or other runtime destination, no interaction-specific provenance remains during cleanup or later execution. No branch, loop edge, second blocking action, arbitrary user-function call, unrelated writer, or independent control-flow target may occur inside that short boundary. The validator enforces this fixed local shape rather than performing whole-plan result-liveness analysis. A result-free button may be the terminal root instruction and uses the existing canonical settled root-end transition.
 
 Completion semantics are:
 
@@ -85,7 +83,7 @@ Interaction limits version 1 uses three shared technical ceilings: `65,536` UTF-
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 
-Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text, destination temporary, and owning call-frame identity for duplicate replay and checkpoint provenance. Delay creation preflights its request plus future completion sequence; interaction creation preflights its request plus future transcript and completion sequences. Interaction completion rechecks both required sequences before writing its destination. Continuation execution remains eligible only through a later normal runtime entry.
+Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text, destination temporary, and owning call-frame identity for duplicate replay. The separate single-use handoff is the persisted authority for the still-unconsumed destination and is validated independently when `lastSettlement` has already been replaced. Delay creation preflights its request plus future completion sequence; interaction creation preflights its request plus future transcript and completion sequences. Interaction completion rechecks both required sequences and validates the complete destination mutation before publishing any write, handoff, settlement, event, or continuation change. Continuation execution remains eligible only through a later normal runtime entry.
 
 ### Standard composer and dynamic choice presentation
 
@@ -276,7 +274,7 @@ Implementation must preserve ADR 0015 and ADR 0016:
 - settlement and continuation remain separate inspectable runtime boundaries;
 - every required plan, snapshot, and checkpoint schema change is explicitly versioned before implementation merge.
 
-The selected behavior is fully lowered into the instruction plan. The issue #74 exact library token is not added to plan/checkpoint data, no implicit latest lookup occurs, and no migration is included.
+The selected behavior is fully lowered into the instruction plan. No package or library identity lookup is added to plan/checkpoint data, restore does not select an implicit latest implementation, and no migration is included.
 
 ## Current runtime
 
@@ -295,7 +293,7 @@ The implementation includes:
 - defensive validation of function regions, parameter progress, call stacks, and prepared-reference state;
 - standalone playground and constrained development server.
 
-Instruction plans use version 5; runtime snapshots and checkpoints use version 6. They are POC formats rather than permanent public wire-format guarantees.
+The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are listed under [Format evolution](#format-evolution). They are POC formats rather than permanent public wire-format guarantees.
 
 The current implementation contains compiler-owned blocking `wait` and one generic foreground `interaction` instruction/action family for button, text, number, and choice. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, author-facing interaction syntax, Player controls, and background pacing remain out of scope.
 
@@ -323,7 +321,7 @@ lastSettlement:
     ActionSettlement | null
 ```
 
-A valid current `waiting` snapshot contains exactly one foreground delay or interaction action. Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity, destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request sequence. A waiting result destination must still be absent. A completed interaction settlement keeps immutable destination and owner identity for duplicate replay, while the separate bounded `lastSettlementResultState` field records whether that result is `live`, `released`, or not applicable. Validation binds a live result to the exact owner temporary even after unrelated instructions or while its caller temporaries are suspended by a pure nested function call. Clearing the destination, returning from its owner function, or exiting marks the lifecycle released without rewriting the recorded settlement. Every persisted interaction instruction, UI/accessibility/option shape, action, settlement, and lifecycle value has an exact supported shape. Non-waiting states contain no foreground action. The background collection remains present but must be empty until the separately scoped pacing implementation versions that schema.
+A valid current `waiting` snapshot contains exactly one foreground delay or interaction action. Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity, destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request sequence. A waiting result destination must still be absent. Successful interaction completion commits the canonical typed value directly into that destination and leaves the snapshot at the local compiler-defined continuation. Snapshot validation uses the independent single-use `interactionResultHandoff` as the canonical result authority while execution remains at the immediate commit or one-instruction transfer boundary, even if `lastSettlement` has already been replaced; after the first canonical consume, transfer, return, discard, or exit succeeds, the record is removed and the value is ordinary runtime state without an interaction-specific lifecycle. Every persisted interaction instruction, UI/accessibility/option shape, action, settlement, and snapshot field has an exact supported shape. Non-waiting states contain no foreground action. The background collection remains present but must be empty until the separately scoped pacing implementation versions that schema.
 
 `currentSessionTimeMs` is canonical runtime state. It preserves the nondecreasing session coordinate across checkpoint and restore. A fresh snapshot receives a validated initial coordinate; deterministic tests may use `0`.
 
@@ -331,7 +329,7 @@ A blocking instruction evaluates its arguments, stores a complete JSON-safe acti
 
 `wait 0` is deliberately immediate: its duration expression is still evaluated, but it allocates no action ID, creates no pending action or settlement, and emits neither action event. The next source instruction runs normally; if it was the terminal root instruction, ordinary natural completion emits one `complete` event. In contrast, a positive terminal root wait settles with `actionCompleted`; the following runtime entry consumes the canonical settled root-end transition and emits the sequenced `complete` event. Re-entering an already halted snapshot emits no further completion event.
 
-A duplicate delivery matching `lastSettlement` returns the same immutable canonical recorded settlement without another write, event, RNG advance, handler, or continuation. Result-lifecycle release is tracked outside that settlement, so consuming or clearing a result cannot change duplicate replay data. A newer settlement replaces the previous record only after any live interaction result has been released. Each delay settlement retains owning and continuation instruction positions.
+A duplicate delivery matching `lastSettlement` returns the same immutable canonical recorded settlement without another write, event, RNG advance, handler, or continuation. `lastSettlement` is bounded replay/idempotency data only: it does not own an expression temporary, prevent destination reuse, or block a later action. A newer settlement may replace it after the interaction result has already been atomically committed; the ordinary runtime value remains valid independently. Each delay settlement retains owning and continuation instruction positions.
 
 Completion lookup always searches the active foreground action and all active background actions first. Only when no active action matches does the runtime compare `lastSettlement`, classify a lower previously issued ID as `staleAction`, or classify an unissued ID as `unknownAction`.
 
@@ -373,21 +371,13 @@ Template interpolation uses normal TeaseScript expression parsing and supports r
 
 Unterminated nested content remains structured: `TSL004` reports an unterminated template and `TSL005` reports an unterminated interpolation. A backtick starts a nested template whenever the current interpolation position can begin an expression, including when horizontal whitespace or a physical line ending follows the nested opening backtick. A backtick in a position where an expression cannot start remains the outer-template recovery boundary.
 
-### Direct AST compatibility route
+### Canonical source-to-runtime route
 
-`execute(program, options)` and `Interpreter.execute(program)` are compatibility/testing entry points for callers that already hold a `Program`. They are not an alternative runtime representation: they validate the program, lower it to an instruction plan, create explicit runtime state, and execute that plan.
+Ordinary TeaseScript source is compiled through `compileSource(...)` into a validated instruction plan, then executed with fresh or restored explicit serializable runtime state. AST data and lowering remain compiler and authoring-tool internals, not product execution APIs.
 
-Before lowering, the compatibility route runs the shared non-finite-literal AST validation and semantic validation with configured global and builtin names. Non-finite literals produce exact-span `TSC001` diagnostics. These diagnostics are ordered before ordinary semantic diagnostics, and any error throws `InterpreterCompilationError` before lowering, runtime-state creation, event emission, or RNG consumption. `InterpreterOptions.random` is required so compatibility execution remains deterministic.
+### Low-level runtime route
 
-After valid lowering but before a runtime snapshot is created, the compatibility route rejects a plan containing any compiled blocking `wait` instruction with `InterpreterCompilationError` diagnostic `TSC004`: "Blocking `wait` requires the canonical resumable runtime API." The diagnostic uses the first `wait` instruction in canonical plan order. This conservative whole-program rule includes waits in branches, loops, nested blocks, and called or uncalled function bodies; it prevents this result shape from silently returning partial pre-wait output without a pending action or resume operation.
-
-This is a temporary compatibility-boundary behavior, not a statement that blocking `wait` is unsupported. The canonical plan/snapshot/runtime API continues to support waits, pending actions, checkpoints, completion, and resumption. The long-term lifecycle of the compatibility APIs and any resumable compatibility result require a separate owner-approved decision.
-
-The compatibility result exposes `say` and `exit` events in its `events` array, structured runtime failures in `errors`, and developer warnings in `warnings`.
-
-### Low-level lowering and runtime route
-
-`compileProgram(program)` is a low-level lowering function for a semantically valid AST. It does not replace `validateSemantics()`. As a narrow defensive boundary, it reuses the shared AST-level finite-literal validation and throws `InstructionCompilationError` with `TSC001` before returning a plan containing `NaN`, `Infinity`, or `-Infinity`. Its other defensive lowering checks include `InstructionCompilationError` with `TSC003` when direct invalid input supplies more positional arguments than a function defines.
+The compiler internally lowers semantically valid AST data after `compileSource(...)` validation. This internal lowering does not replace semantic validation or create a supported direct-AST product route.
 
 The low-level runtime entry points are:
 
@@ -410,7 +400,6 @@ The current boundaries are:
 - low-level named builtin arguments use an immutable prototype-free record and duplicate detection uses own properties;
 - values entering globals or returning from builtins are copied and validated as serializable runtime values;
 - invalid builtin return values become structured runtime failures, including `TSR013` for invalid values;
-- host `RuntimeSpeaker` values are currently unsupported and are rejected rather than converted into temporary or dangling speaker references;
 - normally declared TeaseScript speakers remain runtime-managed state and continue to use stable serialized speaker IDs.
 
 The low-level `RuntimeCapabilities.random` hook is a compatibility/testing override. Without it, execution advances the serialized `xorshift32-v1` state. An injected random source must return a finite number in the half-open range `[0, 1)`.
@@ -431,15 +420,11 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
 
 Current POC defaults and validation limits are:
 
-- instruction-plan format version: `4`;
-- runtime-snapshot format version: `5`;
-- checkpoint format version: `5`;
 - default maximum call depth: `256`;
 - accepted maximum call depth range: `1` through `4096`;
 - maximum external runtime-data nesting depth: `128` (`MAX_EXTERNAL_RUNTIME_DATA_DEPTH`);
 - maximum external runtime-data validation work: `100,000` visited values (`MAX_EXTERNAL_RUNTIME_DATA_WORK`);
 - default `run(...)` and `stepToEvent(...)` instruction budget: `10,000`;
-- compatibility `execute(program, options)` instruction budget: `100,000`;
 - default playground RNG algorithm: `xorshift32-v1`;
 - default playground seed: `0x6d2b79f5`.
 
@@ -477,21 +462,36 @@ Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preser
 
 ## Format evolution
 
-The current formats use version 5 instruction plans and version 6 runtime snapshots/checkpoints. These versions add the generic interaction instruction/action/settlement family and canonical player-transcript event data while retaining delay provenance:
+The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `CHECKPOINT_VERSION` are authoritative for the numeric revisions accepted by the runtime. Accepted ADRs and canonical specifications remain authoritative for format semantics, architecture, and compatibility policy. This table is the single general human-readable summary of the current revisions:
 
-```text
-instruction plan version: 5
-runtime snapshot version: 6
-checkpoint version: 6
-```
+| Format | Current revision | Reason for current revision |
+| --- | ---: | --- |
+| Instruction plan | 6 | Replaced arbitrary long-lived interaction-result arrangements with one locally validated canonical consume/transfer boundary. |
+| Runtime snapshot | 8 | Added one nullable single-use `interactionResultHandoff` authority that protects the still-unconsumed destination independently of `lastSettlement`. |
+| Checkpoint | 8 | Updated the self-contained plan-and-snapshot bundle to carry and validate the current plan contract and the snapshot handoff authority together. |
 
-These numbers describe internal POC JSON schemas, not TeaseScript product releases. Pending-action entries do not receive a redundant nested version field.
+Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
-No migration is provided; older incompatible objects are rejected through the existing structured boundaries. Populated background actions, prepared pacing output, or captured smart-autoplay settings require their own later explicit format changes.
+These numbers are internal POC format revisions, not TeaseScript product releases, public wire-format promises, or backward-compatibility commitments. A changed number in code does not by itself create a new accepted architecture or compatibility policy. Pending-action entries do not receive redundant nested version fields.
+
+Increase a revision when the accepted serialized contract changes incompatibly, including when a required field is added or removed, a field type or meaning changes, new invariants reject previously accepted data, restore behavior changes for the same stored data, or older data must be rejected for correctness or safety. Do not increase a revision for internal refactoring, code movement, renaming, performance work, reorganized tests, clearer diagnostics, documentation-only corrections, or a bug fix that restores already documented behavior while preserving the accepted meaning and validity of stored data. A bug fix does require a bump when previously accepted data changes meaning, becomes unsafe, must be rejected, or would resume differently.
+
+The checkpoint revision represents the complete accepted checkpoint bundle:
+
+| Incompatible change | Revisions to increase |
+| --- | --- |
+| Instruction-plan contract only | instruction plan and checkpoint |
+| Runtime-snapshot contract only | runtime snapshot and checkpoint |
+| Checkpoint envelope only | checkpoint |
+| Internal implementation only | none |
+
+Instruction-plan and runtime-snapshot revisions remain independent and do not need matching numbers. No nested duplicate version fields, hidden sub-format registry, migration chain, or generated documentation synchronization is introduced.
+
+During the POC, only the current revision of each format is supported. Non-current revisions may be rejected explicitly, obsolete development saves and fixtures may become invalid after an incompatible change, and migration code requires a separate owner-approved decision. Git history is sufficient for reconstructing exact older schemas. Populated background actions, prepared pacing output, or captured smart-autoplay settings require their own later explicit format changes.
 
 ## API stability boundary
 
-The exported TypeScript compiler, compatibility wrapper, low-level runtime, snapshot, checkpoint, and RNG functions are current POC surfaces used by the repository and tests. Their presence in `src/index.ts` does not by itself establish a permanent third-party API or wire-format compatibility promise. Long-term package API stability and migration policy remain open.
+The exported TypeScript source frontend, source compiler, low-level runtime, snapshot, checkpoint, and RNG functions are current POC surfaces used by the repository and tests. Their presence in `src/index.ts` does not by itself establish a permanent third-party API or wire-format compatibility promise. Long-term package API stability and migration policy remain open.
 
 ## Remaining runtime work
 

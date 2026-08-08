@@ -1,12 +1,13 @@
 # Documentation map
 
-## Authority
+## Authority and lifecycle
 
 - `../README-FIRST.md`: authority and conflict-routing rules.
 - `specifications/accepted-syntaxes-v30.md`: accepted consolidated syntax baseline.
 - `decisions/`: accepted and proposed ADRs; each file states its status.
-- `../CURRENT-DESIGN.md`: current architecture and implementation boundaries.
-- `../PHASE-STATUS.md`: milestone and verification status.
+- `../CURRENT-DESIGN.md`: stable cross-component architecture and implementation boundaries.
+- `../PHASE-STATUS.md`: current phase, gate, and high-level implemented-capability status.
+- `OPEN-DECISIONS.md`: unresolved choices only; it is not accepted authority.
 - `../WISHES.xml`: product intent and decision history; wishes are not automatic implementation decisions.
 
 ## Current topic documents
@@ -22,35 +23,55 @@
 - `CODE-EDITOR.md`
 - `LLM-INTEGRATION.md`
 - `MATH-EXPRESSIONS.md`
-- `CAPABILITY-MATRIX.md`
 - `TESTING.md`: current testing strategy, runtime invariants, and future quality gates.
-- `OPEN-DECISIONS.md`
 
-These files provide concise current routing and must not duplicate or override accepted syntax or ADRs.
+These files provide maintained topic detail and orientation. They must not duplicate or override accepted syntax or
+ADRs.
 
 ## Development workflow
 
-- `DEVELOPMENT-WORKFLOW.md` defines the GitHub-native issue, agent, branch, pull-request, coordinated-work, documentation, and final-verification process.
-- `../AGENTS.md` contains the mandatory task, coding, review, and Git rules for every agent.
-- `../tools/work-packages/README.md` defines the explicit fallback for agents that cannot complete the normal GitHub branch and pull-request flow.
+- `../README-FIRST.md` selects the repository-wide task route.
+- `agents/README.md` selects the direct-repository or connector-local technical capability route and adds the
+  publication-constrained overlay only for a concrete restriction.
+- `review-and-audit/README.md` mirrors the `../README-FIRST.md` task choice locally and links to normal
+  implementation/review guidance or explicitly assigned audit guidance.
+- `DEVELOPMENT-WORKFLOW.md` owns the universal issue, branch, pull-request, documentation, merge, and verification
+  workflow.
+- `PATCH-PUBLICATION.md` owns the verified patch protocol and security contract.
+- `../tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` owns the project-agent source and installed-layout
+  contract; `chatgpt-project/README-FIRST.md` is the compact project-folder wayfinder; and
+  `chatgpt-project/SYSTEM-PROMPT.txt` is the repository-maintained prompt candidate for deliberate owner-approved
+  synchronization; it does not prove the live ChatGPT Project Settings state.
+- `../AGENTS.md` contains the short mandatory rules that apply to every agent.
 
-Temporary work breakdowns, executor assignments, package files, and merge tracking remain outside the repository.
+Focused guides contain their own procedure. This map does not duplicate their route tables or steps. Temporary work
+breakdowns, executor assignments, and merge tracking remain outside the repository.
+
+## Implementation, review, and audit
+
+`../README-FIRST.md` selects the repository-wide task and routes directly to the shared implementation/review guide or
+the separate explicitly assigned audit guide. `review-and-audit/README.md` mirrors that choice as the local subrouter;
+detailed procedures remain in those two guides.
 
 ## Planning
 
-- `planning/POC-TO-ALPHA-BACKLOG.md` lists owner-selected work that remains required before a stated POC, pre-alpha, or alpha gate. An item may remain unscheduled and is not implementation scope until a phase plan or coordinator assignment selects its ID.
-- `planning/PROPERTY-AND-FUZZ-TESTING-ROADMAP.md` records the staged test-only roadmap for deterministic mutation/property testing (#120) and later grammar/model-based source/runtime testing (#121), including CI, homelab, source-layout, and agent-preparation guidance.
-- `planning/LANGUAGE-LIBRARY-AND-SESSION-DIRECTIONS.md` records the latest owner-selected language simplicity, Standard Library slice, smart-autoplay, input accessibility, explicit timer-handle, library-scope, pause, and recovery direction. For text pacing and public timer API direction it supersedes the older corresponding sections in the camera/media follow-up file.
-- `planning/PLAYER-CAMERA-MEDIA-AND-PACING-FOLLOW-UPS.md` remains the camera, captured-media, and time-integrity planning source. Its older text-pacing and timer-API sections are historical where the newer language/library/session direction explicitly supersedes them.
-- `planning/REPOSITORY-SOURCE-LAYOUT-PROPOSAL.md` records the approved and implemented focused Option A source-layout extraction; `ARCHITECTURE.md` contains the current ownership and facade inventory.
-- `planning/MAINTENANCE-CANDIDATES.md` records unscheduled, non-authoritative repository-maintenance opportunities that require fresh evidence and explicit selection before implementation.
-- `planning/POST-POC-DEVELOPMENT-BACKLOG.md` is a legacy mixed backlog retained for later triage. Its entries are not automatically required.
-- Other files in `planning/` contain proposals and gap analysis. They do not define accepted architecture, syntax, or current implementation scope.
+`planning/README.md` defines the lifecycle and authority boundary for this directory. It contains only active,
+non-implemented planning; entries are non-authoritative and do not schedule themselves.
+
+- `planning/POC-TO-ALPHA-BACKLOG.md` lists owner-selected work that remains required before a stated POC, pre-alpha, or
+  alpha gate.
+- `planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md` retains open timer-handle and advanced recovery-point direction.
+- `planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md` retains open camera ownership, capture, media-lifetime, and
+  browser/server time-integrity direction.
+- `planning/MAINTENANCE-CANDIDATES.md` lists unscheduled repository-maintenance opportunities that require fresh evidence
+  and explicit selection before implementation.
 
 ## Reference
 
-`reference/` explains where non-authoritative capability research, legacy documents, and source archives are stored. Large third-party source examples and historical package material are intentionally kept outside this repository.
+`CAPABILITY-MATRIX.md` is the compact repository-level capability-research summary. `reference/` explains where
+non-authoritative capability research, legacy documents, and source archives are stored. Large third-party source
+examples and historical package material are intentionally kept outside this repository.
 
 ## Documentation ownership
 
-See `DOCUMENTATION-OWNERSHIP.md` for the boundary between canonical repository documentation and the shared project research archive.
+See `DOCUMENTATION-OWNERSHIP.md` for mandatory documentation-edit/review guidance and the boundary between canonical repository documentation and the shared project research archive.

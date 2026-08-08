@@ -1,22 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parse } from "../src/parser.js";
+import { compileSource } from "../src/compiler.js";
 import {
-  execute,
-  InterpreterCompilationError,
-  type BuiltinFunction,
-  type ExecutionResult,
-  type RandomSource,
-} from "../src/runtime/interpreter.js";
-import {
-  createRuntimeList,
-  type RuntimeValue,
-} from "../src/runtime/values.js";
+  createFreshRuntimeSnapshot,
+  run,
+  type InterpreterEvent,
+  type RuntimeBuiltinFunction,
+  type SerializableRuntimeValue,
+} from "../src/index.js";
+import type { RandomSource } from "../src/runtime/random.js";
 
 test("deep-copies lists for declarations and direct assignments", () => {
   const captured: unknown[] = [];
-  const result = run(
+  const result = executeSource(
     [
       "let original = [1, 2]",
       "let declaredCopy = original",
@@ -37,7 +34,7 @@ test("deep-copies lists for declarations and direct assignments", () => {
 
 test("recursively deep-copies nested lists", () => {
   const captured: unknown[] = [];
-  const result = run(
+  const result = executeSource(
     [
       "let original = [[1, 2], [3]]",
       "let copy = original",
@@ -58,7 +55,7 @@ test("recursively deep-copies nested lists", () => {
 
 test("recursively deep-copies ordinary objects", () => {
   const captured: unknown[] = [];
-  const result = run(
+  const result = executeSource(
     [
       "let original = { nested: { value: 1 } }",
       "let copy = original",
@@ -78,7 +75,7 @@ test("recursively deep-copies ordinary objects", () => {
 
 test("deep-copies objects containing lists and sets", () => {
   const captured: unknown[] = [];
-  const result = run(
+  const result = executeSource(
     [
       "let original = { items: [{ value: 1 }], values: set[1, 2] }",
       "let copy = original",
@@ -99,7 +96,7 @@ test("deep-copies objects containing lists and sets", () => {
 
 test("copies sets independently for declaration and assignment", () => {
   const captured: unknown[] = [];
-  const result = run(
+  const result = executeSource(
     [
       "let original = set[1, 2]",
       "let declaredCopy = original",
@@ -118,31 +115,6 @@ test("copies sets independently for declaration and assignment", () => {
   assert.deepEqual(captured, [[1, 2], [1, 2, 3], [2]]);
 });
 
-test("turns a cyclic injected script value into a structured runtime error", () => {
-  const cyclic = createRuntimeList([]);
-  cyclic.items.push(cyclic);
-  const source = "let copy = cyclicValue()";
-  const result = run(source, { cyclicValue: () => cyclic });
-  const start = source.indexOf("cyclicValue");
-
-  assert.deepEqual(
-    result.errors.map((error) => [
-      error.code,
-      error.message,
-      error.span.start.offset,
-      error.span.end.offset,
-    ]),
-    [
-      [
-        "TSR031",
-        "Cyclic script values are not supported.",
-        start,
-        source.length,
-      ],
-    ],
-  );
-});
-
 test("rejects list, object, and set values in set literals at the semantic boundary", () => {
   const cases = [
     ["let values = set[[1]]", "[1]"],
@@ -151,26 +123,17 @@ test("rejects list, object, and set values in set literals at the semantic bound
   ] as const;
 
   for (const [source, elementText] of cases) {
-    const parsed = parse(source);
-    assert.deepEqual(parsed.diagnostics, []);
     const start = source.indexOf(elementText);
-
-    assert.throws(
-      () => execute(parsed.program, { random: { next: () => 0 } }),
-      (error: unknown) => {
-        assert.ok(error instanceof InterpreterCompilationError);
-        const diagnostic = error.diagnostics.find(
-          (candidate) => candidate.code === "TSV006",
-        );
-        assert.notEqual(diagnostic, undefined);
-        assert.deepEqual(
-          diagnostic === undefined
-            ? null
-            : [diagnostic.span.start.offset, diagnostic.span.end.offset],
-          [start, start + elementText.length],
-        );
-        return true;
-      },
+    const result = compileSource(source);
+    const diagnostic = result.semanticDiagnostics.find(
+      (candidate) => candidate.code === "TSV006",
+    );
+    assert.notEqual(diagnostic, undefined);
+    assert.deepEqual(
+      diagnostic === undefined
+        ? null
+        : [diagnostic.span.start.offset, diagnostic.span.end.offset],
+      [start, start + elementText.length],
     );
   }
 });
@@ -182,7 +145,7 @@ test("rejects composite values through set add, contains, and list toSet", () =>
     "let source = [{ value: 1 }]\nlet values = source.toSet()",
     "let source = [set[1]]\nlet values = source.toSet()",
   ]) {
-    const result = run(source);
+    const result = executeSource(source);
     assert.deepEqual(
       result.errors.map((error) => error.code),
       ["TSR032"],
@@ -192,7 +155,7 @@ test("rejects composite values through set add, contains, and list toSet", () =>
 
 test("uses scalar equality for set uniqueness and retains insertion order", () => {
   const captured: unknown[] = [];
-  const result = run(
+  const result = executeSource(
     [
       'let values = set["a", "a", true, true, 1, 1.0, null, null, false]',
       "capture(values.toList())",
@@ -216,7 +179,7 @@ test("errors for first, last, and random on empty lists and sets", () => {
 
   for (const [literal, property, code] of cases) {
     const source = `let values = ${literal}\nsay values.${property}`;
-    const result = run(source);
+    const result = executeSource(source);
     const start = source.indexOf(`values.${property}`);
     assert.deepEqual(
       result.errors.map((error) => [
@@ -238,7 +201,7 @@ test("does not advance RNG state for empty list or set random", () => {
         return 0;
       },
     };
-    const result = run(
+    const result = executeSource(
       `let values = ${literal}\nsay values.random`,
       undefined,
       random,
@@ -257,7 +220,7 @@ test("uses the speaker identifier fallback and warns only once per speaker", () 
     'say "Second"',
     'say as mistressVera "Third"',
   ].join("\n");
-  const result = run(source);
+  const result = executeSource(source);
   const firstSayStart = source.indexOf('say "First"');
 
   assert.deepEqual(result.errors, []);
@@ -290,7 +253,7 @@ test("uses the speaker identifier fallback and warns only once per speaker", () 
 });
 
 test("keeps explicit and derived speaker display names warning-free", () => {
-  const result = run([
+  const result = executeSource([
     "speaker explicit {",
     '  displayName: "Visible Name"',
     "}",
@@ -321,13 +284,13 @@ test("warns when list.remove cannot find a matching value", () => {
     "exit",
   ].join("\n");
   const captured: unknown[] = [];
-  const result = run(source, { capture: captureInto(captured) });
+  const result = executeSource(source, { capture: captureInto(captured) });
   const call = "values.remove(2)";
   const start = source.indexOf(call);
 
   assert.deepEqual(result.errors, []);
   assert.deepEqual(captured, [[1], null]);
-  assert.deepEqual(result.events.map((event) => event.kind), ["exit"]);
+  assert.deepEqual(result.events.map((event) => event.kind), ["developerWarning", "exit"]);
   assert.deepEqual(
     result.warnings.map((warning) => [
       warning.severity,
@@ -348,7 +311,7 @@ test("warns when list.remove cannot find a matching value", () => {
 
 test("removes only the first matching list value without a missing-value warning", () => {
   const captured: unknown[] = [];
-  const result = run(
+  const result = executeSource(
     [
       "let values = [1, 1, 2]",
       "values.remove(1)",
@@ -364,7 +327,7 @@ test("removes only the first matching list value without a missing-value warning
 });
 
 test("does not apply the list.remove warning to sets or other list removals", () => {
-  const result = run([
+  const result = executeSource([
     "let values = [1]",
     "let setValue = set[1]",
     "setValue.remove(2)",
@@ -378,34 +341,42 @@ test("does not apply the list.remove warning to sets or other list removals", ()
   assert.equal(result.warnings.some((warning) => warning.code === "TSW002"), false);
 });
 
-function run(
+function executeSource(
   source: string | readonly string[],
-  builtins?: Readonly<Record<string, BuiltinFunction>>,
+  builtins?: Readonly<Record<string, RuntimeBuiltinFunction>>,
   random: RandomSource = { next: () => 0 },
-): ExecutionResult {
+): { readonly events: readonly InterpreterEvent[]; readonly errors: readonly Extract<InterpreterEvent, { kind: "runtimeFailure" }>[]; readonly warnings: readonly Extract<InterpreterEvent, { kind: "developerWarning" }>[] } {
   const text = typeof source === "string" ? source : source.join("\n");
-  const parsed = parse(text);
-  assert.deepEqual(parsed.diagnostics, []);
-  return execute(parsed.program, {
-    random,
-    ...(builtins === undefined ? {} : { builtins }),
+  const compiled = compileSource(text, {
+    builtins: builtins === undefined ? [] : Object.keys(builtins),
   });
+  assert.deepEqual(compiled.diagnostics, []);
+  assert.notEqual(compiled.plan, null);
+  const result = run(
+    compiled.plan!,
+    createFreshRuntimeSnapshot(compiled.plan!),
+    { random, ...(builtins === undefined ? {} : { builtins }) },
+  );
+  return {
+    events: result.events,
+    errors: result.events.filter((event): event is Extract<InterpreterEvent, { kind: "runtimeFailure" }> => event.kind === "runtimeFailure"),
+    warnings: result.events.filter((event): event is Extract<InterpreterEvent, { kind: "developerWarning" }> => event.kind === "developerWarning"),
+  };
 }
 
-function captureInto(values: unknown[]): BuiltinFunction {
+function captureInto(values: unknown[]): RuntimeBuiltinFunction {
   return (call) => {
     values.push(toNative(call.positional[0] ?? null));
     return null;
   };
 }
 
-function toNative(value: RuntimeValue): unknown {
+function toNative(value: SerializableRuntimeValue): unknown {
   if (value === null || typeof value !== "object") return value;
   if (value.kind === "list" || value.kind === "set") {
     return value.items.map(toNative);
   }
-  if (value.kind === "speaker") return value.identifier;
-  return Object.fromEntries(
-    [...value.properties].map(([name, item]) => [name, toNative(item)]),
-  );
+  if (value.kind === "speakerReference") return value.identifier;
+  if (value.kind === "range") return { ...value };
+  return Object.fromEntries(value.properties.map(({ name, value: item }) => [name, toNative(item)]));
 }

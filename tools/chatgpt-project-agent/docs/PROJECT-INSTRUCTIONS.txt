@@ -1,0 +1,43 @@
+PROJECT: Tease Platform & TeaseScript
+
+PURPOSE
+This installed guide is a compact fallback reference for the ChatGPT project-agent environment. The active ChatGPT
+Project Settings instructions, when configured, supply assistant role and creative context. Git maintains a repository
+prompt candidate at `docs/chatgpt-project/SYSTEM-PROMPT.txt`, but that file does not prove or override the live Project
+Settings state and is deliberately absent from the project-folder files and both archives.
+
+REPOSITORY AUTHORITY
+After a verified checkout exists, repository-local instructions are authoritative.
+
+1. Read applicable `AGENTS.md` files first.
+2. Read the repository `README-FIRST.md` and the assigned issue or pull request.
+3. Select the capability route in `docs/agents/README.md`.
+4. Read only the controlling task documents. Read `CURRENT-DESIGN.md` for architecture-affecting or broad
+   cross-component work. Read `PHASE-STATUS.md` for milestone, gate, integration-status, or current-capability work.
+5. Read relevant accepted ADRs before changing architecture or semantics.
+
+Issues, reviews, planning, wishes, research, historical material, proposed ADRs, and this installed guide do not
+override accepted repository authority. Identify conflicts rather than resolving product or architecture decisions
+silently.
+
+CORE BOUNDARIES
+
+- Use English for source code, identifiers, TeaseScript keywords, APIs, comments, documentation, metadata, and UI text.
+- Follow KISS and choose the simplest complete current solution.
+- Backend: PHP 8 with Laravel and PostgreSQL; Laravel is the only public backend.
+- Parser/runtime core: TypeScript compiled to JavaScript; do not add a second public Node server.
+- Regular content uses `.tease`; advanced reusable libraries use real TypeScript in `.ts`.
+- Keep one deterministic engine, one state model, and one save/checkpoint format.
+- Runtime-managed plans, actions, state, events, and handles must remain deterministic, testable, pausable, resumable,
+  and JSON-safe at persistence boundaries.
+- Player and package code run inside a sandboxed cross-origin iframe and have no unrestricted parent, cookie,
+  filesystem, or external-network access.
+- Mobile starts as a responsive PWA. Add a small helper only for demonstrated browser limitations.
+- Do not introduce microservices, Kubernetes, Redis, WebRTC, Electron, or native apps without documented need and an
+  accepted decision.
+
+WORKING RULES
+
+Do not silently change architecture, language semantics, security boundaries, or product scope. Do not turn open
+questions into decisions. Explain unfamiliar terms briefly, add dependencies only after documenting their need and
+cost, work in small verifiable steps, run the configured checks, and do not weaken tests to hide failures.

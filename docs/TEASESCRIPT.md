@@ -42,7 +42,11 @@ An official TeaseScript construct may lower to:
 - a platform Standard Library function;
 - or a fixed compiler-owned composition of both.
 
-Ordinary Standard Library and package-library exports use normal function-call syntax. Generated signatures and metadata provide the intended path for autocomplete, parameter hints, hover documentation, navigation, and type-aware diagnostics without requiring a new grammar production.
+Ordinary Standard Library and package-library exports use normal function-call
+syntax when linkage is implemented. Future consumer-driven signatures and
+metadata may provide autocomplete, parameter hints, hover documentation,
+navigation, and type-aware diagnostics without requiring a new grammar
+production. Official syntax support remains parser/compiler-owned.
 
 Libraries may not add keywords, command syntax, block syntax, token forms, or parser hooks. New special syntax remains an explicit TeaseScript/compiler decision. Official syntax may call into a library internally, but a library export does not automatically become syntax.
 

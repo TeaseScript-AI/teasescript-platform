@@ -1,5 +1,5 @@
 import type { SourceSpan } from "../source.js";
-import type { RuntimeActionSettlementSnapshot, RuntimePendingActionSnapshot } from "./state.js";
+import type { RuntimeActionSettlementSnapshot, RuntimePendingActionSnapshot } from "./actions/model.js";
 
 export interface OutputSpeaker {
   readonly identifier: string;

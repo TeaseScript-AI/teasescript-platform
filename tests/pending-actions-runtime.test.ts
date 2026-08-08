@@ -3,8 +3,11 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import { createCheckpoint, deserializeCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
-import { completeAction, observeTime, run } from "../src/runtime/engine.js";
-import { createFreshRuntimeSnapshot, validateRuntimeSnapshot, type RuntimeDelayActionSnapshot } from "../src/runtime/state.js";
+import { run } from "../src/runtime/engine.js";
+import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
+import type { RuntimeDelayActionSnapshot } from "../src/runtime/actions/model.js";
+import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 
 function plan(source: string) {
   const result = compileSource(source);

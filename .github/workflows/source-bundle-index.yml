@@ -1,0 +1,114 @@
+name: Index source bundle artifact
+
+on:
+  workflow_run:
+    workflows: [Source bundle]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  index:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'push' ||
+       github.event.workflow_run.event == 'pull_request')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      actions: read
+      statuses: write
+    steps:
+      - name: Validate and publish the exact artifact index
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const repository = context.payload.repository;
+            const fullSha = /^[0-9a-f]{40}$/;
+            const digest = /^sha256:([0-9a-f]{64})$/;
+
+            if (
+              run.name !== 'Source bundle' ||
+              run.path !== '.github/workflows/source-bundle.yml' ||
+              run.status !== 'completed' ||
+              run.conclusion !== 'success' ||
+              !Number.isSafeInteger(run.id) ||
+              run.repository?.id !== repository.id
+            ) {
+              core.setFailed('Unexpected producer workflow identity or status.');
+              return;
+            }
+
+            let sourceSha;
+            if (run.event === 'push') {
+              if (
+                run.head_repository?.id !== repository.id ||
+                run.head_branch !== repository.default_branch ||
+                !fullSha.test(run.head_sha || '')
+              ) {
+                core.setFailed('Push producer identity did not match the default branch.');
+                return;
+              }
+              sourceSha = run.head_sha;
+            } else {
+              const pulls = run.pull_requests || [];
+              const matchingPulls = pulls.filter(
+                (pull) =>
+                  pull.base?.repo?.id === repository.id &&
+                  run.head_repository?.id === pull.head?.repo?.id &&
+                  run.head_branch === pull.head?.ref &&
+                  fullSha.test(pull.head?.sha || ''),
+              );
+              const sourceShas = new Set(matchingPulls.map((pull) => pull.head.sha));
+              if (sourceShas.size !== 1) {
+                core.setFailed('Pull-request producer identity was inconsistent.');
+                return;
+              }
+              [sourceSha] = sourceShas;
+            }
+
+            const artifactResponse = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+              per_page: 100,
+            });
+            const artifacts = artifactResponse.data.artifacts;
+            if (!Array.isArray(artifacts)) {
+              core.setFailed('Producer artifact response did not contain an artifact list.');
+              return;
+            }
+            const expectedName = `teasescript-source-${sourceSha}`;
+            const matching = artifacts.filter((artifact) => artifact?.name === expectedName);
+            if (matching.length !== 1) {
+              core.setFailed('Producer run did not contain exactly one expected Source-bundle artifact.');
+              return;
+            }
+
+            const artifact = matching[0];
+            const digestMatch = digest.exec(artifact.digest || '');
+            const expiresAtMs = Date.parse(artifact.expires_at || '');
+            if (
+              !Number.isSafeInteger(artifact.id) ||
+              artifact.id <= 0 ||
+              artifact.expired === true ||
+              artifact.workflow_run?.id !== run.id ||
+              !digestMatch ||
+              !Number.isFinite(expiresAtMs) ||
+              expiresAtMs <= Date.now()
+            ) {
+              core.setFailed('Producer artifact metadata was incomplete, expired, or inconsistent.');
+              return;
+            }
+
+            const artifactUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}/artifacts/${artifact.id}`;
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: sourceSha,
+              state: 'success',
+              context: 'source-bundle/artifact-v1',
+              description: `artifact ${artifact.id} sha256:${digestMatch[1]}`,
+              target_url: artifactUrl,
+            });

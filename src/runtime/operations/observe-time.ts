@@ -35,7 +35,6 @@ export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, su
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;
-  current.lastSettlementResultState = "none";
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   const span = captured.plan.instructions[action.owningInstruction]?.span ?? captured.plan.sourceSpan;
