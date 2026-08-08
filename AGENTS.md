@@ -25,13 +25,11 @@ owner decisions recorded in a canonical owner. Propose durable rules separately
 with evidence; after owner approval, record them canonically before treating
 them as authority.
 
-Repository ownership language normally identifies a canonical source or governing
-decision authority, not a persistent person or agent. Explicit product-owner,
-coordinator, and temporary task-assignment terms keep their literal role meanings.
-Durable responsibility must be reconstructible from repository state and must not
-depend on an agent remembering prior work. Record the canonical source and governing
-authority, plus the affected boundary and required change or approval process when
-relevant.
+Durable repository responsibility must not depend on a persistent agent identity.
+Issue, branch, and pull-request assignments are temporary; agents do not become
+owners by implementing, reviewing, or coordinating work. Durable rules must be
+recoverable from their canonical repository source or accepted authority. See
+`docs/DOCUMENTATION-OWNERSHIP.md`.
 
 Before the next write after context loss or compaction, session resumption, a
 changed branch or pull-request head, or a transition between implementation,
@@ -125,7 +123,7 @@ route in `docs/agents/README.md` and use only the writes and publication method
 that route permits. Do not improvise a lower-level source-publication route or
 continue from stale capability assumptions.
 
-Keep `main` stable. Use one issue, one owning agent, one short-lived branch, and
+Keep `main` stable. Use one issue, one executing agent, one short-lived branch, and
 one pull request by default. Do not make substantive changes directly on
 `main`, push to another agent's branch without an explicit handoff, or silently
 combine unrelated work. Never force-push or rewrite `main`. Keep the
