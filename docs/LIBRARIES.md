@@ -316,6 +316,6 @@ ADR 0018 compact forms therefore require parser-owned syntax support in addition
 
 ## POC boundary
 
-The generic engine-owned foreground-interaction runtime foundation is implemented for validated lowered plans. It does not make the Standard Library contract author-accessible: compact syntax, automatic prelude linkage, protected-name changes, Standard Player controls, pacing state, and editor support remain separate work. Current engine behavior such as implemented `say` output remains in place.
+The current #111 slice implements compact `showButton`, `askText`, `askNumber`, and `choose`, their directly available protected prelude names, and compiler lowering into the generic foreground-interaction runtime contract. Smart autoplay/pacing, Standard Player controls, editor/formatter/simulator support, and final package/import/version/replacement design remain deferred. Current engine behavior such as implemented `say` output remains in place.
 
 Implemented Standard Library behavior ultimately requires unit, integration, editor-metadata, security-boundary, bounded-data, event-ordering, and checkpoint/resume coverage appropriate to the capabilities it composes.

@@ -97,6 +97,47 @@ test("all accepted compact forms parse and malformed forms recover at the next s
   }
 });
 
+test("compact choose follows V30 continuation and enclosing-terminator boundaries", () => {
+  const commaNewline = parse('let result = choose "A",\n    "B"');
+  assert.deepEqual(commaNewline.diagnostics, []);
+  const newlineChoice = commaNewline.program.statements[0];
+  assert.equal(newlineChoice?.kind, "letStatement");
+  assert.equal(newlineChoice?.initializer.kind, "interactionExpression");
+  assert.deepEqual(newlineChoice?.initializer.options.map((option) => option.value.kind), ["stringLiteral", "stringLiteral"]);
+
+  const block = parse('function pick { return choose "A", "B" }\nlet result = pick()');
+  assert.deepEqual(block.diagnostics, []);
+  assert.deepEqual(block.program.statements.map((statement) => statement.kind), ["functionDeclaration", "letStatement"]);
+
+  const grouped = parse('let result = (choose "A", "B")');
+  assert.deepEqual(grouped.diagnostics, []);
+  const groupedInitializer = grouped.program.statements[0];
+  assert.equal(groupedInitializer?.kind, "letStatement");
+  assert.equal(groupedInitializer?.initializer.kind, "parenthesizedExpression");
+  assert.equal(groupedInitializer?.initializer.expression.kind, "interactionExpression");
+
+  const list = parse('let choices = [choose "A", "B"]');
+  assert.deepEqual(list.diagnostics, []);
+  const listInitializer = list.program.statements[0];
+  assert.equal(listInitializer?.kind, "letStatement");
+  assert.equal(listInitializer?.initializer.kind, "listLiteral");
+  assert.equal(listInitializer?.initializer.elements[0]?.kind, "interactionExpression");
+
+  const interpolation = parse('let message = `Selected: ${choose "A", "B"}`');
+  assert.deepEqual(interpolation.diagnostics, []);
+  const messageInitializer = interpolation.program.statements[0];
+  assert.equal(messageInitializer?.kind, "letStatement");
+  assert.equal(messageInitializer?.initializer.kind, "templateLiteral");
+  assert.equal(messageInitializer?.initializer.parts[1]?.kind, "templateInterpolation");
+  assert.equal(messageInitializer?.initializer.parts[1]?.expression.kind, "interactionExpression");
+});
+
+test("compact choose reports a missing continued option and recovers at the following statement", () => {
+  const parsed = parse('let result = choose "A",\n\nsay "recovered"');
+  assert.deepEqual(parsed.diagnostics.map((diagnostic) => diagnostic.code), ["TSP030"]);
+  assert.deepEqual(parsed.program.statements.map((statement) => statement.kind), ["letStatement", "sayStatement"]);
+});
+
 
 test("parenthesized advanced interaction-call forms are rejected with a focused diagnostic and exact span", () => {
   for (const source of [

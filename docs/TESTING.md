@@ -418,9 +418,9 @@ ADR 0016 defines the shared contract; action-specific tests remain required for 
 
 The implemented ADR 0018 interaction slice covers button, text, number, unlabelled choice, identifier-labelled choice,
 and numeric-labelled choice through both direct validated plans and real compact source. Tests cover exact parser spans
-and recovery, protected prelude names, choice domains and duplicates, requesting-speaker capture, prepared UI provenance
-while preparation state exists, intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking
-expressions, function arguments, root/function checkpoint
+and recovery, V30 comma-newline continuation and enclosing-delimiter composition for compact `choose`, protected prelude
+names, choice domains and duplicates, requesting-speaker capture, prepared UI provenance while preparation state exists,
+intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking expressions, function arguments, root/function checkpoint
 resume, typed completion, transcript behavior, downstream guard delegation, and atomic rejection. The single-use handoff
 regressions prove that a newer retained settlement cannot remove destination/result mismatch rejection before consumption,
 that the handoff disappears immediately after the first successful consume or discard instruction, and that later ordinary

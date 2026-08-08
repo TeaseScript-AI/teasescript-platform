@@ -837,7 +837,11 @@ class Parser {
       const statement = this.#parseStatement();
       if (statement !== null) statements.push(statement);
       if (this.#current === startIndex) this.#advance();
-      this.#finishStatement(true);
+      if (this.#recoveredAtStatementBoundary) {
+        this.#recoveredAtStatementBoundary = false;
+      } else {
+        this.#finishStatement(true);
+      }
       this.#skipNewlines();
     }
     if (!this.#match(TokenKind.RightBrace)) {
@@ -1399,7 +1403,7 @@ class Parser {
     }
 
     const options: InteractionChoiceOption[] = [];
-    while (!this.#check(TokenKind.Newline) && !this.#check(TokenKind.EndOfFile)) {
+    while (!this.#isInteractionChoiceTerminator()) {
       const label = (
         (this.#check(TokenKind.Identifier) || this.#check(TokenKind.NumberLiteral)) &&
         this.#peek(1).kind === TokenKind.Colon
@@ -1419,6 +1423,9 @@ class Parser {
             ? "Expected at least one choice option."
             : "Expected a choice option expression after ':'.",
         );
+        if (isStatementStart(this.#peek().kind)) {
+          this.#recoveredAtStatementBoundary = true;
+        }
         break;
       }
       let separatorSpan: SourceSpan | null = null;
@@ -1434,7 +1441,7 @@ class Parser {
         span: spanFrom(label?.span ?? value.span, value.span),
       }));
       if (separatorSpan === null) {
-        if (!this.#check(TokenKind.Newline) && !this.#check(TokenKind.EndOfFile)) {
+        if (!this.#isInteractionChoiceTerminator()) {
           if (this.#check(TokenKind.KeywordAs)) {
             this.#reportSpan(
               parserDiagnosticCode.unsupportedInteractionForm,
@@ -1452,7 +1459,8 @@ class Parser {
         }
         break;
       }
-      if (this.#check(TokenKind.Newline) || this.#check(TokenKind.EndOfFile)) {
+      this.#skipContinuationNewlines();
+      if (this.#isInteractionChoiceTerminator()) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedChoiceOption,
           "Expected a choice option after ','.",
@@ -1477,6 +1485,17 @@ class Parser {
       options: Object.freeze(options),
       span: spanFrom(command.span, end),
     });
+  }
+
+  #isInteractionChoiceTerminator(): boolean {
+    return (
+      this.#check(TokenKind.Newline) ||
+      this.#check(TokenKind.EndOfFile) ||
+      this.#check(TokenKind.RightBrace) ||
+      this.#check(TokenKind.RightParenthesis) ||
+      this.#check(TokenKind.RightBracket) ||
+      this.#check(TokenKind.InterpolationEnd)
+    );
   }
 
   #interactionChoiceLabel(token: Token): Identifier | import("./ast.js").NumberLiteral {
