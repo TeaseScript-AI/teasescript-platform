@@ -37,7 +37,7 @@ Documentation is recurring agent input: every retained token consumes context-wi
 can displace task-specific evidence. Safe compactness is therefore a quality requirement. Before
 adding text, first try correction, consolidation, relocation, routing, or removal. Reject competing
 authority and unjustified duplicated moving facts. Prefer targeted correction or consolidation over
-append-only amendments when existing wording should own the meaning. Preserve authority, conditions,
+append-only amendments when existing wording should carry the meaning. Preserve authority, conditions,
 order, exceptions, executable detail, and resistance to misinterpretation.
 
 ## Self-review and assigned review
@@ -63,7 +63,7 @@ uncertainty that cannot be bounded through a separately assigned [`AUDIT.md`](AU
   cost.
 - **Tests and evidence:** suitable layers, assertions, oracles, diagnostics, reproducibility,
   negative paths, and proof of the claim rather than a green total.
-- **Documentation and context:** correctness, canonical ownership, lifecycle, routing, executable
+- **Documentation and context:** correctness, canonical-source placement, lifecycle, routing, executable
   details, stale or competing text, consolidation, and safe, token-efficient compactness.
 - **Boundaries and cost:** reachable trust boundaries, realistic workloads, unbounded work, hot
   paths, and proportionate security, performance, and resource scrutiny without speculative

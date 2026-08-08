@@ -5,7 +5,7 @@
 Use project material in this order:
 
 1. Check whether an accepted ADR, accepted specification, or controlling current topic document covers the exact
-   issue. A post-V30 owner decision becomes durable only after it is synchronized into the applicable accepted owner.
+   issue. A post-V30 owner decision becomes durable only after it is synchronized into the applicable accepted source.
    Chat, issue, pull-request, test, review, or wish text remains evidence or task context until that synchronization
    occurs.
 2. For TeaseScript syntax and semantics, use `docs/specifications/accepted-syntaxes-v30.md` unless a later accepted
@@ -14,7 +14,7 @@ Use project material in this order:
 4. Use the task-specific current topic document in `docs/`.
 5. Use `docs/planning/POC-TO-ALPHA-BACKLOG.md` for owner-selected work that remains required before its target gate. Inclusion does not schedule the item and does not define architecture or syntax.
 6. Use other files in `docs/planning/` only for active, non-implemented planning. Planning text is non-authoritative,
-   does not schedule implementation, and may not override accepted decisions or current topic owners.
+   does not schedule implementation, and may not override accepted decisions or current topic sources.
 7. Use `WISHES.xml` for product intent and decision history; an active wish is not automatically an implementation decision or backlog commitment.
 8. Treat capability research, old project packages, audit reports, and source examples as non-authoritative reference material.
 
@@ -26,8 +26,8 @@ Use `CURRENT-DESIGN.md` for the stable cross-component architecture, trust, isol
 and deterministic-runtime boundaries. Use `PHASE-STATUS.md` for the current phase, gates, implemented capability
 groups, and major exclusions. Load a topic document only when the assignment depends on its detailed contract.
 
-Exact source layout, internal format revisions, dependency versions, test results, and live workflow state belong to
-their executable or topic owners rather than this task router.
+Exact source layout, internal format revisions, dependency versions, test results, and live workflow state belong in
+their executable or topic sources rather than this task router.
 
 ## Documentation routing
 

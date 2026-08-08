@@ -92,7 +92,7 @@ Persistent platform records live behind Laravel and PostgreSQL. Active browser e
 scheduled execution use the same validated deterministic engine and checkpoint model; they must coordinate ownership
 rather than create a second personality runtime or incompatible save format. Exact account, global-data, scheduling,
 conflict, reconnect, missed-event, and migration contracts remain with their topic documents and unresolved-decision
-owners until accepted.
+sources until accepted.
 
 See [`docs/CONTINUOUS-PERSONALITIES.md`](docs/CONTINUOUS-PERSONALITIES.md),
 [`docs/DATA-AND-API.md`](docs/DATA-AND-API.md), and [`docs/OPEN-DECISIONS.md`](docs/OPEN-DECISIONS.md).
@@ -104,7 +104,7 @@ Kubernetes, Redis, WebRTC, Electron, native apps, or equivalent infrastructure w
 accepted decision. Mobile begins as a responsive PWA; add a small headless helper only for a demonstrated browser
 limitation.
 
-Use these current owners for detail:
+Use these current sources for detail:
 
 - [`docs/PRODUCT.md`](docs/PRODUCT.md): product direction and current implementation focus;
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): component boundaries, dependency direction, and current source

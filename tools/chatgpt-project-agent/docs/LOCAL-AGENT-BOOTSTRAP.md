@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This document owns the ChatGPT project-agent local-environment route. GitHub is canonical for maintainable
-documentation, scripts, configuration, and helpers. Large runtimes, caches, dependency payloads, and tokenizer data
-stay outside Git in the runtime archive.
+This document is the canonical source for the ChatGPT project-agent local-environment route. GitHub is canonical for
+maintainable documentation, scripts, configuration, and helpers. Large runtimes, caches, dependency payloads, and
+tokenizer data stay outside Git in the runtime archive.
 
 ## Project-folder files
 

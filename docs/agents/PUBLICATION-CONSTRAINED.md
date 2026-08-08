@@ -11,7 +11,7 @@ verified patch-publication route must apply to the repository and target pull re
 **Required**
 
 - the selected source/workspace guide and its normal reading set;
-- [`../PATCH-PUBLICATION.md`](../PATCH-PUBLICATION.md), which is the sole protocol and security-contract owner;
+- [`../PATCH-PUBLICATION.md`](../PATCH-PUBLICATION.md), which is the canonical protocol and security-contract source;
 - the current target PR, exact branch head, and task authorization.
 
 **Conditional**
@@ -34,7 +34,7 @@ identity, task authority, or verification requirements.
 Use only the exact next repository action emitted by the verified patch-publication helper for its declared
 transfer payload, record the verified result, and then request the next action. Low-level blob, tree, commit,
 branch, or full-file operations are not a general substitute. The complete allowed sequence, raw UTF-8
-requirements, trust boundary, validation profiles, cleanup, and retry behavior remain exclusively owned by
+requirements, trust boundary, validation profiles, cleanup, and retry behavior are defined exclusively in
 `docs/PATCH-PUBLICATION.md`.
 
 ## Verification

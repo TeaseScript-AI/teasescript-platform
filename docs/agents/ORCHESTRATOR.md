@@ -40,8 +40,8 @@ capability route that fits each executor; do not impose the orchestrator's envir
 integration branch only when the selected coordinated plan needs one. Keep temporary checklists, sequencing
 notes, and executor tracking outside the repository.
 
-Each executor owns a separate branch and pull request to the assigned integration target. Independent
-workstreams may proceed from the same integration state when their ownership and behavior do not overlap;
+Each executor uses a separate branch and pull request to the assigned integration target. Independent
+workstreams may proceed from the same integration state when their assigned scope and behavior do not overlap;
 dependent work starts from the predecessor's merged state. Do not push to another executor's branch without a
 visible handoff or reassignment.
 
@@ -54,13 +54,13 @@ documents explicitly rather than allowing several workstreams to update them ind
 
 Require proportionate workstream checks and review first. Then verify the combined integration state from a
 clean install with the repository's configured environment and checks, inspect the complete combined diff, and
-run any milestone-specific integration verification. A final verifier reports failures to the owning
+run any milestone-specific integration verification. A final verifier reports failures to the responsible
 workstream or orchestrator and does not silently redesign or repair work without reassignment. Record exact
 commands, results, conflicts, stale materials, and remaining risks.
 
 ## Publication and handoff
 
 Open one final integration pull request to `main` when the combined gate passes. Executor pull requests normally
-use non-closing issue references; the final PR owns issue-closing references. The handoff records actual merged
+use non-closing issue references; the final PR carries issue-closing references. The handoff records actual merged
 behavior, canonical documentation impact, and explicit deferred work, not the original plan. Do not merge the
 final PR without the required approval.

@@ -48,4 +48,4 @@ or permitted publication writes change; use `README-FIRST.md` for task changes.
 The owner decides product scope, priorities, gates, and unresolved product or
 architecture choices. Present realistic options and consequences compactly
 rather than silently choosing. Temporary task state remains outside GitHub;
-accepted results belong in the appropriate canonical owner.
+accepted results belong in the appropriate canonical source.
