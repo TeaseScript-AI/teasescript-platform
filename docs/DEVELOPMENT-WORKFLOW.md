@@ -325,11 +325,15 @@ The pull request is the implementation handoff record. A separate coordinator re
 
 Make small logical commits with concise English imperative messages.
 
-A single-agent pull request that completes its issue may use:
+Every pull request that fully completes an assigned issue must include the closing reference in its description so
+merging the pull request closes that issue automatically:
 
 ```text
 Closes #123
 ```
+
+Use `Refs #123` only when the pull request is related to the issue but intentionally does not complete it and the issue
+must remain open after merge.
 
 ## Capability-specific execution
 

@@ -16,6 +16,7 @@
 - `ARCHITECTURE.md`
 - `TEASESCRIPT.md`
 - `RUNTIME.md`
+- `RESOURCE-LIMITS.md`: canonical resource-limit inventory, evidence justification, and removal/re-derivation routing.
 - `DATA-AND-API.md`
 - `LIBRARIES.md`
 - `SECURITY.md`
@@ -55,11 +56,11 @@ detailed procedures remain in those two guides.
 
 ## Planning
 
-`planning/README.md` defines the lifecycle and authority boundary for this directory. It contains the release-roadmap
-progress record plus active, non-implemented planning; entries do not schedule themselves or define accepted behavior.
+`planning/README.md` defines the lifecycle and authority boundary for this directory. It contains only active,
+non-implemented planning; entries are non-authoritative and do not schedule themselves.
 
-- `planning/RELEASE-ROADMAP.md` records owner-selected release-stage placement, open release-stage outcomes, and
-  compact roadmap progress history.
+- `planning/POC-TO-ALPHA-BACKLOG.md` lists owner-selected work that remains required before a stated POC, pre-alpha, or
+  alpha gate.
 - `planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md` retains open timer-handle and advanced recovery-point direction.
 - `planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md` retains open camera ownership, capture, media-lifetime, and
   browser/server time-integrity direction.

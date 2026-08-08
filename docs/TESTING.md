@@ -4,7 +4,7 @@
 
 Accepted language and runtime behavior remains defined by accepted specifications and ADRs. This document defines the repository's verification strategy, required test categories, and quality expectations for changes.
 
-Owner-selected release-stage testing outcomes are tracked in [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md). Roadmap placement does not schedule implementation or accept unresolved syntax, APIs, host protocols, or architecture.
+Owner-selected outcomes that remain required before pre-alpha or alpha are tracked in [`planning/POC-TO-ALPHA-BACKLOG.md`](planning/POC-TO-ALPHA-BACKLOG.md). Inclusion there establishes a gate, not an implementation schedule. This document does not accept unresolved syntax, APIs, host protocols, or architecture.
 
 ## Current testing model
 
@@ -304,9 +304,13 @@ The campaign deliberately does not pin an ordered catalog/count, PRNG vectors,
 successful signatures, complete traces, work/mutation accounting, fixture
 identity, profiles, or CLI compatibility. Exact technical limits, hostile-data
 shapes, interaction variants, and confirmed defects remain in their focused
-runtime/checkpoint/corruption/regression suites. Convert a confirmed product
-defect to a focused permanent regression; do not preserve private harness
-bookkeeping as evidence.
+runtime/checkpoint/corruption/regression suites. Canonical limit classification,
+evidence status, and coupling/repair routing live in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). A test around a production constant proves only current implementation
+behavior unless independent evidence justifies that boundary. Tests for values whose retention is unsupported move or
+disappear with the repair; they do not turn the historical number into an acceptance target.
+Convert a confirmed product defect to a focused permanent regression; do not
+preserve private harness bookkeeping as evidence.
 
 ## Source-to-runtime conformance corpus
 
@@ -412,7 +416,23 @@ Timed actions must use an injected fake clock or equivalent deterministic time s
 
 ADR 0016 defines the shared contract; action-specific tests remain required for each later API and UI behavior.
 
-The implemented ADR 0018 runtime foundation adds manual validated-plan coverage for button, text, number, unlabelled choice, identifier-labelled choice, and numeric-labelled choice. Tests cover exact normalization/parsing, ambiguous typed choices, canonical transcript ordering and requesting-speaker provenance, duplicate/stale/unknown/wrong-kind classification, pending and post-completion checkpoint JSON round trips, destination absence before action creation, direct atomic result commit, one local consume/transfer-and-clear boundary, exact-once transfer, and source-shaped bindings, assignments, function arguments, nested functions, suspended caller arguments, and source-order-sensitive expressions through private test-only plan injection. The single-use handoff regressions prove that a newer retained settlement cannot remove destination/result mismatch rejection before consumption, that the handoff disappears immediately after the first successful consume or discard instruction, and that later ordinary state no longer carries interaction provenance. Non-canonical branches, loops, second actions, unrelated writers, duplicate producers, and independent targets inside the handoff are rejected locally rather than supported through global interaction-result liveness. Tests also retain exact event-capacity boundaries, exact UTF-8 and option boundaries with measurement instrumentation, unknown persisted fields, malformed actions/settlements, and hostile completion capture. Every rejected completion compares the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot change unnoticed. Parser/compiler syntax and browser UI coverage remain assigned to their later implementation slices.
+The implemented ADR 0018 runtime foundation adds manual validated-plan coverage for button, text, number, unlabelled
+choice, identifier-labelled choice, and numeric-labelled choice. Tests cover exact normalization/parsing, ambiguous typed
+choices, canonical transcript ordering and requesting-speaker provenance, duplicate/stale/unknown/wrong-kind
+classification, pending and post-completion checkpoint JSON round trips, destination absence before action creation,
+direct atomic result commit, one local consume/transfer-and-clear boundary, exact-once transfer, and source-shaped
+bindings, assignments, function arguments, nested functions, suspended caller arguments, and source-order-sensitive
+expressions through private test-only plan injection. The single-use handoff regressions prove that a newer retained
+settlement cannot remove destination/result mismatch rejection before consumption, that the handoff disappears
+immediately after the first successful consume or discard instruction, and that later ordinary state no longer carries
+interaction provenance. Non-canonical branches, loops, second actions, unrelated writers, duplicate producers, and
+independent targets inside the handoff are rejected locally rather than supported through global interaction-result
+liveness. Tests also retain event-capacity invariants, current interaction-guard rejection/atomicity coverage with
+measurement instrumentation, unknown persisted fields, malformed actions/settlements, and hostile completion capture.
+Current guard-threshold cases are implementation regressions only and must move with #129 removal or re-derivation rather
+than becoming capacity evidence. Every rejected completion compares the complete canonical snapshot so RNG state,
+event/action counters, destinations, ownership, and continuation cannot change unnoticed. Parser/compiler syntax and
+browser UI coverage remain assigned to their later implementation slices.
 
 ## Browser E2E gate
 
@@ -423,7 +443,7 @@ Real browser automation becomes required after the cross-origin host shell and p
 - typed or otherwise strictly validated `postMessage` communication;
 - startup, reload, reconnect, and fatal failure;
 - checkpoint save and restore;
-- Standard UI, extending the same browser matrix to package custom UI once custom views are implemented;
+- Standard UI and package custom UI;
 - focus and keyboard behavior;
 - fullscreen and navigation;
 - hostile or malformed host/player messages.
@@ -434,7 +454,7 @@ No browser framework is selected yet. Playwright or another dependency should be
 
 The repository does not use an arbitrary mandatory line-coverage threshold such as 95 percent. Coverage may later help identify untouched branches and error paths, but correctness, determinism, restore equivalence, and boundary validation are more important than maximizing a percentage.
 
-Performance benchmarks are separate from correctness tests. [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md) tracks the Beta outcome **Establish a runtime performance baseline and optimization plan**.
+Performance benchmarks are separate from correctness tests. [`planning/POC-TO-ALPHA-BACKLOG.md`](planning/POC-TO-ALPHA-BACKLOG.md) tracks `POC-ENGINE-001 — Establish runtime performance criteria and a benchmark baseline`.
 
 Performance workloads should measure long-running runtime-state growth as well as instruction throughput. This includes growth in runtime-managed identities, snapshots, checkpoints, cloning, validation, and serialization costs. Repeated scoped speaker creation is a representative workload, but measurements and reachability/lifetime analysis must precede any reclamation or garbage-collection rule.
 
@@ -451,6 +471,8 @@ Tests and benchmarks should use:
 - clean deterministic CI behavior;
 - exact commands and failures reported in pull-request descriptions.
 
-## Parser depth boundary
+## Parser recursion safety
 
-Node 24 regression coverage includes deeply nested parentheses, unary and `not` chains, collection literals, templates, and blocks below the source-size limit. Over-limit input must return one stable `TSP027` diagnostic without a native stack exception.
+Node 24 regression coverage includes deeply nested parentheses, unary and `not` chains, collection literals, templates,
+and blocks. The safety invariant is structured `TSP027` rejection before native stack failure; the current historical
+numeric guard is not a retained capacity target and is tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
