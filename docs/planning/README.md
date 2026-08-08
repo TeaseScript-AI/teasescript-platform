@@ -1,8 +1,12 @@
 # Active planning
 
-`docs/planning/` contains only active, non-implemented planning. It may record owner-selected gate obligations,
-unscheduled maintenance candidates, or proposed direction. Planning does not define accepted architecture, syntax, or
-current implementation status.
+`docs/planning/` contains active planning plus the compact release-roadmap progress record. It may record owner-selected
+gate obligations, release-stage placement, unscheduled maintenance candidates, or proposed direction. Planning does not
+define accepted architecture, syntax, or current implementation status.
+
+[`RELEASE-ROADMAP.md`](RELEASE-ROADMAP.md) is the canonical release-stage roadmap. Unlike ordinary planning files, it may
+retain checked completed items as compact progress history. Those checked entries do not replace current implementation
+status or detailed canonical results elsewhere.
 
 When planning is implemented, superseded, rejected, or useful only as rationale:
 
@@ -14,5 +18,6 @@ When planning is implemented, superseded, rejected, or useful only as rationale:
 - otherwise remove it from the working tree and rely on Git history, issues, pull requests, and reviews. When retention
   value is uncertain, rely on Git history.
 
-Do not keep completed work in this directory as a warning, tombstone, migration guide, or status record. Do not treat an
-entry as scheduled implementation unless the owner or coordinator explicitly schedules it through the normal workflow.
+Except for compact checked entries in `RELEASE-ROADMAP.md`, do not keep completed work in this directory as a warning,
+tombstone, migration guide, or status record. Do not treat an entry as scheduled implementation unless the owner or
+coordinator explicitly schedules it through the normal workflow.
