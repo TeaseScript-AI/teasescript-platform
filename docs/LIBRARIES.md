@@ -151,7 +151,12 @@ The engine owns action identity, continuation, result destination, expected type
 
 The interactions are mandatory and permanently non-cancellable. `askText`, `askNumber`, and `choose` never return `null`; `showButton` has no useful first-slice return value. Invalid input keeps the same action active.
 
-Interaction definitions and completions are subject to shared versioned platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits. ADR 0018 does not impose separate product-facing character counts on answers, hints, buttons, or choices. Concrete implementation constants must be selected and tested before implementation merge. Over-limit data is rejected without truncation or partial state mutation.
+Interaction definitions and completions remain subject to justified versioned platform string, collection, message,
+plan, snapshot, checkpoint, nesting, and validation-work guards where a real boundary requires them. ADR 0018 does not
+impose separate product-facing character counts on answers, hints, buttons, or choices. Under ADR 0019, a concrete
+production bound may remain only when both its necessity and selected value, formula, predicate, accepted domain, or
+mechanism are evidence-based; tests verify a justified boundary rather than creating its justification. Over-limit
+data at a retained guard is rejected without truncation or partial state mutation.
 
 ### Author-facing interaction semantics
 

@@ -241,7 +241,10 @@ Pacing values mean:
 
 Interaction definitions, Standard UI payloads, choice collections, text completions, and host messages must remain within versioned platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits.
 
-ADR 0018 does not impose separate product-facing character counts on `askText`, hint text, button labels, or choice text. The implementation slice must select concrete shared limit constants before merge and test them across compiler, runtime, Player application, checkpoint, and host-message boundaries.
+ADR 0018 does not impose separate product-facing character counts on `askText`, hint text, button labels, or choice
+text. A concrete hard limit is selected only when a real boundary requires one and ADR 0019 can justify both the need
+for the bound and its value, formula, predicate, accepted domain, or mechanism. Applicable tests then verify the
+justified boundary; tests do not create its justification.
 
 Required behavior is fixed:
 
