@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<controlsystems_project name="MilovanaAlternative" schema_version="1.0" last_updated="2026-08-06">
+<controlsystems_project name="MilovanaAlternative" schema_version="1.0" last_updated="2026-08-08">
   <wishlist_policy>
     <memory_note>Project memory is disabled. This XML file is the persistent wishlist artifact for this conversation.</memory_note>
     <retention_rule>Never delete a wish. When abandoned or superseded, change its status to retired or superseded and add a dated history note explaining why.</retention_rule>
@@ -171,7 +171,7 @@
     </wish>
     <wish id="W-014" status="active">
       <title>Toy integration</title>
-      <description>Integrate existing ecosystems where practical, especially Buttplug/Intiface, xToys-compatible workflows and Chaster APIs.</description>
+      <description>Integrate existing toy and device ecosystems where practical, especially Buttplug/Intiface, xToys-compatible workflows and Chaster APIs. Keep local device control possible through suitable browser or helper mechanisms; candidate transports include Bluetooth, local WebSockets or network protocols, serial/COM and MQTT-style bridges, with exact protocols and architecture selected later.</description>
       <tags>
         <tag>toys</tag>
         <tag>buttplug</tag>
@@ -181,6 +181,7 @@
       </tags>
       <history>
         <event date="2026-07-20" type="created">Added from the initial architecture brainstorming request.</event>
+        <event date="2026-08-08" type="refined">Clarified that local toy control should remain possible across practical browser, local-network and helper-backed transports without selecting one protocol now.</event>
       </history>
     </wish>
     <wish id="W-015" status="active">
@@ -276,7 +277,7 @@
     </wish>
     <wish id="W-022" status="active">
       <title>Browser-first with thin headless desktop companion</title>
-      <description>Keep the tease player and primary interface in the normal browser. The installed desktop component should initially be a small headless CLI/native helper without its own full GUI. A browser extension may act as a narrow bridge where required, but the architecture must account for extension-store and browser-distribution constraints.</description>
+      <description>Keep the tease player and primary interface in the normal browser. The installed desktop component should initially be a small headless CLI/native helper without its own full GUI. Use it as a narrow bridge when demonstrated browser limitations block useful local capabilities, including device or protocol access that cannot be handled reliably in-browser. A browser extension may also act as a narrow bridge where required, subject to extension-store and browser-distribution constraints.</description>
       <tags>
         <tag>browser</tag>
         <tag>extension</tag>
@@ -287,6 +288,7 @@
       </tags>
       <history>
         <event date="2026-07-20" type="created">Added after clarifying that a full Electron/Tauri desktop user interface was not the intended baseline.</event>
+        <event date="2026-08-08" type="refined">Clarified that the thin helper may bridge demonstrated browser gaps for local device or protocol integration without becoming a full desktop application.</event>
       </history>
     </wish>
     <wish id="W-023" status="active">
@@ -330,7 +332,7 @@
     </wish>
     <wish id="W-026" status="active">
       <title>Sandboxed code modules and trusted capability plugins</title>
-      <description>Allow advanced packages to include sandboxed TypeScript-derived libraries for complex algorithms and custom player interfaces. Libraries may use HTML, CSS and DOM inside the isolated player iframe, but receive no parent-site DOM, raw external network, filesystem, process or device objects. Separately enabled host integrations may expose controlled external features.</description>
+      <description>Allow advanced packages to include sandboxed TypeScript-derived libraries for complex algorithms and custom player interfaces. Libraries may use HTML, CSS and DOM inside the isolated player iframe and may perform package-defined local computation over data made available inside that sandbox, but receive no parent-site DOM, unrestricted external network, filesystem, process or raw device objects. Separately enabled browser or host integrations may expose controlled capabilities that genuinely cross device, network or OS boundaries.</description>
       <tags>
         <tag>plugins</tag>
         <tag>typescript</tag>
@@ -342,6 +344,7 @@
         <event date="2026-07-20" type="clarified">Separated author-supplied sandboxed computation libraries from separately installed trusted engine plugins.</event>
         <event date="2026-07-21" type="clarified">Removed unnecessary granular permissions; core engine APIs are standard and only genuine external boundaries require one-time enablement.</event>
         <event date="2026-07-21" type="corrected">Allowed HTML/CSS/DOM inside the isolated player iframe while retaining the parent-site, network, filesystem, process and device boundaries.</event>
+        <event date="2026-08-08" type="refined">Clarified that package-defined computation inside the sandbox may remain powerful and local; controls belong at genuine external capability boundaries rather than around ordinary local computation.</event>
       </history>
     </wish>
     <wish id="W-027" status="active">
@@ -646,7 +649,7 @@
     </wish>
     <wish id="W-050" status="active">
       <title>Platform-hosted media and managed external integrations</title>
-      <description>Do not give package code unrestricted external network access. Upload package images, audio and video to platform storage/CDN, build widgets locally in author libraries, and add third-party APIs later as platform-managed Standard Library integrations.</description>
+      <description>Do not give package code unrestricted external Internet access. Upload published package images, audio and video to platform storage/CDN and build widgets locally in author libraries. Third-party Internet APIs remain managed integrations; intentional local-device communication may use separately controlled browser or helper capabilities where useful, without making arbitrary external networking available.</description>
       <tags>
         <tag>network</tag>
         <tag>media</tag>
@@ -656,6 +659,7 @@
       </tags>
       <history>
         <event date="2026-07-21" type="created">Accepted after reviewing privacy, dead-link risk and long-term package reliability.</event>
+        <event date="2026-08-08" type="refined">Distinguished unrestricted external Internet access from deliberately enabled local-device communication, while leaving exact transports and capability architecture for later decisions.</event>
       </history>
     </wish>
     <wish id="W-051" status="active">
@@ -731,7 +735,7 @@
     </wish>
     <wish id="W-056" status="active">
       <title>Dedicated on-device computer vision and adaptive censoring</title>
-      <description>Run specialized task-specific computer-vision models, such as object detectors, segmenters, trackers and pose or keypoint estimators, over runtime-selected or user-provided images, video and camera streams, including private local media libraries. Produce low-latency bounded typed observations such as class labels, counts, bounding boxes or masks, keypoints, confidence scores and stable tracking identities that deterministic scripts can use directly. Example uses include counting detected breasts or genitals to parameterize tasks, validating posture or movement, and applying optional blur, pixelation or other censoring overlays that follow detected regions through still images or video. This fast inference layer is distinct from multimodal LLM image interpretation: an LLM may later receive selected structured observations or occasional frames, but it is not required for real-time detection, counting, tracking or pose analysis. Prefer browser-local inference with available acceleration such as WebGPU or WebAssembly and ONNX-style runtimes so private media remains local by default; raw media or richer evidence may leave the device only through a later explicit privacy and capability design.</description>
+      <description>Run specialized task-specific computer-vision models, such as person or face detectors, object detectors, segmenters, trackers and pose or keypoint estimators, over runtime-selected or user-provided images, video and camera streams, including private local media libraries. Produce low-latency observations such as presence, class labels, counts, bounding boxes or masks, keypoints, confidence scores and stable tracking identities; simple conditions such as standing, kneeling, raised arms or holding a pose should be derivable with ordinary deterministic geometry or predicates rather than an LLM. This fast inference layer is distinct from multimodal LLM image interpretation: an LLM may later receive selected structured observations or occasional frames, but it is not required for real-time detection, counting, tracking or pose analysis. Prefer browser-local inference and allow package-defined local analysis over media made available inside the sandbox where the later capability design permits it. WebGPU acceleration, WebAssembly/CPU fallback and ONNX-style runtimes are candidate implementation routes, not required technologies; raw private media should remain local by default unless a later explicit privacy and capability decision allows otherwise.</description>
       <tags>
         <tag>computer-vision</tag>
         <tag>object-detection</tag>
@@ -752,6 +756,7 @@
         <event date="2026-08-02" type="created">Added as a distinct extension of the general vision-assessment direction in W-008 for unknown-at-authoring-time media, adaptive runtime input and moving censor overlays.</event>
         <event date="2026-08-02" type="refined">Clarified using NudeNet, EraX-NSFW and Ultralytics pose estimation as capability references: the core is low-latency specialized detection, segmentation, tracking and keypoint inference rather than multimodal LLM vision. LLM use is optional downstream context.</event>
         <event date="2026-08-02" type="deferred">Explicitly excluded from the current POC and alpha. Evaluate it for a later beta only if the media, privacy, capability and deterministic typed-result foundations are ready; otherwise retain it as serious post-1.0 work. This records product intent, not a scheduled release, dependency choice or accepted implementation architecture.</event>
+        <event date="2026-08-08" type="refined">Added presence and posture examples, deterministic pose-derived checks, package-local analysis as a future capability option, and explicit WebGPU versus CPU/WASM fallback candidates without selecting an inference architecture.</event>
       </history>
     </wish>
   </wishes>
