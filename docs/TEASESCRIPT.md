@@ -149,7 +149,7 @@ With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySk
 
 ### Bounded-data boundary
 
-ADR 0018 does not assign separate author-facing character limits to text answers, hints, buttons, or choice labels. Interaction definitions and completions remain subject to concrete versioned platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits selected by implementation.
+ADR 0018 does not assign separate author-facing character limits to text answers, hints, buttons, or choice labels. Interaction definitions and completions remain subject to justified current platform constraints for strings, collections, messages, plans, snapshots, checkpoints, nesting, and validation work.
 
 Over-limit data is rejected deterministically without truncation or partial state mutation. The editor may warn earlier about impractically long labels or large choice sets.
 
@@ -184,7 +184,10 @@ The current implemented `say` and `say as` paths remain unchanged until a tested
 
 Parser and semantic diagnostics are deterministic source-associated data. Resource-bound failures must be returned through this diagnostic model rather than exposed as native host exceptions.
 
-The source parser enforces a maximum recursive nesting depth of `64`. Inputs that exceed it return one `TSP027` error diagnostic rather than exposing a native JavaScript stack failure.
+The source parser currently uses an implementation nesting guard so excessive recursive syntax returns one `TSP027`
+error diagnostic rather than exposing a native JavaScript stack failure. The historical numeric guard is not a
+TeaseScript language-capacity requirement; its evidence and #129 repair route are tracked in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
 
 ## Protected names
 

@@ -1,118 +1,109 @@
 # Resource-limit registry
 
-This is the canonical repository registry for current resource-limit classification and evidence routing under
-[ADR 0019](decisions/0019-resource-limit-governance.md). Source code owns implemented values and formulas; accepted ADRs
-and topic specifications own policy. Each entry records the current boundary, reason, category, evidence, coupling, and
-decision route.
+This is the canonical repository inventory and repair router for current resource limits under
+[ADR 0019](decisions/0019-resource-limit-governance.md). Source code owns implemented values; accepted ADRs and topic
+specifications own policy. A number present in code is not a requirement merely because tests or documentation repeat it.
 
-## Scope
+## Evidence rule
 
-The registry covers current hard bounds for source processing, caller-controlled data, engine/runtime work and state,
-checkpoint handling, interaction payloads, and the local playground boundary. Test and CI tooling keep their own limits
-in their owning tooling contracts.
+Retaining a production bound requires evidence for both the need for a bound at that boundary and the selected value,
+formula, predicate, accepted domain, or mechanism. Exact-boundary tests prove current implementation behavior; they do
+not justify the boundary they import. Historical, round, conservative, convenient, or cross-copied values are repair
+inputs rather than capacity targets.
 
-A provisional guard may remain provisional while it protects a concrete current risk. Evidence requirements scale with
-the claim: a local guard needs evidence for its local behavior, while a deliberate official capacity claim requires the
-broader ADR 0019 evidence for every applicable supported layer and resource dimension.
+`provisional` is reserved for a deliberately selected boundary that already has a concrete evidence-based local
+rationale while broader evidence or policy remains incomplete. No reviewed numeric POC guard in the tables below meets
+that standard on the current evidence.
 
-Issue #131 supplies raw coupling evidence. Current Phase 2 probes refresh the findings that still apply to current
-`main`; measured first-failure points remain diagnostic evidence.
+Rows marked **retention unsupported** record current code only so #129 can remove, replace, or re-derive them. Their
+numbers must not become source-capacity goals, implementation targets, regression thresholds, or reasons to preserve
+complexity. Issue #131 first-failure measurements likewise remain diagnostic evidence.
 
 ### Change routing
 
 - Material production-limit changes carry ADR 0019's Owner-information duty.
-- Product-default, official-capacity, absolute-ceiling, and public rejection-policy changes use the explicit Owner route.
-- Capture/validation-budget architecture and accepted cross-component coupling changes use the ADR route.
+- Product-default, official-capacity, absolute-ceiling, and public rejection-policy decisions use the explicit Owner route.
+- Capture/validation-budget architecture and accepted cross-component coupling changes use the ADR route when the
+  architecture or accepted contract changes.
 - Serialized-domain changes include the applicable format-version, migration, and compatibility review.
-- Exact-edge and worst-form evidence is added when the entry's deliberate claim requires it.
+- A repair that removes an unsupported implementation ceiling without creating a replacement capacity promise remains
+  focused implementation work, with tests updated to the resulting justified behavior.
 
-### Primary evidence anchors
+## Retained representation invariants
 
-- [`tests/parser-nesting-boundaries.test.ts`](../tests/parser-nesting-boundaries.test.ts) and
-  [`tests/parser-nesting-limit.test.ts`](../tests/parser-nesting-limit.test.ts): parser recursion.
-- [`tests/external-runtime-data-limits.test.ts`](../tests/external-runtime-data-limits.test.ts) and
-  [`tests/stable-external-data.test.ts`](../tests/stable-external-data.test.ts): graph capture and checkpoint mappings.
-- [`tests/instruction-plan-range-validation.test.ts`](../tests/instruction-plan-range-validation.test.ts) and
-  [`tests/runtime-snapshot-invariants.test.ts`](../tests/runtime-snapshot-invariants.test.ts): plan/runtime numeric domains.
-- [`tests/functions-checkpoint.test.ts`](../tests/functions-checkpoint.test.ts): call-frame and detailed snapshot work.
-- [`tests/foreground-interactions-runtime.test.ts`](../tests/foreground-interactions-runtime.test.ts),
-  [`tests/foreground-interactions-handoff-runtime.test.ts`](../tests/foreground-interactions-handoff-runtime.test.ts), and
-  [`tests/pending-action-hardening.test.ts`](../tests/pending-action-hardening.test.ts): interaction/time/counter boundaries.
-- [`tests/playground-workspace.test.ts`](../tests/playground-workspace.test.ts),
-  [`tests/playground-server.test.ts`](../tests/playground-server.test.ts), and
-  [`tests/playground-browser-workspace.test.ts`](../tests/playground-browser-workspace.test.ts): local workspace boundary.
+| ID | Boundary / invariant | Current mechanism | Evidence / authority |
+|---|---|---|---|
+| `capture.array-index-domain` | Captured arrays require precise own indexes consistent with validated JavaScript array length. | Safe integer indexes `< 0xffff_ffff` and below validated `length`; direct AST capture applies the equivalent dense-index relationship. | JavaScript array representation, ADR 0019, issue #87; hostile/proxy regressions. `proven` |
+| `plan.instruction-address-domain` | Control-flow/function addresses must remain precise and inside validated plan regions. | Instruction boundaries are safe integers within `0..instructions.length`; indexed function IDs are positive safe integers. | ADRs 0015 and 0019; range-validation regressions. `proven` |
+| `runtime.session-time-domain` | Persisted time/deadline arithmetic must remain finite and precise. | `currentSessionTimeMs` is a non-negative safe integer; timed work additionally requires an in-range deadline. | ADR 0016; overflow/atomicity regressions. `proven` |
+| `runtime.identity-space` | Persisted IDs and event sequences must remain unique, monotonic, and precisely representable. | Positive/non-negative safe integers as applicable, with preflight before allocation/advancement would exceed the domain. | ADRs 0015 and 0016; overflow/atomicity regressions. `proven` |
+| `runtime.last-settlement-retention` | Duplicate replay needs only the latest bounded settlement. | `lastSettlement` is `null` or one latest settlement record; a newer settlement replaces it. | ADR 0016 and [`RUNTIME.md`](RUNTIME.md); checkpoint/replay regressions. `proven` |
 
-## Engine and runtime
+## Current numeric bounds with unsupported retention
 
-| ID | Boundary / reason | Category | Current value / mechanism | Canonical source | Authority / status | Coupling, evidence, and next action |
-|---|---|---|---|---|---|---|
-| `parser.nesting` | Recursive source parsing; bounds native-stack exposure and preserves structured parser failure. | Parser/compiler/runtime implementation guard | `MAX_PARSER_NESTING_DEPTH = 64` recursive syntax entries. | [`src/parser.ts`](../src/parser.ts) | ADR 0019; issue #101. `provisional` | Exact-edge and deep-form tests establish current guard behavior. Refresh the rationale when parser recursion structure or this guard changes. |
-| `capture.depth` | Stable capture of caller-controlled graphs; bounds recursive hostile-data traversal before detailed validation and cloning. | Hostile-input capture budget | `MAX_EXTERNAL_RUNTIME_DATA_DEPTH = 128`, root depth `0`. | [`src/external-data-limits.ts`](../src/external-data-limits.ts), [`src/ast-validation.ts`](../src/ast-validation.ts) | ADR 0019; [`SECURITY.md`](SECURITY.md). `suspicious` | The same value governs generic external data and separate direct-AST capture, then influences plan, snapshot, checkpoint, globals, completion, and serializable-value paths. Later work should justify or separate semantically distinct uses when evidence supports a concrete benefit. |
-| `capture.work` | Stable capture of caller-controlled graphs; bounds graph traversal, hostile arrays/keys, and pre-validation allocation/work. | Hostile-input capture budget | `MAX_EXTERNAL_RUNTIME_DATA_WORK = 100_000` visited values; sparse declared array length and key enumeration consume the same allowance. | [`src/external-data-limits.ts`](../src/external-data-limits.ts), [`src/ast-validation.ts`](../src/ast-validation.ts), [`src/plan/capture-support.ts`](../src/plan/capture-support.ts) | ADR 0019; [`SECURITY.md`](SECURITY.md). `suspicious` | Current source compilation and checkpoint probes confirm category spillover across structurally different boundaries. Graph work counts structure; scalar-string and property-key byte accounting is a separate resource dimension. Repair analysis should measure the real structural and byte risks per boundary. |
-| `capture.array-index-domain` | Captured JavaScript arrays; preserves precise indexes and agreement with validated array length under hostile/proxy input. | Representation invariant | Captured indexes are safe integers `< 0xffff_ffff` and below validated `length`; direct AST capture applies the equivalent dense-index relationship. | [`src/external-data-limits.ts`](../src/external-data-limits.ts), [`src/ast-validation.ts`](../src/ast-validation.ts) | JavaScript array representation; ADR 0019; issue #87. `proven` | Focused hardening tests cover proxy-index conflicts and sparse/inflated lengths. |
-| `ast.source-position-domain` | Public source positions and direct-AST spans; keeps diagnostic coordinates precise and serializable. | Representation invariant | Direct-AST capture requires non-negative JavaScript safe integers; exported `createSourcePosition(...)` accepts non-negative integers. | [`src/ast-validation.ts`](../src/ast-validation.ts), [`src/source.ts`](../src/source.ts) | ADR 0019; intended common numeric domain unresolved. `suspicious` | The public constructor and direct-AST boundary accept different numeric domains. Align or explicitly define the shared representation invariant. |
-| `plan.instruction-address-domain` | Public plan control-flow/function addresses; keeps targets precise and inside validated plan regions. | Representation invariant | Instruction boundaries are JavaScript safe integers within `0..instructions.length`; function IDs are positive safe integers where indexed. | [`src/plan/validation.ts`](../src/plan/validation.ts), [`src/plan/model.ts`](../src/plan/model.ts) | ADR 0015; ADR 0019. `proven` | Range-validation tests cover malformed boundaries and function regions. |
-| `plan.temporary-id-domain` | Public plan temporaries and persisted runtime temporaries; keeps plan/runtime identity representation consistent. | Representation invariant | Plan `temporaryCount` accepts non-negative integers and references `1..temporaryCount`; runtime snapshot temporary IDs require positive JavaScript safe integers. | [`src/plan/validation.ts`](../src/plan/validation.ts), [`src/runtime/state.ts`](../src/runtime/state.ts) | ADR 0015; common domain unresolved under ADR 0019. `suspicious` | Current public-API evidence confirms the plan/runtime domains differ above the safe-integer boundary. Align the shared representation invariant. |
-| `plan.loop-id-domain` | Public plan loop identities and persisted runtime loop frames; keeps validated plan identities representable in runtime state. | Representation invariant | Plan `loopStart`/`loopControl` require positive integer `loopId`; persisted loop frames require positive JavaScript safe integers. | [`src/plan/validation.ts`](../src/plan/validation.ts), [`src/runtime/state.ts`](../src/runtime/state.ts), [`src/runtime/engine.ts`](../src/runtime/engine.ts) | ADR 0015; common domain unresolved under ADR 0019. `suspicious` | Current public-API evidence confirms plan validation can accept a loop ID that later falls outside the snapshot domain. Align the plan/runtime loop-ID invariant. |
-| `checkpoint.combined-capture` | Checkpoint serialization/restore; bounds hostile whole-envelope graph work while composing plan and snapshot data. | Hostile-input capture budget | `createCheckpoint(...)` captures plan and snapshot separately; serialization/restore captures the complete `{ plan, snapshot }` envelope under the shared `128` / `100_000` allowance. | [`src/runtime/checkpoint.ts`](../src/runtime/checkpoint.ts) | ADRs 0015 and 0019; composition policy unresolved under #129. `suspicious` | Current public-API evidence confirms separately valid components can exceed the shared allowance only after envelope composition. Repair analysis should address boundary composition or derive a justified relation from the real resource dimensions. |
-| `snapshot.detailed-validation-work` | Detailed snapshot consistency/liveness validation; bounds post-capture validation work before execution or restore. | Parser/compiler/runtime implementation guard | `MAX_DETAILED_VALIDATION_WORK = 1_000_000` operation-local work units. | [`src/runtime/state.ts`](../src/runtime/state.ts) | ADRs 0015, 0016, 0019; [`SECURITY.md`](SECURITY.md). `provisional` | Deterministic exhaustion is covered across snapshot, runtime, and checkpoint boundaries. Additional structural evidence becomes useful when the guard, algorithm, or a supported workload conflict changes. |
-| `interaction.string-bytes` | Interaction definitions/completions; bounds per-string validation and retained runtime state. | Provisional POC guard | `MAX_INTERACTION_STRING_UTF8_BYTES = 65_536` UTF-8 bytes per retained/submitted string. | [`src/interaction-limits.ts`](../src/interaction-limits.ts) | ADRs 0018 and 0019; runtime/security docs. `provisional` | Current direct runtime boundary tests cover the guard. Its scope is the generic runtime interaction payload boundary; later Player/host/transport/storage work supplies evidence for those boundaries when implemented. |
-| `interaction.aggregate-bytes` | One interaction definition; bounds aggregate retained text work and checkpoint payload growth. | Provisional POC guard | `MAX_INTERACTION_AGGREGATE_UTF8_BYTES = 65_536` UTF-8 bytes across retained strings in one definition. | [`src/interaction-limits.ts`](../src/interaction-limits.ts) | ADRs 0018 and 0019; runtime/security docs. `provisional` | Shares the numeric value with the per-string guard while protecting a separate aggregate risk; wrapper/option structure also consumes graph-capture work. |
-| `interaction.option-entries` | Generic choice interaction payload; bounds collection validation, retained state, matching work, and future rendering/transport exposure. | Provisional POC guard | `MAX_INTERACTION_OPTION_ENTRIES = 4_096` entries. | [`src/interaction-limits.ts`](../src/interaction-limits.ts) | ADRs 0018 and 0019. `provisional` | Scope: generic runtime-payload boundary. Current direct runtime tests cover that guard. Author-facing source lowering follows the actual downstream constraints of the implementation it selects. |
-| `runtime.call-depth-default` | Omitted `maxCallDepth`; selects the normal POC recursion setting. | Product default | `DEFAULT_MAX_CALL_DEPTH = 256` call frames. | [`src/runtime/state.ts`](../src/runtime/state.ts) | Current runtime contract; ADR 0019. `provisional` | Callers may configure the supported POC range below. A product-default change follows the explicit Owner route. |
-| `runtime.call-depth-ceiling` | Fresh/restored `maxCallDepth`; bounds configured call-frame growth. | Provisional POC guard | `MAX_SUPPORTED_CALL_DEPTH = 4_096`; accepted configuration `1..4_096`. | [`src/runtime/state.ts`](../src/runtime/state.ts) | ADRs 0015 and 0019. `provisional` | Shared graph capture and detailed snapshot validation also constrain concrete frame shapes. The guard remains local to this configuration boundary. |
-| `runtime.instruction-quantum` | `run(...)` / `stepToEvent(...)` invocation work; bounds one execution call. | Execution quantum | Caller-supplied positive integer `instructionBudget`; exhaustion produces deterministic `TSR037`. | [`src/runtime/engine.ts`](../src/runtime/engine.ts) | ADR 0015; ADR 0019. `suspicious` | The accepted option domain extends beyond `Number.MAX_SAFE_INTEGER`, while the executed-instruction counter is an incremented JavaScript `number`. Repair options are a representable option domain or a different counter representation; a narrowed public domain follows the compatibility/Owner route. |
-| `runtime.instruction-quantum-default` | Omitted instruction budget; selects ordinary per-call work before `TSR037`. | Product default | `10_000` instructions per `run(...)` / `stepToEvent(...)` invocation. | [`src/runtime/engine.ts`](../src/runtime/engine.ts) | ADR 0015; ADR 0019. `provisional` | A product-default change follows the explicit Owner route and should use workload evidence relevant to the intended runtime. |
-| `runtime.session-time-domain` | Persisted session time and timed-action deadlines; preserves finite precise time/deadline arithmetic. | Representation invariant | `0 <= currentSessionTimeMs <= Number.MAX_SAFE_INTEGER`; timed work additionally requires finite non-negative duration and an in-range deadline. | [`src/runtime/state.ts`](../src/runtime/state.ts), [`src/runtime/engine.ts`](../src/runtime/engine.ts), [`src/runtime/operations/observe-time.ts`](../src/runtime/operations/observe-time.ts) | ADR 0016; current snapshot representation. `proven` | Boundary tests cover time/deadline overflow and atomic rejection. |
-| `runtime.identity-space` | Persisted runtime IDs and event sequences; preserves precise identity, monotonicity, and atomic transitions. | Representation invariant | Positive/non-negative JavaScript safe integers as appropriate; allocation/event advancement preflights remaining representable space. | [`src/runtime/state.ts`](../src/runtime/state.ts), [`src/runtime/operations/support.ts`](../src/runtime/operations/support.ts), [`src/runtime/engine.ts`](../src/runtime/engine.ts) | ADRs 0015 and 0016. `proven` | Focused tests cover overflow rejection and atomic state/event behavior. |
-| `runtime.last-settlement-retention` | Completion replay state; bounds retained settlement history while preserving deterministic immediate retry. | Representation invariant | `lastSettlement` is `null` or one latest bounded settlement record; a newer settlement replaces it. | [`src/runtime/state.ts`](../src/runtime/state.ts), [`src/runtime/operations/support.ts`](../src/runtime/operations/support.ts) | ADR 0016; [`RUNTIME.md`](RUNTIME.md). `proven` | Checkpoint/restore and duplicate/stale-action tests cover the single-record invariant. Interaction byte and snapshot validation guards apply to retained content. |
+The real failure mode in this table may justify some bounded mechanism. The reviewed history does not justify the
+selected number itself. ADR 0019 status is therefore `suspicious`; **retention unsupported** is the #129 disposition,
+not permission to preserve the current threshold.
 
-## Playground development boundary
+| ID | Current code | Real concern / evidence | Why the selected value is unsupported | #129 disposition |
+|---|---|---|---|---|
+| `parser.nesting` | `MAX_PARSER_NESTING_DEPTH` | Recursive source parsing produced native stack overflow before issue #101/PR #107; structured `TSP027` is a real requirement. | Failing-before probes established vulnerable deep recursion, but no measured stack margin or structural invariant was found for the selected constant. Exact-edge tests mirror that constant. | Replace the hard-coded threshold with a justified measured/derived guard or remove the numeric ceiling by eliminating vulnerable recursion. |
+| `capture.depth` | `MAX_EXTERNAL_RUNTIME_DATA_DEPTH` | Hostile deeply nested caller data produced native stack failure before issue #42/PR #52. | PR #52 describes the selected value as conservative/tunable and records no derivation from the observed failure or a platform constraint. | Re-derive the boundary from the actual capture implementation/risk or structurally remove the need for an arbitrary depth threshold. |
+| `capture.work` | `MAX_EXTERNAL_RUNTIME_DATA_WORK` | Hostile wide graphs need bounded pre-validation work/allocation. | PR #52 describes the selected value as conservative/tunable; no measurement, safety margin, external constraint, or structural formula was found. The same constant is also reused across semantically different inputs. | Define the real structural/byte work dimensions and derive boundary-specific protection; remove the shared round constant where it has no justified role. |
+| `snapshot.detailed-validation-work` | `MAX_DETAILED_VALIDATION_WORK` | Issue #89/PR #92 established multiplicative detailed-validation work and repaired several algorithms. | PR #92 retained the existing constant but did not derive it from the remaining algorithm, workload, memory bound, or safety margin. Exhaustion tests only prove enforcement. | Re-derive a bound from the remaining work model or remove it if the repaired algorithm can be bounded structurally without an arbitrary ceiling. |
+| `interaction.string-bytes` | `MAX_INTERACTION_STRING_UTF8_BYTES` | Interaction data consumes validation, retained-state, checkpoint, and later platform resources. | PR #117 selected the value by matching an unrelated playground boundary rather than evidence for the runtime interaction boundary. | Remove the generic numeric ceiling unless a concrete runtime risk requires one; otherwise derive a boundary-specific value from that risk. |
+| `interaction.aggregate-bytes` | `MAX_INTERACTION_AGGREGATE_UTF8_BYTES` | Aggregate retained interaction text has resource cost distinct from one string. | PR #117 copied another boundary's value despite the separate aggregate risk and supplied no independent derivation. | Remove or independently derive the aggregate mechanism from the resource it actually protects. |
+| `interaction.option-entries` | `MAX_INTERACTION_OPTION_ENTRIES` | Large option collections consume validation, retained state, matching, and future presentation resources. | PR #117 chose a conservative round value relative to an unrelated graph-work guard. Existing exact tests use cheap static/empty-string shapes and do not justify the count. | Remove the generic option-count ceiling. Add a count bound only if a concrete boundary later demonstrates and justifies one. |
+| `runtime.call-depth-default` | `DEFAULT_MAX_CALL_DEPTH` | Omitted `maxCallDepth` currently selects a value stored in snapshots. | PR #5 introduced the default without workload evidence or an accepted product-default decision. | Remove the unsupported default contract or obtain an explicit product decision backed by relevant workload evidence. |
+| `runtime.call-depth-ceiling` | `MAX_SUPPORTED_CALL_DEPTH` | Call frames consume serializable runtime/checkpoint resources. | PR #5 introduced the ceiling without a reproduced failure, representation formula, downstream capacity derivation, or policy rationale. Runtime calls are explicit serializable frames rather than native JS recursion. | Remove the ceiling unless a real runtime/state boundary requires one; then derive it from that boundary. |
+| `runtime.instruction-quantum-default` | default `instructionBudget` | A single `run(...)` / `stepToEvent(...)` invocation needs deliberate work/failure semantics. | The runtime was introduced with a hard-coded default; no workload, scheduler, latency, safety-margin, or product rationale for that value was found. | Resolve the intended per-invocation semantics, then derive or explicitly decide any default that remains. |
 
-These entries describe the local development workspace boundary.
+### Local playground values
 
-| ID | Boundary / reason | Category | Current value / mechanism | Canonical source | Authority / status | Coupling, evidence, and next action |
-|---|---|---|---|---|---|---|
-| `playground.source-bytes` | Browser/file/workspace source ingestion; bounds local parser/compiler work and upload buffering. | Transport/storage/tooling guard | `MAX_WORKSPACE_SOURCE_BYTES = 64 * 1024 = 65_536` UTF-8 bytes. | [`playground/workspace/controller.ts`](../playground/workspace/controller.ts) | [`SECURITY.md`](SECURITY.md); ADR 0019. `provisional` | Exact byte-boundary tests cover the local tool. Scope remains the playground workspace boundary. |
-| `playground.request-bytes` | Loopback workspace HTTP request buffering; bounds request memory/work before source handling. | Transport/storage/tooling guard | `MAX_WORKSPACE_REQUEST_BYTES = MAX_WORKSPACE_SOURCE_BYTES + 1_024 = 66_560` bytes. | [`playground/server.ts`](../playground/server.ts) | [`SECURITY.md`](SECURITY.md); ADR 0019. `provisional` | The formula intentionally couples request capacity to workspace source bytes plus fixed protocol headroom. |
-| `playground.instruction-quantum` | Browser workspace run/step; bounds one local execution request. | Execution quantum | `MAX_WORKSPACE_INSTRUCTION_BUDGET = 10_000` instructions passed explicitly to runtime run/step. | [`playground/workspace/controller.ts`](../playground/workspace/controller.ts) | Playground development contract; ADR 0015. `provisional` | This is an explicit local-tool choice with the same current number as the runtime default. |
+These are development-tool implementation values, not engine/product capacity. They remain listed because they currently
+reject input and can otherwise be mistaken for TeaseScript requirements.
 
-## Current routing
+| ID | Current code | Evidence result | #129 disposition |
+|---|---|---|---|
+| `playground.source-bytes` | `MAX_WORKSPACE_SOURCE_BYTES` | PR #86 states the bound but supplies no measurement or external constraint selecting its value. **Retention unsupported.** | Remove or derive from the actual local-tool buffering/compiler requirement. |
+| `playground.request-bytes` | `MAX_WORKSPACE_REQUEST_BYTES` | Request buffering is a real boundary, but its fixed headroom has no documented protocol derivation. **Retention unsupported.** | Derive the request bound from the request shapes the local API actually accepts. |
+| `playground.instruction-quantum` | `MAX_WORKSPACE_INSTRUCTION_BUDGET` | PR #86 reused the runtime value; no independent responsiveness/workload evidence selects it. **Retention unsupported.** | Remove the coupling or derive a local-tool value from measured/accepted workspace behavior. |
 
-### Suspicious clusters
+## Structural and domain defects with concrete evidence
 
-1. **Capture and checkpoint accounting.** The shared `128` / `100_000` hostile-data values span direct AST, plan,
-   snapshot, checkpoint, globals/completion, and serializable-value paths. Checkpoint creation and combined-envelope
-   capture also compose those allowances differently. Current evidence supports focused analysis of the real structural
-   and byte dimensions per boundary.
-2. **Representation-domain consistency.** Public source positions, plan temporary IDs, and plan loop IDs each have a
-   wider accepted numeric domain than the corresponding capture/runtime representation. These are narrow consistency
-   defects suitable for one focused repair cluster.
-3. **Instruction-quantum option domain.** The public `instructionBudget` domain extends beyond the precise counting range
-   of the current JavaScript counter. A focused repair should make the accepted option domain and counter representation
-   agree.
+| ID | Evidence | Repair direction |
+|---|---|---|
+| `ast.source-position-domain` | Direct-AST capture requires non-negative safe integers while exported `createSourcePosition(...)` accepts the wider non-negative integer domain. | Align or explicitly define the shared representation invariant. `suspicious` |
+| `plan.temporary-id-domain` | Plan temporary counts/references accept a wider integer domain than persisted runtime temporary IDs. | Align the plan/runtime representation invariant. `suspicious` |
+| `plan.loop-id-domain` | Plan loop IDs accept a wider integer domain than persisted loop frames. | Align the plan/runtime representation invariant. `suspicious` |
+| `checkpoint.combined-capture` | Checkpoint creation captures plan/snapshot separately while serialization/restore recaptures the combined envelope through the shared unsupported capture budgets. Separately valid components can therefore fail only after composition. | Repair composition together with the capture-budget redesign; do not derive checkpoint capacity from the historical capture constants. `suspicious` |
+| `runtime.instruction-quantum` | Caller-supplied positive integer `instructionBudget` accepts values beyond `Number.MAX_SAFE_INTEGER`, while the executed-instruction counter is a JavaScript `number`; exhaustion currently produces terminal `TSR037`. | Make the accepted domain/counter precise and resolve the intended yield/failure semantics without preserving the historical default as a target. `suspicious` |
 
-### Owner decision points
+## #111 and ADR 0018
 
-Owner approval becomes relevant when later work changes the `256` call-depth default, the `10_000` instruction-budget
-default, narrows a previously accepted public input, establishes an official capacity policy, or changes a public
-failure/compatibility policy. Other material technical guard changes retain ADR 0019's Owner-information duty.
+The current option-count constant is not a source capacity, implementation target, end-to-end maximum, or ADR 0018
+acceptance threshold. #111 follows its accepted interaction contract and actual downstream constraints. If realistic
+supported interaction work exposes an unsupported historical guard, #129 repairs that guard or representation rather
+than optimizing source lowering to reach the historical number.
 
-### Recommended follow-up clusters
+## Current repair clusters
 
-1. **Capture/checkpoint accounting:** measure structural and byte dimensions, then select the smallest boundary-specific
-   repair justified by those measurements.
-2. **Representation-domain consistency:** align source-position, temporary-ID, and loop-ID domains with their persisted
-   representations.
-3. **Instruction-quantum domain:** align the accepted per-invocation budget domain with a representable counter and use
-   the compatibility/Owner route for any public-domain narrowing.
+1. **Unsupported guard values with real failure modes:** parser recursion, hostile-data capture, and detailed snapshot
+   validation. Preserve the demonstrated safety property while replacing arbitrary values with structural or evidenced
+   mechanisms.
+2. **Unsupported capacity/default constants:** interaction counts/bytes, call-depth default/ceiling, runtime instruction
+   default, and playground constants. Remove them unless concrete evidence or explicit product/tooling policy justifies a
+   replacement.
+3. **Representation/domain consistency:** source positions, temporary IDs, loop IDs, and instruction-budget counter
+   representation.
+4. **Capture/checkpoint composition:** repair the shared accounting model together with the capture-bound redesign.
 
-Provisional parser, detailed-validation, interaction, call-depth, runtime-default, and playground guards remain useful
-current entries with their existing local rationale. Additional evidence is gathered when a guard changes, a supported
-path exposes a concrete conflict, or a broader policy claim is proposed.
+Owner decisions are needed only where a repair deliberately creates or retains product policy: a product default,
+official supported capacity, absolute ceiling, public rejection/compatibility policy, or equivalent accepted tradeoff.
 
 ## Updating this registry
 
-Update the smallest relevant entry when a production limit is added, removed, materially changed, or gains better
-evidence. Keep each implemented constant/formula near its owning boundary and use focused repair work for concrete
-conflicts, operational risk, or worthwhile simplification.
+Keep implemented values in source near their owning boundary. Update this registry when evidence changes the disposition
+or a focused repair lands. A new or retained numeric production bound must record the derivation, measurement plus safety
+rationale, external constraint, representation invariant, or accepted policy that selects it; tests then verify that
+justified boundary rather than supplying the justification themselves.

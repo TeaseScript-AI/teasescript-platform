@@ -79,14 +79,13 @@ Completion semantics are:
 
 A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
-Interaction limits version 1 uses three shared provisional POC guards: `65,536` UTF-8 bytes for any one string, `65,536`
-UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion
-text uses the same per-string guard. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted
-field once, and stops encoding further fields after either a per-string or aggregate failure. Text completion measures
-the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. Their scope is the current
-runtime/validation boundary. Broader Player, host-message, transport, rendering, and storage capacity is established
-with those paths when implemented. Over-limit data is rejected without truncation, clamping, or partial state mutation.
-Current classification and evidence routing are maintained in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
+The current runtime contains per-string, aggregate-text, and option-count interaction guards. Their exact numeric values
+are implementation inventory, not accepted capacity or source targets; [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)
+records that current evidence does not justify retaining those numbers. Bounded validation first rejects impossible
+UTF-16 lengths, measures each accepted field once, and stops encoding further fields after either a per-string or
+aggregate failure. Text completion measures the raw host string once; CRLF/CR-to-LF normalization cannot increase its
+UTF-8 size. Current over-limit data is rejected without truncation, clamping, or partial state mutation until the #129
+repair replaces or removes the unsupported ceilings.
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 
@@ -425,17 +424,13 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
 
 ## Runtime defaults and limits
 
-Current POC defaults and validation limits are listed below. Their classification, evidence status, couplings, and
-repair routing are maintained in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); this section records implemented runtime
-behavior only.
+Current code contains call-depth, hostile-data capture, detailed-validation, interaction, and instruction-work guards.
+Exact numeric implementation values and their retention evidence live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md);
+values whose retention is unsupported are repair locators rather than runtime-capacity requirements. This document keeps
+the behavior and safety semantics without promoting those historical numbers into contracts.
 
-- default maximum call depth: `256`;
-- accepted maximum call depth range: `1` through `4096`;
-- maximum external runtime-data nesting depth: `128` (`MAX_EXTERNAL_RUNTIME_DATA_DEPTH`);
-- maximum external runtime-data validation work: `100,000` visited values (`MAX_EXTERNAL_RUNTIME_DATA_WORK`);
-- default `run(...)` and `stepToEvent(...)` instruction budget: `10,000`;
-- default playground RNG algorithm: `xorshift32-v1`;
-- default playground seed: `0x6d2b79f5`.
+The playground RNG algorithm remains `xorshift32-v1` with default seed `0x6d2b79f5`; those deterministic identity
+choices are unrelated to resource capacity.
 
 A configured instruction budget must be a positive integer. Exhaustion fails deterministically with structured runtime error `TSR037` instead of hanging. Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
 
