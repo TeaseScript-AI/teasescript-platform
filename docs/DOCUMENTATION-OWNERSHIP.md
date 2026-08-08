@@ -14,20 +14,14 @@ one clear canonical owner. Keep the complete authoritative explanation there.
 Elsewhere, prefer a link or the smallest stable summary needed for the local
 document to remain understandable.
 
-Here, **canonical owner** means the repository source that maintains the
-information or the accepted authority that controls it; it does not mean one
-persistent human or agent.
-Terms such as **product owner**, **coordinator**, or **owning agent** retain their
-literal role meaning only where the text explicitly assigns that role. An owning
-agent is a temporary execution assignment for an issue, branch, or pull request,
-not the durable owner of the resulting rule, contract, limit, or subsystem.
-
-Durable responsibility must survive fresh agent context. Do not require an
-agent identity, memory of earlier work, or an informal handoff to determine who
-or what governs a rule. Where responsibility metadata is needed, record the
-governing or decision authority, canonical source, affected boundary, and
-required change or approval process as applicable. Do not invent a persistent
-individual owner merely to fill an `owner` field.
+**Owner** means the project's human owner and final decision authority. Agents may
+temporarily execute or coordinate issues, branches, pull requests, reviews, or
+workstreams, but they are not durable owners. **Canonical ownership** describes
+where a maintained rule or fact lives in the repository, not a person or agent.
+Durable responsibility must be recoverable from repository state; when a document
+or registry needs responsibility metadata, record the precise canonical source or
+decision/change authority actually needed rather than inventing a persistent agent
+owner. A coordinator is only an explicitly assigned temporary workflow role.
 
 KISS is primary: choose the simplest complete documentation structure across
 local clarity, authority, maintenance, and recurring reader or agent context.
