@@ -1,6 +1,6 @@
 import { CheckpointError, createCheckpoint, deserializeCheckpoint, serializeCheckpoint, type InstructionPlan, type InterpreterEvent, type RuntimeSnapshot } from "../src/index.js";
 import { checkpointStorageKey, exampleUrl, isPlaygroundExampleName, PLAYGROUND_EXAMPLES, type PlaygroundExampleName } from "./examples.js";
-import { MAX_WORKSPACE_SOURCE_BYTES, compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSnapshot, type WorkspaceResult } from "./workspace/controller.js";
+import { compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSnapshot, type WorkspaceResult } from "./workspace/controller.js";
 
 const DRAFT_KEY = "teasescript-playground-draft-v1";
 const elements = {
@@ -100,7 +100,7 @@ function clearSavedCheckpoint(): void { try { localStorage.removeItem(checkpoint
 async function importSource(): Promise<void> {
   const file = elements.sourceFile.files?.[0]; elements.sourceFile.value = "";
   if (file === undefined) return;
-  if (!file.name.toLowerCase().endsWith(".tease") || file.size > MAX_WORKSPACE_SOURCE_BYTES) { setActionStatus(`Import requires one .tease file no larger than ${MAX_WORKSPACE_SOURCE_BYTES} bytes.`); return; }
+  if (!file.name.toLowerCase().endsWith(".tease")) { setActionStatus("Import requires one .tease file."); return; }
   try { const text = decodeWorkspaceSourceBytes(await file.arrayBuffer()); replaceSource(text, "Local file loaded; compile it to create a runtime.", file.name); } catch (error) { setActionStatus(`Import failed: ${errorMessage(error)}`); }
 }
 

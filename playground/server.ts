@@ -4,9 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLAYGROUND_EXAMPLES } from "./examples.js";
-import { MAX_WORKSPACE_SOURCE_BYTES, compileWorkspaceSource, executeWorkspaceSource, type WorkspaceResult } from "./workspace/controller.js";
-
-export const MAX_WORKSPACE_REQUEST_BYTES = MAX_WORKSPACE_SOURCE_BYTES + 1024;
+import { compileWorkspaceSource, executeWorkspaceSource, type WorkspaceResult } from "./workspace/controller.js";
 
 export interface PlaygroundServerOptions {
   readonly projectRoot?: string;
@@ -166,11 +164,8 @@ async function serveWorkspaceApi(request: IncomingMessage, pathname: string, wor
       sendJson(response, 415, { error: { code: "unsupportedContentType", message: "Source uploads require Content-Type: text/plain; charset=utf-8." } });
       return;
     }
-    const body = await readBoundedUtf8(request);
+    const body = await readUtf8Body(request);
     if (!body.ok) { sendJson(response, body.status, { error: body.error }); return; }
-    if (Buffer.byteLength(body.text, "utf8") > MAX_WORKSPACE_SOURCE_BYTES) {
-      sendJson(response, 413, { error: { code: "sourceTooLarge", message: `Source exceeds ${MAX_WORKSPACE_SOURCE_BYTES} UTF-8 bytes.` } }); return;
-    }
     workspace.source = body.text;
     workspace.sourceRevision += 1;
     workspace.lastCompileResult = null;
@@ -180,9 +175,7 @@ async function serveWorkspaceApi(request: IncomingMessage, pathname: string, wor
     return;
   }
   if ((pathname === "/api/workspace/compile" || pathname === "/api/workspace/run") && method === "POST") {
-    const body = await readBoundedBody(request);
-    if (!body.ok) { sendJson(response, body.status, { error: body.error }); return; }
-    if (body.bytes.length !== 0) {
+    if (await hasUnexpectedBody(request)) {
       sendJson(response, 400, { error: { code: "unexpectedBody", message: "This operation does not accept a request body." } }); return;
     }
     const result = pathname.endsWith("/compile") ? compileWorkspaceSource(workspace.source) : executeWorkspaceSource(workspace.source);
@@ -208,31 +201,30 @@ function isUtf8Text(value: string | string[] | undefined): boolean {
   return /^text\/plain(?:\s*;\s*charset=utf-8)?\s*$/iu.test(value);
 }
 
-async function readBoundedUtf8(request: IncomingMessage): Promise<{ readonly ok: true; readonly text: string } | { readonly ok: false; readonly status: number; readonly error: { readonly code: string; readonly message: string } }> {
-  const body = await readBoundedBody(request);
-  if (!body.ok) return body;
+async function readUtf8Body(request: IncomingMessage): Promise<{ readonly ok: true; readonly text: string } | { readonly ok: false; readonly status: number; readonly error: { readonly code: string; readonly message: string } }> {
   try {
-    return { ok: true, text: new TextDecoder("utf-8", { fatal: true }).decode(body.bytes) };
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    return { ok: true, text: new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)) };
   } catch {
     return { ok: false, status: 400, error: { code: "malformedUtf8", message: "Source must be valid UTF-8 text." } };
   }
 }
 
-async function readBoundedBody(request: IncomingMessage): Promise<{ readonly ok: true; readonly bytes: Buffer } | { readonly ok: false; readonly status: number; readonly error: { readonly code: string; readonly message: string } }> {
+async function hasUnexpectedBody(request: IncomingMessage): Promise<boolean> {
   const length = request.headers["content-length"];
-  if (length !== undefined && (!/^\d+$/u.test(length) || Number(length) > MAX_WORKSPACE_REQUEST_BYTES)) {
+  if (length !== undefined && (!/^\d+$/u.test(length) || Number(length) !== 0)) {
     request.resume();
-    return { ok: false, status: 413, error: { code: "requestTooLarge", message: `Request exceeds ${MAX_WORKSPACE_REQUEST_BYTES} bytes.` } };
+    return true;
   }
-  const chunks: Buffer[] = [];
-  let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > MAX_WORKSPACE_REQUEST_BYTES) return { ok: false, status: 413, error: { code: "requestTooLarge", message: `Request exceeds ${MAX_WORKSPACE_REQUEST_BYTES} bytes.` } };
-    chunks.push(buffer);
+    if (buffer.length !== 0) {
+      request.resume();
+      return true;
+    }
   }
-  return { ok: true, bytes: Buffer.concat(chunks) };
+  return false;
 }
 
 interface StaticTarget {

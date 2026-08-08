@@ -23,13 +23,26 @@ test("workspace helper stops blocking waits in waiting with action events", () =
   assert.deepEqual(result.events.map((event) => event.kind), ["actionRequested"]);
 });
 
-test("workspace helper is deterministic and returns runtime failures and budgets", () => {
-  const source = 'say random(1, 10)';
-  assert.deepEqual(executeWorkspaceSource(source), executeWorkspaceSource(source));
-  assert.equal(executeWorkspaceSource("while true {} ").status, "failed");
+test("workspace helper accepts source beyond the former local byte limit", () => {
+  const source = `${"// padding\n".repeat(10_000)}say "large source"`;
+
+  const result = compileWorkspaceSource(source);
+
+  assert.ok(result.plan);
+  assert.equal(result.status, "ready");
 });
 
-test("workspace import decoding rejects malformed UTF-8", () => {
+test("workspace helper is deterministic and returns runtime instruction-budget failures", () => {
+  const source = 'say random(1, 10)';
+  assert.deepEqual(executeWorkspaceSource(source), executeWorkspaceSource(source));
+  const result = executeWorkspaceSource("while true {} ");
+  assert.equal(result.status, "failed");
+  assert.ok(result.events.some((event) => event.kind === "runtimeFailure" && event.code === "TSR037"));
+});
+
+test("workspace import decoding accepts large UTF-8 source and rejects malformed UTF-8", () => {
+  const source = `say "${"🙂".repeat(20_000)}"`;
+  assert.equal(decodeWorkspaceSourceBytes(new TextEncoder().encode(source).buffer), source);
   assert.throws(
     () => decodeWorkspaceSourceBytes(new Uint8Array([0xc3, 0x28]).buffer),
     TypeError,
