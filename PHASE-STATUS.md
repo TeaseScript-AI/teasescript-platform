@@ -3,8 +3,8 @@
 ## Current phase and gate
 
 The current implementation phase is the deterministic TypeScript language/runtime POC with a local browser
-playground. This file records verified capability state at a high level; it does not own source identity, live CI
-state, detailed contracts, or historical execution evidence.
+playground. This file records verified capability state at a high level; it is not the canonical source for source
+identity, live CI state, detailed contracts, or historical execution evidence.
 
 Owner-selected obligations that remain open before a POC, pre-alpha, or alpha gate are tracked in
 [`docs/planning/POC-TO-ALPHA-BACKLOG.md`](docs/planning/POC-TO-ALPHA-BACKLOG.md). Inclusion there does not schedule
@@ -23,8 +23,8 @@ work or accept syntax, architecture, or implementation details.
 - **Development and verification:** a standalone browser playground, source-to-runtime conformance coverage,
   focused runtime/checkpoint/corruption tests, and a bounded deterministic property campaign.
 
-These summaries are orientation only. The current topic documents below own the detailed implementation contracts
-and boundaries.
+These summaries are orientation only. The current topic documents below are canonical for the detailed implementation
+contracts and boundaries.
 
 ## Current major exclusions and blockers
 

@@ -22,7 +22,7 @@ tested patch result.
 
 ## Issue sizing and execution recommendation
 
-An issue should normally describe one coherent, reviewable task that one agent can own from reproduction or design through implementation, tests, documentation impact, and pull request.
+An issue should normally describe one coherent, reviewable task that one agent can execute from reproduction or design through implementation, tests, documentation impact, and pull request.
 
 The agent creating or substantially refining an issue should include:
 
@@ -46,7 +46,7 @@ Multiple agents are justified when, for example:
 - sequencing or overlapping behavior requires an explicit merge order;
 - the task is too broad for one agent but splitting it into independently mergeable issues would create contradictory intermediate states or duplicated work.
 
-Do not recommend multiple agents only because an issue is large, touches several files, or benefits from review. One agent may still own a complex but coherent issue.
+Do not recommend multiple agents only because an issue is large, touches several files, or benefits from review. One agent may still execute a complex but coherent issue.
 
 The issue author's recommendation is advisory. The owner or designated coordinator confirms the execution model before implementation begins.
 

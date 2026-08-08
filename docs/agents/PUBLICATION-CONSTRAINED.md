@@ -34,7 +34,7 @@ identity, task authority, or verification requirements.
 Use only the exact next repository action emitted by the verified patch-publication helper for its declared
 transfer payload, record the verified result, and then request the next action. Low-level blob, tree, commit,
 branch, or full-file operations are not a general substitute. The complete allowed sequence, raw UTF-8
-requirements, trust boundary, validation profiles, cleanup, and retry behavior remain exclusively owned by
+requirements, trust boundary, validation profiles, cleanup, and retry behavior are defined exclusively in
 `docs/PATCH-PUBLICATION.md`.
 
 ## Verification

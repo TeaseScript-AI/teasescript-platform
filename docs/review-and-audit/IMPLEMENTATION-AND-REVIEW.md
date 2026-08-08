@@ -37,7 +37,7 @@ Documentation is recurring agent input: every retained token consumes context-wi
 can displace task-specific evidence. Safe compactness is therefore a quality requirement. Before
 adding text, first try correction, consolidation, relocation, routing, or removal. Reject competing
 authority and unjustified duplicated moving facts. Prefer targeted correction or consolidation over
-append-only amendments when existing wording should own the meaning. Preserve authority, conditions,
+append-only amendments when existing wording should carry the meaning. Preserve authority, conditions,
 order, exceptions, executable detail, and resistance to misinterpretation.
 
 ## Self-review and assigned review

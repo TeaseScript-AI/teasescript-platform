@@ -65,7 +65,7 @@ and earlier file versions. When retention value is uncertain, rely on Git.
   [`docs/specifications/accepted-syntaxes-v30.md`](specifications/accepted-syntaxes-v30.md), overridden only within
   the exact scope of a later accepted ADR or an accepted update to that specification.
 - **Current architecture map and component boundaries:** [`CURRENT-DESIGN.md`](../CURRENT-DESIGN.md) and
-  [`docs/ARCHITECTURE.md`](ARCHITECTURE.md); accepted ADRs own the decisions and rationale.
+  [`docs/ARCHITECTURE.md`](ARCHITECTURE.md); accepted ADRs are canonical for the decisions and rationale.
 - **Exact current implementation:** repository code and executable configuration. Current topic documents are canonical
   for maintained contracts, while [`PHASE-STATUS.md`](../PHASE-STATUS.md) is canonical for high-level capability state.
 - **Open obligations before a named gate:**
@@ -116,7 +116,7 @@ competing policy or current-status sources.
 
 Document names describe durable purpose, not a temporary cleanup history or the
 latest review complaint. General tool, command, option, branch, issue, and
-workflow naming is owned by [`DEVELOPMENT-WORKFLOW.md`](DEVELOPMENT-WORKFLOW.md).
+workflow naming is canonically defined in [`DEVELOPMENT-WORKFLOW.md`](DEVELOPMENT-WORKFLOW.md).
 
 ### Markdown source wrapping
 
