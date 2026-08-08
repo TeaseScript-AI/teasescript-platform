@@ -306,8 +306,8 @@ identity, profiles, or CLI compatibility. Exact technical limits, hostile-data
 shapes, interaction variants, and confirmed defects remain in their focused
 runtime/checkpoint/corruption/regression suites. Canonical limit classification,
 evidence status, and coupling/repair routing live in
-[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); an exact-boundary test proves the
-implemented boundary but does not by itself promote a limit to proven capacity.
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exact-boundary tests establish implemented boundary behavior; official
+capacity classification additionally uses ADR 0019 evidence proportionate to that claim.
 Convert a confirmed product defect to a focused permanent regression; do not
 preserve private harness bookkeeping as evidence.
 

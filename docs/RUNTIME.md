@@ -83,10 +83,10 @@ Interaction limits version 1 uses three shared provisional POC guards: `65,536` 
 UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion
 text uses the same per-string guard. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted
 field once, and stops encoding further fields after either a per-string or aggregate failure. Text completion measures
-the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. These are current
-runtime/validation safety guards, not recommended UI lengths and not yet proven end-to-end Player, host-message,
-transport, rendering, or storage capacity. Over-limit data is rejected without truncation, clamping, or partial state
-mutation. Current classification and evidence routing are maintained in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
+the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. Their scope is the current
+runtime/validation boundary. Broader Player, host-message, transport, rendering, and storage capacity is established
+with those paths when implemented. Over-limit data is rejected without truncation, clamping, or partial state mutation.
+Current classification and evidence routing are maintained in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 
