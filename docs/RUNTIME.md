@@ -79,7 +79,14 @@ Completion semantics are:
 
 A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
-Interaction limits version 1 uses three shared technical ceilings: `65,536` UTF-8 bytes for any one string, `65,536` UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion text uses the same per-string ceiling. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field once, and stops encoding further fields after either a per-string or aggregate failure. Text completion measures the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. These values align interaction messages with the existing bounded playground source/message scale while remaining below the `100,000`-value external-data work boundary. They are transport, storage, rendering, and validation safety ceilings, not recommended UI lengths. Over-limit data is rejected without truncation, clamping, or partial state mutation.
+Interaction limits version 1 uses three shared provisional POC guards: `65,536` UTF-8 bytes for any one string, `65,536`
+UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion
+text uses the same per-string guard. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted
+field once, and stops encoding further fields after either a per-string or aggregate failure. Text completion measures
+the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. These are current
+runtime/validation safety guards, not recommended UI lengths and not yet proven end-to-end Player, host-message,
+transport, rendering, or storage capacity. Over-limit data is rejected without truncation, clamping, or partial state
+mutation. Current classification and evidence routing are maintained in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 
@@ -418,7 +425,9 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
 
 ## Runtime defaults and limits
 
-Current POC defaults and validation limits are:
+Current POC defaults and validation limits are listed below. Their classification, evidence status, couplings, and
+repair routing are maintained in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); this section records implemented runtime
+behavior only.
 
 - default maximum call depth: `256`;
 - accepted maximum call depth range: `1` through `4096`;
