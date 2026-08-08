@@ -25,6 +25,14 @@ owner decisions recorded in a canonical owner. Propose durable rules separately
 with evidence; after owner approval, record them canonically before treating
 them as authority.
 
+Repository ownership language normally identifies the canonical source or
+decision authority, not a persistent person or agent. Product-owner, coordinator,
+and temporary task-assignment wording keeps its literal role meaning. Durable
+responsibility must be reconstructible from repository state and must not depend
+on an agent remembering prior work; record the canonical source, governing
+authority, affected boundary, and required change or approval process where
+applicable.
+
 Before the next write after context loss or compaction, session resumption, a
 changed branch or pull-request head, or a transition between implementation,
 review, repair, verification, and publication, re-establish the exact repository
