@@ -1,0 +1,140 @@
+diff --git a/docs/README.md b/docs/README.md
+index ee9c9b5791c544a3ff6a9ba36c29d00888a281a3..d72eae7e3e91f71ddaaeb2dd130dea9391ade254 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -16,6 +16,7 @@
+ - `ARCHITECTURE.md`
+ - `TEASESCRIPT.md`
+ - `RUNTIME.md`
++- `RESOURCE-LIMITS.md`: canonical resource-limit classification, evidence, and repair routing under ADR 0019.
+ - `DATA-AND-API.md`
+ - `LIBRARIES.md`
+ - `SECURITY.md`
+diff --git a/docs/RESOURCE-LIMITS.md b/docs/RESOURCE-LIMITS.md
+index 89ff8a393f6d2a7867ddddadc0f1795da572a011..d4b9d6cac921618cc25207d52c7f61b351a8421f 100644
+--- a/docs/RESOURCE-LIMITS.md
++++ b/docs/RESOURCE-LIMITS.md
+@@ -1,3 +1,270 @@
+ # Resource-limit registry
+ 
+-> Publication bootstrap only. The verified Phase 2 registry content will replace this placeholder before review.
++This is the canonical repository registry for resource-limit classification and
++evidence routing under [ADR 0019](decisions/0019-resource-limit-governance.md).
++Source code remains canonical for the exact implemented constant or formula;
++accepted ADRs and topic specifications remain authoritative for their decisions.
++This document records what a current bound means, what evidence supports it, and
++what follow-up is still required.
++
++## Scope and use
++
++The registry covers repository-owned production bounds that limit source
++processing, caller-controlled data, engine/runtime work or state, checkpoint
++handling, and the local playground transport/execution boundary. It includes
++implicit hard bounds when they constrain one of those paths. Repository CI,
++agent-bootstrap, patch-publication, and test-harness budgets are development
++workflow controls rather than platform production limits and stay in their own
++tooling contracts.
++
++It is intentionally **not** a catalog of every semantic validator. Type domains
++such as finite arithmetic results, choice-label rules, RNG algorithm state,
++exact format versions, and capability/state-machine exclusions stay in their
++owning specifications unless they are themselves the relevant resource,
++identity, or overflow bound.
++Test-only fuzz/property budgets and validation-statistics overrides are also out
++of scope. No missing category implies that a new limit should be invented.
++
++Evidence statuses (`proven`, `provisional`, `suspicious`, `obsolete`) and change
++triggers have exactly the meanings defined by ADR 0019. In particular:
++
++- a local implementation or tooling guard can be proven for that local risk
++  without becoming a broader engine-capacity promise;
++- `provisional` does not mean unsafe; it means the exact value, formula, policy,
++  or broader evidence is incomplete;
++- `suspicious` identifies a concrete coupling/category/evidence problem and does
++  not authorize changing the value;
++- an official source/platform maximum needs the applicable end-to-end proof;
++- every new or materially changed production limit must be surfaced to the
++  Owner, and ADR 0019 separately defines changes that need explicit Owner
++  approval or an ADR.
++
++Issue #131 is historical Phase 2A evidence. Its measurements proved important
++failure modes and coupling on the then-current tree and PR #128, but its numeric
++choice-lowering boundaries are **not** current-main capacity values after later
++runtime/result-handoff changes. This registry consumes those observations only
++where the underlying current mechanism still exists.
++
++### Registry shorthand for inherited ADR 0019 fields
++
++To keep one table maintainable instead of repeating boilerplate in every row,
++the following fields are inherited unless a row explicitly says otherwise:
++
++- the measurement definition is the quantitative unit/domain stated in the
++  current-value cell;
++- a limit is not caller-configurable unless the row states a configuration
++  surface or range;
++- every material change has the ADR 0019 Owner-information duty; the normal
++  implementation/test/documentation route is available only while all ADR 0019
++  implementation-only conditions remain true;
++- a change that alters capture/validation/budget architecture or accepted ADR
++  semantics requires the applicable ADR work; a change that alters an accepted
++  serialized domain also triggers format-version/migration/compatibility review;
++- changing a row classified as a product default, permanent public capacity,
++  absolute policy ceiling, or user-visible rejection/compatibility policy has
++  the explicit Owner-approval trigger defined by ADR 0019;
++- ordered numeric guards require focused boundary coverage around the accepted
++  edge when meaningful. Runtime-state limits additionally require checkpoint,
++  JSON round-trip, restore/resume, and immutability coverage when those layers
++  apply. An official capacity claim additionally requires the ADR 0019
++  worst-form/end-to-end evidence set;
++- for representation invariants that do not claim quantitative capacity, a
++  cheapest-valid fixture, Pareto worst form, and safety margin are not applicable
++  unless a row identifies an actual resource dimension; relational and
++  exact-domain boundary tests are the relevant evidence instead;
++- for `provisional` or `suspicious` rows, any missing safety margin,
++  cheapest-valid fixture, worst-form derivation, or downstream capacity proof is
++  intentionally recorded as missing evidence rather than invented;
++- no row in this Phase 2 inventory is currently classified as `engine
++  representational capacity`; no general source, plan, snapshot, checkpoint, or
++  platform maximum is created by this registry;
++- engine/checkpoint stages are not applicable to playground-only rows because
++  those values do not enter the engine contract. Their required evidence ends
++  at the actual playground tooling/transport boundary.
++
++### Primary evidence anchors
++
++The registry does not duplicate test cases. The main current boundary evidence
++is maintained in:
++
++- [`tests/parser-nesting-boundaries.test.ts`](../tests/parser-nesting-boundaries.test.ts)
++  and [`tests/parser-nesting-limit.test.ts`](../tests/parser-nesting-limit.test.ts)
++  for parser recursion;
++- [`tests/external-runtime-data-limits.test.ts`](../tests/external-runtime-data-limits.test.ts)
++  and [`tests/stable-external-data.test.ts`](../tests/stable-external-data.test.ts)
++  for graph capture and checkpoint mappings;
++- [`tests/instruction-plan-range-validation.test.ts`](../tests/instruction-plan-range-validation.test.ts)
++  and [`tests/runtime-snapshot-invariants.test.ts`](../tests/runtime-snapshot-invariants.test.ts)
++  for safe-integer plan/runtime representation domains;
++- [`tests/functions-checkpoint.test.ts`](../tests/functions-checkpoint.test.ts)
++  for call-frame and detailed snapshot-validation work;
++- [`tests/foreground-interactions-runtime.test.ts`](../tests/foreground-interactions-runtime.test.ts),
++  [`tests/foreground-interactions-handoff-runtime.test.ts`](../tests/foreground-interactions-handoff-runtime.test.ts),
++  and [`tests/pending-action-hardening.test.ts`](../tests/pending-action-hardening.test.ts)
++  for interaction/time/counter boundaries and checkpoint-safe completion;
++- [`tests/playground-workspace.test.ts`](../tests/playground-workspace.test.ts),
++  [`tests/playground-server.test.ts`](../tests/playground-server.test.ts), and
++  [`tests/playground-browser-workspace.test.ts`](../tests/playground-browser-workspace.test.ts)
++  for the local workspace boundary.
++
++#131 remains the evidence source for historical cross-boundary coupling and the
++old PR #128 reproductions; those measurements are not silently restated as
++current-main maxima.
++
++## Engine and runtime
++
++| ID | Boundary and concrete risk | Primary category | Current value / formula / mechanism | Canonical source | Governing authority / unresolved decision | Evidence status | Couplings, evidence, and next action |
++|---|---|---|---|---|---|---|---|
++| `parser.nesting` | Recursive source parsing; prevents native stack exhaustion and unstructured parser failure. | Parser/compiler/runtime implementation guard | `MAX_PARSER_NESTING_DEPTH = 64` recursive syntax entries. | [`src/parser.ts`](../src/parser.ts) | ADR 0019 governs classification; issue #101 established the required bounded parser failure. No accepted source makes `64` a permanent language-capacity promise. | `provisional` | Boundary tests cover the implemented exact edge and deep failing forms. The need for a guard is established; the retained evidence does not derive `64` as an official source maximum. Re-measure only if parser structure or the guard changes. |
++| `capture.depth` | Stable capture of caller-controlled graphs; prevents unbounded nesting before detailed validation/cloning. | Hostile-input capture budget | `MAX_EXTERNAL_RUNTIME_DATA_DEPTH = 128`, root depth `0`. | [`src/external-data-limits.ts`](../src/external-data-limits.ts), [`src/ast-validation.ts`](../src/ast-validation.ts) | ADR 0019; current security contract in [`SECURITY.md`](SECURITY.md). No authority makes `128` general plan/snapshot/checkpoint capacity. | `suspicious` | The same number governs generic external data and a separate direct-AST capture implementation, and indirectly constrains plans, snapshots, checkpoints, globals, completions, and serializable values. Keep hostile rejection bounded, but separate/justify independently governed uses before treating the number as broader capacity. |
++| `capture.work` | Stable capture of caller-controlled graphs; bounds graph traversal, hostile arrays/keys, and pre-validation allocation/work. | Hostile-input capture budget | `MAX_EXTERNAL_RUNTIME_DATA_WORK = 100_000` visited values; sparse declared array length and key enumeration are also bounded from this allowance. | [`src/external-data-limits.ts`](../src/external-data-limits.ts), [`src/ast-validation.ts`](../src/ast-validation.ts), [`src/plan/capture-support.ts`](../src/plan/capture-support.ts) | ADR 0019; current security contract in [`SECURITY.md`](SECURITY.md). | `suspicious` | #131 and current Phase 2 evidence show category spillover: the same value is reused by direct AST, plan, snapshot, checkpoint, globals, completion, and serializable-value paths. `compileSource(...)` itself can reject a large otherwise ordinary parsed AST through this shared work guard (`TSC005`), so the resulting source boundary is representation-dependent and is not an engine/source-capacity claim. |
++| `capture.array-index-domain` | Captured JavaScript arrays, including hostile/proxy inputs; prevents invalid array-index keys, precision loss, and index/validated-length disagreement. | Representation invariant | A captured array index must be a safe integer `< 0xffff_ffff` and must fall below the already validated array `length`; direct AST capture applies the equivalent safe-integer/dense-index relationship. | [`src/external-data-limits.ts`](../src/external-data-limits.ts), [`src/ast-validation.ts`](../src/ast-validation.ts) | JavaScript array-index representation plus ADR 0019; issue #87 established the hostile proxy/index-order failure mode. | `proven` | Focused hardening tests cover conflicting proxy indexes and sparse/inflated lengths. The separate `100_000` capture-work guard normally constrains accepted arrays far below this representational domain; do not treat `0xffff_ffff` as supported collection capacity. |
++| `ast.source-position-domain` | Public source-position construction and direct-AST source spans; prevents imprecise/non-addressable coordinates from entering compiler diagnostics and serialized data. | Representation invariant | Direct-AST capture requires `offset`, `line`, and `column` to be non-negative JavaScript safe integers, while exported `createSourcePosition(...)` currently accepts any non-negative integer. | [`src/ast-validation.ts`](../src/ast-validation.ts), [`src/source.ts`](../src/source.ts) | ADR 0019 and the public source/direct-AST contracts; the intended uniform numeric domain is unresolved. | `suspicious` | The two public entry points accept different numeric domains. Parser-generated positions remain practically far below either edge, so this does not block ordinary source compilation. Align or explicitly document the constructor/capture domain; do not turn the safe-integer edge into a source-size capacity claim. |

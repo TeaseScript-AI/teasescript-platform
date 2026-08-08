@@ -1,0 +1,125 @@
++| `playground.source-bytes` | Browser/file/workspace source ingestion; bounds parser/compiler work and accidental local-tool uploads. | Transport, storage, or tooling guard | `MAX_WORKSPACE_SOURCE_BYTES = 64 * 1024 = 65_536` UTF-8 bytes. | [`playground/workspace/controller.ts`](../playground/workspace/controller.ts) | Current [`SECURITY.md`](SECURITY.md); no engine/source-capacity authority. | `provisional` | Exact byte boundary and rejection are tested and practical for the dev tool, but `65_536` is not derived as a language maximum. Keep separate from interaction string limits despite numeric equality. |
++| `playground.request-bytes` | Loopback workspace HTTP request buffering; bounds request memory/work before source handling. | Transport, storage, or tooling guard | `MAX_WORKSPACE_REQUEST_BYTES = MAX_WORKSPACE_SOURCE_BYTES + 1_024 = 66_560` bytes. | [`playground/server.ts`](../playground/server.ts) | Current [`SECURITY.md`](SECURITY.md). | `provisional` | Formula is coupled intentionally to source size plus fixed request headroom. It is development transport only; revise with the workspace protocol if the payload shape changes. |
++| `playground.instruction-quantum` | Browser workspace run/step; keeps a local execution request bounded. | Execution quantum | `MAX_WORKSPACE_INSTRUCTION_BUDGET = 10_000` instructions passed explicitly to runtime run/step. | [`playground/workspace/controller.ts`](../playground/workspace/controller.ts) | Playground development contract plus ADR 0015 runtime semantics. | `provisional` | Numerically equals the runtime default but is a separate explicit tooling choice. It is not a lifetime ceiling and does not justify coupling future product execution policy to the playground. |
++
++## Obsolete Phase 2A findings
++
++The following #131 findings are no longer present as current production
++mechanisms. They are retained here only to close the historical inventory loop
++and prevent old numbers from being reused as current authority.
++
++| ID | Historical mechanism | Last observed value | Classification | Current evidence / disposition |
++|---|---|---:|---|---|
++| `obsolete.compat-execute-budget` | Legacy compatibility `execute(...)` wrapper instruction budget | `100_000` instructions | `obsolete` | No compatibility interpreter/`execute` route remains in current `src/`; do not compare this number with the current runtime quantum. |
++| `obsolete.library-metadata-limits` | Removed TypeScript export-metadata POC source, per-field, aggregate, and identity guards | `100_000` characters source; `16_384` per field; `100_000` aggregate; `256` identity characters | `obsolete` | The old metadata parser/catalog/facade are absent from current production source; [`LIBRARIES.md`](LIBRARIES.md) records that the temporary tooling POC was removed. Future linkage/editor metadata must select its own real boundaries. |
++| `obsolete.pr128-interaction-cfg-budget` | PR #128 interaction-control-flow analysis coupled to `MAX_EXTERNAL_RUNTIME_DATA_WORK * 10` | `1_000_000` analysis steps | `obsolete` | The PR #128 implementation is not the current source-lowering contract and this budget is absent from current production code. Do not resurrect it to preserve historical dynamic-choice numbers. |
++
++## Intentionally absent separate maxima
++
++Phase 2 also confirmed several places where a new round limit would be the wrong
++output:
++
++- Core `compileSource(...)` has no general source-byte maximum. The current
++  parser recursion guard and downstream structural/work guards remain separate;
++  the playground's `65_536`-byte tooling ceiling is not promoted into the
++  language.
++- Instruction-plan instruction count and `temporaryCount` have no dedicated
++  capacity constant. Their current practical acceptance is constrained by graph
++  capture plus structural validation. The inconsistent plan/runtime temporary-ID
++  representation domain is classified separately above; it is not a reason to
++  invent an instruction/temporary maximum.
++- `deserializeCheckpoint(...)` has no raw JSON byte ceiling before `JSON.parse`.
++  The parsed graph is subsequently bounded. No public backend checkpoint upload
++  or storage transport is implemented yet, so a byte quota should be selected
++  only with that real boundary and threat model.
++- There is no universal session/lifetime instruction ceiling. The runtime has
++  per-invocation instruction quanta; ADR 0019 requires a separate reason and
++  Owner policy decision before a permanent runaway ceiling is introduced.
++- There is no current production UI-warning threshold and no current TypeScript
++  library-metadata capacity. Those categories remain unpopulated rather than
++  receiving placeholder numbers.
++
++## Current conclusions and routing
++
++### `suspicious` entries
++
++The main suspicious cluster is the reuse of the `128` / `100_000` hostile
++capture values across direct AST, compiler-generated plan, runtime snapshot,
++checkpoint, globals/completion, and serializable-value boundaries, plus the
++split-create/combined-checkpoint capture asymmetry. Existing hardening shows the
++shared capture guard is useful; the problem is treating one threat-model budget
++as unrelated representation capacity.
++
++Two representation-domain entries are separately `suspicious`: public source
++positions are not constrained to the safe-integer domain required by direct-AST
++capture, and plan `temporaryCount` may exceed the safe-integer ID domain required
++by persisted runtime temporaries. Both are narrow consistency defects, not
++capacity-limit proposals.
++
++The runtime instruction quantum is also `suspicious` because its public
++configuration accepts integers above the safe range of the JavaScript counter
++used to prove that execution is bounded. This is a narrow option-domain defect,
++not a reason to add a lifetime instruction ceiling.
++
++No current interaction ceiling is classified `suspicious` merely because the
++complete Player/source path is unfinished. The current `65_536` / `4_096`
++ceilings are intentionally classified as provisional runtime POC guards. A
++future source or platform capacity claim must earn stronger evidence rather than
++changing that classification by assertion.
++
++### Owner or governing decisions still needed
++
++No replacement number or new Owner policy is required to merge this inventory.
++Later work needs an explicit Owner decision when it would:
++
++- change the `256` call-depth or `10_000` instruction-budget product default;
++- narrow the currently accepted `instructionBudget` input domain as a repair,
++  because that changes a public rejection/compatibility boundary;
++- establish or change a permanent public source/platform capacity promise;
++- introduce a permanent lifetime/session runaway ceiling;
++- change a user-visible rejection/failure policy or make a compatibility
++  tradeoff that ADR 0019 assigns to the Owner.
++
++A new/material technical guard that does not trigger those approval cases still
++has the ADR 0019 Owner-information duty. Changing capture/validation budget
++architecture or accepted ADR semantics requires the applicable ADR work even
++when no product number is being selected.
++
++### Recommended repair/evidence clusters
++
++1. **Capture and checkpoint boundary separation.** Current Phase 2 evidence
++   confirms the split-create/combined-serialize failure class. Measure the
++   component expansions needed for a repair, then decide whether hostile external
++   capture, direct AST, plan, snapshot, and whole-checkpoint envelopes need
++   separate formulas/budgets. Prefer structural formulas or simpler
++   representations over globally raising `100_000`.
++2. **Detailed snapshot-validation evidence.** Measure current call/function/loop
++   worst forms against the `1_000_000` detailed-work guard. Optimize or derive a
++   structural allowance only when current evidence shows a meaningful conflict.
++3. **Representation-domain consistency.** Align the exported source-position
++   constructor with direct-AST capture, and separately decide whether plan
++   temporary counts/IDs need one uniform safe-integer invariant. These are
++   representation-hardening questions, not reasons to invent capacity maxima.
++4. **Runtime configuration defaults/ceilings.** Treat call-depth and instruction
++   defaults separately from hard safety/representation invariants. Gather real
++   workload evidence before proposing policy changes.
++5. **Instruction-quantum option-domain hardening.** Resolve the accepted range
++   versus JavaScript counter mismatch without introducing a lifetime ceiling.
++   Prefer the smallest repair that makes the per-invocation bound actually
++   representable; follow the compatibility/Owner route if accepted inputs are
++   narrowed.
++6. **Interaction end-to-end evidence just in time.** The author-facing compact-
++   choice implementation should verify the lowering it actually adds across
++   static/dynamic and root/function forms before landing. Later Player/host work
++   should add those real boundaries to the same evidence path. Do not create a
++   parallel resource-audit implementation of the source lowering.
++
++## Updating this registry
++
++When a production limit is added, removed, materially changed, or gains better
++evidence, update the smallest relevant row in this file in the same PR. Keep the
++actual constant/formula near its owning implementation boundary. Do not create a
++runtime registry, generated schema, global `limits.ts`, or one issue per
++constant. Create a focused repair issue only when a concrete conflict, category
++error, operational risk, or worthwhile simplification justifies independent
++work.

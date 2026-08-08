@@ -1,0 +1,81 @@
+diff --git a/docs/RUNTIME.md b/docs/RUNTIME.md
+index b84dbecd011f5ffde0e4c76cbbaa584e16721916..905a161107a06373d902c2538457068e7a3ddc30 100644
+--- a/docs/RUNTIME.md
++++ b/docs/RUNTIME.md
+@@ -79,7 +79,14 @@ Completion semantics are:
+ 
+ A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
+ 
+-Interaction limits version 1 uses three shared technical ceilings: `65,536` UTF-8 bytes for any one string, `65,536` UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion text uses the same per-string ceiling. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field once, and stops encoding further fields after either a per-string or aggregate failure. Text completion measures the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. These values align interaction messages with the existing bounded playground source/message scale while remaining below the `100,000`-value external-data work boundary. They are transport, storage, rendering, and validation safety ceilings, not recommended UI lengths. Over-limit data is rejected without truncation, clamping, or partial state mutation.
++Interaction limits version 1 uses three shared provisional POC guards: `65,536` UTF-8 bytes for any one string, `65,536`
++UTF-8 bytes across all strings retained by one interaction definition, and `4,096` choice-option entries. Completion
++text uses the same per-string guard. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted
++field once, and stops encoding further fields after either a per-string or aggregate failure. Text completion measures
++the raw host string once; CRLF/CR-to-LF normalization cannot increase its UTF-8 size. These are current
++runtime/validation safety guards, not recommended UI lengths and not yet proven end-to-end Player, host-message,
++transport, rendering, or storage capacity. Over-limit data is rejected without truncation, clamping, or partial state
++mutation. Current classification and evidence routing are maintained in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
+ 
+ Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
+ 
+@@ -418,7 +425,9 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
+ 
+ ## Runtime defaults and limits
+ 
+-Current POC defaults and validation limits are:
++Current POC defaults and validation limits are listed below. Their classification, evidence status, couplings, and
++repair routing are maintained in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); this section records implemented runtime
++behavior only.
+ 
+ - default maximum call depth: `256`;
+ - accepted maximum call depth range: `1` through `4096`;
+diff --git a/docs/SECURITY.md b/docs/SECURITY.md
+index b7d33a35c757c2c7a4e1255d814288b1a223ecf4..97b45bc61d3ac499f00787a8a756727ed99e5418 100644
+--- a/docs/SECURITY.md
++++ b/docs/SECURITY.md
+@@ -13,6 +13,9 @@ Source requires UTF-8 `text/plain; charset=utf-8` and is limited to 65,536 bytes
+ - Keep serializable-set validation and reconstruction linear while preserving insertion order, scalar equality, and the canonical array representation.
+ - Fresh-runtime global initialization consumes each already captured unique own global property once; it does not rescan previously constructed bindings.
+ - Detailed instruction-plan validation builds one local instruction-owner/function index. Detailed snapshot validation builds one local function/region index, call-frame argument and temporary maps, and reuses suspended-continuation liveness results for each validated active-loop variant. These are operation-local only; no untrusted plan or snapshot data enters a global cache. That independently required fixed-point work, its table allocation, and every cached loop-state variant share a deterministic 1,000,000-unit per-validation allowance. Exhaustion is rejected through runtime-snapshot validation before execution, mutation, event emission, or RNG advancement.
++- Resource-limit classification, coupling evidence, and follow-up routing for these capture/validation guards are
++  maintained centrally in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); this security document owns the trust-boundary
++  behavior, not capacity claims.
+ - Interaction-result handoff validation is a fixed local structural check and does not add another control-flow fixed point, future-writer scan, or settlement-provenance cache.
+ - Package code has no unrestricted external network access; published media uses platform-managed storage/CDN.
+ - Future external APIs use platform-managed typed integrations.
+@@ -35,7 +38,14 @@ ADR 0016 adds these requirements:
+ - Time-integrity anomalies are diagnostics, not automatic proof of cheating, until a later policy defines thresholds and script visibility.
+ - Restored Standard UI is reconstructed from validated canonical action payloads rather than replaying untrusted host state.
+ 
+-The implemented foreground-interaction boundary captures each completion request through the shared stable external-data graph before inspecting it. Version-1 interaction limits permit at most `65,536` UTF-8 bytes per string, `65,536` UTF-8 bytes across retained strings in one action, and `4,096` choice entries. Plan and snapshot validation stop UTF-8 encoding after the first per-string or aggregate failure, use set-based duplicate checks and bounded linear matching, and reject unknown persisted interaction fields so hidden data cannot bypass the byte budget. Over-limit definitions and completions are rejected without truncation or partial mutation. These technical ceilings are not UI length recommendations.
++The implemented foreground-interaction boundary captures each completion request through the shared stable external-data
++graph before inspecting it. Version-1 interaction guards permit at most `65,536` UTF-8 bytes per string, `65,536` UTF-8
++bytes across retained strings in one action, and `4,096` choice entries. Plan and snapshot validation stop UTF-8
++encoding after the first per-string or aggregate failure, use set-based duplicate checks and bounded linear matching,
++and reject unknown persisted interaction fields so hidden data cannot bypass the byte budget. Over-limit definitions and
++completions are rejected without truncation or partial mutation. These are provisional runtime safety guards, not UI
++length recommendations or proven end-to-end Player/host/transport/storage capacity. Current classification and evidence
++routing are maintained in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
+ 
+ The engine, not the caller, normalizes text, parses numbers, resolves choice labels/text, and derives player transcript content. Successful completion emits `playerTranscript` before `actionCompleted`; invalid or duplicate attempts emit neither event. Interaction result destinations, speaker IDs, target, ownership, options, settlement results, transcript text, and the single-use result handoff are validated against the immutable plan and current snapshot. A result is atomically committed into a prepared ordinary runtime destination. Until the first canonical consume, transfer, return, discard, or exit succeeds, the nullable handoff retains the canonical value independently of `lastSettlement`; afterward it is removed immediately. `lastSettlement` remains bounded replay data and is not a destination-liveness authority.
+ 
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index 35f784215d5f673ef9421affcdc1fb773d60ed3b..7b82357c0a0fa805f467161ab95a09ffc10a305a 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -304,9 +304,12 @@ The campaign deliberately does not pin an ordered catalog/count, PRNG vectors,
+ successful signatures, complete traces, work/mutation accounting, fixture
+ identity, profiles, or CLI compatibility. Exact technical limits, hostile-data
+ shapes, interaction variants, and confirmed defects remain in their focused
+-runtime/checkpoint/corruption/regression suites. Convert a confirmed product
+-defect to a focused permanent regression; do not preserve private harness
+-bookkeeping as evidence.
++runtime/checkpoint/corruption/regression suites. Canonical limit classification,
++evidence status, and coupling/repair routing live in
++[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); an exact-boundary test proves the
++implemented boundary but does not by itself promote a limit to proven capacity.
++Convert a confirmed product defect to a focused permanent regression; do not
++preserve private harness bookkeeping as evidence.
+ 
+ ## Source-to-runtime conformance corpus
+ 

@@ -1,0 +1,31 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "agent/resource-limit-phase2-inventory",
+  "expectedBaseSha": "cb8116b47389422c98b67f9729344d28abd104e5",
+  "expectedResultTreeSha": "d30d342a28906015143d6a4a50a6f40b9ab0c5ea",
+  "patchSizeBytes": 42906,
+  "patchSha256": "4caea8bf83573802802b49f8f7cd07756fae97d4294bcf322ee94673f8107561",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0004",
+      "sizeBytes": 12269,
+      "sha256": "2907bb19bdf2e7f6e3645645561c720bac2364dc44783393b65f201f4401fae5"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0004",
+      "sizeBytes": 11860,
+      "sha256": "15ab71b8b64567d6f96af2856885e7c1f61ad81481dac0d4dc3404da3da301dd"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0004",
+      "sizeBytes": 9641,
+      "sha256": "33fdf1a1e221569ade084bb97f9b3b4423327039229f15fce9a6b53fa9597679"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0004",
+      "sizeBytes": 9136,
+      "sha256": "5f0dc2907cb2c4627965724c9009c43cd3bf7f557a7a8903e4ac3a6e1e057b44"
+    }
+  ],
+  "commitMessage": "Classify repository resource limits"
+}
