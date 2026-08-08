@@ -30,9 +30,8 @@ boundary, or declare any existing value correct or incorrect. The complete
 repository inventory, measurements, and production repairs remain separate
 follow-up work under issue #129.
 
-The Owner accepted this exact governance contract on 2026-08-08 after
-independent technical review. Future changes to this governance model follow
-the ADR and change-process rules below.
+The Owner accepted the original governance contract on 2026-08-08. Issue #277 later tightened it: a retained
+production bound must justify both its need and its selected boundary.
 
 ## Decision summary
 
@@ -57,8 +56,9 @@ the ADR and change-process rules below.
 6. Changes to product policy, architecture, accepted serialized domains, or
    compatibility require the corresponding Owner approval, ADR, format-version,
    migration, and compatibility decisions described below when applicable.
-7. A provisional POC guard remains provisional until the required evidence and
-   decisions promote it. It is not a permanent public compatibility promise.
+7. Every retained production limit, including a provisional POC guard, must justify both why a bound is needed and
+   why its selected value, formula, predicate, accepted domain, or mechanism is appropriate. `provisional` may mark
+   incomplete evidence or policy for a broader claim; it never justifies an arbitrary local bound.
 8. The repository does not invent an officially supported maximum merely to make
    a resource dimension finite. A language or product maximum needs a concrete
    technical, safety, infrastructure, or product reason; otherwise applicable
@@ -125,13 +125,9 @@ are not structured diagnostics.
 
 ## Limit taxonomy
 
-Each registry entry has one primary category. A limit may interact with other
-categories, but those relationships are recorded separately rather than
-collapsing their meanings. The taxonomy does not require a limit at every
-boundary. A limit needs a concrete risk, representation invariant, accepted
-product policy, or externally imposed constraint. A provisional guard may have
-incomplete evidence, but its current value or formula still needs a documented
-practical rationale rather than an arbitrary maximum.
+Each registry entry has one primary category. Related categories are recorded separately. The taxonomy does not
+require a limit at every boundary; decision 7 governs retention. Historical use, roundness, conservatism, convenience,
+boundary tests, or an unrelated budget do not justify a production bound.
 
 ### Representation invariant
 
@@ -229,14 +225,9 @@ become a lower de facto maximum for a broader supported path.
 
 ### Provisional POC implementation guard
 
-A provisional POC implementation guard is a temporary deterministic bound used
-to keep the current proof of concept safe and reviewable before complete
-capacity evidence or product policy exists.
-
-It must be marked `provisional`, identify the risk it currently prevents, avoid
-claims of permanent support, and record the evidence, governing decision, or
-Owner approval still needed. Tests may pin its current behavior without
-promoting it to proven capacity.
+A provisional POC implementation guard is a temporary deterministic bound whose local need and selected boundary
+already satisfy decision 7 while broader capacity or product evidence remains incomplete. It records that remaining gap
+and does not claim permanent support. Tests verify the justified guard; they do not justify it.
 
 ## Required distinctions
 
@@ -360,21 +351,15 @@ applicable rather than silently omitting it.
 
 ### `provisional`
 
-`provisional` means the limit is a deliberate deterministic current guard, but
-its value, predicate, accepted domain, or formula lacks complete evidence, final
-product policy, or both. The entry records the missing evidence, unresolved
-governing decision, or required Owner approval.
+`provisional` means the local guard satisfies decision 7 but broader capacity or product evidence or policy remains
+incomplete. The entry records that gap.
 
 ### `suspicious`
 
-`suspicious` means available evidence indicates a likely category error,
-circular justification, boundary coupling, unsupported worst form, unexplained
-expansion, inconsistent public behavior, or another reason the current value,
-predicate, accepted domain, or formula should not be trusted as a justified
-contract.
-
-Suspicious does not by itself authorize changing the value or weakening the
-boundary. It requires focused reproduction, measurement, or design work.
+`suspicious` means evidence gives a concrete reason not to trust the current bound, such as a category error,
+circular justification, coupling, unsupported worst form, unexplained expansion, inconsistent public behavior, or
+missing local justification. It requires focused investigation or repair; if decision 7 cannot be satisfied, remove or
+re-derive the bound rather than retaining it as `suspicious`.
 
 ### `obsolete`
 
@@ -616,8 +601,7 @@ statuses.
 - The repository needs a maintained limit inventory and evidence review.
 - Worst-form structural fixtures and end-to-end tests may be more expensive than
   exact-boundary unit tests.
-- Some current values may remain provisional or suspicious until separate
-  measurement and repair work is completed.
+- Unjustified current bounds require removal or re-derivation rather than indefinite provisional or suspicious status.
 - Independently motivated boundaries may require separate constants or formulas
   instead of one convenient shared allowance.
 

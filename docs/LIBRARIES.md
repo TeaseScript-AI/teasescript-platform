@@ -153,7 +153,9 @@ The engine owns action identity, continuation, result destination, expected type
 
 The interactions are mandatory and permanently non-cancellable. `askText`, `askNumber`, and `choose` never return `null`; `showButton` has no useful first-slice return value. Invalid input keeps the same action active.
 
-Interaction definitions and completions are subject to shared versioned platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits. ADR 0018 does not impose separate product-facing character counts on answers, hints, buttons, or choices. The current concrete technical ceilings are documented in [`RUNTIME.md`](RUNTIME.md); compact source lowering does not promote them into broader language-capacity promises. Over-limit data is rejected without truncation or partial state mutation.
+Interaction definitions and completions remain subject to justified platform guards; ADR 0018 defines no separate
+author-facing counts. Under ADR 0019, tests verify rather than justify a retained bound. Retained guards reject
+over-limit data without truncation or partial state mutation.
 
 ### Author-facing interaction semantics
 
@@ -231,7 +233,7 @@ The first POC does not settle:
 - the option name that selects a detailed return type;
 - `showButton` timeout and elapsed return;
 - custom compact `choose` field hints;
-- exact concrete platform limit values;
+- any justified platform guards that later prove necessary;
 - exact dynamic choice-layout breakpoints;
 - the advanced accessibility override field;
 - a deterministic speaker-aware typing indicator;

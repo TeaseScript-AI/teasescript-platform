@@ -4,15 +4,31 @@
 
 The constrained playground server has an ephemeral loopback-only development workspace API: `PUT /api/workspace/source`, `GET /api/workspace`, `POST /api/workspace/compile`, `POST /api/workspace/run`, and `GET /api/workspace/result`. It emits no CORS headers, has no filesystem-write route, and preserves the static allowlist. Automation is rejected for non-loopback clients even if the static development listener is configured beyond loopback.
 
-Source requires UTF-8 `text/plain; charset=utf-8` and is limited to 65,536 bytes; request bodies are limited to 66,560 bytes before buffering. This bounds parser/compiler work and accidental tool uploads. Unsupported methods/content types, malformed UTF-8, unsafe paths, and oversized data receive structured errors without stack traces. This is neither a public API nor a production backend.
+Source requires UTF-8 `text/plain; charset=utf-8`; the local API currently bounds request buffering and source
+ingestion before compilation. Exact tooling values are tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) as current
+implementation inventory and require evidence before retention. Unsupported methods/content types, malformed UTF-8,
+unsafe paths, and oversized data receive structured errors without stack traces. This is neither a public API nor a
+production backend.
 
 - Run the complete player and package code in a sandboxed cross-origin iframe, preferably on a separate player origin.
 - Keep main-site cookies host-only and unavailable to the player.
 - Validate every parent/player message, checkpoint, package manifest, server response, and future integration result.
-- Capture external instruction-plan, runtime-snapshot, checkpoint, globals, and serializable-value data into one stable plain-data graph bounded to a nesting depth of `128` and `100,000` visited values. Reject accessors, trap failures, cycles, unsupported prototypes, and over-limit input before recursive validation, cloning, freezing, state construction, execution, event emission, or RNG consumption. Captured arrays use an engine-owned prototype isolated from ambient numeric `Array.prototype` properties, and density checks require own indexes.
+- Capture external instruction-plan, runtime-snapshot, checkpoint, globals, and serializable-value data into one stable
+  plain-data graph under current depth/work guards. Reject accessors, trap failures, cycles, unsupported prototypes, and
+  over-limit input before recursive validation, cloning, freezing, state construction, execution, event emission, or RNG
+  consumption. Captured arrays use an engine-owned prototype isolated from ambient numeric `Array.prototype` properties,
+  and density checks require own indexes. [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) tracks the current guard values,
+  their unsupported retention evidence, coupling, and repair route; graph work and scalar-string/property-key bytes remain
+  distinct resource dimensions.
 - Keep serializable-set validation and reconstruction linear while preserving insertion order, scalar equality, and the canonical array representation.
 - Fresh-runtime global initialization consumes each already captured unique own global property once; it does not rescan previously constructed bindings.
-- Detailed instruction-plan validation builds one local instruction-owner/function index. Detailed snapshot validation builds one local function/region index, call-frame argument and temporary maps, and reuses suspended-continuation liveness results for each validated active-loop variant. These are operation-local only; no untrusted plan or snapshot data enters a global cache. That independently required fixed-point work, its table allocation, and every cached loop-state variant share a deterministic 1,000,000-unit per-validation allowance. Exhaustion is rejected through runtime-snapshot validation before execution, mutation, event emission, or RNG advancement.
+- Detailed instruction-plan validation builds one local instruction-owner/function index. Detailed snapshot validation
+  builds one local function/region index, call-frame argument and temporary maps, and reuses suspended-continuation
+  liveness results for each validated active-loop variant. These are operation-local only; no untrusted plan or snapshot
+  data enters a global cache. The current implementation also applies a deterministic detailed-validation work guard;
+  its historical numeric value is tracked for re-derivation in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion is
+  rejected through runtime-snapshot validation before execution, mutation, event emission, or RNG advancement.
+- [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) owns resource-limit classification, coupling evidence, and follow-up routing; this security document owns the trust-boundary behavior.
 - Interaction-result handoff validation is a fixed local structural check and does not add another control-flow fixed point, future-writer scan, or settlement-provenance cache.
 - Package code has no unrestricted external network access; published media uses platform-managed storage/CDN.
 - Future external APIs use platform-managed typed integrations.
@@ -35,7 +51,13 @@ ADR 0016 adds these requirements:
 - Time-integrity anomalies are diagnostics, not automatic proof of cheating, until a later policy defines thresholds and script visibility.
 - Restored Standard UI is reconstructed from validated canonical action payloads rather than replaying untrusted host state.
 
-The implemented foreground-interaction boundary captures each completion request through the shared stable external-data graph before inspecting it. Version-1 interaction limits permit at most `65,536` UTF-8 bytes per string, `65,536` UTF-8 bytes across retained strings in one action, and `4,096` choice entries. Plan and snapshot validation stop UTF-8 encoding after the first per-string or aggregate failure, use set-based duplicate checks and bounded linear matching, and reject unknown persisted interaction fields so hidden data cannot bypass the byte budget. Over-limit definitions and completions are rejected without truncation or partial mutation. These technical ceilings are not UI length recommendations.
+The implemented foreground-interaction boundary captures each completion request through the shared stable external-data
+graph before inspecting it. The current implementation has per-string, aggregate-text, and option-count guards; their
+exact historical values have no retained-capacity status and are routed for removal or evidence-based re-derivation in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Plan and snapshot validation stop UTF-8 encoding after the first per-string
+or aggregate failure, use set-based duplicate checks and bounded linear matching, and reject unknown persisted
+interaction fields so hidden data cannot bypass current validation. Rejected definitions and completions do not truncate
+or partially mutate state.
 
 The engine, not the caller, normalizes text, parses numbers, resolves choice labels/text, and derives player transcript content. Successful completion emits `playerTranscript` before `actionCompleted`; invalid or duplicate attempts emit neither event. Interaction result destinations, speaker IDs, target, ownership, options, settlement results, transcript text, and the single-use result handoff are validated against the immutable plan and current snapshot. A result is atomically committed into a prepared ordinary runtime destination. Until the first canonical consume, transfer, return, discard, or exit succeeds, the nullable handoff retains the canonical value independently of `lastSettlement`; afterward it is removed immediately. `lastSettlement` remains bounded replay data and is not a destination-liveness authority.
 

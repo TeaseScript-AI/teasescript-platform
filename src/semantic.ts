@@ -16,11 +16,6 @@ import {
   CORE_RUNTIME_BUILTINS,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
-import {
-  boundedInteractionUtf8ByteLength,
-  MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
-  MAX_INTERACTION_OPTION_ENTRIES,
-} from "./interaction-limits.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -68,7 +63,6 @@ const semanticCode = {
   functionValue: "TSV028",
   invalidInteractionChoice: "TSV029",
   duplicateInteractionChoice: "TSV030",
-  interactionLimit: "TSV031",
   unsupportedBlockingContext: "TSV032",
 } as const;
 
@@ -226,7 +220,6 @@ class SemanticValidator {
       case "showButtonStatement": {
         const contextualSpeaker = this.#interactionSpeaker(statement.speaker, scope);
         this.#validateExpression(statement.label, scope, contextualSpeaker);
-        this.#validateStaticInteractionStrings([statement.label], statement.span);
         return;
       }
       case "waitStatement": {
@@ -477,7 +470,6 @@ class SemanticValidator {
           this.#validateChoice(expression, scope, contextualSpeaker);
         } else if (expression.hint !== null) {
           this.#validateExpression(expression.hint, scope, contextualSpeaker);
-          this.#validateStaticInteractionStrings([expression.hint], expression.span);
         }
         return;
       }
@@ -655,9 +647,6 @@ class SemanticValidator {
       this.#report(semanticCode.invalidInteractionChoice, "A choice requires at least one option.", expression.span);
       return;
     }
-    if (expression.options.length > MAX_INTERACTION_OPTION_ENTRIES) {
-      this.#report(semanticCode.interactionLimit, `Compact choice exceeds the current interaction-entry option guard of ${MAX_INTERACTION_OPTION_ENTRIES}.`, expression.span);
-    }
     const labelled = expression.options.map((option) => option.label !== null);
     if (labelled.some(Boolean) && labelled.some((value) => !value)) {
       this.#report(semanticCode.invalidInteractionChoice, "Labelled and unlabelled choice options may not be mixed.", expression.span);
@@ -686,30 +675,6 @@ class SemanticValidator {
           }
           visible.set(text, option.value.span);
         }
-      }
-    }
-    this.#validateStaticInteractionStrings(expression.options.map((option) => option.value), expression.span, expression.options.flatMap((option) => option.label?.kind === "identifier" ? [option.label.name] : []));
-  }
-
-  #validateStaticInteractionStrings(
-    expressions: readonly Expression[],
-    span: SourceSpan,
-    extraStrings: readonly string[] = [],
-  ): void {
-    let aggregate = 0;
-    for (const value of [...extraStrings, ...expressions.flatMap((expression) => {
-      const known = knownString(expression);
-      return known === undefined ? [] : [known];
-    })]) {
-      const bytes = boundedInteractionUtf8ByteLength(value);
-      if (bytes === null) {
-        this.#report(semanticCode.interactionLimit, "Interaction text exceeds the shared UTF-8 byte limit.", span);
-        return;
-      }
-      aggregate += bytes;
-      if (aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES) {
-        this.#report(semanticCode.interactionLimit, "Interaction data exceeds the shared aggregate UTF-8 byte limit.", span);
-        return;
       }
     }
   }

@@ -8,6 +8,7 @@ import {
 import { compileStableProgram, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
 import { findExternalDataFailure } from "./external-data-limits.js";
+import { validateInstructionPlan } from "./plan/validation.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import {
   validateSemantics,
@@ -50,11 +51,12 @@ export function compileSource(
   const loweringDiagnostics: Diagnostic[] = [];
   if (!hasParserErrors && !hasErrors(semantic.diagnostics)) {
     const compiled = compileStableProgram(parsed.program);
-    const limitDiagnostic = planValidationBudgetDiagnostic(compiled);
-    if (limitDiagnostic === null) {
+    const diagnostic = planCaptureBudgetDiagnostic(compiled)
+      ?? interactionPlanValidationDiagnostic(compiled);
+    if (diagnostic === null) {
       plan = compiled;
     } else {
-      loweringDiagnostics.push(limitDiagnostic);
+      loweringDiagnostics.push(diagnostic);
     }
   }
   const diagnostics = Object.freeze([
@@ -71,7 +73,7 @@ export function compileSource(
   });
 }
 
-function planValidationBudgetDiagnostic(
+function planCaptureBudgetDiagnostic(
   plan: InstructionPlan,
 ): Diagnostic | null {
   const failure = findExternalDataFailure(plan);
@@ -84,6 +86,32 @@ function planValidationBudgetDiagnostic(
     "TSC006",
     "This source lowers to an instruction plan that exceeds the current plan-validation budget for this source shape.",
     plan.sourceSpan,
+  );
+}
+
+function interactionPlanValidationDiagnostic(
+  plan: InstructionPlan,
+): Diagnostic | null {
+  if (!plan.instructions.some((instruction) => instruction.kind === "interaction")) {
+    return null;
+  }
+  const validation = validateInstructionPlan(plan);
+  const match = validation.errors.flatMap((error) => {
+    const instructionMatch = /^\$\.instructions\[(\d+)\]/u.exec(error.path);
+    if (instructionMatch === null) return [];
+    const instructionIndex = Number(instructionMatch[1]);
+    if (!Number.isSafeInteger(instructionIndex) || plan.instructions[instructionIndex]?.kind !== "interaction") {
+      return [];
+    }
+    return [{ error, instructionIndex }];
+  })[0];
+  if (match === undefined) return null;
+
+  return createDiagnostic(
+    DiagnosticSeverity.Error,
+    "TSC006",
+    `Compiled interaction data is rejected by the current instruction-plan validation boundary: ${match.error.message}`,
+    plan.instructions[match.instructionIndex]!.span,
   );
 }
 

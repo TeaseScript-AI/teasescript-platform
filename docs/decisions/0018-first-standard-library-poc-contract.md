@@ -241,7 +241,8 @@ Pacing values mean:
 
 Interaction definitions, Standard UI payloads, choice collections, text completions, and host messages must remain within versioned platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits.
 
-ADR 0018 does not impose separate product-facing character counts on `askText`, hint text, button labels, or choice text. The implementation slice must select concrete shared limit constants before merge and test them across compiler, runtime, Player application, checkpoint, and host-message boundaries.
+ADR 0018 defines no separate product-facing character counts for `askText`, hints, buttons, or choices. Any retained
+hard limit must satisfy ADR 0019; tests verify, not justify, its boundary.
 
 Required behavior is fixed:
 
@@ -626,7 +627,7 @@ V30 `showButton` timeout and elapsed-time return remain accepted future capabili
 Implementation should be split into small issues, at minimum:
 
 1. **Default prelude and lowering boundary** — reserve selected names, add parser/semantic support for compact forms, and lower them without final package import syntax.
-2. **Generic foreground interaction runtime** — add the typed action union, shared concrete platform limits, completion validation, transcript derivation, checkpoint/restore, events, and deterministic resume tests.
+2. **Generic foreground interaction runtime** — add the typed action union, any platform guards justified under ADR 0019, completion validation, transcript derivation, checkpoint/restore, events, and deterministic resume tests.
 3. **Basic Standard Library interactions and Standard UI** — implement `showButton`, `askText`, `askNumber`, and `choose`, dynamic button/dropdown presentation, composer integration, transcript behavior, accessibility defaults, and playground acceptance examples.
 4. **Smart-autoplay runtime and `say` composition** — implement validated captured account settings, `chatPacingGate`, background-to-foreground promotion, prepared output, exact/instant modes, speaker skip defaults, click/tap/Space completion, wait interaction, event ordering, and resume-equivalence tests.
 5. **Editor metadata and diagnostics** — add completion, signature/hover guidance, compact-syntax formatting, duplicate/mixed-choice diagnostics, pacing diagnostics, bounded-data diagnostics, usability warnings, and protected-name diagnostics.
@@ -642,7 +643,7 @@ This ADR intentionally defers:
 - detailed result objects containing elapsed time or metadata, and the option name that selects such a return type;
 - advanced parenthesized call forms and richer input/choice options;
 - custom input hints for compact `choose`;
-- exact concrete platform limit values, which must be selected and tested by the implementation slice before merge;
+- any concrete platform guard that a real boundary requires; its mechanism and selected boundary must be justified under ADR 0019 before tests verify it;
 - the exact advanced accessibility-override field;
 - LLM implementation and author-facing interpretation options;
 - invalid-attempt transcript-retention policy beyond the rule that rejected attempts do not mutate canonical transcript state;
@@ -675,7 +676,7 @@ A player-facing pause command is not deferred; it is excluded by this accepted c
 
 - several post-V30 compact forms require parser/compiler work rather than metadata-only library exports;
 - click-anywhere and Space-to-advance require careful event precedence, input-method, and accessibility testing;
-- concrete bounded-data constants must be selected from implementation evidence and kept consistent across boundaries;
+- bounded-data guards add maintenance and test cost; under ADR 0019 each retained guard needs a justified local boundary, and semantically distinct boundaries are not coupled merely for consistency;
 - account pacing values become deterministic session inputs that must be persisted correctly;
 - populated background actions and background-to-foreground gate promotion require explicit schema versioning and adversarial validation tests;
 - prepared delayed output must preserve source evaluation and RNG results across checkpoint/restore;

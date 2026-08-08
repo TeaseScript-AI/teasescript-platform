@@ -4,6 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import {
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
+  MAX_INTERACTION_OPTION_ENTRIES,
   MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "../src/interaction-limits.js";
 import { parse } from "../src/parser.js";
@@ -822,15 +823,47 @@ test("dynamic settlement uses prepared UI provenance while available and intrins
   const choiceAfterCleanup = run(choicePlan, choiceCompleted.snapshot).snapshot;
   assert.equal(validateRuntimeSnapshot(choiceAfterCleanup, choicePlan).valid, true);
   const labelledPlan = compiled("let result = choose first: firstText, second: secondText", { globals: ["firstText", "secondText"] });
-  const labelledPending = run(labelledPlan, createFreshRuntimeSnapshot(labelledPlan, { globals: { firstText: "Same", secondText: "Same" } }));
+  const labelledPending = run(labelledPlan, createFreshRuntimeSnapshot(labelledPlan, { globals: { firstText: "Alpha", secondText: "Beta" } }));
   const labelledCompleted = completePending(labelledPlan, labelledPending.snapshot, "choice", { kind: "selectedLabel", selectedLabel: "first" });
   const labelledAfterCleanup = run(labelledPlan, labelledCompleted.snapshot).snapshot;
+  const differentPossibleHistory = structuredClone(labelledAfterCleanup) as any;
+  differentPossibleHistory.lastSettlement.transcriptText = "Beta";
+  assert.equal(validateRuntimeSnapshot(differentPossibleHistory, labelledPlan).valid, true);
   const mismatchedLabel = structuredClone(labelledAfterCleanup) as any;
   mismatchedLabel.lastSettlement.result = "third";
   assert.equal(validateRuntimeSnapshot(mismatchedLabel, labelledPlan).valid, false);
   const mismatchedLabelCheckpoint = structuredClone(createCheckpoint(labelledPlan, labelledAfterCleanup)) as any;
   mismatchedLabelCheckpoint.snapshot.lastSettlement.result = "third";
   assert.throws(() => deserializeCheckpoint(JSON.stringify(mismatchedLabelCheckpoint)));
+});
+
+test("static compact source delegates current interaction guards to plan validation instead of semantic source limits", () => {
+  const oversizedButton = `showButton "${"x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 1)}"`;
+  const buttonResult = compileSource(oversizedButton);
+  assert.deepEqual(buttonResult.semanticDiagnostics, []);
+  assert.equal(buttonResult.plan, null);
+  const buttonDiagnostic = buttonResult.diagnostics.find((diagnostic) => diagnostic.code === "TSC006");
+  assert.deepEqual(buttonDiagnostic?.span, {
+    start: { offset: 0, line: 0, column: 0 },
+    end: { offset: oversizedButton.length, line: 0, column: oversizedButton.length },
+  });
+  assert.equal(buttonResult.diagnostics.some((diagnostic) => diagnostic.code === "TSV031"), false);
+
+  const options = Array.from(
+    { length: MAX_INTERACTION_OPTION_ENTRIES + 1 },
+    (_, index) => `"option-${index}"`,
+  ).join(", ");
+  const choiceSource = `let result = choose ${options}`;
+  const choiceResult = compileSource(choiceSource);
+  assert.deepEqual(choiceResult.semanticDiagnostics, []);
+  assert.equal(choiceResult.plan, null);
+  const choiceDiagnostic = choiceResult.diagnostics.find((diagnostic) => diagnostic.code === "TSC006");
+  const choiceStart = choiceSource.indexOf("choose");
+  assert.deepEqual(choiceDiagnostic?.span, {
+    start: { offset: choiceStart, line: 0, column: choiceStart },
+    end: { offset: choiceSource.length, line: 0, column: choiceSource.length },
+  });
+  assert.equal(choiceResult.diagnostics.some((diagnostic) => diagnostic.code === "TSV031"), false);
 });
 
 test("compiled dynamic payloads delegate over-limit data to the existing runtime validation boundary", () => {

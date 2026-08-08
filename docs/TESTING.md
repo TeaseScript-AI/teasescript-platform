@@ -304,9 +304,13 @@ The campaign deliberately does not pin an ordered catalog/count, PRNG vectors,
 successful signatures, complete traces, work/mutation accounting, fixture
 identity, profiles, or CLI compatibility. Exact technical limits, hostile-data
 shapes, interaction variants, and confirmed defects remain in their focused
-runtime/checkpoint/corruption/regression suites. Convert a confirmed product
-defect to a focused permanent regression; do not preserve private harness
-bookkeeping as evidence.
+runtime/checkpoint/corruption/regression suites. Canonical limit classification,
+evidence status, and coupling/repair routing live in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). A test around a production constant proves only current implementation
+behavior unless independent evidence justifies that boundary. Tests for values whose retention is unsupported move or
+disappear with the repair; they do not turn the historical number into an acceptance target.
+Convert a confirmed product defect to a focused permanent regression; do not
+preserve private harness bookkeeping as evidence.
 
 ## Source-to-runtime conformance corpus
 
@@ -412,7 +416,20 @@ Timed actions must use an injected fake clock or equivalent deterministic time s
 
 ADR 0016 defines the shared contract; action-specific tests remain required for each later API and UI behavior.
 
-The implemented ADR 0018 interaction slice covers button, text, number, unlabelled choice, identifier-labelled choice, and numeric-labelled choice through both direct validated plans and real compact source. Tests cover exact parser spans and recovery, protected prelude names, choice label domains and duplicates, requesting-speaker capture, static and prepared UI provenance, source-order evaluation, sequential blocking expressions, function arguments, root/function checkpoint resume, typed completion, transcript behavior, representative downstream over-limit rejection, and atomic rejection. The single-use handoff regressions prove that a newer retained settlement cannot remove destination/result mismatch rejection before consumption, that the handoff disappears immediately after the first successful consume or discard instruction, and that later ordinary state no longer carries interaction provenance. Non-canonical branches, loops, second actions, unrelated writers, duplicate producers, and independent targets inside the handoff are rejected locally rather than supported through global interaction-result liveness. Every rejected completion compares the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot change unnoticed. Standard Player/browser UI coverage remains assigned to its later implementation slice.
+The implemented ADR 0018 interaction slice covers button, text, number, unlabelled choice, identifier-labelled choice,
+and numeric-labelled choice through both direct validated plans and real compact source. Tests cover exact parser spans
+and recovery, protected prelude names, choice domains and duplicates, requesting-speaker capture, prepared UI provenance
+while preparation state exists, intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking
+expressions, function arguments, root/function checkpoint
+resume, typed completion, transcript behavior, downstream guard delegation, and atomic rejection. The single-use handoff
+regressions prove that a newer retained settlement cannot remove destination/result mismatch rejection before consumption,
+that the handoff disappears immediately after the first successful consume or discard instruction, and that later ordinary
+state no longer carries interaction provenance. Non-canonical branches, loops, second actions, unrelated writers, duplicate
+producers, and independent targets inside the handoff are rejected locally rather than supported through global
+interaction-result liveness. Current interaction-guard cases remain implementation-boundary regressions only and must
+move with #129 removal or re-derivation rather than becoming source-capacity evidence. Every rejected completion compares
+the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot
+change unnoticed. Standard Player/browser UI coverage remains assigned to its later implementation slice.
 
 ## Browser E2E gate
 
@@ -451,6 +468,8 @@ Tests and benchmarks should use:
 - clean deterministic CI behavior;
 - exact commands and failures reported in pull-request descriptions.
 
-## Parser depth boundary
+## Parser recursion safety
 
-Node 24 regression coverage includes deeply nested parentheses, unary and `not` chains, collection literals, templates, and blocks below the source-size limit. Over-limit input must return one stable `TSP027` diagnostic without a native stack exception.
+Node 24 regression coverage includes deeply nested parentheses, unary and `not` chains, collection literals, templates,
+and blocks. The safety invariant is structured `TSP027` rejection before native stack failure; the current historical
+numeric guard is not a retained capacity target and is tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
