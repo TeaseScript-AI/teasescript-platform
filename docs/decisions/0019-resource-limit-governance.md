@@ -114,7 +114,11 @@ are not structured diagnostics.
 
 Each registry entry has one primary category. A limit may interact with other
 categories, but those relationships are recorded separately rather than
-collapsing their meanings.
+collapsing their meanings. The taxonomy does not require a limit at every
+boundary. A limit needs a concrete risk, representation invariant, accepted
+product policy, or externally imposed constraint. A provisional guard may have
+incomplete evidence, but its current value or formula still needs a documented
+practical rationale rather than an arbitrary maximum.
 
 ### Representation invariant
 
@@ -204,9 +208,11 @@ A transport, storage, or tooling guard protects a specific non-engine boundary,
 such as an HTTP request body, editor buffer, package metadata field, artifact,
 CLI campaign, development workspace, database field, or build tool.
 
-It proves only the capacity of that boundary. It becomes an engine capacity
-constraint only when the data is contractually required to cross into the
-engine and the relationship is demonstrated.
+It proves only the capacity of that boundary. When the boundary is a required
+path for officially supported data, the registry must record whether and how
+the guard constrains that support, and the applicable end-to-end invariant
+must include it. A local transport, storage, or tooling guard must not silently
+become a lower de facto maximum for a broader supported path.
 
 ### Provisional POC implementation guard
 
