@@ -20,8 +20,6 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTUR
 [ADR 0016](decisions/0016-resumable-pending-action-runtime-contract.md), and
 [ADR 0017](decisions/0017-engine-primitives-and-standard-library-boundary.md).
 
-- Whether to accept the repository-wide resource-limit governance contract proposed in
-  [`decisions/0019-resource-limit-governance.md`](decisions/0019-resource-limit-governance.md).
 - Exact package/source identity binding for browser checkpoints and production plan references.
 - Migration and compatibility policy across plan, snapshot, checkpoint, engine, Standard Library, and package
   versions.

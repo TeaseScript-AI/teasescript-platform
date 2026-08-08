@@ -1,6 +1,6 @@
 # ADR 0019 — Resource-limit governance
 
-**Status:** Proposed
+**Status:** Accepted
 **Issue:** #130
 **Parent:** #129
 
@@ -30,9 +30,9 @@ boundary, or declare any existing value correct or incorrect. The complete
 repository inventory, measurements, and production repairs remain separate
 follow-up work under issue #129.
 
-This ADR remains `Proposed` until the Owner explicitly approves its exact text
-in issue #130 or its pull request. Approval of the
-workstream or technical review alone does not change its status.
+The Owner accepted this exact governance contract on 2026-08-08 after
+independent technical review. Future changes to this governance model follow
+the ADR and change-process rules below.
 
 ## Decision summary
 
