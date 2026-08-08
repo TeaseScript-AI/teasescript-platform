@@ -1,7 +1,7 @@
 # ADR 0019 — Resource-limit governance
 
-**Status:** Proposed  
-**Issue:** #130  
+**Status:** Proposed
+**Issue:** #130
 **Parent:** #129
 
 ## Context
@@ -30,14 +30,16 @@ boundary, or declare any existing value correct or incorrect. The complete
 repository inventory, measurements, and production repairs remain separate
 follow-up work under issue #129.
 
-This ADR remains `Proposed` until the designated product owner explicitly
-approves its exact text in issue #130 or its pull request. Approval of the
+This ADR remains `Proposed` until the Owner explicitly approves its exact text
+in issue #130 or its pull request. Approval of the
 workstream or technical review alone does not change its status.
 
 ## Decision summary
 
 1. Every explicit or implicit repository limit must have one primary category,
-   an owner, a boundary, a measurement definition, a concrete risk, and an
+   an affected boundary, a canonical source, its governing authority or an
+   explicitly unresolved decision, the applicable change process and any
+   required Owner approval, a measurement definition, a concrete risk, and an
    evidence status. The measurement definition is a quantitative unit or a
    qualitative domain or predicate, with a reason when no quantitative unit
    applies.
@@ -53,8 +55,8 @@ workstream or technical review alone does not change its status.
    implicit hard bound. This ADR defines that registry contract but does not
    populate it.
 6. Changes to product policy, architecture, accepted serialized domains, or
-   compatibility require the corresponding owner, ADR, format-version,
-   migration, and compatibility decisions described below.
+   compatibility require the corresponding Owner approval, ADR, format-version,
+   migration, and compatibility decisions described below when applicable.
 7. A provisional POC guard remains provisional until the required evidence and
    decisions promote it. It is not a permanent public compatibility promise.
 
@@ -72,11 +74,14 @@ plan validation, snapshot creation, checkpoint creation, restore, Player
 presentation, host-message validation, transport, rendering, storage, or a
 tooling command.
 
-An **owner** is the repository role or decision authority accountable for a
-limit's boundary, rationale, evidence, and change decisions. Ownership is not
-automatically assigned to the ADR approver or to the agent or contributor
-performing the work; the registry must name the applicable product,
-architecture, component, security, platform, or tooling authority.
+A **governing authority** is an accepted ADR, accepted specification, or
+controlling current topic contract that defines or constrains a limit or its
+boundary. If accepted authority does not decide a required change, the registry
+records that choice as unresolved and records the applicable change process and
+any required Owner approval. Owner approval becomes durable implementation
+authority only after the applicable accepted source is updated. An executing,
+reviewing, or coordinating agent is temporary and does not acquire durable
+ownership by working on the entry.
 
 A **measurement definition** states how the governed property is evaluated. It
 uses a quantitative unit when the property is measurable, such as bytes, nodes,
@@ -127,7 +132,7 @@ number.
 
 A product default selects ordinary behavior when the author, player, account,
 or caller supplies no override. A default is not automatically a maximum. Its
-owner and override rules must be explicit.
+canonical policy source, change process, and override rules must be explicit.
 
 Changing a user-visible default may require a product-policy decision and a
 compatibility note even when every previously accepted value remains valid.
@@ -191,8 +196,7 @@ consumption, or another condition after which the session, operation, package,
 or account is permanently rejected, failed, stopped, or disallowed by policy.
 
 Because it changes user-visible acceptance or failure semantics, this category
-normally requires explicit product-owner approval and clear compatibility
-handling.
+normally requires explicit Owner approval and clear compatibility handling.
 
 ### Transport, storage, or tooling guard
 
@@ -211,9 +215,9 @@ to keep the current proof of concept safe and reviewable before complete
 capacity evidence or product policy exists.
 
 It must be marked `provisional`, identify the risk it currently prevents, avoid
-claims of permanent support, and record the evidence or owner decision still
-needed. Tests may pin its current behavior without promoting it to proven
-capacity.
+claims of permanent support, and record the evidence, governing decision, or
+Owner approval still needed. Tests may pin its current behavior without
+promoting it to proven capacity.
 
 ## Required distinctions
 
@@ -232,13 +236,13 @@ The following distinctions are mandatory:
   set, or supported end to end.
 - Raising a general security or hostile-input budget is not the default repair
   for an inefficient compiler-generated, plan, snapshot, checkpoint, or other
-  internal representation. The representation, expansion, and owning budget
-  must be analysed first.
+  internal representation. The representation, expansion, and applicable
+  governing budget must be analysed first.
 - Sharing a number across boundaries does not establish that the boundaries
   have the same threat model, measurement definition, expansion factor,
   evidence, or compatibility contract.
 - A product default, warning threshold, and technical rejection limit may have
-  different values and owners.
+  different values, canonical sources, and change processes.
 
 ## End-to-end maximum invariant
 
@@ -335,8 +339,8 @@ applicable rather than silently omitting it.
 
 `provisional` means the limit is a deliberate deterministic current guard, but
 its value, predicate, accepted domain, or formula lacks complete evidence, final
-product policy, or both. The entry records the missing evidence or owner
-decision.
+product policy, or both. The entry records the missing evidence, unresolved
+governing decision, or required Owner approval.
 
 ### `suspicious`
 
@@ -378,8 +382,11 @@ production constant, option, formula, validation budget, bounded mechanism, or
 implicit hard bound. Each entry contains at least:
 
 - stable entry identity;
-- owner;
-- public or internal boundary;
+- canonical source for the current limit or contract;
+- governing authority, or an explicit unresolved-decision marker when no
+  accepted source decides the change;
+- affected public or internal boundary;
+- applicable change process, including any required Owner approval;
 - constant, option, formula, or implicit mechanism;
 - primary taxonomy category;
 - measurement definition: quantitative unit or qualitative domain, predicate,
@@ -402,7 +409,7 @@ implicit hard bound. Each entry contains at least:
   where runtime continuation applies;
 - explicit not-applicable reasons for omitted quantitative units, layers,
   boundaries, or tests;
-- recommendation, repair direction, or unresolved owner decision.
+- recommendation, repair direction, or unresolved governing or Owner decision.
 
 The registry is authoritative for classification and evidence routing after it
 is populated and accepted through the normal documentation workflow. It must
@@ -411,16 +418,17 @@ that inventory or assign evidence statuses to current repository values.
 
 ## Decision and versioning triggers
 
-A proposed limit change first identifies the category, owner, boundary,
-measurement definition, evidence status, downstream effects, and compatibility
-impact. The following triggers then apply cumulatively.
+A proposed limit change first identifies the category, canonical source,
+governing authority or unresolved decision, affected boundary, applicable
+change process, measurement definition, evidence status, downstream effects,
+and compatibility impact. The following triggers then apply cumulatively.
 
 ### Implementation, tests, and documentation only
 
 A normal code, test, and documentation change is sufficient only when all of the
 following hold:
 
-- the owning accepted architecture and product policy remain unchanged;
+- the applicable accepted architecture and product policy remain unchanged;
 - no previously accepted public input becomes rejected;
 - no user-visible default or absolute policy changes;
 - no serialized shape, field meaning, identity rule, or format compatibility
@@ -434,9 +442,9 @@ structural formula or increasing an internal validation-work allowance after
 proof that the accepted input domain and compatibility contract are unchanged.
 The example does not pre-approve any concrete change.
 
-### Explicit owner product-policy decision
+### Explicit Owner product-policy decision
 
-An explicit product-owner decision is required when changing:
+An explicit Owner decision is required when changing:
 
 - a product default;
 - a UI warning intended as official product guidance;
@@ -446,14 +454,14 @@ An explicit product-owner decision is required when changing:
 - a compatibility tradeoff between accepting larger data and preserving older
   consumers, sessions, or storage.
 
-Technical approval does not substitute for this owner decision.
+Technical approval does not substitute for this Owner decision.
 
 ### New or amended ADR
 
 A new or amended ADR is required when a change alters:
 
 - the taxonomy or meaning of a category;
-- boundary ownership or the separation of threat models;
+- boundary responsibility or the separation of threat models;
 - the architecture for capture, validation, plan, snapshot, checkpoint,
   transport, storage, or execution budgets;
 - the relationship between execution quanta and permanent failure policy;
@@ -543,8 +551,8 @@ statuses.
 
 ### Benefits
 
-- Technical limits gain explicit owners, meanings, measurement definitions,
-  risks, and evidence.
+- Technical limits gain explicit governing authorities, canonical sources,
+  change processes, meanings, measurement definitions, risks, and evidence.
 - Defensive hostile-input budgets no longer silently define internal engine
   capacity.
 - UI guidance, execution scheduling, permanent policy, and representational
@@ -583,11 +591,10 @@ This ADR does not:
 
 ## Follow-up
 
-Issue #131 already collects raw repository inventory, coupling, and
-cross-boundary reproduction evidence in parallel without applying this proposed
-taxonomy. After this ADR is explicitly accepted, the authoritative Phase 2
-synthesis under #129 must consume and validate #131's evidence, reproduce only
-missing or unresolved cases through public APIs, populate the registry, measure
-the required worst-form evidence sets, propose focused repairs, and request the
-required owner or ADR decisions. That work must not be folded into this
-governance PR.
+Issue #131 completed the raw repository inventory, coupling, and cross-boundary
+reproduction evidence and is closed. After this ADR is explicitly accepted,
+the authoritative Phase 2 synthesis under #129 must consume and validate that
+evidence, reproduce only missing or unresolved cases through public APIs,
+populate the registry, measure the required worst-form evidence sets, propose
+focused repairs, and request any required Owner or ADR decisions. That work
+must not be folded into this governance PR.
