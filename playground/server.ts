@@ -202,9 +202,9 @@ function isUtf8Text(value: string | string[] | undefined): boolean {
 }
 
 async function readUtf8Body(request: IncomingMessage): Promise<{ readonly ok: true; readonly text: string } | { readonly ok: false; readonly status: number; readonly error: { readonly code: string; readonly message: string } }> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   try {
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     return { ok: true, text: new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)) };
   } catch {
     return { ok: false, status: 400, error: { code: "malformedUtf8", message: "Source must be valid UTF-8 text." } };
