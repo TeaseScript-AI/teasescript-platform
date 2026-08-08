@@ -170,5 +170,5 @@ Read completely and apply in this order:
 These rules apply to the agent; they are not optional background material. Read installed `LOCAL-AGENT-BOOTSTRAP.md`
 when setup or preparation fails, and `CODEX-MODEL-SELECTION.md` before selecting Codex or writing a Codex prompt. Work
 locally after checkout; reserve the GitHub connector for live state and permitted writes. After checkout,
-`docs/agents/CONNECTOR-SOURCE-ACQUISITION.md` is the canonical owner of replaceable acquisition mechanics; re-read it
+`docs/agents/CONNECTOR-SOURCE-ACQUISITION.md` is the canonical source for replaceable acquisition mechanics; re-read it
 before a later source refresh instead of relying on this startup copy.

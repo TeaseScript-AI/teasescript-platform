@@ -2,12 +2,12 @@
 
 ## Scope
 
-Use this guide only when the selected source/workspace route is connector-local. It owns the replaceable
-mechanics for obtaining one exact repository source artifact and preparing a trusted local checkout. Stable
+Use this guide only when the selected source/workspace route is connector-local. It is the canonical source for the
+replaceable mechanics for obtaining one exact repository source artifact and preparing a trusted local checkout. Stable
 connector-local work, write, verification, and handoff rules remain in
 [`CONNECTOR-LOCAL.md`](CONNECTOR-LOCAL.md).
 
-This guide owns the current fixed-index, Artifact mailbox, and polling mechanics. The compact project-folder
+This guide is canonical for the current fixed-index, Artifact mailbox, and polling mechanics. The compact project-folder
 `README-FIRST.md` intentionally carries the concrete pre-checkout copy needed to obtain the first exact source before
 this guide is locally available. After checkout, update and use the moving acquisition details here for later source
 refreshes rather than copying them into universal documents, another capability guide, or other project-agent
@@ -73,7 +73,7 @@ invalidate a ready result; for a newly produced artifact, fixed-index publicatio
 - Treat command cleanup separately from artifact validity. Never replace a verified ready result with an
   unrelated generic failure or continue from a failed production attempt.
 
-The workflow implementation and focused tests enforce these boundaries. This guide owns the agent-facing
+The workflow implementation and focused tests enforce these boundaries. This guide is canonical for the agent-facing
 procedure; it does not duplicate the workflow code or create a second protocol.
 
 ## Prepare the local checkout

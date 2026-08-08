@@ -115,7 +115,7 @@ For every relevant document, establish that:
 - normative strength, priority, scope, audience, conditions, timing, order, exceptions, required
   action, failure behavior, and intended practical behavior are correct and preserved;
 - maintained rules, moving facts, status statements, and instructions have the correct canonical
-  owner, placement, lifecycle, and routing without stale competing authority;
+  source, placement, lifecycle, and routing without stale competing authority;
 - the complete mandatory reading route supplies required information before the affected
   decision or action;
 - commands, paths, options, examples, generated derivatives, external copies, status, and
@@ -124,7 +124,7 @@ For every relevant document, establish that:
   be mistaken for current guidance;
 - likely misreadings introduced by shortening, moving, merging, splitting, or reformatting have
   been considered; and
-- targeted edits, consolidation with existing text, or an existing canonical owner were
+- targeted edits, consolidation with existing text, or an existing canonical source were
   preferred over append-only amendments, unnecessary files, duplicated moving facts, wholesale
   rewrites, or speculative documentation infrastructure where those alternatives preserve the
   intended meaning.

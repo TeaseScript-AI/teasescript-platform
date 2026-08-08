@@ -63,7 +63,7 @@ uncertainty that cannot be bounded through a separately assigned [`AUDIT.md`](AU
   cost.
 - **Tests and evidence:** suitable layers, assertions, oracles, diagnostics, reproducibility,
   negative paths, and proof of the claim rather than a green total.
-- **Documentation and context:** correctness, canonical ownership, lifecycle, routing, executable
+- **Documentation and context:** correctness, canonical-source placement, lifecycle, routing, executable
   details, stale or competing text, consolidation, and safe, token-efficient compactness.
 - **Boundaries and cost:** reachable trust boundaries, realistic workloads, unbounded work, hot
   paths, and proportionate security, performance, and resource scrutiny without speculative

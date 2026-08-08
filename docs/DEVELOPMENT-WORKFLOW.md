@@ -91,7 +91,7 @@ material shared-workflow failure instead of silently working around it.
 Do not invent project-wide policy, numeric thresholds, style or readability
 limits, naming rules, compatibility promises, mandatory tools, or workflow
 gates. Until a durable rule has evidence, owner approval, and synchronization
-into its canonical owner, use configured tooling, current authority, and
+into its canonical source, use configured tooling, current authority, and
 task-proportional judgment.
 
 ### KISS, pragmatic YAGNI, and DRY
@@ -333,9 +333,9 @@ Closes #123
 
 ## Capability-specific execution
 
-This document owns only rules that apply regardless of agent capability. Before source acquisition or a
+This document is canonical only for rules that apply regardless of agent capability. Before source acquisition or a
 repository write, select the applicable route in [`agents/README.md`](agents/README.md). That router and its
-focused capability guides own capability-specific source acquisition, permitted writes, verification, and
+focused capability guides are canonical for capability-specific source acquisition, permitted writes, verification, and
 publication constraints. Explicitly coordinated work may add the focused orchestrator task guide after
 capability selection. Do not copy those procedures into this document.
 
@@ -347,9 +347,9 @@ decisions in the active issue, pull request, or review discussion; do not create
 task requires one.
 
 The agent implementing a change updates documentation affected by the implemented behavior in the same pull
-request unless the task explicitly assigns that owner elsewhere. Every pull request states its documentation
-impact, including when no edit is needed. For explicitly coordinated work, use the assignment and integration
-rules in [`agents/ORCHESTRATOR.md`](agents/ORCHESTRATOR.md).
+request unless the task explicitly assigns that documentation update elsewhere. Every pull request states its
+documentation impact, including when no edit is needed. For explicitly coordinated work, use the assignment and
+integration rules in [`agents/ORCHESTRATOR.md`](agents/ORCHESTRATOR.md).
 
 Canonical documentation records actual implemented behavior and explicit deferred work, not an obsolete plan.
 

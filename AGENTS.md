@@ -21,7 +21,7 @@ earlier agent suggestion is not a repository requirement. Do not invent
 project-wide policy, numeric thresholds, style or readability limits, naming
 rules, compatibility promises, mandatory tools, or workflow gates. Use strong
 requirement language only for accepted behavior, real boundaries, or explicit
-owner decisions recorded in a canonical owner. Propose durable rules separately
+owner decisions recorded in a canonical source. Propose durable rules separately
 with evidence; after owner approval, record them canonically before treating
 them as authority.
 

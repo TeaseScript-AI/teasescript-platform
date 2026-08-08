@@ -32,13 +32,13 @@ selects this route.
 
 ## Source acquisition
 
-Resolve one exact source identity, obtain its verified artifact through the single acquisition owner, and run
+Resolve one exact source identity, obtain its verified artifact through the canonical acquisition source, and run
 the trusted installed preparation helper. Inspect, edit, search, and test the resulting checkout locally. Do
 not use repeated connector file reads as the normal repository-reading strategy and do not execute an
 untrusted helper from the artifact being reviewed to establish its own trust.
 
 The current fixed-index, regeneration, timing, and polling details live only in
-`CONNECTOR-SOURCE-ACQUISITION.md`. That owner may replace them without changing this route, universal workflow,
+`CONNECTOR-SOURCE-ACQUISITION.md`. That source may replace them without changing this route, universal workflow,
 or installed derivative summaries.
 
 ## Writes

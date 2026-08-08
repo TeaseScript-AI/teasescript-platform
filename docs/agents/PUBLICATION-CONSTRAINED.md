@@ -11,7 +11,7 @@ verified patch-publication route must apply to the repository and target pull re
 **Required**
 
 - the selected source/workspace guide and its normal reading set;
-- [`../PATCH-PUBLICATION.md`](../PATCH-PUBLICATION.md), which is the sole protocol and security-contract owner;
+- [`../PATCH-PUBLICATION.md`](../PATCH-PUBLICATION.md), which is the canonical protocol and security-contract source;
 - the current target PR, exact branch head, and task authorization.
 
 **Conditional**

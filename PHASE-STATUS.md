@@ -55,7 +55,7 @@ git diff --check
 Inspect the complete diff and any affected security or playground route matrix. Resolve live pull-request and CI
 state from GitHub.
 
-## Current topic owners
+## Current topic sources
 
 - Product scope and current implementation focus: [`docs/PRODUCT.md`](docs/PRODUCT.md)
 - Architecture and component boundaries: [`CURRENT-DESIGN.md`](CURRENT-DESIGN.md) and
