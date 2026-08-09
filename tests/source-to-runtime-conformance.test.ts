@@ -92,20 +92,35 @@ test("executes source output, speaker provenance, collection copies, and control
 test("keeps contextual say skip words available as ordinary identifier expressions", () => {
   const plan = compiled([
     'speaker vera {}',
-    "let skippable = 1",
-    "let unskippable = 2",
-    "let suffix = 3",
+    'let skippable = ["indexed"]',
+    'let unskippable = ["unindexed"]',
     "say skippable",
-    "say unskippable",
-    "say skippable + suffix",
-    "say skippable, instant",
-    "say as vera skippable",
+    "say skippable[0]",
+    "say unskippable[0]",
+    "say skippable[0], instant",
+    "say as vera skippable[0]",
   ].join("\n"));
 
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["1", "2", "4", "1", "1"],
+    ["indexed", "indexed", "unindexed", "indexed", "indexed"],
+  );
+  assert.equal(result.snapshot.status, "halted");
+});
+
+test("keeps contextual say skip words available as call expressions", () => {
+  const plan = compiled([
+    'function skippable(value) { return "called" }',
+    'function unskippable(value) { return "also called" }',
+    'say skippable("ok"), instant',
+    'say unskippable("ok"), instant',
+  ].join("\n"));
+
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["called", "also called"],
   );
   assert.equal(result.snapshot.status, "halted");
 });

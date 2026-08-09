@@ -255,57 +255,61 @@ function executePlannedInstruction(
 ): void {
   switch (instruction.kind) {
     case "declareSpeaker": {
-      if (findBinding(snapshot, instruction.name) !== undefined) {
-        throw fault("TSR001", `Speaker '${instruction.name}' is already visible in this scope.`, instruction.span);
-      }
-      assertCounterCanAdvance(snapshot.nextSpeakerId, "nextSpeakerId");
-      const speaker: RuntimeSpeakerSnapshot = {
-        id: snapshot.nextSpeakerId,
-        identifier: instruction.name,
-        properties: [],
-      };
-      snapshot.nextSpeakerId += 1;
-      snapshot.speakers.push(speaker);
-      currentFrame(snapshot).bindings.push({
-        name: instruction.name,
-        value: {
-          kind: "speakerReference",
-          speakerId: speaker.id,
+      executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
+        if (findBinding(stagedSnapshot, instruction.name) !== undefined) {
+          throw fault("TSR001", `Speaker '${instruction.name}' is already visible in this scope.`, instruction.span);
+        }
+        assertCounterCanAdvance(stagedSnapshot.nextSpeakerId, "nextSpeakerId");
+        const speaker: RuntimeSpeakerSnapshot = {
+          id: stagedSnapshot.nextSpeakerId,
           identifier: instruction.name,
-        },
-      });
-      snapshot.contextualSpeaker = speaker.id;
-      for (const property of instruction.properties) {
-        if (speaker.properties.some((item) => item.name === property.name)) {
-          throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
-        }
-        const propertyValue = cloneSerializableValue(evaluator.evaluate(property.value));
-        if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
-          throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", property.span);
-        }
-        speaker.properties.push({
-          name: property.name,
-          value: propertyValue,
+          properties: [],
+        };
+        stagedSnapshot.nextSpeakerId += 1;
+        stagedSnapshot.speakers.push(speaker);
+        currentFrame(stagedSnapshot).bindings.push({
+          name: instruction.name,
+          value: {
+            kind: "speakerReference",
+            speakerId: speaker.id,
+            identifier: instruction.name,
+          },
         });
-      }
-      advance(snapshot);
+        stagedSnapshot.contextualSpeaker = speaker.id;
+        for (const property of instruction.properties) {
+          if (speaker.properties.some((item) => item.name === property.name)) {
+            throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
+          }
+          const propertyValue = cloneSerializableValue(stagedEvaluator.evaluate(property.value));
+          if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
+            throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", property.span);
+          }
+          speaker.properties.push({
+            name: property.name,
+            value: propertyValue,
+          });
+        }
+        advance(stagedSnapshot);
+      });
       return;
     }
     case "setDeclaredSpeakerProperty": {
-      const speaker = evaluator.speakerByName(instruction.speaker, instruction.span);
-      if (speaker.properties.some((property) => property.name === instruction.name)) {
-        throw fault("TSR007", `Duplicate speaker property '${instruction.name}'.`, instruction.span);
-      }
-      snapshot.contextualSpeaker = speaker.id;
-      const propertyValue = cloneSerializableValue(evaluator.evaluate(instruction.value));
-      if (instruction.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
-        throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", instruction.span);
-      }
-      speaker.properties.push({
-        name: instruction.name,
-        value: propertyValue,
+      executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
+        const speaker = stagedEvaluator.speakerByName(instruction.speaker, instruction.span);
+        if (speaker.properties.some((property) => property.name === instruction.name)) {
+          throw fault("TSR007", `Duplicate speaker property '${instruction.name}'.`, instruction.span);
+        }
+        stagedSnapshot.contextualSpeaker = speaker.id;
+        const propertyValue = cloneSerializableValue(stagedEvaluator.evaluate(instruction.value));
+        if (instruction.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
+          throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", instruction.span);
+        }
+        speaker.properties.push({
+          name: instruction.name,
+          value: propertyValue,
+        });
+        advance(stagedSnapshot);
       });
-      advance(snapshot);
       return;
     }
     case "setDefaultSpeaker": {
@@ -2517,6 +2521,21 @@ function executeSayAtomically(
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
   executeSay(plan, instruction, stagedSnapshot, stagedEvaluator, stagedEvents);
+  Object.assign(snapshot, stagedSnapshot);
+  events.push(...stagedEvents);
+}
+
+function executeSpeakerAtomically(
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+  operation: (stagedSnapshot: RuntimeSnapshot, stagedEvaluator: Evaluator) => void,
+): void {
+  const stagedSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const stagedEvents: InterpreterEvent[] = [];
+  const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
+
+  operation(stagedSnapshot, stagedEvaluator);
   Object.assign(snapshot, stagedSnapshot);
   events.push(...stagedEvents);
 }

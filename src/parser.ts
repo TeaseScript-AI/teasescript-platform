@@ -397,7 +397,7 @@ class Parser {
     }
 
     let skipPolicy: SayStatement["skipPolicy"] = null;
-    if (this.#check(TokenKind.Identifier) && startsSayModifierText(this.#peek(1))) {
+    if (this.#check(TokenKind.Identifier) && !this.#canParseCompleteSayValue()) {
       const policy = this.#peek().lexeme;
       if (policy === "skippable" || policy === "unskippable") {
         skipPolicy = policy;
@@ -447,6 +447,38 @@ class Parser {
       pacing,
       span: spanFrom(keyword.span, endSpan),
     });
+  }
+
+  /**
+   * `skippable` and `unskippable` predate their modifier meaning as ordinary
+   * identifiers. Keep that interpretation whenever the existing say grammar
+   * can consume a complete value (and optional pacing) from this position.
+   */
+  #canParseCompleteSayValue(): boolean {
+    const speculative = new Parser(this.tokens);
+    speculative.#current = this.#current;
+
+    const value = speculative.#parseExpression();
+    if (value === null || speculative.#diagnostics.length > 0) return false;
+
+    if (speculative.#match(TokenKind.Comma)) {
+      if (speculative.#checkIdentifier("instant")) {
+        speculative.#advance();
+      } else {
+        const pacing = speculative.#parseExpression();
+        if (pacing === null || speculative.#diagnostics.length > 0) return false;
+      }
+    }
+
+    return speculative.#isSayStatementBoundary();
+  }
+
+  #isSayStatementBoundary(): boolean {
+    return (
+      this.#check(TokenKind.Newline) ||
+      this.#check(TokenKind.RightBrace) ||
+      this.#check(TokenKind.EndOfFile)
+    );
   }
 
   #parseExitStatement(): Statement {
@@ -1991,12 +2023,6 @@ function isExpressionStart(token: Token): boolean {
     token.kind === TokenKind.Plus ||
     token.kind === TokenKind.Minus
   );
-}
-
-function startsSayModifierText(token: Token): boolean {
-  return isExpressionStart(token) &&
-    token.kind !== TokenKind.Plus &&
-    token.kind !== TokenKind.Minus;
 }
 
 function isStatementStart(kind: TokenKind): boolean {

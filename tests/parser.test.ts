@@ -143,7 +143,7 @@ test("parses say pacing and skip syntax with pacing spans", () => {
   assert.deepEqual(second?.span, sourceSpan(source, source.indexOf("say \"Now\""), source.length));
 });
 
-test("treats say skip words as modifiers only when text follows", () => {
+test("treats say skip words as modifiers only when the existing expression cannot finish", () => {
   const source = [
     'say skippable "Read this."',
     'say as vera unskippable "Read this."',
@@ -152,6 +152,11 @@ test("treats say skip words as modifiers only when text follows", () => {
     "say skippable + suffix",
     "say skippable, instant",
     "say as vera skippable",
+    "say skippable[0]",
+    "say unskippable(index)",
+    "say skippable.member",
+    "say unskippable.member[0]",
+    "say as vera skippable[0], instant",
   ].join("\n");
   const result = parse(source);
 
@@ -168,6 +173,11 @@ test("treats say skip words as modifiers only when text follows", () => {
     null,
     null,
     null,
+    null,
+    null,
+    null,
+    null,
+    null,
   ]);
   assert.deepEqual(statements.slice(2).map((statement) => statement.value.kind), [
     "identifier",
@@ -175,9 +185,17 @@ test("treats say skip words as modifiers only when text follows", () => {
     "binaryExpression",
     "identifier",
     "identifier",
+    "indexExpression",
+    "callExpression",
+    "propertyAccessExpression",
+    "indexExpression",
+    "indexExpression",
   ]);
   assert.equal(statements[5]?.pacing, "instant");
+  assert.equal(statements[11]?.pacing, "instant");
   assert.deepEqual(statements[4]?.value.span, sourceSpan(source, source.indexOf("skippable + suffix"), source.indexOf("skippable + suffix") + "skippable + suffix".length));
+  const indexedStart = source.lastIndexOf("skippable[0]");
+  assert.deepEqual(statements[11]?.value.span, sourceSpan(source, indexedStart, indexedStart + "skippable[0]".length));
 });
 
 test("rejects missing say pacing expressions", () => {

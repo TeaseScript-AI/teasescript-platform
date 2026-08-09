@@ -2079,19 +2079,33 @@ function validatePendingActionState(
   if (
     isPlainRecord(action) &&
     isPlainRecord(settlement) &&
-    (
-      !positiveSafeInteger(action.actionId) ||
-      !positiveSafeInteger(action.requestEventSequence) ||
-      !positiveSafeInteger(settlement.actionId) ||
-      !positiveSafeInteger(settlement.completionEventSequence) ||
-      action.actionId <= settlement.actionId ||
-      action.requestEventSequence <= settlement.completionEventSequence ||
-      (settlement.actionKind === "interaction" &&
-        (!positiveSafeInteger(settlement.transcriptEventSequence) || action.requestEventSequence <= settlement.transcriptEventSequence))
-    )
+    !validForegroundSettlementOrdering(action, settlement)
   ) {
-    errors.push("Runtime foreground action must be newer than the retained settlement.");
+    errors.push("Runtime foreground action is inconsistent with the retained settlement.");
   }
+}
+
+function validForegroundSettlementOrdering(
+  action: Record<string, unknown>,
+  settlement: Record<string, unknown>,
+): boolean {
+  if (
+    !positiveSafeInteger(action.actionId) ||
+    !positiveSafeInteger(action.requestEventSequence) ||
+    !positiveSafeInteger(settlement.actionId) ||
+    !positiveSafeInteger(settlement.completionEventSequence) ||
+    action.actionId <= settlement.actionId
+  ) return false;
+
+  if (action.requestEventSequence > settlement.completionEventSequence) return true;
+
+  // A foreground wait may have been requested before a concurrent background
+  // pacing gate later settles. The gate completion must not invalidate it.
+  return (
+    action.requestEventSequence < settlement.completionEventSequence &&
+    action.kind === "delay" &&
+    settlement.actionKind === "chatPacingGate"
+  );
 }
 
 function validForegroundActionBase(
