@@ -19,6 +19,6 @@ export type ActionCompletionOutcome =
   | { readonly kind: "alreadySettled"; readonly settlement: RuntimeActionSettlementSnapshot }
   | { readonly kind: "staleAction"; readonly actionId: number }
   | { readonly kind: "unknownAction"; readonly actionId: number }
-  | { readonly kind: "wrongActionKind"; readonly actionId: number; readonly expectedActionKind: "delay" | "interaction"; readonly receivedActionKind: string }
+  | { readonly kind: "wrongActionKind"; readonly actionId: number; readonly expectedActionKind: "delay" | "interaction" | "chatPacingGate"; readonly receivedActionKind: string }
   | { readonly kind: "invalidPayload"; readonly message: string }
   | { readonly kind: "notDue"; readonly actionId: number; readonly currentSessionTimeMs: number; readonly deadlineMs: number };

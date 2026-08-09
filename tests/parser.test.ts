@@ -89,12 +89,14 @@ test("parses say, say as, and exit statements", () => {
     {
       kind: "sayStatement",
       speaker: null,
+      skipPolicy: null,
       value: {
         kind: "stringLiteral",
         raw: '"Kneel."',
         value: "Kneel.",
         span: sourceSpan(source, 4, 12),
       },
+      pacing: null,
       span: sourceSpan(source, 0, 12),
     },
     {
@@ -104,12 +106,14 @@ test("parses say, say as, and exit statements", () => {
         name: "cashier",
         span: sourceSpan(source, 20, 27),
       },
+      skipPolicy: null,
       value: {
         kind: "stringLiteral",
         raw: '"Your total is five euros."',
         value: "Your total is five euros.",
         span: sourceSpan(source, 28, 55),
       },
+      pacing: null,
       span: sourceSpan(source, 13, 55),
     },
     {
@@ -127,6 +131,7 @@ test("preserves template text and identifier interpolation", () => {
   assert.deepEqual(result.program.statements[0], {
     kind: "sayStatement",
     speaker: null,
+    skipPolicy: null,
     value: {
       kind: "templateLiteral",
       parts: [
@@ -154,6 +159,7 @@ test("preserves template text and identifier interpolation", () => {
       ],
       span: sourceSpan(source, 4, 22),
     },
+    pacing: null,
     span: sourceSpan(source, 0, 22),
   });
 });

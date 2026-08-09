@@ -215,6 +215,13 @@ class SemanticValidator {
               ? statement.speaker.name
               : null;
         this.#validateExpression(statement.value, scope, contextualSpeaker);
+        if (statement.pacing !== null && statement.pacing !== "instant") {
+          this.#validateExpression(statement.pacing, scope, contextualSpeaker);
+          const known = knownNumber(statement.pacing);
+          if (known !== undefined && known < 0) {
+            this.#report(semanticCode.invalidRepeatCount, "Say pacing must not be negative.", statement.pacing.span);
+          }
+        }
         return;
       }
       case "showButtonStatement": {

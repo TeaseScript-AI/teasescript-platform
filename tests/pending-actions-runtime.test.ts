@@ -8,6 +8,7 @@ import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { RuntimeDelayActionSnapshot } from "../src/runtime/actions/model.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 function plan(source: string) {
   const result = compileSource(source);
@@ -18,7 +19,7 @@ function plan(source: string) {
 
 test("wait lowers to a foreground delay and settles only after an explicit observation", () => {
   const compiled = plan('wait 1.5 s\nsay "done"\nexit');
-  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const waiting = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   assert.equal(waiting.snapshot.status, "waiting");
   assert.equal(waiting.snapshot.foregroundAction?.kind, "delay");
   assert.equal((waiting.snapshot.foregroundAction as RuntimeDelayActionSnapshot).deadlineMs, 1500);

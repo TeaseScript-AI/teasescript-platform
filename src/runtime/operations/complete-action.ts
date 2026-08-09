@@ -5,7 +5,7 @@ import {
   type RuntimeInteractionResultHandoffSnapshot,
   type RuntimeSnapshot,
 } from "../state.js";
-import type { RuntimeActionSettlementSnapshot, RuntimeInteractionActionSnapshot } from "../actions/model.js";
+import type { RuntimeActionSettlementSnapshot, RuntimeChatPacingGateActionSnapshot, RuntimeInteractionActionSnapshot } from "../actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent, PlayerTranscriptEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
@@ -37,14 +37,49 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
     if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: cloneSettlement(current.lastSettlement) });
     return pendingResult(current, [], actionId < current.nextActionId ? { kind: "staleAction", actionId } : { kind: "unknownAction", actionId });
   }
-  if (value.actionKind !== active.kind) return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: active.kind, receivedActionKind: value.actionKind === "delay" || value.actionKind === "interaction" ? value.actionKind : "<invalid>" });
+  if (value.actionKind !== active.kind) return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: active.kind, receivedActionKind: value.actionKind === "delay" || value.actionKind === "interaction" || value.actionKind === "chatPacingGate" ? value.actionKind : "<invalid>" });
   if (active.kind === "interaction") return completeInteraction(captured.plan, current, active, value);
+  if (active.kind === "chatPacingGate") return completePacingGate(captured.plan, current, active, value);
   if (!isPlainRecord(value.payload) || value.payload.kind !== "time" || !isValidSessionTime(value.payload.currentSessionTimeMs)) return pendingResult(current, [], { kind: "invalidPayload", message: "Delay completion payload must contain a valid time observation." });
   const effectiveNow = Math.max(current.currentSessionTimeMs, value.payload.currentSessionTimeMs);
   if (effectiveNow < active.deadlineMs) return pendingResult(current, [], { kind: "notDue", actionId, currentSessionTimeMs: current.currentSessionTimeMs, deadlineMs: active.deadlineMs });
   const observed = observeTime(captured.plan, current, effectiveNow);
   if (observed.outcome.kind !== "observed" || observed.outcome.completion === null) throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
   return Object.freeze({ ...observed, outcome: { kind: "completed" as const, settlement: observed.outcome.completion } });
+}
+
+function completePacingGate(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  action: RuntimeChatPacingGateActionSnapshot,
+  request: Record<string, unknown>,
+): PendingActionOperationResult<ActionCompletionOutcome> {
+  if (!isPlainRecord(request.payload) || request.payload.kind !== "skip") {
+    return pendingResult(current, [], { kind: "invalidPayload", message: "Pacing completion payload must be a skip request." });
+  }
+  if (!action.skippable) {
+    return pendingResult(current, [], { kind: "invalidPayload", message: "This pacing gate is not skippable." });
+  }
+  assertEventSequenceCapacity(current, 1);
+  const completionEventSequence = takeSequence(current);
+  const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
+    actionId: action.actionId, actionKind: "chatPacingGate", settlementKind: "skipped",
+    owningInstruction: action.owningInstruction, continuationInstruction: action.continuationInstruction,
+    requestEventSequence: action.requestEventSequence, completionEventSequence,
+    deadlineMs: action.deadlineMs, completedAtMs: current.currentSessionTimeMs,
+  });
+  current.foregroundAction = null;
+  current.lastSettlement = settlement;
+  current.status = "running";
+  if (action.preparedOutput !== null) {
+    current.preparedSayOutput = action.preparedOutput;
+    current.nextInstruction = action.preparedOutput.owningInstruction;
+  } else {
+    current.nextInstruction = action.continuationInstruction;
+  }
+  const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
+  const events: InterpreterEvent[] = [Object.freeze({ kind: "actionCompleted", sequence: completionEventSequence, settlement, span: copySpan(span) } satisfies ActionCompletedEvent)];
+  return pendingResult(current, events, { kind: "completed", settlement });
 }
 
 function completeInteraction(

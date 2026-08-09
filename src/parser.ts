@@ -396,6 +396,15 @@ class Parser {
       speaker = this.#identifier(this.#advance());
     }
 
+    let skipPolicy: SayStatement["skipPolicy"] = null;
+    if (this.#check(TokenKind.Identifier)) {
+      const policy = this.#peek().lexeme;
+      if (policy === "skippable" || policy === "unskippable") {
+        skipPolicy = policy;
+        this.#advance();
+      }
+    }
+
     const valueStart = this.#peek().kind;
     const value = this.#parseExpression();
     if (value === null) {
@@ -410,11 +419,33 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
+    let pacing: SayStatement["pacing"] = null;
+    let endSpan = value.span;
+    if (this.#match(TokenKind.Comma)) {
+      if (this.#checkIdentifier("instant")) {
+        endSpan = this.#advance().span;
+        pacing = "instant";
+      } else {
+        const parsedPacing = this.#parseExpression();
+        if (parsedPacing === null) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedExpression,
+            "Expected a pacing value after ','.",
+          );
+          this.#synchronizeStatement();
+          return null;
+        }
+        pacing = parsedPacing;
+        endSpan = parsedPacing.span;
+      }
+    }
     return Object.freeze({
       kind: "sayStatement",
       speaker,
+      skipPolicy,
       value,
-      span: spanFrom(keyword.span, value.span),
+      pacing,
+      span: spanFrom(keyword.span, endSpan),
     });
   }
 

@@ -54,7 +54,9 @@ export interface SpeakerSetterStatement {
 export interface SayStatement {
   readonly kind: "sayStatement";
   readonly speaker: Identifier | null;
+  readonly skipPolicy: "skippable" | "unskippable" | null;
   readonly value: Expression;
+  readonly pacing: Expression | "instant" | null;
   readonly span: SourceSpan;
 }
 

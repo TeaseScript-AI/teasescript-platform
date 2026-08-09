@@ -1,7 +1,7 @@
 import type { SourceSpan } from "../source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 8;
+export const INSTRUCTION_PLAN_VERSION = 9;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
@@ -248,6 +248,8 @@ export interface SayInstruction extends InstructionBase {
   readonly kind: "say";
   readonly speaker: string | null;
   readonly value: ExpressionPlan;
+  readonly skipPolicy: "skippable" | "unskippable" | null;
+  readonly pacing: ExpressionPlan | "smart" | "instant";
 }
 
 export interface WaitInstruction extends InstructionBase {

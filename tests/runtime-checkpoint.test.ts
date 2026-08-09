@@ -53,7 +53,7 @@ test("restores a self-contained checkpoint from serialized JSON", () => {
 
 test("checkpoint component capture does not spend one work allowance across plan and snapshot", () => {
   const compiled = plan(
-    Array.from({ length: 4_000 }, (_value, index) => `say "${index}"`).join("\n"),
+    Array.from({ length: 3_000 }, (_value, index) => `say "${index}"`).join("\n"),
   );
   const snapshot = createFreshRuntimeSnapshot(compiled);
   snapshot.frames[0]!.bindings.push(

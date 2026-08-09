@@ -375,6 +375,12 @@ function validateInstruction(
     case "say":
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      if (value.skipPolicy !== null && value.skipPolicy !== "skippable" && value.skipPolicy !== "unskippable") {
+        errors.push(planError("TSC002", "Say skip policy is invalid.", `${path}.skipPolicy`));
+      }
+      if (value.pacing !== "smart" && value.pacing !== "instant") {
+        validateExpression(value.pacing, `${path}.pacing`, errors, false, temporaryCount);
+      }
       return;
     case "wait":
       if (value.unit !== null && !["ms", "s", "min", "h"].includes(String(value.unit))) {

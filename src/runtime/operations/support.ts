@@ -56,6 +56,7 @@ export function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): Ru
     deadlineMs: settlement.deadlineMs,
     completedAtMs: settlement.completedAtMs,
   };
+  if (settlement.actionKind === "chatPacingGate") return { ...settlement };
   return {
     actionId: settlement.actionId,
     actionKind: "interaction",

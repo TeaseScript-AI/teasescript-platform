@@ -73,8 +73,18 @@ import {
   type RuntimeCallFrameSnapshot,
   type RuntimeTemporarySnapshot,
 } from "./state.js";
-import type { RuntimeInteractionActionSnapshot } from "./actions/model.js";
+import type {
+  RuntimeChatPacingGateActionSnapshot,
+  RuntimeInteractionActionSnapshot,
+  RuntimePreparedSayOutputSnapshot,
+} from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import {
+  calculatePacingDeadlineMs,
+  calculateSmartPacingDurationMs,
+  secondsToPacingMilliseconds,
+} from "./actions/pacing.js";
+import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -268,9 +278,13 @@ function executePlannedInstruction(
         if (speaker.properties.some((item) => item.name === property.name)) {
           throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
         }
+        const propertyValue = cloneSerializableValue(evaluator.evaluate(property.value));
+        if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
+          throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", property.span);
+        }
         speaker.properties.push({
           name: property.name,
-          value: cloneSerializableValue(evaluator.evaluate(property.value)),
+          value: propertyValue,
         });
       }
       advance(snapshot);
@@ -282,9 +296,13 @@ function executePlannedInstruction(
         throw fault("TSR007", `Duplicate speaker property '${instruction.name}'.`, instruction.span);
       }
       snapshot.contextualSpeaker = speaker.id;
+      const propertyValue = cloneSerializableValue(evaluator.evaluate(instruction.value));
+      if (instruction.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
+        throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", instruction.span);
+      }
       speaker.properties.push({
         name: instruction.name,
-        value: cloneSerializableValue(evaluator.evaluate(instruction.value)),
+        value: propertyValue,
       });
       advance(snapshot);
       return;
@@ -426,6 +444,21 @@ function executePlannedInstruction(
       returnFromFunction(plan, snapshot, null, instruction.span);
       return;
     case "say": {
+      const prepared = snapshot.preparedSayOutput;
+      if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) {
+        validatePacingCreation(snapshot, instruction.span, prepared.durationMs, 2);
+        snapshot.preparedSayOutput = null;
+        emitSay(snapshot, events, instruction.span, prepared.speaker, prepared.text);
+        establishPacingAfterSay(
+          snapshot,
+          events,
+          instruction.span,
+          prepared.durationMs,
+          prepared.skippable,
+        );
+        snapshot.nextInstruction = prepared.continuationInstruction;
+        return;
+      }
       const speaker =
         instruction.speaker !== null
           ? evaluator.speakerByName(instruction.speaker, instruction.span)
@@ -434,16 +467,40 @@ function executePlannedInstruction(
             : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
       snapshot.contextualSpeaker = speaker?.id ?? null;
       const text = evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span);
+      const pacingValue = typeof instruction.pacing === "object"
+        ? evaluator.evaluate(instruction.pacing)
+        : instruction.pacing;
       const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
-      events.push(
-        Object.freeze({
-          kind: "say",
-          sequence: takeSequence(snapshot),
-          speaker: output,
-          text,
-          span: copySpan(instruction.span),
-        } satisfies SayEvent),
+      const durationMs = sayDurationMs(instruction, text, pacingValue, snapshot);
+      const skippable = effectiveSaySkippable(instruction.skipPolicy, speaker, instruction.span);
+      const activeGate = snapshot.backgroundActions.find(
+        (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
       );
+      if (activeGate !== undefined) {
+        if (durationMs === 0) {
+          assertEventSequenceCapacity(snapshot, 2, instruction.span);
+          settleBackgroundPacingGate(plan, snapshot, activeGate, "supersededByInstantOutput", events);
+          emitSay(snapshot, events, instruction.span, output, text);
+          advance(snapshot);
+          return;
+        }
+        const preparedOutput: RuntimePreparedSayOutputSnapshot = Object.freeze({
+          owningInstruction: snapshot.nextInstruction,
+          continuationInstruction: snapshot.nextInstruction + 1,
+          speaker: output === null ? null : { ...output },
+          text,
+          durationMs,
+          skippable,
+        });
+        const index = snapshot.backgroundActions.indexOf(activeGate);
+        snapshot.backgroundActions.splice(index, 1);
+        snapshot.foregroundAction = Object.freeze({ ...activeGate, preparedOutput });
+        snapshot.status = "waiting";
+        return;
+      }
+      if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs, 2);
+      emitSay(snapshot, events, instruction.span, output, text);
+      if (durationMs > 0) establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
       advance(snapshot);
       return;
     }
@@ -482,7 +539,7 @@ function executePlannedInstruction(
         );
       }
       if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
-      assertEventSequenceCapacity(snapshot, 3, instruction.span);
+      assertEventSequenceCapacity(snapshot, snapshot.backgroundActions.some((action) => action.kind === "chatPacingGate") ? 4 : 3, instruction.span);
       const prepared = "preparedUi" in instruction;
       const speaker = prepared
         ? preparedInteractionSpeaker(instruction.speakerTemporary, snapshot.temporaries, evaluator, instruction.span)
@@ -504,6 +561,12 @@ function executePlannedInstruction(
             stagedWrites: [] as const,
             rngState: snapshot.rng.state,
           };
+      const backgroundGate = snapshot.backgroundActions.find(
+        (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
+      );
+      if (backgroundGate !== undefined) {
+        settleBackgroundPacingGate(plan, snapshot, backgroundGate, "consumedByForegroundInteraction", events);
+      }
       const sequence = snapshot.nextEventSequence;
       const action: RuntimeInteractionActionSnapshot = Object.freeze({
         kind: "interaction",
@@ -2483,6 +2546,105 @@ function currentFrame(snapshot: RuntimeSnapshot) {
 
 function advance(snapshot: RuntimeSnapshot): void {
   snapshot.nextInstruction += 1;
+}
+
+function sayDurationMs(
+  instruction: Extract<Instruction, { kind: "say" }>,
+  text: string,
+  pacingValue: SerializableRuntimeValue | "smart" | "instant",
+  snapshot: RuntimeSnapshot,
+): number {
+  try {
+    if (pacingValue === "instant") return 0;
+    if (pacingValue === "smart") {
+      return calculateSmartPacingDurationMs(text, snapshot.chatPacingSettings);
+    }
+    return secondsToPacingMilliseconds(pacingValue);
+  } catch (error) {
+    if (error instanceof RuntimeFault) throw error;
+    throw fault("TSR050", error instanceof Error ? error.message : "Say pacing is invalid.", instruction.span);
+  }
+}
+
+function effectiveSaySkippable(
+  explicit: "skippable" | "unskippable" | null,
+  speaker: RuntimeSpeakerSnapshot | null,
+  span: SourceSpan,
+): boolean {
+  if (explicit === "skippable") return true;
+  if (explicit === "unskippable") return false;
+  const configured = speaker?.properties.find((property) => property.name === "defaultSaySkippable");
+  if (configured === undefined) return true;
+  if (typeof configured.value !== "boolean") {
+    throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
+  }
+  return configured.value;
+}
+
+function emitSay(
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+  span: SourceSpan,
+  speaker: OutputSpeaker | null,
+  text: string,
+): void {
+  events.push(Object.freeze({
+    kind: "say",
+    sequence: takeSequence(snapshot),
+    speaker,
+    text,
+    span: copySpan(span),
+  } satisfies SayEvent));
+}
+
+function establishPacingAfterSay(
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+  span: SourceSpan,
+  durationMs: number,
+  skippable: boolean,
+): void {
+  let deadlineMs: number;
+  try {
+    deadlineMs = calculatePacingDeadlineMs(snapshot.currentSessionTimeMs, durationMs);
+  } catch (error) {
+    throw fault("TSR050", error instanceof Error ? error.message : "Say pacing deadline is invalid.", span);
+  }
+  const requestEventSequence = takeSequence(snapshot);
+  const action: RuntimeChatPacingGateActionSnapshot = Object.freeze({
+    kind: "chatPacingGate",
+    actionId: snapshot.nextActionId,
+    owningInstruction: snapshot.nextInstruction,
+    continuationInstruction: snapshot.nextInstruction + 1,
+    ownerCallFrameId: currentCallFrameId(snapshot),
+    scopeDepth: snapshot.frames.length,
+    loopDepth: snapshot.loopFrames.length,
+    createdAtMs: snapshot.currentSessionTimeMs,
+    deadlineMs,
+    skippable,
+    requestEventSequence,
+    preparedOutput: null,
+  });
+  snapshot.nextActionId += 1;
+  snapshot.backgroundActions.push(action);
+  events.push(Object.freeze({ kind: "actionRequested", sequence: requestEventSequence, action: { ...action }, span: copySpan(span) } satisfies ActionRequestedEvent));
+}
+
+function validatePacingCreation(
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+  durationMs: number,
+  eventCount = 1,
+): void {
+  if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) {
+    throw fault("TSR051", "Runtime action ID space is exhausted.", span);
+  }
+  assertEventSequenceCapacity(snapshot, eventCount, span);
+  try {
+    calculatePacingDeadlineMs(snapshot.currentSessionTimeMs, durationMs);
+  } catch (error) {
+    throw fault("TSR050", error instanceof Error ? error.message : "Say pacing deadline is invalid.", span);
+  }
 }
 
 

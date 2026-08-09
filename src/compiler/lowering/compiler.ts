@@ -110,13 +110,26 @@ export class InstructionCompiler {
       case "sayStatement":
         {
         const lowered = this.#lowerExpression(statement.value);
+        const loweredPacing = statement.pacing === null || statement.pacing === "instant"
+          ? null
+          : this.#lowerExpression(statement.pacing);
+        const pacing = statement.pacing === null
+          ? "smart" as const
+          : statement.pacing === "instant"
+            ? "instant" as const
+            : loweredPacing!.plan;
         this.instructions.push({
           kind: "say",
           speaker: statement.speaker?.name ?? null,
           value: lowered.plan,
+          skipPolicy: statement.skipPolicy,
+          pacing,
           span: copySpan(statement.span),
         });
-        this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
+        this.#emitTemporaryCleanup([
+          ...lowered.temporaryIds,
+          ...(loweredPacing?.temporaryIds ?? []),
+        ], statement.span);
         return;
         }
       case "showButtonStatement":
