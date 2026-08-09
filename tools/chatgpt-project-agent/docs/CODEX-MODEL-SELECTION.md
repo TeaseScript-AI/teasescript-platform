@@ -187,6 +187,8 @@ For implementation work, require Codex to briefly identify expected files, criti
 
 Define stop conditions narrowly: an unresolved owner or architecture decision, an invalidated branch or head, unavailable permission or evidence with no permitted alternative, a security or trust-boundary concern, or a repair that would materially broaden scope or change accepted behavior. A recoverable tool, command, or GitHub failure is normally a retry or route-selection problem rather than task completion or a stop condition. Resolve minor ambiguity from current repository evidence and report the assumption instead of stopping.
 
+A prompt-supplied expected or reference SHA is not itself a stop condition when the task is to start from current `main`. In that case, have Codex synchronize the authoritative remote `main`, leave any unrelated or stale local branch, and start the task branch from the synchronized head. Stop for a SHA/head mismatch only when the assignment requires an exact immutable source identity or synchronization shows that the assigned branch/head was genuinely invalidated in a way that affects the task. A stale local branch or remote-tracking ref is normally synchronization work, not task completion.
+
 Limit repository reading as well as prompt length:
 
 - **Required:** sources that materially define implementation or verification.
