@@ -1899,8 +1899,8 @@ function validateStatusConsistency(
   if (value.preparedSayOutput !== null && !validPreparedSayOutput(value.preparedSayOutput, value, plan)) {
     errors.push("Runtime prepared say output is malformed.");
   }
-  if (value.preparedSayOutput !== null && value.foregroundAction !== null) {
-    errors.push("Runtime prepared say output cannot coexist with a foreground action.");
+  if (!validTopLevelPreparedSayOutputRelationship(value)) {
+    errors.push("Runtime prepared say output has impossible pacing-settlement provenance.");
   }
   if (value.status === "ready") {
     if (
@@ -2073,19 +2073,83 @@ function validatePendingActionState(
     }
   }
   const settlement = value.lastSettlement;
-  if (settlement !== null && (!isPlainRecord(settlement) || !["delay", "interaction", "chatPacingGate"].includes(String(settlement.actionKind)) || (settlement.actionKind !== "chatPacingGate" && settlement.settlementKind !== "completed") || !positiveSafeInteger(settlement.actionId) || !validSettlementProvenance(settlement, plan) || !validSettlementKindData(settlement, value, plan, analysis) || !positiveSafeInteger(settlement.requestEventSequence) || !positiveSafeInteger(settlement.completionEventSequence) || settlement.requestEventSequence >= settlement.completionEventSequence || settlement.completionEventSequence >= (typeof value.nextEventSequence === "number" ? value.nextEventSequence : 0) || settlement.actionId >= (typeof value.nextActionId === "number" ? value.nextActionId : 0) || (isPlainRecord(action) && action.actionId === settlement.actionId))) {
+  if (!validRetainedSettlement(settlement, value, plan, analysis)) {
     errors.push("Runtime lastSettlement is malformed.");
   }
-  if (
-    isPlainRecord(action) &&
-    isPlainRecord(settlement) &&
-    !validForegroundSettlementOrdering(action, settlement)
-  ) {
-    errors.push("Runtime foreground action is inconsistent with the retained settlement.");
+  if (!validActiveActionIdentityCoherence(value)) {
+    errors.push("Runtime active action identities are inconsistent with each other or the retained settlement.");
   }
 }
 
-function validForegroundSettlementOrdering(
+function validRetainedSettlement(
+  settlement: unknown,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
+): boolean {
+  if (!isPlainRecord(settlement)) return settlement === null;
+  if (!validSettlementShapeAndKind(settlement, snapshot, plan, analysis)) return false;
+  return validSettlementIdentityAndEventSequences(settlement, snapshot);
+}
+
+function validSettlementShapeAndKind(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
+): boolean {
+  return ["delay", "interaction", "chatPacingGate"].includes(String(settlement.actionKind)) &&
+    (settlement.actionKind === "chatPacingGate" || settlement.settlementKind === "completed") &&
+    positiveSafeInteger(settlement.actionId) &&
+    validSettlementProvenance(settlement, plan) &&
+    validSettlementKindData(settlement, snapshot, plan, analysis);
+}
+
+function validSettlementIdentityAndEventSequences(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  if (
+    !positiveSafeInteger(settlement.actionId) ||
+    !positiveSafeInteger(settlement.requestEventSequence) ||
+    !positiveSafeInteger(settlement.completionEventSequence) ||
+    !positiveSafeInteger(snapshot.nextActionId) ||
+    !positiveSafeInteger(snapshot.nextEventSequence) ||
+    settlement.actionId >= snapshot.nextActionId ||
+    settlement.requestEventSequence >= settlement.completionEventSequence ||
+    settlement.completionEventSequence >= snapshot.nextEventSequence
+  ) return false;
+
+  if (settlement.actionKind !== "interaction") return true;
+  return positiveSafeInteger(settlement.transcriptEventSequence) &&
+    settlement.requestEventSequence < settlement.transcriptEventSequence &&
+    settlement.transcriptEventSequence < settlement.completionEventSequence;
+}
+
+function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): boolean {
+  const actions = [snapshot.foregroundAction, ...(Array.isArray(snapshot.backgroundActions) ? snapshot.backgroundActions : [])]
+    .filter(isPlainRecord);
+  const actionIds = new Set<number>();
+  const requestSequences = new Set<number>();
+  const settlement = isPlainRecord(snapshot.lastSettlement) ? snapshot.lastSettlement : null;
+
+  if (
+    settlement !== null &&
+    isPlainRecord(snapshot.foregroundAction) &&
+    !validForegroundActionAgainstRetainedSettlement(snapshot.foregroundAction, settlement)
+  ) return false;
+
+  for (const action of actions) {
+    if (!positiveSafeInteger(action.actionId) || !positiveSafeInteger(action.requestEventSequence)) return false;
+    if (actionIds.has(action.actionId) || requestSequences.has(action.requestEventSequence)) return false;
+    if (settlement !== null && !validActiveActionAgainstSettlement(action, settlement)) return false;
+    actionIds.add(action.actionId);
+    requestSequences.add(action.requestEventSequence);
+  }
+  return true;
+}
+
+function validForegroundActionAgainstRetainedSettlement(
   action: Record<string, unknown>,
   settlement: Record<string, unknown>,
 ): boolean {
@@ -2099,13 +2163,24 @@ function validForegroundSettlementOrdering(
 
   if (action.requestEventSequence > settlement.completionEventSequence) return true;
 
-  // A foreground wait may have been requested before a concurrent background
-  // pacing gate later settles. The gate completion must not invalidate it.
-  return (
-    action.requestEventSequence < settlement.completionEventSequence &&
-    action.kind === "delay" &&
-    settlement.actionKind === "chatPacingGate"
-  );
+  // A foreground wait can be requested before an older background pacing gate
+  // settles. That legal background completion must not invalidate the wait.
+  return action.kind === "delay" && settlement.actionKind === "chatPacingGate";
+}
+
+function validActiveActionAgainstSettlement(
+  action: Record<string, unknown>,
+  settlement: Record<string, unknown>,
+): boolean {
+  if (!positiveSafeInteger(action.requestEventSequence) || action.actionId === settlement.actionId) return false;
+  const retainedEventSequences = new Set<number>([
+    settlement.requestEventSequence,
+    settlement.completionEventSequence,
+  ].filter(positiveSafeInteger));
+  if (settlement.actionKind === "interaction" && positiveSafeInteger(settlement.transcriptEventSequence)) {
+    retainedEventSequences.add(settlement.transcriptEventSequence);
+  }
+  return !retainedEventSequences.has(action.requestEventSequence);
 }
 
 function validForegroundActionBase(
@@ -2225,11 +2300,42 @@ function validPreparedSayOutput(value: unknown, snapshot: Record<string, unknown
   if (!isPlainRecord(value) || !hasExactKeys(value, ["owningInstruction", "continuationInstruction", "speaker", "text", "durationMs", "skippable"]) ||
     !nonNegativeSafeInteger(value.owningInstruction) || !nonNegativeSafeInteger(value.continuationInstruction) ||
     value.continuationInstruction !== value.owningInstruction + 1 || typeof value.text !== "string" ||
-    typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs) || value.durationMs <= 0 ||
+    !validPreparedSayDuration(value.durationMs) ||
     typeof value.skippable !== "boolean") return false;
-  if (value.speaker !== null && (!isPlainRecord(value.speaker) || !hasExactKeys(value.speaker, ["identifier", "displayName", "color", "font", "avatar"]) || typeof value.speaker.identifier !== "string" || typeof value.speaker.displayName !== "string" || (value.speaker.color !== null && typeof value.speaker.color !== "string") || (value.speaker.font !== null && typeof value.speaker.font !== "string") || (value.speaker.avatar !== null && typeof value.speaker.avatar !== "string"))) return false;
+  if (!validPreparedSaySpeaker(value.speaker)) return false;
   if (plan !== undefined && plan.instructions[value.owningInstruction]?.kind !== "say") return false;
   return snapshot.nextInstruction === value.owningInstruction;
+}
+
+function validPreparedSayDuration(value: unknown): value is number {
+  return typeof value === "number" &&
+    Number.isFinite(value) &&
+    value > 0 &&
+    value <= MAX_RUNTIME_SESSION_TIME_MS;
+}
+
+function validPreparedSaySpeaker(value: unknown): boolean {
+  return value === null || (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ["identifier", "displayName", "color", "font", "avatar"]) &&
+    typeof value.identifier === "string" &&
+    typeof value.displayName === "string" &&
+    (value.color === null || typeof value.color === "string") &&
+    (value.font === null || typeof value.font === "string") &&
+    (value.avatar === null || typeof value.avatar === "string")
+  );
+}
+
+function validTopLevelPreparedSayOutputRelationship(snapshot: Record<string, unknown>): boolean {
+  if (snapshot.preparedSayOutput === null) return true;
+  const settlement = snapshot.lastSettlement;
+  return snapshot.status === "running" &&
+    snapshot.foregroundAction === null &&
+    Array.isArray(snapshot.backgroundActions) &&
+    !snapshot.backgroundActions.some((action) => isPlainRecord(action) && action.kind === "chatPacingGate") &&
+    isPlainRecord(settlement) &&
+    settlement.actionKind === "chatPacingGate" &&
+    (settlement.settlementKind === "completed" || settlement.settlementKind === "skipped");
 }
 
 function validateInteractionResultHandoffState(
@@ -3114,6 +3220,12 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
       names.add(property.name);
       const failure = validateSerializableValue(property.value);
       if (failure !== null) errors.push(failure);
+      if (
+        property.name === "defaultSaySkippable" &&
+        typeof property.value !== "boolean"
+      ) {
+        errors.push("Runtime speaker property defaultSaySkippable must be a boolean.");
+      }
     }
   }
   return ids;

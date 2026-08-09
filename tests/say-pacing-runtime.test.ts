@@ -726,6 +726,146 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
   }
 });
 
+test("runtime-produced pacing states validate and checkpoint through their lifecycle", () => {
+  const positive = plan('say "first"\nexit');
+  const background = run(positive, createFreshRuntimeSnapshot(positive));
+
+  const waitPlan = plan('say "first"\nwait 10 s\nexit');
+  const withWait = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
+  const waitGate = withWait.snapshot.backgroundActions[0];
+  assert.equal(waitGate?.kind, "chatPacingGate");
+  const backgroundSkipped = completeAction(waitPlan, withWait.snapshot, {
+    actionId: waitGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  const backgroundTimed = observeTime(waitPlan, withWait.snapshot, 1_800);
+
+  const shortWaitPlan = plan('say "first"\nwait 1 s\nexit');
+  const shortWait = run(shortWaitPlan, createFreshRuntimeSnapshot(shortWaitPlan));
+  const delaySettled = observeTime(shortWaitPlan, shortWait.snapshot, 1_000);
+
+  const interactionPlan = plan('say "first"\nshowButton "Continue"');
+  const interaction = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
+
+  const instantPlan = plan('say "first"\nsay "now", instant');
+  const instant = run(instantPlan, createFreshRuntimeSnapshot(instantPlan));
+
+  const promotionPlan = plan('say "first"\nsay "second"');
+  const promoted = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
+  const promotedGate = promoted.snapshot.foregroundAction;
+  assert.equal(promotedGate?.kind, "chatPacingGate");
+  const releasedByTime = observeTime(promotionPlan, promoted.snapshot, promotedGate!.deadlineMs);
+  const releasedBySkip = completeAction(promotionPlan, promoted.snapshot, {
+    actionId: promotedGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  const replacement = run(promotionPlan, releasedBySkip.snapshot);
+
+  const unwoundPlans = [
+    plan('if true { say "branch" }\nexit'),
+    plan('repeat 1 { say "loop" }\nexit'),
+    plan('function f { say "call" }\nf()\nexit'),
+  ];
+  const unwound = unwoundPlans.map((compiled) => ({
+    compiled,
+    snapshot: run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot,
+  }));
+
+  const states: Array<[string, ReturnType<typeof plan>, unknown]> = [
+    ["initial background gate", positive, background.snapshot],
+    ["background gate with foreground wait", waitPlan, withWait.snapshot],
+    ["background skip while wait remains", waitPlan, backgroundSkipped.snapshot],
+    ["background time settlement while wait remains", waitPlan, backgroundTimed.snapshot],
+    ["foreground delay settlement with older background gate", shortWaitPlan, delaySettled.snapshot],
+    ["interaction consumption", interactionPlan, interaction.snapshot],
+    ["instant supersession", instantPlan, instant.snapshot],
+    ["later say promotion", promotionPlan, promoted.snapshot],
+    ["foreground pacing time release", promotionPlan, releasedByTime.snapshot],
+    ["foreground pacing skip release", promotionPlan, releasedBySkip.snapshot],
+    ["prepared output normal re-entry", promotionPlan, replacement.snapshot],
+    ["branch unwind", unwound[0]!.compiled, unwound[0]!.snapshot],
+    ["loop unwind", unwound[1]!.compiled, unwound[1]!.snapshot],
+    ["function unwind", unwound[2]!.compiled, unwound[2]!.snapshot],
+    ["halted execution with a background gate", positive, background.snapshot],
+  ];
+
+  for (const [label, compiled, snapshot] of states) {
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, label);
+    const restored = deserializeCheckpoint(serializeCheckpoint(
+      createCheckpoint(compiled, snapshot as ReturnType<typeof createFreshRuntimeSnapshot>),
+    ));
+    assert.deepEqual(restored.snapshot, snapshot, label);
+  }
+});
+
+test("pacing state validation rejects relational identity, property, duration, and prepared-output corruption", () => {
+  const waitPlan = plan('say "first"\nwait 10 s\nexit');
+  const waiting = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
+  const gate = waiting.snapshot.backgroundActions[0];
+  assert.equal(gate?.kind, "chatPacingGate");
+  const retained = completeAction(waitPlan, waiting.snapshot, {
+    actionId: gate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+
+  const speakerPlan = plan('speaker vera { defaultSaySkippable: true\ncustom: "kept" }\nexit');
+  const speakerState = run(speakerPlan, createFreshRuntimeSnapshot(speakerPlan));
+  assert.equal(validateRuntimeSnapshot(speakerState.snapshot, speakerPlan).valid, true);
+  const falseSpeakerCheckpoint = mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
+    snapshot.speakers[0].properties[0].value = false;
+  });
+  assert.equal(validateRuntimeSnapshot((falseSpeakerCheckpoint as { snapshot: unknown }).snapshot, speakerPlan).valid, true);
+  assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(falseSpeakerCheckpoint)));
+
+  const preparedPlan = plan('say "first"\nsay "second"');
+  const promoted = run(preparedPlan, createFreshRuntimeSnapshot(preparedPlan));
+  const promotedGate = promoted.snapshot.foregroundAction;
+  assert.equal(promotedGate?.kind, "chatPacingGate");
+  const prepared = completeAction(preparedPlan, promoted.snapshot, {
+    actionId: promotedGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.notEqual(prepared.snapshot.preparedSayOutput, null);
+
+  const validMaximumDuration = mutateCheckpoint(preparedPlan, promoted.snapshot, (snapshot) => {
+    snapshot.foregroundAction.preparedOutput.durationMs = Number.MAX_SAFE_INTEGER;
+  });
+  assert.equal(validateRuntimeSnapshot((validMaximumDuration as { snapshot: unknown }).snapshot, preparedPlan).valid, true);
+  assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(validMaximumDuration)));
+  const nonFiniteDuration = mutateCheckpoint(preparedPlan, promoted.snapshot, (snapshot) => {
+    snapshot.foregroundAction.preparedOutput.durationMs = Number.POSITIVE_INFINITY;
+  });
+  assert.equal(validateRuntimeSnapshot((nonFiniteDuration as { snapshot: unknown }).snapshot, preparedPlan).valid, false);
+
+  const corruptions: Array<[string, unknown, ReturnType<typeof plan>]> = [
+    ["duplicate active action ID", mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => { snapshot.backgroundActions[0].actionId = snapshot.foregroundAction.actionId; }), waitPlan],
+    ["duplicate active request sequence", mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => { snapshot.backgroundActions[0].requestEventSequence = snapshot.foregroundAction.requestEventSequence; }), waitPlan],
+    ["active ID equals settlement ID", mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => { snapshot.foregroundAction.actionId = snapshot.lastSettlement.actionId; }), waitPlan],
+    ["active request equals settlement request", mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => { snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.requestEventSequence; }), waitPlan],
+    ["active request equals settlement completion", mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => { snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.completionEventSequence; }), waitPlan],
+    ["malformed settlement events", mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => { snapshot.lastSettlement.requestEventSequence = snapshot.lastSettlement.completionEventSequence; }), waitPlan],
+    ["invalid speaker default number", mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => { snapshot.speakers[0].properties[0].value = 123; }), speakerPlan],
+    ["invalid speaker default string", mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => { snapshot.speakers[0].properties[0].value = "false"; }), speakerPlan],
+    ["invalid speaker default null", mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => { snapshot.speakers[0].properties[0].value = null; }), speakerPlan],
+    ["invalid speaker default object", mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => { snapshot.speakers[0].properties[0].value = { kind: "object", properties: [] }; }), speakerPlan],
+    ["invalid speaker default list", mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => { snapshot.speakers[0].properties[0].value = { kind: "list", items: [] }; }), speakerPlan],
+    ["prepared duration exceeds supported domain", mutateCheckpoint(preparedPlan, promoted.snapshot, (snapshot) => { snapshot.foregroundAction.preparedOutput.durationMs = Number.MAX_SAFE_INTEGER + 1; }), preparedPlan],
+    ["top-level prepared output without release settlement", mutateCheckpoint(preparedPlan, prepared.snapshot, (snapshot) => { snapshot.lastSettlement.settlementKind = "consumedByForegroundInteraction"; }), preparedPlan],
+    ["top-level prepared output with incompatible status", mutateCheckpoint(preparedPlan, prepared.snapshot, (snapshot) => { snapshot.status = "waiting"; }), preparedPlan],
+    ["top-level prepared output with a background gate", mutateCheckpoint(preparedPlan, prepared.snapshot, (snapshot) => { snapshot.backgroundActions.push(structuredClone(waiting.snapshot.backgroundActions[0])); }), preparedPlan],
+  ];
+
+  for (const [label, checkpoint, compiled] of corruptions) {
+    const snapshot = (checkpoint as { snapshot: unknown }).snapshot;
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false, label);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), label);
+  }
+});
+
 function mutateCheckpoint(
   compiled: ReturnType<typeof plan>,
   snapshot: ReturnType<typeof createFreshRuntimeSnapshot>,
