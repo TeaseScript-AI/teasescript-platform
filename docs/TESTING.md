@@ -121,6 +121,23 @@ structured external-data rejection, atomic mutation, deterministic ordering,
 or other accepted invariants remain correctness defects and require the
 appropriate focused regression.
 
+When an accepted default intentionally changes behavior used incidentally by a
+broad test corpus, classify the shared changed assumption before treating every
+failure as an independent product defect. Tests whose purpose is unrelated to
+the changed default should, where the real supported setup permits it, configure
+a neutral environment rather than rewrite source into a different language form
+solely to recover the previous incidental behavior. Retain representative
+integration coverage with the real defaults so the neutral fixture cannot hide
+errors in the default path.
+
+For smart `say` pacing, for example, control-flow, function, RNG, and equivalence
+tests that are not testing pacing may use captured pacing settings that produce
+a zero duration while continuing to exercise ordinary `say` source. The pacing
+coverage must still include the actual platform defaults, positive-duration
+lifecycle, and a representative ordinary multi-`say` integration path. This
+pattern is a test-isolation technique, not a source compatibility promise or
+permission to hide behavior that the test actually owns.
+
 ## Systematic coverage for bounded behavior spaces
 
 When supported behavior can be described through a finite or otherwise

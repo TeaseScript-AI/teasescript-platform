@@ -193,6 +193,11 @@ foregroundAction != null
 
 Settlement emits `actionCompleted` before continuation. A later normal runtime entry emits the prepared text exactly once and creates its next positive gate when applicable. Prepared text and RNG results are not reevaluated after waiting or restore.
 
+These two `say` transitions are one immediately reachable runtime behavior for ordinary multi-message source. A
+runtime that creates a positive background gate must also implement the accepted later-`say` promotion/prepared-output
+path; no supported intermediate behavior may ignore, auto-settle, or reschedule that later `say` under temporary
+semantics.
+
 #### Time and player completion
 
 `observeTime(...)` may settle a due pacing gate while it is background work or the foreground action blocking prepared output. It uses the persisted `currentSessionTimeMs` and absolute-deadline semantics shared with `wait`.

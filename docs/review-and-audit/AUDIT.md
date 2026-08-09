@@ -32,7 +32,10 @@ Before executing the audit, create a temporary, task-specific audit plan. Record
 
 Study the relevant implementation, history, earlier reviews, and current state. Treat earlier
 conclusions, author claims, green test totals, and previous approval as leads to challenge, not
-proof.
+proof. When the author is explicitly assigned to audit their own change, the audit still
+re-establishes scope, authority, likely misreadings, and evidence from the final candidate; the
+author's prior self-review and design intent are not proof and do not reduce the required depth.
+A self-audit does not replace independent review or approval when the surrounding workflow requires one.
 
 Update the plan as checks, results, and uncertainty emerge; it guides but never limits
 investigation. Add every subject-specific angle and evidence need required by the scope.
@@ -153,8 +156,12 @@ is possible.
 
 Use independent, reproducible, proportionate evidence. Select the smallest evidence set that
 convincingly proves each obligation, but never use efficiency to excuse incomplete coverage.
-Avoid duplicate equivalent checks, maximum-scale cases when smaller evidence proves the same
-invariant, and permanent audit machinery for a bounded problem.
+Audit obligations and relevant risk lenses are mandatory within the declared scope; particular
+evidence techniques are not rituals. Use mutation probes, fuzzing, history reconstruction,
+maximum-scale cases, or other expensive techniques when they materially reduce uncertainty. If the
+task-specific audit plan identified such a technique as materially plausible and the final audit
+omits it, record the inspected reason or equivalent evidence that made it unnecessary. Avoid
+duplicate equivalent checks and permanent audit machinery for a bounded problem.
 
 Classify actionable findings with the existing project finding classes. A finding must identify
 the violated requirement, supported path, real boundary, or demonstrated maintenance

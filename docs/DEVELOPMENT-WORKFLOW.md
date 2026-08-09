@@ -13,7 +13,13 @@ one issue
 
 Do not introduce a coordinator, integration branch, or multiple executor agents merely because a task is technically difficult, touches several files, or spans more than one layer. Coordination has a cost and must solve a concrete problem.
 
-Use coordinated multi-agent work only when the work cannot reasonably be completed as one coherent agent task, or when several dependent workstreams must be reviewed and landed together.
+Use coordinated multi-agent work only when it solves a concrete execution or integration problem, such as genuinely
+independent workstreams, dependent work that needs controlled handoffs or merge order, capability separation, or safe
+pipelining that materially reduces idle time without blurring ownership. Workflow defaults guide the common case rather
+than act as ceremony: a task-proportional deviation is valid when it is simpler or safer for the actual scope, provided
+the reason, changed ownership, and verification consequences are made explicit. This flexibility applies to stated
+defaults and recommendations, not explicit mandatory repository or capability-route rules, and does not override
+accepted behavior, trust boundaries, or required evidence.
 
 Source bundles and agent bootstrap provide local repository access when needed.
 Development and integration use GitHub-native branches and pull requests.
@@ -37,13 +43,19 @@ The agent creating or substantially refining an issue should include:
   - `Single agent` — the default;
   - `Coordinated multi-agent` — only with a short concrete rationale.
 
-Before recommending multiple agents, first consider whether the work can be split into independent issues. Prefer separate single-agent issues when each can be implemented, tested, reviewed, and merged safely on its own.
+Before recommending multiple agents, first consider whether the work can be split into independent issues. Prefer
+separate single-agent issues when each can be implemented, tested, reviewed, and merged safely on its own. A proposed
+implementation phase must also be dependency-closed for behavior it introduces: if ordinary successful execution
+immediately reaches a required transition, state, serialization rule, or validation path, that reachable behavior
+belongs in the same landable phase unless the earlier work remains behavior-neutral. Do not invent temporary semantics
+merely to preserve an artificial milestone boundary.
 
 Multiple agents are justified when, for example:
 
 - one accepted goal contains genuinely separate workstreams that can progress independently;
 - the workstreams share a contract or integration gate and must land together;
 - sequencing or overlapping behavior requires an explicit merge order;
+- different capabilities or roles can safely pipeline non-conflicting work and materially reduce idle time;
 - the task is too broad for one agent but splitting it into independently mergeable issues would create contradictory intermediate states or duplicated work.
 
 Do not recommend multiple agents only because an issue is large, touches several files, or benefits from review. One agent may still execute a complex but coherent issue.
@@ -272,8 +284,12 @@ behavior, data risk, security boundary, or maintenance problem the stronger
 contract protects, what happens without it, and what complexity it adds. For a
 durable or ADR-level choice, also present viable alternatives, project-wide
 consequences, recurring maintenance cost, difficult-to-reverse effects, and the
-simplest credible option. Do not ask the owner to approve an unexplained
-technical abstraction.
+simplest credible option. The technical agent should make and justify a
+recommendation instead of delegating arbitrary implementation details or
+numeric guesses to the owner. Ask the owner to decide the product, policy,
+compatibility, cost, or difficult-to-reverse trade-off that actually requires
+owner authority; do not ask the owner to approve an unexplained technical
+abstraction.
 
 These rules prevent accidental scope escalation. They do not permit reviewers
 to dismiss reproducible defects or weaken accepted syntax/semantics,
@@ -298,6 +314,24 @@ If required input cannot be obtained in the current environment, stop repeating
 equivalent impossible variants, record the exact missing input and checked
 alternatives, and request the smallest concrete owner action that can unblock
 the work.
+
+Before destructively discarding substantial experimental work that established
+useful coupling, failure, migration, or verification evidence, preserve a local
+recovery point when practical, such as a temporary commit, stash, or patch. A
+recovery point is not review evidence and must not be pushed or merged merely
+because it exists.
+
+For routine branch integration, prefer the normal version-control or platform
+merge machinery available through the selected capability route. Let it carry
+non-conflicting changes and inspect or resolve the actual conflicting hunks; do
+not manually reconstruct an entire merge merely to reproduce work the supported
+route already performs. Escalate to a more manual integration method only when
+the normal route cannot preserve the required semantics or exact source identity.
+
+When an assignment says to start from current `main`, resolve and synchronize the
+current branch tip before creating the task branch. A prompt-supplied reference
+SHA is not an immutable stop condition unless the assignment explicitly binds the
+task, review, reproduction, or evidence to that exact identity.
 
 Tool, command, option, file, branch, issue, and workflow names describe durable
 purpose rather than temporary cleanup history or the latest review complaint.
