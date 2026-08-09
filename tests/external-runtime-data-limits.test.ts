@@ -351,26 +351,54 @@ test("serializable cloning accepts the depth boundary and rejects the next level
 
 
 test("external capture bounds sparse array length before detailed validation", () => {
+  const sparseArrayLengthBoundary = 100_000;
   const accepted: unknown[] = [];
-  accepted.length = MAX_EXTERNAL_RUNTIME_DATA_WORK;
+  accepted.length = sparseArrayLengthBoundary;
   const acceptedCapture = captureExternalData(accepted, "$.items");
   assert.equal(acceptedCapture.ok, true);
   if (acceptedCapture.ok) {
     assert.ok(Array.isArray(acceptedCapture.value));
     assert.equal(
       (acceptedCapture.value as unknown[]).length,
-      MAX_EXTERNAL_RUNTIME_DATA_WORK,
+      sparseArrayLengthBoundary,
     );
   }
 
   const rejected: unknown[] = [];
-  rejected.length = MAX_EXTERNAL_RUNTIME_DATA_WORK + 1;
+  rejected.length = sparseArrayLengthBoundary + 1;
   assert.deepEqual(captureExternalData(rejected, "$.items"), {
     ok: false,
     failure: {
       kind: "work",
       path: "$.items",
     },
+  });
+});
+
+test("external capture accounts for non-enumerable own-key descriptor work", () => {
+  const hostile = Object.create(null) as Record<string, unknown>;
+  for (let index = 0; index < MAX_EXTERNAL_RUNTIME_DATA_WORK; index += 1) {
+    Object.defineProperty(hostile, `hidden${index}`, {
+      value: null,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+
+  assert.deepEqual(captureExternalData(hostile), {
+    ok: false,
+    failure: { kind: "work", path: "$" },
+  });
+});
+
+test("external capture reserves enumerable child visits without double charging", () => {
+  const accepted = new Array(MAX_EXTERNAL_RUNTIME_DATA_WORK - 1).fill(null);
+  assert.equal(captureExternalData(accepted).ok, true);
+
+  const rejected = new Array(MAX_EXTERNAL_RUNTIME_DATA_WORK).fill(null);
+  assert.deepEqual(captureExternalData(rejected), {
+    ok: false,
+    failure: { kind: "work", path: "$" },
   });
 });
 

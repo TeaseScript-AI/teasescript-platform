@@ -671,12 +671,12 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   }
   let aggregate = 0;
   for (const value of strings) {
-    const bytes = boundedInteractionUtf8ByteLength(value);
-    if (bytes === null) throw fault("TSR052", "Interaction text exceeds the shared UTF-8 byte limit.", span);
+    const bytes = boundedInteractionUtf8ByteLength(
+      value,
+      MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate,
+    );
+    if (bytes === null) throw fault("TSR052", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", span);
     aggregate += bytes;
-    if (aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES) {
-      throw fault("TSR052", "Interaction data exceeds the shared aggregate UTF-8 byte limit.", span);
-    }
   }
 }
 
@@ -2530,7 +2530,9 @@ function failForBudget(plan: InstructionPlan, snapshot: RuntimeSnapshot): Runtim
 
 function instructionBudget(value: number | undefined): number {
   const budget = value ?? 10_000;
-  if (!Number.isInteger(budget) || budget < 1) throw new RangeError("Instruction budget must be a positive integer.");
+  if (!Number.isSafeInteger(budget) || budget < 1) {
+    throw new RangeError("Instruction budget must be a positive safe integer.");
+  }
   return budget;
 }
 

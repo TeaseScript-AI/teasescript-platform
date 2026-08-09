@@ -12,6 +12,9 @@ import type {
 } from "../src/runtime/serializable-values.js";
 import {
   createFreshRuntimeSnapshot,
+  DEFAULT_MAX_CALL_DEPTH,
+  MAX_SUPPORTED_CALL_DEPTH,
+  validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 
@@ -445,6 +448,22 @@ test("fails structurally at configured call depth", () => {
   assert.equal(result.snapshot.status, "failed");
   assert.equal(result.snapshot.failure?.code, "TSR047");
   assert.ok(result.snapshot.failure?.span.start.offset !== undefined);
+});
+
+test("fresh and validated runtime snapshots preserve the call-depth policy domain", () => {
+  const compiled = plan("exit");
+  assert.equal(createFreshRuntimeSnapshot(compiled).maxCallDepth, DEFAULT_MAX_CALL_DEPTH);
+
+  const ceiling = createFreshRuntimeSnapshot(compiled, {
+    maxCallDepth: MAX_SUPPORTED_CALL_DEPTH,
+  });
+  assert.equal(validateRuntimeSnapshot(ceiling, compiled).valid, true);
+  assert.throws(
+    () => createFreshRuntimeSnapshot(compiled, {
+      maxCallDepth: MAX_SUPPORTED_CALL_DEPTH + 1,
+    }),
+    RangeError,
+  );
 });
 
 test("instruction budgets still stop recursive execution", () => {

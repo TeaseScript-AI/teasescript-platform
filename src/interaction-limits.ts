@@ -22,13 +22,16 @@ export function interactionStringFits(value: string): boolean {
   return boundedInteractionUtf8ByteLength(value) !== null;
 }
 
-/** Exact byte length for data that can fit the shared per-string boundary. */
-export function boundedInteractionUtf8ByteLength(value: string): number | null {
+/** Exact byte length for data that can fit the supplied UTF-8 byte budget. */
+export function boundedInteractionUtf8ByteLength(
+  value: string,
+  maxBytes = MAX_INTERACTION_STRING_UTF8_BYTES,
+): number | null {
   // UTF-8 is never shorter than the source UTF-16 code-unit count. This
   // constant-time rejection avoids allocating an oversized encoded copy.
-  if (value.length > MAX_INTERACTION_STRING_UTF8_BYTES) return null;
+  if (value.length > maxBytes) return null;
   const bytes = interactionUtf8ByteLength(value);
-  return bytes <= MAX_INTERACTION_STRING_UTF8_BYTES ? bytes : null;
+  return bytes <= maxBytes ? bytes : null;
 }
 
 export function interactionStringHasNonWhitespace(value: string): boolean {

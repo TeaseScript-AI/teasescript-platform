@@ -3,7 +3,6 @@ import {
   interactionStringHasNonWhitespace,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
-  MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "../interaction-limits.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import {
@@ -456,7 +455,6 @@ function validateStaticInteractionUi(
     errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", path));
   }
   let aggregate = 0;
-  let aggregateExceeded = false;
   let measurementExhausted = false;
   const countString = (candidate: unknown, fieldPath: string): candidate is string => {
     if (typeof candidate !== "string") {
@@ -464,22 +462,23 @@ function validateStaticInteractionUi(
       return false;
     }
     if (measurementExhausted) {
-      if (candidate.length > MAX_INTERACTION_STRING_UTF8_BYTES) {
-        errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+      if (candidate.length > Math.max(0, MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate)) {
+        errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
         return false;
       }
       return true;
     }
     recordValidationTestWork("interactionUtf8Measurements");
-    const bytes = boundedInteractionUtf8ByteLength(candidate);
+    const bytes = boundedInteractionUtf8ByteLength(
+      candidate,
+      MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate,
+    );
     if (bytes === null) {
       measurementExhausted = true;
-      errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+      errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
       return false;
     }
     aggregate += bytes;
-    aggregateExceeded = aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES;
-    measurementExhausted = aggregateExceeded;
     return true;
   };
   validateInteractionAccessibleName(kind, ui.accessibleName, `${path}.accessibleName`, countString, measurementExhausted, errors);
@@ -522,7 +521,6 @@ function validateStaticInteractionUi(
       }
     }
   }
-  if (aggregateExceeded) errors.push(planError("TSC002", "Interaction data exceeds the shared aggregate UTF-8 byte limit.", path));
 }
 
 function validatePreparedInteractionUi(
@@ -545,7 +543,6 @@ function validatePreparedInteractionUi(
       : ["kind", "labelType", "optionsTemporary", "optionCount", "labels", "accessibleName"];
   if (!hasExactKeys(ui, keys)) errors.push(planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path));
   let aggregate = 0;
-  let aggregateExceeded = false;
   let measurementExhausted = false;
   const countString = (candidate: unknown, fieldPath: string): candidate is string => {
     if (typeof candidate !== "string") {
@@ -553,22 +550,23 @@ function validatePreparedInteractionUi(
       return false;
     }
     if (measurementExhausted) {
-      if (candidate.length > MAX_INTERACTION_STRING_UTF8_BYTES) {
-        errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+      if (candidate.length > Math.max(0, MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate)) {
+        errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
         return false;
       }
       return true;
     }
     recordValidationTestWork("interactionUtf8Measurements");
-    const bytes = boundedInteractionUtf8ByteLength(candidate);
+    const bytes = boundedInteractionUtf8ByteLength(
+      candidate,
+      MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate,
+    );
     if (bytes === null) {
       measurementExhausted = true;
-      errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+      errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
       return false;
     }
     aggregate += bytes;
-    aggregateExceeded = aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES;
-    measurementExhausted = aggregateExceeded;
     return true;
   };
   validateInteractionAccessibleName(
@@ -621,13 +619,6 @@ function validatePreparedInteractionUi(
     if (!valid) errors.push(planError("TSC002", "Prepared choice label does not match the label type.", labelPath));
     if ((typeof label === "string" || typeof label === "number") && labels.has(label)) errors.push(planError("TSC002", "Prepared choice labels must be unique.", labelPath));
     if (typeof label === "string" || typeof label === "number") labels.add(label);
-  }
-  if (aggregateExceeded) {
-    errors.push(planError(
-      "TSC002",
-      "Interaction data exceeds the shared aggregate UTF-8 byte limit.",
-      path,
-    ));
   }
 }
 

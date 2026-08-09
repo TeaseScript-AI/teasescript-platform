@@ -22,7 +22,6 @@ import {
   interactionStringFits,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
-  MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "../interaction-limits.js";
 import {
   createXorShift32State,
@@ -2316,18 +2315,19 @@ function validInteractionUiShape(kind: "button" | "text" | "number" | "choice", 
   let measurementExhausted = false;
   const count = (text: unknown): text is string => {
     if (typeof text !== "string") return false;
-    if (measurementExhausted) return text.length <= MAX_INTERACTION_STRING_UTF8_BYTES;
+    if (measurementExhausted) {
+      return text.length <= Math.max(0, MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate);
+    }
     recordValidationTestWork("interactionUtf8Measurements");
-    const bytes = boundedInteractionUtf8ByteLength(text);
+    const bytes = boundedInteractionUtf8ByteLength(
+      text,
+      MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate,
+    );
     if (bytes === null) {
       measurementExhausted = true;
       return false;
     }
     aggregate += bytes;
-    if (aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES) {
-      measurementExhausted = true;
-      return false;
-    }
     return true;
   };
   const expectedKey = kind === "button" ? "continue" : kind === "number" ? "number" : kind === "choice" ? "chooseOption" : "answer";

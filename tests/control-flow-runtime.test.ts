@@ -91,6 +91,34 @@ test("instruction budget stops an infinite while loop", () => {
   assert.equal(result.snapshot.failure?.code, "TSR037");
 });
 
+test("runtime instruction budgets use the positive safe-integer domain", () => {
+  const compiled = plan('say "ready"\nexit');
+  const maximum = Number.MAX_SAFE_INTEGER;
+
+  assert.equal(
+    run(compiled, createFreshRuntimeSnapshot(compiled), {}, {
+      instructionBudget: maximum,
+    }).snapshot.status,
+    "halted",
+  );
+  assert.deepEqual(
+    stepToEvent(compiled, createFreshRuntimeSnapshot(compiled), {}, {
+      instructionBudget: maximum,
+    }).events.map((event) => event.kind),
+    ["say"],
+  );
+  for (const operation of [
+    () => run(compiled, createFreshRuntimeSnapshot(compiled), {}, {
+      instructionBudget: maximum + 1,
+    }),
+    () => stepToEvent(compiled, createFreshRuntimeSnapshot(compiled), {}, {
+      instructionBudget: maximum + 1,
+    }),
+  ]) {
+    assert.throws(operation, /positive safe integer/);
+  }
+});
+
 test("run and stepToEvent do not mutate their caller snapshots", () => {
   const successfulPlan = plan("let first = 1\nlet second = first + 1\nexit");
   const successfulInput = createFreshRuntimeSnapshot(successfulPlan);
