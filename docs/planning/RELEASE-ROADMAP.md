@@ -43,51 +43,69 @@ Player/runtime boundaries, and the development tooling needed to exercise them.
 **Expectation:** The system may still be developer-oriented and incomplete. Internal APIs, formats, tooling, and
 architecture may change substantially while correctness and the basic model are being proven.
 
-- [ ] **Complete pending-action state-machine coverage**
-  - **Outcome:** As each remaining pending-action kind and host-delivery path becomes supported, complete deterministic
-    transition coverage for cancellation, timeout, late and wrong-type responses, checkpoint/restore across foreground
-    and background actions and around timeout processing, duplicate delivery, active/settled/stale/unknown identities,
-    non-reuse of event/action IDs after restore, and fake-time operation without real waiting. Preserve ADR 0016 as the
-    shared runtime contract and add action-specific tests with the feature that makes each path real rather than creating
-    speculative APIs, a duplicate state model, or another test framework. Action-specific contracts and the host-delivery
-    schema still follow their normal accepted-decision routes; existing blocking-`wait` and generic foreground-interaction
-    evidence remains current rather than being reopened.
-  - **Reference:** [ADR 0016](../decisions/0016-resumable-pending-action-runtime-contract.md),
-    [`RUNTIME.md`](../RUNTIME.md), [`TESTING.md`](../TESTING.md), and
-    [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
+- [ ] **ADR 0018 Standard Library interactions and pacing**
+  - **Outcome:** Implement the accepted ADR 0018 slice end to end: `showButton`, `askText`, `askNumber`, `choose`, and
+    `say` pacing/skip behavior, together with the matching Standard Player controls and editor/simulator support. Keep the
+    detailed runtime state-machine and checkpoint rules in their accepted runtime sources rather than repeating them here.
+  - **Reference:** [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md), [`RUNTIME.md`](../RUNTIME.md),
+    [`LIBRARIES.md`](../LIBRARIES.md), and [`CODE-EDITOR.md`](../CODE-EDITOR.md).
+
+- [ ] **Foreground and background timers**
+  - **Outcome:** Let scripts use foreground timers that block script progress and background timers that continue while
+    other script work proceeds, with explicit lifecycle control and deterministic save/resume behavior. Keep exact handle,
+    syntax, repetition, and presentation decisions in the timer planning and accepted runtime/library sources.
+  - **Reference:** [`TIMER-AND-RECOVERY-FOLLOW-UPS.md`](TIMER-AND-RECOVERY-FOLLOW-UPS.md),
+    [ADR 0016](../decisions/0016-resumable-pending-action-runtime-contract.md), [`RUNTIME.md`](../RUNTIME.md), and
+    [`LIBRARIES.md`](../LIBRARIES.md).
+
+- [ ] **Player UI**
+  - **Outcome:** Replace the technical playground presentation with a practical Player interface for transcript output,
+    Standard interactions, timers, status/errors, and the media capabilities selected for the POC. Keep development and
+    debug controls secondary to the actual Player experience.
+  - **Reference:** [`PRODUCT.md`](../PRODUCT.md) and [`CODE-EDITOR.md`](../CODE-EDITOR.md).
+
+- [ ] **Iframe development host and virtual viewport**
+  - **Outcome:** Run the Player through a small local host shell using the product's iframe boundary without requiring a
+    Laravel site. Let the host set custom viewport dimensions plus useful phone, tablet, desktop, and 4K presets, scaling
+    the preview to fit the available monitor while the Player lays itself out against the requested viewport; keep device
+    simulation logic out of the Player itself.
+  - **Reference:** [`ARCHITECTURE.md`](../ARCHITECTURE.md), [`SECURITY.md`](../SECURITY.md), and
+    [`WISHES.xml` W-041](../../WISHES.xml).
+
+- [ ] **Browser editor and Player preview**
+  - **Outcome:** Provide the browser authoring environment with editing, diagnostics, simulation/debugging, and a Player
+    preview that can use the same iframe host and virtual viewport. Keep the editor and Player as separate components even
+    when they are shown side by side.
+  - **Reference:** [`CODE-EDITOR.md`](../CODE-EDITOR.md) and [`WISHES.xml` W-031](../../WISHES.xml).
+
+- [ ] **Audio and video playback**
+  - **Outcome:** Support real Player audio and video playback for the POC, including blocking/foreground and background
+    use, simultaneous identified resources, and targeted lifecycle control. Keep exact media APIs and persistence details
+    in the runtime/library design rather than defining them in the roadmap.
+  - **Reference:** [`RUNTIME.md`](../RUNTIME.md), [`LIBRARIES.md`](../LIBRARIES.md), and
+    [`WISHES.xml` W-044](../../WISHES.xml).
 
 ## Alpha
 
 **Goal:** Turn the proven foundation into a coherent usable product slice that can be exercised meaningfully, especially
 the scripting, editor/tooling, and Player experience selected for alpha.
 
-**Expectation:** Selected core flows should work together well enough for sustained testing. A complete production
+**Expectation:** Selected core flows should work together well enough for sustained testing. A production
 website, community platform, or every planned product feature is not required. Rough UX, missing secondary capabilities,
 and breaking changes remain acceptable.
 
-- [ ] **Define the cross-origin player host contract**
-  - **Outcome:** Define the smallest coherent contract between the website host shell and its cross-origin Player iframe:
-    iframe creation and lifecycle, sandbox/CSP, strictly validated parent/player messages, capability negotiation,
-    transfer of only selected validated package/session/account data, checkpoint storage acknowledgement and failure,
-    restore/reconnect, resize/fullscreen, navigation/back behavior, protocol/fatal errors, and responsibility boundaries.
-    The host continues to own the iframe while Standard UI and package UI stay inside the Player; package custom views do
-    not normally talk directly to the parent. The roadmap does not select a final message schema/version, TypeScript API,
-    capability names, reconnect algorithm, sandbox flags, or CSP details. The design is complete only after the Owner
-    approves the lifecycle, validation, capability, recovery, and responsibility contract and the relevant ADRs/current
-    documents are updated.
+- [ ] **Cross-origin Player host contract**
+  - **Outcome:** Define the smallest coherent production contract between the application host shell and its cross-origin
+    Player iframe: iframe creation/lifecycle, sandbox/CSP, validated parent/Player messages, capability negotiation,
+    selected package/session data and any later host-owned account data, checkpoint storage acknowledgement/failure,
+    restore/reconnect, resize/fullscreen/navigation, protocol errors, and responsibility boundaries. When that concrete
+    boundary exists, verify the contract in real browsers for the relevant startup, restore, input, navigation, and
+    malformed-message paths;
+    browser tests verify the contract rather than define it.
   - **Reference:** [ADR 0012](../decisions/0012-custom-view-capability.md),
     [ADR 0015](../decisions/0015-serializable-runtime-architecture.md), [`ARCHITECTURE.md`](../ARCHITECTURE.md),
-    [`RUNTIME.md`](../RUNTIME.md), [`SECURITY.md`](../SECURITY.md), and
-    [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
-
-- [ ] **Add cross-origin player browser E2E coverage**
-  - **Outcome:** Once the concrete host shell and cross-origin Player exist, add real-browser coverage for sandbox/CSP,
-    validated messaging, startup/reload/reconnect/shutdown/fatal failure, checkpoint save/restore, Standard UI,
-    focus/keyboard/fullscreen/navigation behavior, and hostile or malformed messages. Select a browser-test framework
-    only when the real browser surface and maintenance cost can be evaluated; testing must verify rather than define the
-    host protocol, sandbox, CSP, or UI lifecycle.
-  - **Reference:** **Define the cross-origin player host contract**, [`ARCHITECTURE.md`](../ARCHITECTURE.md),
-    [`SECURITY.md`](../SECURITY.md), and [`TESTING.md`](../TESTING.md).
+    [`RUNTIME.md`](../RUNTIME.md), [`SECURITY.md`](../SECURITY.md), [`TESTING.md`](../TESTING.md),
+    [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), and [`WISHES.xml` W-041](../../WISHES.xml).
 
 ## Beta
 
@@ -107,14 +125,15 @@ subsystems may still have different maturity levels.
     Standard UI; focus/keyboard/overlay/navigation/back behavior; accessibility; preview/editor/simulator/debugger needs;
     and compare the viable TypeScript-only, small TeaseScript invocation, and fuller declarative TeaseScript API shapes.
     These are logical views inside the Player, not browser pop-ups or an iframe per view; any genuine host capability is a
-    separate host-boundary decision. When custom views become supported, extend the cross-origin browser E2E matrix to
-    package custom UI. The design is complete only after the Owner approves a coherent lifecycle/state/security contract
-    and the relevant ADRs/current documents are updated; roadmap placement does not accept final syntax or implementation
+    separate host-boundary decision. When custom views become supported, extend the real-browser Player/host test
+    coverage to package custom UI. The design is complete only after the Owner approves a coherent
+    lifecycle/state/security contract and the relevant ADRs/current documents are updated; roadmap placement does not
+    accept final syntax or implementation
     APIs.
   - **Reference:** [ADR 0012](../decisions/0012-custom-view-capability.md),
     [ADR 0015](../decisions/0015-serializable-runtime-architecture.md), [`RUNTIME.md`](../RUNTIME.md),
-    [`LIBRARIES.md`](../LIBRARIES.md), [`SECURITY.md`](../SECURITY.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and
-    [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
+    [`LIBRARIES.md`](../LIBRARIES.md), [`SECURITY.md`](../SECURITY.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md),
+    [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), and [`WISHES.xml` W-042/W-055](../../WISHES.xml).
 
 - [ ] **Establish a runtime performance baseline and optimization plan**
   - **Outcome:** Measure representative small, normal, stress, and long-running deterministic-runtime workloads before
