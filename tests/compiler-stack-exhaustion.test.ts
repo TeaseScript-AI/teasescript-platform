@@ -35,9 +35,9 @@ test("compiler explains genuine parser host-stack exhaustion and preserves its c
   assert.equal(result.name, "CompilerHostStackExhaustionError");
   assert.match(result.message, /Host JavaScript stack exhaustion/u);
   assert.match(result.message, /not a TeaseScript nesting limit/u);
-  assert.ok(["RangeError", "SyntaxError"].includes(result.cause.constructor));
-  assert.equal(result.cause.name, result.cause.constructor);
-  assert.match(result.cause.message, /stack/i);
+  assert.equal(result.cause.constructor, "RangeError");
+  assert.equal(result.cause.name, "RangeError");
+  assert.equal(result.cause.message, "Maximum call stack size exceeded");
 });
 
 for (const [name, error] of [
