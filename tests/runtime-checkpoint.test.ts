@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { captureExternalData } from "../src/external-data-limits.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
+  CHECKPOINT_FORMAT,
+  CHECKPOINT_VERSION,
   CheckpointError,
   createCheckpoint,
   deserializeCheckpoint,
@@ -45,6 +48,81 @@ test("restores a self-contained checkpoint from serialized JSON", () => {
 
   assert.equal(completed.snapshot.status, "halted");
   assert.deepEqual(completed.events.map((event) => event.sequence), [1, 2]);
+});
+
+test("checkpoint component capture does not spend one work allowance across plan and snapshot", () => {
+  const compiled = plan(
+    Array.from({ length: 4_000 }, (_value, index) => `say "${index}"`).join("\n"),
+  );
+  const snapshot = createFreshRuntimeSnapshot(compiled);
+  snapshot.frames[0]!.bindings.push(
+    ...Array.from({ length: 20_000 }, (_value, index) => ({
+      name: `value${index}`,
+      value: index,
+    })),
+  );
+
+  assert.equal(captureExternalData(compiled).ok, true);
+  assert.equal(captureExternalData(snapshot).ok, true);
+  assert.equal(captureExternalData({
+    format: CHECKPOINT_FORMAT,
+    version: CHECKPOINT_VERSION,
+    plan: compiled,
+    snapshot,
+  }).ok, false, "The former combined envelope capture would exhaust one shared allowance.");
+
+  const created = createCheckpoint(compiled, snapshot);
+  const serialized = serializeCheckpoint(created);
+  const restored = restoreCheckpoint(created);
+  const deserialized = deserializeCheckpoint(serialized);
+
+  assert.deepEqual(restored, created);
+  assert.deepEqual(deserialized, created);
+});
+
+test("checkpoint envelope rejects malformed metadata without invoking accessors", () => {
+  const compiled = plan("exit");
+  const checkpoint = JSON.parse(
+    serializeCheckpoint(createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled))),
+  ) as Record<string, unknown>;
+
+  assertCheckpointError(
+    { ...checkpoint, extra: true },
+    {
+      code: "TSK002",
+      message: "Checkpoint contains unsupported fields or omits required fields.",
+      path: "$.",
+    },
+  );
+  const missing = { ...checkpoint };
+  delete missing.plan;
+  assertCheckpointError(
+    missing,
+    {
+      code: "TSK002",
+      message: "Checkpoint contains unsupported fields or omits required fields.",
+      path: "$.",
+    },
+  );
+
+  let accessorReads = 0;
+  const accessor = { ...checkpoint };
+  Object.defineProperty(accessor, "plan", {
+    enumerable: true,
+    get() {
+      accessorReads += 1;
+      return checkpoint.plan;
+    },
+  });
+  assertCheckpointCode(accessor, "TSK002");
+  assert.equal(accessorReads, 0);
+
+  assertCheckpointCode(Object.setPrototypeOf({ ...checkpoint }, {}), "TSK002");
+  assertCheckpointCode(new Proxy(checkpoint, {
+    ownKeys() {
+      throw new Error("hostile ownKeys");
+    },
+  }), "TSK002");
 });
 
 test("uninterrupted and checkpoint-resumed execution are identical", () => {
