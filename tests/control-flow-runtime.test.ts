@@ -91,6 +91,35 @@ test("instruction budget stops an infinite while loop", () => {
   assert.equal(result.snapshot.failure?.code, "TSR037");
 });
 
+test("run and stepToEvent do not mutate their caller snapshots", () => {
+  const successfulPlan = plan("let first = 1\nlet second = first + 1\nexit");
+  const successfulInput = createFreshRuntimeSnapshot(successfulPlan);
+  const successfulBefore = structuredClone(successfulInput);
+  assert.equal(run(successfulPlan, successfulInput).snapshot.status, "halted");
+  assert.deepEqual(successfulInput, successfulBefore);
+
+  const faultPlan = plan("let values = []\nsay values.first\nexit");
+  const faultInput = createFreshRuntimeSnapshot(faultPlan);
+  const faultBefore = structuredClone(faultInput);
+  assert.equal(run(faultPlan, faultInput).snapshot.status, "failed");
+  assert.deepEqual(faultInput, faultBefore);
+
+  const budgetPlan = plan("let first = 1\nlet second = 2\nexit");
+  const budgetInput = createFreshRuntimeSnapshot(budgetPlan);
+  const budgetBefore = structuredClone(budgetInput);
+  assert.equal(
+    run(budgetPlan, budgetInput, {}, { instructionBudget: 1 }).snapshot.failure?.code,
+    "TSR037",
+  );
+  assert.deepEqual(budgetInput, budgetBefore);
+
+  const eventPlan = plan('let value = 1\nsay value\nexit');
+  const eventInput = createFreshRuntimeSnapshot(eventPlan);
+  const eventBefore = structuredClone(eventInput);
+  assert.deepEqual(stepToEvent(eventPlan, eventInput).events.map((event) => event.kind), ["say"]);
+  assert.deepEqual(eventInput, eventBefore);
+});
+
 test("loop plans are deterministic, JSON-safe, and reject malformed targets", () => {
   const source = [
     "for value in 1..=3 {",

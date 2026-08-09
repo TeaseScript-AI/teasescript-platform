@@ -66,7 +66,6 @@ import {
   type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import {
-  cloneCapturedRuntimeSnapshot,
   type RuntimeBindingSnapshot,
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
@@ -112,10 +111,9 @@ export function executeInstruction(
 
 function executeCapturedInstruction(
   plan: InstructionPlan,
-  inputSnapshot: RuntimeSnapshot,
+  snapshot: RuntimeSnapshot,
   capabilities: RuntimeCapabilities,
 ): RuntimeOperationResult {
-  const snapshot = cloneCapturedRuntimeSnapshot(inputSnapshot);
   if (snapshot.status === "halted" || snapshot.status === "failed") {
     return result(snapshot, [], 0);
   }
@@ -172,7 +170,7 @@ export function stepToEvent(
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
   const budget = instructionBudget(options.instructionBudget);
-  let current = cloneCapturedRuntimeSnapshot(captured.snapshot);
+  let current = captured.snapshot;
   const events: InterpreterEvent[] = [];
   let instructionsExecuted = 0;
   while (
@@ -207,7 +205,7 @@ export function run(
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
   const budget = instructionBudget(options.instructionBudget);
-  let current = cloneCapturedRuntimeSnapshot(captured.snapshot);
+  let current = captured.snapshot;
   const events: InterpreterEvent[] = [];
   let instructionsExecuted = 0;
   while (current.status !== "waiting" && current.status !== "halted" && current.status !== "failed") {
@@ -2524,11 +2522,10 @@ function failSnapshot(
 }
 
 function failForBudget(plan: InstructionPlan, snapshot: RuntimeSnapshot): RuntimeOperationResult {
-  const copy = cloneCapturedRuntimeSnapshot(snapshot);
-  const span = plan.instructions[copy.nextInstruction]?.span ?? plan.sourceSpan;
+  const span = plan.instructions[snapshot.nextInstruction]?.span ?? plan.sourceSpan;
   const events: InterpreterEvent[] = [];
-  failSnapshot(copy, { code: "TSR037", message: "Runtime instruction budget exceeded.", span }, events);
-  return result(copy, events, 0);
+  failSnapshot(snapshot, { code: "TSR037", message: "Runtime instruction budget exceeded.", span }, events);
+  return result(snapshot, events, 0);
 }
 
 function instructionBudget(value: number | undefined): number {
