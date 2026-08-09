@@ -81,11 +81,16 @@ function completePacingGate(
   assertEventSequenceCapacity(current, 1);
   const completionEventSequence = takeSequence(current);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
-    actionId: action.actionId, actionKind: "chatPacingGate", settlementKind: "skipped",
-    owningInstruction: action.owningInstruction, continuationInstruction: action.continuationInstruction,
-    requestEventSequence: action.requestEventSequence, completionEventSequence,
-    deadlineMs: action.deadlineMs, completedAtMs: current.currentSessionTimeMs,
-    releasedPreparedOutput: action.preparedOutput !== null,
+    actionId: action.actionId,
+    actionKind: "chatPacingGate",
+    settlementKind: "skipped",
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    requestEventSequence: action.requestEventSequence,
+    completionEventSequence,
+    deadlineMs: action.deadlineMs,
+    completedAtMs: current.currentSessionTimeMs,
+    releasedPreparedOutputInstruction: action.preparedOutput?.owningInstruction ?? null,
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;

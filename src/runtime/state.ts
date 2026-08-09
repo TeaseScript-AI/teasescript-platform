@@ -46,7 +46,7 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 11;
+export const RUNTIME_SNAPSHOT_VERSION = 12;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -1900,7 +1900,7 @@ function validateStatusConsistency(
   if (value.preparedSayOutput !== null && !validPreparedSayOutput(value.preparedSayOutput, value, plan)) {
     errors.push("Runtime prepared say output is malformed.");
   }
-  if (!validTopLevelPreparedSayOutputRelationship(value)) {
+  if (!validTopLevelPreparedSayOutputRelationship(value, plan)) {
     errors.push("Runtime prepared say output has impossible pacing-settlement provenance.");
   }
   if (value.status === "ready") {
@@ -2402,14 +2402,33 @@ function validPacingGateCreationProvenance(
 }
 
 function validPreparedSayOutput(value: unknown, snapshot: Record<string, unknown>, plan: InstructionPlan | undefined): boolean {
-  if (!isPlainRecord(value) || !hasExactKeys(value, ["owningInstruction", "continuationInstruction", "speaker", "text", "durationMs", "skippable"]) ||
-    !nonNegativeSafeInteger(value.owningInstruction) || !nonNegativeSafeInteger(value.continuationInstruction) ||
-    value.continuationInstruction !== value.owningInstruction + 1 || typeof value.text !== "string" ||
-    !validPreparedSayDuration(value.durationMs) ||
-    typeof value.skippable !== "boolean") return false;
+  if (!isPreparedSayOutputShape(value)) return false;
+  if (!validPreparedSayOutputDomain(value)) return false;
   if (!validPreparedSaySpeaker(value.speaker)) return false;
-  if (plan !== undefined && plan.instructions[value.owningInstruction]?.kind !== "say") return false;
-  return snapshot.nextInstruction === value.owningInstruction;
+  const owningInstruction = value.owningInstruction;
+  if (!nonNegativeSafeInteger(owningInstruction)) return false;
+  if (plan !== undefined && plan.instructions[owningInstruction]?.kind !== "say") return false;
+  return snapshot.nextInstruction === owningInstruction;
+}
+
+function isPreparedSayOutputShape(value: unknown): value is Record<string, unknown> {
+  return isPlainRecord(value) && hasExactKeys(value, [
+    "owningInstruction",
+    "continuationInstruction",
+    "speaker",
+    "text",
+    "durationMs",
+    "skippable",
+  ]);
+}
+
+function validPreparedSayOutputDomain(value: Record<string, unknown>): boolean {
+  return nonNegativeSafeInteger(value.owningInstruction) &&
+    nonNegativeSafeInteger(value.continuationInstruction) &&
+    value.continuationInstruction === value.owningInstruction + 1 &&
+    typeof value.text === "string" &&
+    validPreparedSayDuration(value.durationMs) &&
+    typeof value.skippable === "boolean";
 }
 
 function validPreparedSayDuration(value: unknown): value is number {
@@ -2431,31 +2450,44 @@ function validPreparedSaySpeaker(value: unknown): boolean {
   );
 }
 
-function validTopLevelPreparedSayOutputRelationship(snapshot: Record<string, unknown>): boolean {
+function validTopLevelPreparedSayOutputRelationship(
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
   const settlement = snapshot.lastSettlement;
   if (snapshot.preparedSayOutput === null) {
-    return validReleasedPacingSettlementWithoutPreparedOutput(snapshot, settlement);
+    return validReleasedPacingSettlementAfterPreparedOutputConsumption(snapshot, settlement);
   }
-  return snapshot.status === "running" &&
+  return isPreparedSayOutputShape(snapshot.preparedSayOutput) &&
+    snapshot.status === "running" &&
     snapshot.foregroundAction === null &&
     Array.isArray(snapshot.backgroundActions) &&
     !snapshot.backgroundActions.some((action) => isPlainRecord(action) && action.kind === "chatPacingGate") &&
-    isPlainRecord(settlement) &&
-    settlement.actionKind === "chatPacingGate" &&
-    settlement.releasedPreparedOutput === true;
+    validPacingSettlementReleaseLineage(settlement, plan) &&
+    settlement.releasedPreparedOutputInstruction === snapshot.preparedSayOutput.owningInstruction;
 }
 
-function validReleasedPacingSettlementWithoutPreparedOutput(
+function validReleasedPacingSettlementAfterPreparedOutputConsumption(
   snapshot: Record<string, unknown>,
   settlement: unknown,
 ): boolean {
   if (!isPlainRecord(settlement) || settlement.actionKind !== "chatPacingGate") return true;
-  if (settlement.releasedPreparedOutput !== true) return true;
+  const releasedInstruction = settlement.releasedPreparedOutputInstruction;
+  if (releasedInstruction === null) return true;
+  if (!nonNegativeSafeInteger(releasedInstruction)) return false;
 
-  // Before normal re-entry, a foreground pacing settlement must retain the
-  // prepared output at the settled gate's continuation. Once that output has
-  // been consumed, execution has advanced away from that continuation.
-  return snapshot.nextInstruction !== settlement.continuationInstruction;
+  return activePacingActions(snapshot).some(
+    (action) =>
+      action.owningInstruction === releasedInstruction &&
+      validActionCreatedAfterSettlement(action, settlement),
+  );
+}
+
+function activePacingActions(snapshot: Record<string, unknown>): Record<string, unknown>[] {
+  const actions = [snapshot.foregroundAction, ...(Array.isArray(snapshot.backgroundActions) ? snapshot.backgroundActions : [])];
+  return actions.filter(
+    (action): action is Record<string, unknown> => isPlainRecord(action) && action.kind === "chatPacingGate",
+  );
 }
 
 function validateInteractionResultHandoffState(
@@ -2849,7 +2881,7 @@ function validSettlementKindData(
   plan: InstructionPlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
 ): boolean {
-  if (settlement.actionKind === "chatPacingGate") return validPacingGateSettlement(settlement, snapshot);
+  if (settlement.actionKind === "chatPacingGate") return validPacingGateSettlement(settlement, snapshot, plan);
   if (settlement.actionKind === "delay") {
     return hasExactKeys(settlement, [
       "actionId", "actionKind", "settlementKind", "owningInstruction",
@@ -2932,17 +2964,15 @@ function validSettlementKindData(
 function validPacingGateSettlement(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
+  plan?: InstructionPlan,
 ): boolean {
   if (!hasExactKeys(settlement, [
     "actionId", "actionKind", "settlementKind", "owningInstruction",
     "continuationInstruction", "requestEventSequence", "completionEventSequence",
-    "deadlineMs", "completedAtMs", "releasedPreparedOutput",
+    "deadlineMs", "completedAtMs", "releasedPreparedOutputInstruction",
   ])) return false;
   if (!validPacingSettlementKind(settlement.settlementKind)) return false;
-  if (typeof settlement.releasedPreparedOutput !== "boolean") return false;
-  if (settlement.releasedPreparedOutput && !pacingSettlementCanReleasePreparedOutput(settlement.settlementKind)) {
-    return false;
-  }
+  if (!validPacingSettlementReleaseLineage(settlement, plan)) return false;
   if (settlement.settlementKind === "completed") {
     return validSettlementChronology(settlement, snapshot);
   }
@@ -2960,6 +2990,20 @@ function pacingSettlementCanReleasePreparedOutput(
   settlementKind: RuntimeChatPacingGateSettlementSnapshot["settlementKind"],
 ): boolean {
   return settlementKind === "completed" || settlementKind === "skipped";
+}
+
+function validPacingSettlementReleaseLineage(
+  settlement: unknown,
+  plan: InstructionPlan | undefined,
+): settlement is Record<string, unknown> & { readonly releasedPreparedOutputInstruction: number | null } {
+  if (!isPlainRecord(settlement)) return false;
+  const releasedInstruction = settlement.releasedPreparedOutputInstruction;
+  if (releasedInstruction === null) return true;
+  return pacingSettlementCanReleasePreparedOutput(
+    settlement.settlementKind as RuntimeChatPacingGateSettlementSnapshot["settlementKind"],
+  ) &&
+    nonNegativeSafeInteger(releasedInstruction) &&
+    (plan === undefined || plan.instructions[releasedInstruction]?.kind === "say");
 }
 
 function validNonTimePacingSettlementChronology(

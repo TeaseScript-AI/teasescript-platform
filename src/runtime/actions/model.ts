@@ -99,8 +99,8 @@ export interface RuntimeChatPacingGateSettlementSnapshot {
   readonly completionEventSequence: number;
   readonly deadlineMs: number;
   readonly completedAtMs: number;
-  /** Whether this foreground settlement released a prepared later say output. */
-  readonly releasedPreparedOutput: boolean;
+  /** The owning say instruction released by this foreground settlement, if any. */
+  readonly releasedPreparedOutputInstruction: number | null;
 }
 
 export type RuntimeActionSettlementSnapshot = RuntimeDelayActionSettlementSnapshot | RuntimeInteractionActionSettlementSnapshot | RuntimeChatPacingGateSettlementSnapshot;

@@ -121,7 +121,7 @@ test("active-action and retained-settlement relations admit only canonical cross
     completionEventSequence: 4,
     deadlineMs: 1_800,
     completedAtMs: 1_000,
-    releasedPreparedOutput: false,
+    releasedPreparedOutputInstruction: null,
   };
   expectInvalidSnapshot("older foreground pacing cannot coexist with newer pacing settlement", promotionPlan, newerPacingSettlement);
 
@@ -207,15 +207,15 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
   assert.equal(compiled.version, 9);
-  assert.equal(snapshot.version, 11);
-  assert.equal(checkpoint.version, 13);
+  assert.equal(snapshot.version, 12);
+  assert.equal(checkpoint.version, 14);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot) as any;
-  oldSnapshot.version = 10;
+  oldSnapshot.version = 11;
   assert.equal(validateRuntimeSnapshot(oldSnapshot, compiled).valid, false);
   const oldCheckpoint = structuredClone(checkpoint);
-  oldCheckpoint.version = 12;
+  oldCheckpoint.version = 13;
   assert.throws(() => deserializeCheckpoint(JSON.stringify(oldCheckpoint)));
 });
 
@@ -263,26 +263,104 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
     payload: { kind: "skip" },
   });
 
-  const corruptions: Array<[string, unknown, typeof backgroundPlan | typeof foregroundPlan]> = [
-    ["action identity", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions[0].actionId = 0; }), backgroundPlan],
-    ["action kind", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions[0].kind = "delay"; }), backgroundPlan],
-    ["deadline", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions[0].deadlineMs = 0; }), backgroundPlan],
-    ["request sequence", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions[0].requestEventSequence = snapshot.nextEventSequence; }), backgroundPlan],
-    ["background uniqueness", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions.push(structuredClone(snapshot.backgroundActions[0])); }), backgroundPlan],
-    ["foreground/background location", mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => { snapshot.backgroundActions.push(structuredClone(snapshot.foregroundAction)); }), foregroundPlan],
-    ["background prepared output", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions[0].preparedOutput = structuredClone(foregroundGate.preparedOutput); }), backgroundPlan],
-    ["foreground prepared output ownership", mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => { snapshot.foregroundAction.preparedOutput = null; }), foregroundPlan],
-    ["waiting status ownership", mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => { snapshot.status = "running"; }), foregroundPlan],
-    ["prepared continuation", mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => { snapshot.foregroundAction.preparedOutput.continuationInstruction += 1; }), foregroundPlan],
-    ["pacing settlement", mutateCheckpoint(backgroundPlan, settled.snapshot, (snapshot) => { snapshot.lastSettlement.actionKind = "delay"; }), backgroundPlan],
-    ["settlement completed time", mutateCheckpoint(backgroundPlan, settled.snapshot, (snapshot) => { snapshot.lastSettlement.completedAtMs = snapshot.currentSessionTimeMs + 1; }), backgroundPlan],
-    ["unwound function provenance", mutateCheckpoint(functionPlan, functionBackground.snapshot, (snapshot) => { snapshot.backgroundActions[0].ownerCallFrameId = snapshot.nextCallFrameId; }), functionPlan],
+  const corruptions = [
+    {
+      name: "action identity",
+      plan: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].actionId = 0;
+      }),
+    },
+    {
+      name: "action kind",
+      plan: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].kind = "delay";
+      }),
+    },
+    {
+      name: "deadline",
+      plan: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].deadlineMs = 0;
+      }),
+    },
+    {
+      name: "request sequence",
+      plan: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].requestEventSequence = snapshot.nextEventSequence;
+      }),
+    },
+    {
+      name: "background uniqueness",
+      plan: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => {
+        snapshot.backgroundActions.push(structuredClone(snapshot.backgroundActions[0]));
+      }),
+    },
+    {
+      name: "foreground/background location",
+      plan: foregroundPlan,
+      checkpoint: mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => {
+        snapshot.backgroundActions.push(structuredClone(snapshot.foregroundAction));
+      }),
+    },
+    {
+      name: "background prepared output",
+      plan: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].preparedOutput = structuredClone(foregroundGate.preparedOutput);
+      }),
+    },
+    {
+      name: "foreground prepared output ownership",
+      plan: foregroundPlan,
+      checkpoint: mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => {
+        snapshot.foregroundAction.preparedOutput = null;
+      }),
+    },
+    {
+      name: "waiting status ownership",
+      plan: foregroundPlan,
+      checkpoint: mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => {
+        snapshot.status = "running";
+      }),
+    },
+    {
+      name: "prepared continuation",
+      plan: foregroundPlan,
+      checkpoint: mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => {
+        snapshot.foregroundAction.preparedOutput.continuationInstruction += 1;
+      }),
+    },
+    {
+      name: "pacing settlement",
+      plan: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, settled.snapshot, (snapshot) => {
+        snapshot.lastSettlement.actionKind = "delay";
+      }),
+    },
+    {
+      name: "settlement completed time",
+      plan: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, settled.snapshot, (snapshot) => {
+        snapshot.lastSettlement.completedAtMs = snapshot.currentSessionTimeMs + 1;
+      }),
+    },
+    {
+      name: "unwound function provenance",
+      plan: functionPlan,
+      checkpoint: mutateCheckpoint(functionPlan, functionBackground.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].ownerCallFrameId = snapshot.nextCallFrameId;
+      }),
+    },
   ];
 
-  for (const [label, checkpoint, compiled] of corruptions) {
-    const snapshot = (checkpoint as { snapshot: unknown }).snapshot;
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false, label);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), label);
+  for (const corruption of corruptions) {
+    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
+    assert.equal(validateRuntimeSnapshot(snapshot, corruption.plan).valid, false, corruption.name);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
   }
 });
 
@@ -490,7 +568,7 @@ test("pacing state validation rejects relational identity, property, duration, a
       name: "top-level prepared output without release settlement",
       compiled: preparedPlan,
       checkpoint: mutateCheckpoint(preparedPlan, prepared.snapshot, (snapshot) => {
-        snapshot.lastSettlement.releasedPreparedOutput = false;
+        snapshot.lastSettlement.releasedPreparedOutputInstruction = null;
       }),
     },
     {
@@ -537,52 +615,100 @@ test("cross-field pacing snapshot corruption rejects at direct and checkpoint bo
   });
   const laterWait = run(interactionPlan, interactionSettled.snapshot);
 
-  const corruptions: Array<[string, ReturnType<typeof plan>, unknown]> = [
-    ["foreground gate moved to background", promotedPlan, mutateCheckpoint(promotedPlan, promoted.snapshot, (snapshot) => {
-      snapshot.backgroundActions.push(snapshot.foregroundAction);
-      snapshot.foregroundAction = null;
-    })],
-    ["prepared output moved to top level while foreground remains", promotedPlan, mutateCheckpoint(promotedPlan, promoted.snapshot, (snapshot) => {
-      snapshot.preparedSayOutput = snapshot.foregroundAction.preparedOutput;
-    })],
-    ["pacing deadline before current time", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-      snapshot.backgroundActions[0].deadlineMs = snapshot.currentSessionTimeMs;
-    })],
-    ["next action ID reuses active identity", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-      snapshot.nextActionId = snapshot.foregroundAction.actionId;
-    })],
-    ["next event sequence reuses request identity", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-      snapshot.nextEventSequence = snapshot.foregroundAction.requestEventSequence;
-    })],
-    ["prepared continuation is not say", promotedPlan, mutateCheckpoint(promotedPlan, promoted.snapshot, (snapshot) => {
-      snapshot.foregroundAction.preparedOutput.owningInstruction = 2;
-      snapshot.foregroundAction.preparedOutput.continuationInstruction = 3;
-      snapshot.nextInstruction = 2;
-    })],
-    ["background gate carries prepared output", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-      snapshot.backgroundActions[0].preparedOutput = structuredClone(promotedGate?.preparedOutput);
-    })],
-    ["multiple background gates", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-      snapshot.backgroundActions.push(structuredClone(snapshot.backgroundActions[0]));
-    })],
-    ["extra pacing setting", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-      snapshot.chatPacingSettings.extra = 1;
-    })],
-    ["missing pacing setting", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-      delete snapshot.chatPacingSettings.baseDelayMs;
-    })],
-    ["duplicate speaker pacing property", speakerPlan, mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
-      snapshot.speakers[0].properties.push(structuredClone(snapshot.speakers[0].properties[0]));
-    })],
-    ["active request collides with interaction transcript", interactionPlan, mutateCheckpoint(interactionPlan, laterWait.snapshot, (snapshot) => {
-      snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.transcriptEventSequence;
-    })],
+  const corruptions = [
+    {
+      name: "foreground gate moved to background",
+      plan: promotedPlan,
+      checkpoint: mutateCheckpoint(promotedPlan, promoted.snapshot, (snapshot) => {
+        snapshot.backgroundActions.push(snapshot.foregroundAction);
+        snapshot.foregroundAction = null;
+      }),
+    },
+    {
+      name: "prepared output moved to top level while foreground remains",
+      plan: promotedPlan,
+      checkpoint: mutateCheckpoint(promotedPlan, promoted.snapshot, (snapshot) => {
+        snapshot.preparedSayOutput = snapshot.foregroundAction.preparedOutput;
+      }),
+    },
+    {
+      name: "pacing deadline before current time",
+      plan: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].deadlineMs = snapshot.currentSessionTimeMs;
+      }),
+    },
+    {
+      name: "next action ID reuses active identity",
+      plan: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+        snapshot.nextActionId = snapshot.foregroundAction.actionId;
+      }),
+    },
+    {
+      name: "next event sequence reuses request identity",
+      plan: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+        snapshot.nextEventSequence = snapshot.foregroundAction.requestEventSequence;
+      }),
+    },
+    {
+      name: "prepared continuation is not say",
+      plan: promotedPlan,
+      checkpoint: mutateCheckpoint(promotedPlan, promoted.snapshot, (snapshot) => {
+        snapshot.foregroundAction.preparedOutput.owningInstruction = 2;
+        snapshot.foregroundAction.preparedOutput.continuationInstruction = 3;
+        snapshot.nextInstruction = 2;
+      }),
+    },
+    {
+      name: "background gate carries prepared output",
+      plan: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].preparedOutput = structuredClone(promotedGate?.preparedOutput);
+      }),
+    },
+    {
+      name: "multiple background gates",
+      plan: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+        snapshot.backgroundActions.push(structuredClone(snapshot.backgroundActions[0]));
+      }),
+    },
+    {
+      name: "extra pacing setting",
+      plan: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+        snapshot.chatPacingSettings.extra = 1;
+      }),
+    },
+    {
+      name: "missing pacing setting",
+      plan: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+        delete snapshot.chatPacingSettings.baseDelayMs;
+      }),
+    },
+    {
+      name: "duplicate speaker pacing property",
+      plan: speakerPlan,
+      checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
+        snapshot.speakers[0].properties.push(structuredClone(snapshot.speakers[0].properties[0]));
+      }),
+    },
+    {
+      name: "active request collides with interaction transcript",
+      plan: interactionPlan,
+      checkpoint: mutateCheckpoint(interactionPlan, laterWait.snapshot, (snapshot) => {
+        snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.transcriptEventSequence;
+      }),
+    },
   ];
 
-  for (const [label, compiled, checkpoint] of corruptions) {
-    const snapshot = (checkpoint as { snapshot: unknown }).snapshot;
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false, label);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), label);
+  for (const corruption of corruptions) {
+    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
+    assert.equal(validateRuntimeSnapshot(snapshot, corruption.plan).valid, false, corruption.name);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
   }
 });
 
@@ -620,7 +746,7 @@ test("pacing settlement release provenance and chronology accept only canonical 
       compiled: backgroundPlan,
       snapshot: backgroundCompleted.snapshot,
       kind: "completed",
-      releasedPreparedOutput: false,
+      releasedPreparedOutputInstruction: null,
       hasPreparedOutput: false,
     },
     {
@@ -628,7 +754,7 @@ test("pacing settlement release provenance and chronology accept only canonical 
       compiled: backgroundPlan,
       snapshot: backgroundSkipped.snapshot,
       kind: "skipped",
-      releasedPreparedOutput: false,
+      releasedPreparedOutputInstruction: null,
       hasPreparedOutput: false,
     },
     {
@@ -636,7 +762,7 @@ test("pacing settlement release provenance and chronology accept only canonical 
       compiled: interactionPlan,
       snapshot: interaction.snapshot,
       kind: "consumedByForegroundInteraction",
-      releasedPreparedOutput: false,
+      releasedPreparedOutputInstruction: null,
       hasPreparedOutput: false,
     },
     {
@@ -644,7 +770,7 @@ test("pacing settlement release provenance and chronology accept only canonical 
       compiled: instantPlan,
       snapshot: superseded.snapshot,
       kind: "supersededByInstantOutput",
-      releasedPreparedOutput: false,
+      releasedPreparedOutputInstruction: null,
       hasPreparedOutput: false,
     },
     {
@@ -652,7 +778,7 @@ test("pacing settlement release provenance and chronology accept only canonical 
       compiled: promotionPlan,
       snapshot: foregroundCompleted.snapshot,
       kind: "completed",
-      releasedPreparedOutput: true,
+      releasedPreparedOutputInstruction: 1,
       hasPreparedOutput: true,
     },
     {
@@ -660,7 +786,7 @@ test("pacing settlement release provenance and chronology accept only canonical 
       compiled: promotionPlan,
       snapshot: foregroundSkipped.snapshot,
       kind: "skipped",
-      releasedPreparedOutput: true,
+      releasedPreparedOutputInstruction: 1,
       hasPreparedOutput: true,
     },
   ] as const;
@@ -670,7 +796,11 @@ test("pacing settlement release provenance and chronology accept only canonical 
     assert.equal(settlement?.actionKind, "chatPacingGate", scenario.name);
     if (settlement?.actionKind !== "chatPacingGate") throw new Error(scenario.name);
     assert.equal(settlement?.settlementKind, scenario.kind, scenario.name);
-    assert.equal(settlement?.releasedPreparedOutput, scenario.releasedPreparedOutput, scenario.name);
+    assert.equal(
+      settlement?.releasedPreparedOutputInstruction,
+      scenario.releasedPreparedOutputInstruction,
+      scenario.name,
+    );
     assert.equal(scenario.snapshot.preparedSayOutput !== null, scenario.hasPreparedOutput, scenario.name);
     assert.equal(validateRuntimeSnapshot(scenario.snapshot, scenario.compiled).valid, true, scenario.name);
     const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(scenario.compiled, scenario.snapshot)));
@@ -683,14 +813,14 @@ test("pacing settlement release provenance and chronology accept only canonical 
       name: "prepared output requires release evidence",
       compiled: promotionPlan,
       checkpoint: mutateCheckpoint(promotionPlan, foregroundSkipped.snapshot, (snapshot) => {
-        snapshot.lastSettlement.releasedPreparedOutput = false;
+        snapshot.lastSettlement.releasedPreparedOutputInstruction = null;
       }),
     },
     {
       name: "background skip cannot falsely claim prepared-output release",
       compiled: backgroundPlan,
       checkpoint: mutateCheckpoint(backgroundPlan, backgroundSkipped.snapshot, (snapshot) => {
-        snapshot.lastSettlement.releasedPreparedOutput = true;
+        snapshot.lastSettlement.releasedPreparedOutputInstruction = 1;
       }),
     },
     {
@@ -706,14 +836,14 @@ test("pacing settlement release provenance and chronology accept only canonical 
       name: "consumption cannot claim prepared-output release",
       compiled: interactionPlan,
       checkpoint: mutateCheckpoint(interactionPlan, interaction.snapshot, (snapshot) => {
-        snapshot.lastSettlement.releasedPreparedOutput = true;
+        snapshot.lastSettlement.releasedPreparedOutputInstruction = 1;
       }),
     },
     {
       name: "supersession cannot claim prepared-output release",
       compiled: instantPlan,
       checkpoint: mutateCheckpoint(instantPlan, superseded.snapshot, (snapshot) => {
-        snapshot.lastSettlement.releasedPreparedOutput = true;
+        snapshot.lastSettlement.releasedPreparedOutputInstruction = 1;
       }),
     },
     {
@@ -741,14 +871,14 @@ test("pacing settlement release provenance and chronology accept only canonical 
       name: "pacing settlement requires boolean release evidence",
       compiled: backgroundPlan,
       checkpoint: mutateCheckpoint(backgroundPlan, backgroundSkipped.snapshot, (snapshot) => {
-        snapshot.lastSettlement.releasedPreparedOutput = "false";
+        snapshot.lastSettlement.releasedPreparedOutputInstruction = "1";
       }),
     },
     {
       name: "pacing settlement requires the release evidence key",
       compiled: backgroundPlan,
       checkpoint: mutateCheckpoint(backgroundPlan, backgroundSkipped.snapshot, (snapshot) => {
-        delete snapshot.lastSettlement.releasedPreparedOutput;
+        delete snapshot.lastSettlement.releasedPreparedOutputInstruction;
       }),
     },
   ];
@@ -774,7 +904,7 @@ test("instruction boundaries preserve pacing release provenance before and after
   });
   assert.equal(backgroundSkip.snapshot.lastSettlement?.actionKind, "chatPacingGate");
   if (backgroundSkip.snapshot.lastSettlement?.actionKind !== "chatPacingGate") throw new Error("Expected pacing settlement.");
-  assert.equal(backgroundSkip.snapshot.lastSettlement.releasedPreparedOutput, false);
+  assert.equal(backgroundSkip.snapshot.lastSettlement.releasedPreparedOutputInstruction, null);
   assert.equal(backgroundSkip.snapshot.preparedSayOutput, null);
 
   const secondAsFreshOutput = executeInstruction(compiled, backgroundSkip.snapshot);
@@ -795,7 +925,7 @@ test("instruction boundaries preserve pacing release provenance before and after
   });
   assert.equal(released.snapshot.lastSettlement?.actionKind, "chatPacingGate");
   if (released.snapshot.lastSettlement?.actionKind !== "chatPacingGate") throw new Error("Expected pacing settlement.");
-  assert.equal(released.snapshot.lastSettlement.releasedPreparedOutput, true);
+  assert.equal(released.snapshot.lastSettlement.releasedPreparedOutputInstruction, 1);
   assert.notEqual(released.snapshot.preparedSayOutput, null);
 
   const restoredRelease = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, released.snapshot)));
@@ -803,4 +933,149 @@ test("instruction boundaries preserve pacing release provenance before and after
   assert.equal(resumed.events.filter((event) => event.kind === "say").length, 1);
   assert.equal(resumed.snapshot.backgroundActions[0]?.actionId, 2);
   assert.equal(resumed.snapshot.rng.state, secondAsFreshOutput.snapshot.rng.state);
+});
+
+test("pacing settlements retain exact prepared-output lineage through release and consumption", () => {
+  const threeSays = plan('say "first"\nsay "second"\nsay "third"');
+  const promoted = run(threeSays, createFreshRuntimeSnapshot(threeSays));
+  const firstGate = promoted.snapshot.foregroundAction;
+  assert.equal(firstGate?.kind, "chatPacingGate");
+
+  const released = completeAction(threeSays, promoted.snapshot, {
+    actionId: firstGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(
+    released.snapshot.lastSettlement?.actionKind === "chatPacingGate" &&
+      released.snapshot.lastSettlement.releasedPreparedOutputInstruction,
+    1,
+  );
+  assert.equal(released.snapshot.preparedSayOutput?.owningInstruction, 1);
+  assert.equal(validateRuntimeSnapshot(released.snapshot, threeSays).valid, true);
+  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(threeSays, released.snapshot))));
+
+  const forgedThird = checkpointSnapshot(threeSays, released.snapshot);
+  forgedThird.preparedSayOutput.owningInstruction = 2;
+  forgedThird.preparedSayOutput.continuationInstruction = 3;
+  forgedThird.preparedSayOutput.text = "forged third";
+  forgedThird.nextInstruction = 2;
+  expectInvalidSnapshot("settlement lineage must match the released prepared say", threeSays, forgedThird);
+
+  const consumed = executeInstruction(threeSays, released.snapshot);
+  const replacement = consumed.snapshot.backgroundActions[0];
+  assert.equal(replacement?.kind, "chatPacingGate");
+  assert.equal(replacement?.owningInstruction, 1);
+  assert.equal(replacement?.actionId, 2);
+  assert.equal(validateRuntimeSnapshot(consumed.snapshot, threeSays).valid, true);
+  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(threeSays, consumed.snapshot))));
+
+  const promotedReplacement = run(threeSays, consumed.snapshot);
+  assert.equal(promotedReplacement.snapshot.foregroundAction?.kind, "chatPacingGate");
+  assert.equal(promotedReplacement.snapshot.foregroundAction?.actionId, replacement?.actionId);
+  assert.equal(validateRuntimeSnapshot(promotedReplacement.snapshot, threeSays).valid, true);
+
+  const waitPlan = plan('say "first"\nsay "second"\nwait 10 s\nexit');
+  const waitPromoted = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
+  const waitGate = waitPromoted.snapshot.foregroundAction;
+  assert.equal(waitGate?.kind, "chatPacingGate");
+  const waitReleased = completeAction(waitPlan, waitPromoted.snapshot, {
+    actionId: waitGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  const replacementWithWait = run(waitPlan, waitReleased.snapshot);
+  assert.equal(replacementWithWait.snapshot.backgroundActions[0]?.owningInstruction, 1);
+  assert.equal(replacementWithWait.snapshot.foregroundAction?.kind, "delay");
+  assert.equal(validateRuntimeSnapshot(replacementWithWait.snapshot, waitPlan).valid, true);
+  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(waitPlan, replacementWithWait.snapshot))));
+
+  const corruptions = [
+    {
+      name: "top-level prepared output requires a matching lineage instruction",
+      compiled: threeSays,
+      checkpoint: mutateCheckpoint(threeSays, released.snapshot, (snapshot) => {
+        snapshot.lastSettlement.releasedPreparedOutputInstruction = 2;
+      }),
+    },
+    {
+      name: "released lineage cannot remain without prepared output or replacement gate",
+      compiled: threeSays,
+      checkpoint: mutateCheckpoint(threeSays, released.snapshot, (snapshot) => {
+        snapshot.preparedSayOutput = null;
+      }),
+    },
+    {
+      name: "replacement gate must belong to the released prepared say",
+      compiled: threeSays,
+      checkpoint: mutateCheckpoint(threeSays, consumed.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].owningInstruction = 0;
+        snapshot.backgroundActions[0].continuationInstruction = 1;
+      }),
+    },
+    {
+      name: "replacement gate must be newer than its releasing settlement",
+      compiled: threeSays,
+      checkpoint: mutateCheckpoint(threeSays, consumed.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].actionId = snapshot.lastSettlement.actionId;
+      }),
+    },
+    {
+      name: "replacement request must follow the releasing completion",
+      compiled: threeSays,
+      checkpoint: mutateCheckpoint(threeSays, consumed.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].requestEventSequence =
+          snapshot.lastSettlement.completionEventSequence;
+      }),
+    },
+    {
+      name: "lineage must be null for background completion",
+      compiled: plan('say "first"\nexit'),
+      checkpoint: (() => {
+        const backgroundPlan = plan('say "first"\nexit');
+        const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
+        const gate = background.snapshot.backgroundActions[0];
+        if (gate?.kind !== "chatPacingGate") throw new Error("Expected a background pacing gate.");
+        const settled = observeTime(backgroundPlan, background.snapshot, gate!.deadlineMs);
+        return mutateCheckpoint(backgroundPlan, settled.snapshot, (snapshot) => {
+          snapshot.lastSettlement.releasedPreparedOutputInstruction = 0;
+        });
+      })(),
+    },
+    {
+      name: "obsolete boolean release evidence is rejected",
+      compiled: threeSays,
+      checkpoint: mutateCheckpoint(threeSays, released.snapshot, (snapshot) => {
+        delete snapshot.lastSettlement.releasedPreparedOutputInstruction;
+        snapshot.lastSettlement.releasedPreparedOutput = true;
+      }),
+    },
+    {
+      name: "lineage instruction must be a say in the current plan",
+      compiled: threeSays,
+      checkpoint: mutateCheckpoint(threeSays, released.snapshot, (snapshot) => {
+        snapshot.lastSettlement.releasedPreparedOutputInstruction = 3;
+      }),
+    },
+    {
+      name: "lineage instruction must be non-negative",
+      compiled: threeSays,
+      checkpoint: mutateCheckpoint(threeSays, released.snapshot, (snapshot) => {
+        snapshot.lastSettlement.releasedPreparedOutputInstruction = -1;
+      }),
+    },
+    {
+      name: "lineage instruction cannot name a non-say instruction",
+      compiled: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waitReleased.snapshot, (snapshot) => {
+        snapshot.lastSettlement.releasedPreparedOutputInstruction = 2;
+      }),
+    },
+  ];
+
+  for (const corruption of corruptions) {
+    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
+    assert.equal(validateRuntimeSnapshot(snapshot, corruption.compiled).valid, false, corruption.name);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+  }
 });

@@ -66,11 +66,16 @@ function settleForegroundTimedAction(
           deadlineMs: action.deadlineMs, completedAtMs: snapshot.currentSessionTimeMs,
         }
       : {
-          actionId: action.actionId, actionKind: "chatPacingGate", settlementKind: "completed",
-          owningInstruction: action.owningInstruction, continuationInstruction: action.continuationInstruction,
-          requestEventSequence: action.requestEventSequence, completionEventSequence,
-          deadlineMs: action.deadlineMs, completedAtMs: snapshot.currentSessionTimeMs,
-          releasedPreparedOutput: action.preparedOutput !== null,
+          actionId: action.actionId,
+          actionKind: "chatPacingGate",
+          settlementKind: "completed",
+          owningInstruction: action.owningInstruction,
+          continuationInstruction: action.continuationInstruction,
+          requestEventSequence: action.requestEventSequence,
+          completionEventSequence,
+          deadlineMs: action.deadlineMs,
+          completedAtMs: snapshot.currentSessionTimeMs,
+          releasedPreparedOutputInstruction: action.preparedOutput?.owningInstruction ?? null,
         },
   );
   snapshot.foregroundAction = null;
