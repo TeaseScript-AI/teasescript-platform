@@ -17,6 +17,7 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 test("executes positional and named function calls with returned values", () => {
   const result = runSource([
@@ -205,7 +206,7 @@ test("evaluates observable built-ins in assignment target-before-value order", (
   };
   const result = run(
     compiled,
-    createFreshRuntimeSnapshot(compiled),
+    createImmediatePacingRuntimeSnapshot(compiled),
     { builtins: { indexBuiltin, valueBuiltin } },
   );
 
@@ -505,7 +506,7 @@ test("break and continue cannot cross function boundaries", () => {
 
 function runSource(source: string) {
   const compiled = plan(source);
-  return run(compiled, createFreshRuntimeSnapshot(compiled));
+  return run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
 }
 
 function plan(source: string): InstructionPlan {

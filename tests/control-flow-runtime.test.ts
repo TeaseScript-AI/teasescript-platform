@@ -12,6 +12,7 @@ import {
 import { run, stepToEvent } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 test("executes exclusive and inclusive integer ranges", () => {
   assert.deepEqual(sayTexts(runSource("for value in 1..4 { say value }")), ["1", "2", "3"]);
@@ -77,7 +78,7 @@ test("invalid random built-in arguments fail with source-associated errors", () 
       assert.ok(compiled.diagnostics.length > 0);
       continue;
     }
-    const result = run(compiled.plan, createFreshRuntimeSnapshot(compiled.plan));
+    const result = run(compiled.plan, createImmediatePacingRuntimeSnapshot(compiled.plan));
     assert.equal(result.snapshot.status, "failed");
     assert.equal(result.events.at(-1)?.kind, "runtimeFailure");
     assert.ok(result.snapshot.failure?.span.start.offset !== undefined);
@@ -96,22 +97,22 @@ test("runtime instruction budgets use the positive safe-integer domain", () => {
   const maximum = Number.MAX_SAFE_INTEGER;
 
   assert.equal(
-    run(compiled, createFreshRuntimeSnapshot(compiled), {}, {
+    run(compiled, createImmediatePacingRuntimeSnapshot(compiled), {}, {
       instructionBudget: maximum,
     }).snapshot.status,
     "halted",
   );
   assert.deepEqual(
-    stepToEvent(compiled, createFreshRuntimeSnapshot(compiled), {}, {
+    stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled), {}, {
       instructionBudget: maximum,
     }).events.map((event) => event.kind),
     ["say"],
   );
   for (const operation of [
-    () => run(compiled, createFreshRuntimeSnapshot(compiled), {}, {
+    () => run(compiled, createImmediatePacingRuntimeSnapshot(compiled), {}, {
       instructionBudget: maximum + 1,
     }),
-    () => stepToEvent(compiled, createFreshRuntimeSnapshot(compiled), {}, {
+    () => stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled), {}, {
       instructionBudget: maximum + 1,
     }),
   ]) {
@@ -127,7 +128,7 @@ test("run and stepToEvent do not mutate their caller snapshots", () => {
   assert.deepEqual(successfulInput, successfulBefore);
 
   const faultPlan = plan("let values = []\nsay values.first\nexit");
-  const faultInput = createFreshRuntimeSnapshot(faultPlan);
+  const faultInput = createImmediatePacingRuntimeSnapshot(faultPlan);
   const faultBefore = structuredClone(faultInput);
   assert.equal(run(faultPlan, faultInput).snapshot.status, "failed");
   assert.deepEqual(faultInput, faultBefore);
@@ -142,7 +143,7 @@ test("run and stepToEvent do not mutate their caller snapshots", () => {
   assert.deepEqual(budgetInput, budgetBefore);
 
   const eventPlan = plan('let value = 1\nsay value\nexit');
-  const eventInput = createFreshRuntimeSnapshot(eventPlan);
+  const eventInput = createImmediatePacingRuntimeSnapshot(eventPlan);
   const eventBefore = structuredClone(eventInput);
   assert.deepEqual(stepToEvent(eventPlan, eventInput).events.map((event) => event.kind), ["say"]);
   assert.deepEqual(eventInput, eventBefore);
@@ -186,7 +187,7 @@ test("checkpoint restore in every loop kind matches uninterrupted events", () =>
 
 test("checkpoint restore preserves RNG and event sequences between calls", () => {
   const compiled = plan("say random()\nsay randomInteger(1..=10)\nexit");
-  const initial = createFreshRuntimeSnapshot(compiled, { seed: 77 });
+  const initial = createImmediatePacingRuntimeSnapshot(compiled, { seed: 77 });
   const uninterrupted = run(compiled, initial);
   const first = stepToEvent(compiled, initial);
   const checkpoint = restoreCheckpoint(
@@ -201,7 +202,7 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
 
 test("rejects malformed serialized loop state", () => {
   const compiled = plan("for value in 1..=3 { say value }");
-  const active = stepToEvent(compiled, createFreshRuntimeSnapshot(compiled));
+  const active = stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   const checkpoint = JSON.parse(
     JSON.stringify(createCheckpoint(compiled, active.snapshot)),
   ) as Record<string, unknown>;
@@ -214,7 +215,7 @@ test("rejects malformed serialized loop state", () => {
 
 test("rejects loop frames that do not match the next plan instruction", () => {
   const compiled = plan('repeat 2 { say "again" }');
-  const active = stepToEvent(compiled, createFreshRuntimeSnapshot(compiled));
+  const active = stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   const checkpoint = JSON.parse(
     JSON.stringify(createCheckpoint(compiled, active.snapshot)),
   ) as { snapshot: { loopFrames: Array<{ loopId: number }> } };
@@ -235,7 +236,7 @@ test("loop variables deep-copy composite list elements", () => {
 
 function runSource(source: string, seed = 1) {
   const compiled = plan(source);
-  return run(compiled, createFreshRuntimeSnapshot(compiled, { seed }));
+  return run(compiled, createImmediatePacingRuntimeSnapshot(compiled, { seed }));
 }
 
 function sayTexts(result: ReturnType<typeof run>): string[] {

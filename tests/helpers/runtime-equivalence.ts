@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   compileSource,
   createCheckpoint,
-  createFreshRuntimeSnapshot,
   deserializeCheckpoint,
   executeInstruction,
   run,
@@ -13,6 +12,7 @@ import {
   type InterpreterEvent,
   type RuntimeSnapshot,
 } from "../../src/index.js";
+import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
 
 const DEFAULT_EQUIVALENCE_SEED = 0x1234_5678;
 const DEFAULT_INSTRUCTION_GUARD = 2_000;
@@ -56,7 +56,7 @@ export function assertRuntimeResumeEquivalent(
     `${scenario}: compiled plan must validate: ${formatValidationErrors(initialPlanValidation.errors)}`,
   );
 
-  const initial = createFreshRuntimeSnapshot(plan, {
+  const initial = createImmediatePacingRuntimeSnapshot(plan, {
     seed: options.seed ?? DEFAULT_EQUIVALENCE_SEED,
   });
   const initialSnapshotValidation = validateRuntimeSnapshot(initial, plan);
