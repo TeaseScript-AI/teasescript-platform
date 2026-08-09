@@ -44,10 +44,15 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 8;
+export const RUNTIME_SNAPSHOT_VERSION = 9;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
+const DEFAULT_CHAT_PACING_SETTINGS = Object.freeze({
+  baseDelayMs: 1500,
+  delayPerWordMs: 300,
+  delayPerCharacterMs: 30,
+});
 const MAX_DETAILED_VALIDATION_WORK = 1_000_000;
 const RUNTIME_SNAPSHOT_KEYS = [
   "format",
@@ -67,6 +72,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextSpeakerId",
   "nextCallFrameId",
   "currentSessionTimeMs",
+  "chatPacingSettings",
   "foregroundAction",
   "backgroundActions",
   "nextActionId",
@@ -175,6 +181,12 @@ export interface RuntimeInteractionResultHandoffSnapshot {
   readonly result: string | number;
 }
 
+export interface ChatPacingSettings {
+  readonly baseDelayMs: number;
+  readonly delayPerWordMs: number;
+  readonly delayPerCharacterMs: number;
+}
+
 export interface RuntimeSnapshot {
   readonly format: typeof RUNTIME_SNAPSHOT_FORMAT;
   readonly version: typeof RUNTIME_SNAPSHOT_VERSION;
@@ -193,6 +205,7 @@ export interface RuntimeSnapshot {
   nextSpeakerId: number;
   nextCallFrameId: number;
   currentSessionTimeMs: number;
+  readonly chatPacingSettings: ChatPacingSettings;
   foregroundAction: RuntimePendingActionSnapshot | null;
   readonly backgroundActions: RuntimePendingActionSnapshot[];
   nextActionId: number;
@@ -208,6 +221,9 @@ export interface FreshRuntimeOptions {
   readonly globals?: Readonly<Record<string, SerializableRuntimeValue>>;
   readonly maxCallDepth?: number;
   readonly initialSessionTimeMs?: number;
+  readonly baseDelayMs?: number;
+  readonly delayPerWordMs?: number;
+  readonly delayPerCharacterMs?: number;
 }
 
 export interface SnapshotValidationResult {
@@ -243,6 +259,7 @@ export function createFreshRuntimeSnapshot(
   const bindings: RuntimeBindingSnapshot[] = [];
   const maxCallDepthValue = capturedOptions.maxCallDepth;
   const initialSessionTimeMs = capturedOptions.initialSessionTimeMs ?? 0;
+  const chatPacingSettings = captureChatPacingSettings(capturedOptions);
   if (!validSessionTime(initialSessionTimeMs)) {
     throw new RangeError(`initialSessionTimeMs must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.`);
   }
@@ -292,6 +309,7 @@ export function createFreshRuntimeSnapshot(
     nextSpeakerId: 1,
     nextCallFrameId: 1,
     currentSessionTimeMs: initialSessionTimeMs,
+    chatPacingSettings,
     foregroundAction: null,
     backgroundActions: [],
     nextActionId: 1,
@@ -375,6 +393,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextSpeakerId: snapshot.nextSpeakerId,
     nextCallFrameId: snapshot.nextCallFrameId,
     currentSessionTimeMs: snapshot.currentSessionTimeMs,
+    chatPacingSettings: cloneChatPacingSettings(snapshot.chatPacingSettings),
     foregroundAction: snapshot.foregroundAction === null ? null : clonePendingAction(snapshot.foregroundAction),
     backgroundActions: snapshot.backgroundActions.map(clonePendingAction),
     nextActionId: snapshot.nextActionId,
@@ -555,6 +574,9 @@ export function validateCapturedRuntimeSnapshot(
   }
   if (value.format !== RUNTIME_SNAPSHOT_FORMAT) errors.push("Unsupported runtime-snapshot format.");
   if (value.version !== RUNTIME_SNAPSHOT_VERSION) errors.push("Unsupported runtime-snapshot version.");
+  if (!validChatPacingSettings(value.chatPacingSettings)) {
+    errors.push("Runtime chatPacingSettings is malformed.");
+  }
   const analysis = plan === undefined ? undefined : createSnapshotValidationAnalysis(plan);
   const instructionLimit = plan?.instructions.length;
   if (
@@ -1926,6 +1948,42 @@ function validateRootEndTransition(
 
 function validSessionTime(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_RUNTIME_SESSION_TIME_MS;
+}
+
+function captureChatPacingSettings(options: Record<string, unknown>): ChatPacingSettings {
+  return Object.freeze({
+    baseDelayMs: capturePacingSetting(options.baseDelayMs, "baseDelayMs", DEFAULT_CHAT_PACING_SETTINGS.baseDelayMs),
+    delayPerWordMs: capturePacingSetting(options.delayPerWordMs, "delayPerWordMs", DEFAULT_CHAT_PACING_SETTINGS.delayPerWordMs),
+    delayPerCharacterMs: capturePacingSetting(options.delayPerCharacterMs, "delayPerCharacterMs", DEFAULT_CHAT_PACING_SETTINGS.delayPerCharacterMs),
+  });
+}
+
+function capturePacingSetting(value: unknown, name: string, defaultValue: number): number {
+  if (value === undefined) return defaultValue;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative safe integer number of milliseconds.`);
+  }
+  return value;
+}
+
+function cloneChatPacingSettings(settings: ChatPacingSettings): ChatPacingSettings {
+  return Object.freeze({
+    baseDelayMs: settings.baseDelayMs,
+    delayPerWordMs: settings.delayPerWordMs,
+    delayPerCharacterMs: settings.delayPerCharacterMs,
+  });
+}
+
+function validChatPacingSettings(value: unknown): value is ChatPacingSettings {
+  return isPlainRecord(value) &&
+    hasExactKeys(value, ["baseDelayMs", "delayPerWordMs", "delayPerCharacterMs"]) &&
+    validPacingSetting(value.baseDelayMs) &&
+    validPacingSetting(value.delayPerWordMs) &&
+    validPacingSetting(value.delayPerCharacterMs);
+}
+
+function validPacingSetting(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function positiveSafeInteger(value: unknown): value is number {
