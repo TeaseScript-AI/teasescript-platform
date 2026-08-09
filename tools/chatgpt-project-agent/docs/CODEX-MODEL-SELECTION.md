@@ -220,18 +220,18 @@ Adjust investigation depth independently by reasoning level:
 - **Medium:** provide direction and allow normal repository investigation.
 - **High:** identify unresolved questions, trade-offs, or diagnostic risks instead of adding procedural steps.
 
-Use one coherent Codex execution phase by default only when the complete required reading, implementation, verification,
-diff review, publication, and assigned pull-request maintenance are expected to fit comfortably. Otherwise split the
-work before execution into the smallest coherent, independently verifiable phases. Before splitting, trace immediate
-execution dependencies. Each phase must be dependency-closed for the behavior it introduces: do not defer a required
-transition, state, serialization, validation, or other path that ordinary successful execution can immediately reach.
-Order phases by dependency, from prerequisites through reachable behavior, before hardening or finalization. Each
-implementation phase should normally end in a durable repository state, and a dependent next phase should start from
-the verified resulting head or another explicitly recorded handoff state. Split also when different capability is
-genuinely required, an owner decision must occur between phases, or independently reviewable work benefits from
-separation. Do not use a stronger model or higher reasoning merely to compensate for excessive execution volume.
-Internal milestones remain useful when they validate a risky intermediate choice, but they are not separate approval
-gates or automatically separate prompts, branches, pull requests, contexts, or model selections.
+Prefer the largest coherent, dependency-closed work package within the assigned scope that Codex can reliably complete
+and verify in one execution.
+Extra prompts may repeat required reading, context reacquisition, handoff reconstruction, and setup or verification
+work; combine adjacent milestones when they share context and remain reliably executable. Split only when execution
+volume, an intervening owner decision or capability change, independent review value, or dependency/ownership safety
+materially favors separation. Before splitting, trace immediate dependencies. A behavior-changing phase must include
+every transition, state, serialization, validation, or other path
+ordinary successful execution can immediately reach; behavior-neutral prerequisites may stand alone. Each phase should
+normally end in a durable repository state, with dependent work starting from its verified head or explicit handoff
+state.
+Do not use a stronger model or higher reasoning to compensate for excessive execution volume. Internal milestones are
+planning structure, not automatic prompt, branch, pull-request, context, or model-selection boundaries.
 
 Remove repetition and narrative filler, not meaning. Review prompts and phase plans for recurring token/context cost;
 remove detail that does not guide current execution, especially duplicated facts or unrelated future-phase material.
