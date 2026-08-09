@@ -48,7 +48,7 @@ export function validateCapturedInstructionPlan(
     errors.push(planError("TSC001", "Unsupported instruction-plan version.", "$.version"));
   }
   validateSpan(value.sourceSpan, "$.sourceSpan", errors);
-  const temporaryCount = nonNegativeInteger(value.temporaryCount)
+  const temporaryCount = nonNegativeSafeInteger(value.temporaryCount)
     ? value.temporaryCount
     : -1;
   if (temporaryCount < 0) {
@@ -176,7 +176,7 @@ function validateLoopStructure(
     const instruction = instructions[index];
     if (!isRecord(instruction) || instruction.kind !== "loopStart") continue;
     if (
-      !Number.isInteger(instruction.loopId) ||
+      !positiveSafeInteger(instruction.loopId) ||
       !Number.isInteger(instruction.target) ||
       !Number.isInteger(instruction.continueTarget)
     ) continue;
@@ -203,7 +203,7 @@ function validateLoopStructure(
   for (let index = 0; index < instructions.length; index += 1) {
     const instruction = instructions[index];
     if (!isRecord(instruction) || instruction.kind !== "loopControl") continue;
-    if (!Number.isInteger(instruction.loopId) || !Number.isInteger(instruction.target)) continue;
+    if (!positiveSafeInteger(instruction.loopId) || !Number.isInteger(instruction.target)) continue;
     const start = starts.get(instruction.loopId as number);
     if (start === undefined) {
       errors.push(planError("TSC002", "Loop control refers to an unknown loop.", `$.instructions[${index}].loopId`));
@@ -293,7 +293,7 @@ function validateInstruction(
       if (!["repeat", "for", "while"].includes(String(value.loopKind))) {
         errors.push(planError("TSC002", "Invalid loop kind.", `${path}.loopKind`));
       }
-      requirePositiveInteger(value.loopId, `${path}.loopId`, errors);
+      requirePositiveSafeInteger(value.loopId, `${path}.loopId`, errors);
       if (value.loopKind === "for") requireString(value.variable, `${path}.variable`, errors);
       validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
       validateJumpTarget(value.continueTarget, `${path}.continueTarget`, instructionCount, errors);
@@ -303,7 +303,7 @@ function validateInstruction(
       if (!["break", "continue"].includes(String(value.action))) {
         errors.push(planError("TSC002", "Invalid loop-control action.", `${path}.action`));
       }
-      requirePositiveInteger(value.loopId, `${path}.loopId`, errors);
+      requirePositiveSafeInteger(value.loopId, `${path}.loopId`, errors);
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
       return;
     case "storeTemporary":
@@ -1719,7 +1719,7 @@ function validateTemporaryId(
   temporaryCount: number,
   errors: PlanValidationError[],
 ): void {
-  if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > temporaryCount) {
+  if (!positiveSafeInteger(value) || value > temporaryCount) {
     errors.push(planError("TSC002", "Temporary reference is outside the plan's temporary range.", path));
   }
 }
@@ -1750,9 +1750,9 @@ function validateSpan(value: unknown, path: string, errors: PlanValidationError[
 function validPosition(value: unknown): boolean {
   return (
     isRecord(value) &&
-    nonNegativeInteger(value.offset) &&
-    nonNegativeInteger(value.line) &&
-    nonNegativeInteger(value.column)
+    nonNegativeSafeInteger(value.offset) &&
+    nonNegativeSafeInteger(value.line) &&
+    nonNegativeSafeInteger(value.column)
   );
 }
 
@@ -1780,6 +1780,16 @@ function requirePositiveInteger(
 ): void {
   if (!Number.isInteger(value) || (value as number) < 1) {
     errors.push(planError("TSC002", "Expected a positive integer.", path));
+  }
+}
+
+function requirePositiveSafeInteger(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!positiveSafeInteger(value)) {
+    errors.push(planError("TSC002", "Expected a positive safe integer.", path));
   }
 }
 
@@ -1815,6 +1825,10 @@ function validInstructionBoundary(
 
 function nonNegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function positiveSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 1;
 }
 
 function nonNegativeInteger(value: unknown): value is number {
