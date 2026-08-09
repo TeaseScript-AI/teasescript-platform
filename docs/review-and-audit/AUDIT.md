@@ -161,9 +161,10 @@ Select the smallest evidence set that convincingly proves each obligation, but n
 incomplete coverage.
 Audit obligations and relevant risk lenses are mandatory within the declared scope; particular evidence techniques
 are not rituals. Use mutation probes, fuzzing, history reconstruction, maximum-scale cases, or other expensive
-techniques when they materially reduce uncertainty. When a material risk makes such a technique plausibly useful, use
-it or record the inspected reason or equivalent evidence that made it unnecessary; update the plan when that need
-emerges. Avoid duplicate equivalent checks and permanent audit machinery for a bounded problem.
+techniques when they are reasonably expected to materially reduce unresolved uncertainty. If a material risk makes such
+an expensive technique a credible way to do that, use it or record the inspected reason or equivalent evidence that
+closes the uncertainty; update the plan when that need emerges. Avoid duplicate equivalent checks and permanent audit
+machinery for a bounded problem.
 
 Classify actionable findings with the existing project finding classes. A finding must identify
 the violated requirement, supported path, real boundary, or demonstrated maintenance
