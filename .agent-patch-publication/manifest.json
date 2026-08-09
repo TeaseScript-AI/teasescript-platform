@@ -1,0 +1,21 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "agent/issue-288-batch-b-core-limits",
+  "expectedBaseSha": "830a49346052b353a849b2e716ecaddd2ff0d4f8",
+  "expectedResultTreeSha": "a84e4db7578a38eeb2e22a13f4742adb22f9ff48",
+  "patchSizeBytes": 14307,
+  "patchSha256": "ec5285f31bbbd9cbe69d4c34986796e38fae95c80490c3ce7dad79a4afa0de5f",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0002",
+      "sizeBytes": 11104,
+      "sha256": "ddbda345efb2e92898b5ac32f3cf432e45e312aa0e3d2e9f9bc41bcf69c1f2eb"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0002",
+      "sizeBytes": 3203,
+      "sha256": "9d8a86044d92fc88c9bbc8f4966f4963c6523c77a86889a293b87361eb41337d"
+    }
+  ],
+  "commitMessage": "Synchronize parser limit documentation"
+}

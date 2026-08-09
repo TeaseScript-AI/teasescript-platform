@@ -1,0 +1,49 @@
+diff --git a/docs/TEASESCRIPT.md b/docs/TEASESCRIPT.md
+index 83e65c35fb382e1ce2a4f5eda28d408594abb955..a2b968ce64ff4c741c7f40631470f80b9c3de2d2 100644
+--- a/docs/TEASESCRIPT.md
++++ b/docs/TEASESCRIPT.md
+@@ -186,10 +186,10 @@ The current implemented `say` and `say as` paths remain unchanged until a tested
+ 
+ ## Diagnostics
+ 
+-Parser and semantic diagnostics are deterministic source-associated data. Ordinary syntax failures return through this
+-diagnostic model. TeaseScript does not define an authored-syntax nesting maximum; host JavaScript stack exhaustion on
+-pathological input remains environment-specific rather than a language-capacity contract. Diagnostic evidence is
+-tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
++Parser and semantic diagnostics are deterministic source-associated data. Ordinary syntax failures use this model.
++TeaseScript defines no authored-syntax nesting maximum; host JavaScript stack exhaustion is an environment-specific
++implementation constraint, not language capacity. Current compiler handling is defined in [`RUNTIME.md`](RUNTIME.md),
++and diagnostic measurements live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
+ 
+ ## Protected names
+ 
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index 80823e3cc6bda0a592af753663ff3e67420ff47a..86f4236dd17eb2fe61b9fa57262040feebfec1b4 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -470,7 +470,7 @@ Tests and benchmarks should use:
+ 
+ ## Parser recursion safety
+ 
+-Node 24 regression coverage includes valid nesting beyond the former parser guard for parentheses, unary and `not`
+-chains, collection literals, templates, and blocks, plus structured diagnostics for malformed nesting. These cases do
+-not define an authored-syntax capacity: host-stack observations are diagnostic evidence in
+-[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md), not CI thresholds.
++Regression coverage verifies valid nesting beyond the removed parser guard, malformed-input diagnostics, and narrow
++`compileSource(...)` translation of recognized parser host-stack exhaustion while preserving the cause and leaving
++unrelated exceptions unchanged. Host-stack measurements in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) are diagnostic
++evidence, not CI thresholds or capacity.
+diff --git a/docs/decisions/0019-resource-limit-governance.md b/docs/decisions/0019-resource-limit-governance.md
+index 8bb3e2cd062d89e84937319f23b1e38030c07bdd..7451f21fa84746387969f1486bbb4f8a9c4baf23 100644
+--- a/docs/decisions/0019-resource-limit-governance.md
++++ b/docs/decisions/0019-resource-limit-governance.md
+@@ -67,6 +67,9 @@ production bound must justify both its need and its selected boundary.
+ 9. Every new production limit or material change to an existing limit is surfaced
+    to the Owner even when no explicit Owner approval is required by the change
+    triggers below.
++10. Incidental host resource exhaustion is an implementation or platform constraint, not TeaseScript capacity. A public
++    compiler or tooling boundary may add a developer-facing explanation only when it reliably identifies the specific
++    host failure, preserves the original cause, and does not remap broad JavaScript exception classes.
+ 
+ ## Terminology
+ 

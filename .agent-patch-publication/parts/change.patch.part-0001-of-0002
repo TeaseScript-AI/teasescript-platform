@@ -1,0 +1,91 @@
+diff --git a/docs/RESOURCE-LIMITS.md b/docs/RESOURCE-LIMITS.md
+index e32d7c0a68759462846710cc8432b2c717e63169..dd11aa4984f83e0d0d0455113b525993859e1941 100644
+--- a/docs/RESOURCE-LIMITS.md
++++ b/docs/RESOURCE-LIMITS.md
+@@ -25,26 +25,26 @@ verify the predicate/domain itself.
+ 
+ ## Diagnostic parser-stack evidence
+ 
+-On 2026-08-09 UTC, revision `9968bb6e4dfdc3523681cb36e6af7e300ad57341` was measured locally with only the
+-removed parser nesting guard bypassed. Fresh `node` child processes called `parse(...)` on valid declarations (or valid
+-`if` blocks); exponential search followed by binary narrowing and a boundary recheck found the following observations:
+-
+-| Form | Passing / first failing depth | Source bytes at pass / fail | Failure |
+-|---|---:|---:|---|
+-| parentheses | 537 / 538 | 1,087 / 1,089 | native stack-overflow `SyntaxError` |
+-| `not` chain | 4,280 / 4,281 | 17,136 / 17,140 | `RangeError: Maximum call stack size exceeded` |
+-| unary `-` chain | 4,277 / 4,278 | 4,290 / 4,291 | native stack-overflow `SyntaxError` |
+-| lists | 501 / 502 | 1,015 / 1,017 | native stack-overflow `SyntaxError` |
+-| objects | 525 / 526 | 5,788 / 5,799 | native stack-overflow `SyntaxError` |
+-| sets | 501 / 502 | 2,518 / 2,523 | native stack-overflow `SyntaxError` |
+-| template interpolation | 520 / 521 | 5,733 / 5,744 | native stack-overflow `SyntaxError` |
+-| nested `if` blocks | 1,644 / 1,645 | 19,733 / 19,745 | `RangeError: Maximum call stack size exceeded` |
+-
+-Environment: Node `v24.18.0`, V8 `13.6.233.17-node.50`, Linux `7.0.14-4-pve` x86_64, AMD Ryzen 7 5825U, 8.0 GiB RAM
+-(7.2 GiB available), no relevant Node flags. These are environment-specific observations, not TeaseScript limits,
+-official capacity, safety margins, or justification for a replacement production bound. Different browser, Node/V8
+-release, architecture, stack configuration, or syntax form can fail differently. They are retained only to diagnose
+-the removed guard's native-stack risk and compare future implementation work.
++On 2026-08-09 UTC, revision `830a49346052b353a849b2e716ecaddd2ff0d4f8` was measured on Linux `7.0.14-4-pve`
++x86_64, AMD Ryzen 7 5825U, 8 GiB RAM, with no relevant Node flags. Fresh Node 24.18.0 / V8 13.6.233.17-node.50
++child processes parsed valid source; each form passed at depth 96 before exponential search, binary narrowing, and
++boundary rechecks found:
++
++| Form | Passing / first failing depth | Failure |
++|---|---:|---|
++| parentheses | 537 / 538 | `SE` |
++| `not` chain | 4,280 / 4,281 | `RE` (`#parseUnaryArithmetic`) |
++| unary `-` chain | 4,276 / 4,277 | `SE` |
++| lists / sets | 501 / 502 | `SE` |
++| objects | 525 / 526 | `SE` |
++| template interpolation | 520 / 521 | `SE` |
++| nested `if` blocks | 1,644 / 1,645 | `RE` (`#parseStatement`) |
++
++`SE` is `SyntaxError: Invalid regular expression: /[.eE]/u: Stack overflow`, with `RegExp.test` then `#parsePrimary`;
++`RE` is `RangeError: Maximum call stack size exceeded`. Node 26.5.0 / V8 14.6.202.34-node.24 reproduced both signatures
++on the same host; thresholds matched except unary `-` passed/failed at 4,277 / 4,278, and the `not` failure frame was
++`#parsePostfix`. These observations support narrow host-stack recognition and future comparison only; they are not
++TeaseScript limits, supported capacity, CI thresholds, safety margins, or evidence for a replacement bound.
+ 
+ ## Proven representation and state invariants
+ 
+@@ -52,6 +52,9 @@ the removed guard's native-stack risk and compare future implementation work.
+ |---|---|---|---|---|---|---|
+ | `capture.array-index-domain` | `src/external-data-limits.ts`, `src/ast-validation.ts`; stable array capture | Safe-integer length/indexes; indexes `< 0xffff_ffff` and `< length`; direct-AST arrays are dense own-index arrays. | representation invariant | `proven` | JS array representation + ADR 0019; version/ADR review only if representation changes | issue #87 plus hostile/proxy regressions establish the index/density relation. Separate from the work-coupled preflights below. |
+ | `plan.instruction-address-domain` | `src/plan/validation.ts`; plan validation | Safe-integer instruction boundaries within the plan; function targets must resolve to validated definitions. | representation invariant | `proven` | ADRs 0015/0019; Version review if serialized domain changes | Range-validation regressions; no independent instruction-count capacity claim. |
++| `ast.source-position-domain` | `src/source.ts`, direct-AST and plan validation; source positions | Offset, line, and column are non-negative safe integers. | representation invariant | `proven` | ADR 0019 + [`RUNTIME.md`](RUNTIME.md); Version review if the serialized domain changes | Source-helper, direct-AST, plan, and runtime-snapshot regressions enforce one exact-integer domain; no source-capacity claim. |
++| `plan.temporary-id-domain` | plan validation and persisted runtime temporaries | `temporaryCount` is a non-negative safe integer; temporary IDs are positive safe integers within that count. | representation invariant | `proven` | ADRs 0015/0019 + [`RUNTIME.md`](RUNTIME.md); Version review if the serialized domain changes | Plan-range and runtime-snapshot regressions align the plan and persisted temporary domains. |
++| `plan.loop-id-domain` | plan validation and persisted loop frames | Loop IDs are positive safe integers. | representation invariant | `proven` | ADRs 0015/0019 + [`RUNTIME.md`](RUNTIME.md); Version review if the serialized domain changes | Plan-range, fresh-runtime, and checkpoint-restore regressions align the plan and persisted loop domains. |
+ | `runtime.session-time-domain` | `src/runtime/state.ts`, `src/runtime/actions/delay.ts`; persisted time/deadlines | Finite values in `0..Number.MAX_SAFE_INTEGER`; integer-valued persisted time uses that precise domain. | representation invariant | `proven` | ADR 0016; Version review if serialized domain changes | Overflow/atomicity/checkpoint regressions protect precise time arithmetic. |
+ | `runtime.rng-seed-state-domain` | `src/runtime/random.ts`, `src/runtime/state.ts`; fresh `seed` option and persisted RNG state | Non-zero unsigned 32-bit integer `1..0xffffffff`. | representation invariant | `proven` | ADR 0015 + [`RUNTIME.md`](RUNTIME.md); Version/compatibility review if algorithm or serialized domain changes | `FreshRuntimeOptions.seed` is caller-configurable; omitted seed uses `DEFAULT_PLAYGROUND_SEED = 0x6d2b79f5`. Creation and snapshot validation enforce the same non-zero uint32 domain, preserving deterministic `xorshift32-v1` state. |
+ | `runtime.identity-space` | runtime state/engine/support; persisted IDs and event sequences | Positive/non-negative safe integers as defined per field, with preflight before exhaustion. | representation invariant | `proven` | ADRs 0015/0016/0019; Version review if serialized domain changes | Overflow/atomicity regressions prevent ID/sequence reuse. |
+@@ -89,14 +92,6 @@ These are development-tool behavior, not TeaseScript or engine capacity. `suspic
+ | `playground.port-domain` | `playground/server.ts`; configured local listener port | Integer `1..65,535` through option or `PORT`. | transport, storage, or tooling guard | `provisional` | Network port representation + ADR 0019; tooling compatibility review for configuration changes | The configured listener requires an explicit non-zero TCP port number; `65,535` is the protocol port maximum, while `0` requests OS ephemeral allocation rather than naming a port. The local rationale is concrete; focused boundary-test evidence remains incomplete. |
+ | `playground.instruction-quantum` | workspace controller; local run automation | `MAX_WORKSPACE_INSTRUCTION_BUDGET = 10,000` runtime instructions. | execution quantum | `suspicious` | ADR 0019; tooling implementation; ADR 0015 still governs runtime exhaustion | PR #86 reused the runtime number without local responsiveness/workload evidence. Decouple/remove or derive from accepted tooling behavior. |
+ 
+-## Representation/domain defects needing focused repair
+-
+-| ID | Source / boundary | Current | Category | Status | Authority / change | Evidence / repair |
+-|---|---|---|---|---|---|---|
+-| `ast.source-position-domain` | `src/source.ts` vs `src/ast-validation.ts`; exported source positions/direct-AST capture | Helper accepts non-negative JS integers; direct-AST capture requires non-negative safe integers. | representation invariant | `suspicious` | ADR 0019; compatibility/Owner review if public rejection policy changes | Align or explicitly define the domain and test both entry paths; no replacement maximum selected here. |
+-| `plan.temporary-id-domain` | plan validation vs runtime snapshot temporaries | Plan count/IDs allow JS integers (`1..temporaryCount`); persisted temporary IDs require positive safe integers. | representation invariant | `suspicious` | ADRs 0015/0019; Version review if serialized domain changes | Align the invariant; prove plan + snapshot/checkpoint JSON/restore/resume for the chosen domain. |
+-| `plan.loop-id-domain` | plan validation vs persisted loop frames | Plan loop IDs allow positive JS integers; persisted loop IDs require positive safe integers. | representation invariant | `suspicious` | ADRs 0015/0019; Version review if serialized domain changes | Align the invariant; prove plan + snapshot/checkpoint JSON/restore/resume for the chosen domain. |
+-
+ ## Updating this registry
+ 
+ Update this file when implementation or evidence changes an entry. Do not preserve an unsupported value to keep the table
+diff --git a/docs/RUNTIME.md b/docs/RUNTIME.md
+index fa938dee22b69c9a13e082cd46ba5cc256ddfa5b..cb8940b912d0c8a85e98a19892e7671e65793bba 100644
+--- a/docs/RUNTIME.md
++++ b/docs/RUNTIME.md
+@@ -379,6 +379,10 @@ Blocking `wait` remains the first source-to-runtime slice. The generic interacti
+ 
+ The result separates parser and semantic diagnostics and returns `plan: null` when compilation fails. A returned plan is checked at the snapshot/runtime boundary or may be checked explicitly with `validateInstructionPlan(...)` before use.
+ 
++`compileSource(...)` translates only recognized parser-origin host JavaScript stack exhaustion into
++`CompilerHostStackExhaustionError`, preserving the native error as `cause`; other exceptions propagate unchanged. This
++is environment-specific failure handling, not a TeaseScript nesting limit.
++
+ `compileSource(...)` rejects numeric literals such as `1e999` and `-1e999` with error diagnostic `TSC001`. It does not return an instruction plan for those inputs. Large finite values such as `1e308` remain valid. The normal compilation route therefore cannot return a plan containing literal `Infinity`, `-Infinity`, or `NaN`, and instruction-plan validation independently rejects any non-finite number in plan data.
+ 
+ The `TSC001` check is implemented as shared AST-level validation. `compileSource(...)` includes these diagnostics in its parser-diagnostic boundary, while the lower-level `parse(...)` result may still expose the raw JavaScript number produced while parsing. Callers must not treat parsing alone as successful compilation.
