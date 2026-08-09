@@ -542,10 +542,6 @@ class Parser {
   }
 
   #parseIfStatement(): IfStatement | null {
-    return this.#parseIfStatementBody();
-  }
-
-  #parseIfStatementBody(): IfStatement | null {
     const keyword = this.#advance();
     const condition = this.#parseRequiredExpression();
     if (condition === null) {
@@ -790,10 +786,6 @@ class Parser {
   }
 
   #parseBlock(): Block | null {
-    return this.#parseBlockBody();
-  }
-
-  #parseBlockBody(): Block | null {
     if (!this.#match(TokenKind.LeftBrace)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedBlock,
@@ -940,11 +932,6 @@ class Parser {
   }
 
   #parseNot(): Expression | null {
-    if (!this.#check(TokenKind.KeywordNot)) return this.#parseComparison();
-    return this.#parseNotExpression();
-  }
-
-  #parseNotExpression(): Expression | null {
     if (this.#match(TokenKind.KeywordNot)) {
       const operator = this.#previous();
       this.#skipContinuationNewlines();
@@ -1097,13 +1084,6 @@ class Parser {
   }
 
   #parseUnaryArithmetic(): Expression | null {
-    if (!this.#check(TokenKind.Plus) && !this.#check(TokenKind.Minus)) {
-      return this.#parsePostfix();
-    }
-    return this.#parseUnaryArithmeticExpression();
-  }
-
-  #parseUnaryArithmeticExpression(): Expression | null {
     if (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus)) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
@@ -1482,12 +1462,6 @@ class Parser {
   }
 
   #parseParenthesized(start: Token): ParenthesizedExpression | null {
-    return this.#parseParenthesizedExpression(start);
-  }
-
-  #parseParenthesizedExpression(
-    start: Token,
-  ): ParenthesizedExpression | null {
     this.#skipNewlines();
     const expression = this.#parseRequiredExpression();
     this.#skipNewlines();
@@ -1507,11 +1481,7 @@ class Parser {
     });
   }
 
-  #parseListLiteral(start: Token): Expression | null {
-    return this.#parseListLiteralBody(start);
-  }
-
-  #parseListLiteralBody(start: Token): Expression {
+  #parseListLiteral(start: Token): Expression {
     const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
     const end = this.#consumeClosingDelimiter(
       TokenKind.RightBracket,
@@ -1524,11 +1494,7 @@ class Parser {
     });
   }
 
-  #parseSetLiteral(start: Token): SetLiteral | null {
-    return this.#parseSetLiteralBody(start);
-  }
-
-  #parseSetLiteralBody(start: Token): SetLiteral {
+  #parseSetLiteral(start: Token): SetLiteral {
     const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
     const end = this.#consumeClosingDelimiter(
       TokenKind.RightBracket,
@@ -1565,11 +1531,7 @@ class Parser {
     return elements;
   }
 
-  #parseObjectLiteral(start: Token): ObjectLiteral | null {
-    return this.#parseObjectLiteralBody(start);
-  }
-
-  #parseObjectLiteralBody(start: Token): ObjectLiteral {
+  #parseObjectLiteral(start: Token): ObjectLiteral {
     const properties: ObjectProperty[] = [];
     this.#skipNewlines();
     while (
@@ -1627,10 +1589,6 @@ class Parser {
   }
 
   #parseTemplateLiteral(start: Token): TemplateLiteral | null {
-    return this.#parseTemplateLiteralBody(start);
-  }
-
-  #parseTemplateLiteralBody(start: Token): TemplateLiteral | null {
     const parts: TemplatePart[] = [];
     let valid = true;
     while (

@@ -37,6 +37,22 @@ test("reports parser and semantic source diagnostics through the package root", 
   );
 });
 
+test("propagates unexpected parser exceptions through the public compiler boundary", () => {
+  const error = new Error("unexpected parser failure");
+  const original = RegExp.prototype.test;
+  RegExp.prototype.test = () => {
+    throw error;
+  };
+  try {
+    assert.throws(
+      () => compileSource("let value = 1"),
+      (received: unknown) => received === error,
+    );
+  } finally {
+    RegExp.prototype.test = original;
+  }
+});
+
 test("executes source output, speaker provenance, collection copies, and control flow", () => {
   const plan = compiled([
     "speaker vera {}",
