@@ -66,6 +66,7 @@ import {
   type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import {
+  cloneCapturedRuntimeSnapshot,
   type RuntimeBindingSnapshot,
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
@@ -444,64 +445,7 @@ function executePlannedInstruction(
       returnFromFunction(plan, snapshot, null, instruction.span);
       return;
     case "say": {
-      const prepared = snapshot.preparedSayOutput;
-      if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) {
-        validatePacingCreation(snapshot, instruction.span, prepared.durationMs, 2);
-        snapshot.preparedSayOutput = null;
-        emitSay(snapshot, events, instruction.span, prepared.speaker, prepared.text);
-        establishPacingAfterSay(
-          snapshot,
-          events,
-          instruction.span,
-          prepared.durationMs,
-          prepared.skippable,
-        );
-        snapshot.nextInstruction = prepared.continuationInstruction;
-        return;
-      }
-      const speaker =
-        instruction.speaker !== null
-          ? evaluator.speakerByName(instruction.speaker, instruction.span)
-          : snapshot.defaultSpeaker === null
-            ? null
-            : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
-      snapshot.contextualSpeaker = speaker?.id ?? null;
-      const text = evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span);
-      const pacingValue = typeof instruction.pacing === "object"
-        ? evaluator.evaluate(instruction.pacing)
-        : instruction.pacing;
-      const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
-      const durationMs = sayDurationMs(instruction, text, pacingValue, snapshot);
-      const skippable = effectiveSaySkippable(instruction.skipPolicy, speaker, instruction.span);
-      const activeGate = snapshot.backgroundActions.find(
-        (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
-      );
-      if (activeGate !== undefined) {
-        if (durationMs === 0) {
-          assertEventSequenceCapacity(snapshot, 2, instruction.span);
-          settleBackgroundPacingGate(plan, snapshot, activeGate, "supersededByInstantOutput", events);
-          emitSay(snapshot, events, instruction.span, output, text);
-          advance(snapshot);
-          return;
-        }
-        const preparedOutput: RuntimePreparedSayOutputSnapshot = Object.freeze({
-          owningInstruction: snapshot.nextInstruction,
-          continuationInstruction: snapshot.nextInstruction + 1,
-          speaker: output === null ? null : { ...output },
-          text,
-          durationMs,
-          skippable,
-        });
-        const index = snapshot.backgroundActions.indexOf(activeGate);
-        snapshot.backgroundActions.splice(index, 1);
-        snapshot.foregroundAction = Object.freeze({ ...activeGate, preparedOutput });
-        snapshot.status = "waiting";
-        return;
-      }
-      if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs, 2);
-      emitSay(snapshot, events, instruction.span, output, text);
-      if (durationMs > 0) establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
-      advance(snapshot);
+      executeSayAtomically(plan, instruction, snapshot, evaluator, events);
       return;
     }
     case "wait": {
@@ -1166,6 +1110,13 @@ class Evaluator {
     builtins.chance = (call) => this.#chanceBuiltin(call);
     builtins.randomInteger = (call) => this.#randomIntegerBuiltin(call);
     this.#builtins = Object.freeze(builtins);
+  }
+
+  public forSnapshot(
+    snapshot: RuntimeSnapshot,
+    events: InterpreterEvent[],
+  ): Evaluator {
+    return new Evaluator(snapshot, this.capabilities, events);
   }
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
@@ -2546,6 +2497,96 @@ function currentFrame(snapshot: RuntimeSnapshot) {
 
 function advance(snapshot: RuntimeSnapshot): void {
   snapshot.nextInstruction += 1;
+}
+
+/**
+ * A `say` instruction evaluates visible text, pacing, and speaker output before
+ * it can know whether its complete transition is representable. Evaluate that
+ * work against a private canonical-state clone so a rejected pacing value cannot
+ * retain RNG, warning, event, or action changes.
+ */
+function executeSayAtomically(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "say" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const stagedSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const stagedEvents: InterpreterEvent[] = [];
+  const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
+
+  executeSay(plan, instruction, stagedSnapshot, stagedEvaluator, stagedEvents);
+  Object.assign(snapshot, stagedSnapshot);
+  events.push(...stagedEvents);
+}
+
+function executeSay(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "say" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const prepared = snapshot.preparedSayOutput;
+  if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) {
+    validatePacingCreation(snapshot, instruction.span, prepared.durationMs, 2);
+    snapshot.preparedSayOutput = null;
+    emitSay(snapshot, events, instruction.span, prepared.speaker, prepared.text);
+    establishPacingAfterSay(
+      snapshot,
+      events,
+      instruction.span,
+      prepared.durationMs,
+      prepared.skippable,
+    );
+    snapshot.nextInstruction = prepared.continuationInstruction;
+    return;
+  }
+
+  const speaker =
+    instruction.speaker !== null
+      ? evaluator.speakerByName(instruction.speaker, instruction.span)
+      : snapshot.defaultSpeaker === null
+        ? null
+        : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
+  snapshot.contextualSpeaker = speaker?.id ?? null;
+  const text = evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span);
+  const pacingValue = typeof instruction.pacing === "object"
+    ? evaluator.evaluate(instruction.pacing)
+    : instruction.pacing;
+  const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
+  const durationMs = sayDurationMs(instruction, text, pacingValue, snapshot);
+  const skippable = effectiveSaySkippable(instruction.skipPolicy, speaker, instruction.span);
+  const activeGate = snapshot.backgroundActions.find(
+    (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
+  );
+  if (activeGate !== undefined) {
+    if (durationMs === 0) {
+      assertEventSequenceCapacity(snapshot, 2, instruction.span);
+      settleBackgroundPacingGate(plan, snapshot, activeGate, "supersededByInstantOutput", events);
+      emitSay(snapshot, events, instruction.span, output, text);
+      advance(snapshot);
+      return;
+    }
+    const preparedOutput: RuntimePreparedSayOutputSnapshot = Object.freeze({
+      owningInstruction: snapshot.nextInstruction,
+      continuationInstruction: snapshot.nextInstruction + 1,
+      speaker: output === null ? null : { ...output },
+      text,
+      durationMs,
+      skippable,
+    });
+    const index = snapshot.backgroundActions.indexOf(activeGate);
+    snapshot.backgroundActions.splice(index, 1);
+    snapshot.foregroundAction = Object.freeze({ ...activeGate, preparedOutput });
+    snapshot.status = "waiting";
+    return;
+  }
+  if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs, 2);
+  emitSay(snapshot, events, instruction.span, output, text);
+  if (durationMs > 0) establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
+  advance(snapshot);
 }
 
 function sayDurationMs(

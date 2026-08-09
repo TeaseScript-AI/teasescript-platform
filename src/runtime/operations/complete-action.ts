@@ -11,6 +11,7 @@ import { isValidSessionTime } from "../actions/delay.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { observeTime } from "./observe-time.js";
+import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import {
   RuntimeDataError,
   assertEventSequenceCapacity,
@@ -32,7 +33,12 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
   const value = external.value;
   if (!positiveSafeInteger(value.actionId)) return pendingResult(current, [], { kind: "invalidPayload", message: "Action completion actionId must be a positive safe integer." });
   const actionId = value.actionId;
-  const active = current.foregroundAction?.actionId === actionId ? current.foregroundAction : null;
+  const active = current.foregroundAction?.actionId === actionId
+    ? current.foregroundAction
+    : current.backgroundActions.find(
+      (action): action is RuntimeChatPacingGateActionSnapshot =>
+        action.kind === "chatPacingGate" && action.actionId === actionId,
+    ) ?? null;
   if (active === null) {
     if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: cloneSettlement(current.lastSettlement) });
     return pendingResult(current, [], actionId < current.nextActionId ? { kind: "staleAction", actionId } : { kind: "unknownAction", actionId });
@@ -45,7 +51,14 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
   if (effectiveNow < active.deadlineMs) return pendingResult(current, [], { kind: "notDue", actionId, currentSessionTimeMs: current.currentSessionTimeMs, deadlineMs: active.deadlineMs });
   const observed = observeTime(captured.plan, current, effectiveNow);
   if (observed.outcome.kind !== "observed" || observed.outcome.completion === null) throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
-  return Object.freeze({ ...observed, outcome: { kind: "completed" as const, settlement: observed.outcome.completion } });
+  const requestedCompletion = observed.events.find(
+    (event): event is ActionCompletedEvent =>
+      event.kind === "actionCompleted" && event.settlement.actionId === actionId,
+  );
+  if (requestedCompletion === undefined) {
+    throw new RuntimeDataError("TSR101", "Due delay completion did not settle the requested action.");
+  }
+  return Object.freeze({ ...observed, outcome: { kind: "completed" as const, settlement: requestedCompletion.settlement } });
 }
 
 function completePacingGate(
@@ -59,6 +72,11 @@ function completePacingGate(
   }
   if (!action.skippable) {
     return pendingResult(current, [], { kind: "invalidPayload", message: "This pacing gate is not skippable." });
+  }
+  if (current.backgroundActions.includes(action)) {
+    const events: InterpreterEvent[] = [];
+    const settlement = settleBackgroundPacingGate(plan, current, action, "skipped", events);
+    return pendingResult(current, events, { kind: "completed", settlement });
   }
   assertEventSequenceCapacity(current, 1);
   const completionEventSequence = takeSequence(current);

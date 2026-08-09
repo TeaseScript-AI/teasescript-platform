@@ -123,6 +123,32 @@ test("parses say, say as, and exit statements", () => {
   ]);
 });
 
+test("parses say pacing and skip syntax with pacing spans", () => {
+  const source = 'say as vera unskippable "Read this", 1.5\nsay "Now", instant';
+  const result = parse(source);
+  const first = result.program.statements[0];
+  const second = result.program.statements[1];
+
+  assert.deepEqual(result.diagnostics, []);
+  assert.equal(first?.kind, "sayStatement");
+  assert.equal(first?.kind === "sayStatement" ? first.skipPolicy : null, "unskippable");
+  assert.deepEqual(
+    first?.kind === "sayStatement" && first.pacing !== null && first.pacing !== "instant"
+      ? first.pacing.span
+      : null,
+    sourceSpan(source, source.indexOf("1.5"), source.indexOf("1.5") + 3),
+  );
+  assert.deepEqual(first?.span, sourceSpan(source, 0, source.indexOf("\n")));
+  assert.equal(second?.kind === "sayStatement" ? second.pacing : null, "instant");
+  assert.deepEqual(second?.span, sourceSpan(source, source.indexOf("say \"Now\""), source.length));
+});
+
+test("rejects missing say pacing expressions", () => {
+  const result = parse('say "later",');
+  assert.equal(result.program.statements.length, 0);
+  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.message === "Expected a pacing value after ','."));
+});
+
 test("preserves template text and identifier interpolation", () => {
   const source = "say `Hello ${player}!`";
   const result = parse(source);

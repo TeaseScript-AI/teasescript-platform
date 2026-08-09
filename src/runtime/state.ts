@@ -2123,7 +2123,7 @@ function validPreparedSayOutput(value: unknown, snapshot: Record<string, unknown
     value.continuationInstruction !== value.owningInstruction + 1 || typeof value.text !== "string" ||
     typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs) || value.durationMs <= 0 ||
     typeof value.skippable !== "boolean") return false;
-  if (value.speaker !== null && (!isPlainRecord(value.speaker) || typeof value.speaker.identifier !== "string" || typeof value.speaker.displayName !== "string" || (value.speaker.color !== null && typeof value.speaker.color !== "string") || (value.speaker.font !== null && typeof value.speaker.font !== "string") || (value.speaker.avatar !== null && typeof value.speaker.avatar !== "string"))) return false;
+  if (value.speaker !== null && (!isPlainRecord(value.speaker) || !hasExactKeys(value.speaker, ["identifier", "displayName", "color", "font", "avatar"]) || typeof value.speaker.identifier !== "string" || typeof value.speaker.displayName !== "string" || (value.speaker.color !== null && typeof value.speaker.color !== "string") || (value.speaker.font !== null && typeof value.speaker.font !== "string") || (value.speaker.avatar !== null && typeof value.speaker.avatar !== "string"))) return false;
   if (plan !== undefined && plan.instructions[value.owningInstruction]?.kind !== "say") return false;
   return snapshot.nextInstruction === value.owningInstruction;
 }

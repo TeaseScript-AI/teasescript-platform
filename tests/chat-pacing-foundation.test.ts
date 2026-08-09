@@ -91,6 +91,46 @@ test("captured settings clone, validate, and checkpoint through JSON", () => {
   assert.deepEqual(restored.snapshot.chatPacingSettings, snapshot.chatPacingSettings);
 });
 
+test("snapshot and checkpoint reject malformed persisted chat pacing settings", () => {
+  const compiled = plan();
+  const checkpoint = JSON.parse(serializeCheckpoint(
+    createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)),
+  )) as { snapshot: { chatPacingSettings: Record<string, unknown> } };
+  checkpoint.snapshot.chatPacingSettings.baseDelayMs = -1;
+
+  assert.equal(validateRuntimeSnapshot(checkpoint.snapshot, compiled).valid, false);
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
+});
+
+test("captured pacing settings and representable pacing arithmetic retain the safe-integer boundary", () => {
+  const compiled = plan();
+  assert.equal(
+    createFreshRuntimeSnapshot(compiled, {
+      baseDelayMs: Number.MAX_SAFE_INTEGER,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    }).chatPacingSettings.baseDelayMs,
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(
+    calculateSmartPacingDurationMs("", settings({
+      baseDelayMs: Number.MAX_SAFE_INTEGER,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    })),
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(
+    calculateSmartPacingDurationMs("word", settings({
+      baseDelayMs: 0,
+      delayPerWordMs: Number.MAX_SAFE_INTEGER,
+      delayPerCharacterMs: 0,
+    })),
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(calculatePacingDeadlineMs(0, Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
+});
+
 test("snapshot and checkpoint reject their previous versions", () => {
   const compiled = plan();
   const snapshot = createFreshRuntimeSnapshot(compiled) as unknown as { version: number };
