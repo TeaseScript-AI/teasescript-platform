@@ -7,7 +7,7 @@ import {
   run,
   type RuntimeOperationResult,
 } from "../src/runtime/engine.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 test("selects an eligible visible list value exactly once", () => {
   const direct = runSource('say ["left", 2]', 0.75);
@@ -64,7 +64,7 @@ function runSource(
   let randomCalls = 0;
   const result = run(
     plan,
-    createFreshRuntimeSnapshot(plan),
+    createImmediatePacingRuntimeSnapshot(plan),
     {
       random: {
         next(): number {

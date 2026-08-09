@@ -29,6 +29,7 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("runtime snapshots survive JSON stringify and parse validation", () => {
@@ -42,7 +43,7 @@ test("runtime snapshots survive JSON stringify and parse validation", () => {
 
 test("restores a self-contained checkpoint from serialized JSON", () => {
   const compiled = plan('let score = 1\nsay `${score}`\nexit');
-  const first = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
+  const first = executeInstruction(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, first.snapshot)));
   const completed = run(restored.plan, restored.snapshot);
 
@@ -185,7 +186,7 @@ test("keeps same-named speakers in sibling lexical scopes as distinct state", ()
     "}",
     "exit",
   ].join("\n"));
-  const completed = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const completed = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
 
   assert.equal(completed.snapshot.status, "halted");
   assert.deepEqual(completed.snapshot.speakers.map((speaker) => speaker.id), [1, 2]);
@@ -203,7 +204,7 @@ test("continues fallback-warning deduplication and event sequences after restore
     'say "Second"',
     "exit",
   ].join("\n"));
-  const firstBoundary = stepToEvent(compiled, createFreshRuntimeSnapshot(compiled));
+  const firstBoundary = stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   assert.deepEqual(firstBoundary.events.map((event) => event.kind), [
     "developerWarning",
     "say",
@@ -226,7 +227,7 @@ test("preserves list.remove missing-value warnings across event boundaries and r
     "exit",
   ].join("\n");
   const compiled = plan(source);
-  const initial = createFreshRuntimeSnapshot(compiled);
+  const initial = createImmediatePacingRuntimeSnapshot(compiled);
   const uninterrupted = run(compiled, initial);
   const firstBoundary = stepToEvent(compiled, initial);
   const call = "values.remove(2)";
@@ -281,7 +282,7 @@ test("continues deterministic RNG state after restore", () => {
     "say values.random",
     "exit",
   ].join("\n"));
-  const initial = createFreshRuntimeSnapshot(compiled, { seed: 0x1234_5678 });
+  const initial = createImmediatePacingRuntimeSnapshot(compiled, { seed: 0x1234_5678 });
   const uninterrupted = run(compiled, initial);
   const first = stepToEvent(compiled, initial);
   const restored = deserializeCheckpoint(

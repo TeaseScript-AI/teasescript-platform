@@ -23,6 +23,7 @@ import {
   SerializableValueError,
   validateSerializableValue,
 } from "../src/runtime/serializable-values.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 function plan(
   source = "exit",
@@ -333,7 +334,7 @@ test("low-level builtin proxy results execute only the captured descriptor graph
     key === "items" ? [999] : Reflect.get(target, key),
   );
 
-  const result = run(compiled, createFreshRuntimeSnapshot(compiled), {
+  const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled), {
     builtins: { unstable: () => returned },
   });
 

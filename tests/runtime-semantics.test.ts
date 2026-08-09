@@ -3,13 +3,13 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import {
-  createFreshRuntimeSnapshot,
   run,
   type InterpreterEvent,
   type RuntimeBuiltinFunction,
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import type { RandomSource } from "../src/runtime/random.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 test("deep-copies lists for declarations and direct assignments", () => {
   const captured: unknown[] = [];
@@ -354,7 +354,7 @@ function executeSource(
   assert.notEqual(compiled.plan, null);
   const result = run(
     compiled.plan!,
-    createFreshRuntimeSnapshot(compiled.plan!),
+    createImmediatePacingRuntimeSnapshot(compiled.plan!),
     { random, ...(builtins === undefined ? {} : { builtins }) },
   );
   return {

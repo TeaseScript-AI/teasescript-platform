@@ -4,13 +4,13 @@ import test from "node:test";
 import {
   compileSource,
   createCheckpoint,
-  createFreshRuntimeSnapshot,
   deserializeCheckpoint,
   observeTime,
   run,
   serializeCheckpoint,
   type SerializableRuntimeValue,
 } from "../src/index.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("reports parser and semantic source diagnostics through the package root", () => {
@@ -68,7 +68,7 @@ test("executes source output, speaker provenance, collection copies, and control
     "say as vera \"Override\"",
   ].join("\n"));
 
-  const result = run(plan, createFreshRuntimeSnapshot(plan, { seed: 7 }));
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: 7 }));
   assert.equal(result.snapshot.status, "halted");
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => [
@@ -110,7 +110,7 @@ test("preserves function evaluation, deterministic random output, and checkpoint
 
 test("resumes a blocking wait through public checkpoint and time APIs", () => {
   const plan = compiled('wait 1 ms\nsay "done"\nexit');
-  const pending = run(plan, createFreshRuntimeSnapshot(plan));
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(pending.snapshot.status, "waiting");
   assert.deepEqual(pending.events.map((event) => event.kind), ["actionRequested"]);
 
