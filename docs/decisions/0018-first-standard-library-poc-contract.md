@@ -252,7 +252,8 @@ Required behavior is fixed:
 - an invalid or over-limit completion does not mutate the action, result, transcript, RNG, event sequence, or continuation;
 - the same mandatory interaction remains active after a rejected player attempt.
 
-These are technical safety limits against uncontrolled memory, validation, storage, rendering, and transport work. They are not recommendations that ordinary UI labels should approach the technical maximum. The editor may provide earlier non-blocking usability warnings for unusually long labels or unusually large choice sets.
+These are technical safety limits against uncontrolled memory, validation, storage, rendering, and transport work. They
+are not recommendations that ordinary UI labels should approach the technical maximum.
 
 ## Generic typed foreground interaction
 
@@ -630,7 +631,8 @@ Implementation should be split into small issues, at minimum:
 2. **Generic foreground interaction runtime** — add the typed action union, any platform guards justified under ADR 0019, completion validation, transcript derivation, checkpoint/restore, events, and deterministic resume tests.
 3. **Basic Standard Library interactions and Standard UI** — implement `showButton`, `askText`, `askNumber`, and `choose`, dynamic button/dropdown presentation, composer integration, transcript behavior, accessibility defaults, and playground acceptance examples.
 4. **Smart-autoplay runtime and `say` composition** — implement validated captured account settings, `chatPacingGate`, background-to-foreground promotion, prepared output, exact/instant modes, speaker skip defaults, click/tap/Space completion, wait interaction, event ordering, and resume-equivalence tests.
-5. **Editor metadata and diagnostics** — add completion, signature/hover guidance, compact-syntax formatting, duplicate/mixed-choice diagnostics, pacing diagnostics, bounded-data diagnostics, usability warnings, and protected-name diagnostics.
+5. **Editor metadata and diagnostics** — add completion, signature/hover guidance, compact-syntax formatting,
+   duplicate/mixed-choice diagnostics, pacing diagnostics, bounded-data diagnostics, and protected-name diagnostics.
 6. **Vertical POC acceptance coverage** — demonstrate compile, run, invalid retry, over-limit rejection, checkpoint, JSON round trip, restore, transcript rendering, dynamic choice presentation, and deterministic completion across the selected APIs.
 
 The implementation issues must inspect the then-current plan/snapshot versions and explicitly version every schema change. They must not reuse issue #74's internal token as an accidental permanent package identity.
