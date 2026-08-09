@@ -29,7 +29,8 @@ Classify using six dimensions:
 - **Verification strength:** how reliably will incorrect work be detected?
 - **Failure impact:** how costly or hidden would a subtle error be?
 - **Ambiguity:** are behavior, ownership, and implementation strategy resolved?
-- **Execution volume:** will the required reading, implementation, verification, diff review, and publication fit comfortably in one Codex execution?
+- **Execution volume:** can Codex reliably complete the required reading, implementation, verification, diff review,
+  and publication in one execution?
 
 Task size, file count, architectural vocabulary, and large diffs do not by themselves increase conceptual complexity, but execution volume still determines whether the work fits one run. A task may be Terra-level yet require several bounded execution phases. Strong verification permits a cheaper configuration only when it covers the relevant risks. Green tests are insufficient when ownership, compatibility, API leakage, ordering, or other important properties are not tested.
 
