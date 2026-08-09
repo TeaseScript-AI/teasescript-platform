@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "agent/issue-288-batch-b-core-limits",
+  "expectedBaseSha": "cc532489c6efd63c6c77165bac4656ea8c86cf9d",
+  "expectedResultTreeSha": "b3878fd36a5ff51243fca99c728fb01debe4be1d",
+  "patchSizeBytes": 4891,
+  "patchSha256": "0fccf5e9bc89a9b90a3f32fc53547fc38b970eb475486b1284dd8c5ffad22468",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0001",
+      "sizeBytes": 4891,
+      "sha256": "0fccf5e9bc89a9b90a3f32fc53547fc38b970eb475486b1284dd8c5ffad22468"
+    }
+  ],
+  "commitMessage": "Record capture-depth structural scope"
+}
