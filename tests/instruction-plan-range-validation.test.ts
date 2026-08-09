@@ -70,6 +70,57 @@ test("rejects an extreme root boundary without building a metadata-sized region"
   });
 });
 
+test("rejects unsafe persisted temporary and loop identities", () => {
+  const unsafe = Number.MAX_SAFE_INTEGER + 1;
+  const sourcePlan = mutablePlan(functionPlan());
+  (sourcePlan.sourceSpan.start as { offset: number }).offset = unsafe;
+
+  const sourceValidation = validateInstructionPlan(sourcePlan as unknown as InstructionPlan);
+  assert.equal(sourceValidation.valid, false);
+  assert.ok(sourceValidation.errors.some((error) =>
+    error.path === "$.sourceSpan" && error.message === "Source span is malformed."
+  ));
+
+  const temporaryPlan = mutablePlan(functionPlan());
+  temporaryPlan.temporaryCount = unsafe;
+
+  const temporaryValidation = validateInstructionPlan(temporaryPlan as unknown as InstructionPlan);
+  assert.equal(temporaryValidation.valid, false);
+  assert.ok(temporaryValidation.errors.some((error) =>
+    error.path === "$.temporaryCount" && error.message === "temporaryCount must be a non-negative safe integer."
+  ));
+
+  const loopPlan = mutablePlan(compiledPlan("repeat 1 { say 1 }"));
+  const loopStart = loopPlan.instructions.find((instruction) => instruction.kind === "loopStart")! as { loopId: number };
+  const loopControl = loopPlan.instructions.find((instruction) => instruction.kind === "loopControl")! as { loopId: number };
+  loopStart.loopId = unsafe;
+  loopControl.loopId = unsafe;
+
+  const loopValidation = validateInstructionPlan(loopPlan as unknown as InstructionPlan);
+  assert.equal(loopValidation.valid, false);
+  assert.ok(loopValidation.errors.some((error) =>
+    error.path.endsWith(".loopId") && error.message === "Expected a positive safe integer."
+  ));
+  assert.throws(
+    () => createFreshRuntimeSnapshot(loopPlan as unknown as InstructionPlan),
+    (error: unknown) => error instanceof TypeError && error.message === "Expected a positive safe integer.",
+  );
+
+  const validLoopPlan = compiledPlan("repeat 1 { say 1 }");
+  const checkpoint = JSON.parse(JSON.stringify(createCheckpoint(
+    validLoopPlan,
+    createFreshRuntimeSnapshot(validLoopPlan),
+  ))) as MutableCheckpoint;
+  const checkpointLoopStart = checkpoint.plan.instructions.find((instruction) => instruction.kind === "loopStart")! as { loopId: number };
+  const checkpointLoopControl = checkpoint.plan.instructions.find((instruction) => instruction.kind === "loopControl")! as { loopId: number };
+  checkpointLoopStart.loopId = unsafe;
+  checkpointLoopControl.loopId = unsafe;
+  assert.throws(
+    () => restoreCheckpoint(checkpoint),
+    (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002",
+  );
+});
+
 test("validates many small function regions without changing root or owner semantics", () => {
   const source = [
     ...Array.from({ length: 96 }, (_unused, index) =>
@@ -248,6 +299,7 @@ type MutableFunction = {
 
 type MutablePlan = Omit<InstructionPlan, "functions"> & {
   rootEndInstruction: number;
+  temporaryCount: number;
   functions: MutableFunction[];
 };
 

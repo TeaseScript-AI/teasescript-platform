@@ -4,6 +4,10 @@ import test from "node:test";
 import type { Program } from "../src/ast.js";
 import { captureProgramAst } from "../src/ast-validation.js";
 import {
+  EXTERNAL_DATA_WORK_MESSAGE,
+  MAX_EXTERNAL_RUNTIME_DATA_WORK,
+} from "../src/external-data-limits.js";
+import {
   InstructionCompilationError,
   compileProgram,
 } from "../src/compiler/compile-program.js";
@@ -85,4 +89,26 @@ test("AST array staging and output bypass inherited numeric setters", () => {
   assert.equal(captured!.program!.statements.length, 4);
   assert.equal(Object.hasOwn(captured!.program!.statements, 3), true);
   assert.equal(setterCalls, 0);
+});
+
+test("direct AST source positions reject non-safe integers", () => {
+  const program = mutableProgram("exit");
+  (program.span.start as unknown as { offset: number }).offset = Number.MAX_SAFE_INTEGER + 1;
+
+  const captured = captureProgramAst(program);
+
+  assert.equal(captured.program, null);
+  assert.equal(captured.diagnostic?.code, "TSC005");
+});
+
+test("direct AST arrays reserve dense child visits before staging output", () => {
+  const program = mutableProgram("exit");
+  (program as unknown as { statements: unknown[] }).statements = new Array(
+    MAX_EXTERNAL_RUNTIME_DATA_WORK,
+  ).fill(program.statements[0]);
+
+  const captured = captureProgramAst(program);
+
+  assert.equal(captured.program, null);
+  assert.equal(captured.diagnostic?.message, EXTERNAL_DATA_WORK_MESSAGE);
 });

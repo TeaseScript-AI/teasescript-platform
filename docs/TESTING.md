@@ -426,8 +426,9 @@ regressions prove that a newer retained settlement cannot remove destination/res
 that the handoff disappears immediately after the first successful consume or discard instruction, and that later ordinary
 state no longer carries interaction provenance. Non-canonical branches, loops, second actions, unrelated writers, duplicate
 producers, and independent targets inside the handoff are rejected locally rather than supported through global
-interaction-result liveness. Current interaction-guard cases remain implementation-boundary regressions only and must
-move with #129 removal or re-derivation rather than becoming source-capacity evidence. Every rejected completion compares
+interaction-result liveness. Current interaction-guard cases remain implementation-boundary regressions for the
+provisional POC policies and structural separation; they are not source-capacity evidence and must move with later
+evidence-based reassessment. Every rejected completion compares
 the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot
 change unnoticed. Standard Player/browser UI coverage remains assigned to its later implementation slice.
 
@@ -470,6 +471,6 @@ Tests and benchmarks should use:
 
 ## Parser recursion safety
 
-Node 24 regression coverage includes deeply nested parentheses, unary and `not` chains, collection literals, templates,
-and blocks. The safety invariant is structured `TSP027` rejection before native stack failure; the current historical
-numeric guard is not a retained capacity target and is tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
+Regression coverage verifies valid nesting beyond the removed parser guard and malformed-input diagnostics without
+pinning an incidental host-stack failure point. Historical measurements in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)
+are diagnostic evidence, not CI thresholds or capacity.

@@ -18,16 +18,17 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
   over-limit input before recursive validation, cloning, freezing, state construction, execution, event emission, or RNG
   consumption. Captured arrays use an engine-owned prototype isolated from ambient numeric `Array.prototype` properties,
   and density checks require own indexes. [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) tracks the current guard values,
-  their unsupported retention evidence, coupling, and repair route; graph work and scalar-string/property-key bytes remain
-  distinct resource dimensions.
+  evidence/policy status, coupling, and reassessment route; capture depth, aggregate graph work, and generic
+  sparse-array length remain distinct resource dimensions.
 - Keep serializable-set validation and reconstruction linear while preserving insertion order, scalar equality, and the canonical array representation.
 - Fresh-runtime global initialization consumes each already captured unique own global property once; it does not rescan previously constructed bindings.
 - Detailed instruction-plan validation builds one local instruction-owner/function index. Detailed snapshot validation
   builds one local function/region index, call-frame argument and temporary maps, and reuses suspended-continuation
   liveness results for each validated active-loop variant. These are operation-local only; no untrusted plan or snapshot
   data enters a global cache. The current implementation also applies a deterministic detailed-validation work guard;
-  its historical numeric value is tracked for re-derivation in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion is
-  rejected through runtime-snapshot validation before execution, mutation, event emission, or RNG advancement.
+  its current value and provisional Owner POC reassessment route are tracked in
+  [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion is rejected through runtime-snapshot validation before
+  execution, mutation, event emission, or RNG advancement.
 - [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) owns resource-limit classification, coupling evidence, and follow-up routing; this security document owns the trust-boundary behavior.
 - Interaction-result handoff validation is a fixed local structural check and does not add another control-flow fixed point, future-writer scan, or settlement-provenance cache.
 - Package code has no unrestricted external network access; published media uses platform-managed storage/CDN.
@@ -52,12 +53,14 @@ ADR 0016 adds these requirements:
 - Restored Standard UI is reconstructed from validated canonical action payloads rather than replaying untrusted host state.
 
 The implemented foreground-interaction boundary captures each completion request through the shared stable external-data
-graph before inspecting it. The current implementation has per-string, aggregate-text, and option-count guards; their
-exact historical values have no retained-capacity status and are routed for removal or evidence-based re-derivation in
-[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Plan and snapshot validation stop UTF-8 encoding after the first per-string
-or aggregate failure, use set-based duplicate checks and bounded linear matching, and reject unknown persisted
-interaction fields so hidden data cannot bypass current validation. Rejected definitions and completions do not truncate
-or partially mutate state.
+graph before inspecting it. The current implementation keeps separate completion/result/transcript string bytes, one
+aggregate retained-definition byte budget, and option count as resource axes. Authored/materialized UI fields have no
+independent per-field byte policy; each preflights against the remaining definition aggregate. Their current numeric
+values are provisional Owner POC policy with the reassessment route recorded in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md), not retained-capacity claims. Validation stops UTF-8 encoding after the
+first applicable byte failure, uses set-based duplicate checks and bounded linear matching, and rejects unknown
+persisted interaction fields so hidden data cannot bypass current validation. Rejected definitions and completions do not
+truncate or partially mutate state.
 
 The engine, not the caller, normalizes text, parses numbers, resolves choice labels/text, and derives player transcript content. Successful completion emits `playerTranscript` before `actionCompleted`; invalid or duplicate attempts emit neither event. Interaction result destinations, speaker IDs, target, ownership, options, settlement results, transcript text, and the single-use result handoff are validated against the immutable plan and current snapshot. A result is atomically committed into a prepared ordinary runtime destination. Until the first canonical consume, transfer, return, discard, or exit succeeds, the nullable handoff retains the canonical value independently of `lastSettlement`; afterward it is removed immediately. `lastSettlement` remains bounded replay data and is not a destination-liveness authority.
 

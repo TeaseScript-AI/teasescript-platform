@@ -47,6 +47,9 @@ test("combines source spans regardless of their supplied order", () => {
 test("rejects invalid positions and reversed spans", () => {
   assert.throws(() => createSourcePosition(-1, 0, 0), RangeError);
   assert.throws(() => createSourcePosition(0, 0.5, 0), RangeError);
+  assert.throws(() => createSourcePosition(Number.MAX_SAFE_INTEGER + 1, 0, 0), RangeError);
+  assert.throws(() => createSourcePosition(0, Number.MAX_SAFE_INTEGER + 1, 0), RangeError);
+  assert.throws(() => createSourcePosition(0, 0, Number.MAX_SAFE_INTEGER + 1), RangeError);
   assert.throws(
     () =>
       createSourceSpan(

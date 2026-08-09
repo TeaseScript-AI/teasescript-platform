@@ -3,7 +3,6 @@ import {
   interactionStringHasNonWhitespace,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
-  MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "../interaction-limits.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import {
@@ -48,11 +47,11 @@ export function validateCapturedInstructionPlan(
     errors.push(planError("TSC001", "Unsupported instruction-plan version.", "$.version"));
   }
   validateSpan(value.sourceSpan, "$.sourceSpan", errors);
-  const temporaryCount = nonNegativeInteger(value.temporaryCount)
+  const temporaryCount = nonNegativeSafeInteger(value.temporaryCount)
     ? value.temporaryCount
     : -1;
   if (temporaryCount < 0) {
-    errors.push(planError("TSC002", "temporaryCount must be a non-negative integer.", "$.temporaryCount"));
+    errors.push(planError("TSC002", "temporaryCount must be a non-negative safe integer.", "$.temporaryCount"));
   }
   if (!Array.isArray(value.instructions)) {
     errors.push(planError("TSC002", "Instructions must be an array.", "$.instructions"));
@@ -176,7 +175,7 @@ function validateLoopStructure(
     const instruction = instructions[index];
     if (!isRecord(instruction) || instruction.kind !== "loopStart") continue;
     if (
-      !Number.isInteger(instruction.loopId) ||
+      !positiveSafeInteger(instruction.loopId) ||
       !Number.isInteger(instruction.target) ||
       !Number.isInteger(instruction.continueTarget)
     ) continue;
@@ -203,7 +202,7 @@ function validateLoopStructure(
   for (let index = 0; index < instructions.length; index += 1) {
     const instruction = instructions[index];
     if (!isRecord(instruction) || instruction.kind !== "loopControl") continue;
-    if (!Number.isInteger(instruction.loopId) || !Number.isInteger(instruction.target)) continue;
+    if (!positiveSafeInteger(instruction.loopId) || !Number.isInteger(instruction.target)) continue;
     const start = starts.get(instruction.loopId as number);
     if (start === undefined) {
       errors.push(planError("TSC002", "Loop control refers to an unknown loop.", `$.instructions[${index}].loopId`));
@@ -293,7 +292,7 @@ function validateInstruction(
       if (!["repeat", "for", "while"].includes(String(value.loopKind))) {
         errors.push(planError("TSC002", "Invalid loop kind.", `${path}.loopKind`));
       }
-      requirePositiveInteger(value.loopId, `${path}.loopId`, errors);
+      requirePositiveSafeInteger(value.loopId, `${path}.loopId`, errors);
       if (value.loopKind === "for") requireString(value.variable, `${path}.variable`, errors);
       validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
       validateJumpTarget(value.continueTarget, `${path}.continueTarget`, instructionCount, errors);
@@ -303,7 +302,7 @@ function validateInstruction(
       if (!["break", "continue"].includes(String(value.action))) {
         errors.push(planError("TSC002", "Invalid loop-control action.", `${path}.action`));
       }
-      requirePositiveInteger(value.loopId, `${path}.loopId`, errors);
+      requirePositiveSafeInteger(value.loopId, `${path}.loopId`, errors);
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
       return;
     case "storeTemporary":
@@ -456,7 +455,6 @@ function validateStaticInteractionUi(
     errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", path));
   }
   let aggregate = 0;
-  let aggregateExceeded = false;
   let measurementExhausted = false;
   const countString = (candidate: unknown, fieldPath: string): candidate is string => {
     if (typeof candidate !== "string") {
@@ -464,22 +462,23 @@ function validateStaticInteractionUi(
       return false;
     }
     if (measurementExhausted) {
-      if (candidate.length > MAX_INTERACTION_STRING_UTF8_BYTES) {
-        errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+      if (candidate.length > Math.max(0, MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate)) {
+        errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
         return false;
       }
       return true;
     }
     recordValidationTestWork("interactionUtf8Measurements");
-    const bytes = boundedInteractionUtf8ByteLength(candidate);
+    const bytes = boundedInteractionUtf8ByteLength(
+      candidate,
+      MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate,
+    );
     if (bytes === null) {
       measurementExhausted = true;
-      errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+      errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
       return false;
     }
     aggregate += bytes;
-    aggregateExceeded = aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES;
-    measurementExhausted = aggregateExceeded;
     return true;
   };
   validateInteractionAccessibleName(kind, ui.accessibleName, `${path}.accessibleName`, countString, measurementExhausted, errors);
@@ -522,7 +521,6 @@ function validateStaticInteractionUi(
       }
     }
   }
-  if (aggregateExceeded) errors.push(planError("TSC002", "Interaction data exceeds the shared aggregate UTF-8 byte limit.", path));
 }
 
 function validatePreparedInteractionUi(
@@ -545,7 +543,6 @@ function validatePreparedInteractionUi(
       : ["kind", "labelType", "optionsTemporary", "optionCount", "labels", "accessibleName"];
   if (!hasExactKeys(ui, keys)) errors.push(planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path));
   let aggregate = 0;
-  let aggregateExceeded = false;
   let measurementExhausted = false;
   const countString = (candidate: unknown, fieldPath: string): candidate is string => {
     if (typeof candidate !== "string") {
@@ -553,22 +550,23 @@ function validatePreparedInteractionUi(
       return false;
     }
     if (measurementExhausted) {
-      if (candidate.length > MAX_INTERACTION_STRING_UTF8_BYTES) {
-        errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+      if (candidate.length > Math.max(0, MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate)) {
+        errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
         return false;
       }
       return true;
     }
     recordValidationTestWork("interactionUtf8Measurements");
-    const bytes = boundedInteractionUtf8ByteLength(candidate);
+    const bytes = boundedInteractionUtf8ByteLength(
+      candidate,
+      MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate,
+    );
     if (bytes === null) {
       measurementExhausted = true;
-      errors.push(planError("TSC002", "Interaction text exceeds the shared UTF-8 byte limit.", fieldPath));
+      errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
       return false;
     }
     aggregate += bytes;
-    aggregateExceeded = aggregate > MAX_INTERACTION_AGGREGATE_UTF8_BYTES;
-    measurementExhausted = aggregateExceeded;
     return true;
   };
   validateInteractionAccessibleName(
@@ -621,13 +619,6 @@ function validatePreparedInteractionUi(
     if (!valid) errors.push(planError("TSC002", "Prepared choice label does not match the label type.", labelPath));
     if ((typeof label === "string" || typeof label === "number") && labels.has(label)) errors.push(planError("TSC002", "Prepared choice labels must be unique.", labelPath));
     if (typeof label === "string" || typeof label === "number") labels.add(label);
-  }
-  if (aggregateExceeded) {
-    errors.push(planError(
-      "TSC002",
-      "Interaction data exceeds the shared aggregate UTF-8 byte limit.",
-      path,
-    ));
   }
 }
 
@@ -1719,7 +1710,7 @@ function validateTemporaryId(
   temporaryCount: number,
   errors: PlanValidationError[],
 ): void {
-  if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > temporaryCount) {
+  if (!positiveSafeInteger(value) || value > temporaryCount) {
     errors.push(planError("TSC002", "Temporary reference is outside the plan's temporary range.", path));
   }
 }
@@ -1750,9 +1741,9 @@ function validateSpan(value: unknown, path: string, errors: PlanValidationError[
 function validPosition(value: unknown): boolean {
   return (
     isRecord(value) &&
-    nonNegativeInteger(value.offset) &&
-    nonNegativeInteger(value.line) &&
-    nonNegativeInteger(value.column)
+    nonNegativeSafeInteger(value.offset) &&
+    nonNegativeSafeInteger(value.line) &&
+    nonNegativeSafeInteger(value.column)
   );
 }
 
@@ -1780,6 +1771,16 @@ function requirePositiveInteger(
 ): void {
   if (!Number.isInteger(value) || (value as number) < 1) {
     errors.push(planError("TSC002", "Expected a positive integer.", path));
+  }
+}
+
+function requirePositiveSafeInteger(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!positiveSafeInteger(value)) {
+    errors.push(planError("TSC002", "Expected a positive safe integer.", path));
   }
 }
 
@@ -1815,6 +1816,10 @@ function validInstructionBoundary(
 
 function nonNegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function positiveSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 1;
 }
 
 function nonNegativeInteger(value: unknown): value is number {

@@ -239,7 +239,7 @@ test("pending interaction survives JSON checkpoint restore with monotonic events
   assert.equal(observeTime(restored.plan, restored.snapshot, 10).snapshot.status, "waiting");
 });
 
-test("shared exact string and option boundaries are accepted and over-limit plans are rejected linearly", () => {
+test("interaction definitions preflight each field against remaining aggregate bytes", () => {
   assert.equal(interactionUtf8ByteLength("x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 4_464)), 70_000);
   const exact = interactionPlan("button", { kind: "button", buttonLabel: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES), accessibleName: defaults.button });
   assert.equal(validateInstructionPlan(exact).valid, true);
@@ -272,6 +272,20 @@ test("shared exact string and option boundaries are accepted and over-limit plan
   const overAggregate = structuredClone(exactAggregate) as any;
   overAggregate.instructions[0].ui.hint += "h";
   assert.equal(validateInstructionPlan(overAggregate).valid, false);
+
+  const choiceWithinAggregate = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "none",
+    accessibleName: defaults.choice,
+    options: [
+      { text: "a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES - 1), label: null },
+      { text: "b", label: null },
+    ],
+  });
+  assert.equal(validateInstructionPlan(choiceWithinAggregate).valid, true);
+  const choiceOverAggregate = structuredClone(choiceWithinAggregate) as any;
+  choiceOverAggregate.instructions[0].ui.options[1].text += "b";
+  assert.equal(validateInstructionPlan(choiceOverAggregate).valid, false);
 
   const hugePending = waiting(completionPlan);
   const huge = completeAction(completionPlan, hugePending.snapshot, { actionId: hugePending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 16) } });

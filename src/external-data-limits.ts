@@ -1,5 +1,6 @@
 export const MAX_EXTERNAL_RUNTIME_DATA_DEPTH = 128;
 export const MAX_EXTERNAL_RUNTIME_DATA_WORK = 100_000;
+const MAX_EXTERNAL_RUNTIME_SPARSE_ARRAY_LENGTH = 100_000;
 
 export const EXTERNAL_DATA_DEPTH_MESSAGE =
   "External runtime data exceeds the supported nesting depth.";
@@ -48,6 +49,7 @@ type WorkItem =
       readonly depth: number;
       readonly path: PathNode | null;
       readonly target: AssignmentTarget | null;
+      readonly precharged: boolean;
     }
   | {
       readonly kind: "iterate";
@@ -77,10 +79,16 @@ export function captureExternalData(
 ): ExternalDataCaptureResult {
   const active = new Set<object>();
   const work: WorkItem[] = [
-    { kind: "visit", value, depth: 0, path: null, target: null },
+    { kind: "visit", value, depth: 0, path: null, target: null, precharged: false },
   ];
-  let visited = 0;
+  let consumedWork = 0;
   let capturedRoot: unknown;
+
+  const consumeWork = (amount = 1): boolean => {
+    if (amount > MAX_EXTERNAL_RUNTIME_DATA_WORK - consumedWork) return false;
+    consumedWork += amount;
+    return true;
+  };
 
   while (work.length > 0) {
     const item = work.pop()!;
@@ -100,6 +108,13 @@ export function captureExternalData(
 
       const key = item.keys[item.index]!;
       if (item.array && key === "length") continue;
+
+      // Each non-length own key requires descriptor processing. Enumerable
+      // data properties reserve their child visit here so dense data is not
+      // charged once for the descriptor and again for that same child.
+      if (!consumeWork()) {
+        return captureFailure("work", item.path, rootPath);
+      }
 
       let descriptor: PropertyDescriptor | undefined;
       try {
@@ -141,12 +156,12 @@ export function captureExternalData(
         depth: item.depth + 1,
         path: nestedPath,
         target: { container: item.captured, key },
+        precharged: true,
       });
       continue;
     }
 
-    visited += 1;
-    if (visited > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
+    if (!item.precharged && !consumeWork()) {
       return captureFailure("work", item.path, rootPath);
     }
     if (item.depth > MAX_EXTERNAL_RUNTIME_DATA_DEPTH) {
@@ -216,7 +231,7 @@ export function captureExternalData(
       ) {
         return captureFailure("nonJsonSafeValue", item.path, rootPath);
       }
-      if (lengthDescriptor.value > MAX_EXTERNAL_RUNTIME_DATA_WORK) {
+      if (lengthDescriptor.value > MAX_EXTERNAL_RUNTIME_SPARSE_ARRAY_LENGTH) {
         return captureFailure("work", item.path, rootPath);
       }
       arrayLength = lengthDescriptor.value;
@@ -228,10 +243,6 @@ export function captureExternalData(
     } catch {
       return captureFailure("nonJsonSafeValue", item.path, rootPath);
     }
-    if (keys.length > MAX_EXTERNAL_RUNTIME_DATA_WORK + 1) {
-      return captureFailure("work", item.path, rootPath);
-    }
-
     const captured = array
       ? createCapturedArray(arrayLength!)
       : (Object.create(prototype) as Record<string, unknown>);

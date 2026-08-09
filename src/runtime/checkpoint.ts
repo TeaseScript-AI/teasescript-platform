@@ -2,24 +2,14 @@ import {
   type InstructionPlan,
 } from "../plan/model.js";
 import { captureInstructionPlan } from "../plan/capture.js";
-import { validateCapturedInstructionPlan } from "../plan/validation.js";
-import {
-  EXTERNAL_DATA_DEPTH_MESSAGE,
-  EXTERNAL_DATA_WORK_MESSAGE,
-  captureExternalData,
-  type ExternalDataFailureKind,
-} from "../external-data-limits.js";
 import {
   captureRuntimeSnapshot,
   cloneCapturedRuntimeSnapshot,
-  RUNTIME_SNAPSHOT_FORMAT,
-  RUNTIME_SNAPSHOT_VERSION,
-  validateCapturedRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "./state.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 9;
+export const CHECKPOINT_VERSION = 10;
 
 export interface RuntimeCheckpoint {
   readonly format: typeof CHECKPOINT_FORMAT;
@@ -61,42 +51,91 @@ export function serializeCheckpoint(checkpoint: RuntimeCheckpoint): string {
 }
 
 export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {
-  const capture = captureExternalData(value);
-  if (!capture.ok) {
-    throw checkpointError(
-      "TSK002",
-      checkpointExternalDataFailureMessage(capture.failure.kind),
-      capture.failure.path.startsWith("$.snapshot")
-        ? "$.snapshot"
-        : capture.failure.path,
-    );
-  }
-  const stable = capture.value;
-  if (!isPlainRecord(stable)) {
-    throw checkpointError("TSK002", "Checkpoint must be a JSON object.", "$.");
-  }
-  if (!hasExactKeys(stable, ["format", "version", "plan", "snapshot"])) {
-    throw checkpointError(
-      "TSK002",
-      "Checkpoint contains unsupported fields or omits required fields.",
-      "$.",
-    );
-  }
-  if (stable.format !== CHECKPOINT_FORMAT) {
+  const envelope = captureCheckpointEnvelope(value);
+  if (envelope.format !== CHECKPOINT_FORMAT) {
     throw checkpointError("TSK001", "Unsupported checkpoint format.", "$.format");
   }
-  if (stable.version !== CHECKPOINT_VERSION) {
+  if (envelope.version !== CHECKPOINT_VERSION) {
     throw checkpointError("TSK001", "Unsupported checkpoint version.", "$.version");
   }
 
-  const plan = assertCapturedPlan(stable.plan, "$.plan");
-  const snapshot = assertCapturedSnapshot(stable.snapshot, plan, "$.snapshot");
+  const plan = capturePlan(envelope.plan, "$.plan");
+  const snapshot = captureSnapshot(envelope.snapshot, plan, "$.snapshot");
   return Object.freeze({
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
     plan: clonePlan(plan),
     snapshot: cloneCapturedRuntimeSnapshot(snapshot),
   });
+}
+
+interface CheckpointEnvelope {
+  readonly format: unknown;
+  readonly version: unknown;
+  readonly plan: unknown;
+  readonly snapshot: unknown;
+}
+
+const CHECKPOINT_KEYS = ["format", "version", "plan", "snapshot"] as const;
+
+function captureCheckpointEnvelope(value: unknown): CheckpointEnvelope {
+  if (typeof value !== "object" || value === null) {
+    throw checkpointError("TSK002", "Checkpoint must be a JSON object.", "$.");
+  }
+
+  let array: boolean;
+  let prototype: object | null;
+  let keys: readonly (string | symbol)[];
+  try {
+    array = Array.isArray(value);
+    prototype = Reflect.getPrototypeOf(value);
+    keys = Reflect.ownKeys(value);
+  } catch {
+    throw checkpointError("TSK002", "Checkpoint contains a non-JSON-safe value.", "$.");
+  }
+  if (array) {
+    throw checkpointError("TSK002", "Checkpoint must be a JSON object.", "$.");
+  }
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw checkpointError("TSK002", "Checkpoint must be a JSON object.", "$.");
+  }
+  if (
+    keys.length !== CHECKPOINT_KEYS.length ||
+    keys.some(
+      (key) =>
+        typeof key !== "string" ||
+        !CHECKPOINT_KEYS.includes(key as typeof CHECKPOINT_KEYS[number]),
+    )
+  ) {
+    throw checkpointError(
+      "TSK002",
+      "Checkpoint contains unsupported fields or omits required fields.",
+      "$.",
+    );
+  }
+
+  const captured: Record<string, unknown> = {};
+  for (const key of CHECKPOINT_KEYS) {
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+    } catch {
+      throw checkpointError(
+        "TSK002",
+        "Checkpoint contains a non-JSON-safe value.",
+        `$.${key}`,
+      );
+    }
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+      throw checkpointError(
+        "TSK002",
+        "Checkpoint contains a non-JSON-safe value.",
+        `$.${key}`,
+      );
+    }
+    captured[key] = descriptor.value;
+  }
+  return captured as unknown as CheckpointEnvelope;
 }
 
 function clonePlan(plan: InstructionPlan): InstructionPlan {
@@ -120,7 +159,9 @@ function capturePlan(value: unknown, path: string): InstructionPlan {
     const first = captured.validation.errors[0];
     throw checkpointError(
       first?.code === "TSC001" ? "TSK001" : "TSK002",
-      first?.message ?? "Instruction plan is malformed.",
+      checkpointComponentCaptureMessage(
+        first?.message ?? "Instruction plan is malformed.",
+      ),
       `${path}${first?.path.slice(1) ?? ""}`,
     );
   }
@@ -134,61 +175,41 @@ function captureSnapshot(
 ): RuntimeSnapshot {
   const captured = captureRuntimeSnapshot(value, plan);
   if (!captured.validation.valid || captured.snapshot === null) {
-    const message = captured.validation.errors[0] ?? "Runtime snapshot is malformed.";
+    const message = checkpointComponentCaptureMessage(
+      captured.validation.errors[0] ?? "Runtime snapshot is malformed.",
+    );
     const unsupported = message.includes("Unsupported runtime-snapshot");
     throw checkpointError(unsupported ? "TSK001" : "TSK002", message, path);
   }
   return captured.snapshot;
 }
 
-function assertCapturedPlan(value: unknown, path: string): InstructionPlan {
-  const validation = validateCapturedInstructionPlan(value);
-  if (!validation.valid) {
-    const first = validation.errors[0];
-    throw checkpointError(
-      first?.code === "TSC001" ? "TSK001" : "TSK002",
-      first?.message ?? "Instruction plan is malformed.",
-      `${path}${first?.path.slice(1) ?? ""}`,
-    );
+function checkpointComponentCaptureMessage(message: string): string {
+  if (
+    message === "Plan contains a non-finite number." ||
+    message === "Runtime snapshot contains a non-finite number."
+  ) {
+    return "Checkpoint contains a non-finite number.";
   }
-  return value as InstructionPlan;
-}
-
-function assertCapturedSnapshot(
-  value: unknown,
-  plan: InstructionPlan,
-  path: string,
-): RuntimeSnapshot {
-  const validation = validateCapturedRuntimeSnapshot(value, plan);
-  if (!validation.valid) {
-    const message = validation.errors[0] ?? "Runtime snapshot is malformed.";
-    const unsupported =
-      message.includes("Unsupported runtime-snapshot") ||
-      (isPlainRecord(value) &&
-        (value.format !== RUNTIME_SNAPSHOT_FORMAT ||
-          value.version !== RUNTIME_SNAPSHOT_VERSION));
-    throw checkpointError(unsupported ? "TSK001" : "TSK002", message, path);
+  if (
+    message === "Plan contains a non-JSON-safe value." ||
+    message === "Runtime snapshot contains a non-JSON-safe value."
+  ) {
+    return "Checkpoint contains a non-JSON-safe value.";
   }
-  return value as RuntimeSnapshot;
-}
-
-function checkpointExternalDataFailureMessage(
-  kind: ExternalDataFailureKind,
-): string {
-  switch (kind) {
-    case "depth":
-      return EXTERNAL_DATA_DEPTH_MESSAGE;
-    case "work":
-      return EXTERNAL_DATA_WORK_MESSAGE;
-    case "nonFiniteNumber":
-      return "Checkpoint contains a non-finite number.";
-    case "nonJsonSafeValue":
-      return "Checkpoint contains a non-JSON-safe value.";
-    case "cycle":
-      return "Checkpoint contains a cycle.";
-    case "nonPlainObject":
-      return "Checkpoint contains a non-plain object.";
+  if (
+    message === "Plan contains a cycle." ||
+    message === "Runtime snapshot contains a cycle."
+  ) {
+    return "Checkpoint contains a cycle.";
   }
+  if (
+    message === "Plan contains a non-plain object." ||
+    message === "Runtime snapshot contains a non-plain object."
+  ) {
+    return "Checkpoint contains a non-plain object.";
+  }
+  return message;
 }
 
 function checkpointError(
@@ -197,17 +218,6 @@ function checkpointError(
   path: string,
 ): CheckpointError {
   return new CheckpointError(Object.freeze({ code, message, path }));
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value);
-  return keys.length === expected.length && expected.every((key) => keys.includes(key));
 }
 
 function deepFreeze<T>(value: T): T {

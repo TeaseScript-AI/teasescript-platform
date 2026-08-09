@@ -344,7 +344,7 @@ test("prepared-plan validation rejects malformed new shapes and stale plan revis
   assert.equal(validateInstructionPlan(aliased).valid, false);
 
   const oldVersion = structuredClone(compiled("let answer = askText")) as any;
-  oldVersion.version = 6;
+  oldVersion.version = 7;
   assert.equal(validateInstructionPlan(oldVersion).valid, false);
 });
 

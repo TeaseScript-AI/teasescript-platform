@@ -81,13 +81,14 @@ Completion semantics are:
 
 A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
-The current runtime contains per-string, aggregate-text, and option-count interaction guards. Their exact numeric values
-are implementation inventory, not accepted capacity or source targets; [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)
-records that current evidence does not justify retaining those numbers. Bounded validation first rejects impossible
-UTF-16 lengths, measures each accepted field once, and stops encoding further fields after either a per-string or
-aggregate failure. Text completion measures the raw host string once; CRLF/CR-to-LF normalization cannot increase its
-UTF-8 size. Current over-limit data is rejected without truncation, clamping, or partial state mutation until the #129
-repair replaces or removes the unsupported ceilings.
+The current runtime keeps three independent interaction resource axes: completion/result/transcript string bytes,
+aggregate UTF-8 bytes for one retained interaction definition, and option count. Authored/materialized UI fields have no
+independent per-field byte ceiling; each preflights against the remaining definition aggregate. Exact numeric values and
+their provisional Owner POC reassessment route live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); they are not accepted
+capacity or source targets. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field
+once, and stops encoding after the applicable byte budget fails. Text completion measures the raw host string once;
+CRLF/CR-to-LF normalization cannot increase its UTF-8 size. Over-limit data is rejected without truncation, clamping,
+or partial state mutation.
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 
@@ -379,6 +380,9 @@ Blocking `wait` remains the first source-to-runtime slice. The generic interacti
 
 The result separates parser and semantic diagnostics and returns `plan: null` when compilation fails. A returned plan is checked at the snapshot/runtime boundary or may be checked explicitly with `validateInstructionPlan(...)` before use.
 
+Unexpected native JavaScript exceptions from parsing or compilation propagate unchanged through `compileSource(...)`;
+they are not reclassified as TeaseScript capacity failures.
+
 `compileSource(...)` rejects numeric literals such as `1e999` and `-1e999` with error diagnostic `TSC001`. It does not return an instruction plan for those inputs. Large finite values such as `1e308` remain valid. The normal compilation route therefore cannot return a plan containing literal `Infinity`, `-Infinity`, or `NaN`, and instruction-plan validation independently rejects any non-finite number in plan data.
 
 The `TSC001` check is implemented as shared AST-level validation. `compileSource(...)` includes these diagnostics in its parser-diagnostic boundary, while the lower-level `parse(...)` result may still expose the raw JavaScript number produced while parsing. Callers must not treat parsing alone as successful compilation.
@@ -437,16 +441,26 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
 ## Runtime defaults and limits
 
 Current code contains call-depth, hostile-data capture, detailed-validation, interaction, and instruction-work guards.
-Exact numeric implementation values and their retention evidence live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md);
-values whose retention is unsupported are repair locators rather than runtime-capacity requirements. This document keeps
-the behavior and safety semantics without promoting those historical numbers into contracts.
+Exact numeric implementation values, their current evidence status, and any provisional POC policy/reassessment route
+live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). This document keeps the behavior and safety semantics without
+promoting provisional implementation values or product defaults into supported runtime-capacity claims.
 
 The playground RNG algorithm remains `xorshift32-v1` with default seed `0x6d2b79f5`; those deterministic identity
 choices are unrelated to resource capacity.
 
-A configured instruction budget must be a positive integer. Exhaustion fails deterministically with structured runtime error `TSR037` instead of hanging. Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
+A configured instruction budget must be a positive JavaScript safe integer. Omitting it uses the current product default
+tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion fails deterministically with structured runtime error
+`TSR037` instead of hanging and leaves the returned snapshot failed rather than resumable through a later `run(...)`.
+Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
 
-Externally supplied instruction plans, runtime snapshots, checkpoints, globals, and serializable runtime values are captured into one bounded stable plain-data graph before detailed validation, cloning, freezing, state construction, execution, event emission, or RNG consumption. Enumerable accessors are rejected without invocation, proxy behavior is not retained, and later phases consume only the captured graph. Depth is counted from the external root at zero, and the work limit applies to each bounded capture. Exceeding either implementation limit or failing stable capture is malformed external runtime data. Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`, and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
+Externally supplied instruction plans, runtime snapshots, globals, and serializable runtime values are captured into
+bounded stable plain-data graphs before detailed validation, cloning, freezing, state construction, execution, event
+emission, or RNG consumption. Checkpoint restore validates its fixed envelope without invoking accessors, then captures
+its plan and snapshot independently through those existing boundaries. Proxy behavior is not retained, and later phases
+consume only captured plain data. Depth is counted from each captured root at zero, and the work limit applies to each
+bounded capture. Exceeding either implementation limit or failing stable capture is malformed external runtime data.
+Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`,
+and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
 
 Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality and duplicate handling are unchanged.
 
@@ -482,9 +496,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 7 | Added canonical prepared-interaction speaker/UI instructions for compact source lowering while retaining the local interaction-result consume/transfer boundary. |
+| Instruction plan | 8 | Narrowed source positions, temporary counts/IDs, and loop IDs to JavaScript safe-integer representation domains; revision 7 accepted values that the corrected contract must reject. |
 | Runtime snapshot | 8 | Added one nullable single-use `interactionResultHandoff` authority that protects the still-unconsumed destination independently of `lastSettlement`. |
-| Checkpoint | 9 | Updated the self-contained bundle for instruction-plan revision 7 while retaining runtime-snapshot revision 8. |
+| Checkpoint | 10 | Updated the self-contained bundle for instruction-plan revision 8 while retaining runtime-snapshot revision 8. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

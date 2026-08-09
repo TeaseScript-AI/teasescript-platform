@@ -18,6 +18,7 @@ import {
 import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
 import {
   createFreshRuntimeSnapshot,
+  MAX_SUPPORTED_CALL_DEPTH,
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
@@ -46,6 +47,18 @@ test("restores every instruction boundary during defaults and nested calls", () 
   assert.ok(observations.some((snapshot) =>
     snapshot.callFrames.length === 0 && snapshot.temporaries.length > 0
   ));
+});
+
+test("checkpoint restoration accepts the configured call-depth ceiling", () => {
+  const compiled = plan("exit");
+  const snapshot = createFreshRuntimeSnapshot(compiled, {
+    maxCallDepth: MAX_SUPPORTED_CALL_DEPTH,
+  });
+
+  assert.equal(
+    restoreCheckpoint(createCheckpoint(compiled, snapshot)).snapshot.maxCallDepth,
+    MAX_SUPPORTED_CALL_DEPTH,
+  );
 });
 
 test("restores inside function loops, after continue, and before early return", () => {
