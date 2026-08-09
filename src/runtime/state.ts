@@ -2157,10 +2157,15 @@ function validForegroundActionAgainstRetainedSettlement(
     !positiveSafeInteger(action.actionId) ||
     !positiveSafeInteger(action.requestEventSequence) ||
     !positiveSafeInteger(settlement.actionId) ||
-    !positiveSafeInteger(settlement.completionEventSequence) ||
-    action.actionId <= settlement.actionId
+    !positiveSafeInteger(settlement.completionEventSequence)
   ) return false;
 
+  // A background pacing gate can remain active while a newer foreground delay
+  // settles, then later be promoted. Active lookup stays authoritative over
+  // retained-settlement chronology for that same gate.
+  if (action.kind === "chatPacingGate") return true;
+
+  if (action.actionId <= settlement.actionId) return false;
   if (action.requestEventSequence > settlement.completionEventSequence) return true;
 
   // A foreground wait can be requested before an older background pacing gate

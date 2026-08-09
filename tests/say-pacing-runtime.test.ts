@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
@@ -865,6 +866,379 @@ test("pacing state validation rejects relational identity, property, duration, a
     assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), label);
   }
 });
+
+test("multiple pacing cycles preserve prepared output, identities, replay, and checkpoint equivalence", () => {
+  const compiled = plan([
+    'say "one"',
+    'say `two ${["alpha", "beta"]}`',
+    'say ["three", "three-alt"]',
+    'say "four"',
+    "exit",
+  ].join("\n"));
+  const initial = createFreshRuntimeSnapshot(compiled, { seed: 77 });
+  const first = run(compiled, initial);
+  const firstGate = first.snapshot.foregroundAction;
+  assert.equal(firstGate?.kind, "chatPacingGate");
+  assert.equal(firstGate?.actionId, 1);
+  assert.equal(firstGate?.preparedOutput?.owningInstruction, 1);
+  assert.equal(first.events.map((event) => event.kind).filter((kind) => kind === "actionRequested").length, 1);
+  assert.equal(validateRuntimeSnapshot(first.snapshot, compiled).valid, true);
+
+  const releasedFirst = completeAction(compiled, first.snapshot, {
+    actionId: firstGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(releasedFirst.outcome.kind, "completed");
+  assert.equal(releasedFirst.snapshot.lastSettlement?.actionId, 1);
+  const duplicateFirst = completeAction(compiled, releasedFirst.snapshot, {
+    actionId: 1,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(duplicateFirst.outcome.kind, "alreadySettled");
+
+  const second = run(compiled, releasedFirst.snapshot);
+  const secondGate = second.snapshot.foregroundAction;
+  assert.equal(secondGate?.kind, "chatPacingGate");
+  assert.equal(secondGate?.actionId, 2);
+  assert.equal(second.events.filter((event) => event.kind === "say").length, 1);
+  assert.equal(second.events.filter((event) => event.kind === "actionRequested").length, 1);
+  assert.notEqual(secondGate?.preparedOutput, null);
+  assert.equal(validateRuntimeSnapshot(second.snapshot, compiled).valid, true);
+
+  const releasedSecond = observeTime(compiled, second.snapshot, secondGate!.deadlineMs);
+  assert.equal(releasedSecond.snapshot.lastSettlement?.actionId, 2);
+  assert.equal(releasedSecond.snapshot.preparedSayOutput?.text, secondGate?.preparedOutput?.text);
+  assert.equal(validateRuntimeSnapshot(releasedSecond.snapshot, compiled).valid, true);
+
+  const third = run(compiled, releasedSecond.snapshot);
+  const thirdGate = third.snapshot.foregroundAction;
+  assert.equal(thirdGate?.kind, "chatPacingGate");
+  assert.equal(thirdGate?.actionId, 3);
+  assert.equal(third.events.filter((event) => event.kind === "say").length, 1);
+  assert.equal(third.events.filter((event) => event.kind === "actionRequested").length, 1);
+
+  const releasedThird = completeAction(compiled, third.snapshot, {
+    actionId: thirdGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  const finalRun = run(compiled, releasedThird.snapshot);
+  assert.equal(finalRun.snapshot.status, "halted");
+  assert.equal(finalRun.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
+  assert.equal(finalRun.snapshot.backgroundActions[0]?.actionId, 4);
+  assert.equal(finalRun.snapshot.lastSettlement?.actionId, 3);
+  assert.equal(validateRuntimeSnapshot(finalRun.snapshot, compiled).valid, true);
+  assert.doesNotThrow(() => createCheckpoint(compiled, finalRun.snapshot));
+
+  const cuts = [first.snapshot, second.snapshot, releasedSecond.snapshot, third.snapshot, releasedThird.snapshot];
+  for (const cut of cuts) {
+    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, cut)));
+    const resumed = finishPacingChain(restored.plan, restored.snapshot);
+    const uninterrupted = finishPacingChain(compiled, cut);
+    assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
+    assert.deepEqual(resumed.events, uninterrupted.events);
+  }
+});
+
+test("mixed wait, interaction, instant, and pacing composition keeps event ordering canonical", () => {
+  const compiled = plan([
+    'say "one"',
+    "wait 1 s",
+    'say "two"',
+    'showButton "Continue"',
+    'say "now", instant',
+    'say "four"',
+    "exit",
+  ].join("\n"));
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const delay = waiting.snapshot.foregroundAction;
+  const background = waiting.snapshot.backgroundActions[0];
+  assert.equal(delay?.kind, "delay");
+  assert.equal(background?.kind, "chatPacingGate");
+  assert.deepEqual(waiting.events.map((event) => event.kind), ["say", "actionRequested", "actionRequested"]);
+
+  const delayCompleted = observeTime(compiled, waiting.snapshot, 1_000);
+  assert.deepEqual(delayCompleted.events.map((event) => event.kind), ["actionCompleted"]);
+  assert.equal(delayCompleted.snapshot.backgroundActions[0]?.actionId, background?.actionId);
+  assert.equal(delayCompleted.snapshot.foregroundAction, null);
+
+  const promoted = run(compiled, delayCompleted.snapshot);
+  const pacing = promoted.snapshot.foregroundAction;
+  assert.equal(pacing?.kind, "chatPacingGate");
+  assert.equal(pacing?.actionId, background?.actionId);
+  assert.equal(promoted.events.filter((event) => event.kind === "actionRequested").length, 0);
+
+  const released = observeTime(compiled, promoted.snapshot, pacing!.deadlineMs);
+  const interactionWaiting = run(compiled, released.snapshot);
+  assert.deepEqual(interactionWaiting.events.map((event) => event.kind), ["say", "actionRequested", "actionCompleted", "actionRequested"]);
+  assert.equal(interactionWaiting.events[2]?.kind === "actionCompleted" && interactionWaiting.events[2].settlement.settlementKind, "consumedByForegroundInteraction");
+  const interaction = interactionWaiting.snapshot.foregroundAction;
+  assert.equal(interaction?.kind, "interaction");
+
+  const interactionCompleted = completeAction(compiled, interactionWaiting.snapshot, {
+    actionId: interaction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  });
+  assert.deepEqual(interactionCompleted.events.map((event) => event.kind), ["playerTranscript", "actionCompleted"]);
+  const finalRun = run(compiled, interactionCompleted.snapshot);
+  assert.deepEqual(finalRun.events.map((event) => event.kind), ["say", "say", "actionRequested", "exit"]);
+  assert.equal(finalRun.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
+  assert.equal(finalRun.snapshot.backgroundActions[0]?.actionId, interaction!.actionId + 1);
+  assert.equal(validateRuntimeSnapshot(finalRun.snapshot, compiled).valid, true);
+  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, finalRun.snapshot))));
+});
+
+test("say instruction plans and public pacing failures stay at their validation boundaries", () => {
+  const validSources = [
+    'say "smart"',
+    'let seconds = 1.5\nsay "exact", seconds',
+    'say "instant", instant',
+    'say skippable "skip"',
+    'speaker vera {}\nsay as vera unskippable "speaker"',
+  ];
+  for (const source of validSources) {
+    const compiled = plan(source);
+    assert.equal(validateInstructionPlan(compiled).valid, true, source);
+  }
+
+  const base = plan('speaker vera {}\nsay as vera skippable "text", 1');
+  const sayIndex = base.instructions.findIndex((instruction) => instruction.kind === "say");
+  const invalidPlans: Array<[string, (candidate: any) => void]> = [
+    ["missing skip policy", (candidate) => { delete candidate.instructions[sayIndex].skipPolicy; }],
+    ["invalid skip policy", (candidate) => { candidate.instructions[sayIndex].skipPolicy = "later"; }],
+    ["missing pacing", (candidate) => { delete candidate.instructions[sayIndex].pacing; }],
+    ["malformed pacing expression", (candidate) => { candidate.instructions[sayIndex].pacing = { kind: "missing" }; }],
+    ["invalid speaker", (candidate) => { candidate.instructions[sayIndex].speaker = 123; }],
+    ["malformed value", (candidate) => { candidate.instructions[sayIndex].value = { kind: "literal", value: () => "bad" }; }],
+    ["old plan version", (candidate) => { candidate.version -= 1; }],
+    ["malformed span", (candidate) => { candidate.instructions[sayIndex].span.start.offset = -1; }],
+  ];
+  for (const [label, mutate] of invalidPlans) {
+    const hostile = structuredClone(base) as any;
+    mutate(hostile);
+    const validation = validateInstructionPlan(hostile);
+    assert.equal(validation.valid, false, label);
+    assert.ok(validation.errors.length > 0, label);
+    assert.doesNotThrow(() => validateInstructionPlan(hostile), label);
+  }
+
+  const pacingPlan = plan('say "first"\nwait 10 s\nexit');
+  const pending = run(pacingPlan, createFreshRuntimeSnapshot(pacingPlan));
+  const baseline = JSON.stringify(pending.snapshot);
+  const background = pending.snapshot.backgroundActions[0];
+  const failures = [
+    completeAction(pacingPlan, pending.snapshot, { actionId: background!.actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs: 0 } }),
+    completeAction(pacingPlan, pending.snapshot, { actionId: background!.actionId, actionKind: "chatPacingGate", payload: { kind: "wrong" } }),
+    completeAction(pacingPlan, pending.snapshot, { actionId: 0, actionKind: "chatPacingGate", payload: { kind: "skip" } }),
+    observeTime(pacingPlan, pending.snapshot, Number.POSITIVE_INFINITY),
+    observeTime(pacingPlan, pending.snapshot, -1),
+  ];
+  for (const result of failures) {
+    assert.deepEqual(result.events, []);
+    assert.equal(JSON.stringify(result.snapshot), baseline);
+  }
+});
+
+test("cross-field pacing snapshot corruption rejects at direct and checkpoint boundaries", () => {
+  const waitPlan = plan('say "first"\nwait 10 s\nexit');
+  const waiting = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
+  const promotedPlan = plan('say "first"\nsay "second"');
+  const promoted = run(promotedPlan, createFreshRuntimeSnapshot(promotedPlan));
+  const promotedGate = promoted.snapshot.foregroundAction;
+  assert.equal(promotedGate?.kind, "chatPacingGate");
+  const speakerPlan = plan('speaker vera { defaultSaySkippable: true }\nexit');
+  const speakerState = run(speakerPlan, createFreshRuntimeSnapshot(speakerPlan));
+  const interactionPlan = plan('say "first"\nshowButton "Continue"\nwait 10 s\nexit');
+  const interactionWaiting = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
+  const interaction = interactionWaiting.snapshot.foregroundAction;
+  assert.equal(interaction?.kind, "interaction");
+  const interactionSettled = completeAction(interactionPlan, interactionWaiting.snapshot, {
+    actionId: interaction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  });
+  const laterWait = run(interactionPlan, interactionSettled.snapshot);
+
+  const corruptions: Array<[string, ReturnType<typeof plan>, unknown]> = [
+    ["foreground gate moved to background", promotedPlan, mutateCheckpoint(promotedPlan, promoted.snapshot, (snapshot) => {
+      snapshot.backgroundActions.push(snapshot.foregroundAction);
+      snapshot.foregroundAction = null;
+    })],
+    ["prepared output moved to top level while foreground remains", promotedPlan, mutateCheckpoint(promotedPlan, promoted.snapshot, (snapshot) => {
+      snapshot.preparedSayOutput = snapshot.foregroundAction.preparedOutput;
+    })],
+    ["pacing deadline before current time", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+      snapshot.backgroundActions[0].deadlineMs = snapshot.currentSessionTimeMs;
+    })],
+    ["next action ID reuses active identity", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+      snapshot.nextActionId = snapshot.foregroundAction.actionId;
+    })],
+    ["next event sequence reuses request identity", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+      snapshot.nextEventSequence = snapshot.foregroundAction.requestEventSequence;
+    })],
+    ["prepared continuation is not say", promotedPlan, mutateCheckpoint(promotedPlan, promoted.snapshot, (snapshot) => {
+      snapshot.foregroundAction.preparedOutput.owningInstruction = 2;
+      snapshot.foregroundAction.preparedOutput.continuationInstruction = 3;
+      snapshot.nextInstruction = 2;
+    })],
+    ["background gate carries prepared output", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+      snapshot.backgroundActions[0].preparedOutput = structuredClone(promotedGate?.preparedOutput);
+    })],
+    ["multiple background gates", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+      snapshot.backgroundActions.push(structuredClone(snapshot.backgroundActions[0]));
+    })],
+    ["extra pacing setting", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+      snapshot.chatPacingSettings.extra = 1;
+    })],
+    ["missing pacing setting", waitPlan, mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+      delete snapshot.chatPacingSettings.baseDelayMs;
+    })],
+    ["duplicate speaker pacing property", speakerPlan, mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
+      snapshot.speakers[0].properties.push(structuredClone(snapshot.speakers[0].properties[0]));
+    })],
+    ["active request collides with interaction transcript", interactionPlan, mutateCheckpoint(interactionPlan, laterWait.snapshot, (snapshot) => {
+      snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.transcriptEventSequence;
+    })],
+  ];
+
+  for (const [label, compiled, checkpoint] of corruptions) {
+    const snapshot = (checkpoint as { snapshot: unknown }).snapshot;
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false, label);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), label);
+  }
+});
+
+test("pacing event-order matrix covers representative lifecycle transitions", () => {
+  const initialPlan = plan('say "first"\nexit');
+  const initial = run(initialPlan, createFreshRuntimeSnapshot(initialPlan));
+  const promotedPlan = plan('say "first"\nsay "second"');
+  const promoted = run(promotedPlan, createFreshRuntimeSnapshot(promotedPlan));
+  const promotedGate = promoted.snapshot.foregroundAction;
+  assert.equal(promotedGate?.kind, "chatPacingGate");
+  const released = observeTime(promotedPlan, promoted.snapshot, promotedGate!.deadlineMs);
+  const interactionPlan = plan('say "first"\nshowButton "Continue"');
+  const interaction = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
+  const instantPlan = plan('say "first"\nsay "now", instant');
+  const instant = run(instantPlan, createFreshRuntimeSnapshot(instantPlan));
+  const dualPlan = plan('say "first"\nwait 1 s\nexit');
+  const dual = run(dualPlan, createFreshRuntimeSnapshot(dualPlan));
+
+  const cases: Array<[string, readonly string[]]> = [
+    ["initial positive say", initial.events.map((event) => event.kind)],
+    ["later positive say promotion", promoted.events.map((event) => event.kind)],
+    ["foreground pacing settlement", released.events.map((event) => event.kind)],
+    ["background typed skip", completeAction(initialPlan, initial.snapshot, {
+      actionId: initial.snapshot.backgroundActions[0]!.actionId,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    }).events.map((event) => event.kind)],
+    ["interaction consumption", interaction.events.map((event) => event.kind)],
+    ["instant supersession", instant.events.map((event) => event.kind)],
+    ["simultaneously due delay and pacing", observeTime(dualPlan, dual.snapshot, 2_000).events.map((event) => event.kind)],
+    ["prepared re-entry replacement", run(promotedPlan, released.snapshot).events.map((event) => event.kind)],
+  ];
+  const expected = new Map<string, readonly string[]>([
+    ["initial positive say", ["say", "actionRequested", "exit"]],
+    ["later positive say promotion", ["say", "actionRequested"]],
+    ["foreground pacing settlement", ["actionCompleted"]],
+    ["background typed skip", ["actionCompleted"]],
+    ["interaction consumption", ["say", "actionRequested", "actionCompleted", "actionRequested"]],
+    ["instant supersession", ["say", "actionRequested", "actionCompleted", "say", "complete"]],
+    ["simultaneously due delay and pacing", ["actionCompleted", "actionCompleted"]],
+    ["prepared re-entry replacement", ["say", "actionRequested", "complete"]],
+  ]);
+  for (const [label, events] of cases) assert.deepEqual(events, expected.get(label), label);
+});
+
+test("bounded replay advances across delay, pacing, and interaction settlements", () => {
+  const compiled = plan('say "first"\nwait 1 s\nshowButton "Continue"\nexit');
+  const initial = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const pacing = initial.snapshot.backgroundActions[0];
+  const delay = initial.snapshot.foregroundAction;
+  assert.equal(pacing?.kind, "chatPacingGate");
+  assert.equal(delay?.kind, "delay");
+
+  const delaySettled = observeTime(compiled, initial.snapshot, 1_000);
+  assert.equal(delaySettled.snapshot.lastSettlement?.actionId, delay?.actionId);
+  const delayReplay = completeAction(compiled, delaySettled.snapshot, {
+    actionId: delay!.actionId,
+    actionKind: "delay",
+    payload: { kind: "time", currentSessionTimeMs: 1_000 },
+  });
+  assert.equal(delayReplay.outcome.kind, "alreadySettled");
+
+  const pacingSettled = completeAction(compiled, delaySettled.snapshot, {
+    actionId: pacing!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(pacingSettled.snapshot.lastSettlement?.actionId, pacing?.actionId);
+  assert.equal(completeAction(compiled, pacingSettled.snapshot, {
+    actionId: delay!.actionId,
+    actionKind: "delay",
+    payload: { kind: "time", currentSessionTimeMs: 1_000 },
+  }).outcome.kind, "staleAction");
+
+  const interactionWaiting = run(compiled, pacingSettled.snapshot);
+  const interaction = interactionWaiting.snapshot.foregroundAction;
+  assert.equal(interaction?.kind, "interaction");
+  const interactionSettled = completeAction(compiled, interactionWaiting.snapshot, {
+    actionId: interaction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  });
+  assert.equal(interactionSettled.snapshot.lastSettlement?.actionId, interaction?.actionId);
+  assert.equal(completeAction(compiled, interactionSettled.snapshot, {
+    actionId: pacing!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  }).outcome.kind, "staleAction");
+  assert.equal(completeAction(compiled, interactionSettled.snapshot, {
+    actionId: 999,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  }).outcome.kind, "unknownAction");
+});
+
+function finishPacingChain(
+  compiled: ReturnType<typeof plan>,
+  snapshot: ReturnType<typeof createFreshRuntimeSnapshot>,
+): { snapshot: ReturnType<typeof createFreshRuntimeSnapshot>; events: unknown[] } {
+  let current = snapshot;
+  const events: unknown[] = [];
+  for (let steps = 0; steps < 16; steps += 1) {
+    const advanced = run(compiled, current);
+    current = advanced.snapshot;
+    events.push(...advanced.events);
+    if (current.foregroundAction?.kind === "chatPacingGate") {
+      const settled = completeAction(compiled, current, {
+        actionId: current.foregroundAction.actionId,
+        actionKind: "chatPacingGate",
+        payload: { kind: "skip" },
+      });
+      current = settled.snapshot;
+      events.push(...settled.events);
+      continue;
+    }
+    if (current.status === "halted" && current.backgroundActions[0]?.kind === "chatPacingGate") {
+      const settled = completeAction(compiled, current, {
+        actionId: current.backgroundActions[0].actionId,
+        actionKind: "chatPacingGate",
+        payload: { kind: "skip" },
+      });
+      current = settled.snapshot;
+      events.push(...settled.events);
+    }
+    return { snapshot: current, events };
+  }
+  throw new Error("Pacing chain did not finish within its bounded test steps.");
+}
 
 function mutateCheckpoint(
   compiled: ReturnType<typeof plan>,
