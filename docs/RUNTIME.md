@@ -81,13 +81,14 @@ Completion semantics are:
 
 A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
-The current runtime contains per-string, aggregate-text, and option-count interaction guards. Their exact numeric values
-are implementation inventory, not accepted capacity or source targets; [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)
-records that current evidence does not justify retaining those numbers. Bounded validation first rejects impossible
-UTF-16 lengths, measures each accepted field once, and stops encoding further fields after either a per-string or
-aggregate failure. Text completion measures the raw host string once; CRLF/CR-to-LF normalization cannot increase its
-UTF-8 size. Current over-limit data is rejected without truncation, clamping, or partial state mutation until the #129
-repair replaces or removes the unsupported ceilings.
+The current runtime keeps three independent interaction resource axes: completion/result/transcript string bytes,
+aggregate UTF-8 bytes for one retained interaction definition, and option count. Authored/materialized UI fields have no
+independent per-field byte ceiling; each preflights against the remaining definition aggregate. Exact numeric values and
+their provisional Owner POC reassessment route live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); they are not accepted
+capacity or source targets. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field
+once, and stops encoding after the applicable byte budget fails. Text completion measures the raw host string once;
+CRLF/CR-to-LF normalization cannot increase its UTF-8 size. Over-limit data is rejected without truncation, clamping,
+or partial state mutation.
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 
@@ -495,9 +496,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 7 | Added canonical prepared-interaction speaker/UI instructions for compact source lowering while retaining the local interaction-result consume/transfer boundary. |
+| Instruction plan | 8 | Narrowed source positions, temporary counts/IDs, and loop IDs to JavaScript safe-integer representation domains; revision 7 accepted values that the corrected contract must reject. |
 | Runtime snapshot | 8 | Added one nullable single-use `interactionResultHandoff` authority that protects the still-unconsumed destination independently of `lastSettlement`. |
-| Checkpoint | 9 | Updated the self-contained bundle for instruction-plan revision 7 while retaining runtime-snapshot revision 8. |
+| Checkpoint | 10 | Updated the self-contained bundle for instruction-plan revision 8 while retaining runtime-snapshot revision 8. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

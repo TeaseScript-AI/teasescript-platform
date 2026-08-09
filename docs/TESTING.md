@@ -426,8 +426,9 @@ regressions prove that a newer retained settlement cannot remove destination/res
 that the handoff disappears immediately after the first successful consume or discard instruction, and that later ordinary
 state no longer carries interaction provenance. Non-canonical branches, loops, second actions, unrelated writers, duplicate
 producers, and independent targets inside the handoff are rejected locally rather than supported through global
-interaction-result liveness. Current interaction-guard cases remain implementation-boundary regressions only and must
-move with #129 removal or re-derivation rather than becoming source-capacity evidence. Every rejected completion compares
+interaction-result liveness. Current interaction-guard cases remain implementation-boundary regressions for the
+provisional POC policies and structural separation; they are not source-capacity evidence and must move with later
+evidence-based reassessment. Every rejected completion compares
 the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot
 change unnoticed. Standard Player/browser UI coverage remains assigned to its later implementation slice.
 

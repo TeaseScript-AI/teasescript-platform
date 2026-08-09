@@ -16,7 +16,7 @@
 - `ARCHITECTURE.md`
 - `TEASESCRIPT.md`
 - `RUNTIME.md`
-- `RESOURCE-LIMITS.md`: canonical resource-limit inventory, evidence justification, and removal/re-derivation routing.
+- `RESOURCE-LIMITS.md`: canonical resource-limit inventory, evidence/policy status, coupling, and reassessment routing.
 - `DATA-AND-API.md`
 - `LIBRARIES.md`
 - `SECURITY.md`
