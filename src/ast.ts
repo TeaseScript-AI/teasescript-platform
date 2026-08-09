@@ -10,6 +10,7 @@ export type Statement =
   | SpeakerDeclaration
   | SpeakerSetterStatement
   | SayStatement
+  | ShowButtonStatement
   | WaitStatement
   | ExitStatement
   | LetStatement
@@ -54,6 +55,15 @@ export interface SayStatement {
   readonly kind: "sayStatement";
   readonly speaker: Identifier | null;
   readonly value: Expression;
+  readonly span: SourceSpan;
+}
+
+export interface ShowButtonStatement {
+  readonly kind: "showButtonStatement";
+  readonly commandSpan: SourceSpan;
+  readonly asSpan: SourceSpan | null;
+  readonly speaker: Identifier | null;
+  readonly label: Expression;
   readonly span: SourceSpan;
 }
 
@@ -193,7 +203,28 @@ export type Expression =
   | CallExpression
   | UnaryExpression
   | BinaryExpression
-  | RangeExpression;
+  | RangeExpression
+  | InteractionExpression;
+
+export interface InteractionExpression {
+  readonly kind: "interactionExpression";
+  readonly interactionKind: "text" | "number" | "choice";
+  readonly commandSpan: SourceSpan;
+  readonly asSpan: SourceSpan | null;
+  readonly speaker: Identifier | null;
+  readonly hint: Expression | null;
+  readonly options: readonly InteractionChoiceOption[];
+  readonly span: SourceSpan;
+}
+
+export interface InteractionChoiceOption {
+  readonly kind: "interactionChoiceOption";
+  readonly label: Identifier | NumberLiteral | null;
+  readonly colonSpan: SourceSpan | null;
+  readonly value: Expression;
+  readonly separatorSpan: SourceSpan | null;
+  readonly span: SourceSpan;
+}
 
 /** Kept as a compatibility alias for the initial parser POC public API. */
 export type StringExpression = StringLiteral | TemplateLiteral;

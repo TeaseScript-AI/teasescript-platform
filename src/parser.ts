@@ -24,6 +24,9 @@ import type {
   PropertyAccessExpression,
   ScalarTypeName,
   SayStatement,
+  ShowButtonStatement,
+  InteractionExpression,
+  InteractionChoiceOption,
   WaitStatement,
   RepeatStatement,
   ReturnStatement,
@@ -88,6 +91,11 @@ const parserDiagnosticCode = {
   expectedParameter: "TSP025",
   emptyFunctionParameters: "TSP026",
   nestingDepth: "TSP027",
+  expectedInteractionText: "TSP028",
+  expectedInteractionSpeaker: "TSP029",
+  expectedChoiceOption: "TSP030",
+  expectedChoiceSeparator: "TSP031",
+  unsupportedInteractionForm: "TSP032",
 } as const;
 
 /** Parses the accepted core-language milestone. */
@@ -166,6 +174,9 @@ class Parser {
   }
 
   #parseStatement(): Statement | null {
+    if (this.#checkIdentifier("showButton")) {
+      return this.#parseShowButtonStatement();
+    }
     if (
       this.#check(TokenKind.KeywordWait) &&
       this.#peek(1).kind === TokenKind.LeftParenthesis &&
@@ -212,6 +223,74 @@ class Parser {
         this.#synchronizeStatement();
         return null;
     }
+  }
+
+  #parseShowButtonStatement(): ShowButtonStatement | null {
+    const command = this.#advance();
+    if (this.#check(TokenKind.LeftParenthesis)) {
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        "Parenthesized showButton arguments are not supported in the compact interaction syntax.",
+        this.#peek().span,
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    let asSpan: SourceSpan | null = null;
+    let speaker: Identifier | null = null;
+    if (this.#match(TokenKind.KeywordAs)) {
+      asSpan = copySpan(this.#previous().span);
+      if (!this.#check(TokenKind.Identifier)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedInteractionSpeaker,
+          "Expected a speaker identifier after 'as'.",
+        );
+        this.#synchronizeStatement();
+        return null;
+      }
+      speaker = this.#identifier(this.#advance());
+    }
+    if (this.#check(TokenKind.LeftParenthesis)) {
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        "Parenthesized showButton arguments are not supported in the compact interaction syntax.",
+        this.#peek().span,
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const label = this.#parseExpression();
+    if (label === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedInteractionText,
+        "Expected button text after 'showButton'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    if (this.#check(TokenKind.KeywordAs)) {
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        "The 'as speaker' clause must appear immediately after 'showButton'.",
+        this.#peek().span,
+      );
+      this.#synchronizeStatement();
+    } else if (this.#check(TokenKind.Comma)) {
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        "Additional showButton arguments are not supported in the compact interaction syntax.",
+        this.#peek().span,
+      );
+      this.#synchronizeStatement();
+    }
+    return Object.freeze({
+      kind: "showButtonStatement",
+      commandSpan: copySpan(command.span),
+      asSpan,
+      speaker,
+      label,
+      span: spanFrom(command.span, label.span),
+    });
   }
 
   #parseSpeakerStatement():
@@ -758,7 +837,11 @@ class Parser {
       const statement = this.#parseStatement();
       if (statement !== null) statements.push(statement);
       if (this.#current === startIndex) this.#advance();
-      this.#finishStatement(true);
+      if (this.#recoveredAtStatementBoundary) {
+        this.#recoveredAtStatementBoundary = false;
+      } else {
+        this.#finishStatement(true);
+      }
       this.#skipNewlines();
     }
     if (!this.#match(TokenKind.RightBrace)) {
@@ -1187,6 +1270,13 @@ class Parser {
 
   #parsePrimary(): Expression | null {
     const token = this.#peek();
+    if (
+      this.#checkIdentifier("askText") ||
+      this.#checkIdentifier("askNumber") ||
+      this.#checkIdentifier("choose")
+    ) {
+      return this.#parseInteractionExpression();
+    }
     if (this.#match(TokenKind.NumberLiteral)) {
       return Object.freeze({
         kind: "numberLiteral",
@@ -1248,6 +1338,175 @@ class Parser {
       return this.#parseSetLiteral(token);
     }
     return null;
+  }
+
+  #parseInteractionExpression(): InteractionExpression | null {
+    const command = this.#advance();
+    if (this.#check(TokenKind.LeftParenthesis)) {
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        `Parenthesized ${command.lexeme} arguments are not supported in the compact interaction syntax.`,
+        this.#peek().span,
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const interactionKind = command.lexeme === "askText"
+      ? "text"
+      : command.lexeme === "askNumber"
+        ? "number"
+        : "choice";
+    let asSpan: SourceSpan | null = null;
+    let speaker: Identifier | null = null;
+    if (this.#match(TokenKind.KeywordAs)) {
+      asSpan = copySpan(this.#previous().span);
+      if (!this.#check(TokenKind.Identifier)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedInteractionSpeaker,
+          "Expected a speaker identifier after 'as'.",
+        );
+        return null;
+      }
+      speaker = this.#identifier(this.#advance());
+    }
+    if (this.#check(TokenKind.LeftParenthesis)) {
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        `Parenthesized ${command.lexeme} arguments are not supported in the compact interaction syntax.`,
+        this.#peek().span,
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+
+    if (interactionKind !== "choice") {
+      const hint = isExpressionStart(this.#peek()) ? this.#parseExpression() : null;
+      if (this.#check(TokenKind.KeywordAs)) {
+        this.#reportSpan(
+          parserDiagnosticCode.unsupportedInteractionForm,
+          `The 'as speaker' clause must appear immediately after '${command.lexeme}'.`,
+          this.#peek().span,
+        );
+        this.#synchronizeStatement();
+      }
+      const end = hint?.span ?? speaker?.span ?? command.span;
+      return Object.freeze({
+        kind: "interactionExpression",
+        interactionKind,
+        commandSpan: copySpan(command.span),
+        asSpan,
+        speaker,
+        hint,
+        options: Object.freeze([]),
+        span: spanFrom(command.span, end),
+      });
+    }
+
+    const options: InteractionChoiceOption[] = [];
+    while (!this.#isInteractionChoiceTerminator()) {
+      const label = (
+        (this.#check(TokenKind.Identifier) || this.#check(TokenKind.NumberLiteral)) &&
+        this.#peek(1).kind === TokenKind.Colon
+      )
+        ? this.#interactionChoiceLabel(this.#advance())
+        : null;
+      let colonSpan: SourceSpan | null = null;
+      if (label !== null) {
+        this.#advance();
+        colonSpan = copySpan(this.#previous().span);
+      }
+      const value = this.#parseExpression();
+      if (value === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedChoiceOption,
+          label === null
+            ? "Expected at least one choice option."
+            : "Expected a choice option expression after ':'.",
+        );
+        if (isStatementStart(this.#peek().kind)) {
+          this.#recoveredAtStatementBoundary = true;
+        }
+        break;
+      }
+      let separatorSpan: SourceSpan | null = null;
+      if (this.#match(TokenKind.Comma)) {
+        separatorSpan = copySpan(this.#previous().span);
+      }
+      options.push(Object.freeze({
+        kind: "interactionChoiceOption",
+        label,
+        colonSpan,
+        value,
+        separatorSpan,
+        span: spanFrom(label?.span ?? value.span, value.span),
+      }));
+      if (separatorSpan === null) {
+        if (!this.#isInteractionChoiceTerminator()) {
+          if (this.#check(TokenKind.KeywordAs)) {
+            this.#reportSpan(
+              parserDiagnosticCode.unsupportedInteractionForm,
+              "The 'as speaker' clause must appear immediately after 'choose'.",
+              this.#peek().span,
+            );
+          } else {
+            this.#reportSpan(
+              parserDiagnosticCode.expectedChoiceSeparator,
+              "Expected ',' or the end of the statement after a choice option.",
+              this.#peek().span,
+            );
+          }
+          this.#synchronizeStatement();
+        }
+        break;
+      }
+      this.#skipContinuationNewlines();
+      if (this.#isInteractionChoiceTerminator()) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedChoiceOption,
+          "Expected a choice option after ','.",
+        );
+        break;
+      }
+    }
+    if (options.length === 0 && !this.#diagnostics.some((item) => item.code === parserDiagnosticCode.expectedChoiceOption && item.span.start.offset >= command.span.start.offset)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedChoiceOption,
+        "Expected at least one choice option.",
+      );
+    }
+    const end = options.at(-1)?.value.span ?? speaker?.span ?? command.span;
+    return Object.freeze({
+      kind: "interactionExpression",
+      interactionKind,
+      commandSpan: copySpan(command.span),
+      asSpan,
+      speaker,
+      hint: null,
+      options: Object.freeze(options),
+      span: spanFrom(command.span, end),
+    });
+  }
+
+  #isInteractionChoiceTerminator(): boolean {
+    return (
+      this.#check(TokenKind.Newline) ||
+      this.#check(TokenKind.EndOfFile) ||
+      this.#check(TokenKind.RightBrace) ||
+      this.#check(TokenKind.RightParenthesis) ||
+      this.#check(TokenKind.RightBracket) ||
+      this.#check(TokenKind.InterpolationEnd)
+    );
+  }
+
+  #interactionChoiceLabel(token: Token): Identifier | import("./ast.js").NumberLiteral {
+    if (token.kind === TokenKind.Identifier) return this.#identifier(token);
+    return Object.freeze({
+      kind: "numberLiteral",
+      raw: token.lexeme,
+      value: Number(token.lexeme),
+      numericType: /[.eE]/u.test(token.lexeme) ? "number" : "integer",
+      span: copySpan(token.span),
+    });
   }
 
   #parseParenthesized(start: Token): ParenthesizedExpression | null {
@@ -1725,6 +1984,10 @@ class Parser {
 
   #check(kind: TokenKind): boolean {
     return this.#peek().kind === kind;
+  }
+
+  #checkIdentifier(name: string): boolean {
+    return this.#check(TokenKind.Identifier) && this.#peek().lexeme === name;
   }
 
   #advance(): Token {

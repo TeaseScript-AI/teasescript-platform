@@ -66,6 +66,8 @@ The accepted boundary does not itself change accepted V30 forms such as `wait 2`
 
 ADR 0018 selects direct Standard Library names with no import and no first-POC opt-out or shadowing.
 
+The current compiler implements the four compact interaction forms in this section through explicit versioned interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced parameters remain deferred; this slice does not treat compact syntax as a runtime library call. Parenthesized interaction-call spellings and an `as speaker` clause placed after the payload are rejected with focused parser diagnostic `TSP032` rather than being interpreted as compact syntax.
+
 ### Basic interactions
 
 ```tease
@@ -107,6 +109,8 @@ let result = choose 1: "Open the door", 2: "Walk away"
 The compact form keeps every option in one statement and separates options with commas. Labelled and unlabelled options may not be mixed. Identifier labels and finite numeric-literal labels are accepted, but one `choose` may not mix the two label types. Identifier labels return `string`; numeric labels return `number`. Labels must be unique. Repeated visible text is allowed only for labelled choices; an unlabelled duplicate is a compile error.
 
 `choose` is the author-facing construct. `choice` is the internal interaction/action noun.
+
+Existing downstream interaction and validation guards remain boundary-local technical constraints; compact `choose` does not promote them into a TeaseScript source-capacity promise.
 
 Selecting a labelled button or dropdown entry supplies its label to the engine; selecting an unlabelled entry supplies its visible text. The engine validates the selection and derives the canonical visible player-transcript text from the active choice. Manually typed input uses exact, unambiguous visible-text matching.
 

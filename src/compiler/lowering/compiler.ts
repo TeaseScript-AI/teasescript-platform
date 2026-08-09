@@ -4,6 +4,8 @@ import type {
   Expression,
   FunctionDeclaration,
   Statement,
+  InteractionExpression,
+  ShowButtonStatement,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
@@ -21,6 +23,8 @@ import type {
   PreparedCallArgument,
   TemplatePartPlan,
   TemporaryExpressionPlan,
+  InteractionUiPayload,
+  PreparedInteractionUiPayload,
 } from "../../plan/model.js";
 
 export class InstructionCompiler {
@@ -37,6 +41,7 @@ export class InstructionCompiler {
   >;
   #nextLoopId = 1;
   #nextTemporaryId = 1;
+  #contextualSpeakerTemporary: number | null = null;
 
   public constructor(private readonly declarations: readonly FunctionDeclaration[]) {
     this.#functionByName = new Map(
@@ -114,6 +119,9 @@ export class InstructionCompiler {
         this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
         }
+      case "showButtonStatement":
+        this.#compileShowButton(statement);
+        return;
       case "waitStatement": {
         const lowered = this.#lowerExpression(statement.duration);
         this.instructions.push({ kind: "wait", duration: lowered.plan, unit: statement.unit, span: copySpan(statement.span) });
@@ -415,6 +423,9 @@ export class InstructionCompiler {
   }
 
   #lowerExpression(expression: Expression): LoweredExpression {
+    if (expression.kind === "interactionExpression") {
+      return this.#lowerInteraction(expression);
+    }
     if (
       expression.kind === "callExpression" &&
       expression.callee.kind === "identifier" &&
@@ -434,7 +445,14 @@ export class InstructionCompiler {
       case "nullLiteral":
       case "numberLiteral":
       case "stringLiteral":
+        return { plan: compileExpression(expression), temporaryIds: [] };
       case "identifier":
+        if (expression.name === "speaker" && this.#contextualSpeakerTemporary !== null) {
+          return {
+            plan: { kind: "temporary", temporaryId: this.#contextualSpeakerTemporary, span: copySpan(expression.span) },
+            temporaryIds: [],
+          };
+        }
         return { plan: compileExpression(expression), temporaryIds: [] };
       case "parenthesizedExpression": {
         const nested = this.#lowerExpression(expression.expression);
@@ -595,6 +613,244 @@ export class InstructionCompiler {
         };
       }
     }
+  }
+
+  #compileShowButton(statement: ShowButtonStatement): void {
+    const staticLabel = staticVisibleText(statement.label);
+    if (staticLabel !== undefined) {
+      this.instructions.push({
+        kind: "interaction",
+        interactionKind: "button",
+        target: "standardChat",
+        speaker: statement.speaker?.name ?? null,
+        destinationTemporary: null,
+        expectedResult: "none",
+        ui: {
+          kind: "button",
+          buttonLabel: staticLabel,
+          accessibleName: { kind: "localizedDefault", key: "continue" },
+        },
+        span: copySpan(statement.span),
+      });
+      return;
+    }
+
+    const speakerTemporary = this.#prepareInteractionSpeaker(
+      statement.speaker?.name ?? null,
+      statement.asSpan ?? statement.commandSpan,
+    );
+    const label = this.#materializeDedicatedInteractionValue(
+      this.#lowerInteractionPayload(statement.label, speakerTemporary),
+      statement.label.span,
+    );
+    this.instructions.push({
+      kind: "interaction",
+      interactionKind: "button",
+      target: "standardChat",
+      speakerTemporary,
+      destinationTemporary: null,
+      expectedResult: "none",
+      preparedUi: {
+        kind: "button",
+        buttonLabelTemporary: label.temporaryId,
+        accessibleName: { kind: "localizedDefault", key: "continue" },
+      },
+      span: copySpan(statement.span),
+    });
+    this.#emitTemporaryCleanup([speakerTemporary, label.temporaryId], statement.span);
+  }
+
+  #lowerInteraction(expression: InteractionExpression): LoweredExpression {
+    const values = expression.interactionKind === "choice"
+      ? expression.options.map((option) => option.value)
+      : expression.hint === null ? [] : [expression.hint];
+    const staticValues = values.map(staticVisibleText);
+    const allStatic = staticValues.every((value) => value !== undefined);
+    const labelType = interactionLabelType(expression);
+    const expectedResult = expression.interactionKind === "number" ||
+      (expression.interactionKind === "choice" && labelType === "number")
+      ? "number" as const
+      : "string" as const;
+
+    if (allStatic) {
+      const ui = staticInteractionUi(expression, staticValues as string[], labelType);
+      return this.#emitResultInteraction({
+        interactionKind: expression.interactionKind,
+        target: "standardChat",
+        speaker: expression.speaker?.name ?? null,
+        expectedResult,
+        ui,
+        span: copySpan(expression.span),
+      }, expression.span);
+    }
+
+    const speakerTemporary = this.#prepareInteractionSpeaker(
+      expression.speaker?.name ?? null,
+      expression.asSpan ?? expression.commandSpan,
+    );
+    let preparedUi: PreparedInteractionUiPayload;
+    const preparedTemporaryIds: number[] = [speakerTemporary];
+
+    if (expression.interactionKind === "text" || expression.interactionKind === "number") {
+      const hint = expression.hint === null
+        ? null
+        : this.#materializeDedicatedInteractionValue(
+            this.#lowerInteractionPayload(expression.hint, speakerTemporary),
+            expression.hint.span,
+          );
+      if (hint !== null) preparedTemporaryIds.push(hint.temporaryId);
+      preparedUi = {
+        kind: expression.interactionKind,
+        hintTemporary: hint?.temporaryId ?? null,
+        accessibleName: {
+          kind: "localizedDefault",
+          key: expression.interactionKind === "text" ? "answer" : "number",
+        },
+      };
+    } else {
+      const loweredValues = this.#lowerInteractionPayloads(values, speakerTemporary);
+      const optionsTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "storeTemporary",
+        temporaryId: optionsTemporary,
+        value: {
+          kind: "list",
+          elements: loweredValues.map((item) => item.plan),
+          span: copySpan(expression.span),
+        },
+        expectBoolean: false,
+        span: copySpan(expression.span),
+      });
+      this.#emitTemporaryCleanup(
+        loweredValues.flatMap((item) => item.temporaryIds),
+        expression.span,
+      );
+      preparedTemporaryIds.push(optionsTemporary);
+      preparedUi = {
+        kind: "choice",
+        labelType,
+        optionsTemporary,
+        optionCount: expression.options.length,
+        labels: labelType === "none"
+          ? null
+          : expression.options.map((option) => interactionLabelValue(option.label!)),
+        accessibleName: { kind: "localizedDefault", key: "chooseOption" },
+      };
+    }
+
+    const lowered = this.#emitPreparedResultInteraction(
+      expression.interactionKind,
+      expectedResult,
+      speakerTemporary,
+      preparedUi,
+      expression.span,
+    );
+    this.#emitTemporaryCleanup(preparedTemporaryIds, expression.span);
+    return lowered;
+  }
+
+  #emitResultInteraction(
+    instruction: Omit<Extract<import("../../plan/model.js").InteractionInstruction, { readonly ui: InteractionUiPayload }>, "kind" | "destinationTemporary">,
+    span: SourceSpan,
+  ): LoweredExpression {
+    const transientTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "interaction",
+      ...instruction,
+      destinationTemporary: transientTemporary,
+    });
+    return this.#consumeInteractionResult(transientTemporary, span);
+  }
+
+  #emitPreparedResultInteraction(
+    interactionKind: InteractionExpression["interactionKind"],
+    expectedResult: "string" | "number",
+    speakerTemporary: number,
+    preparedUi: PreparedInteractionUiPayload,
+    span: SourceSpan,
+  ): LoweredExpression {
+    const transientTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "interaction",
+      interactionKind,
+      target: "standardChat",
+      speakerTemporary,
+      destinationTemporary: transientTemporary,
+      expectedResult,
+      preparedUi,
+      span: copySpan(span),
+    });
+    return this.#consumeInteractionResult(transientTemporary, span);
+  }
+
+  #consumeInteractionResult(transientTemporary: number, span: SourceSpan): LoweredExpression {
+    const ordinaryTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: ordinaryTemporary,
+      value: { kind: "temporary", temporaryId: transientTemporary, span: copySpan(span) },
+      expectBoolean: false,
+      span: copySpan(span),
+    });
+    this.instructions.push({
+      kind: "clearTemporary",
+      temporaryId: transientTemporary,
+      span: copySpan(span),
+    });
+    return {
+      plan: { kind: "temporary", temporaryId: ordinaryTemporary, span: copySpan(span) },
+      temporaryIds: [ordinaryTemporary],
+    };
+  }
+
+  #prepareInteractionSpeaker(speaker: string | null, span: SourceSpan): number {
+    const destinationTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "prepareInteractionSpeaker",
+      speaker,
+      destinationTemporary,
+      span: copySpan(span),
+    });
+    return destinationTemporary;
+  }
+
+  #lowerInteractionPayload(expression: Expression, speakerTemporary: number): LoweredExpression {
+    const previous = this.#contextualSpeakerTemporary;
+    this.#contextualSpeakerTemporary = speakerTemporary;
+    try {
+      return this.#lowerExpression(expression);
+    } finally {
+      this.#contextualSpeakerTemporary = previous;
+    }
+  }
+
+  #lowerInteractionPayloads(
+    expressions: readonly Expression[],
+    speakerTemporary: number,
+  ): LoweredExpression[] {
+    const previous = this.#contextualSpeakerTemporary;
+    this.#contextualSpeakerTemporary = speakerTemporary;
+    try {
+      return this.#lowerOrderedExpressions(expressions);
+    } finally {
+      this.#contextualSpeakerTemporary = previous;
+    }
+  }
+
+  #materializeDedicatedInteractionValue(
+    lowered: LoweredExpression,
+    span: SourceSpan,
+  ): { readonly temporaryId: number } {
+    const temporaryId = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId,
+      value: lowered.plan,
+      expectBoolean: false,
+      span: copySpan(span),
+    });
+    this.#emitTemporaryCleanup(lowered.temporaryIds, span);
+    return { temporaryId };
   }
 
   #lowerAssignmentTarget(expression: Expression): {
@@ -837,6 +1093,7 @@ export class InstructionCompiler {
   }
 
   #containsUserCall(expression: Expression): boolean {
+    if (expression.kind === "interactionExpression") return true;
     if (
       expression.kind === "callExpression" &&
       expression.callee.kind === "identifier" &&
@@ -995,6 +1252,8 @@ function compileExpression(expression: Expression): ExpressionPlan {
         inclusive: expression.inclusive,
         span: copySpan(expression.span),
       };
+    case "interactionExpression":
+      throw new TypeError("Blocking interactions must be lowered before expression-plan compilation.");
   }
 }
 
@@ -1013,6 +1272,107 @@ function compileArgument(argument: CallArgument): ArgumentPlan {
       };
 }
 
+
+function interactionLabelType(expression: InteractionExpression): "none" | "identifier" | "number" {
+  const label = expression.options[0]?.label;
+  return label === undefined || label === null
+    ? "none"
+    : label.kind === "identifier"
+      ? "identifier"
+      : "number";
+}
+
+function interactionLabelValue(label: NonNullable<InteractionExpression["options"][number]["label"]>): string | number {
+  return label.kind === "identifier"
+    ? label.name
+    : Object.is(label.value, -0) ? 0 : label.value;
+}
+
+function staticInteractionUi(
+  expression: InteractionExpression,
+  staticValues: readonly string[],
+  labelType: "none" | "identifier" | "number",
+): InteractionUiPayload {
+  if (expression.interactionKind === "text" || expression.interactionKind === "number") {
+    return {
+      kind: expression.interactionKind,
+      hint: staticValues[0] ?? null,
+      accessibleName: {
+        kind: "localizedDefault",
+        key: expression.interactionKind === "text" ? "answer" : "number",
+      },
+    };
+  }
+  return {
+    kind: "choice",
+    labelType,
+    options: expression.options.map((option, index) => ({
+      text: staticValues[index]!,
+      label: option.label === null ? null : interactionLabelValue(option.label),
+    })),
+    accessibleName: { kind: "localizedDefault", key: "chooseOption" },
+  };
+}
+
+function staticVisibleText(expression: Expression): string | undefined {
+  switch (expression.kind) {
+    case "stringLiteral":
+      return expression.value;
+    case "numberLiteral":
+      return Number.isFinite(expression.value)
+        ? String(Object.is(expression.value, -0) ? 0 : expression.value)
+        : undefined;
+    case "booleanLiteral":
+      return expression.value ? "true" : "false";
+    case "nullLiteral":
+      return "null";
+    case "parenthesizedExpression":
+      return staticVisibleText(expression.expression);
+    case "unaryExpression":
+    case "binaryExpression": {
+      const value = staticNumber(expression);
+      return value !== undefined && Number.isFinite(value)
+        ? String(Object.is(value, -0) ? 0 : value)
+        : undefined;
+    }
+    case "templateLiteral": {
+      const parts: string[] = [];
+      for (const part of expression.parts) {
+        if (part.kind === "templateText") {
+          parts.push(part.value);
+          continue;
+        }
+        const value = staticVisibleText(part.expression);
+        if (value === undefined) return undefined;
+        parts.push(value);
+      }
+      return parts.join("");
+    }
+    default:
+      return undefined;
+  }
+}
+
+function staticNumber(expression: Expression): number | undefined {
+  if (expression.kind === "numberLiteral") return expression.value;
+  if (expression.kind === "parenthesizedExpression") return staticNumber(expression.expression);
+  if (expression.kind === "unaryExpression" && (expression.operator === "+" || expression.operator === "-")) {
+    const value = staticNumber(expression.operand);
+    return value === undefined ? undefined : expression.operator === "+" ? value : -value;
+  }
+  if (expression.kind !== "binaryExpression") return undefined;
+  const left = staticNumber(expression.left);
+  const right = staticNumber(expression.right);
+  if (left === undefined || right === undefined) return undefined;
+  switch (expression.operator) {
+    case "+": return left + right;
+    case "-": return left - right;
+    case "*": return left * right;
+    case "/": return right === 0 ? undefined : left / right;
+    case "%": return right === 0 ? undefined : left % right;
+    default: return undefined;
+  }
+}
 
 function copySpan(span: SourceSpan): SourceSpan {
   return createSourceSpan(span.start, span.end);

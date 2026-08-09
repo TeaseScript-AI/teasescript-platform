@@ -44,7 +44,7 @@ Candidate Standard Library responsibilities include `say` policy, standard outpu
 
 ## Accepted first Standard Library runtime contract
 
-ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`, followed by a separate `say` smart-autoplay slice. The generic runtime family is implemented for manually constructed validated plans; author-facing syntax, Standard Library lowering, Player UI, and smart autoplay remain separate work.
+ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`, followed by a separate `say` smart-autoplay slice. The generic runtime family and the compact author-facing source/lowering slice are implemented. Standard Player UI and smart autoplay remain separate work.
 
 ### Generic foreground interactions
 
@@ -66,6 +66,8 @@ accessible-name data or localized default key
 The engine owns action identity, active state, completion validation, transcript-result derivation, result writes, events, settlement replay, checkpoint/restore, and structured rejection. Compiler/Standard Library lowering owns compact syntax and default UI payload.
 
 The selected interactions are mandatory and non-cancellable. Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice, and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or continuation.
+
+The compact compiler fully lowers these forms into the versioned plan. Static control text is embedded directly in the interaction instruction. Dynamic control text first captures the requesting speaker, evaluates payload expressions in source order, and stores one prepared UI value; dynamic `choose` batches all option expressions into one prepared list rather than emitting one interaction-preparation instruction per option. The runtime materializes and validates that prepared UI atomically before publishing the pending action. No Standard Library lookup or suspended JavaScript/TypeScript call survives the compile boundary.
 
 Result-bearing text, number, and choice instructions require the destination temporary to be absent when the interaction is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary, records one nullable single-use `interactionResultHandoff` authority, and advances to the next instruction without executing it. The handoff contains only the completed action identity, owning and continuation positions, owner call frame, destination temporary, and canonical result. It remains independent of bounded `lastSettlement` replay data, so a later settlement cannot remove the value-consistency check before consumption. A canonical plan then either discards the temporary directly, returns or exits the owning runtime region, or performs one ordinary local consume/transfer instruction followed immediately by `clearTemporary`. The handoff record is removed after that first instruction succeeds; after a value is copied into an ordinary binding, prepared argument, assignment, or other runtime destination, no interaction-specific provenance remains during cleanup or later execution. No branch, loop edge, second blocking action, arbitrary user-function call, unrelated writer, or independent control-flow target may occur inside that short boundary. The validator enforces this fixed local shape rather than performing whole-plan result-liveness analysis. A result-free button may be the terminal root instruction and uses the existing canonical settled root-end transition.
 
@@ -89,7 +91,17 @@ repair replaces or removes the unsupported ceilings.
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 
-Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text, destination temporary, and owning call-frame identity for duplicate replay. The separate single-use handoff is the persisted authority for the still-unconsumed destination and is validated independently when `lastSettlement` has already been replaced. Delay creation preflights its request plus future completion sequence; interaction creation preflights its request plus future transcript and completion sequences. Interaction completion rechecks both required sequences and validates the complete destination mutation before publishing any write, handoff, settlement, event, or continuation change. Continuation execution remains eligible only through a later normal runtime entry.
+Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive
+monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text,
+destination temporary, and owning call-frame identity for duplicate replay. The separate single-use handoff is the
+persisted authority for the still-unconsumed destination and is validated independently when `lastSettlement` has
+already been replaced. Prepared dynamic UI is checked against its preparation temporaries while those temporaries
+remain; after canonical cleanup, snapshot validation does not reconstruct or authenticate the historical dynamic-UI
+evaluation, consistent with the general snapshot-history rule below. Delay creation preflights its request plus future
+completion sequence; interaction creation preflights its request plus future transcript and completion sequences.
+Interaction completion rechecks both required sequences and validates the complete destination mutation before
+publishing any write, handoff, settlement, event, or continuation change. Continuation execution remains eligible only
+through a later normal runtime entry.
 
 ### Standard composer and dynamic choice presentation
 
@@ -301,7 +313,7 @@ The implementation includes:
 
 The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are listed under [Format evolution](#format-evolution). They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation contains compiler-owned blocking `wait` and one generic foreground `interaction` instruction/action family for button, text, number, and choice. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, author-facing interaction syntax, Player controls, and background pacing remain out of scope.
+The current implementation contains compiler-owned blocking `wait` plus the compact `showButton`, `askText`, `askNumber`, and `choose` source forms lowered into one generic foreground `interaction` instruction/action family for button, text, number, and choice. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, Player controls, smart autoplay/pacing, and populated background actions remain out of scope.
 
 ## Accepted resumable pending-action model
 
@@ -351,7 +363,7 @@ settle actions due at effectiveNow
 
 No checkpoint may contain due-action processing performed against a newer observation while retaining the older session-time value.
 
-Blocking `wait` remains the first source-to-runtime slice. The generic interaction runtime is now the second foreground use of ADR 0016, exercised through manual validated plans until its separate parser/compiler issue lands. Smart-autoplay and `chatPacingGate` remain unimplemented.
+Blocking `wait` remains the first source-to-runtime slice. The generic interaction runtime is the second foreground use of ADR 0016 and is now exercised through the compact `showButton`, `askText`, `askNumber`, and `choose` parser/compiler slice as well as focused low-level plan tests. Smart-autoplay and `chatPacingGate` remain unimplemented.
 
 ## Compiler and execution entry points
 
@@ -470,9 +482,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 6 | Replaced arbitrary long-lived interaction-result arrangements with one locally validated canonical consume/transfer boundary. |
+| Instruction plan | 7 | Added canonical prepared-interaction speaker/UI instructions for compact source lowering while retaining the local interaction-result consume/transfer boundary. |
 | Runtime snapshot | 8 | Added one nullable single-use `interactionResultHandoff` authority that protects the still-unconsumed destination independently of `lastSettlement`. |
-| Checkpoint | 8 | Updated the self-contained plan-and-snapshot bundle to carry and validate the current plan contract and the snapshot handoff authority together. |
+| Checkpoint | 9 | Updated the self-contained bundle for instruction-plan revision 7 while retaining runtime-snapshot revision 8. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

@@ -2,7 +2,7 @@ import type { FunctionDeclaration, Program } from "../ast.js";
 import {
   AST_VALIDATION_CODES,
   captureProgramAst,
-  findNonFiniteNumericLiteralDiagnostics,
+  findNonFiniteNumericLiteralDiagnosticsInStableProgram,
 } from "../ast-validation.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
@@ -25,8 +25,20 @@ export function compileProgram(program: Program): InstructionPlan {
       capture.diagnostic!.span,
     );
   }
-  const capturedProgram = capture.program;
-  const nonFiniteDiagnostic = findNonFiniteNumericLiteralDiagnostics(capturedProgram)[0];
+  return compileStableProgram(capture.program);
+}
+
+/**
+ * Lowers parser-owned or already-captured stable AST data.
+ *
+ * The canonical source route calls this after parsing and semantic validation so
+ * parser-owned AST size is not conflated with the hostile direct-AST capture
+ * budget. `compileProgram(...)` remains the guarded internal entry point for
+ * caller-constructed AST data.
+ */
+export function compileStableProgram(program: Program): InstructionPlan {
+  const nonFiniteDiagnostic =
+    findNonFiniteNumericLiteralDiagnosticsInStableProgram(program)[0];
   if (nonFiniteDiagnostic !== undefined) {
     throw new InstructionCompilationError(
       AST_VALIDATION_CODES.nonFiniteNumericLiteral,
@@ -34,13 +46,13 @@ export function compileProgram(program: Program): InstructionPlan {
       nonFiniteDiagnostic.span,
     );
   }
-  const declarations = capturedProgram.statements.filter(
+  const declarations = program.statements.filter(
     (statement): statement is FunctionDeclaration =>
       statement.kind === "functionDeclaration",
   );
   const compiler = new InstructionCompiler(declarations);
   compiler.compileStatements(
-    capturedProgram.statements.filter(
+    program.statements.filter(
       (statement) => statement.kind !== "functionDeclaration",
     ),
   );
@@ -49,7 +61,7 @@ export function compileProgram(program: Program): InstructionPlan {
   return deepFreeze({
     format: INSTRUCTION_PLAN_FORMAT,
     version: INSTRUCTION_PLAN_VERSION,
-    sourceSpan: copySpan(capturedProgram.span),
+    sourceSpan: copySpan(program.span),
     rootEndInstruction,
     temporaryCount: compiler.temporaryCount,
     functions: compiler.functions,

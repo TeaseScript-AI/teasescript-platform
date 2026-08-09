@@ -18,8 +18,9 @@ work or accept syntax, architecture, or implementation details.
   control flow, deterministic random built-ins, and top-level user-defined functions.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
-- **Pending-action foundation:** compiler-owned blocking `wait` plus one generic typed foreground-interaction action
-  and settlement family with deterministic checkpoint/restore and canonical transcript events.
+- **Pending-action and compact-interaction foundation:** compiler-owned blocking `wait` plus protected compact
+  `showButton`, `askText`, `askNumber`, and `choose` source forms lowered into one generic typed foreground-interaction
+  action and settlement family with deterministic checkpoint/restore and canonical transcript events.
 - **Development and verification:** a standalone browser playground, source-to-runtime conformance coverage,
   focused runtime/checkpoint/corruption tests, and a bounded deterministic property campaign.
 
@@ -29,8 +30,8 @@ contracts and boundaries.
 ## Current major exclusions and blockers
 
 - complete V30 coverage, complete static typing, and units/date/time/duration values;
-- author-facing Standard Library interaction syntax, smart-autoplay pacing, Standard Player controls, editor support,
-  and final interaction acceptance coverage;
+- smart-autoplay pacing, Standard Player interaction controls, richer editor support, and final browser interaction
+  acceptance coverage;
 - populated background actions, general timers, media actions, camera lifecycle, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
