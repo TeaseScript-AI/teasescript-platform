@@ -499,6 +499,58 @@ test("background pacing actions require dense JSON-safe array entries", () => {
   }
 });
 
+test("#112 persisted arrays reject custom own keys that JSON would omit", () => {
+  const backgroundPlan = plan('say "first"\nexit');
+  const background = run(
+    backgroundPlan,
+    createFreshRuntimeSnapshot(backgroundPlan),
+  );
+  const speakerPlan = plan('speaker vera { custom: "kept" }\nexit');
+  const speakerState = run(
+    speakerPlan,
+    createFreshRuntimeSnapshot(speakerPlan),
+  );
+
+  const backgroundExtra = structuredClone(background.snapshot) as any;
+  backgroundExtra.backgroundActions.extra = "lost";
+
+  const speakersExtra = structuredClone(speakerState.snapshot) as any;
+  speakersExtra.speakers.extra = "lost";
+
+  const propertiesExtra = structuredClone(speakerState.snapshot) as any;
+  propertiesExtra.speakers[0].properties.extra = "lost";
+
+  const corruptions = [
+    {
+      name: "backgroundActions custom key",
+      compiled: backgroundPlan,
+      snapshot: backgroundExtra,
+    },
+    {
+      name: "speakers custom key",
+      compiled: speakerPlan,
+      snapshot: speakersExtra,
+    },
+    {
+      name: "speaker properties custom key",
+      compiled: speakerPlan,
+      snapshot: propertiesExtra,
+    },
+  ];
+
+  for (const corruption of corruptions) {
+    assert.equal(
+      validateRuntimeSnapshot(corruption.snapshot, corruption.compiled).valid,
+      false,
+      corruption.name,
+    );
+    assert.throws(
+      () => createCheckpoint(corruption.compiled, corruption.snapshot),
+      corruption.name,
+    );
+  }
+});
+
 test("runtime-produced pacing states validate and checkpoint through their lifecycle", () => {
   const positive = plan('say "first"\nexit');
   const background = run(positive, createFreshRuntimeSnapshot(positive));

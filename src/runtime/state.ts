@@ -2091,10 +2091,9 @@ function validBackgroundPacingActions(
   plan: InstructionPlan | undefined,
 ): boolean {
   const actions = snapshot.backgroundActions;
-  if (!Array.isArray(actions) || actions.length > 1) return false;
+  if (!isCanonicalJsonArray(actions) || actions.length > 1) return false;
 
   for (let index = 0; index < actions.length; index += 1) {
-    if (!Object.hasOwn(actions, index)) return false;
     if (!validPacingGateAction(actions[index], snapshot, plan, false)) return false;
   }
   return true;
@@ -3444,7 +3443,7 @@ function validateFrames(value: unknown, errors: string[]): void {
 
 function validateSpeakers(value: unknown, errors: string[]): Set<number> {
   const ids = new Set<number>();
-  if (!Array.isArray(value)) {
+  if (!isCanonicalJsonArray(value)) {
     errors.push("Runtime speakers must be an array.");
     return ids;
   }
@@ -3454,7 +3453,7 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
       !nonNegativeSafeInteger(speaker.id) ||
       typeof speaker.identifier !== "string" ||
       speaker.identifier.length === 0 ||
-      !Array.isArray(speaker.properties)
+      !isCanonicalJsonArray(speaker.properties)
     ) {
       errors.push("Runtime speaker is malformed.");
       continue;
@@ -3628,6 +3627,35 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const keys = Object.keys(value);
   return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
+}
+
+/**
+ * A persisted runtime array must preserve its complete own-key shape through
+ * JSON serialization. Array indexes and `length` are canonical; custom own
+ * properties would be silently omitted by JSON.stringify.
+ */
+function isCanonicalJsonArray(value: unknown): value is unknown[] {
+  if (!Array.isArray(value)) return false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index)) return false;
+  }
+
+  for (const key of Reflect.ownKeys(value)) {
+    if (key === "length") continue;
+    if (typeof key !== "string" || !isCanonicalArrayIndexKey(key, value.length)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isCanonicalArrayIndexKey(key: string, length: number): boolean {
+  const index = Number(key);
+  return Number.isSafeInteger(index) &&
+    index >= 0 &&
+    index < length &&
+    String(index) === key;
 }
 
 function runtimeInputDataFailureMessage(
