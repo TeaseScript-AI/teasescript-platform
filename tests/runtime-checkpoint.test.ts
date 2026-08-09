@@ -307,7 +307,7 @@ test("accepts current internal format revisions and rejects non-current or malfo
   assert.doesNotThrow(() => restoreCheckpoint(checkpoint));
 
   const previousPlan = structuredClone(compiled) as unknown as { version: unknown };
-  previousPlan.version = compiled.version - 1;
+  previousPlan.version = 7;
   assert.deepEqual(validateInstructionPlan(previousPlan).errors[0], {
     code: "TSC001",
     message: "Unsupported instruction-plan version.",
@@ -315,7 +315,7 @@ test("accepts current internal format revisions and rejects non-current or malfo
   });
 
   const previousCheckpoint = structuredClone(checkpoint);
-  previousCheckpoint.version = Number(checkpoint.version) - 1;
+  previousCheckpoint.version = 9;
   assertCheckpointError(previousCheckpoint, {
     code: "TSK001",
     message: "Unsupported checkpoint version.",
@@ -329,7 +329,7 @@ test("accepts current internal format revisions and rejects non-current or malfo
   );
 
   const previousNestedPlan = structuredClone(checkpoint);
-  previousNestedPlan.plan.version = compiled.version - 1;
+  previousNestedPlan.plan.version = 7;
   assertCheckpointError(previousNestedPlan, {
     code: "TSK001",
     message: "Unsupported instruction-plan version.",
