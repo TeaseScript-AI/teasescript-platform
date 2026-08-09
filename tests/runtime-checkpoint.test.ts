@@ -306,6 +306,36 @@ test("accepts current internal format revisions and rejects non-current or malfo
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
   assert.doesNotThrow(() => restoreCheckpoint(checkpoint));
 
+  const previousPlan = structuredClone(compiled) as unknown as { version: unknown };
+  previousPlan.version = compiled.version - 1;
+  assert.deepEqual(validateInstructionPlan(previousPlan).errors[0], {
+    code: "TSC001",
+    message: "Unsupported instruction-plan version.",
+    path: "$.version",
+  });
+
+  const previousCheckpoint = structuredClone(checkpoint);
+  previousCheckpoint.version = Number(checkpoint.version) - 1;
+  assertCheckpointError(previousCheckpoint, {
+    code: "TSK001",
+    message: "Unsupported checkpoint version.",
+    path: "$.version",
+  });
+  assert.throws(
+    () => deserializeCheckpoint(JSON.stringify(previousCheckpoint)),
+    (error: unknown) => error instanceof CheckpointError &&
+      error.info.code === "TSK001" &&
+      error.info.path === "$.version",
+  );
+
+  const previousNestedPlan = structuredClone(checkpoint);
+  previousNestedPlan.plan.version = compiled.version - 1;
+  assertCheckpointError(previousNestedPlan, {
+    code: "TSK001",
+    message: "Unsupported instruction-plan version.",
+    path: "$.plan.version",
+  });
+
   for (const replacement of [compiled.version + 1, String(compiled.version)]) {
     const invalidPlan = structuredClone(compiled) as unknown as { version: unknown };
     invalidPlan.version = replacement;
