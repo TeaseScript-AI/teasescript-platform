@@ -2133,12 +2133,6 @@ function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): 
   const requestSequences = new Set<number>();
   const settlement = isPlainRecord(snapshot.lastSettlement) ? snapshot.lastSettlement : null;
 
-  if (
-    settlement !== null &&
-    isPlainRecord(snapshot.foregroundAction) &&
-    !validForegroundActionAgainstRetainedSettlement(snapshot.foregroundAction, settlement)
-  ) return false;
-
   for (const action of actions) {
     if (!positiveSafeInteger(action.actionId) || !positiveSafeInteger(action.requestEventSequence)) return false;
     if (actionIds.has(action.actionId) || requestSequences.has(action.requestEventSequence)) return false;
@@ -2149,7 +2143,7 @@ function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): 
   return true;
 }
 
-function validForegroundActionAgainstRetainedSettlement(
+function validActiveActionAgainstSettlement(
   action: Record<string, unknown>,
   settlement: Record<string, unknown>,
 ): boolean {
@@ -2157,35 +2151,106 @@ function validForegroundActionAgainstRetainedSettlement(
     !positiveSafeInteger(action.actionId) ||
     !positiveSafeInteger(action.requestEventSequence) ||
     !positiveSafeInteger(settlement.actionId) ||
+    !positiveSafeInteger(settlement.requestEventSequence) ||
     !positiveSafeInteger(settlement.completionEventSequence)
   ) return false;
 
-  // A background pacing gate can remain active while a newer foreground delay
-  // settles, then later be promoted. Active lookup stays authoritative over
-  // retained-settlement chronology for that same gate.
-  if (action.kind === "chatPacingGate") return true;
-
-  if (action.actionId <= settlement.actionId) return false;
-  if (action.requestEventSequence > settlement.completionEventSequence) return true;
-
-  // A foreground wait can be requested before an older background pacing gate
-  // settles. That legal background completion must not invalidate the wait.
-  return action.kind === "delay" && settlement.actionKind === "chatPacingGate";
+  if (!validActiveActionEventIdentity(action, settlement)) return false;
+  if (validActionCreatedAfterSettlement(action, settlement)) return true;
+  if (validOlderPacingGateWithNewerDelaySettlement(action, settlement)) return true;
+  return validForegroundDelayWithOlderPacingSettlement(action, settlement);
 }
 
-function validActiveActionAgainstSettlement(
+function validActiveActionEventIdentity(
   action: Record<string, unknown>,
   settlement: Record<string, unknown>,
 ): boolean {
-  if (!positiveSafeInteger(action.requestEventSequence) || action.actionId === settlement.actionId) return false;
+  const actionId = action.actionId;
+  const requestEventSequence = action.requestEventSequence;
+  const settlementActionId = settlement.actionId;
+  const settlementRequestEventSequence = settlement.requestEventSequence;
+  const settlementCompletionEventSequence = settlement.completionEventSequence;
+  if (
+    !positiveSafeInteger(actionId) ||
+    !positiveSafeInteger(requestEventSequence) ||
+    !positiveSafeInteger(settlementActionId) ||
+    !positiveSafeInteger(settlementRequestEventSequence) ||
+    !positiveSafeInteger(settlementCompletionEventSequence)
+  ) return false;
+  if (actionId === settlementActionId) return false;
   const retainedEventSequences = new Set<number>([
-    settlement.requestEventSequence,
-    settlement.completionEventSequence,
+    settlementRequestEventSequence,
+    settlementCompletionEventSequence,
   ].filter(positiveSafeInteger));
   if (settlement.actionKind === "interaction" && positiveSafeInteger(settlement.transcriptEventSequence)) {
     retainedEventSequences.add(settlement.transcriptEventSequence);
   }
-  return !retainedEventSequences.has(action.requestEventSequence);
+  return !retainedEventSequences.has(requestEventSequence);
+}
+
+function validActionCreatedAfterSettlement(
+  action: Record<string, unknown>,
+  settlement: Record<string, unknown>,
+): boolean {
+  const actionId = action.actionId;
+  const requestEventSequence = action.requestEventSequence;
+  const settlementActionId = settlement.actionId;
+  const settlementCompletionEventSequence = settlement.completionEventSequence;
+  return positiveSafeInteger(actionId) &&
+    positiveSafeInteger(requestEventSequence) &&
+    positiveSafeInteger(settlementActionId) &&
+    positiveSafeInteger(settlementCompletionEventSequence) &&
+    actionId > settlementActionId &&
+    requestEventSequence > settlementCompletionEventSequence;
+}
+
+function validOlderPacingGateWithNewerDelaySettlement(
+  action: Record<string, unknown>,
+  settlement: Record<string, unknown>,
+): boolean {
+  // A pacing gate can remain background while a later foreground delay settles,
+  // then be promoted by a later say. It must predate that delay in both action
+  // identity and request sequence. An interaction would have consumed it, and
+  // a second pacing settlement would require a second simultaneous gate.
+  const actionId = action.actionId;
+  const requestEventSequence = action.requestEventSequence;
+  const settlementActionId = settlement.actionId;
+  const settlementRequestEventSequence = settlement.requestEventSequence;
+  const settlementCompletionEventSequence = settlement.completionEventSequence;
+  return action.kind === "chatPacingGate" &&
+    settlement.actionKind === "delay" &&
+    positiveSafeInteger(actionId) &&
+    positiveSafeInteger(requestEventSequence) &&
+    positiveSafeInteger(settlementActionId) &&
+    positiveSafeInteger(settlementRequestEventSequence) &&
+    positiveSafeInteger(settlementCompletionEventSequence) &&
+    actionId < settlementActionId &&
+    requestEventSequence < settlementRequestEventSequence &&
+    settlementRequestEventSequence < settlementCompletionEventSequence;
+}
+
+function validForegroundDelayWithOlderPacingSettlement(
+  action: Record<string, unknown>,
+  settlement: Record<string, unknown>,
+): boolean {
+  // A wait requested after a pacing gate may remain foreground while that
+  // older background gate settles. The delay request is therefore between the
+  // pacing request and completion, even though its action ID is newer.
+  const actionId = action.actionId;
+  const requestEventSequence = action.requestEventSequence;
+  const settlementActionId = settlement.actionId;
+  const settlementRequestEventSequence = settlement.requestEventSequence;
+  const settlementCompletionEventSequence = settlement.completionEventSequence;
+  return action.kind === "delay" &&
+    settlement.actionKind === "chatPacingGate" &&
+    positiveSafeInteger(actionId) &&
+    positiveSafeInteger(requestEventSequence) &&
+    positiveSafeInteger(settlementActionId) &&
+    positiveSafeInteger(settlementRequestEventSequence) &&
+    positiveSafeInteger(settlementCompletionEventSequence) &&
+    actionId > settlementActionId &&
+    requestEventSequence > settlementRequestEventSequence &&
+    requestEventSequence < settlementCompletionEventSequence;
 }
 
 function validForegroundActionBase(
