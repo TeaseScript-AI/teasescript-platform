@@ -62,10 +62,7 @@ These are development-tool behavior, not TeaseScript or engine capacity. `suspic
 
 | ID | Source / boundary | Current | Category | Status | Authority / change | Evidence / repair |
 |---|---|---|---|---|---|---|
-| `playground.source-bytes` | workspace controller/browser/server; local source import | `MAX_WORKSPACE_SOURCE_BYTES = 64 * 1024 = 65,536` UTF-8 bytes. | transport, storage, or tooling guard | `suspicious` | ADR 0019; tooling implementation unless promoted to product policy | PR #86 gives no measurement/external constraint. Remove or derive from actual buffering/compiler needs. |
-| `playground.request-bytes` | `playground/server.ts`; local request buffering | `MAX_WORKSPACE_REQUEST_BYTES = MAX_WORKSPACE_SOURCE_BYTES + 1,024 = 66,560` bytes. | transport, storage, or tooling guard | `suspicious` | ADR 0019; tooling implementation unless promoted to product policy | Buffering is real; `+1,024` has no protocol derivation. Derive from accepted request shapes or another concrete constraint. |
 | `playground.port-domain` | `playground/server.ts`; configured local listener port | Integer `1..65,535` through option or `PORT`. | transport, storage, or tooling guard | `provisional` | Network port representation + ADR 0019; tooling compatibility review for configuration changes | The configured listener requires an explicit non-zero TCP port number; `65,535` is the protocol port maximum, while `0` requests OS ephemeral allocation rather than naming a port. The local rationale is concrete; focused boundary-test evidence remains incomplete. |
-| `playground.instruction-quantum` | workspace controller; local run automation | `MAX_WORKSPACE_INSTRUCTION_BUDGET = 10,000` runtime instructions. | execution quantum | `suspicious` | ADR 0019; tooling implementation; ADR 0015 still governs runtime exhaustion | PR #86 reused the runtime number without local responsiveness/workload evidence. Decouple/remove or derive from accepted tooling behavior. |
 
 ## Representation/domain defects needing focused repair
 

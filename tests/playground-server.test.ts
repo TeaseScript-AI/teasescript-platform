@@ -127,13 +127,28 @@ test("workspace automation stores revisions and returns compile and run results"
   assert.equal((JSON.parse(result.body) as { stale: boolean }).stale, false);
 });
 
-test("workspace automation rejects unsafe methods, bodies, content, and bounds", async () => {
+test("workspace automation accepts source beyond the former local byte limit", async () => {
+  const source = `${"// padding\n".repeat(10_000)}say "large upload"`;
+  const uploaded = await api("PUT", "/api/workspace/source", source, "text/plain; charset=utf-8");
+
+  assert.equal(uploaded.status, 200);
+  assert.equal((JSON.parse(uploaded.body) as { source: string }).source, source);
+});
+
+test("workspace automation rejects malformed UTF-8 source", async () => {
+  const uploaded = await api("PUT", "/api/workspace/source", Buffer.from([0xc3, 0x28]), "text/plain; charset=utf-8");
+
+  assert.equal(uploaded.status, 400);
+  assert.equal((JSON.parse(uploaded.body) as { error: { code: string } }).error.code, "malformedUtf8");
+});
+
+test("workspace automation rejects unsafe methods, content, and non-empty operation bodies", async () => {
   assert.equal((await api("DELETE", "/api/workspace")).status, 405);
   assert.equal((await api("PUT", "/api/workspace/source", "x")).status, 415);
   assert.equal((await api("PUT", "/api/workspace/source", "x", "application/json")).status, 415);
+  assert.equal((await api("POST", "/api/workspace/compile", "{}", "application/json")).status, 400);
   assert.equal((await api("POST", "/api/workspace/run", "{}", "application/json")).status, 400);
   assert.equal((await api("POST", "/api/workspace/run", "{}", undefined, port, true)).status, 400);
-  assert.equal((await api("PUT", "/api/workspace/source", "x".repeat(70 * 1024), "text/plain; charset=utf-8")).status, 413);
 });
 
 test("workspace automation rejects clients outside the permitted loopback address", async (context) => {
@@ -154,7 +169,7 @@ function get(path: string, requestPort = port): Promise<HttpResult> {
   return api("GET", path, undefined, undefined, requestPort);
 }
 
-function api(method: string, path: string, body?: string, contentType?: string, requestPort = port, omitContentLength = false, localAddress?: string): Promise<HttpResult> {
+function api(method: string, path: string, body?: string | Buffer, contentType?: string, requestPort = port, omitContentLength = false, localAddress?: string): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
     const outgoing = request(
       {

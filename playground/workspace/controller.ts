@@ -9,10 +9,6 @@ import {
   type RuntimeSnapshot,
 } from "../../src/index.js";
 
-/** Limits keep the local automation surface useful without accepting unbounded work. */
-export const MAX_WORKSPACE_SOURCE_BYTES = 64 * 1024;
-export const MAX_WORKSPACE_INSTRUCTION_BUDGET = 10_000;
-
 export interface WorkspaceDiagnostic {
   readonly code: string;
   readonly message: string;
@@ -44,30 +40,24 @@ export function executeWorkspaceSource(source: string, mode: "run" | "step" = "r
   const compiled = compileWorkspaceSource(source);
   if (compiled.plan === null || compiled.snapshot === null) return compiled;
   const operation = mode === "run"
-    ? run(compiled.plan, compiled.snapshot, {}, { instructionBudget: MAX_WORKSPACE_INSTRUCTION_BUDGET })
-    : stepToEvent(compiled.plan, compiled.snapshot, {}, { instructionBudget: MAX_WORKSPACE_INSTRUCTION_BUDGET });
+    ? run(compiled.plan, compiled.snapshot)
+    : stepToEvent(compiled.plan, compiled.snapshot);
   return freezeResult({ diagnostics: compiled.diagnostics, plan: compiled.plan, snapshot: operation.snapshot, events: operation.events, status: operation.snapshot.status, instructionsExecuted: operation.instructionsExecuted });
 }
 
 export function executeWorkspaceSnapshot(plan: InstructionPlan, snapshot: RuntimeSnapshot, mode: "run" | "step"): WorkspaceResult {
   const operation = mode === "run"
-    ? run(plan, snapshot, {}, { instructionBudget: MAX_WORKSPACE_INSTRUCTION_BUDGET })
-    : stepToEvent(plan, snapshot, {}, { instructionBudget: MAX_WORKSPACE_INSTRUCTION_BUDGET });
+    ? run(plan, snapshot)
+    : stepToEvent(plan, snapshot);
   return freezeResult({ diagnostics: [], plan, snapshot: operation.snapshot, events: operation.events, status: operation.snapshot.status, instructionsExecuted: operation.instructionsExecuted });
 }
 
 export function assertWorkspaceSource(source: unknown): asserts source is string {
   if (typeof source !== "string") throw new TypeError("Workspace source must be UTF-8 text.");
-  if (new TextEncoder().encode(source).byteLength > MAX_WORKSPACE_SOURCE_BYTES) {
-    throw new RangeError(`Workspace source must not exceed ${MAX_WORKSPACE_SOURCE_BYTES} UTF-8 bytes.`);
-  }
 }
 
 /** Decodes locally imported source without silently replacing malformed UTF-8 bytes. */
 export function decodeWorkspaceSourceBytes(bytes: ArrayBuffer): string {
-  if (bytes.byteLength > MAX_WORKSPACE_SOURCE_BYTES) {
-    throw new RangeError(`Workspace source must not exceed ${MAX_WORKSPACE_SOURCE_BYTES} UTF-8 bytes.`);
-  }
   return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
