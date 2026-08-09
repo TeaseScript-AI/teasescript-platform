@@ -1,5 +1,6 @@
 import type {
   RuntimeActionSettlementSnapshot,
+  RuntimeChatPacingGateSettlementSnapshot,
   RuntimePendingActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
 } from "./actions/model.js";
@@ -45,7 +46,7 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 10;
+export const RUNTIME_SNAPSHOT_VERSION = 11;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -2041,7 +2042,7 @@ function validatePendingActionState(
   errors: string[],
 ): void {
   if (!validSessionTime(value.currentSessionTimeMs)) errors.push("Runtime currentSessionTimeMs is outside the supported range.");
-  if (!Array.isArray(value.backgroundActions) || value.backgroundActions.length > 1 || value.backgroundActions.some((action) => !validPacingGateAction(action, value, plan, false))) {
+  if (!validBackgroundPacingActions(value, plan)) {
     errors.push("Runtime backgroundActions are malformed.");
   }
   if (!positiveSafeInteger(value.nextActionId)) errors.push("Runtime nextActionId must be a positive safe integer.");
@@ -2063,11 +2064,12 @@ function validatePendingActionState(
       action.createdAtMs <= currentSessionTimeMs &&
       action.deadlineMs > currentSessionTimeMs;
     const baseValid = validForegroundActionBase(action, value, callIds);
-    const kindValid = isPlainRecord(action) && (action.kind === "delay"
-      ? delayTimesAreValid && action.expectedCompletion === "time" && hasEventSequenceCapacity(value.nextEventSequence, 1)
-      : action.kind === "interaction"
-        ? validInteractionAction(action, value, plan) && hasEventSequenceCapacity(value.nextEventSequence, 2)
-        : action.kind === "chatPacingGate" && validPacingGateAction(action, value, plan, true) && hasEventSequenceCapacity(value.nextEventSequence, 1));
+    const kindValid = validForegroundActionKind(
+      action,
+      value,
+      plan,
+      delayTimesAreValid,
+    );
     if (!baseValid || !kindValid || (plan !== undefined && isPlainRecord(action) && !validForegroundActionOwnership(action, value, plan))) {
       errors.push("Runtime foreground action is malformed.");
     }
@@ -2079,6 +2081,39 @@ function validatePendingActionState(
   if (!validActiveActionIdentityCoherence(value)) {
     errors.push("Runtime active action identities are inconsistent with each other or the retained settlement.");
   }
+}
+
+function validBackgroundPacingActions(
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  const actions = snapshot.backgroundActions;
+  return Array.isArray(actions) &&
+    actions.length <= 1 &&
+    actions.every((action) => validPacingGateAction(action, snapshot, plan, false));
+}
+
+function validForegroundActionKind(
+  action: unknown,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  delayTimesAreValid: boolean,
+): boolean {
+  if (!isPlainRecord(action)) return false;
+  if (action.kind === "delay") {
+    return delayTimesAreValid &&
+      action.expectedCompletion === "time" &&
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 1);
+  }
+  if (action.kind === "interaction") {
+    return validInteractionAction(action, snapshot, plan) &&
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 2);
+  }
+  if (action.kind === "chatPacingGate") {
+    return validPacingGateAction(action, snapshot, plan, true) &&
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 1);
+  }
+  return false;
 }
 
 function validRetainedSettlement(
@@ -2397,15 +2432,30 @@ function validPreparedSaySpeaker(value: unknown): boolean {
 }
 
 function validTopLevelPreparedSayOutputRelationship(snapshot: Record<string, unknown>): boolean {
-  if (snapshot.preparedSayOutput === null) return true;
   const settlement = snapshot.lastSettlement;
+  if (snapshot.preparedSayOutput === null) {
+    return validReleasedPacingSettlementWithoutPreparedOutput(snapshot, settlement);
+  }
   return snapshot.status === "running" &&
     snapshot.foregroundAction === null &&
     Array.isArray(snapshot.backgroundActions) &&
     !snapshot.backgroundActions.some((action) => isPlainRecord(action) && action.kind === "chatPacingGate") &&
     isPlainRecord(settlement) &&
     settlement.actionKind === "chatPacingGate" &&
-    (settlement.settlementKind === "completed" || settlement.settlementKind === "skipped");
+    settlement.releasedPreparedOutput === true;
+}
+
+function validReleasedPacingSettlementWithoutPreparedOutput(
+  snapshot: Record<string, unknown>,
+  settlement: unknown,
+): boolean {
+  if (!isPlainRecord(settlement) || settlement.actionKind !== "chatPacingGate") return true;
+  if (settlement.releasedPreparedOutput !== true) return true;
+
+  // Before normal re-entry, a foreground pacing settlement must retain the
+  // prepared output at the settled gate's continuation. Once that output has
+  // been consumed, execution has advanced away from that continuation.
+  return snapshot.nextInstruction !== settlement.continuationInstruction;
 }
 
 function validateInteractionResultHandoffState(
@@ -2799,17 +2849,7 @@ function validSettlementKindData(
   plan: InstructionPlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
 ): boolean {
-  if (settlement.actionKind === "chatPacingGate") {
-    return hasExactKeys(settlement, [
-      "actionId", "actionKind", "settlementKind", "owningInstruction",
-      "continuationInstruction", "requestEventSequence", "completionEventSequence",
-      "deadlineMs", "completedAtMs",
-    ]) &&
-      ["completed", "skipped", "consumedByForegroundInteraction", "supersededByInstantOutput"].includes(String(settlement.settlementKind)) &&
-      (settlement.settlementKind === "completed"
-        ? validSettlementChronology(settlement, snapshot)
-        : validSessionTime(settlement.completedAtMs) && validSessionTime(snapshot.currentSessionTimeMs) && settlement.completedAtMs <= snapshot.currentSessionTimeMs && validSessionTime(settlement.deadlineMs));
-  }
+  if (settlement.actionKind === "chatPacingGate") return validPacingGateSettlement(settlement, snapshot);
   if (settlement.actionKind === "delay") {
     return hasExactKeys(settlement, [
       "actionId", "actionKind", "settlementKind", "owningInstruction",
@@ -2887,6 +2927,50 @@ function validSettlementKindData(
   if (instruction.ui.kind === "number") return true;
   if (instruction.ui.kind !== "choice") return false;
   return instruction.ui.options.some((option) => option.text === settlement.transcriptText && (option.label ?? option.text) === settlement.result);
+}
+
+function validPacingGateSettlement(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  if (!hasExactKeys(settlement, [
+    "actionId", "actionKind", "settlementKind", "owningInstruction",
+    "continuationInstruction", "requestEventSequence", "completionEventSequence",
+    "deadlineMs", "completedAtMs", "releasedPreparedOutput",
+  ])) return false;
+  if (!validPacingSettlementKind(settlement.settlementKind)) return false;
+  if (typeof settlement.releasedPreparedOutput !== "boolean") return false;
+  if (settlement.releasedPreparedOutput && !pacingSettlementCanReleasePreparedOutput(settlement.settlementKind)) {
+    return false;
+  }
+  if (settlement.settlementKind === "completed") {
+    return validSettlementChronology(settlement, snapshot);
+  }
+  return validNonTimePacingSettlementChronology(settlement, snapshot);
+}
+
+function validPacingSettlementKind(value: unknown): value is RuntimeChatPacingGateSettlementSnapshot["settlementKind"] {
+  return value === "completed" ||
+    value === "skipped" ||
+    value === "consumedByForegroundInteraction" ||
+    value === "supersededByInstantOutput";
+}
+
+function pacingSettlementCanReleasePreparedOutput(
+  settlementKind: RuntimeChatPacingGateSettlementSnapshot["settlementKind"],
+): boolean {
+  return settlementKind === "completed" || settlementKind === "skipped";
+}
+
+function validNonTimePacingSettlementChronology(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  return validSessionTime(settlement.deadlineMs) &&
+    validSessionTime(settlement.completedAtMs) &&
+    validSessionTime(snapshot.currentSessionTimeMs) &&
+    settlement.completedAtMs < settlement.deadlineMs &&
+    settlement.completedAtMs <= snapshot.currentSessionTimeMs;
 }
 
 function preparedInteractionSettlementMatches(

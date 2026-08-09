@@ -85,6 +85,7 @@ function completePacingGate(
     owningInstruction: action.owningInstruction, continuationInstruction: action.continuationInstruction,
     requestEventSequence: action.requestEventSequence, completionEventSequence,
     deadlineMs: action.deadlineMs, completedAtMs: current.currentSessionTimeMs,
+    releasedPreparedOutput: action.preparedOutput !== null,
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;

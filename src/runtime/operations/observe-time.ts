@@ -70,6 +70,7 @@ function settleForegroundTimedAction(
           owningInstruction: action.owningInstruction, continuationInstruction: action.continuationInstruction,
           requestEventSequence: action.requestEventSequence, completionEventSequence,
           deadlineMs: action.deadlineMs, completedAtMs: snapshot.currentSessionTimeMs,
+          releasedPreparedOutput: action.preparedOutput !== null,
         },
   );
   snapshot.foregroundAction = null;

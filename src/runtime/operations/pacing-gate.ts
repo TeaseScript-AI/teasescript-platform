@@ -29,6 +29,7 @@ export function settleBackgroundPacingGate(
     completionEventSequence,
     deadlineMs: action.deadlineMs,
     completedAtMs: snapshot.currentSessionTimeMs,
+    releasedPreparedOutput: false,
   });
   snapshot.lastSettlement = settlement;
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;

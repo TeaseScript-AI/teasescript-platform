@@ -7,7 +7,7 @@ import {
   deserializeCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { run } from "../src/runtime/engine.js";
+import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import {
@@ -121,6 +121,7 @@ test("active-action and retained-settlement relations admit only canonical cross
     completionEventSequence: 4,
     deadlineMs: 1_800,
     completedAtMs: 1_000,
+    releasedPreparedOutput: false,
   };
   expectInvalidSnapshot("older foreground pacing cannot coexist with newer pacing settlement", promotionPlan, newerPacingSettlement);
 
@@ -206,19 +207,19 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
   assert.equal(compiled.version, 9);
-  assert.equal(snapshot.version, 10);
-  assert.equal(checkpoint.version, 12);
+  assert.equal(snapshot.version, 11);
+  assert.equal(checkpoint.version, 13);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot) as any;
-  oldSnapshot.version = 9;
+  oldSnapshot.version = 10;
   assert.equal(validateRuntimeSnapshot(oldSnapshot, compiled).valid, false);
   const oldCheckpoint = structuredClone(checkpoint);
-  oldCheckpoint.version = 11;
+  oldCheckpoint.version = 12;
   assert.throws(() => deserializeCheckpoint(JSON.stringify(oldCheckpoint)));
 });
 
-+test("snapshot and checkpoint reject malformed pacing prepared output", () => {
+test("snapshot and checkpoint reject malformed pacing prepared output", () => {
   const compiled = plan('speaker vera { displayName: "Vera" }\nsay as vera "first"\nsay as vera "second"');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const corrupted = JSON.parse(serializeCheckpoint(
@@ -400,32 +401,122 @@ test("pacing state validation rejects relational identity, property, duration, a
   });
   assert.equal(validateRuntimeSnapshot((nonFiniteDuration as { snapshot: unknown }).snapshot, preparedPlan).valid, false);
 
-  const corruptions: Array<[string, unknown, ReturnType<typeof plan>]> = [
-    ["duplicate active action ID", mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => { snapshot.backgroundActions[0].actionId = snapshot.foregroundAction.actionId; }), waitPlan],
-    ["duplicate active request sequence", mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => { snapshot.backgroundActions[0].requestEventSequence = snapshot.foregroundAction.requestEventSequence; }), waitPlan],
-    ["active ID equals settlement ID", mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => { snapshot.foregroundAction.actionId = snapshot.lastSettlement.actionId; }), waitPlan],
-    ["active request equals settlement request", mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => { snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.requestEventSequence; }), waitPlan],
-    ["active request equals settlement completion", mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => { snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.completionEventSequence; }), waitPlan],
-    ["malformed settlement events", mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => { snapshot.lastSettlement.requestEventSequence = snapshot.lastSettlement.completionEventSequence; }), waitPlan],
-    ["invalid speaker default number", mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => { snapshot.speakers[0].properties[0].value = 123; }), speakerPlan],
-    ["invalid speaker default string", mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => { snapshot.speakers[0].properties[0].value = "false"; }), speakerPlan],
-    ["invalid speaker default null", mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => { snapshot.speakers[0].properties[0].value = null; }), speakerPlan],
-    ["invalid speaker default object", mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => { snapshot.speakers[0].properties[0].value = { kind: "object", properties: [] }; }), speakerPlan],
-    ["invalid speaker default list", mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => { snapshot.speakers[0].properties[0].value = { kind: "list", items: [] }; }), speakerPlan],
-    ["prepared duration exceeds supported domain", mutateCheckpoint(preparedPlan, promoted.snapshot, (snapshot) => { snapshot.foregroundAction.preparedOutput.durationMs = Number.MAX_SAFE_INTEGER + 1; }), preparedPlan],
-    ["top-level prepared output without release settlement", mutateCheckpoint(preparedPlan, prepared.snapshot, (snapshot) => { snapshot.lastSettlement.settlementKind = "consumedByForegroundInteraction"; }), preparedPlan],
-    ["top-level prepared output with incompatible status", mutateCheckpoint(preparedPlan, prepared.snapshot, (snapshot) => { snapshot.status = "waiting"; }), preparedPlan],
-    ["top-level prepared output with a background gate", mutateCheckpoint(preparedPlan, prepared.snapshot, (snapshot) => { snapshot.backgroundActions.push(structuredClone(waiting.snapshot.backgroundActions[0])); }), preparedPlan],
+  const corruptions = [
+    {
+      name: "duplicate active action ID",
+      compiled: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].actionId = snapshot.foregroundAction.actionId;
+      }),
+    },
+    {
+      name: "duplicate active request sequence",
+      compiled: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
+        snapshot.backgroundActions[0].requestEventSequence = snapshot.foregroundAction.requestEventSequence;
+      }),
+    },
+    {
+      name: "active ID equals settlement ID",
+      compiled: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => {
+        snapshot.foregroundAction.actionId = snapshot.lastSettlement.actionId;
+      }),
+    },
+    {
+      name: "active request equals settlement request",
+      compiled: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => {
+        snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.requestEventSequence;
+      }),
+    },
+    {
+      name: "active request equals settlement completion",
+      compiled: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => {
+        snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.completionEventSequence;
+      }),
+    },
+    {
+      name: "malformed settlement events",
+      compiled: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => {
+        snapshot.lastSettlement.requestEventSequence = snapshot.lastSettlement.completionEventSequence;
+      }),
+    },
+    {
+      name: "invalid speaker default number",
+      compiled: speakerPlan,
+      checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
+        snapshot.speakers[0].properties[0].value = 123;
+      }),
+    },
+    {
+      name: "invalid speaker default string",
+      compiled: speakerPlan,
+      checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
+        snapshot.speakers[0].properties[0].value = "false";
+      }),
+    },
+    {
+      name: "invalid speaker default null",
+      compiled: speakerPlan,
+      checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
+        snapshot.speakers[0].properties[0].value = null;
+      }),
+    },
+    {
+      name: "invalid speaker default object",
+      compiled: speakerPlan,
+      checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
+        snapshot.speakers[0].properties[0].value = { kind: "object", properties: [] };
+      }),
+    },
+    {
+      name: "invalid speaker default list",
+      compiled: speakerPlan,
+      checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
+        snapshot.speakers[0].properties[0].value = { kind: "list", items: [] };
+      }),
+    },
+    {
+      name: "prepared duration exceeds supported domain",
+      compiled: preparedPlan,
+      checkpoint: mutateCheckpoint(preparedPlan, promoted.snapshot, (snapshot) => {
+        snapshot.foregroundAction.preparedOutput.durationMs = Number.MAX_SAFE_INTEGER + 1;
+      }),
+    },
+    {
+      name: "top-level prepared output without release settlement",
+      compiled: preparedPlan,
+      checkpoint: mutateCheckpoint(preparedPlan, prepared.snapshot, (snapshot) => {
+        snapshot.lastSettlement.releasedPreparedOutput = false;
+      }),
+    },
+    {
+      name: "top-level prepared output with incompatible status",
+      compiled: preparedPlan,
+      checkpoint: mutateCheckpoint(preparedPlan, prepared.snapshot, (snapshot) => {
+        snapshot.status = "waiting";
+      }),
+    },
+    {
+      name: "top-level prepared output with a background gate",
+      compiled: preparedPlan,
+      checkpoint: mutateCheckpoint(preparedPlan, prepared.snapshot, (snapshot) => {
+        snapshot.backgroundActions.push(structuredClone(waiting.snapshot.backgroundActions[0]));
+      }),
+    },
   ];
 
-  for (const [label, checkpoint, compiled] of corruptions) {
-    const snapshot = (checkpoint as { snapshot: unknown }).snapshot;
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false, label);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), label);
+  for (const corruption of corruptions) {
+    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
+    assert.equal(validateRuntimeSnapshot(snapshot, corruption.compiled).valid, false, corruption.name);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
   }
 });
 
-+test("cross-field pacing snapshot corruption rejects at direct and checkpoint boundaries", () => {
+test("cross-field pacing snapshot corruption rejects at direct and checkpoint boundaries", () => {
   const waitPlan = plan('say "first"\nwait 10 s\nexit');
   const waiting = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
   const promotedPlan = plan('say "first"\nsay "second"');
@@ -493,4 +584,223 @@ test("pacing state validation rejects relational identity, property, duration, a
     assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false, label);
     assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), label);
   }
+});
+
+test("pacing settlement release provenance and chronology accept only canonical lifecycle states", () => {
+  const backgroundPlan = plan('say "first"\nsay "second"');
+  const background = executeInstruction(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
+  const backgroundGate = background.snapshot.backgroundActions[0];
+  assert.equal(backgroundGate?.kind, "chatPacingGate");
+  const backgroundCompleted = observeTime(backgroundPlan, background.snapshot, backgroundGate!.deadlineMs);
+  const backgroundSkipped = completeAction(backgroundPlan, background.snapshot, {
+    actionId: backgroundGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+
+  const interactionPlan = plan('say "first"\nshowButton "Continue"');
+  const interaction = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
+  const instantPlan = plan('say "first"\nsay "second", instant');
+  const superseded = run(instantPlan, createFreshRuntimeSnapshot(instantPlan));
+
+  const promotionPlan = plan('say "first"\nsay "second"');
+  const promoted = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
+  const foregroundGate = promoted.snapshot.foregroundAction;
+  assert.equal(foregroundGate?.kind, "chatPacingGate");
+  const foregroundCompleted = observeTime(promotionPlan, promoted.snapshot, foregroundGate!.deadlineMs);
+  const foregroundSkipped = completeAction(promotionPlan, promoted.snapshot, {
+    actionId: foregroundGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+
+  const cases = [
+    {
+      name: "background time completion",
+      compiled: backgroundPlan,
+      snapshot: backgroundCompleted.snapshot,
+      kind: "completed",
+      releasedPreparedOutput: false,
+      hasPreparedOutput: false,
+    },
+    {
+      name: "background typed skip",
+      compiled: backgroundPlan,
+      snapshot: backgroundSkipped.snapshot,
+      kind: "skipped",
+      releasedPreparedOutput: false,
+      hasPreparedOutput: false,
+    },
+    {
+      name: "interaction consumes background pacing",
+      compiled: interactionPlan,
+      snapshot: interaction.snapshot,
+      kind: "consumedByForegroundInteraction",
+      releasedPreparedOutput: false,
+      hasPreparedOutput: false,
+    },
+    {
+      name: "instant output supersedes background pacing",
+      compiled: instantPlan,
+      snapshot: superseded.snapshot,
+      kind: "supersededByInstantOutput",
+      releasedPreparedOutput: false,
+      hasPreparedOutput: false,
+    },
+    {
+      name: "foreground time completion releases prepared output",
+      compiled: promotionPlan,
+      snapshot: foregroundCompleted.snapshot,
+      kind: "completed",
+      releasedPreparedOutput: true,
+      hasPreparedOutput: true,
+    },
+    {
+      name: "foreground typed skip releases prepared output",
+      compiled: promotionPlan,
+      snapshot: foregroundSkipped.snapshot,
+      kind: "skipped",
+      releasedPreparedOutput: true,
+      hasPreparedOutput: true,
+    },
+  ] as const;
+
+  for (const scenario of cases) {
+    const settlement = scenario.snapshot.lastSettlement;
+    assert.equal(settlement?.actionKind, "chatPacingGate", scenario.name);
+    if (settlement?.actionKind !== "chatPacingGate") throw new Error(scenario.name);
+    assert.equal(settlement?.settlementKind, scenario.kind, scenario.name);
+    assert.equal(settlement?.releasedPreparedOutput, scenario.releasedPreparedOutput, scenario.name);
+    assert.equal(scenario.snapshot.preparedSayOutput !== null, scenario.hasPreparedOutput, scenario.name);
+    assert.equal(validateRuntimeSnapshot(scenario.snapshot, scenario.compiled).valid, true, scenario.name);
+    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(scenario.compiled, scenario.snapshot)));
+    assert.deepEqual(restored.snapshot, scenario.snapshot, scenario.name);
+  }
+
+  const advancedAfterSkip = observeTime(backgroundPlan, backgroundSkipped.snapshot, 2_000);
+  const corruptions = [
+    {
+      name: "prepared output requires release evidence",
+      compiled: promotionPlan,
+      checkpoint: mutateCheckpoint(promotionPlan, foregroundSkipped.snapshot, (snapshot) => {
+        snapshot.lastSettlement.releasedPreparedOutput = false;
+      }),
+    },
+    {
+      name: "background skip cannot falsely claim prepared-output release",
+      compiled: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, backgroundSkipped.snapshot, (snapshot) => {
+        snapshot.lastSettlement.releasedPreparedOutput = true;
+      }),
+    },
+    {
+      name: "background skip cannot release injected prepared output",
+      compiled: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, backgroundSkipped.snapshot, (snapshot) => {
+        snapshot.preparedSayOutput = structuredClone(
+          foregroundSkipped.snapshot.preparedSayOutput,
+        );
+      }),
+    },
+    {
+      name: "consumption cannot claim prepared-output release",
+      compiled: interactionPlan,
+      checkpoint: mutateCheckpoint(interactionPlan, interaction.snapshot, (snapshot) => {
+        snapshot.lastSettlement.releasedPreparedOutput = true;
+      }),
+    },
+    {
+      name: "supersession cannot claim prepared-output release",
+      compiled: instantPlan,
+      checkpoint: mutateCheckpoint(instantPlan, superseded.snapshot, (snapshot) => {
+        snapshot.lastSettlement.releasedPreparedOutput = true;
+      }),
+    },
+    {
+      name: "non-time settlement cannot complete at its deadline",
+      compiled: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, advancedAfterSkip.snapshot, (snapshot) => {
+        snapshot.lastSettlement.completedAtMs = snapshot.lastSettlement.deadlineMs;
+      }),
+    },
+    {
+      name: "non-time settlement cannot complete after its deadline",
+      compiled: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, advancedAfterSkip.snapshot, (snapshot) => {
+        snapshot.lastSettlement.completedAtMs = snapshot.lastSettlement.deadlineMs + 1;
+      }),
+    },
+    {
+      name: "time settlement cannot complete before its deadline",
+      compiled: promotionPlan,
+      checkpoint: mutateCheckpoint(promotionPlan, foregroundCompleted.snapshot, (snapshot) => {
+        snapshot.lastSettlement.completedAtMs = snapshot.lastSettlement.deadlineMs - 1;
+      }),
+    },
+    {
+      name: "pacing settlement requires boolean release evidence",
+      compiled: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, backgroundSkipped.snapshot, (snapshot) => {
+        snapshot.lastSettlement.releasedPreparedOutput = "false";
+      }),
+    },
+    {
+      name: "pacing settlement requires the release evidence key",
+      compiled: backgroundPlan,
+      checkpoint: mutateCheckpoint(backgroundPlan, backgroundSkipped.snapshot, (snapshot) => {
+        delete snapshot.lastSettlement.releasedPreparedOutput;
+      }),
+    },
+  ];
+
+  for (const corruption of corruptions) {
+    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
+    assert.equal(validateRuntimeSnapshot(snapshot, corruption.compiled).valid, false, corruption.name);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+  }
+});
+
+test("instruction boundaries preserve pacing release provenance before and after promotion", () => {
+  const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]');
+  const afterFirst = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
+  const backgroundGate = afterFirst.snapshot.backgroundActions[0];
+  assert.equal(backgroundGate?.kind, "chatPacingGate");
+
+  const restoredBackground = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, afterFirst.snapshot)));
+  const backgroundSkip = completeAction(restoredBackground.plan, restoredBackground.snapshot, {
+    actionId: backgroundGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(backgroundSkip.snapshot.lastSettlement?.actionKind, "chatPacingGate");
+  if (backgroundSkip.snapshot.lastSettlement?.actionKind !== "chatPacingGate") throw new Error("Expected pacing settlement.");
+  assert.equal(backgroundSkip.snapshot.lastSettlement.releasedPreparedOutput, false);
+  assert.equal(backgroundSkip.snapshot.preparedSayOutput, null);
+
+  const secondAsFreshOutput = executeInstruction(compiled, backgroundSkip.snapshot);
+  assert.equal(secondAsFreshOutput.events.filter((event) => event.kind === "say").length, 1);
+  assert.equal(secondAsFreshOutput.snapshot.backgroundActions[0]?.actionId, 2);
+
+  const promoted = run(restoredBackground.plan, restoredBackground.snapshot);
+  const foregroundGate = promoted.snapshot.foregroundAction;
+  assert.equal(foregroundGate?.kind, "chatPacingGate");
+  assert.equal(foregroundGate?.actionId, backgroundGate?.actionId);
+  assert.equal(foregroundGate?.deadlineMs, backgroundGate?.deadlineMs);
+  assert.equal(promoted.events.filter((event) => event.kind === "actionRequested").length, 0);
+
+  const released = completeAction(compiled, promoted.snapshot, {
+    actionId: foregroundGate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(released.snapshot.lastSettlement?.actionKind, "chatPacingGate");
+  if (released.snapshot.lastSettlement?.actionKind !== "chatPacingGate") throw new Error("Expected pacing settlement.");
+  assert.equal(released.snapshot.lastSettlement.releasedPreparedOutput, true);
+  assert.notEqual(released.snapshot.preparedSayOutput, null);
+
+  const restoredRelease = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, released.snapshot)));
+  const resumed = executeInstruction(restoredRelease.plan, restoredRelease.snapshot);
+  assert.equal(resumed.events.filter((event) => event.kind === "say").length, 1);
+  assert.equal(resumed.snapshot.backgroundActions[0]?.actionId, 2);
+  assert.equal(resumed.snapshot.rng.state, secondAsFreshOutput.snapshot.rng.state);
 });
