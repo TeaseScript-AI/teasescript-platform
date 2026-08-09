@@ -43,7 +43,17 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
     if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: cloneSettlement(current.lastSettlement) });
     return pendingResult(current, [], actionId < current.nextActionId ? { kind: "staleAction", actionId } : { kind: "unknownAction", actionId });
   }
-  if (value.actionKind !== active.kind) return pendingResult(current, [], { kind: "wrongActionKind", actionId, expectedActionKind: active.kind, receivedActionKind: value.actionKind === "delay" || value.actionKind === "interaction" || value.actionKind === "chatPacingGate" ? value.actionKind : "<invalid>" });
+  if (value.actionKind !== active.kind) {
+    const receivedActionKind = validRequestedActionKind(value.actionKind)
+      ? value.actionKind
+      : "<invalid>";
+    return pendingResult(current, [], {
+      kind: "wrongActionKind",
+      actionId,
+      expectedActionKind: active.kind,
+      receivedActionKind,
+    });
+  }
   if (active.kind === "interaction") return completeInteraction(captured.plan, current, active, value);
   if (active.kind === "chatPacingGate") return completePacingGate(captured.plan, current, active, value);
   if (!isPlainRecord(value.payload) || value.payload.kind !== "time" || !isValidSessionTime(value.payload.currentSessionTimeMs)) return pendingResult(current, [], { kind: "invalidPayload", message: "Delay completion payload must contain a valid time observation." });
@@ -102,8 +112,20 @@ function completePacingGate(
     current.nextInstruction = action.continuationInstruction;
   }
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
-  const events: InterpreterEvent[] = [Object.freeze({ kind: "actionCompleted", sequence: completionEventSequence, settlement, span: copySpan(span) } satisfies ActionCompletedEvent)];
+  const completionEvent: ActionCompletedEvent = Object.freeze({
+    kind: "actionCompleted",
+    sequence: completionEventSequence,
+    settlement,
+    span: copySpan(span),
+  });
+  const events: InterpreterEvent[] = [completionEvent];
   return pendingResult(current, events, { kind: "completed", settlement });
+}
+
+function validRequestedActionKind(
+  value: unknown,
+): value is "delay" | "interaction" | "chatPacingGate" {
+  return value === "delay" || value === "interaction" || value === "chatPacingGate";
 }
 
 function completeInteraction(

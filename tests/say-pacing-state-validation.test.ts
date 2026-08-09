@@ -52,6 +52,29 @@ function expectInvalidSnapshot(
   assert.throws(() => deserializeCheckpoint(checkpoint), label);
 }
 
+function expectCheckpointJsonRoundTrip(
+  label: string,
+  compiled: ReturnType<typeof plan>,
+  snapshot: ReturnType<typeof createFreshRuntimeSnapshot>,
+): void {
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, label);
+
+  const checkpoint = createCheckpoint(compiled, snapshot);
+  const restored = deserializeCheckpoint(serializeCheckpoint(checkpoint));
+
+  assert.equal(validateRuntimeSnapshot(restored.snapshot, compiled).valid, true, label);
+  assert.deepEqual(restored.snapshot, snapshot, label);
+}
+
+function checkpointWithSnapshot(
+  baseline: { snapshot: any },
+  snapshot: unknown,
+): unknown {
+  const checkpoint = structuredClone(baseline);
+  checkpoint.snapshot = snapshot;
+  return checkpoint;
+}
+
 test("older pacing gate promotes after a newer delay settlement and resumes prepared output once", () => {
   const compiled = plan('say "first"\nwait 1 s\nsay "second"\nexit');
   const initial = run(compiled, createFreshRuntimeSnapshot(compiled));
@@ -364,6 +387,118 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
   }
 });
 
+test("background pacing actions require dense JSON-safe array entries", () => {
+  const compiled = plan('say "first"\nexit');
+  const background = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const baselineCheckpoint = JSON.parse(serializeCheckpoint(
+    createCheckpoint(compiled, background.snapshot),
+  )) as { snapshot: any };
+
+  const sparseSnapshot = structuredClone(baselineCheckpoint.snapshot);
+  sparseSnapshot.backgroundActions = new Array(1);
+  assert.equal(validateRuntimeSnapshot(sparseSnapshot, compiled).valid, false);
+  assert.throws(() => createCheckpoint(compiled, sparseSnapshot));
+
+  const jsonSparseCheckpoint = structuredClone(baselineCheckpoint);
+  jsonSparseCheckpoint.snapshot.backgroundActions = [null];
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(jsonSparseCheckpoint)));
+
+  const foregroundPlan = plan('say "first"\nsay "second"');
+  const foreground = run(foregroundPlan, createFreshRuntimeSnapshot(foregroundPlan));
+  const foregroundCheckpoint = JSON.parse(serializeCheckpoint(
+    createCheckpoint(foregroundPlan, foreground.snapshot),
+  )) as { snapshot: any };
+
+  const undefinedEntrySnapshot = structuredClone(baselineCheckpoint.snapshot);
+  undefinedEntrySnapshot.backgroundActions = [undefined];
+
+  const nullEntrySnapshot = structuredClone(baselineCheckpoint.snapshot);
+  nullEntrySnapshot.backgroundActions = [null];
+
+  const nonObjectEntrySnapshot = structuredClone(baselineCheckpoint.snapshot);
+  nonObjectEntrySnapshot.backgroundActions = [42];
+
+  const duplicateGateSnapshot = structuredClone(baselineCheckpoint.snapshot);
+  duplicateGateSnapshot.backgroundActions.push(
+    structuredClone(duplicateGateSnapshot.backgroundActions[0]),
+  );
+
+  const preparedOutputArraySnapshot = checkpointSnapshot(
+    foregroundPlan,
+    foreground.snapshot,
+  );
+  preparedOutputArraySnapshot.foregroundAction.preparedOutput = [];
+
+  const skipped = completeAction(compiled, background.snapshot, {
+    actionId: 1,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  const skippedCheckpoint = JSON.parse(serializeCheckpoint(
+    createCheckpoint(compiled, skipped.snapshot),
+  )) as { snapshot: any };
+  const obsoleteLineageSnapshot = checkpointSnapshot(compiled, skipped.snapshot);
+  delete obsoleteLineageSnapshot.lastSettlement.releasedPreparedOutputInstruction;
+  obsoleteLineageSnapshot.lastSettlement.releasedPreparedOutput = true;
+
+  const corruptions = [
+    {
+      name: "undefined direct snapshot entry",
+      compiled,
+      snapshot: undefinedEntrySnapshot,
+      checkpoint: checkpointWithSnapshot(baselineCheckpoint, undefinedEntrySnapshot),
+    },
+    {
+      name: "null background entry",
+      compiled,
+      snapshot: nullEntrySnapshot,
+      checkpoint: checkpointWithSnapshot(baselineCheckpoint, nullEntrySnapshot),
+    },
+    {
+      name: "non-object background entry",
+      compiled,
+      snapshot: nonObjectEntrySnapshot,
+      checkpoint: checkpointWithSnapshot(baselineCheckpoint, nonObjectEntrySnapshot),
+    },
+    {
+      name: "second background pacing gate",
+      compiled,
+      snapshot: duplicateGateSnapshot,
+      checkpoint: checkpointWithSnapshot(baselineCheckpoint, duplicateGateSnapshot),
+    },
+    {
+      name: "array prepared output",
+      compiled: foregroundPlan,
+      snapshot: preparedOutputArraySnapshot,
+      checkpoint: checkpointWithSnapshot(
+        foregroundCheckpoint,
+        preparedOutputArraySnapshot,
+      ),
+    },
+    {
+      name: "obsolete settlement lineage field",
+      compiled,
+      snapshot: obsoleteLineageSnapshot,
+      checkpoint: checkpointWithSnapshot(
+        skippedCheckpoint,
+        obsoleteLineageSnapshot,
+      ),
+    },
+  ];
+
+  for (const corruption of corruptions) {
+    assert.equal(
+      validateRuntimeSnapshot(corruption.snapshot, corruption.compiled).valid,
+      false,
+      corruption.name,
+    );
+    assert.throws(
+      () => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)),
+      corruption.name,
+    );
+  }
+});
+
 test("runtime-produced pacing states validate and checkpoint through their lifecycle", () => {
   const positive = plan('say "first"\nexit');
   const background = run(positive, createFreshRuntimeSnapshot(positive));
@@ -430,11 +565,11 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
   ];
 
   for (const [label, compiled, snapshot] of states) {
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, label);
-    const restored = deserializeCheckpoint(serializeCheckpoint(
-      createCheckpoint(compiled, snapshot as ReturnType<typeof createFreshRuntimeSnapshot>),
-    ));
-    assert.deepEqual(restored.snapshot, snapshot, label);
+    expectCheckpointJsonRoundTrip(
+      label,
+      compiled,
+      snapshot as ReturnType<typeof createFreshRuntimeSnapshot>,
+    );
   }
 });
 

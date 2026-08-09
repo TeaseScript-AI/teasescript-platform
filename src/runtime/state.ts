@@ -2091,9 +2091,13 @@ function validBackgroundPacingActions(
   plan: InstructionPlan | undefined,
 ): boolean {
   const actions = snapshot.backgroundActions;
-  return Array.isArray(actions) &&
-    actions.length <= 1 &&
-    actions.every((action) => validPacingGateAction(action, snapshot, plan, false));
+  if (!Array.isArray(actions) || actions.length > 1) return false;
+
+  for (let index = 0; index < actions.length; index += 1) {
+    if (!Object.hasOwn(actions, index)) return false;
+    if (!validPacingGateAction(actions[index], snapshot, plan, false)) return false;
+  }
+  return true;
 }
 
 function validForegroundActionKind(

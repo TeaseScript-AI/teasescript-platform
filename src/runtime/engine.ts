@@ -487,7 +487,11 @@ function executePlannedInstruction(
         );
       }
       if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
-      assertEventSequenceCapacity(snapshot, snapshot.backgroundActions.some((action) => action.kind === "chatPacingGate") ? 4 : 3, instruction.span);
+      const backgroundPacingGate = snapshot.backgroundActions.some(
+        (action) => action.kind === "chatPacingGate",
+      );
+      const requiredEventSequences = backgroundPacingGate ? 4 : 3;
+      assertEventSequenceCapacity(snapshot, requiredEventSequences, instruction.span);
       const prepared = "preparedUi" in instruction;
       const speaker = prepared
         ? preparedInteractionSpeaker(instruction.speakerTemporary, snapshot.temporaries, evaluator, instruction.span)
@@ -2687,7 +2691,13 @@ function establishPacingAfterSay(
   });
   snapshot.nextActionId += 1;
   snapshot.backgroundActions.push(action);
-  events.push(Object.freeze({ kind: "actionRequested", sequence: requestEventSequence, action: { ...action }, span: copySpan(span) } satisfies ActionRequestedEvent));
+  const requestEvent: ActionRequestedEvent = Object.freeze({
+    kind: "actionRequested",
+    sequence: requestEventSequence,
+    action: { ...action },
+    span: copySpan(span),
+  });
+  events.push(requestEvent);
 }
 
 function validatePacingCreation(

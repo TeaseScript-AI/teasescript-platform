@@ -41,7 +41,13 @@ export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, su
 
 function timedActionsDue(snapshot: RuntimeSnapshot, now: number): Array<RuntimeDelayActionSnapshot | RuntimeChatPacingGateActionSnapshot> {
   const actions: Array<RuntimeDelayActionSnapshot | RuntimeChatPacingGateActionSnapshot> = [];
-  if (snapshot.foregroundAction?.kind === "delay" || snapshot.foregroundAction?.kind === "chatPacingGate") actions.push(snapshot.foregroundAction);
+  const foregroundAction = snapshot.foregroundAction;
+  if (
+    foregroundAction?.kind === "delay" ||
+    foregroundAction?.kind === "chatPacingGate"
+  ) {
+    actions.push(foregroundAction);
+  }
   for (const action of snapshot.backgroundActions) {
     if (action.kind === "chatPacingGate") actions.push(action);
   }
@@ -57,27 +63,9 @@ function settleForegroundTimedAction(
   events: InterpreterEvent[],
 ): RuntimeActionSettlementSnapshot {
   const completionEventSequence = takeSequence(snapshot);
-  const settlement: RuntimeActionSettlementSnapshot = Object.freeze(
-    action.kind === "delay"
-      ? {
-          actionId: action.actionId, actionKind: "delay", settlementKind: "completed",
-          owningInstruction: action.owningInstruction, continuationInstruction: action.continuationInstruction,
-          requestEventSequence: action.requestEventSequence, completionEventSequence,
-          deadlineMs: action.deadlineMs, completedAtMs: snapshot.currentSessionTimeMs,
-        }
-      : {
-          actionId: action.actionId,
-          actionKind: "chatPacingGate",
-          settlementKind: "completed",
-          owningInstruction: action.owningInstruction,
-          continuationInstruction: action.continuationInstruction,
-          requestEventSequence: action.requestEventSequence,
-          completionEventSequence,
-          deadlineMs: action.deadlineMs,
-          completedAtMs: snapshot.currentSessionTimeMs,
-          releasedPreparedOutputInstruction: action.preparedOutput?.owningInstruction ?? null,
-        },
-  );
+  const settlement = action.kind === "delay"
+    ? createDelaySettlement(action, completionEventSequence, snapshot.currentSessionTimeMs)
+    : createPacingSettlement(action, completionEventSequence, snapshot.currentSessionTimeMs);
   snapshot.foregroundAction = null;
   snapshot.lastSettlement = settlement;
   snapshot.status = "running";
@@ -88,6 +76,49 @@ function settleForegroundTimedAction(
     snapshot.nextInstruction = action.continuationInstruction;
   }
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
-  events.push(Object.freeze({ kind: "actionCompleted", sequence: completionEventSequence, settlement, span: copySpan(span) } satisfies ActionCompletedEvent));
+  const completionEvent: ActionCompletedEvent = Object.freeze({
+    kind: "actionCompleted",
+    sequence: completionEventSequence,
+    settlement,
+    span: copySpan(span),
+  });
+  events.push(completionEvent);
   return settlement;
+}
+
+function createDelaySettlement(
+  action: RuntimeDelayActionSnapshot,
+  completionEventSequence: number,
+  completedAtMs: number,
+): RuntimeActionSettlementSnapshot {
+  return Object.freeze({
+    actionId: action.actionId,
+    actionKind: "delay",
+    settlementKind: "completed",
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    requestEventSequence: action.requestEventSequence,
+    completionEventSequence,
+    deadlineMs: action.deadlineMs,
+    completedAtMs,
+  });
+}
+
+function createPacingSettlement(
+  action: RuntimeChatPacingGateActionSnapshot,
+  completionEventSequence: number,
+  completedAtMs: number,
+): RuntimeActionSettlementSnapshot {
+  return Object.freeze({
+    actionId: action.actionId,
+    actionKind: "chatPacingGate",
+    settlementKind: "completed",
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    requestEventSequence: action.requestEventSequence,
+    completionEventSequence,
+    deadlineMs: action.deadlineMs,
+    completedAtMs,
+    releasedPreparedOutputInstruction: action.preparedOutput?.owningInstruction ?? null,
+  });
 }
