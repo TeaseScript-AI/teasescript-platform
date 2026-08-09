@@ -43,8 +43,10 @@ boundary rechecks found:
 `SE` is `SyntaxError: Invalid regular expression: /[.eE]/u: Stack overflow`, with `RegExp.test` then `#parsePrimary`;
 `RE` is `RangeError: Maximum call stack size exceeded`. Node 26.5.0 / V8 14.6.202.34-node.24 reproduced both signatures
 on the same host; thresholds matched except unary `-` passed/failed at 4,277 / 4,278, and the `not` failure frame was
-`#parsePostfix`. These observations support narrow host-stack recognition and future comparison only; they are not
-TeaseScript limits, supported capacity, CI thresholds, safety margins, or evidence for a replacement bound.
+`#parsePostfix`. Revision `e8e5f0554a08866d2f521f273d6899192a9e49ff` later removed nine no-op wrapper layers left by
+the old nesting guard, so these exact depths are historical observations rather than measurements of the final parser.
+They are retained only as evidence that host-stack failure varies materially by syntax and implementation shape; they are
+not TeaseScript limits, supported capacity, CI thresholds, safety margins, or production-classifier inputs.
 
 ## Proven representation and state invariants
 

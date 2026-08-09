@@ -188,8 +188,8 @@ The current implemented `say` and `say as` paths remain unchanged until a tested
 
 Parser and semantic diagnostics are deterministic source-associated data. Ordinary syntax failures use this model.
 TeaseScript defines no authored-syntax nesting maximum; host JavaScript stack exhaustion is an environment-specific
-implementation constraint, not language capacity. Current compiler handling is defined in [`RUNTIME.md`](RUNTIME.md),
-and diagnostic measurements live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
+implementation constraint, not language capacity. Historical diagnostic measurements live in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
 
 ## Protected names
 

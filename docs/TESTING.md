@@ -470,7 +470,6 @@ Tests and benchmarks should use:
 
 ## Parser recursion safety
 
-Regression coverage verifies valid nesting beyond the removed parser guard, malformed-input diagnostics, and narrow
-`compileSource(...)` translation of recognized parser host-stack exhaustion while preserving the cause and leaving
-unrelated exceptions unchanged. Host-stack measurements in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) are diagnostic
-evidence, not CI thresholds or capacity.
+Regression coverage verifies valid nesting beyond the removed parser guard and malformed-input diagnostics without
+pinning an incidental host-stack failure point. Historical measurements in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)
+are diagnostic evidence, not CI thresholds or capacity.
