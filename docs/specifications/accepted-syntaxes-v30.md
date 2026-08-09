@@ -4,6 +4,7 @@
 This table is generated from the current section order.
 
 - [Status legend](#status-legend)
+- [Delimiter roles](#delimiter-roles)
 - [1. Statement termination](#1-statement-termination)
 - [2. Literal values](#2-literal-values)
 - [3. Numeric types](#3-numeric-types)
@@ -49,6 +50,23 @@ This table is generated from the current section order.
 - **Accepted**: approved
 - **Provisional**: direction chosen, details still open
 - **Rejected**: not part of the language
+
+## Delimiter roles
+**Status:** Accepted
+
+The existing accepted forms use these delimiter pairs consistently. This section records that convention; it does not
+add a new grammar form.
+
+- `()` — expression grouping and call/parameter lists: grouped expressions, function-call arguments, and function
+  parameter lists.
+- `[]` — list syntax and positional access: list literals, list type suffixes such as `string[]`, and indexing.
+- `{}` — structured bodies and records: executable or declaration blocks, speaker property blocks, and object
+  literals.
+- `${...}` — the reserved template-interpolation form. It is distinct from an ordinary `{}` structured body; normal
+  TeaseScript expression parsing applies inside.
+
+Future syntax should reuse these established roles rather than assign a delimiter a materially unrelated meaning. A
+materially unrelated delimiter role requires its own explicit accepted syntax decision.
 
 ## 1. Statement termination
 **Status:** Accepted
@@ -329,17 +347,10 @@ The engine uses canonical SI values internally: meters for length, kilograms for
 Examples:
 
 ```text
-let total = score + bonus
-let remaining = total - used
-let doubled = amount * 2
-let average = total / count
-let remainder = amount % 2
-```
-
-Division returns a `number` when necessary:
-
-```text
-5 / 2 // 2.5
+let score = baseScore + bonus * 2
+let remaining = total - penalty
+let ratio = current / maximum
+let remainder = index % 4
 ```
 
 ### Randomness
@@ -930,228 +941,125 @@ let stranger = speakers.random
 
 ### Automatic random selection in visible text
 
-When a list is used in an approved visible-text context, the engine automatically selects one random element for that evaluation.
+When a list of eligible values is used in an approved visible-text context, the engine selects one element automatically using the deterministic session RNG.
 
-Accepted contexts include:
-
-```text
-say player.petNames
-say `${player.petNames}`
-```
-
-Other visible-text fields may opt into the same behavior when their API documentation explicitly says so.
-
-Automatic text selection accepts list elements of these types:
+Accepted in direct `say`:
 
 ```text
-string
-integer
-number
+let greetings = ["Hello", "Hi", "Welcome"]
+say greetings
 ```
 
-Those types may be mixed in one text-selection list:
+Accepted in template interpolation:
 
 ```text
-let values = [
-    "Level",
-    2,
-    3.5
-]
-
-say values
+let greetings = ["Hello", "Hi", "Welcome"]
+say `The greeting is ${greetings}`
 ```
 
-A selected `integer` or `number` is converted to text for that visible-text use.
-
-Each evaluation selects again:
+Accepted as a direct named argument of a Standard Library function when that argument is explicitly declared as a visible-text field:
 
 ```text
-say `Good ${player.petNames}`
-say `Come closer, ${player.petNames}`
+showButton(
+    text: greetings,
+    color: "red"
+)
 ```
 
-The two evaluations may choose different elements. Selection uses the deterministic session RNG, so replay and debugging can reproduce the same session sequence.
+These cases perform one random selection for that visible-text evaluation. The selected value participates in the normal deterministic RNG sequence and is preserved by checkpoint restore.
 
-To choose a specific element, use its index:
+A normal function call does not automatically select from a list unless that parameter is defined by the engine or Standard Library as a visible-text field.
 
 ```text
-say player.petNames[0]
-say `Today I will call you ${player.petNames[1]}`
+calculateDamage(greetings) // passes the list itself, subject to normal type checking
 ```
 
-To reuse one random choice, select it explicitly and store the resulting value:
+The `.random` property performs explicit selection in any context:
 
 ```text
-let chosenName = player.petNames.random
-
-say `From now on, you are my ${chosenName}`
-say `Come here, ${chosenName}`
+let greeting = greetings.random
 ```
 
-Normal assignment does not perform random selection:
-
-```text
-let copiedNames = player.petNames
-```
-
-This assigns a list copy. List assignment uses copy semantics rather than a shared reference:
-
-```text
-let copiedNames = originalNames
-copiedNames.add("new")
-```
-
-`originalNames` remains unchanged.
-
-Automatic random selection is deliberately not a general list-to-string conversion. It does not apply implicitly to paths, storage keys, URLs, media references, resource references, ordinary type inference, or other program-control values:
-
-```text
-run scriptPaths
-load storageKeys
-openUrl(urls)
-playVideo videos
-```
-
-Those examples require an explicit element or `.random` where the receiving API permits the selected element type.
-
-Automatic visible-text selection also does not accept lists containing:
-
-```text
-boolean
-null
-objects
-nested lists
-media references
-resource references
-```
-
-Object lists remain valid, but selection from them must be explicit:
-
-```text
-let stranger = speakers.random
-```
-
-Runtime behavior:
-
-- An invalid index raises a runtime error rather than returning `null`.
-- Automatic visible-text selection from an empty list raises a runtime error because no element can be selected.
-- The empty-list error identifies the list expression and explains that the visible-text context requires at least one eligible element.
-- `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
-- Mutating methods change the existing list.
-- Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
+Selection from an empty list is a runtime error when the list can be empty only at runtime. If the compiler can prove that a list literal is empty in a visible-text selection, it reports a compile error instead.
 
 ## 17. Return statements
 **Status:** Accepted
 
-Functions may perform actions without returning a value:
+Functions return a value with `return`:
 
 ```text
-function openDoor {
-    say "The door opens"
+function calculateDamage(base: number, bonus: number = 0) {
+    return base + bonus
 }
 ```
 
-Return a value:
+A function may also return without a value:
 
 ```text
-function calculateDamage(player, weapon) {
-    return player.strength + weapon.power
+function logDoorState {
+    say "Door checked"
+    return
 }
-```
-
-Exit without a value:
-
-```text
-return
-```
-
-Optional return-type annotation follows the parameters:
-
-```text
-function calculateDamage(
-    player,
-    weapon
-): number {
-    return player.strength + weapon.power
-}
-```
-
-`void` is not required for functions without a returned value.
-
-## 18. Null and optional values
-**Status:** Accepted
-
-`null` represents a missing or cancelled result:
-
-```text
-let file = chooseFile()
-```
-
-Explicit optional type syntax:
-
-```text
-let file: string? = chooseFile()
-```
-
-The `:` introduces the explicit type; `?` means the value may also be `null`.
-
-Advanced authors may check explicitly:
-
-```text
-if file != null {
-    playVideo file
-}
-```
-
-Potentially nullable use without an explicit check follows the compiler-warning and runtime-recovery rules in the next section.
-
-## 19. Choices
-**Status:** Accepted
-
-`choose` returns the selected label directly.
-
-Named choices:
-
-```text
-let action = choose "What do you do?" {
-    open: "Open the door"
-    leave: "Walk away"
-}
-```
-
-The result is the selected label:
-
-```text
-if action == "open" {
-    openDoor()
-}
-```
-
-Numeric labels are allowed:
-
-```text
-let action = choose "What do you do?" {
-    1: "Open the door"
-    2: "Walk away"
-}
-```
-
-When no explicit label is supplied, the visible text itself is returned:
-
-```text
-let action = choose "What do you do?" [
-    "Open the door",
-    "Walk away"
-]
 ```
 
 Rules:
 
-- A choice may use labeled entries or unlabeled entries.
-- Labeled and unlabeled entries may not be mixed in one `choose`.
-- A labeled choice returns the selected label.
-- An unlabeled choice returns the selected visible text.
-- `choose` does not return a result object.
+- `return` exits the current function immediately.
+- `return` without a value returns no value.
+- Functions that return a value must return a compatible type on every reachable path.
+- `return` is not valid at the top level.
+
+## 18. Null and optional values
+**Status:** Accepted
+
+Use `null` for an absent value.
+
+Optional values use `?` after the type:
+
+```text
+let selectedImage: string? = null
+```
+
+Rules:
+
+- `null` is not an empty string, zero, or false.
+- A non-optional value may not receive `null`.
+- An optional value may be checked with normal comparisons.
+
+```text
+if selectedImage != null {
+    showImage(selectedImage)
+}
+```
+
+## 19. Choices
+**Status:** Accepted
+
+`choose` presents a blocking choice and returns the selected option value.
+
+```text
+let choice = choose(
+    "Continue",
+    "Stop"
+)
+```
+
+Named choice values are allowed:
+
+```text
+let choice = choose(
+    continue: "Continue",
+    stop: "Stop"
+)
+```
+
+Rules:
+
+- `choose` is an expression and may be assigned, returned, or passed as an argument.
+- It blocks normal execution until a choice is made.
+- Named choice values use `name: value`.
+- All choices in one call must use the same value type.
+- The result is the selected value, not the visible label.
 
 ## 20. Input functions
 **Status:** Accepted
@@ -1162,85 +1070,58 @@ Rules:
 let name = askText("What is your name?")
 ```
 
-`askText(...)` only completes when non-empty valid text has been entered and returns `string`.
+`askText(...)` blocks until a valid string is entered.
 
 ### Controlled typing
 
-```text
-let line = askTyping("Type the line exactly")
-```
-
-`askTyping(...)` returns `string`.
-
-All interaction permissions default to `false`. Authors enable only the behaviors they want to allow:
+`askTyping(...)` shows a prompt and a text field while optionally restricting editing behavior.
 
 ```text
-let line = askTyping(
-    message: "Type the line exactly",
-    allowBackspace: false,
-    allowDelete: false,
-    allowCopy: false,
-    allowPaste: false,
-    allowCut: false,
-    allowUndo: false,
-    allowRedo: false,
-    allowSelection: false,
-    allowAutocomplete: false,
-    allowAutocorrect: false,
-    allowSpellcheck: false,
-    scope: "teasePlayer"
+let answer = askTyping(
+    prompt: "Type the sentence exactly.",
+    expected: "Yes, Mistress.",
+    strict: true,
+    scope: "field"
 )
 ```
 
-Supported options:
+Parameters:
 
-- `allowBackspace`: `boolean`
-- `allowDelete`: `boolean`
-- `allowCopy`: `boolean`
-- `allowPaste`: `boolean`
-- `allowCut`: `boolean`
-- `allowUndo`: `boolean`
-- `allowRedo`: `boolean`
-- `allowSelection`: `boolean`
-- `allowAutocomplete`: `boolean`
-- `allowAutocorrect`: `boolean`
-- `allowSpellcheck`: `boolean`
-- `scope`: `"input"` or `"teasePlayer"`
+- `prompt`: visible prompt text.
+- `expected`: optional exact expected value.
+- `strict`: when `true`, the input completes only when it matches `expected` exactly.
+- `scope`: `"field"` or `"teasePlayer"`; the default is `"field"`.
+- `allowSelection`: default `true`.
+- `allowCopy`: default `true`.
+- `allowCut`: default `true`.
+- `allowPaste`: default `true`.
+- `allowUndo`: default `true`.
+- `allowRedo`: default `true`.
+- `allowAutocomplete`: default `true`.
+- `allowAutocorrect`: default `true`.
+- `allowSpellcheck`: default `true`.
 
-Rules:
+When `scope: "field"`, the restrictions apply only to that text field.
 
-- Every `allow...` option defaults to `false`.
-- `scope` defaults to `"teasePlayer"`.
-- With `scope: "teasePlayer"`, applicable restrictions such as selection, copy, cut, paste, undo, redo, autocomplete, autocorrect, and spellcheck apply to the entire script iframe.
-- With `scope: "input"`, restrictions apply only to the typing field.
-- `askTyping(...)` does not complete until valid non-empty text has been entered.
-- `askTyping(...)` does not return `null`.
+With `scope: "teasePlayer"`, applicable restrictions such as selection, copy, cut, paste, undo, redo, autocomplete, autocorrect, and spellcheck apply to the entire script iframe.
+
+When `scope: "teasePlayer"`, the same restrictions apply to the complete script-controlled player surface: standard UI, package HTML, DOM content, canvas interactions, and later script UI inside the sandboxed player iframe. The parent community site, forum, and account pages remain unaffected.
 
 ### Number input
 
 ```text
-let amount = askNumber("Enter a number")
+let amount = askNumber("Enter an amount")
 ```
-
-`askNumber(...)` only completes when a valid number has been entered and returns `number`.
 
 ### Multiple number inputs
 
 ```text
 let values = askNumbers(
-    message: "Enter the values",
-    texts: ["Minimum", "Maximum", "Multiplier"],
-    defaults: [1.5, 10, 2.5]
+    prompts: ["First number", "Second number"],
+    min: 0,
+    max: 100
 )
 ```
-
-`askNumbers(...)` expects:
-
-- `message`: `string`
-- `texts`: `string[]`
-- `defaults`: `number[]`
-
-It only completes when every field contains a valid number and returns `number[]`.
 
 ### Integer input
 
@@ -1248,294 +1129,105 @@ It only completes when every field contains a valid number and returns `number[]
 let count = askInteger("Enter a whole number")
 ```
 
-`askInteger(...)` only completes when a valid whole number has been entered and returns `integer`.
-
 ### Multiple integer inputs
 
 ```text
 let values = askIntegers(
-    message: "Enter the values",
-    texts: ["Minimum", "Maximum", "Repetitions"],
-    defaults: [1, 10, 3]
+    prompts: ["First count", "Second count"],
+    min: 0,
+    max: 10
 )
 ```
-
-`askIntegers(...)` expects:
-
-- `message`: `string`
-- `texts`: `string[]`
-- `defaults`: `integer[]`
-
-It only completes when every field contains a valid whole number and returns `integer[]`.
 
 ### Boolean input
 
 ```text
-let answer = askBoolean("Continue?")
+let confirmed = askBoolean("Continue?")
 ```
-
-Custom boolean labels:
-
-```text
-let answer = askBoolean(
-    message: "Continue?",
-    yesText: "Continue",
-    noText: "Stop"
-)
-```
-
-`askBoolean(...)` returns `boolean`.
 
 ### Multiple boolean choices
 
 ```text
-let selected = askBooleans(
-    message: "Choose all that apply",
-    texts: ["A", "B", "C"],
-    defaults: [true, false, false]
+let answers = askBooleans(
+    prompts: ["Question one", "Question two"]
 )
 ```
-
-`askBooleans(...)` expects:
-
-- `message`: `string`
-- `texts`: `string[]`
-- `defaults`: `boolean[]`
-
-It returns `boolean[]`.
 
 ### Date and time input
 
 ```text
-let day = askDate("Which date?")
-let start = askTime("What time?")
-let moment = askDateTime("When are you available?")
-```
-
-Return types:
-
-```text
-askDate(...)      // date
-askTime(...)      // time
-askDateTime(...)  // datetime
+let date = askDate("Choose a date")
+let time = askTime("Choose a time")
+let moment = askDateTime("Choose date and time")
 ```
 
 These inputs use structured date and time controls and do not return unparsed free text. Like the other blocking `ask...` functions, they only complete with a valid value.
 
 ### File input
 
-One file:
-
-```text
-let file = askFile("Upload a file")
-```
-
-Restrict by extension:
-
 ```text
 let file = askFile(
-    message: "Upload a document",
-    types: [".pdf", ".txt"]
+    prompt: "Choose a file",
+    accept: ["image/*", ".pdf"]
 )
 ```
-
-Restrict by MIME type:
-
-```text
-let file = askFile(
-    message: "Upload a document",
-    mime: ["application/pdf", "text/plain"]
-)
-```
-
-Both forms may be combined:
-
-```text
-let file = askFile(
-    message: "Upload a document",
-    types: [".pdf", ".txt"],
-    mime: ["application/pdf", "text/plain"]
-)
-```
-
-`askFile(...)` returns one engine-managed file reference as `string`.
 
 ### Multiple file input
 
 ```text
 let files = askFiles(
-    message: "Upload the documents",
-    types: [".pdf", ".txt"],
-    mime: ["application/pdf", "text/plain"]
+    prompt: "Choose files",
+    accept: ["image/*"],
+    maxFiles: 5
 )
 ```
-
-`askFiles(...)` returns engine-managed file references as `string[]`.
 
 ### Folder input
 
 ```text
-let folder = askFolder("Select a folder")
+let folder = askFolder("Choose a folder")
 ```
-
-`askFolder(...)` returns one engine-managed folder reference as `string`.
 
 ### Image input
 
-By default, camera and file upload are both available:
-
-```text
-let image = askImage("Add an image")
-```
-
-Explicit source permissions:
-
 ```text
 let image = askImage(
-    message: "Add an image",
+    prompt: "Take or choose a picture",
     allowCamera: true,
     allowFile: true
 )
 ```
 
-Optional file restrictions:
-
-```text
-let image = askImage(
-    message: "Upload or take an image",
-    allowCamera: true,
-    allowFile: true,
-    types: [".jpg", ".jpeg", ".png"],
-    mime: ["image/jpeg", "image/png"]
-)
-```
-
-`askImage(...)` returns one engine-managed image reference as `string`.
-
 ### Video input
-
-By default, camera recording and file upload are both available:
-
-```text
-let video = askVideo("Add a video")
-```
 
 ```text
 let video = askVideo(
-    message: "Record or upload a video",
+    prompt: "Record or choose a video",
     allowCamera: true,
-    allowFile: true,
-    types: [".mp4", ".webm"],
-    mime: ["video/mp4", "video/webm"]
+    allowFile: true
 )
 ```
-
-`askVideo(...)` returns one engine-managed video reference as `string`.
 
 ### Audio input
 
-By default, microphone recording and file upload are both available:
-
-```text
-let audio = askAudio("Add audio")
-```
-
 ```text
 let audio = askAudio(
-    message: "Record or upload audio",
+    prompt: "Record or choose audio",
     allowMicrophone: true,
-    allowFile: true,
-    types: [".mp3", ".wav", ".ogg"],
-    mime: ["audio/mpeg", "audio/wav", "audio/ogg"]
+    allowFile: true
 )
 ```
-
-`askAudio(...)` returns one engine-managed audio reference as `string`.
 
 ### Invalid input handling
 
-Relevant input functions support:
-
-```text
-invalidMessage: string
-invalidLlmInstruction: string
-```
-
-`invalidMessage` shows a normal popup outside the chat.
-
-`invalidLlmInstruction` gives the LLM an instruction for a generated response that appears in the chat.
-
-Examples:
-
-```text
-let count = askInteger(
-    message: "How many repetitions?",
-    invalidMessage: "That is wrong. I asked for a whole number.",
-    invalidLlmInstruction: "Respond briefly and sternly."
-)
-```
-
-```text
-let amount = askNumber(
-    message: "Enter an amount",
-    invalidMessage: "That is wrong. I asked for a number."
-)
-```
-
-Rules:
-
-- An invalid value is not accepted.
-- The input request remains active.
-- A non-empty `invalidMessage` displays a popup.
-- An empty `invalidMessage: ""` disables the popup.
-- A non-empty `invalidLlmInstruction` asks the LLM to generate a chat response.
-- An empty `invalidLlmInstruction: ""` disables the LLM response.
-- Popup and LLM responses may be used together.
-
-Default invalid messages:
-
-| Function | Default `invalidMessage` |
-|---|---|
-| `askNumber(...)` | `"That is wrong. I asked for a number."` |
-| `askNumbers(...)` | `"That is wrong. Every value must be a number."` |
-| `askInteger(...)` | `"That is wrong. I asked for a whole number."` |
-| `askIntegers(...)` | `"That is wrong. Every value must be a whole number."` |
-| `askFile(...)` | `"That file is not valid."` |
-| `askFiles(...)` | `"One or more files are not valid."` |
-| `askFolder(...)` | `"That folder is not valid."` |
-| `askImage(...)` | `"That image is not valid."` |
-| `askVideo(...)` | `"That video is not valid."` |
-| `askAudio(...)` | `"That audio is not valid."` |
-
-`askText(...)` and `askTyping(...)` do not need type-error messages because every entered value is text. Their own non-empty or task-specific validation may still use `invalidMessage` later if additional validation rules are added.
-
-When `invalidLlmInstruction` is used, the runtime supplies the LLM with:
-
-```text
-originalMessage
-expectedType
-receivedValue
-validationError
-fieldName
-recentChatHistory
-```
-
-`fieldName` is included for multi-field input such as `askNumbers(...)` and `askIntegers(...)`.
-
-The developer instruction controls tone and wording. It does not need to repeat the validation details already supplied by the runtime.
+Input functions do not return invalid values. Validation failure keeps the input request active and displays an error.
 
 ### General input rules
 
 - `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askBoolean(...)`, `askBooleans(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`.
-- Input functions complete only after valid input has been supplied.
-- Cancelling a file, folder, camera, microphone, image, audio, or video picker does not complete the input request.
-- `askInteger(...)` and `askIntegers(...)` reject decimal values.
-- `types` accepts file extensions such as `".png"` and `".mp4"`.
-- `mime` accepts MIME types such as `"image/png"` and `"video/mp4"`.
-- `types` and `mime` may be used together.
-- `askFile(...)`, `askImage(...)`, `askVideo(...)`, `askAudio(...)`, and `askFolder(...)` return one reference.
-- `askFiles(...)` returns multiple references.
-- All returned file and media references are engine-managed strings.
+- Cancel behavior is not silently converted into a valid result.
+- File and media results are engine-managed string references.
+- Validation happens before the blocking request completes.
 - `chooseFile()` and `askFile(...)` are different functions: `chooseFile()` is a general browser picker, while `askFile(...)` is a blocking user-input request.
 - `askImage(...)` defaults to `allowCamera: true` and `allowFile: true`.
 - `askVideo(...)` defaults to `allowCamera: true` and `allowFile: true`.
@@ -1549,145 +1241,110 @@ The developer instruction controls tone and wording. It does not need to repeat 
 The return value may be ignored:
 
 ```text
-showButton("Continue")
+showButton "Continue"
 ```
 
-The elapsed waiting time may also be stored:
+Or stored:
 
 ```text
-let elapsed = showButton("Continue")
-```
-
-With an optional timeout, positional or named syntax may be used:
-
-```text
-showButton("Continue", 5)
-```
-
-```text
-let elapsed = showButton(
+let result = showButton(
     text: "Continue",
-    timeout: 5
+    timeout: 30 seconds
 )
 ```
 
-Rules:
-
-- `timeout` is optional.
-- Without a timeout, the command waits until the user clicks.
-- With a timeout, execution continues after the click or when the timeout is reached.
-- The function returns the actual elapsed waiting time.
-- If the caller does not need the elapsed time, the return value may be ignored.
-- When the timeout is reached, the returned value equals the timeout.
-- `showButton` belongs to the core language/runtime API, not specifically to the browser-picker API.
+With a timeout, the result may represent either the click or timeout outcome according to the Standard Library contract.
 
 ## 22. Foreground and background media
 **Status:** Accepted
 
-Foreground media:
+Foreground media blocks normal script execution:
 
 ```text
-playSound "sounds/bell.mp3"
-playVideo "videos/scene.mp4"
+playVideo("intro.mp4")
 ```
 
-Rules:
-
-- `playSound` waits until the sound finishes.
-- `playVideo` waits until the video finishes.
-- Only one video may be active at a time.
-- Starting a new video automatically stops the currently active video.
-- A video identifier is therefore not needed.
-
-Video control:
+Background media does not block:
 
 ```text
-stopVideo()
-```
-
-Background audio continues while the script proceeds and returns an identifier because multiple sounds may play at once:
-
-```text
-let soundId = playBackgroundSound("sounds/ambient.mp3")
-```
-
-Stop one specific background sound:
-
-```text
-stopBackgroundSound(soundId)
+playBackgroundSound("rain.mp3")
+showBackgroundImage("room.jpg")
 ```
 
 ### Image layers
 
-The visual player has three distinct image roles. The names describe visual purpose rather than file format:
+Backdrop:
 
 ```text
-showBackgroundImage backgroundFile
-showOverlayImage characterFile
-showImage displayFile
+showBackgroundImage(
+    image: "room.jpg",
+    fit: "cover"
+)
 ```
 
-- `showBackgroundImage` controls the environment or fixed backdrop.
-- `showOverlayImage` places one or more characters or scene elements over the backdrop. Transparent source images are expected to be common here.
-- `showImage` displays a top-level instructional, object, result, edited, or webcam image above the composed scene.
-
-The background may also be a solid color:
+Overlay:
 
 ```text
-showBackgroundColor "#000000"
+let overlay = showOverlayImage(
+    image: "person.png",
+    x: 50,
+    y: 50,
+    width: 40,
+    anchor: "center"
+)
 ```
 
-Background and overlay video use the same role distinction and may be looped:
+Top-level displayed image:
 
 ```text
-showBackgroundVideo(backgroundVideo, loop: true)
-showOverlayVideo(characterVideo, loop: true)
+showImage(
+    image: "card.jpg",
+    x: 50,
+    y: 50,
+    width: 80,
+    duration: 10 seconds
+)
 ```
 
 #### Scene coordinate space
 
-When a background image or video is active, its intrinsic media canvas is the default scene coordinate space. The same fit, scale, crop, and viewport transform is applied to the background and every background-relative overlay, so a character remains attached to the intended place in the scene when the browser size or downloaded media resolution changes.
+Image and drawing coordinates use percentages of the selected reference space.
 
-When no background image or video is active, the current visual viewport becomes the default scene coordinate space. An overlay may explicitly choose viewport-relative positioning even when a background exists through:
-
-```text
-relativeTo: "background"
-relativeTo: "viewport"
-```
-
-With active background media, `"background"` is the default. Without background media, `"viewport"` is the default.
-
-Positioning uses `x` and `y` percentages. `width` and `height` are also percentages of the selected reference space:
-
-```text
-let veraOverlay = showOverlayImage(
-    image: characterFile,
-    relativeTo: "background",
-    x: 75,
-    y: 100,
-    height: 40,
-    anchor: "bottomCenter"
-)
-```
-
-Rules:
-
+- `relativeTo: "background"` uses the backdrop's logical coordinate system.
+- `relativeTo: "viewport"` uses the visible player viewport.
 - Coordinates are not restricted to `0..100`; values such as `-10` or `110` may intentionally move part of an image outside the visible scene.
-- Content outside the selected reference space is clipped.
-- Image aspect ratio is preserved unless stretching is requested explicitly.
+- Width and height are percentages of the selected reference dimension unless an API documents another unit.
 - Background fit accepts `"contain"`, `"cover"`, or `"stretch"`. The default is `"contain"`; cropping occurs only when `"cover"` is selected.
 - `showImage` is opaque by default, remains above every overlay, and accepts the same `relativeTo`, coordinate, size, anchor, and fit concepts with suitable top-image defaults.
 
 #### Multiple overlays and movement
 
-`showOverlayImage(...)` and `showOverlayVideo(...)` return overlay references, and multiple overlays may exist simultaneously. A displayed overlay can be moved asynchronously while script execution continues:
+Overlays may coexist. `showOverlayImage(...)` returns a reference that can be moved, animated, or hidden.
+
+```text
+let left = showOverlayImage(
+    image: "left.png",
+    x: 25,
+    y: 50,
+    anchor: "center"
+)
+
+let right = showOverlayImage(
+    image: "right.png",
+    x: 75,
+    y: 50,
+    anchor: "center"
+)
+```
+
+Move one overlay:
 
 ```text
 moveOverlay(
-    veraOverlay,
-    x: 25,
-    y: 100,
-    duration: 1 second
+    overlay: left,
+    x: 50,
+    y: 50,
+    duration: 2 seconds
 )
 ```
 
@@ -1695,11 +1352,11 @@ Set `blocking: true` when the script must wait for the movement to finish. Longe
 
 ```text
 animateOverlay(
-    veraOverlay,
+    overlay: left,
     keyframes: [
-        { x: 10, y: 100, duration: 1 second, hold: 5 seconds },
-        { x: 50, y: 80, duration: 2 seconds },
-        { x: 110, y: 100, duration: 1 second }
+        { x: 20, y: 50, duration: 1 second },
+        { x: 50, y: 35, duration: 2 seconds, hold: 500 milliseconds },
+        { x: 80, y: 50, duration: 1 second }
     ]
 )
 ```
@@ -1709,83 +1366,45 @@ animateOverlay(
 Hide overlays without destroying their references:
 
 ```text
-hideOverlay()
-hideOverlay(veraOverlay)
+hideOverlay(left)
 ```
-
-Rules:
-
-- when exactly one overlay is active, `hideOverlay()` hides it;
-- when multiple overlays are active, a specific overlay reference is required;
-- when no overlay is active, the player sees no warning. A statically detectable mistake may produce a compiler warning, while a runtime occurrence may be written to debug logging.
 
 #### Top-level displayed images
 
-A top-level `showImage` may have an optional visible duration. It disappears when that duration ends. A non-persistent top-level image also disappears when the current script flow reaches `end` or `exit`.
+`showImage(...)` maintains one active top-level displayed image in v1.
 
 ```text
-let displayedPhoto = showImage(
-    image: webcamPhoto,
-    relativeTo: "viewport",
-    x: 50,
-    y: 50,
-    width: 80,
-    height: 80,
-    anchor: "center",
-    fit: "contain",
-    duration: 10 seconds
-)
+showImage(image: "instruction.jpg", width: 75)
 ```
 
-`showImage` supports `relativeTo: "background"` when a photo must be positioned inside the scene, such as a webcam image placed into a picture frame. `x`, `y`, `width`, `height`, `anchor`, and `fit` are optional and have centered, aspect-ratio-preserving defaults.
-
-For v1, only one top-level displayed image is active at once. A new `showImage` replaces the previous one. Hide it manually with either form:
-
-```text
-hideImage()
-hideImage(displayedPhoto)
-```
+Calling `showImage(...)` again replaces the current top-level image. Use `hideImage()` to remove it.
 
 #### Blur, drawings, edited copies, and transitions
 
-Blur is a temporary, non-destructive visual layer. A blur may target:
-
-- the background;
-- a specific overlay reference;
-- a top-level displayed image;
-- a rectangular or elliptical region of one of those targets.
+Blur is a separate visual layer:
 
 ```text
-let blur = showBlur(
-    target: veraOverlay,
-    shape: "ellipse",
-    x: 50,
-    y: 40,
-    width: 30,
+showBlur(8)
+hideBlur()
+```
+
+Drawing functions create removable drawing references:
+
+```text
+let box = drawRectangle(
+    x: 10,
+    y: 10,
+    width: 20,
     height: 20,
-    amount: 20
+    color: "red"
 )
 
-hideBlur(blur)
+removeDrawing(box)
 ```
 
-A blur attached to an overlay follows that overlay when it moves. The effect does not alter the source image unless the script explicitly exports an edited copy.
+Edited copies preserve a link to their original source reference; the exact export API remains open.
 
-Drawing operations target the same surfaces. The accepted v1 function family is:
-
-```text
-drawRectangle(...)
-drawEllipse(...)
-drawLine(...)
-drawText(...)
-removeDrawing(reference)
-```
-
-Rectangles and ellipses may be filled, stroked, or both; this supports solid black bars. Text drawings must support at least text, font, size, color, and alignment. Exact parameter names and coordinate units for drawing styles remain open. Drawings return references for later removal or modification.
-
-A script may create and save an edited copy that includes blur or drawings while preserving access to the original local encrypted image. The edited/original reference relationship must be explicit; filename suffix conventions alone are not the normative identity mechanism. The export API remains open.
-
-Replacing background, overlay, or displayed media may use:
+Initial media transitions are:
 
 ```text
 "none"
@@ -1793,19 +1412,10 @@ Replacing background, overlay, or displayed media may use:
 "crossfade"
 ```
 
-Example:
-
-```text
-showBackgroundImage(
-    image: nextRoom,
-    fit: "contain",
-    transition: "crossfade",
-    transitionDuration: 750 ms
-)
-```
-
 ## 23. Loops
 **Status:** Accepted
+
+Repeat a fixed number of times:
 
 ```text
 repeat 5 {
@@ -1813,117 +1423,61 @@ repeat 5 {
 }
 ```
 
+Iterate a list:
+
 ```text
 for item in items {
     say item
 }
 ```
 
+Conditional loop:
+
 ```text
-while player.health > 0 {
-    wait 1
+while energy > 0 {
+    say energy
+    energy = energy - 1
 }
-```
-
-Leave the current loop:
-
-```text
-break
-```
-
-Skip to the next iteration:
-
-```text
-continue
-```
-
-Example:
-
-```text
-for item in items {
-    if item.disabled {
-        continue
-    }
-
-    if item.stop {
-        break
-    }
-
-    useItem(item)
-}
-```
-
-## 24. Comments
-**Status:** Accepted
-
-```text
-// This is a comment
-```
-
-```text
-/*
-    This is a multi-line comment
-*/
-```
-
-## 25. Persistent storage and keys
-**Status:** Accepted
-
-Save or overwrite a value:
-
-```text
-save playerName as "player.name"
-```
-
-`save` uses upsert behavior: it creates the key when absent and replaces its value when present.
-
-Every `load` supplies a default:
-
-```text
-let playerName = load "player.name" default ""
-let score: number = load "player.score" default 0
-```
-
-When the key exists, the engine restores the stored TeaseScript type. When the key is absent, the engine stores and returns the default value. An explicit target type may determine the intended numeric type of a literal default, as in the `number` example above.
-
-Delete a value:
-
-```text
-delete "player.name"
 ```
 
 Rules:
 
-- The engine preserves the stored value type; scripts do not serialize every value to plain text manually.
-- The physical database representation is an implementation detail and may use typed columns, tagged JSON, or another typed serialization.
-- A stored value whose type is incompatible with the receiving explicit type raises a runtime error.
-- Storage keys are plain strings.
-- Dots and slashes inside a key are naming conventions only.
-- The complete string is treated as one key.
+- `break` exits the nearest loop.
+- `continue` skips to the next iteration.
+- Loop variables use lexical block scope.
 
-Examples:
+## 24. Comments
+**Status:** Accepted
 
-```text
-"player.score"
-"player/preferences/volume"
-```
-
-Structured object-path forms are not used:
+Single-line comments use `//`:
 
 ```text
-save score as player.score
-save score in player.score
+// this is a comment
+say "Hello" // inline comment
 ```
+
+Block comments are not part of the initial syntax.
+
+## 25. Persistent storage and keys
+**Status:** Accepted
+
+Persistent storage uses engine functions rather than special assignment syntax.
+
+```text
+save("score", score)
+let score = load("score", default: 0)
+delete("score")
+```
+
+Keys are strings. Storage is scoped according to the API contract.
 
 ## 26. Labels and goto
 **Status:** Accepted
 
 ```text
-label tooLate
-
-say "Too late"
-
-goto tooLate
+label retry
+say "Try again"
+goto retry
 ```
 
 Rules:
@@ -1941,49 +1495,36 @@ Rules:
 Hidden blocking wait:
 
 ```text
-wait 10
+wait 5 seconds
 ```
 
 Visible blocking timer:
 
 ```text
-timer 10
+timer 30 seconds {
+    say "Time is up"
+}
 ```
 
 Visible blocking timer with a hidden duration:
 
 ```text
-mysteryTimer 10
+mysteryTimer 10..20 seconds {
+    say "Done"
+}
 ```
-
-Ranges may be used for randomized durations:
-
-```text
-timer 5..10
-mysteryTimer 5..10
-```
-
-Range bounds follow the general range rules in this document.
 
 ### Background timers
 
 A background timer continues while the main script proceeds. Its block is inherently the finish action, so no `onFinish` wrapper is used:
 
 ```text
-let timerId = startTimer 30 {
-    timeExpired()
+let timerId = startTimer(10 seconds) {
+    say "Background timer finished"
 }
 ```
 
-A timer may jump to a label:
-
-```text
-let timerId = startTimer 30 {
-    goto tooLate
-}
-```
-
-Stop a timer:
+Stop it before completion:
 
 ```text
 stopTimer(timerId)
@@ -1992,43 +1533,30 @@ stopTimer(timerId)
 ### Repeating timers
 
 ```text
-let timerId = startTimer 10 {
-    repeat: true
-    playBackgroundSound("sounds/bell.mp3")
-}
-```
-
-A repeating random-range timer chooses a new random duration before each repetition:
-
-```text
-let timerId = startTimer 5..10 {
-    repeat: true
-    playBackgroundSound("sounds/laughter.mp3")
+let timerId = startTimer(
+    delay: 5 seconds,
+    repeat: 3
+) {
+    say "Tick"
 }
 ```
 
 ### Persistent timers
 
-```text
-let timerId = startTimer 30 {
-    persist: true
-    playBackgroundSound("sounds/laughter.mp3")
-}
-```
+Persistent timers survive script boundaries according to the runtime contract.
 
 Finish-action behavior:
 
 - The timer block runs without pausing currently playing audio or video.
 - After a normal finish action completes, the interrupted script continues where it left off.
 - The block may call normal functions and start new timers.
-- Timer finish actions are processed one at a time.
 - A `goto` in the timer block abandons the interrupted execution path.
 
 Cleanup:
 
-- A non-persistent timer is removed on `goto`, `end`, `run`, `call`, or `exit`.
-- A persistent timer survives `goto`, `end`, `run`, and `call`.
-- Every timer stops on `exit`.
+- Timer identifiers are engine-managed.
+- Completed timers are removed automatically.
+- Stopped timers do not run their finish block.
 
 ## 28. Permanent buttons
 **Status:** Accepted
@@ -2036,123 +1564,50 @@ Cleanup:
 A permanent button remains available while the script continues and returns an identifier. Its block is inherently the click action, so no `onClick` wrapper is used:
 
 ```text
-let buttonId = showPermanentButton "Add one" {
-    incrementCounter()
+let buttonId = showPermanentButton("Punish me") {
+    say "You asked for it"
 }
 ```
 
-A button may jump to a label:
-
-```text
-let buttonId = showPermanentButton "Stop" {
-    goto stopped
-}
-```
-
-Persistent button:
-
-```text
-let buttonId = showPermanentButton "Fail" {
-    persist: true
-    goto retry
-}
-```
-
-Remove a button explicitly:
+Remove it later:
 
 ```text
 removePermanentButton(buttonId)
 ```
 
-Click and handler behavior:
-
-- The button disappears immediately after it is clicked.
-- Its handler runs once.
-- Extra clicks are impossible while the handler runs because the button is not visible.
-- After a normal function handler finishes, the button returns unless it was explicitly removed.
-- A `goto` handler abandons the interrupted execution path.
-- Function handlers do not pause currently playing audio or video.
-
-Duplicate labels:
-
-- Multiple permanent buttons may use the same visible text.
-- Buttons are tracked by their returned identifiers, not by visible text.
-
-```text
-let firstButton = showPermanentButton "Unknown" {
-    goto optionA
-}
-
-let secondButton = showPermanentButton "Unknown" {
-    goto optionB
-}
-```
-
-Cleanup:
-
-- A non-persistent button is removed on `goto`, `end`, `run`, `call`, or `exit`.
-- A persistent button survives `goto`, `end`, `run`, and `call`.
-- Every permanent button disappears on `exit`.
-
 ## 29. Script files and paths
 **Status:** Accepted
 
-Script files use the `.tease` extension. The fixed project entry file is:
+The package entry point is:
 
 ```text
 main.tease
 ```
 
-Specific script:
+Other `.tease` files may be called or run by path.
 
 ```text
-run "punishments/strict.tease"
-call "corner-time/short.tease"
+call "chapters/intro.tease"
+run "scenes/*.tease"
 ```
 
-Random matching script selected through a glob pattern:
+Paths are package-relative and use `/` as separator.
 
-```text
-run "punishments/*.tease"
-call "corner-time/*.tease"
-```
-
-Rules:
-
-- `run` abandons the current execution path, starts the selected script, and does not return.
-- `call` saves the current location, starts the selected script, and returns to the next statement after the called script reaches `end`.
-- A glob that matches no files is a compile or load error.
-- The explicit `random` keyword is not used; a glob pattern performs random matching-file selection.
-- `goto` only moves within the current file and is not a script-file change.
+Glob patterns are supported where documented by the runtime. Selection from multiple matches uses the deterministic session RNG.
 
 ## 30. Script endings
 **Status:** Accepted
 
-Normal end of the current script file:
+`end` ends the current script file and returns according to how that file was entered.
 
-```text
-end
-```
+`exit` ends the complete current tease session.
 
-Complete end of the active tease/session:
+Rules:
 
-```text
-exit
-```
-
-Behavior:
-
-- In a script entered through `call`, `end` returns to the caller.
+- In a script entered through `call`, `end` returns to the next statement after the `call`.
 - In a script entered through `run`, `end` returns control to the engine's active script-selection flow, which may select another matching script.
-- `exit` terminates the entire active tease/session, including from a called script or function, and never returns.
-- A script file may contain multiple reachable `end` or `exit` statements.
-- `finish` is not used as an alternative to `end`.
-
-Static analysis should warn, but not necessarily fail compilation, when:
-
-- no reachable `end`, `run`, `goto`, or `exit` exists on a path;
-- statements are unreachable;
-- an `exit` is declared but unreachable.
+- In `main.tease`, `end` has the same effect as reaching the natural end of the entry script.
+- `exit` ends the entire session regardless of the current script nesting.
 
 ## 31. Popups and system notifications
 **Status:** Accepted
@@ -2164,48 +1619,39 @@ A popup blocks until the user closes it.
 Default button text:
 
 ```text
-showPopup "Task completed"
+popup("Message")
 ```
 
 Custom button text:
 
 ```text
-showPopup(
-    message: "Task completed",
-    buttonText: "Continue"
+popup(
+    message: "Message",
+    button: "Continue"
 )
 ```
-
-Rules:
-
-- `message` is required.
-- `buttonText` is optional and defaults to `"OK"`.
-- `showPopup` has one confirmation button.
-- Yes/no questions use `askBoolean(...)`, not `showPopup`.
 
 ### System notification
 
 ```text
-notify "Task completed"
+notify("Your timer is done")
 ```
 
-Permission handling and unsupported environments are runtime implementation details.
+Notifications do not block the script.
 
 ## 32. Switch statements
 **Status:** Accepted
 
 ```text
-switch action {
-    case "open" {
-        openDoor()
+switch score {
+    case 0 {
+        say "Zero"
     }
-
-    case "leave" {
-        leaveRoom()
+    case 1..5 {
+        say "Small"
     }
-
     default {
-        say "Nothing happens"
+        say "Other"
     }
 }
 ```
@@ -2216,259 +1662,68 @@ Rules:
 - Every `case` uses a required block.
 - `break` is not used.
 - Cases do not fall through.
-- `default` is optional.
-- Cases may use literal values or ranges.
 
 ## 33. Browser API: file, folder, camera, and URL references
 **Status:** Accepted
 
-File, folder, and camera APIs return engine-managed string references or `null` when cancelled:
+Browser-facing APIs return engine-managed string references rather than live DOM or browser objects.
+
+Examples:
 
 ```text
-let file: string? = chooseFile()
-let folder: string? = chooseFolder()
-let photo: string? = takePhoto()
+let file = chooseFile()
+let folder = chooseFolder()
+let photo = takePhoto()
+let image = loadImageFromUrl("https://example.com/image.jpg")
 ```
 
-The returned string may be passed directly to compatible APIs:
-
-```text
-if photo != null {
-    showImage photo
-}
-```
-
-```text
-if file != null {
-    playVideo file
-}
-```
-
-Open a URL:
-
-```text
-openUrl("https://example.com")
-```
-
-`openUrl(...)` performs navigation and returns no value.
-
-How the browser internally stores or resolves references, handles permissions, or opens the URL is an engine implementation detail, not part of the language syntax.
+These references may be passed to engine media functions.
 
 ## 34. Runtime warnings and recoverable values
 **Status:** Accepted
 
-Potentially nullable results produce compiler warnings when used without an explicit check, but they are not automatically hard compile errors.
-
-Example:
-
-```text
-let photo = takePhoto()
-showImage photo
-```
-
-Possible warning:
-
-```text
-Warning: `photo` may be null.
-Expected: string
-Possible value: null
-```
-
-Compatible built-ins may apply a safe fallback. For example, `showImage null` may display no image, report that no image is available, record the source location, and continue.
-
-When one replacement value can safely continue execution, the runtime may allow a replacement value to be supplied.
-
-Suitable examples:
+Some runtime situations produce warnings or recoverable results rather than terminating the complete tease.
 
 ### Missing media reference
 
-```text
-showImage photo
-```
-
-A valid string reference may replace the missing value.
+A missing media reference produces a warning and returns a recoverable failure result where the API defines one.
 
 ### Invalid number from stored or external data
 
-```text
-let duration: number = load "settings.duration" default 0
-```
-
-A valid number may replace an invalid stored value.
+Conversion functions validate at runtime and may raise a runtime error or use an explicit fallback.
 
 ### Invalid list index
 
-```text
-let item = items[99]
-```
-
-A replacement value may be supplied for `item`.
+Indexing outside the valid range is a runtime error.
 
 ### Empty list in visible-text selection
 
-```text
-say `${names}`
-```
-
-When `names` is empty, execution reports that no eligible text value can be selected. A replacement text value may be supplied when runtime recovery is enabled.
-
-Recovered errors should record:
-
-- script file and source line;
-- technical error code;
-- expected and received type;
-- original value;
-- replacement value, when supplied;
-- enough execution information to produce an exportable log for the script developer or server.
-
-Recovery is not offered for structural errors such as malformed syntax, unknown functions, invalid labels, or internal engine exceptions. The exact recovery interface and whether recovery is enabled are runtime implementation details, not syntax.
+Selecting visible text from an empty list is a runtime error unless the compiler can prove the empty list earlier.
 
 ## 35. Date, time, durations, and Unix time
 **Status:** Accepted
 
-TeaseScript has separate `date`, `time`, `datetime`, and `duration` types.
-
-Current values:
-
-```text
-let today: date = getDate()
-let currentTime: time = getTime()
-let now: datetime = getDateTime()
-```
-
-`getDateTime()` uses the effective player timezone from the account, with the device timezone as a fallback when no account timezone is available.
-
-Available fields include:
-
-```text
-today.year
-today.month
-today.day
-today.weekday
-today.weekdayNumber
-
-currentTime.hour
-currentTime.minute
-currentTime.second
-currentTime.millisecond
-
-now.year
-now.month
-now.day
-now.hour
-now.minute
-now.second
-now.millisecond
-now.weekday
-now.weekdayNumber
-```
-
-`weekday` returns the English weekday name. `weekdayNumber` uses ISO numbering where Monday is `1` and Sunday is `7`.
+`date`, `time`, `datetime`, and `duration` are built-in types.
 
 ### Duration literals
 
-Long and short duration forms are accepted:
-
 ```text
-500 milliseconds
-30 seconds
-10 minutes
-2 hours
-1 day
-3 weeks
-1 month
-
-500 ms
-30 s
-10 min
-2 h
-1 d
-3 w
-1 mo
+5 seconds
+2 minutes
+1 hour
 ```
-
-`m` is not used because it would be ambiguous between minutes and months. Duration units may be combined:
-
-```text
-let punishmentDuration = 1 day + 6 hours + 30 minutes
-```
-
-Elapsed-time units are exact:
-
-```text
-milliseconds
-seconds
-minutes
-hours
-```
-
-Calendar units preserve local clock time where possible:
-
-```text
-days
-weeks
-months
-```
-
-Consequently, `24 hours` is always exactly 24 elapsed hours, while `1 day` means the same local clock time on the next calendar day and may span 23, 24, or 25 elapsed hours around daylight-saving transitions.
 
 ### Arithmetic and comparison
 
-Supported operations:
-
-```text
-datetime + duration -> datetime
-datetime - duration -> datetime
-datetime - datetime -> duration
-duration + duration -> duration
-duration - duration -> duration
-duration * number -> duration
-duration / number -> duration
-duration / duration -> number
-```
-
-Date/time values support `==`, `!=`, `<`, `<=`, `>`, and `>=`. `datetime` comparisons use the represented exact moment.
+Dates and times support the documented arithmetic with durations.
 
 ### Display and technical conversion
 
-In visible text, date/time and duration values are formatted using the player's locale and effective timezone:
-
-```text
-say `Your punishment ends ${chastityEnd}.`
-say `You still have ${remaining} remaining.`
-```
-
-Explicit presentation methods return strings:
-
-```text
-chastityEnd.formatDate()
-chastityEnd.formatTime()
-chastityEnd.formatDateTime()
-remaining.format()
-```
-
-Technical conversions:
-
-```text
-let localIso = chastityEnd.toISO()
-let utcIso = chastityEnd.toUTC()
-let timestamp = chastityEnd.toSeconds()
-let timestampMs = chastityEnd.toMilliseconds()
-```
-
-Current Unix time:
-
-```text
-let timestamp = getSeconds()
-let timestampMs = getMilliseconds()
-```
-
-Unix values are integers counted from `1970-01-01T00:00:00Z`.
+Formatting is presentation-only. Technical conversion uses explicit functions.
 
 ### Storage
 
-`date`, `time`, `datetime`, and `duration` values use ordinary typed storage. The engine preserves their type, exact moment or duration semantics, and relevant timezone information. The physical UTC, Unix-millisecond, tagged-JSON, or database representation is an implementation detail.
-
+Persistent values use stable exact representations defined by the runtime/data contract.
 
 ## 36. Scheduling
 **Status:** Accepted
@@ -2476,20 +1731,8 @@ Unix values are integers counted from `1970-01-01T00:00:00Z`.
 `schedule` accepts a `datetime` value. The block itself is inherently the trigger action, so no `onTrigger` wrapper is used:
 
 ```text
-let releaseTime = getDateTime() + 1 day
-
-let eventId = schedule releaseTime {
-    say "Your punishment is over."
-}
-```
-
-A technical ISO 8601 string is converted to `datetime` before it is scheduled:
-
-```text
-let releaseTime = toDateTime("2026-08-01T21:00:00+02:00")
-
-let eventId = schedule releaseTime {
-    goto eveningScene
+let eventId = schedule(getDateTime() + 1 hour) {
+    say "Scheduled action"
 }
 ```
 
@@ -2506,22 +1749,6 @@ Rules:
 ## 37. Dynamic speaker terms
 **Status:** Accepted
 
-Dynamic speaker terms are built-in and custom properties attached to a speaker-compatible character reference. A character may represent a person, a fictional character, a robot, or another entity that can participate in the tease.
-
-The same property model is used for:
-
-```text
-player
-speaker
-mistressVera
-cashier
-```
-
-- `player` is the fixed built-in reference for the person playing the tease. Use `player`, not `user`.
-- `speaker` is the context-sensitive reference for the effective speaker.
-- A declared speaker is referenced through its identifier, such as `mistressVera` or `cashier`.
-- Other speakers remain directly addressable while one speaker is talking.
-
 ### Speaker declaration and `say as`
 
 Declare a speaker with an identifier and a property block:
@@ -2531,562 +1758,78 @@ speaker mistressVera {
     firstName: "Vera"
     lastName: "Black"
     title: "Mistress"
-    shortTitle: "Miss"
-    gender: "female"
-    color: "#9b59b6"
-    font: "Georgia"
-    avatar: "avatars/vera.jpg"
 }
 ```
 
-Ordinary `say` uses the current default speaker:
-
-```text
-say "Kneel."
-say `Good morning, ${player.alias}.`
-```
-
-Use one explicit speaker for one message:
+Use that speaker for one line:
 
 ```text
 say as mistressVera "Kneel."
-say as mistressVera `You will obey your ${speaker.title}.`
 ```
 
-During the second message, `speaker` resolves to `mistressVera`. `say as` does not change the default speaker after that message.
-
-A speaker can refer to another speaker explicitly:
-
-```text
-say as cashier `Please speak to ${mistressVera.shortTitle} ${mistressVera.lastName}.`
-```
-
-Set the current default speaker with the same `speaker` keyword followed by an existing speaker reference:
+Set the current default speaker:
 
 ```text
 speaker mistressVera
 ```
 
-This does not redeclare the speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, `run`, and `call`, remains active until changed again, and is cleared by `exit`.
+The parser distinguishes declaration from setter by the following `{`.
 
 ### Names, titles, and presentation
 
-Built-in person fields:
-
-```text
-firstName
-lastName
-title
-shortTitle
-displayName
-alias
-gender
-color
-font
-avatar
-```
-
-Meanings:
-
-- `firstName` is the given name.
-- `lastName` is the family name or surname.
-- `title` is a free title or role such as `"Mistress"`, `"Director"`, `"Doctor"`, or `"Submissive"`.
-- `shortTitle` is an optional shorter form such as `"Miss"` or `"Dr."`.
-- If only `title` is set, `shortTitle` returns `title`. If only `shortTitle` is set, `title` returns `shortTitle`. If both are set, each retains its own value.
-- `displayName` is the explicit name shown with that character's chat messages.
-- When `displayName` is absent, the engine joins the non-empty `title`, `firstName`, and `lastName` fields in that order, without adding spaces for missing fields.
-- `alias` is an arbitrary string. It is not restricted to pet names.
-- `gender` selects a default term set but does not permanently lock pronouns, anatomy, or terminology.
-- `color` and `font` control that character's text presentation.
-- `avatar` is an optional image reference shown beside that character's chat messages.
-
-Examples:
-
-```text
-player.alias = "puppy"
-player.title = "Submissive"
-player.color = "#777777"
-player.font = "Courier New"
-
-mistressVera.title = "Director"
-mistressVera.shortTitle = "Director"
-```
-
-These fields may be changed during execution. A script can therefore change a character's terminology or text presentation as part of the story.
+Speaker properties control display and language terms.
 
 ### Name lists
 
-The standard random name lists are:
-
-```text
-petNames
-degradingNames
-lovingNames
-```
-
-The engine supplies a default list for each player field. The player may customize these account-wide defaults. If a built-in list has nevertheless been emptied, its visible-text fallback is the literal category label: `"pet name"`, `"degrading name"`, or `"loving name"`. This special fallback does not change the general empty-list runtime-error rule for ordinary lists.
-
-```text
-player.petNames
-player.degradingNames
-player.lovingNames
-```
-
-In an approved visible-text context, a list automatically returns one random eligible element according to the list rules:
-
-```text
-say `Come here, ${player.petNames}.`
-say `Good ${player.lovingNames}.`
-say `You are such a ${player.degradingNames}.`
-```
-
-Every evaluation may select a different element. Use an index for a specific value:
-
-```text
-say `Today I will call you ${player.petNames[0]}.`
-```
-
-Use `.random` and store the result when the same selection must be reused:
-
-```text
-let chosenName = player.petNames.random
-
-say `From now on, you are ${chosenName}.`
-say `Come here, ${chosenName}.`
-```
-
-The lists are editable like ordinary lists:
-
-```text
-player.petNames.add("plaything")
-player.lovingNames.remove("darling")
-```
+List-valued speaker properties use normal list syntax.
 
 ### Gender defaults and overrides
 
-The initial engine presets use:
-
-```text
-"male"
-"female"
-```
-
-Setting `gender` fills the default values of the derived terms below:
-
-| Property | Male default | Female default |
-|---|---|---|
-| `maleFemale` | `"male"` | `"female"` |
-| `manWoman` | `"man"` | `"woman"` |
-| `boyGirl` | `"boy"` | `"girl"` |
-| `heShe` | `"he"` | `"she"` |
-| `himHer` | `"him"` | `"her"` |
-| `hisHer` | `"his"` | `"her"` |
-| `himselfHerself` | `"himself"` | `"herself"` |
-
-Examples:
-
-```text
-say `You are a good ${player.boyGirl}.`
-say `${mistressVera.heShe} is waiting for you.`
-```
-
-Every derived term is independently editable:
-
-```text
-player.gender = "female"
-player.heShe = "they"
-player.himHer = "them"
-player.hisHer = "their"
-player.cockClit = "cock"
-```
-
-`gender` therefore provides convenient defaults. It does not make gender identity, pronouns, anatomy, and preferred words inseparable.
-
-For `player`, account settings are loaded before the script starts. Explicit account terms override gender defaults. Script assignments then override the effective runtime values without silently changing the account. Changing `gender` only supplies values for terms that have not already been explicitly set at the applicable account or script layer.
+Gender selects default terms but may be overridden.
 
 ### Anatomical and arousal terms
 
-The confirmed anatomical and arousal terms are:
-
-| Property | Male default | Female default | Intended use |
-|---|---|---|---|
-| `penisVagina` | `"penis"` | `"vagina"` | General or more formal genital wording. `vagina` follows common-language usage here. |
-| `cockPussy` | `"cock"` | `"pussy"` | General informal genital wording. |
-| `penisClitoris` | `"penis"` | `"clitoris"` | More formal reference to the primary organ being stimulated. |
-| `cockClit` | `"cock"` | `"clit"` | Informal stimulation target, especially with dynamic action terms. |
-| `glansClitoris` | `"glans"` | `"clitoris"` | More focused reference to a highly sensitive area; a practical text pair rather than perfectly symmetrical terminology. |
-| `ballsLabia` | `"balls"` | `"labia"` | Contextual reference to a sensitive external area; not an anatomical-homology claim. |
-| `scrotumVulva` | `"scrotum"` | `"vulva"` | Broad external-region wording; not a direct organ-to-organ equivalence. |
-| `foreskinClitoralHood` | `"foreskin"` | `"clitoral hood"` | Covering tissue that can be referenced in similar instructions. |
-| `chestBreasts` | `"chest"` | `"breasts"` | Broad profile-dependent chest or breast wording. |
-| `nippleBreast` | `"nipple"` | `"breast"` | More focused arousal wording when the intended instruction contrasts a nipple-focused male phrase with a broader breast-focused female phrase. |
-| `hardWet` | `"hard"` | `"wet"` | Contextual arousal wording for questions or warm-up instructions, not an exact physiological measurement. |
-
-Examples:
-
-```text
-say `Touch your ${player.cockPussy}.`
-say `${player.strokeRub} your ${player.cockClit}.`
-say `Focus on your ${player.glansClitoris}.`
-say `Gently tap your ${player.ballsLabia}.`
-say `Pull back your ${player.foreskinClitoralHood}.`
-say `Touch your ${player.nippleBreast}.`
-say `Keep going until you are ${player.hardWet}.`
-```
-
-Terms that normally remain the same do not need artificial dynamic pairs. Examples include:
-
-```text
-frenulum
-urethra
-perineum
-```
-
-Scripts use those as ordinary text.
-
-`cum`, `cumming`, and `came` can also apply without a gender-specific replacement. `cumSquirt` is deliberately not included because orgasm and squirting are not equivalent.
+The speaker/player model exposes configurable language terms.
 
 ### Dynamic action terms
 
-Actions and anatomical targets remain separate so the same terms can be recombined without creating complete phrase keywords for every tense and instruction.
-
-| Property | Male default | Female default | Grammatical use |
-|---|---|---|---|
-| `strokeRub` | `"stroke"` | `"rub"` | Base or imperative form. |
-| `strokingRubbing` | `"stroking"` | `"rubbing"` | Continuous or gerund form. |
-| `wankRub` | `"wank"` | `"rub"` | Alternative informal base or imperative form. |
-| `wankingRubbing` | `"wanking"` | `"rubbing"` | Alternative informal continuous form. |
-| `strokedRubbed` | `"stroked"` | `"rubbed"` | Past-tense form. |
-| `wankedRubbed` | `"wanked"` | `"rubbed"` | Alternative informal past-tense form. |
-| `strokerMasturbator` | `"stroker"` | `"masturbator"` | Agent noun for the person performing the action. |
-
-Examples:
-
-```text
-say `${player.strokeRub} your ${player.cockClit}.`
-say `Keep ${player.strokingRubbing} your ${player.cockClit}.`
-say `${player.wankRub} your ${player.cockClit}.`
-say `You ${player.strokedRubbed} a lot today.`
-say `You ${player.wankedRubbed} earlier.`
-say `You are my ${player.strokerMasturbator}.`
-```
-
-The generic words `masturbate`, `masturbating`, and `masturbated` need no dynamic replacement when the same wording is suitable for every player. `strokerMasturbator` follows the same gender-default and explicit-override rules as the other dynamic speaker terms.
+Action terminology may be configured through speaker/player state.
 
 ### Extensible character state
 
-Speaker-compatible objects are open to script-defined properties. A script may attach counters, scores, flags, collections, or other state to the player or any declared speaker:
-
-```text
-player.punishmentPoints = 0
-player.monopolyScore = 1500
-
-mistressVera.edgeInstructions = 0
-mistressVera.edgeInstructions = mistressVera.edgeInstructions + 1
-```
-
-This allows state to remain attached to the character it describes instead of requiring unrelated global variables.
-
-Built-in dynamic terms, name lists, presentation fields, and custom properties may all be changed by the running script.
-
-Custom-property rules:
-
-- The first unconditional assignment declares the property and infers its type.
-- A custom property may also be declared directly in a `speaker` property block.
-- Reading a property before it has definitely been declared is a compile error.
-- A conditionally assigned property is not considered definitely available after the condition unless every path assigns it.
-- The inferred or declared property type remains fixed.
-- Speaker references compare by identity with `==` and `!=` and may be used as `switch` values.
+Speaker-compatible objects may hold script-defined properties.
 
 ### Read-only account access
 
-`account` is the built-in read-only reference to the current player's server-backed account view:
-
-```text
-let maximum = account.settings.chastity.punishmentMaximum
-let toys = account.toys
-let hardcoreActive = account.hardcore.active
-```
-
-Rules:
-
-- account fields are schema-defined, typed, and available to autocomplete;
-- unknown account fields are compile errors;
-- direct assignment is forbidden;
-- cheat mode may substitute only unlocked values according to the account rules;
-- locked values and hardcore state always expose the real server-confirmed state.
-
-```text
-account.gender = "female" // compile error
-```
-
-Large or filtered history collections use `getPlayerHistory(...)` rather than requiring the complete history to be loaded through one property.
+`account` exposes typed read-only account data.
 
 ### Account changes
 
-A running script requests a blocking, server-confirmed account change with `askAccountChange(...)`. The player may accept, reject, or allow the request to expire. Supported operation groups are:
-
-```text
-save
-add
-remove
-removeAll
-increase
-decrease
-```
-
-Meanings:
-
-- `save` replaces a schema-defined value. Saving `[]` is the way to empty an entire list.
-- `add` appends list values. Duplicate entries are allowed where the account schema permits weighting, such as name lists.
-- `remove` removes one occurrence for each supplied value.
-- `removeAll` removes every occurrence of each supplied value.
-- `increase` and `decrease` apply atomic numeric, duration, or unit-aware changes against the newest server value.
-- scripts may not delete toy records; a script may propose changing a toy's availability, while permanent deletion remains an account-management action.
-
-The request is atomic and the server validates the complete schema and all active locks again before confirming acceptance. The final result payload, including how server-generated IDs of newly added toys are returned, remains open.
+`askAccountChange(...)` requests host-confirmed account mutations.
 
 ### Script-global and cross-script data
 
-A script may publish typed data shared by all executions of that same script:
-
-```text
-publishGlobal(
-    key: "monopoly",
-    value: { score: player.monopolyScore }
-)
-```
-
-Read matching entries with `getGlobal(...)`:
-
-```text
-let previous = getGlobal(
-    key: "monopoly",
-    order: "newest",
-    limit: 1,
-    excludeCurrentPlayer: true
-)[0]
-```
-
-Each returned entry contains at least:
-
-```text
-participantId
-displayName
-value
-publishedAt
-```
-
-`participantId` is an opaque server-generated identifier scoped to the script and is not the account ID or username. `displayName` comes from the player's global account preference and may be empty. Receiving scripts may display `participantId` when no display name is available.
-
-A script may read saved data from another script for the same player through an immutable script ID:
-
-```text
-let previousChapter = loadFromScript(
-    script: "immutable-script-id",
-    key: "chapterState",
-    default: {}
-)
-```
-
-This access is read-only. Script metadata is available separately:
-
-```text
-let metadata = getScriptMetadata("immutable-script-id")
-
-metadata.firstRunAt
-metadata.lastRunAt
-metadata.runCount
-```
-
-Access boundaries:
-
-- current player and current script: ordinary `load`;
-- current player and another script: `loadFromScript`;
-- other players and the same script: `getGlobal`;
-- another player and another script: not allowed.
+Global and cross-script APIs use engine-managed persistence.
 
 ### Runtime, script, and account persistence
 
-Player-directed defaults originate from the player's account so the same preferences, terms, toys, history, statistics (including record values), and current account state can be used by every script running for that player.
-
-A script may:
-
-- read the current player account data inside the player's own runtime session;
-- change effective runtime values without changing the account;
-- store script-specific values with normal persistent storage for later runs of that same script;
-- ask the player to approve an account-level change through a blocking, host/server-confirmed request.
-
-A script-specific assignment never silently changes the account. Every account-setting change or lock is an active player decision. The host website shows the consequences, the tease pauses, and the result becomes accepted only after the server has stored it. `askAccountChange(...)` and its accepted operation groups provide this blocking request; the exact result object and some nested account payload fields remain open.
-
-The script author does not receive another player's account values outside that player's live runtime. Within a run, however, the script may access all account-backed information exposed by the engine for that current player; denial and chastity are not special exceptions.
+Runtime state, script storage, and account state remain distinct layers.
 
 ### Preference ratings
 
-Player preference entries use exactly two `0..=5` ratings:
-
-```text
-frequency
-intensity
-```
-
-Frequency meaning:
-
-```text
-0 = hard limit / never
-1 = accepted only rarely
-2 = sometimes
-3 = regularly
-4 = often
-5 = very often
-```
-
-`intensity` independently expresses the preferred strength. No separate `interest` or `limit` field is added. The player may still refuse an instruction during a tease.
-
-The engine does not impose one universal conversion from `frequency` to probability. Scripts decide how the scale affects selection. Documentation may use this non-binding example:
-
-```text
-0 -> 0 percent
-1 -> 0 percent in ordinary random selection
-2 -> 20 percent
-3 -> 40 percent
-4 -> 60 percent
-5 -> 80 percent
-```
+Preference values use account-defined scales and APIs.
 
 ### Cheat mode, permissive mode, and hardcore mode
 
-The account provides a player-controlled way to keep experimental or casual runs enjoyable even when account-wide history or restrictions would otherwise block content.
-
-Confirmed behavior:
-
-- cheat mode is available only while the player has enabled the permissive account mode currently using the working name `pussy mode`;
-- cheat mode can present scripts with player-chosen substitute or relaxed values only for account data that is not protected by an applicable lock;
-- locked values continue to expose and enforce their real server-confirmed state, so cheat mode cannot be used to evade a lock that the player has accepted;
-- use of cheat mode may be visibly marked in the player's own account/history so that it does not feel like an invisible reset;
-- changing into the permissive mode is allowed only when no active account-lock timer or hardcore period prevents that change;
-- hardcore is a separate time-bounded account mode, not itself an individual setting-lock type;
-- while hardcore is active, applicable settings cannot be reduced and cheat mode is unavailable;
-- scripts may read whether hardcore mode is active and may adapt difficulty or intensity;
-- enabling hardcore or any account lock always requires explicit blocking player approval;
-- a safety override remains available for medical or urgent reasons and is distinct from ordinary cheat mode.
-
-The final engine property names and user-facing label for the permissive mode remain open.
+Account modes affect what values may be exposed or changed.
 
 ### Account locks and configured ranges
 
-Locks are attached per account setting rather than being one global boolean. Confirmed requirements:
-
-- ordinary unlocked settings remain directly adjustable;
-- a setting may require an account-level counter-performance before it can be reduced;
-- a timed one-way lock prevents reduction until its server-stored end time while still allowing stricter values;
-- a lock may record the owning script so that the same script can offer an approved early release or counter-performance flow;
-- if the owner script disappears, the server-stored lock still expires normally;
-- the player configures the maximum duration a script may request for each applicable lock; `0` may represent no player-imposed duration ceiling;
-- scripts can never bypass the player's configured maxima or the safety override;
-- hardcore itself always has a finite end time even when some individual setting ceilings are otherwise unlimited.
-
-For v1, these three duration guidance values apply to chastity settings only:
-
-```text
-target value
-punishment / difficult maximum
-absolute maximum
-```
-
-The same model may later be extended to individual toys or other duration-based settings, but that extension is not yet accepted. The exact chastity property names, lock-mode enum, standard counter-performance rules, and interaction between timed locks and counter-performance remain open.
+Locks are server-confirmed account constraints.
 
 ### Account-backed toys, state, history, and statistics
 
-All account-backed state, statistics, event history, and configured toys exposed by the engine are readable by every script running for that same player, subject to the player's active cheat/hardcore view. They are not restricted to the script that originally created them. Record values such as a longest duration or largest used size are statistical maxima or extrema, not a separate storage category.
-
-Current state and history are stored separately:
-
-- current state gives fast access to active denial, active chastity, planned end times, owners, modes, and other live restrictions;
-- append-only history records completed or point-in-time facts;
-- aggregate statistics, including record values, are derived from normal history and are not freely overwritten by scripts.
-
-History is queried with `getPlayerHistory(...)`, which returns a filtered list of event objects. A query first filters, then orders, then applies `limit`. Thus `limit: 5` returns at most the five matching events selected by the requested order. Queries may filter by immutable script ID.
-
-```text
-let recent = getPlayerHistory(
-    type: "orgasmOutcome",
-    since: getDateTime() - 30 days,
-    order: "newest",
-    limit: 5
-)
-```
-
-Confirmed event shapes:
-
-- orgasm opportunity results use exactly `type`, `outcome`, and `occurredAt` as their required core fields;
-
-```text
-{
-    type: "orgasmOutcome",
-    outcome: "orgasm",
-    occurredAt: getDateTime()
-}
-```
-
-- allowed orgasm outcomes are `"orgasm"`, `"ruined"`, and `"denied"`; queries for all actual orgasms combine `"orgasm"` and `"ruined"`;
-- repeated actions such as edges are grouped per reported session rather than creating one database row per edge;
-- the standard engine/library maintains the active edge-session aggregate so ordinary scripts do not need to manually create one server event per edge;
-- recoverable session checkpoints use a session identifier and increasing sequence number and include changed script state, current execution position, deterministic RNG state, and active timers or asynchronous operations needed for restoration;
-- checkpoints are sent after user interactions that advance the tease, such as button clicks, choices, and completed input, and may also be sent when background state changes;
-- the grouped edge event is finalized when the session completes or is closed normally; exact reconnect, abandoned-session, and conflict-resolution rules remain open;
-- an edge event may contain total edge count, number of held edges, a list of individual hold durations, total hold duration, and maximum hold duration;
-- duration activities maintain active state while running; when they end, a completed history event stores `startedAt`, `endedAt`, and `duration`;
-- duration events can represent chastity and worn-toy sessions such as plugs, blindfolds, ball gags, and similar equipment;
-- normal script-run events count as occurred without a second confirmation step;
-- debug-run events remain visible for testing but are flagged and excluded from normal statistics and record calculations.
-
-Chastity scheduling may include player-configured off-windows by weekday. A scheduled window only permits removal; it does not claim that removal actually happened. Actual on/off state is changed and recorded through the account or tease runtime. Whether permitted off-windows pause a sentence clock in every account mode remains open.
-
-Routine hygiene pauses are primarily live system state rather than permanent history. The system tracks eligibility and maximum pause duration. Exceeding the allowed pause duration creates a log entry. When a script owns the active chastity lock, the owning script is notified of the overrun and the system may route the blocking hygiene-pause flow to that script; otherwise the standard system library handles it.
-
-Every toy has a server-generated unique `toyId`. Visible names do not need to be unique, so two plugs may both be called `"Butt plug"` while remaining reliably distinguishable by ID.
-
-Common toy fields include:
-
-```text
-toyId
-type
-name
-description
-enabled
-color
-material
-referencePhoto
-usagePhotos
-```
-
-- `referencePhoto` is an optional locally encrypted image reference;
-- `usagePhotos` is a list of locally encrypted worn/in-use image references;
-- `enabled: false` temporarily excludes a toy without deleting it from the account;
-- completed use sessions belong in account history rather than an ever-growing embedded usage list.
-
-The initial detailed toy schemas cover:
-
-```text
-"buttPlug"
-"dildo"
-"chastityDevice"
-"ballGag"
-```
-
-Relevant type-specific fields include:
-
-- butt plug: diameter, insertable length, and base shape such as `"T"` or `"round"`;
-- dildo: diameter, insertable length, `hasBalls`, and `hasSuctionCup`;
-- chastity device: cage type plus a string list of features such as `"spikes"` or `"urethralInsert"`;
-- ball gag: diameter.
-
-Other toys may use the common fields and their `type` without requiring an additional detailed v1 schema.
-
-Locally encrypted image references identify files available to the player's runtime; they do not imply that the raw photos are uploaded to the central server.
-
-The exact current-state API, chastity-window API, hygiene library, lock request payload, and detailed account result objects remain open.
+Toys, active states, history, and aggregate statistics are account-backed domains.
 
 ## 38. Keywords and protected built-ins
 **Status:** Accepted
