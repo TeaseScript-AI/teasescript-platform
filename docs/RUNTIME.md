@@ -440,14 +440,17 @@ The earlier proposal for automatic chat pacing at 17 visible characters per seco
 ## Runtime defaults and limits
 
 Current code contains call-depth, hostile-data capture, detailed-validation, interaction, and instruction-work guards.
-Exact numeric implementation values and their retention evidence live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md);
-values whose retention is unsupported are repair locators rather than runtime-capacity requirements. This document keeps
-the behavior and safety semantics without promoting those historical numbers into contracts.
+Exact numeric implementation values, their current evidence status, and any provisional POC policy/reassessment route
+live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). This document keeps the behavior and safety semantics without
+promoting provisional implementation values or product defaults into supported runtime-capacity claims.
 
 The playground RNG algorithm remains `xorshift32-v1` with default seed `0x6d2b79f5`; those deterministic identity
 choices are unrelated to resource capacity.
 
-A configured instruction budget must be a positive integer. Exhaustion fails deterministically with structured runtime error `TSR037` instead of hanging. Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
+A configured instruction budget must be a positive JavaScript safe integer. Omitting it uses the current product default
+tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion fails deterministically with structured runtime error
+`TSR037` instead of hanging and leaves the returned snapshot failed rather than resumable through a later `run(...)`.
+Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
 
 Externally supplied instruction plans, runtime snapshots, globals, and serializable runtime values are captured into
 bounded stable plain-data graphs before detailed validation, cloning, freezing, state construction, execution, event
