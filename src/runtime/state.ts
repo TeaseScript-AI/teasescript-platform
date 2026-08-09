@@ -2081,6 +2081,9 @@ function validatePendingActionState(
   if (!validActiveActionIdentityCoherence(value)) {
     errors.push("Runtime active action identities are inconsistent with each other or the retained settlement.");
   }
+  if (!validActiveActionLocationCoherence(value)) {
+    errors.push("Runtime foreground and background action locations are incoherent.");
+  }
 }
 
 function validBackgroundPacingActions(
@@ -2176,6 +2179,56 @@ function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): 
     requestSequences.add(action.requestEventSequence);
   }
   return true;
+}
+
+function validActiveActionLocationCoherence(snapshot: Record<string, unknown>): boolean {
+  const backgroundActions = snapshot.backgroundActions;
+  if (!Array.isArray(backgroundActions)) return false;
+
+  const backgroundPacingActions: Record<string, unknown>[] = [];
+  for (let index = 0; index < backgroundActions.length; index += 1) {
+    if (!Object.hasOwn(backgroundActions, index)) continue;
+    const action = backgroundActions[index];
+    if (isPlainRecord(action) && action.kind === "chatPacingGate") {
+      backgroundPacingActions.push(action);
+    }
+  }
+  const foregroundAction = isPlainRecord(snapshot.foregroundAction)
+    ? snapshot.foregroundAction
+    : null;
+  const foregroundPacingGateCount = foregroundAction?.kind === "chatPacingGate"
+    ? 1
+    : 0;
+  const activePacingGateCount = backgroundPacingActions.length + foregroundPacingGateCount;
+
+  if (activePacingGateCount > 1) {
+    return false;
+  }
+  if (foregroundAction?.kind === "interaction") {
+    return backgroundPacingActions.length === 0;
+  }
+  if (foregroundAction?.kind !== "delay") return true;
+  if (backgroundPacingActions.length === 0) return true;
+
+  const backgroundPacingAction = backgroundPacingActions[0];
+  if (backgroundPacingAction === undefined) return false;
+
+  return validPacingGateCreatedBeforeForegroundDelay(
+    backgroundPacingAction,
+    foregroundAction,
+  );
+}
+
+function validPacingGateCreatedBeforeForegroundDelay(
+  pacingGate: Record<string, unknown>,
+  delay: Record<string, unknown>,
+): boolean {
+  return positiveSafeInteger(pacingGate.actionId) &&
+    positiveSafeInteger(pacingGate.requestEventSequence) &&
+    positiveSafeInteger(delay.actionId) &&
+    positiveSafeInteger(delay.requestEventSequence) &&
+    pacingGate.actionId < delay.actionId &&
+    pacingGate.requestEventSequence < delay.requestEventSequence;
 }
 
 function validActiveActionAgainstSettlement(

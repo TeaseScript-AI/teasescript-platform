@@ -8,14 +8,13 @@ import {
   deserializeCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { run } from "../src/runtime/engine.js";
+import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import {
   createFreshRuntimeSnapshot,
   validateRuntimeSnapshot,
 } from "../src/runtime/state.js";
-import { executeInstruction } from "../src/runtime/engine.js";
 
 function plan(source: string) {
   const compiled = compileSource(source);
@@ -26,7 +25,15 @@ function plan(source: string) {
 
 test("say lowers smart, exact, and instant pacing with explicit skip policy", () => {
   const compiled = plan('say skippable "a"\nsay unskippable "b", 1.5\nsay "c", instant');
-  assert.deepEqual(compiled.instructions.map((instruction) => instruction.kind === "say" ? [instruction.skipPolicy, instruction.pacing === "smart" || instruction.pacing === "instant" ? instruction.pacing : instruction.pacing.kind] : instruction.kind), [
+  const loweredPacing = compiled.instructions.map((instruction) => {
+    if (instruction.kind !== "say") return instruction.kind;
+    const pacingKind = instruction.pacing === "smart" || instruction.pacing === "instant"
+      ? instruction.pacing
+      : instruction.pacing.kind;
+    return [instruction.skipPolicy, pacingKind];
+  });
+
+  assert.deepEqual(loweredPacing, [
     ["skippable", "smart"],
     ["unskippable", "literal"],
     [null, "instant"],
@@ -215,7 +222,10 @@ test("smart pacing uses the final visible text and captured settings", () => {
     const gate = result.snapshot.backgroundActions[0];
     assert.equal(gate?.kind, "chatPacingGate", scenario.source);
     assert.equal(gate?.deadlineMs, scenario.deadlineMs, scenario.source);
-    assert.equal(result.events.find((event) => event.kind === "say")?.kind === "say" ? result.events.find((event) => event.kind === "say")?.text : null, scenario.text, scenario.source);
+    const sayEvent = result.events.find((event) => event.kind === "say");
+    assert.equal(sayEvent?.kind, "say", scenario.source);
+    if (sayEvent?.kind !== "say") throw new Error("Expected a say event.");
+    assert.equal(sayEvent.text, scenario.text, scenario.source);
   }
 
   const zero = plan('say "no gate"');
@@ -699,9 +709,21 @@ test("say instruction plans and public pacing failures stay at their validation 
   const baseline = JSON.stringify(pending.snapshot);
   const background = pending.snapshot.backgroundActions[0];
   const failures = [
-    completeAction(pacingPlan, pending.snapshot, { actionId: background!.actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs: 0 } }),
-    completeAction(pacingPlan, pending.snapshot, { actionId: background!.actionId, actionKind: "chatPacingGate", payload: { kind: "wrong" } }),
-    completeAction(pacingPlan, pending.snapshot, { actionId: 0, actionKind: "chatPacingGate", payload: { kind: "skip" } }),
+    completeAction(pacingPlan, pending.snapshot, {
+      actionId: background!.actionId,
+      actionKind: "delay",
+      payload: { kind: "time", currentSessionTimeMs: 0 },
+    }),
+    completeAction(pacingPlan, pending.snapshot, {
+      actionId: background!.actionId,
+      actionKind: "chatPacingGate",
+      payload: { kind: "wrong" },
+    }),
+    completeAction(pacingPlan, pending.snapshot, {
+      actionId: 0,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    }),
     observeTime(pacingPlan, pending.snapshot, Number.POSITIVE_INFINITY),
     observeTime(pacingPlan, pending.snapshot, -1),
   ];

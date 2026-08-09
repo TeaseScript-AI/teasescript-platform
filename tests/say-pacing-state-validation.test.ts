@@ -712,6 +712,99 @@ test("cross-field pacing snapshot corruption rejects at direct and checkpoint bo
   }
 });
 
+test("active pacing locations allow only runtime-produced foreground and background compositions", () => {
+  const waitPlan = plan('say "first"\nwait 10 s\nexit');
+  const waitState = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
+  const backgroundPacing = waitState.snapshot.backgroundActions[0];
+  const foregroundDelay = waitState.snapshot.foregroundAction;
+  assert.equal(backgroundPacing?.kind, "chatPacingGate");
+  assert.equal(foregroundDelay?.kind, "delay");
+  assert.equal(validateRuntimeSnapshot(waitState.snapshot, waitPlan).valid, true);
+  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(
+    createCheckpoint(waitPlan, waitState.snapshot),
+  )));
+
+  const promotionPlan = plan('say "first"\nsay "second"');
+  const promoted = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
+  const foregroundPacing = promoted.snapshot.foregroundAction;
+  assert.equal(foregroundPacing?.kind, "chatPacingGate");
+
+  const interactionPlan = plan('say "first"\nshowButton "Continue"');
+  const afterFirst = executeInstruction(
+    interactionPlan,
+    createFreshRuntimeSnapshot(interactionPlan),
+  );
+  assert.equal(afterFirst.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
+  assert.equal(validateRuntimeSnapshot(afterFirst.snapshot, interactionPlan).valid, true);
+
+  const interactionState = run(interactionPlan, afterFirst.snapshot);
+  assert.equal(interactionState.snapshot.foregroundAction?.kind, "interaction");
+  assert.equal(interactionState.snapshot.backgroundActions.length, 0);
+  assert.equal(
+    interactionState.snapshot.lastSettlement?.settlementKind,
+    "consumedByForegroundInteraction",
+  );
+  assert.equal(validateRuntimeSnapshot(interactionState.snapshot, interactionPlan).valid, true);
+  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(
+    createCheckpoint(interactionPlan, interactionState.snapshot),
+  )));
+
+  const corruptions = [
+    {
+      name: "foreground and background cannot retain two pacing gates",
+      compiled: promotionPlan,
+      checkpoint: mutateCheckpoint(promotionPlan, promoted.snapshot, (snapshot) => {
+        const duplicate = structuredClone(snapshot.foregroundAction);
+        duplicate.actionId = snapshot.nextActionId;
+        duplicate.requestEventSequence = snapshot.nextEventSequence;
+        duplicate.preparedOutput = null;
+        snapshot.nextActionId += 1;
+        snapshot.nextEventSequence += 1;
+        snapshot.backgroundActions.push(duplicate);
+      }),
+    },
+    {
+      name: "foreground interaction cannot retain a background pacing gate",
+      compiled: interactionPlan,
+      checkpoint: mutateCheckpoint(interactionPlan, interactionState.snapshot, (snapshot) => {
+        const replacement = structuredClone(
+          afterFirst.snapshot.backgroundActions[0],
+        ) as any;
+        replacement.actionId = snapshot.nextActionId;
+        replacement.requestEventSequence = snapshot.nextEventSequence;
+        snapshot.nextActionId += 1;
+        snapshot.nextEventSequence += 1;
+        snapshot.backgroundActions.push(replacement);
+      }),
+    },
+    {
+      name: "background pacing must predate the foreground delay action ID",
+      compiled: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waitState.snapshot, (snapshot) => {
+        const pacingActionId = snapshot.backgroundActions[0].actionId;
+        snapshot.backgroundActions[0].actionId = snapshot.foregroundAction.actionId;
+        snapshot.foregroundAction.actionId = pacingActionId;
+      }),
+    },
+    {
+      name: "background pacing must predate the foreground delay request sequence",
+      compiled: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waitState.snapshot, (snapshot) => {
+        const pacingRequestSequence = snapshot.backgroundActions[0].requestEventSequence;
+        snapshot.backgroundActions[0].requestEventSequence =
+          snapshot.foregroundAction.requestEventSequence;
+        snapshot.foregroundAction.requestEventSequence = pacingRequestSequence;
+      }),
+    },
+  ];
+
+  for (const corruption of corruptions) {
+    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
+    assert.equal(validateRuntimeSnapshot(snapshot, corruption.compiled).valid, false, corruption.name);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+  }
+});
+
 test("pacing settlement release provenance and chronology accept only canonical lifecycle states", () => {
   const backgroundPlan = plan('say "first"\nsay "second"');
   const background = executeInstruction(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
