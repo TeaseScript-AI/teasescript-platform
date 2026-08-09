@@ -67,6 +67,9 @@ production bound must justify both its need and its selected boundary.
 9. Every new production limit or material change to an existing limit is surfaced
    to the Owner even when no explicit Owner approval is required by the change
    triggers below.
+10. Incidental host resource exhaustion is an implementation or platform constraint, not TeaseScript capacity. A public
+    compiler or tooling boundary may add a developer-facing explanation only when it reliably identifies the specific
+    host failure, preserves the original cause, and does not remap broad JavaScript exception classes.
 
 ## Terminology
 

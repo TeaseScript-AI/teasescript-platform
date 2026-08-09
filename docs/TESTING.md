@@ -470,7 +470,7 @@ Tests and benchmarks should use:
 
 ## Parser recursion safety
 
-Node 24 regression coverage includes valid nesting beyond the former parser guard for parentheses, unary and `not`
-chains, collection literals, templates, and blocks, plus structured diagnostics for malformed nesting. These cases do
-not define an authored-syntax capacity: host-stack observations are diagnostic evidence in
-[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md), not CI thresholds.
+Regression coverage verifies valid nesting beyond the removed parser guard, malformed-input diagnostics, and narrow
+`compileSource(...)` translation of recognized parser host-stack exhaustion while preserving the cause and leaving
+unrelated exceptions unchanged. Host-stack measurements in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) are diagnostic
+evidence, not CI thresholds or capacity.
