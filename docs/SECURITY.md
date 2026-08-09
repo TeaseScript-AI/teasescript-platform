@@ -4,11 +4,11 @@
 
 The constrained playground server has an ephemeral loopback-only development workspace API: `PUT /api/workspace/source`, `GET /api/workspace`, `POST /api/workspace/compile`, `POST /api/workspace/run`, and `GET /api/workspace/result`. It emits no CORS headers, has no filesystem-write route, and preserves the static allowlist. Automation is rejected for non-loopback clients even if the static development listener is configured beyond loopback.
 
-Source requires UTF-8 `text/plain; charset=utf-8`; the local API currently bounds request buffering and source
-ingestion before compilation. Exact tooling values are tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) as current
-implementation inventory and require evidence before retention. Unsupported methods/content types, malformed UTF-8,
-unsafe paths, and oversized data receive structured errors without stack traces. This is neither a public API nor a
-production backend.
+Source requires UTF-8 `text/plain; charset=utf-8`. Source ingestion has no repository-defined byte ceiling; the local
+server buffers the upload and rejects malformed UTF-8 before storing it. Compile and run requests accept no body and
+reject a non-empty body without buffering the complete payload. Unsupported methods/content types, malformed UTF-8,
+and unsafe paths receive structured errors without stack traces. Remaining tooling guards are tracked in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). This is neither a public API nor a production backend.
 
 - Run the complete player and package code in a sandboxed cross-origin iframe, preferably on a separate player origin.
 - Keep main-site cookies host-only and unavailable to the player.
