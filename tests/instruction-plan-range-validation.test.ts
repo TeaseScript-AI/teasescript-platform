@@ -87,7 +87,7 @@ test("rejects unsafe persisted temporary and loop identities", () => {
   const temporaryValidation = validateInstructionPlan(temporaryPlan as unknown as InstructionPlan);
   assert.equal(temporaryValidation.valid, false);
   assert.ok(temporaryValidation.errors.some((error) =>
-    error.path === "$.temporaryCount" && error.message === "temporaryCount must be a non-negative integer."
+    error.path === "$.temporaryCount" && error.message === "temporaryCount must be a non-negative safe integer."
   ));
 
   const loopPlan = mutablePlan(compiledPlan("repeat 1 { say 1 }"));

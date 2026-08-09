@@ -52,7 +52,7 @@ export function validateCapturedInstructionPlan(
     ? value.temporaryCount
     : -1;
   if (temporaryCount < 0) {
-    errors.push(planError("TSC002", "temporaryCount must be a non-negative integer.", "$.temporaryCount"));
+    errors.push(planError("TSC002", "temporaryCount must be a non-negative safe integer.", "$.temporaryCount"));
   }
   if (!Array.isArray(value.instructions)) {
     errors.push(planError("TSC002", "Instructions must be an array.", "$.instructions"));
