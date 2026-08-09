@@ -2,8 +2,8 @@
 
 This file contains unresolved product, language, runtime, architecture, security, and compatibility choices only.
 Accepted decisions belong in accepted ADRs or specifications; current implementation contracts belong in topic
-documents; selected gate obligations belong in the POC-to-alpha backlog; concrete execution work belongs in GitHub
-issues.
+documents; owner-selected release-stage placement and open roadmap outcomes belong in the release roadmap; concrete
+execution work belongs in GitHub issues.
 
 A listed question is not accepted direction. Its linked accepted or current sources constrain the decision without
 deciding the remaining choice.
@@ -75,8 +75,8 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
 [`CODE-EDITOR.md`](CODE-EDITOR.md), [ADR 0010](decisions/0010-package-network-policy.md),
 [ADR 0012](decisions/0012-custom-view-capability.md),
 [ADR 0016](decisions/0016-resumable-pending-action-runtime-contract.md), and
-[ADR 0018](decisions/0018-first-standard-library-poc-contract.md). Selected pre-alpha/alpha design obligations
-remain in the [`POC-to-alpha backlog`](planning/POC-TO-ALPHA-BACKLOG.md).
+[ADR 0018](decisions/0018-first-standard-library-poc-contract.md). Owner-selected release-stage design outcomes
+remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and Content Security Policy.
 - Action-kind-specific media completion, advanced timeout, cancellation, and recovery policies beyond ADR 0018's

@@ -55,7 +55,10 @@ tree only when it preserves unique reasoning likely to answer a concrete future
 question and cannot be reduced without meaningful loss. Mark retained history
 non-authoritative and exclude it from default reading. Git history is the normal
 fallback; deep historical research also checks relevant commits, pull requests,
-and earlier file versions. When retention value is uncertain, rely on Git.
+and earlier file versions. When retention value is uncertain, rely on Git. The
+compact checked milestone summaries explicitly retained by the release roadmap
+are the narrow exception: they record roadmap progress, not current implementation
+detail or decision rationale.
 
 ## Canonical source map
 
@@ -68,9 +71,9 @@ and earlier file versions. When retention value is uncertain, rely on Git.
   [`docs/ARCHITECTURE.md`](ARCHITECTURE.md); accepted ADRs are canonical for the decisions and rationale.
 - **Exact current implementation:** repository code and executable configuration. Current topic documents are canonical
   for maintained contracts, while [`PHASE-STATUS.md`](../PHASE-STATUS.md) is canonical for high-level capability state.
-- **Open obligations before a named gate:**
-  [`docs/planning/POC-TO-ALPHA-BACKLOG.md`](planning/POC-TO-ALPHA-BACKLOG.md), while
-  [`PHASE-STATUS.md`](../PHASE-STATUS.md) records verified current state.
+- **Release-stage placement, open release-stage outcomes, and compact roadmap progress:**
+  [`docs/planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md), while [`PHASE-STATUS.md`](../PHASE-STATUS.md) records
+  verified current state. The roadmap does not replace accepted decisions, specifications, or topic contracts.
 - **Unresolved product or technical choices:** [`docs/OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
 - **Concrete execution tasks:** GitHub issues; pull requests are implementation handoffs and review evidence.
 
@@ -141,20 +144,20 @@ security boundaries, product decisions, or the stable development process:
   source acquisition, writes, verification, and publication constraints, with
   separate focused task guidance for explicitly coordinated work;
 - `docs/PATCH-PUBLICATION.md` for the verified patch protocol and security boundary;
-- current open decisions, the selected POC-to-alpha backlog, and deliberately maintained repository planning documents;
+- current open decisions, the release roadmap, and deliberately maintained repository planning documents;
 - `WISHES.xml` product intent/history;
 - executable, tested examples under `examples/`.
 
 A code or semantic change is incomplete when its canonical documentation becomes false. Update the relevant repository document in the same pull request unless the change is purely internal and does not affect documented behavior or status.
 
-The selected backlog, temporary coordination, and implementation status have different lifecycles:
+The release roadmap, temporary coordination, and implementation status have different lifecycles:
 
-- `docs/planning/POC-TO-ALPHA-BACKLOG.md` records owner-selected obligations that remain open before a target gate;
+- `docs/planning/RELEASE-ROADMAP.md` records owner-selected release-stage placement and open outcomes, and may retain
+  compact checked milestones as progress history; current implementation details and status remain in their canonical
+  sources;
 - a deliberately maintained repository issue or phase-scope document may record scheduled scope when the owner or coordinator chooses to keep that planning in GitHub;
 - temporary coordinator work breakdowns, executor assignments, integration order, and commit tracking remain outside the repository and are non-canonical;
 - accepted decisions and implemented results from temporary coordination are synchronized back into the relevant ADRs, specifications, current topic documents, and `PHASE-STATUS.md`.
-
-Do not keep completed items in the open backlog merely as history; Git already preserves their earlier state.
 
 Capability routing follows the same canonical-source rule. `docs/agents/README.md` is the canonical source for
 selection and composition; each focused guide is canonical only for its profile procedure. After a verified checkout

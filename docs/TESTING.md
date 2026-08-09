@@ -4,7 +4,7 @@
 
 Accepted language and runtime behavior remains defined by accepted specifications and ADRs. This document defines the repository's verification strategy, required test categories, and quality expectations for changes.
 
-Owner-selected outcomes that remain required before pre-alpha or alpha are tracked in [`planning/POC-TO-ALPHA-BACKLOG.md`](planning/POC-TO-ALPHA-BACKLOG.md). Inclusion there establishes a gate, not an implementation schedule. This document does not accept unresolved syntax, APIs, host protocols, or architecture.
+Owner-selected release-stage testing outcomes are tracked in [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md). Roadmap placement does not schedule implementation or accept unresolved syntax, APIs, host protocols, or architecture.
 
 ## Current testing model
 
@@ -441,7 +441,7 @@ Real browser automation becomes required after the cross-origin host shell and p
 - typed or otherwise strictly validated `postMessage` communication;
 - startup, reload, reconnect, and fatal failure;
 - checkpoint save and restore;
-- Standard UI and package custom UI;
+- Standard UI, extending the same browser matrix to package custom UI once custom views are implemented;
 - focus and keyboard behavior;
 - fullscreen and navigation;
 - hostile or malformed host/player messages.
@@ -452,7 +452,7 @@ No browser framework is selected yet. Playwright or another dependency should be
 
 The repository does not use an arbitrary mandatory line-coverage threshold such as 95 percent. Coverage may later help identify untouched branches and error paths, but correctness, determinism, restore equivalence, and boundary validation are more important than maximizing a percentage.
 
-Performance benchmarks are separate from correctness tests. [`planning/POC-TO-ALPHA-BACKLOG.md`](planning/POC-TO-ALPHA-BACKLOG.md) tracks `POC-ENGINE-001 — Establish runtime performance criteria and a benchmark baseline`.
+Performance benchmarks are separate from correctness tests. [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md) tracks the Beta outcome **Establish a runtime performance baseline and optimization plan**.
 
 Performance workloads should measure long-running runtime-state growth as well as instruction throughput. This includes growth in runtime-managed identities, snapshots, checkpoints, cloning, validation, and serialization costs. Repeated scoped speaker creation is a representative workload, but measurements and reachability/lifetime analysis must precede any reclamation or garbage-collection rule.
 

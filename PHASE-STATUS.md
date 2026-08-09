@@ -6,9 +6,9 @@ The current implementation phase is the deterministic TypeScript language/runtim
 playground. This file records verified capability state at a high level; it is not the canonical source for source
 identity, live CI state, detailed contracts, or historical execution evidence.
 
-Owner-selected obligations that remain open before a POC, pre-alpha, or alpha gate are tracked in
-[`docs/planning/POC-TO-ALPHA-BACKLOG.md`](docs/planning/POC-TO-ALPHA-BACKLOG.md). Inclusion there does not schedule
-work or accept syntax, architecture, or implementation details.
+Owner-selected release-stage outcomes, including work that remains open for POC / Foundation or Alpha, are tracked
+in [`docs/planning/RELEASE-ROADMAP.md`](docs/planning/RELEASE-ROADMAP.md). Roadmap placement does not schedule work or
+accept syntax, architecture, or implementation details.
 
 ## Implemented capability groups
 

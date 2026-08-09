@@ -1,10 +1,11 @@
 <?xml version='1.0' encoding='utf-8'?>
-<controlsystems_project name="MilovanaAlternative" schema_version="1.0" last_updated="2026-08-08">
+<controlsystems_project name="MilovanaAlternative" schema_version="1.0" last_updated="2026-08-09">
   <wishlist_policy>
     <memory_note>Project memory is disabled. This XML file is the persistent wishlist artifact for this conversation.</memory_note>
     <retention_rule>Never delete a wish. When abandoned or superseded, change its status to retired or superseded and add a dated history note explaining why.</retention_rule>
     <inference_rule>Agents may propose reasonably inferred wishes, but may not add or activate them without explicit owner approval.</inference_rule>
     <authority_rule>Wishes preserve approved product intent and history. Accepted product scope and implementation authority belong in the applicable accepted ADR, accepted specification, or controlling current topic document.</authority_rule>
+    <roadmap_rule>Add the planned-in-roadmap tag when an active wish is represented by a roadmap outcome; keep the wish and its history rather than treating roadmap placement as implementation authority.</roadmap_rule>
   </wishlist_policy>
   <wishes>
     <wish id="W-001" status="active">
@@ -411,6 +412,7 @@
         <tag>authoring</tag>
         <tag>debugger</tag>
         <tag>validation</tag>
+        <tag>planned-in-roadmap</tag>
       </tags>
       <history>
         <event date="2026-07-21" type="created">Added while consolidating the ChatGPT project documentation and new reference examples.</event>
@@ -540,6 +542,7 @@
         <tag>architecture</tag>
         <tag>iframe</tag>
         <tag>isolation</tag>
+        <tag>planned-in-roadmap</tag>
       </tags>
       <history>
         <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
@@ -552,6 +555,7 @@
         <tag>libraries</tag>
         <tag>gui</tag>
         <tag>dom</tag>
+        <tag>planned-in-roadmap</tag>
       </tags>
       <history>
         <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
@@ -577,6 +581,7 @@
         <tag>video</tag>
         <tag>runtime</tag>
         <tag>concurrency</tag>
+        <tag>planned-in-roadmap</tag>
       </tags>
       <history>
         <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
@@ -727,6 +732,7 @@
         <tag>teasescript</tag>
         <tag>gui</tag>
         <tag>custom-view</tag>
+        <tag>planned-in-roadmap</tag>
       </tags>
       <history>
         <event date="2026-07-23" type="created">Confirmed during the phase-1 core language and runtime design.</event>
