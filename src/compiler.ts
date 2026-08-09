@@ -27,12 +27,30 @@ export interface CompilationResult {
 
 export { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 
+export class CompilerHostStackExhaustionError extends Error {
+  public constructor(cause: Error) {
+    super(
+      "Host JavaScript stack exhaustion occurred while compiling source. Deep nesting can contribute; this is environment-specific and not a TeaseScript nesting limit.",
+      { cause },
+    );
+    this.name = "CompilerHostStackExhaustionError";
+  }
+}
+
 /** Parses, validates, and compiles source without executing it. */
 export function compileSource(
   source: string,
   options: CompileOptions = {},
 ): CompilationResult {
-  const parsed = parse(source);
+  let parsed;
+  try {
+    parsed = parse(source);
+  } catch (error) {
+    if (isParserHostStackExhaustion(error)) {
+      throw new CompilerHostStackExhaustionError(error);
+    }
+    throw error;
+  }
   const parserDiagnostics = Object.freeze([
     ...parsed.diagnostics,
     ...findNonFiniteNumericLiteralDiagnosticsInStableProgram(parsed.program),
@@ -71,6 +89,17 @@ export function compileSource(
     diagnostics,
     plan,
   });
+}
+
+function isParserHostStackExhaustion(error: unknown): error is Error {
+  if (!(error instanceof Error) || typeof error.stack !== "string") return false;
+  const recognizedRangeError =
+    error instanceof RangeError && error.message === "Maximum call stack size exceeded";
+  const recognizedSyntaxError =
+    error instanceof SyntaxError &&
+    error.message === "Invalid regular expression: /[.eE]/u: Stack overflow";
+  if (!recognizedRangeError && !recognizedSyntaxError) return false;
+  return /\bat #parse[A-Za-z]+ \(.*\/src\/parser\./u.test(error.stack);
 }
 
 function planCaptureBudgetDiagnostic(
