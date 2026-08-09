@@ -23,6 +23,29 @@ Checkpoint/JSON/restore/resume coverage applies when affected state is resumable
 For qualitative representation invariants, numeric safety margins and ordered max-edge tests are not applicable; tests
 verify the predicate/domain itself.
 
+## Diagnostic parser-stack evidence
+
+On 2026-08-09 UTC, revision `9968bb6e4dfdc3523681cb36e6af7e300ad57341` was measured locally with only the
+removed parser nesting guard bypassed. Fresh `node` child processes called `parse(...)` on valid declarations (or valid
+`if` blocks); exponential search followed by binary narrowing and a boundary recheck found the following observations:
+
+| Form | Passing / first failing depth | Source bytes at pass / fail | Failure |
+|---|---:|---:|---|
+| parentheses | 537 / 538 | 1,087 / 1,089 | native stack-overflow `SyntaxError` |
+| `not` chain | 4,280 / 4,281 | 17,136 / 17,140 | `RangeError: Maximum call stack size exceeded` |
+| unary `-` chain | 4,277 / 4,278 | 4,290 / 4,291 | native stack-overflow `SyntaxError` |
+| lists | 501 / 502 | 1,015 / 1,017 | native stack-overflow `SyntaxError` |
+| objects | 525 / 526 | 5,788 / 5,799 | native stack-overflow `SyntaxError` |
+| sets | 501 / 502 | 2,518 / 2,523 | native stack-overflow `SyntaxError` |
+| template interpolation | 520 / 521 | 5,733 / 5,744 | native stack-overflow `SyntaxError` |
+| nested `if` blocks | 1,644 / 1,645 | 19,733 / 19,745 | `RangeError: Maximum call stack size exceeded` |
+
+Environment: Node `v24.18.0`, V8 `13.6.233.17-node.50`, Linux `7.0.14-4-pve` x86_64, AMD Ryzen 7 5825U, 8.0 GiB RAM
+(7.2 GiB available), no relevant Node flags. These are environment-specific observations, not TeaseScript limits,
+official capacity, safety margins, or justification for a replacement production bound. Different browser, Node/V8
+release, architecture, stack configuration, or syntax form can fail differently. They are retained only to diagnose
+the removed guard's native-stack risk and compare future implementation work.
+
 ## Proven representation and state invariants
 
 | ID | Source / boundary | Current | Category | Status | Authority / change | Evidence / repair |
@@ -41,7 +64,6 @@ supported maxima.
 
 | ID | Source / boundary | Current | Category | Status | Authority / change | Evidence / repair |
 |---|---|---|---|---|---|---|
-| `parser.nesting` | `src/parser.ts`; recursive parsing | `MAX_PARSER_NESTING_DEPTH = 64`; overflow path emits `TSP027`. | parser, compiler, or runtime implementation guard | `suspicious` | ADR 0019; implementation + Owner notice for material replacement | issue #101/PR #107 proved native-stack risk, not `64`. Eliminate vulnerable recursion or derive a guard from stack/structure evidence. |
 | `capture.depth` | external/direct-AST capture | `MAX_EXTERNAL_RUNTIME_DATA_DEPTH = 128`, root depth `0`. | hostile-input capture budget | `suspicious` | ADR 0019; ADR only if capture architecture changes; Owner notice for material change | PR #52 proved deep hostile-data risk but called the value conservative/tunable. Re-derive or structurally remove it. |
 | `capture.work` | external/direct-AST graph capture and dependent plan/snapshot/checkpoint/globals/completion capture | `MAX_EXTERNAL_RUNTIME_DATA_WORK = 100,000` visited values per capture. | hostile-input capture budget | `suspicious` | ADR 0019; ADR if threat-model/coupling architecture changes; Owner notice for material change | PR #52 proved bounded hostile work is needed, not `100,000`; the value is reused across different inputs. Split/derive only where a real resource dimension requires it. |
 | `capture.array-length-preflight` | external/direct-AST array capture | Array `length <= 100,000`; direct-AST arrays also require exactly `length + 1` own keys including `length`. | hostile-input capture budget | `suspicious` | ADR 0019; coupled to `capture.work` | Imports the graph-work number as allocation/shape preflight without independent derivation. Re-derive or structurally replace with capture redesign. |

@@ -61,8 +61,6 @@ export interface ParseResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
-export const MAX_PARSER_NESTING_DEPTH = 64;
-
 const parserDiagnosticCode = {
   expectedStatement: "TSP001",
   expectedStatementEnd: "TSP002",
@@ -90,7 +88,6 @@ const parserDiagnosticCode = {
   expectedFunctionName: "TSP024",
   expectedParameter: "TSP025",
   emptyFunctionParameters: "TSP026",
-  nestingDepth: "TSP027",
   expectedInteractionText: "TSP028",
   expectedInteractionSpeaker: "TSP029",
   expectedChoiceOption: "TSP030",
@@ -117,34 +114,12 @@ class Parser {
   readonly #diagnostics: Diagnostic[] = [];
   #current = 0;
   #recoveredAtStatementBoundary = false;
-  #nestingDepth = 0;
-  #reportedNestingDepth = false;
 
   public constructor(private readonly tokens: readonly Token[]) {}
 
   public get diagnostics(): readonly Diagnostic[] {
     return this.#diagnostics;
   }
-
-  #withNesting<T>(operation: () => T, fallback: T): T {
-  if (this.#nestingDepth >= MAX_PARSER_NESTING_DEPTH) {
-    if (!this.#reportedNestingDepth) {
-      this.#reportedNestingDepth = true;
-      this.#reportToken(
-        parserDiagnosticCode.nestingDepth,
-        `Parser nesting exceeds the supported depth of ${MAX_PARSER_NESTING_DEPTH}.`,
-        this.#peek(),
-      );
-    }
-    return fallback;
-  }
-  this.#nestingDepth += 1;
-  try {
-    return operation();
-  } finally {
-    this.#nestingDepth -= 1;
-  }
-}
 
   public parseProgram(): Program {
     const statements: Statement[] = [];
@@ -567,10 +542,10 @@ class Parser {
   }
 
   #parseIfStatement(): IfStatement | null {
-  return this.#withNesting(() => this.#parseIfStatementWithinNesting(), null);
-}
+    return this.#parseIfStatementBody();
+  }
 
-  #parseIfStatementWithinNesting(): IfStatement | null {
+  #parseIfStatementBody(): IfStatement | null {
     const keyword = this.#advance();
     const condition = this.#parseRequiredExpression();
     if (condition === null) {
@@ -815,10 +790,10 @@ class Parser {
   }
 
   #parseBlock(): Block | null {
-  return this.#withNesting(() => this.#parseBlockWithinNesting(), null);
-}
+    return this.#parseBlockBody();
+  }
 
-  #parseBlockWithinNesting(): Block | null {
+  #parseBlockBody(): Block | null {
     if (!this.#match(TokenKind.LeftBrace)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedBlock,
@@ -965,11 +940,11 @@ class Parser {
   }
 
   #parseNot(): Expression | null {
-  if (!this.#check(TokenKind.KeywordNot)) return this.#parseComparison();
-  return this.#withNesting(() => this.#parseNotWithinNesting(), null);
-}
+    if (!this.#check(TokenKind.KeywordNot)) return this.#parseComparison();
+    return this.#parseNotExpression();
+  }
 
-  #parseNotWithinNesting(): Expression | null {
+  #parseNotExpression(): Expression | null {
     if (this.#match(TokenKind.KeywordNot)) {
       const operator = this.#previous();
       this.#skipContinuationNewlines();
@@ -1122,16 +1097,13 @@ class Parser {
   }
 
   #parseUnaryArithmetic(): Expression | null {
-  if (!this.#check(TokenKind.Plus) && !this.#check(TokenKind.Minus)) {
-    return this.#parsePostfix();
+    if (!this.#check(TokenKind.Plus) && !this.#check(TokenKind.Minus)) {
+      return this.#parsePostfix();
+    }
+    return this.#parseUnaryArithmeticExpression();
   }
-  return this.#withNesting(
-    () => this.#parseUnaryArithmeticWithinNesting(),
-    null,
-  );
-}
 
-  #parseUnaryArithmeticWithinNesting(): Expression | null {
+  #parseUnaryArithmeticExpression(): Expression | null {
     if (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus)) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
@@ -1510,13 +1482,10 @@ class Parser {
   }
 
   #parseParenthesized(start: Token): ParenthesizedExpression | null {
-  return this.#withNesting(
-    () => this.#parseParenthesizedWithinNesting(start),
-    null,
-  );
-}
+    return this.#parseParenthesizedExpression(start);
+  }
 
-  #parseParenthesizedWithinNesting(
+  #parseParenthesizedExpression(
     start: Token,
   ): ParenthesizedExpression | null {
     this.#skipNewlines();
@@ -1539,13 +1508,10 @@ class Parser {
   }
 
   #parseListLiteral(start: Token): Expression | null {
-  return this.#withNesting(
-    () => this.#parseListLiteralWithinNesting(start),
-    null,
-  );
-}
+    return this.#parseListLiteralBody(start);
+  }
 
-  #parseListLiteralWithinNesting(start: Token): Expression {
+  #parseListLiteralBody(start: Token): Expression {
     const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
     const end = this.#consumeClosingDelimiter(
       TokenKind.RightBracket,
@@ -1559,13 +1525,10 @@ class Parser {
   }
 
   #parseSetLiteral(start: Token): SetLiteral | null {
-  return this.#withNesting(
-    () => this.#parseSetLiteralWithinNesting(start),
-    null,
-  );
-}
+    return this.#parseSetLiteralBody(start);
+  }
 
-  #parseSetLiteralWithinNesting(start: Token): SetLiteral {
+  #parseSetLiteralBody(start: Token): SetLiteral {
     const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
     const end = this.#consumeClosingDelimiter(
       TokenKind.RightBracket,
@@ -1603,13 +1566,10 @@ class Parser {
   }
 
   #parseObjectLiteral(start: Token): ObjectLiteral | null {
-  return this.#withNesting(
-    () => this.#parseObjectLiteralWithinNesting(start),
-    null,
-  );
-}
+    return this.#parseObjectLiteralBody(start);
+  }
 
-  #parseObjectLiteralWithinNesting(start: Token): ObjectLiteral {
+  #parseObjectLiteralBody(start: Token): ObjectLiteral {
     const properties: ObjectProperty[] = [];
     this.#skipNewlines();
     while (
@@ -1667,13 +1627,10 @@ class Parser {
   }
 
   #parseTemplateLiteral(start: Token): TemplateLiteral | null {
-  return this.#withNesting(
-    () => this.#parseTemplateLiteralWithinNesting(start),
-    null,
-  );
-}
+    return this.#parseTemplateLiteralBody(start);
+  }
 
-  #parseTemplateLiteralWithinNesting(start: Token): TemplateLiteral | null {
+  #parseTemplateLiteralBody(start: Token): TemplateLiteral | null {
     const parts: TemplatePart[] = [];
     let valid = true;
     while (

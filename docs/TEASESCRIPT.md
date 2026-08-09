@@ -186,12 +186,10 @@ The current implemented `say` and `say as` paths remain unchanged until a tested
 
 ## Diagnostics
 
-Parser and semantic diagnostics are deterministic source-associated data. Resource-bound failures must be returned through this diagnostic model rather than exposed as native host exceptions.
-
-The source parser currently uses an implementation nesting guard so excessive recursive syntax returns one `TSP027`
-error diagnostic rather than exposing a native JavaScript stack failure. The historical numeric guard is not a
-TeaseScript language-capacity requirement; its evidence and #129 repair route are tracked in
-[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
+Parser and semantic diagnostics are deterministic source-associated data. Ordinary syntax failures return through this
+diagnostic model. TeaseScript does not define an authored-syntax nesting maximum; host JavaScript stack exhaustion on
+pathological input remains environment-specific rather than a language-capacity contract. Diagnostic evidence is
+tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
 
 ## Protected names
 

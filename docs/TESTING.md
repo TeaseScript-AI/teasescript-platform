@@ -470,6 +470,7 @@ Tests and benchmarks should use:
 
 ## Parser recursion safety
 
-Node 24 regression coverage includes deeply nested parentheses, unary and `not` chains, collection literals, templates,
-and blocks. The safety invariant is structured `TSP027` rejection before native stack failure; the current historical
-numeric guard is not a retained capacity target and is tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
+Node 24 regression coverage includes valid nesting beyond the former parser guard for parentheses, unary and `not`
+chains, collection literals, templates, and blocks, plus structured diagnostics for malformed nesting. These cases do
+not define an authored-syntax capacity: host-stack observations are diagnostic evidence in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md), not CI thresholds.
