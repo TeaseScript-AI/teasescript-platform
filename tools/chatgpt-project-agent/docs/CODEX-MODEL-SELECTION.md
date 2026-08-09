@@ -183,11 +183,22 @@ Include task-relevant authority, likely files or code areas, canonical modules o
 
 Require only sources that materially affect implementation or verification. Give each non-obvious Required source a task-specific reason that identifies the decision, invariant, boundary, or verification requirement it controls; stable repository-mandated reads may share one concise justification. Point to relevant sections when practical, prefer current canonical repository sources over copied documents or historical reports, and do not repeat stable rules already available in applicable `AGENTS.md`, CI, tests, or canonical workflow documentation.
 
-For implementation work, require Codex to briefly identify expected files, critical invariants, material risks, and genuine stop conditions, then continue through the assigned implementation, verification, complete diff review, publication, and pull-request work without waiting for plan approval. A plan, progress update, focused test run, local commit, or push is intermediate rather than completion while assigned work remains. When dense implementation is a plausible failure mode, make the repository readability/KISS standard explicit in the prompt: fewer lines or characters are not a goal, and compact code is acceptable only when it keeps or improves clarity, maintainability, debuggability, and reviewability.
+For implementation work, require Codex to briefly identify expected files, critical invariants, material risks, and
+genuine stop conditions, then continue through the assigned implementation, verification, complete diff review,
+publication, and pull-request work without waiting for plan approval. A plan, progress update, focused test run, local
+commit, or push is intermediate rather than completion while assigned work remains. When dense implementation is a
+plausible failure mode, make the repository readability/KISS standard explicit in the prompt: fewer lines or
+characters are not a goal, and compact code is acceptable only when it keeps or improves clarity, maintainability,
+debuggability, and reviewability.
 
 Define stop conditions narrowly: an unresolved owner or architecture decision, an invalidated branch or head, unavailable permission or evidence with no permitted alternative, a security or trust-boundary concern, or a repair that would materially broaden scope or change accepted behavior. A recoverable tool, command, or GitHub failure is normally a retry or route-selection problem rather than task completion or a stop condition. Resolve minor ambiguity from current repository evidence and report the assumption instead of stopping.
 
-A prompt-supplied expected or reference SHA is not itself a stop condition when the task is to start from current `main`. In that case, have Codex synchronize the authoritative remote `main`, leave any unrelated or stale local branch, and start the task branch from the synchronized head. Stop for a SHA/head mismatch only when the assignment requires an exact immutable source identity or synchronization shows that the assigned branch/head was genuinely invalidated in a way that affects the task. A stale local branch or remote-tracking ref is normally synchronization work, not task completion.
+A prompt-supplied expected or reference SHA is not itself a stop condition when the task is to start from current
+`main`. In that case, have Codex synchronize the authoritative remote `main`, leave any unrelated or stale local branch,
+and start the task branch from the synchronized head. Stop for a SHA/head mismatch only when the assignment requires
+an exact immutable source identity or synchronization shows that the assigned branch/head was genuinely invalidated in
+a way that affects the task. A stale local branch or remote-tracking ref is normally synchronization work, not task
+completion.
 
 Limit repository reading as well as prompt length:
 
@@ -209,9 +220,23 @@ Adjust investigation depth independently by reasoning level:
 - **Medium:** provide direction and allow normal repository investigation.
 - **High:** identify unresolved questions, trade-offs, or diagnostic risks instead of adding procedural steps.
 
-Use one coherent Codex execution phase by default only when the complete required reading, implementation, verification, diff review, publication, and assigned pull-request maintenance are expected to fit comfortably. Otherwise split the work before execution into the smallest coherent, independently verifiable phases. Before splitting, trace immediate execution dependencies. Each phase must be dependency-closed for the behavior it introduces: do not defer a required transition, state, serialization, validation, or other path that ordinary successful execution can immediately reach. Order phases by dependency, from prerequisites through reachable behavior, before hardening or finalization. Each implementation phase should normally end in a durable repository state, and a dependent next phase should start from the verified resulting head or another explicitly recorded handoff state. Split also when different capability is genuinely required, an owner decision must occur between phases, or independently reviewable work benefits from separation. Do not use a stronger model or higher reasoning merely to compensate for excessive execution volume. Internal milestones remain useful when they validate a risky intermediate choice, but they are not separate approval gates or automatically separate prompts, branches, pull requests, contexts, or model selections.
+Use one coherent Codex execution phase by default only when the complete required reading, implementation, verification,
+diff review, publication, and assigned pull-request maintenance are expected to fit comfortably. Otherwise split the
+work before execution into the smallest coherent, independently verifiable phases. Before splitting, trace immediate
+execution dependencies. Each phase must be dependency-closed for the behavior it introduces: do not defer a required
+transition, state, serialization, validation, or other path that ordinary successful execution can immediately reach.
+Order phases by dependency, from prerequisites through reachable behavior, before hardening or finalization. Each
+implementation phase should normally end in a durable repository state, and a dependent next phase should start from
+the verified resulting head or another explicitly recorded handoff state. Split also when different capability is
+genuinely required, an owner decision must occur between phases, or independently reviewable work benefits from
+separation. Do not use a stronger model or higher reasoning merely to compensate for excessive execution volume.
+Internal milestones remain useful when they validate a risky intermediate choice, but they are not separate approval
+gates or automatically separate prompts, branches, pull requests, contexts, or model selections.
 
-Remove repetition and narrative filler, not meaning. Self-review prompts and phase plans for recurring token/context cost; remove detail that does not guide current execution, especially duplicated facts or unrelated future-phase material. Preserve necessary conditions, ordering, exceptions, and execution clarity. Do not write the patch in prose or leave the objective underspecified.
+Remove repetition and narrative filler, not meaning. Review prompts and phase plans for recurring token/context cost;
+remove detail that does not guide current execution, especially duplicated facts or unrelated future-phase material.
+Preserve necessary conditions, ordering, exceptions, and execution clarity. Do not write the patch in prose or leave
+the objective underspecified.
 
 ### Internal routing recommendation
 
