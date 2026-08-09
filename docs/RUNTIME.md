@@ -449,7 +449,14 @@ choices are unrelated to resource capacity.
 
 A configured instruction budget must be a positive integer. Exhaustion fails deterministically with structured runtime error `TSR037` instead of hanging. Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
 
-Externally supplied instruction plans, runtime snapshots, checkpoints, globals, and serializable runtime values are captured into one bounded stable plain-data graph before detailed validation, cloning, freezing, state construction, execution, event emission, or RNG consumption. Enumerable accessors are rejected without invocation, proxy behavior is not retained, and later phases consume only the captured graph. Depth is counted from the external root at zero, and the work limit applies to each bounded capture. Exceeding either implementation limit or failing stable capture is malformed external runtime data. Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`, and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
+Externally supplied instruction plans, runtime snapshots, globals, and serializable runtime values are captured into
+bounded stable plain-data graphs before detailed validation, cloning, freezing, state construction, execution, event
+emission, or RNG consumption. Checkpoint restore validates its fixed envelope without invoking accessors, then captures
+its plan and snapshot independently through those existing boundaries. Proxy behavior is not retained, and later phases
+consume only captured plain data. Depth is counted from each captured root at zero, and the work limit applies to each
+bounded capture. Exceeding either implementation limit or failing stable capture is malformed external runtime data.
+Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`,
+and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
 
 Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality and duplicate handling are unchanged.
 
