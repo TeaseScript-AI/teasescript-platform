@@ -35,10 +35,13 @@ through the route selected for their capabilities.
 ## Writes
 
 Each assignment states the exact scope, exclusions, acceptance criteria, relevant authority, expected checks,
-source branch and PR target, dependencies, and files reserved for another workstream. Select the simplest
-capability route that fits each executor; do not impose the orchestrator's environment on them. Use an
-integration branch only when the selected coordinated plan needs one. Keep temporary checklists, sequencing
-notes, and executor tracking outside the repository.
+source branch and PR target, dependencies, and files reserved for another workstream. Make hard requirements distinct
+from illustrative implementation advice: hand off resolved invariants, dependencies, stop conditions, and the required
+final state, while treating likely files and examples as starting points unless controlling authority makes them exact.
+Exclude chat chronology and rejected alternatives unless they explain a live constraint. Select the simplest capability
+route that fits each executor; do not impose the orchestrator's environment on them. Use an integration branch only
+when the selected coordinated plan needs one. Keep temporary checklists, sequencing notes, and executor tracking
+outside the repository.
 
 Separate executor branches and pull requests are the default because they make ownership and review boundaries
 obvious. An explicitly coordinated shared pull-request branch is also valid when it materially reduces integration
@@ -66,11 +69,13 @@ ban.
 
 ## Verification
 
-Require proportionate workstream checks and review first. Then verify the combined integration state from a
-clean install with the repository's configured environment and checks, inspect the complete combined diff, and
-run any milestone-specific integration verification. A final verifier reports failures to the responsible
-workstream or orchestrator and does not silently redesign or repair work without reassignment. Record exact
-commands, results, conflicts, stale materials, and remaining risks.
+Require proportionate workstream checks and review first. Treat executor summaries and completion claims as
+navigation to evidence, not proof: verify the exact handed-off head, relevant diff, and decisive checks before relying
+on the result for integration or dependent behavior. Then verify the combined integration state from a clean install
+with the repository's configured environment and checks, inspect the complete combined diff, and run any
+milestone-specific integration verification. A final verifier reports failures to the responsible workstream or
+orchestrator and does not silently redesign or repair work without reassignment. Record exact commands, results,
+conflicts, stale materials, and remaining risks.
 
 ## Publication and handoff
 

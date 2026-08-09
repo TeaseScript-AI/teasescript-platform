@@ -58,7 +58,9 @@ fallback; deep historical research also checks relevant commits, pull requests,
 and earlier file versions. When retention value is uncertain, rely on Git. The
 compact checked milestone summaries explicitly retained by the release roadmap
 are the narrow exception: they record roadmap progress, not current implementation
-detail or decision rationale.
+detail or decision rationale. When a superseded standalone document is deliberately
+retained, make that lifecycle visible without opening the file through a concise path or
+name marker such as `SUPERSEDED-`, and identify the current replacement inside the document.
 
 ## Canonical source map
 
