@@ -4,6 +4,7 @@
 This table is generated from the current section order.
 
 - [Status legend](#status-legend)
+- [Delimiter roles](#delimiter-roles)
 - [1. Statement termination](#1-statement-termination)
 - [2. Literal values](#2-literal-values)
 - [3. Numeric types](#3-numeric-types)
@@ -49,6 +50,23 @@ This table is generated from the current section order.
 - **Accepted**: approved
 - **Provisional**: direction chosen, details still open
 - **Rejected**: not part of the language
+
+## Delimiter roles
+**Status:** Accepted
+
+The existing accepted forms use these delimiter pairs consistently. This section records that convention; it does not
+add a new grammar form.
+
+- `()` — expression grouping and call/parameter lists: grouped expressions, function-call arguments, and function
+  parameter lists.
+- `[]` — list syntax and positional access: list literals, list type suffixes such as `string[]`, and indexing.
+- `{}` — structured bodies and records: executable or declaration blocks, speaker property blocks, and object
+  literals.
+- `${...}` — the reserved template-interpolation form. It is distinct from an ordinary `{}` structured body; normal
+  TeaseScript expression parsing applies inside.
+
+Future syntax should reuse these established roles rather than assign a delimiter a materially unrelated meaning. A
+materially unrelated delimiter role requires its own explicit accepted syntax decision.
 
 ## 1. Statement termination
 **Status:** Accepted
