@@ -60,10 +60,13 @@ add a new grammar form.
 - `()` — expression grouping and call/parameter lists: grouped expressions, function-call arguments, and function
   parameter lists.
 - `[]` — list syntax and positional access: list literals, list type suffixes such as `string[]`, and indexing.
-- `{}` — structured bodies and records: executable or declaration blocks, speaker property blocks, and object
-  literals.
+- `{}` — structured bodies and records: executable blocks, structured declaration bodies such as
+  `speaker mistressVera { ... }`, and object literals.
 - `${...}` — the reserved template-interpolation form. It is distinct from an ordinary `{}` structured body; normal
   TeaseScript expression parsing applies inside.
+
+When named properties or fields appear inside a structured declaration or record, `{}` delimit the containing
+structure, not the individual property or field.
 
 Future syntax should reuse these established roles rather than assign a delimiter a materially unrelated meaning. A
 materially unrelated delimiter role requires its own explicit accepted syntax decision.
