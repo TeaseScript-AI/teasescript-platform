@@ -134,6 +134,17 @@ subsystems may still have different maturity levels.
     [ADR 0019](../decisions/0019-resource-limit-governance.md), [`CURRENT-DESIGN.md`](../../CURRENT-DESIGN.md),
     [`RUNTIME.md`](../RUNTIME.md), [`TESTING.md`](../TESTING.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
+- [ ] **Evaluate editor usability warnings for interaction content**
+  - **Outcome:** Use representative authoring, Player, accessibility, and usability evidence to decide whether non-blocking
+    editor warnings are useful for unusually long interaction labels or unusually large choice sets. If warnings are
+    adopted, define them as a separate usability policy rather than copying engine hard limits or treating provisional
+    resource guards as recommendations. Do not invent placeholder thresholds merely to make the warning category finite.
+  - **Trigger:** Reconsider after representative Alpha/Beta authoring and Player usage provides concrete evidence that
+    technically valid interaction content creates a recurring usability or accessibility problem.
+  - **Reference:** [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md),
+    [ADR 0019](../decisions/0019-resource-limit-governance.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and
+    [`RESOURCE-LIMITS.md`](../RESOURCE-LIMITS.md).
+
 - [ ] **Reassess retained #288 numeric resource policies and defaults**
   - **Outcome:** Before any numeric policy or default deliberately retained by Issue #288 becomes supported non-POC
     compatibility behavior, reassess it using then-current workload, safety, performance, compatibility, and maintenance
