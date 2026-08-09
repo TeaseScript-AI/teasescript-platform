@@ -89,6 +89,27 @@ test("executes source output, speaker provenance, collection copies, and control
   assert.equal(rootBinding(result.snapshot.frames[0]?.bindings ?? [], "total"), 4);
 });
 
+test("keeps contextual say skip words available as ordinary identifier expressions", () => {
+  const plan = compiled([
+    'speaker vera {}',
+    "let skippable = 1",
+    "let unskippable = 2",
+    "let suffix = 3",
+    "say skippable",
+    "say unskippable",
+    "say skippable + suffix",
+    "say skippable, instant",
+    "say as vera skippable",
+  ].join("\n"));
+
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["1", "2", "4", "1", "1"],
+  );
+  assert.equal(result.snapshot.status, "halted");
+});
+
 test("preserves function evaluation, deterministic random output, and checkpoint resume equivalence", () => {
   const result = assertRuntimeResumeEquivalent([
     "let order = []",

@@ -2062,7 +2062,7 @@ function validatePendingActionState(
       validSessionTime(currentSessionTimeMs) &&
       action.createdAtMs <= currentSessionTimeMs &&
       action.deadlineMs > currentSessionTimeMs;
-    const baseValid = isPlainRecord(action) && positiveSafeInteger(action.actionId) && positiveSafeInteger(action.requestEventSequence) && nonNegativeSafeInteger(action.owningInstruction) && nonNegativeSafeInteger(action.continuationInstruction) && nonNegativeSafeInteger(action.scopeDepth) && nonNegativeSafeInteger(action.loopDepth) && (action.ownerCallFrameId === null || (positiveSafeInteger(action.ownerCallFrameId) && callIds.has(action.ownerCallFrameId))) && action.scopeDepth === (Array.isArray(value.frames) ? value.frames.length : -1) && action.loopDepth === (Array.isArray(value.loopFrames) ? value.loopFrames.length : -1) && (typeof value.nextEventSequence !== "number" || action.requestEventSequence < value.nextEventSequence) && action.actionId < (typeof value.nextActionId === "number" ? value.nextActionId : 0);
+    const baseValid = validForegroundActionBase(action, value, callIds);
     const kindValid = isPlainRecord(action) && (action.kind === "delay"
       ? delayTimesAreValid && action.expectedCompletion === "time" && hasEventSequenceCapacity(value.nextEventSequence, 1)
       : action.kind === "interaction"
@@ -2094,27 +2094,117 @@ function validatePendingActionState(
   }
 }
 
+function validForegroundActionBase(
+  action: unknown,
+  snapshot: Record<string, unknown>,
+  activeCallFrameIds: ReadonlySet<unknown>,
+): boolean {
+  if (
+    !isPlainRecord(action) ||
+    !positiveSafeInteger(action.actionId) ||
+    !positiveSafeInteger(action.requestEventSequence) ||
+    !nonNegativeSafeInteger(action.owningInstruction) ||
+    !nonNegativeSafeInteger(action.continuationInstruction) ||
+    !nonNegativeSafeInteger(action.scopeDepth) ||
+    !nonNegativeSafeInteger(action.loopDepth) ||
+    (typeof snapshot.nextEventSequence === "number" &&
+      action.requestEventSequence >= snapshot.nextEventSequence) ||
+    action.actionId >= (typeof snapshot.nextActionId === "number" ? snapshot.nextActionId : 0)
+  ) return false;
+
+  if (action.kind === "chatPacingGate") return true;
+  return (
+    (action.ownerCallFrameId === null ||
+      (positiveSafeInteger(action.ownerCallFrameId) && activeCallFrameIds.has(action.ownerCallFrameId))) &&
+    action.scopeDepth === (Array.isArray(snapshot.frames) ? snapshot.frames.length : -1) &&
+    action.loopDepth === (Array.isArray(snapshot.loopFrames) ? snapshot.loopFrames.length : -1)
+  );
+}
+
 function validPacingGateAction(
   action: unknown,
   snapshot: Record<string, unknown>,
   plan: InstructionPlan | undefined,
   foreground: boolean,
 ): boolean {
-  if (!isPlainRecord(action) || !hasExactKeys(action, [
-    "kind", "actionId", "owningInstruction", "continuationInstruction", "ownerCallFrameId",
-    "scopeDepth", "loopDepth", "createdAtMs", "deadlineMs", "skippable", "requestEventSequence", "preparedOutput",
-  ]) || action.kind !== "chatPacingGate" || !positiveSafeInteger(action.actionId) ||
-    !nonNegativeSafeInteger(action.owningInstruction) || !nonNegativeSafeInteger(action.continuationInstruction) ||
-    action.continuationInstruction !== action.owningInstruction + 1 ||
-    !validSessionTime(action.createdAtMs) || !validSessionTime(action.deadlineMs) ||
-    !validSessionTime(snapshot.currentSessionTimeMs) || action.createdAtMs > snapshot.currentSessionTimeMs ||
-    action.deadlineMs <= snapshot.currentSessionTimeMs || typeof action.skippable !== "boolean" ||
-    !positiveSafeInteger(action.requestEventSequence) || !positiveSafeInteger(snapshot.nextEventSequence) || action.requestEventSequence >= snapshot.nextEventSequence ||
-    !positiveSafeInteger(snapshot.nextActionId) || action.actionId >= snapshot.nextActionId || action.scopeDepth !== (Array.isArray(snapshot.frames) ? snapshot.frames.length : -1) ||
-    action.loopDepth !== (Array.isArray(snapshot.loopFrames) ? snapshot.loopFrames.length : -1)) return false;
-  if (plan !== undefined && plan.instructions[action.owningInstruction]?.kind !== "say") return false;
+  if (!isPacingGateShape(action)) return false;
+  if (!validPacingGateIdentity(action, snapshot)) return false;
+  if (!validPacingGateTiming(action, snapshot)) return false;
+  if (!validPacingGateCreationProvenance(action, snapshot, plan)) return false;
   if (!foreground) return action.preparedOutput === null;
   return validPreparedSayOutput(action.preparedOutput, snapshot, plan);
+}
+
+function isPacingGateShape(action: unknown): action is Record<string, unknown> {
+  return isPlainRecord(action) &&
+    hasExactKeys(action, [
+      "kind", "actionId", "owningInstruction", "continuationInstruction", "ownerCallFrameId",
+      "scopeDepth", "loopDepth", "createdAtMs", "deadlineMs", "skippable", "requestEventSequence", "preparedOutput",
+    ]) &&
+    action.kind === "chatPacingGate" &&
+    nonNegativeSafeInteger(action.owningInstruction) &&
+    nonNegativeSafeInteger(action.continuationInstruction) &&
+    action.continuationInstruction === action.owningInstruction + 1 &&
+    typeof action.skippable === "boolean";
+}
+
+function validPacingGateIdentity(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  return positiveSafeInteger(action.actionId) &&
+    positiveSafeInteger(action.requestEventSequence) &&
+    positiveSafeInteger(snapshot.nextActionId) &&
+    positiveSafeInteger(snapshot.nextEventSequence) &&
+    action.actionId < snapshot.nextActionId &&
+    action.requestEventSequence < snapshot.nextEventSequence;
+}
+
+function validPacingGateTiming(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  return validSessionTime(action.createdAtMs) &&
+    validSessionTime(action.deadlineMs) &&
+    validSessionTime(snapshot.currentSessionTimeMs) &&
+    action.createdAtMs <= snapshot.currentSessionTimeMs &&
+    action.deadlineMs > snapshot.currentSessionTimeMs;
+}
+
+function validPacingGateCreationProvenance(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  if (
+    !nonNegativeSafeInteger(action.scopeDepth) ||
+    !nonNegativeSafeInteger(action.loopDepth) ||
+    action.loopDepth > action.scopeDepth ||
+    !positiveSafeInteger(snapshot.nextScopeId) ||
+    action.scopeDepth > snapshot.nextScopeId ||
+    (action.ownerCallFrameId !== null &&
+      (!positiveSafeInteger(action.ownerCallFrameId) ||
+        !positiveSafeInteger(snapshot.nextCallFrameId) ||
+        action.ownerCallFrameId >= snapshot.nextCallFrameId))
+  ) return false;
+  if (plan === undefined) return true;
+
+  const owningInstruction = action.owningInstruction;
+  if (!nonNegativeSafeInteger(owningInstruction) || plan.instructions[owningInstruction]?.kind !== "say") return false;
+  const owningFunction = plan.functions.find(
+    (definition) =>
+      owningInstruction >= definition.entryInstruction &&
+      owningInstruction < definition.endInstruction,
+  );
+  if (owningFunction === undefined) return action.ownerCallFrameId === null;
+  if (!positiveSafeInteger(action.ownerCallFrameId)) return false;
+
+  const liveOwner = Array.isArray(snapshot.callFrames)
+    ? snapshot.callFrames.find(
+      (frame) => isPlainRecord(frame) && frame.id === action.ownerCallFrameId,
+    )
+    : undefined;
+  return liveOwner === undefined || liveOwner.functionId === owningFunction.id;
 }
 
 function validPreparedSayOutput(value: unknown, snapshot: Record<string, unknown>, plan: InstructionPlan | undefined): boolean {

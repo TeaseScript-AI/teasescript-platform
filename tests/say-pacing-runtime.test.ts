@@ -31,6 +31,25 @@ test("say lowers smart, exact, and instant pacing with explicit skip policy", ()
   ]);
 });
 
+test("say lowering preserves contextual skip words as value identifiers", () => {
+  const compiled = plan([
+    'let skippable = "one"',
+    'let unskippable = "two"',
+    "say skippable",
+    "say unskippable",
+    "say skippable, instant",
+  ].join("\n"));
+  const says = compiled.instructions.filter(
+    (instruction): instruction is Extract<typeof instruction, { kind: "say" }> => instruction.kind === "say",
+  );
+
+  assert.deepEqual(says.map((instruction) => [instruction.skipPolicy, instruction.value.kind, instruction.pacing]), [
+    [null, "identifier", "smart"],
+    [null, "identifier", "smart"],
+    [null, "identifier", "instant"],
+  ]);
+});
+
 test("first smart say creates a background gate and later say promotes it without a second request", () => {
   const compiled = plan('say "first"\nsay "second"');
   const result = run(compiled, createFreshRuntimeSnapshot(compiled));
@@ -74,6 +93,97 @@ test("pacing gate survives checkpoint JSON restore and settles through observed 
   assert.deepEqual(settled.events.map((event) => event.kind), ["actionCompleted"]);
   const resumed = run(restored.plan, settled.snapshot);
   assert.ok(resumed.events.some((event) => event.kind === "say" && event.text === "second"));
+});
+
+test("background pacing survives scope, loop, and call unwinding through checkpoint restore", () => {
+  const scenarios = [
+    'if true { say "branch" }\nexit',
+    'repeat 1 { say "loop" }\nexit',
+    'function f { say "call" }\nf()\nexit',
+  ];
+
+  for (const source of scenarios) {
+    const compiled = plan(source);
+    const completed = run(compiled, createFreshRuntimeSnapshot(compiled));
+    const gate = completed.snapshot.backgroundActions[0];
+    assert.equal(gate?.kind, "chatPacingGate", source);
+    assert.equal(validateRuntimeSnapshot(completed.snapshot, compiled).valid, true, source);
+
+    const restored = deserializeCheckpoint(serializeCheckpoint(
+      createCheckpoint(compiled, completed.snapshot),
+    ));
+    assert.deepEqual(restored.snapshot, completed.snapshot, source);
+
+    const settled = completeAction(restored.plan, restored.snapshot, {
+      actionId: gate!.actionId,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    });
+    assert.equal(settled.outcome.kind, "completed", source);
+  }
+});
+
+test("a pacing gate created by a returned function promotes and resumes later output", () => {
+  const compiled = plan('function f { say "first" }\nf()\nsay ["second", "second-alt"]');
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
+  const gate = waiting.snapshot.foregroundAction;
+  assert.equal(gate?.kind, "chatPacingGate");
+  const preparedText = gate?.preparedOutput?.text;
+  assert.equal(typeof preparedText, "string");
+  assert.equal(validateRuntimeSnapshot(waiting.snapshot, compiled).valid, true);
+
+  const restored = deserializeCheckpoint(serializeCheckpoint(
+    createCheckpoint(compiled, waiting.snapshot),
+  ));
+  const settled = observeTime(restored.plan, restored.snapshot, gate!.deadlineMs);
+  const resumed = run(restored.plan, settled.snapshot);
+  assert.deepEqual(
+    resumed.events.filter((event) => event.kind === "say").map((event) => event.text),
+    [preparedText],
+  );
+});
+
+test("positive pacing control-flow paths have equivalent uninterrupted and restored results", () => {
+  const scenarios = [
+    'if true { say "branch" }\nsay "after"',
+    'repeat 1 { say "loop" }\nsay "after"',
+    'function f { say "call" }\nf()\nsay "after"',
+    'function f(count) { if count == 0 { say "recursive" } else { f(count - 1) } }\nf(1)\nsay "after"',
+  ];
+
+  for (const source of scenarios) {
+    const compiled = plan(source);
+    const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+    const gate = waiting.snapshot.foregroundAction;
+    assert.equal(gate?.kind, "chatPacingGate", source);
+
+    const uninterruptedSettled = observeTime(compiled, waiting.snapshot, gate!.deadlineMs);
+    const uninterrupted = run(compiled, uninterruptedSettled.snapshot);
+    const restored = deserializeCheckpoint(serializeCheckpoint(
+      createCheckpoint(compiled, waiting.snapshot),
+    ));
+    const restoredSettled = observeTime(restored.plan, restored.snapshot, gate!.deadlineMs);
+    const resumed = run(restored.plan, restoredSettled.snapshot);
+
+    assert.deepEqual(
+      [...restoredSettled.events, ...resumed.events],
+      [...uninterruptedSettled.events, ...uninterrupted.events],
+      source,
+    );
+    assert.deepEqual(resumed.snapshot, uninterrupted.snapshot, source);
+  }
+});
+
+test("pacing creation provenance rejects an impossible function owner", () => {
+  const compiled = plan('function f { say "first" }\nf()\nexit');
+  const completed = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const corrupted = JSON.parse(serializeCheckpoint(
+    createCheckpoint(compiled, completed.snapshot),
+  )) as { snapshot: { backgroundActions: Array<{ ownerCallFrameId: number | null }> } };
+  corrupted.snapshot.backgroundActions[0]!.ownerCallFrameId = null;
+
+  assert.equal(validateRuntimeSnapshot(corrupted.snapshot, compiled).valid, false);
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(corrupted)));
 });
 
 test("speaker default and explicit skip policy determine pacing gate skippability", () => {
@@ -346,3 +456,42 @@ test("snapshot and checkpoint reject malformed pacing prepared output", () => {
   assert.equal(validateRuntimeSnapshot(corrupted.snapshot, compiled).valid, false);
   assert.throws(() => deserializeCheckpoint(JSON.stringify(corrupted)));
 });
+
+test("snapshot and checkpoint reject representative malformed pacing action state", () => {
+  const backgroundPlan = plan('say "first"\nexit');
+  const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
+  const foregroundPlan = plan('say "first"\nsay "second"');
+  const foreground = run(foregroundPlan, createFreshRuntimeSnapshot(foregroundPlan));
+  const settled = completeAction(backgroundPlan, background.snapshot, {
+    actionId: 1,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+
+  const corruptions: Array<[string, unknown, typeof backgroundPlan | typeof foregroundPlan]> = [
+    ["action identity", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions[0].actionId = 0; }), backgroundPlan],
+    ["action kind", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions[0].kind = "delay"; }), backgroundPlan],
+    ["deadline", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions[0].deadlineMs = 0; }), backgroundPlan],
+    ["request sequence", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions[0].requestEventSequence = snapshot.nextEventSequence; }), backgroundPlan],
+    ["background uniqueness", mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => { snapshot.backgroundActions.push(structuredClone(snapshot.backgroundActions[0])); }), backgroundPlan],
+    ["foreground/background location", mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => { snapshot.backgroundActions.push(structuredClone(snapshot.foregroundAction)); }), foregroundPlan],
+    ["prepared continuation", mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => { snapshot.foregroundAction.preparedOutput.continuationInstruction += 1; }), foregroundPlan],
+    ["pacing settlement", mutateCheckpoint(backgroundPlan, settled.snapshot, (snapshot) => { snapshot.lastSettlement.actionKind = "delay"; }), backgroundPlan],
+  ];
+
+  for (const [label, checkpoint, compiled] of corruptions) {
+    const snapshot = (checkpoint as { snapshot: unknown }).snapshot;
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false, label);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), label);
+  }
+});
+
+function mutateCheckpoint(
+  compiled: ReturnType<typeof plan>,
+  snapshot: ReturnType<typeof createFreshRuntimeSnapshot>,
+  mutate: (snapshot: any) => void,
+): unknown {
+  const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot))) as { snapshot: any };
+  mutate(checkpoint.snapshot);
+  return checkpoint;
+}

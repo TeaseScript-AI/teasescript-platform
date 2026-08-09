@@ -397,7 +397,7 @@ class Parser {
     }
 
     let skipPolicy: SayStatement["skipPolicy"] = null;
-    if (this.#check(TokenKind.Identifier)) {
+    if (this.#check(TokenKind.Identifier) && startsSayModifierText(this.#peek(1))) {
       const policy = this.#peek().lexeme;
       if (policy === "skippable" || policy === "unskippable") {
         skipPolicy = policy;
@@ -1991,6 +1991,12 @@ function isExpressionStart(token: Token): boolean {
     token.kind === TokenKind.Plus ||
     token.kind === TokenKind.Minus
   );
+}
+
+function startsSayModifierText(token: Token): boolean {
+  return isExpressionStart(token) &&
+    token.kind !== TokenKind.Plus &&
+    token.kind !== TokenKind.Minus;
 }
 
 function isStatementStart(kind: TokenKind): boolean {

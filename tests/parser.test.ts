@@ -143,6 +143,43 @@ test("parses say pacing and skip syntax with pacing spans", () => {
   assert.deepEqual(second?.span, sourceSpan(source, source.indexOf("say \"Now\""), source.length));
 });
 
+test("treats say skip words as modifiers only when text follows", () => {
+  const source = [
+    'say skippable "Read this."',
+    'say as vera unskippable "Read this."',
+    "say skippable",
+    "say unskippable",
+    "say skippable + suffix",
+    "say skippable, instant",
+    "say as vera skippable",
+  ].join("\n");
+  const result = parse(source);
+
+  assert.deepEqual(result.diagnostics, []);
+  const statements = result.program.statements.filter(
+    (statement): statement is Extract<typeof statement, { kind: "sayStatement" }> =>
+      statement.kind === "sayStatement",
+  );
+  assert.deepEqual(statements.map((statement) => statement.skipPolicy), [
+    "skippable",
+    "unskippable",
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]);
+  assert.deepEqual(statements.slice(2).map((statement) => statement.value.kind), [
+    "identifier",
+    "identifier",
+    "binaryExpression",
+    "identifier",
+    "identifier",
+  ]);
+  assert.equal(statements[5]?.pacing, "instant");
+  assert.deepEqual(statements[4]?.value.span, sourceSpan(source, source.indexOf("skippable + suffix"), source.indexOf("skippable + suffix") + "skippable + suffix".length));
+});
+
 test("rejects missing say pacing expressions", () => {
   const result = parse('say "later",');
   assert.equal(result.program.statements.length, 0);
