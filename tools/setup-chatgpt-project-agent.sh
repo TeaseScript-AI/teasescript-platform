@@ -236,6 +236,7 @@ with tools, runtime:
         "docs/DEVELOPMENT-WORKFLOW-CONTEXT.md",
         "docs/PROJECT-INSTRUCTIONS.txt",
         "docs/CODEX-MODEL-SELECTION.md",
+        "docs/CODEX-PROMPTING.md",
     }
     if not canonical_required_tools.issubset(set(required_tools)):
         raise fail("tools manifest omits a canonical required path")
