@@ -184,8 +184,9 @@ Complete static typing and the wider V30 Standard Library/runtime APIs are not i
 
 The current source/compiler implements the ADR 0018 `say` pacing and skip forms while preserving existing `say`/
 `say as` spans, diagnostics, visible output, speaker identity, deterministic RNG use, and checkpoint behavior.
-`skippable`, `unskippable`, and `instant` remain contextual: ordinary compatible identifier expressions retain their
-existing meaning when they occupy a complete expression position.
+`skippable` and `unskippable` act as modifiers only where the existing value grammar cannot consume them as the complete
+`say` value. Bare `instant` is the zero-duration alias only when it fills the complete pacing slot; larger pacing
+expressions beginning with an identifier named `instant` remain ordinary expressions.
 
 ## Diagnostics
 

@@ -129,7 +129,10 @@ Published community libraries and package-local libraries still require a later 
 
 The selected resumable helpers are fully lowered into explicit versioned plan instructions and JSON-safe state. A checkpoint contains the original plan and does not perform runtime lookup against a current or `latest` Standard Library implementation.
 
-The current implementation includes the compact `showButton`, `askText`, `askNumber`, and `choose` parser/compiler slice. Dynamic interaction payloads are prepared explicitly before suspension, and result-bearing forms consume the short canonical interaction handoff into ordinary runtime state before later expression evaluation continues.
+The current implementation fully lowers the compact `showButton`, `askText`, `askNumber`, and `choose` forms plus the
+ADR 0018 `say` pacing/skip slice into explicit versioned instructions and state. Dynamic interaction payloads are
+prepared explicitly before suspension, and result-bearing forms consume the short canonical interaction handoff into
+ordinary runtime state before later expression evaluation continues.
 
 A new session may be compiled with a newer compatible Standard Library/compiler, but an active or restored session remains bound to its original plan and captured pacing configuration. No checkpoint migration is included.
 
