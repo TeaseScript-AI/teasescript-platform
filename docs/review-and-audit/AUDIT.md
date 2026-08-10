@@ -14,11 +14,13 @@ checklist, invent requirements, or manufacture hypothetical defects merely to ap
 
 ## Prepare the audit
 
-Before executing any audit, present the task-specific plan to the owner or coordinator and do not
-proceed until they approve or adjust it. An audit may assess a final candidate or diagnose an
-unfinished or troubled state; identify the exact state and limit every conclusion to it.
+Before executing an audit, create a temporary, task-specific audit plan. Present it to the owner or coordinator for
+approval when the assignment has not already authorized the audit and its declared scope. Do not add a second approval
+round-trip merely to restate an explicitly authorized audit. If the audit would expand its declared scope or take
+actions outside previously authorized boundaries, obtain approval before that expansion. An audit may assess a final
+candidate or diagnose an unfinished or troubled state; identify the exact state and limit every conclusion to it.
 
-Before executing the audit, create a temporary, task-specific audit plan. Record:
+Record:
 
 - the exact audit question, snapshot or state, scope, authority, obligations, and exclusions;
 - the code, tests, documentation, workflows, configuration, integrations, generated results, and
@@ -32,7 +34,10 @@ Before executing the audit, create a temporary, task-specific audit plan. Record
 
 Study the relevant implementation, history, earlier reviews, and current state. Treat earlier
 conclusions, author claims, green test totals, and previous approval as leads to challenge, not
-proof.
+proof. When the author is explicitly assigned to audit their own change, the audit still
+re-establishes scope, authority, likely misreadings, and evidence from the final candidate; the
+author's prior self-review and design intent are not proof and do not reduce the required depth.
+A self-audit does not replace independent review or approval when the surrounding workflow requires one.
 
 Update the plan as checks, results, and uncertainty emerge; it guides but never limits
 investigation. Add every subject-specific angle and evidence need required by the scope.
@@ -151,10 +156,15 @@ is possible.
 
 ### Evidence and findings
 
-Use independent, reproducible, proportionate evidence. Select the smallest evidence set that
-convincingly proves each obligation, but never use efficiency to excuse incomplete coverage.
-Avoid duplicate equivalent checks, maximum-scale cases when smaller evidence proves the same
-invariant, and permanent audit machinery for a bounded problem.
+Use reproducible, proportionate evidence that can be checked independently of the auditor's assertion or memory.
+Select the smallest evidence set that convincingly proves each obligation, but never use efficiency to excuse
+incomplete coverage.
+Audit obligations and relevant risk lenses are mandatory within the declared scope; particular evidence techniques
+are not rituals. Use mutation probes, fuzzing, history reconstruction, maximum-scale cases, or other expensive
+techniques when they are reasonably expected to materially reduce unresolved uncertainty. If a material risk makes such
+an expensive technique a credible way to do that, use it or record the inspected reason or equivalent evidence that
+closes the uncertainty; update the plan when that need emerges. Avoid duplicate equivalent checks and permanent audit
+machinery for a bounded problem.
 
 Classify actionable findings with the existing project finding classes. A finding must identify
 the violated requirement, supported path, real boundary, or demonstrated maintenance

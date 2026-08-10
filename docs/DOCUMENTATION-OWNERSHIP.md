@@ -58,7 +58,9 @@ fallback; deep historical research also checks relevant commits, pull requests,
 and earlier file versions. When retention value is uncertain, rely on Git. The
 compact checked milestone summaries explicitly retained by the release roadmap
 are the narrow exception: they record roadmap progress, not current implementation
-detail or decision rationale.
+detail or decision rationale. When a superseded standalone document is deliberately
+retained, make that lifecycle visible without opening the file through a concise path or
+name marker such as `SUPERSEDED-`, and identify the current replacement inside the document.
 
 ## Canonical source map
 
@@ -116,6 +118,17 @@ Verify that DRY is used where it reduces total complexity, that intentional
 repetition serves local comprehension, that moving facts are not copied without
 a concrete local need, and that routing documents do not silently become
 competing policy or current-status sources.
+
+For coordinated work, assign semantic write ownership for each canonical
+surface instead of having multiple agents independently reconcile the same
+meaning. This is a risk-based default, not an absolute rule that an executor may
+never edit documentation: a small mechanical correction may travel with an
+implementation when its authority, meaning, and conflict risk are clear, while
+cross-document consolidation, decision wording, or other semantically sensitive
+changes should normally be handled by one designated documentation writer or an
+explicit handoff. Concurrent documentation work must not create competing
+current-state descriptions merely because the file edits do not textually
+conflict.
 
 Document names describe durable purpose, not a temporary cleanup history or the
 latest review complaint. General tool, command, option, branch, issue, and
