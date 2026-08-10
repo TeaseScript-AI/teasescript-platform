@@ -390,8 +390,19 @@ test("interaction definitions preflight each field against remaining aggregate b
   ui.options.push({ text: "", label: MAX_INTERACTION_OPTION_ENTRIES });
   assert.equal(validateInstructionPlan(overOptions).valid, false);
 
-  const completionPlan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
-  const accepted = complete(completionPlan, { kind: "submittedText", submittedText: "é".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2) }, "text");
+  const completionPlan = interactionPlan("text", {
+    kind: "text",
+    hint: null,
+    accessibleName: defaults.text,
+  });
+  const accepted = complete(
+    completionPlan,
+    {
+      kind: "submittedText",
+      submittedText: "é".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2),
+    },
+    "text",
+  );
   assert.equal(accepted.outcome.kind, "completed");
   const overUtf8 = waiting(completionPlan);
   const rejected = completeAction(completionPlan, overUtf8.snapshot, {
