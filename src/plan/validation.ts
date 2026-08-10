@@ -1098,12 +1098,9 @@ function validateCanonicalPreparedSays(
 ): void {
   const producers = new Map<number, number[]>();
   instructions.forEach((instruction, instructionIndex) => {
-    if (!isRecord(instruction) || ![
-      "prepareSaySpeaker",
-      "prepareSayText",
-    ].includes(String(instruction.kind))) return;
-    if (!Number.isSafeInteger(instruction.destinationTemporary)) return;
-    const temporaryId = instruction.destinationTemporary as number;
+    if (!isRecord(instruction)) return;
+    const temporaryId = producedTemporaryId(instruction);
+    if (temporaryId === null) return;
     const entries = producers.get(temporaryId) ?? [];
     entries.push(instructionIndex);
     producers.set(temporaryId, entries);
@@ -1181,7 +1178,8 @@ function validatePreparedSayProducer(
   errors: PlanValidationError[],
 ): void {
   if (!Number.isSafeInteger(temporaryId)) return;
-  const candidates = producers.get(temporaryId as number) ?? [];
+  const preparedTemporaryId = temporaryId as number;
+  const candidates = producers.get(preparedTemporaryId) ?? [];
   const producerIndex = candidates.length === 1 ? candidates[0] : undefined;
   const producer = producerIndex === undefined ? undefined : instructions[producerIndex];
   const producerPath = `${sayPath}.${expectedKind === "prepareSaySpeaker" ? "speakerTemporary" : "textTemporary"}`;
@@ -1212,6 +1210,18 @@ function validatePreparedSayProducer(
     return;
   }
   consumed.add(producerIndex);
+  if (preparedSayTemporaryIsCleared(
+    instructions,
+    producerIndex,
+    sayIndex,
+    preparedTemporaryId,
+  )) {
+    errors.push(planError(
+      "TSC002",
+      `Prepared say ${expectedKind === "prepareSaySpeaker" ? "speaker" : "text"} temporary is cleared before its consuming say instruction.`,
+      producerPath,
+    ));
+  }
   if (preparedSayCanBeBypassed(instructions, index, region, producerIndex, sayIndex)) {
     errors.push(planError(
       "TSC002",
@@ -1221,6 +1231,27 @@ function validatePreparedSayProducer(
   }
 }
 
+function preparedSayTemporaryIsCleared(
+  instructions: readonly unknown[],
+  producerIndex: number,
+  sayIndex: number,
+  temporaryId: number,
+): boolean {
+  for (
+    let instructionIndex = producerIndex + 1;
+    instructionIndex < sayIndex;
+    instructionIndex += 1
+  ) {
+    const instruction = instructions[instructionIndex];
+    if (
+      isRecord(instruction) &&
+      instruction.kind === "clearTemporary" &&
+      instruction.temporaryId === temporaryId
+    ) return true;
+  }
+  return false;
+}
+
 function preparedSayCanBeBypassed(
   instructions: readonly unknown[],
   index: PlanValidationIndex,
@@ -1228,12 +1259,13 @@ function preparedSayCanBeBypassed(
   producerIndex: number,
   sayIndex: number,
 ): boolean {
-  for (let sourceIndex = region.startInstruction; sourceIndex < producerIndex; sourceIndex += 1) {
+  for (let sourceIndex = region.startInstruction; sourceIndex < region.endInstruction; sourceIndex += 1) {
     const instruction = instructions[sourceIndex];
     if (!isRecord(instruction) || index.owners[sourceIndex] !== region) continue;
     if (explicitInstructionTargets(instruction).some((target) =>
       typeof target === "number" && Number.isSafeInteger(target) &&
-      target > producerIndex && target <= sayIndex
+      target > producerIndex && target <= sayIndex &&
+      (sourceIndex < producerIndex || sourceIndex >= sayIndex)
     )) return true;
   }
   return false;

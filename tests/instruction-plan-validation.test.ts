@@ -296,7 +296,7 @@ test("keeps snapshots valid after accepted root control flow reaches its boundar
   assert.equal(validateRuntimeSnapshot(first.snapshot, compiled).valid, true);
 });
 
-test("rejects forged prepared say fields before any script event executes", () => {
+test("rejects forged prepared say fields and lifetimes before any script event executes", () => {
   const ordinary = plan('say "first", instant\nsay "second", instant');
   const secondSay = ordinary.instructions.findIndex((instruction, index) => index > 0 && instruction.kind === "say");
   assert.ok(secondSay >= 0);
@@ -310,9 +310,8 @@ test("rejects forged prepared say fields before any script event executes", () =
   );
 
   const prepared = plan([
-    'function textValue { return "hello" }',
     "function pace { return 1 }",
-    "say textValue(), pace()",
+    'say ["first", "second"], pace()',
   ].join("\n"));
   const sayIndex = prepared.instructions.findIndex((instruction) => instruction.kind === "say");
   const say = prepared.instructions[sayIndex];
@@ -320,6 +319,23 @@ test("rejects forged prepared say fields before any script event executes", () =
   if (say?.kind !== "say" || typeof say.speakerTemporary !== "number" || typeof say.textTemporary !== "number") {
     throw new Error("Expected prepared say fields.");
   }
+
+  const speakerPreparation = prepared.instructions.findIndex(
+    (instruction) => instruction.kind === "prepareSaySpeaker",
+  );
+  const textPreparation = prepared.instructions.findIndex(
+    (instruction) => instruction.kind === "prepareSayText",
+  );
+  const pacingCall = prepared.instructions.findIndex(
+    (instruction) => instruction.kind === "callFunction",
+  );
+  const pacingStore = prepared.instructions.findIndex(
+    (instruction) => instruction.kind === "storeTemporary",
+  );
+  assert.ok(speakerPreparation >= 0);
+  assert.ok(textPreparation >= 0);
+  assert.ok(pacingCall >= 0);
+  assert.ok(pacingStore >= 0);
 
   const cases: Array<[string, (candidate: any) => void]> = [
     ["forged text temporary", (candidate) => {
@@ -336,12 +352,68 @@ test("rejects forged prepared say fields before any script event executes", () =
       delete candidate.instructions[sayIndex].speakerTemporary;
       delete candidate.instructions[sayIndex].textTemporary;
     }],
+    ["duplicate prepared speaker producer", (candidate) => {
+      candidate.instructions[textPreparation].destinationTemporary = say.speakerTemporary;
+    }],
+    ["prepared speaker overwritten by store", (candidate) => {
+      candidate.instructions[pacingStore].temporaryId = say.speakerTemporary;
+      candidate.instructions[sayIndex].pacing.temporaryId = say.speakerTemporary;
+    }],
+    ["prepared text overwritten by store", (candidate) => {
+      candidate.instructions[pacingStore].temporaryId = say.textTemporary;
+      candidate.instructions[sayIndex].pacing.temporaryId = say.textTemporary;
+    }],
+    ["prepared speaker overwritten by a function call", (candidate) => {
+      candidate.instructions[pacingCall].destinationTemporary = say.speakerTemporary;
+      candidate.instructions[pacingStore].value.temporaryId = say.speakerTemporary;
+    }],
+    ["prepared speaker cleared before its say", (candidate) => {
+      candidate.instructions[pacingStore] = {
+        kind: "clearTemporary",
+        temporaryId: say.speakerTemporary,
+        span: candidate.instructions[pacingStore].span,
+      };
+    }],
+    ["prepared text cleared before its say", (candidate) => {
+      candidate.instructions[pacingStore] = {
+        kind: "clearTemporary",
+        temporaryId: say.textTemporary,
+        span: candidate.instructions[pacingStore].span,
+      };
+    }],
+    ["backedge re-enters a prepared say", (candidate) => {
+      candidate.instructions[sayIndex + 1] = {
+        kind: "jump",
+        target: sayIndex,
+        span: candidate.instructions[sayIndex + 1].span,
+      };
+    }],
   ];
   for (const [name, mutate] of cases) {
     const malformed = JSON.parse(JSON.stringify(prepared));
     mutate(malformed);
     assert.equal(validateInstructionPlan(malformed).valid, false, name);
   }
+
+  const malformed = JSON.parse(JSON.stringify(prepared));
+  malformed.instructions[pacingStore].temporaryId = say.speakerTemporary;
+  malformed.instructions[sayIndex].pacing.temporaryId = say.speakerTemporary;
+  let randomCalls = 0;
+  const initial = createFreshRuntimeSnapshot(prepared);
+  const beforeExecution = structuredClone(initial);
+  assert.throws(
+    () => run(malformed, initial, {
+      random: {
+        next: () => {
+          randomCalls += 1;
+          return 0.5;
+        },
+      },
+    }),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+  );
+  assert.deepEqual(initial, beforeExecution, "malformed plan does not mutate canonical runtime state");
+  assert.equal(randomCalls, 0, "malformed plan is rejected before source evaluation or events");
 
   const bypassable = plan([
     'function textValue { return "hello" }',
@@ -357,6 +429,40 @@ test("rejects forged prepared say fields before any script event executes", () =
   const malformedBypass = JSON.parse(JSON.stringify(bypassable)) as InstructionPlan;
   (malformedBypass.instructions[bypassJump] as any).target = bypassSay;
   assert.equal(validateInstructionPlan(malformedBypass).valid, false, "bypassed prepared text");
+});
+
+test("preserves compiler-generated prepared says across control-flow regions", () => {
+  const sources = [
+    [
+      "function textValue { return \"hello\" }",
+      "function pace { return 1 }",
+      'say textValue(), instant',
+      'say "pacing", pace()',
+      "say textValue(), pace()",
+    ].join("\n"),
+    [
+      "function textValue { return \"hello\" }",
+      "function pace { return 1 }",
+      "if true {",
+      "  say textValue(), pace()",
+      "}",
+      "repeat 2 {",
+      "  say textValue(), pace()",
+      "}",
+    ].join("\n"),
+    [
+      "function textValue { return \"hello\" }",
+      "function pace { return 1 }",
+      "function speak {",
+      "  say textValue(), pace()",
+      "}",
+      "speak()",
+    ].join("\n"),
+  ];
+
+  for (const source of sources) {
+    assert.equal(validateInstructionPlan(plan(source)).valid, true, source);
+  }
 });
 
 function rootBranchWithTwoFunctions(): string {
