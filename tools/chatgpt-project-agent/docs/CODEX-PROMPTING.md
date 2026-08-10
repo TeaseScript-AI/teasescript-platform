@@ -9,6 +9,9 @@ context. When uncertain whether it is still fresh, re-read it.
 This file owns work-package boundaries, milestone handling, prompt content, and the author preflight;
 [`CODEX-MODEL-SELECTION.md`](CODEX-MODEL-SELECTION.md) owns executor, model, reasoning, and escalation selection.
 
+Reclassify review-repair prompts by the remaining task; on retries, revisit selection when an escalation
+trigger is met.
+
 ## Build the work package first
 
 Prefer the largest coherent, dependency-closed work package within scope that Codex can reliably complete and verify in
