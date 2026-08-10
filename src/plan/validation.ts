@@ -1043,6 +1043,7 @@ function validateInstructionControlFlowRegions(
   if (index === null) return;
 
   validateCanonicalInteractionResultHandoffs(instructions, index, errors);
+  validateCanonicalPreparedSays(instructions, index, errors);
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
     const region = index.owners[instructionIndex];
@@ -1088,6 +1089,168 @@ function validateInstructionControlFlowRegions(
         return;
     }
   });
+}
+
+function validateCanonicalPreparedSays(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  errors: PlanValidationError[],
+): void {
+  const producers = new Map<number, number[]>();
+  instructions.forEach((instruction, instructionIndex) => {
+    if (!isRecord(instruction) || ![
+      "prepareSaySpeaker",
+      "prepareSayText",
+    ].includes(String(instruction.kind))) return;
+    if (!Number.isSafeInteger(instruction.destinationTemporary)) return;
+    const temporaryId = instruction.destinationTemporary as number;
+    const entries = producers.get(temporaryId) ?? [];
+    entries.push(instructionIndex);
+    producers.set(temporaryId, entries);
+  });
+
+  const consumed = new Set<number>();
+  instructions.forEach((instruction, instructionIndex) => {
+    if (!isRecord(instruction) || instruction.kind !== "say") return;
+    const region = index.owners[instructionIndex];
+    if (region === undefined) return;
+    const path = `$.instructions[${instructionIndex}]`;
+    const speakerTemporary = instruction.speakerTemporary;
+    const textTemporary = instruction.textTemporary;
+    if (speakerTemporary !== undefined && textTemporary !== undefined && speakerTemporary === textTemporary) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared say speaker and text temporaries must not alias.",
+        `${path}.textTemporary`,
+      ));
+    }
+    validatePreparedSayProducer(
+      "prepareSaySpeaker",
+      speakerTemporary,
+      instruction.speaker,
+      instructionIndex,
+      path,
+      region,
+      instructions,
+      index,
+      producers,
+      consumed,
+      errors,
+    );
+    validatePreparedSayProducer(
+      "prepareSayText",
+      textTemporary,
+      instruction.value,
+      instructionIndex,
+      path,
+      region,
+      instructions,
+      index,
+      producers,
+      consumed,
+      errors,
+    );
+  });
+
+  instructions.forEach((instruction, instructionIndex) => {
+    if (
+      isRecord(instruction) &&
+      (instruction.kind === "prepareSaySpeaker" || instruction.kind === "prepareSayText") &&
+      !consumed.has(instructionIndex)
+    ) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared say instruction must have one matching consuming say instruction.",
+        `$.instructions[${instructionIndex}]`,
+      ));
+    }
+  });
+}
+
+function validatePreparedSayProducer(
+  expectedKind: "prepareSaySpeaker" | "prepareSayText",
+  temporaryId: unknown,
+  expectedValue: unknown,
+  sayIndex: number,
+  sayPath: string,
+  region: InstructionExecutionRegion,
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  producers: ReadonlyMap<number, readonly number[]>,
+  consumed: Set<number>,
+  errors: PlanValidationError[],
+): void {
+  if (!Number.isSafeInteger(temporaryId)) return;
+  const candidates = producers.get(temporaryId as number) ?? [];
+  const producerIndex = candidates.length === 1 ? candidates[0] : undefined;
+  const producer = producerIndex === undefined ? undefined : instructions[producerIndex];
+  const producerPath = `${sayPath}.${expectedKind === "prepareSaySpeaker" ? "speakerTemporary" : "textTemporary"}`;
+  if (
+    producerIndex === undefined ||
+    !isRecord(producer) ||
+    producer.kind !== expectedKind ||
+    producerIndex >= sayIndex ||
+    index.owners[producerIndex] !== region ||
+    !samePreparedSayValue(
+      expectedKind === "prepareSaySpeaker" ? producer.speaker : producer.value,
+      expectedValue,
+    )
+  ) {
+    errors.push(planError(
+      "TSC002",
+      `Prepared say ${expectedKind === "prepareSaySpeaker" ? "speaker" : "text"} temporary lacks its canonical producer.`,
+      producerPath,
+    ));
+    return;
+  }
+  if (consumed.has(producerIndex)) {
+    errors.push(planError(
+      "TSC002",
+      "Prepared say producer must not be reused by another say instruction.",
+      producerPath,
+    ));
+    return;
+  }
+  consumed.add(producerIndex);
+  if (preparedSayCanBeBypassed(instructions, index, region, producerIndex, sayIndex)) {
+    errors.push(planError(
+      "TSC002",
+      "Prepared say instruction can be reached while bypassing its required preparation.",
+      sayPath,
+    ));
+  }
+}
+
+function preparedSayCanBeBypassed(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  region: InstructionExecutionRegion,
+  producerIndex: number,
+  sayIndex: number,
+): boolean {
+  for (let sourceIndex = region.startInstruction; sourceIndex < producerIndex; sourceIndex += 1) {
+    const instruction = instructions[sourceIndex];
+    if (!isRecord(instruction) || index.owners[sourceIndex] !== region) continue;
+    if (explicitInstructionTargets(instruction).some((target) =>
+      typeof target === "number" && Number.isSafeInteger(target) &&
+      target > producerIndex && target <= sayIndex
+    )) return true;
+  }
+  return false;
+}
+
+function samePreparedSayValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length && left.every((value, index) => samePreparedSayValue(value, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) =>
+    Object.hasOwn(right, key) && samePreparedSayValue(left[key], right[key])
+  );
 }
 
 function validateCanonicalInteractionResultHandoffs(

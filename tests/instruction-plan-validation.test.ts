@@ -296,6 +296,69 @@ test("keeps snapshots valid after accepted root control flow reaches its boundar
   assert.equal(validateRuntimeSnapshot(first.snapshot, compiled).valid, true);
 });
 
+test("rejects forged prepared say fields before any script event executes", () => {
+  const ordinary = plan('say "first", instant\nsay "second", instant');
+  const secondSay = ordinary.instructions.findIndex((instruction, index) => index > 0 && instruction.kind === "say");
+  assert.ok(secondSay >= 0);
+  const forgedSpeaker = JSON.parse(JSON.stringify(ordinary)) as InstructionPlan & { temporaryCount: number };
+  forgedSpeaker.temporaryCount = 1;
+  (forgedSpeaker.instructions[secondSay] as any).speakerTemporary = 0;
+  assert.equal(validateInstructionPlan(forgedSpeaker).valid, false);
+  assert.throws(
+    () => run(forgedSpeaker, createFreshRuntimeSnapshot(ordinary)),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+  );
+
+  const prepared = plan([
+    'function textValue { return "hello" }',
+    "function pace { return 1 }",
+    "say textValue(), pace()",
+  ].join("\n"));
+  const sayIndex = prepared.instructions.findIndex((instruction) => instruction.kind === "say");
+  const say = prepared.instructions[sayIndex];
+  assert.equal(say?.kind, "say");
+  if (say?.kind !== "say" || typeof say.speakerTemporary !== "number" || typeof say.textTemporary !== "number") {
+    throw new Error("Expected prepared say fields.");
+  }
+
+  const cases: Array<[string, (candidate: any) => void]> = [
+    ["forged text temporary", (candidate) => {
+      candidate.temporaryCount += 1;
+      candidate.instructions[sayIndex].textTemporary = candidate.temporaryCount - 1;
+    }],
+    ["wrong producer kind", (candidate) => {
+      candidate.instructions[sayIndex].speakerTemporary = say.textTemporary;
+    }],
+    ["aliased preparation temporaries", (candidate) => {
+      candidate.instructions[sayIndex].textTemporary = say.speakerTemporary;
+    }],
+    ["orphaned preparation instructions", (candidate) => {
+      delete candidate.instructions[sayIndex].speakerTemporary;
+      delete candidate.instructions[sayIndex].textTemporary;
+    }],
+  ];
+  for (const [name, mutate] of cases) {
+    const malformed = JSON.parse(JSON.stringify(prepared));
+    mutate(malformed);
+    assert.equal(validateInstructionPlan(malformed).valid, false, name);
+  }
+
+  const bypassable = plan([
+    'function textValue { return "hello" }',
+    "function pace { return 1 }",
+    "say false and textValue(), pace()",
+  ].join("\n"));
+  const bypassSay = bypassable.instructions.findIndex((instruction) => instruction.kind === "say");
+  const bypassTextPreparation = bypassable.instructions.findIndex((instruction) => instruction.kind === "prepareSayText");
+  const bypassJump = bypassable.instructions.findIndex(
+    (instruction, index) => index < bypassTextPreparation && instruction.kind === "jumpIfFalse",
+  );
+  assert.ok(bypassJump >= 0);
+  const malformedBypass = JSON.parse(JSON.stringify(bypassable)) as InstructionPlan;
+  (malformedBypass.instructions[bypassJump] as any).target = bypassSay;
+  assert.equal(validateInstructionPlan(malformedBypass).valid, false, "bypassed prepared text");
+});
+
 function rootBranchWithTwoFunctions(): string {
   return [
     'function first { say "first" }',

@@ -169,7 +169,7 @@ test("indexes prepared arguments and caller temporaries once per suspended frame
   missing.callFrames[0].callerTemporaries = [];
   assert.equal(validateRuntimeSnapshot(missing, compiled).valid, false);
   const mismatched = structuredClone(snapshot) as any;
-  mismatched.callFrames[0].callerTemporaries[0].value = 99;
+  mismatched.callFrames[0].callerTemporaries[1].value = 99;
   assert.equal(validateRuntimeSnapshot(mismatched, compiled).valid, false);
 });
 

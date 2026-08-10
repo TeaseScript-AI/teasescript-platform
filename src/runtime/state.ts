@@ -46,7 +46,7 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 14;
+export const RUNTIME_SNAPSHOT_VERSION = 15;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -2620,9 +2620,10 @@ function isExplicitExitHaltState(
   if (
     plan === undefined ||
     snapshot.status !== "halted" ||
-    snapshot.nextInstruction !== plan.rootEndInstruction
+    !nonNegativeSafeInteger(snapshot.nextInstruction) ||
+    snapshot.nextInstruction === 0
   ) return false;
-  return plan.instructions[plan.rootEndInstruction - 1]?.kind === "exit";
+  return plan.instructions[snapshot.nextInstruction - 1]?.kind === "exit";
 }
 
 function activePacingActions(snapshot: Record<string, unknown>): Record<string, unknown>[] {
@@ -3540,9 +3541,9 @@ function requiredInstructionTemporaries(
     case "exit":
       break;
     case "say":
-      collect(instruction.value);
-      if (typeof instruction.speakerTemporary === "number") output.add(instruction.speakerTemporary);
       if (typeof instruction.textTemporary === "number") output.add(instruction.textTemporary);
+      else collect(instruction.value);
+      if (typeof instruction.speakerTemporary === "number") output.add(instruction.speakerTemporary);
       if (typeof instruction.pacing === "object") collect(instruction.pacing);
       break;
     case "wait":

@@ -108,6 +108,52 @@ test("say prepares earlier inputs before a suspending pacing call and restores t
   assert.equal(resumed.events.filter((event) => event.kind === "say").length, 1);
 });
 
+test("text-side calls capture explicit speaker provenance before they suspend", () => {
+  const compiled = plan([
+    'speaker vera { displayName: "Before" }',
+    "let calls = 0",
+    "function mutate {",
+    "  calls = calls + 1",
+    '  vera.displayName = "After"',
+    '  return "hello"',
+    "}",
+    "say as vera mutate(), instant",
+  ].join("\n"));
+  const callIndex = compiled.instructions.findIndex((instruction) => instruction.kind === "callFunction");
+  const sayIndex = compiled.instructions.findIndex((instruction) => instruction.kind === "say");
+  const speakerPreparation = compiled.instructions.findIndex((instruction) => instruction.kind === "prepareSaySpeaker");
+  assert.ok(speakerPreparation >= 0);
+  assert.ok(speakerPreparation < callIndex);
+  assert.ok(callIndex < sayIndex);
+
+  let checkpointed = createFreshRuntimeSnapshot(compiled);
+  while (checkpointed.nextInstruction !== callIndex) {
+    checkpointed = executeInstruction(compiled, checkpointed).snapshot;
+  }
+  checkpointed = executeInstruction(compiled, checkpointed).snapshot;
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, checkpointed)));
+  const resumed = run(restored.plan, restored.snapshot);
+  const direct = run(compiled, createFreshRuntimeSnapshot(compiled));
+
+  assert.deepEqual(resumed.events, direct.events);
+  assert.deepEqual(resumed.snapshot, direct.snapshot);
+  const output = resumed.events.find((event) => event.kind === "say");
+  assert.equal(output?.kind, "say");
+  assert.equal(output?.speaker?.displayName, "Before");
+  assert.equal(output?.text, "hello");
+  assert.equal(resumed.events.filter((event) => event.kind === "say").length, 1);
+  assert.equal(
+    resumed.snapshot.frames[0]?.bindings.find((binding) => binding.name === "calls")?.value,
+    1,
+  );
+  assert.equal(
+    resumed.snapshot.speakers
+      .find((speaker) => speaker.identifier === "vera")
+      ?.properties.find((property) => property.name === "displayName")?.value,
+    "After",
+  );
+});
+
 test("first smart say creates a background gate and later say promotes it without a second request", () => {
   const compiled = plan('say "first"\nsay "second"');
   const result = run(compiled, createFreshRuntimeSnapshot(compiled));

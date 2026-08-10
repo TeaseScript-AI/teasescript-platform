@@ -109,10 +109,11 @@ export class InstructionCompiler {
         return;
       case "sayStatement":
         {
-        const needsPreparation = statement.pacing !== null &&
+        const textCanSuspend = this.#containsUserCall(statement.value);
+        const pacingCanSuspend = statement.pacing !== null &&
           statement.pacing !== "instant" &&
           this.#containsUserCall(statement.pacing);
-        if (!needsPreparation) {
+        if (!textCanSuspend && !pacingCanSuspend) {
           const lowered = this.#lowerExpression(statement.value);
           const loweredPacing = statement.pacing === null || statement.pacing === "instant"
             ? null
@@ -143,6 +144,30 @@ export class InstructionCompiler {
           span: copySpan(statement.span),
         });
         const lowered = this.#lowerExpression(statement.value);
+        if (!pacingCanSuspend) {
+          const loweredPacing = statement.pacing === null || statement.pacing === "instant"
+            ? null
+            : this.#lowerExpression(statement.pacing);
+          this.instructions.push({
+            kind: "say",
+            speaker: statement.speaker?.name ?? null,
+            value: lowered.plan,
+            speakerTemporary,
+            skipPolicy: statement.skipPolicy,
+            pacing: statement.pacing === null
+              ? "smart"
+              : loweredPacing === null
+                ? "instant"
+                : loweredPacing.plan,
+            span: copySpan(statement.span),
+          });
+          this.#emitTemporaryCleanup([
+            speakerTemporary,
+            ...lowered.temporaryIds,
+            ...(loweredPacing?.temporaryIds ?? []),
+          ], statement.span);
+          return;
+        }
         const textTemporary = this.#allocateTemporary();
         this.instructions.push({
           kind: "prepareSayText",

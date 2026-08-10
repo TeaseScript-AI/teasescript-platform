@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
@@ -140,6 +141,27 @@ test("explicit exit cleans released pacing lineage without admitting forged paci
   assert.equal(naturallyHalted.snapshot.status, "halted");
   assert.equal(naturallyHalted.snapshot.backgroundActions.length, 1);
   expectCheckpointJsonRoundTrip("natural root may retain background pacing", naturalRoot, naturallyHalted.snapshot);
+});
+
+test("branch-local and nested explicit exits reject forged retained pacing work", () => {
+  for (const source of [
+    'say "first", 5\nif true { exit }\nsay "never", instant',
+    'say "first", 5\nif true { if true { exit } }\nsay "never", instant',
+  ]) {
+    const compiled = plan(source);
+    const created = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
+    const pacing = created.snapshot.backgroundActions[0];
+    assert.equal(pacing?.kind, "chatPacingGate");
+    const exited = run(compiled, created.snapshot);
+    assert.equal(exited.snapshot.status, "halted");
+    assert.notEqual(exited.snapshot.nextInstruction, compiled.rootEndInstruction);
+    assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);
+
+    const forged = checkpointSnapshot(compiled, exited.snapshot);
+    forged.backgroundActions.push(structuredClone(pacing));
+    expectInvalidSnapshot("branch-local explicit exit cannot retain pacing work", compiled, forged);
+    assert.throws(() => createCheckpoint(compiled, forged));
+  }
 });
 
 test("terminal continuation handoffs reject malformed external state and preserve result-free buttons", () => {
@@ -325,16 +347,19 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const compiled = plan('say "first"');
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
-  assert.equal(compiled.version, 10);
-  assert.equal(snapshot.version, 14);
-  assert.equal(checkpoint.version, 17);
+  assert.equal(compiled.version, 11);
+  assert.equal(snapshot.version, 15);
+  assert.equal(checkpoint.version, 18);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot) as any;
-  oldSnapshot.version = 13;
+  oldSnapshot.version = 14;
   assert.equal(validateRuntimeSnapshot(oldSnapshot, compiled).valid, false);
+  const oldPlan = structuredClone(compiled) as any;
+  oldPlan.version = 10;
+  assert.equal(validateInstructionPlan(oldPlan).valid, false);
   const oldCheckpoint = structuredClone(checkpoint);
-  oldCheckpoint.version = 16;
+  oldCheckpoint.version = 17;
   assert.throws(() => deserializeCheckpoint(JSON.stringify(oldCheckpoint)));
 });
 
@@ -382,6 +407,48 @@ test("say pacing expression temporaries are required before checkpoint restore",
       (temporary: { id: number }) => temporary.id !== temporaryId,
     );
     assert.equal(validateRuntimeSnapshot(missingPreparedTemporary, compiled).valid, false);
+  }
+});
+
+test("prepared say text is live instead of its already-consumed source expression", () => {
+  const compiled = plan([
+    'function textValue { return "hello" }',
+    "function pace { return 1 }",
+    "say textValue(), pace()",
+  ].join("\n"));
+  const say = compiled.instructions.find((instruction) => instruction.kind === "say");
+  assert.equal(say?.kind, "say");
+  if (say?.kind !== "say" || typeof say.textTemporary !== "number" || typeof say.speakerTemporary !== "number") {
+    throw new Error("Expected a fully prepared say.");
+  }
+  const pacingTemporary = typeof say.pacing === "object" && say.pacing.kind === "temporary"
+    ? say.pacing.temporaryId
+    : null;
+  assert.equal(typeof pacingTemporary, "number");
+
+  let pending = createFreshRuntimeSnapshot(compiled);
+  while (pending.nextInstruction !== compiled.instructions.indexOf(say)) {
+    pending = executeInstruction(compiled, pending).snapshot;
+    assert.equal(validateRuntimeSnapshot(pending, compiled).valid, true);
+  }
+  expectCheckpointJsonRoundTrip("prepared say before pacing return", compiled, pending);
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, pending)));
+  const resumed = run(restored.plan, restored.snapshot);
+  const direct = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.deepEqual(resumed.events, direct.events);
+  assert.deepEqual(resumed.snapshot, direct.snapshot);
+  assert.equal(resumed.events.filter((event) => event.kind === "say").length, 1);
+
+  let boundary = createFreshRuntimeSnapshot(compiled);
+  while (boundary.status !== "halted") {
+    boundary = executeInstruction(compiled, boundary).snapshot;
+    assert.equal(validateRuntimeSnapshot(boundary, compiled).valid, true);
+  }
+
+  for (const temporaryId of [pacingTemporary, say.textTemporary, say.speakerTemporary]) {
+    const missing = structuredClone(pending) as any;
+    missing.temporaries = missing.temporaries.filter((temporary: { id: number }) => temporary.id !== temporaryId);
+    assert.equal(validateRuntimeSnapshot(missing, compiled).valid, false);
   }
 });
 
