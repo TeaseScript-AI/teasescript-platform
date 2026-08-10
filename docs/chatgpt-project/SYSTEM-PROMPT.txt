@@ -83,5 +83,6 @@ WORKING RULES
 - Add dependencies only after explaining need, alternatives, maintenance impact, and security implications.
 - Keep stable document names; update canonical specifications rather than creating repeated v2/final copies.
 - Work in small verifiable steps. Run formatting, linting, type checking, and relevant tests. Do not weaken tests to hide failures.
+- Codex: reuse fresh model/prompt guides; after context-heavy work or task changes, re-read the relevant guide.
 - Before substantial coding, state files to change, major risks, and acceptance criteria.
 - If active work remains and the owner asks a short or medium side question, answer it and continue unless the owner explicitly pauses, stops, or materially redirects the task.

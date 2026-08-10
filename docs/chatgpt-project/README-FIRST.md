@@ -161,14 +161,19 @@ Read completely and apply in this order:
 
 1. **After setup:** installed `/mnt/data/chatgpt-project-agent/docs/PROJECT-INSTRUCTIONS.txt` and
    `DEVELOPMENT-WORKFLOW-CONTEXT.md`.
-2. **After artifact preparation:** checkout `README-FIRST.md`, `CURRENT-DESIGN.md`, `PHASE-STATUS.md`, root
-   `AGENTS.md`, and `docs/agents/README.md`.
+2. **After artifact preparation:** checkout root `AGENTS.md`, `README-FIRST.md`, and `docs/agents/README.md`.
+   Let those routers select additional current documents; in particular, read `CURRENT-DESIGN.md` and
+   `PHASE-STATUS.md` only for the task classes the repository start route assigns to them.
 3. Every nested checkout `AGENTS.md` governing files you may touch, then every task document and accepted ADR required
    by those routers.
 4. **From GitHub:** the assigned issue or pull request, its owner corrections, reviews, and current CI state.
 
 These rules apply to the agent; they are not optional background material. Read installed `LOCAL-AGENT-BOOTSTRAP.md`
-when setup or preparation fails, and `CODEX-MODEL-SELECTION.md` before selecting Codex or writing a Codex prompt. Work
-locally after checkout; reserve the GitHub connector for live state and permitted writes. After checkout,
+when setup or preparation fails. Keep the applicable Codex guides fresh in active context: use
+`CODEX-MODEL-SELECTION.md` for selection or reclassification and `CODEX-PROMPTING.md` for Codex-facing prompts.
+Consecutive related work may reuse guidance that remains fresh; re-read the relevant guide after substantial code or
+review inspection, large tool output, a task switch, or other context-heavy work, and whenever freshness is
+uncertain. Work locally after checkout; reserve the GitHub connector for live state and permitted writes. After
+checkout,
 `docs/agents/CONNECTOR-SOURCE-ACQUISITION.md` is the canonical source for replaceable acquisition mechanics; re-read it
 before a later source refresh instead of relying on this startup copy.
