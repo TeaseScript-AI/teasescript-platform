@@ -226,7 +226,11 @@ enough.
 
 Escalate to a stronger model when the current model repeatedly makes incorrect ownership or semantic decisions, cannot
 preserve interacting invariants, produces superficially green but incomplete work, or consumes the expected saving
-through retries and repair.
+through retries and repair. Before escalating a well-understood repair, distinguish a model reasoning limit from a
+prompt-packaging failure: if accepted semantics are clear but the assignment unnecessarily makes one executor choose a
+moving foundation, downstream repair order, and publication boundary at once, first tighten the work package and
+implementation direction. A successful bounded retry is evidence that the earlier package was the problem; failure of
+that better-specified retry is stronger evidence for increased reasoning or model capability.
 
 A scope-stop condition is not a model-escalation trigger. It prevents automatic scope expansion. Do not repeat the same
 failed prompt and configuration more than once without changing the instructions, reasoning effort, model, or task
