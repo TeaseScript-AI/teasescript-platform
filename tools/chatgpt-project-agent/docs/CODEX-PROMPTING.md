@@ -85,11 +85,11 @@ stale local branch or remote-tracking ref is synchronization work, not completio
 When dense implementation is a plausible failure mode, make readability/KISS explicit: fewer lines or characters are
 not a goal; clarity, maintainability, debuggability, and reviewability are. For behavior-neutral readability or
 refactoring work, do not assume tests provide a completeness oracle: Codex can improve representative examples while
-leaving sibling regions untouched. Identify the concrete code regions or recurring patterns already found, make each
-independently skippable region its own completion item, and use a bounded final scan of the named files for the same
-pattern when useful. Describe semantic density such as combined predicates, mutations, nested object construction, or
-control decisions rather than inventing a numeric line-length target. Long but clear literals, signatures, regular
-expressions, and table-driven data are not automatic targets.
+leaving sibling regions untouched. Identify the concrete code regions or recurring patterns already found and explicitly
+enumerate the independently skippable regions or recurring pattern classes that must all be covered; use a bounded final
+scan of named files for the same pattern when useful. Describe semantic density such as combined predicates, mutations,
+nested object construction, or control decisions rather than inventing a numeric line-length target. Long but clear
+literals, signatures, regular expressions, and table-driven data are not automatic targets.
 
 For that maintenance class, state the behavior that must remain unchanged and verify completion against the actual diff
 and named regions rather than treating Codex's completion report as proof. Do not impose this inventory ceremony on a
@@ -141,9 +141,10 @@ If any item fails, revise the prompt first.
 - **Decision space:** For the selected configuration, have known semantic choices, architectural boundaries, dependency
   order, and relevant precedent been resolved far enough that Codex is implementing rather than rediscovering the work
   strategy? Tighten the package or direction when the prompt author can already establish those constraints.
-- **Maintenance oracle:** For behavior-neutral readability or refactoring without a strong failing oracle, are concrete
-  independently skippable regions explicit, behavior-preservation constraints clear, and any final same-pattern scan
-  bounded to named files? Avoid numeric formatting proxies for semantic readability.
+- **Maintenance oracle:** For behavior-neutral readability or refactoring without a strong failing oracle, are the
+  independently skippable regions or recurring pattern classes that must all be covered explicit, behavior-preservation
+  constraints clear, and any final same-pattern scan bounded to named files? Avoid numeric formatting proxies for
+  semantic readability.
 - **Administration:** Does every checklist, log, evidence, progress, or reporting request have a concrete purpose?
   Remove ceremonial work.
 - **Completion:** Does `Done when` cover actual checks, complete diff review, assigned publication, and final state
