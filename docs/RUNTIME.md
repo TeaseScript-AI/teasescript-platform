@@ -531,9 +531,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 9 | Added the accepted `say` skip-policy and pacing representation to each `say` instruction. |
+| Instruction plan | 10 | Added source-ordered `say` preparation instructions that capture speaker provenance and final visible text before a pacing call or interaction may suspend. |
 | Runtime snapshot | 12 | Replaced boolean prepared-output release evidence with exact owning-instruction lineage for pacing settlements. |
-| Checkpoint | 14 | Updated the self-contained bundle for instruction-plan revision 9 and runtime-snapshot revision 12. |
+| Checkpoint | 15 | Updated the self-contained bundle for instruction-plan revision 10 and runtime-snapshot revision 12. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

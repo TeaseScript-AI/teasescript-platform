@@ -1858,6 +1858,9 @@ function instructionKilledTemporaries(
   switch (instruction.kind) {
     case "storeTemporary":
       return new Set([instruction.temporaryId]);
+    case "prepareSayText":
+    case "prepareSaySpeaker":
+      return new Set([instruction.destinationTemporary]);
     case "prepareInteractionSpeaker":
       return new Set([instruction.destinationTemporary]);
     case "prepareReference":
@@ -3377,6 +3380,9 @@ function requiredInstructionTemporaries(
       break;
     case "say":
       collect(instruction.value);
+      if (typeof instruction.speakerTemporary === "number") output.add(instruction.speakerTemporary);
+      if (typeof instruction.textTemporary === "number") output.add(instruction.textTemporary);
+      if (typeof instruction.pacing === "object") collect(instruction.pacing);
       break;
     case "wait":
       collect(instruction.duration);

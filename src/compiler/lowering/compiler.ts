@@ -109,25 +109,66 @@ export class InstructionCompiler {
         return;
       case "sayStatement":
         {
+        const needsPreparation = statement.pacing !== null &&
+          statement.pacing !== "instant" &&
+          this.#containsUserCall(statement.pacing);
+        if (!needsPreparation) {
+          const lowered = this.#lowerExpression(statement.value);
+          const loweredPacing = statement.pacing === null || statement.pacing === "instant"
+            ? null
+            : this.#lowerExpression(statement.pacing);
+          this.instructions.push({
+            kind: "say",
+            speaker: statement.speaker?.name ?? null,
+            value: lowered.plan,
+            skipPolicy: statement.skipPolicy,
+            pacing: statement.pacing === null
+              ? "smart"
+              : loweredPacing === null
+                ? "instant"
+                : loweredPacing.plan,
+            span: copySpan(statement.span),
+          });
+          this.#emitTemporaryCleanup([
+            ...lowered.temporaryIds,
+            ...(loweredPacing?.temporaryIds ?? []),
+          ], statement.span);
+          return;
+        }
+        const speakerTemporary = this.#allocateTemporary();
+        this.instructions.push({
+          kind: "prepareSaySpeaker",
+          speaker: statement.speaker?.name ?? null,
+          destinationTemporary: speakerTemporary,
+          span: copySpan(statement.span),
+        });
         const lowered = this.#lowerExpression(statement.value);
-        const loweredPacing = statement.pacing === null || statement.pacing === "instant"
-          ? null
-          : this.#lowerExpression(statement.pacing);
-        const pacing = statement.pacing === null
-          ? "smart" as const
-          : statement.pacing === "instant"
-            ? "instant" as const
-            : loweredPacing!.plan;
+        const textTemporary = this.#allocateTemporary();
+        this.instructions.push({
+          kind: "prepareSayText",
+          value: lowered.plan,
+          destinationTemporary: textTemporary,
+          span: copySpan(statement.value.span),
+        });
+        this.#emitTemporaryCleanup(lowered.temporaryIds, statement.value.span);
+        const loweredPacing = this.#materializeExpression(
+          this.#lowerExpression(statement.pacing),
+          statement.pacing.span,
+        );
+        const pacing = loweredPacing.plan;
         this.instructions.push({
           kind: "say",
           speaker: statement.speaker?.name ?? null,
           value: lowered.plan,
+          speakerTemporary,
+          textTemporary,
           skipPolicy: statement.skipPolicy,
           pacing,
           span: copySpan(statement.span),
         });
         this.#emitTemporaryCleanup([
-          ...lowered.temporaryIds,
+          speakerTemporary,
+          textTemporary,
           ...(loweredPacing?.temporaryIds ?? []),
         ], statement.span);
         return;

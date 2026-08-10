@@ -408,6 +408,39 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     }
+    case "prepareSaySpeaker": {
+      const speaker = instruction.speaker === null
+        ? snapshot.defaultSpeaker === null
+          ? null
+          : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
+        : evaluator.speakerByName(instruction.speaker, instruction.span);
+      const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
+      setTemporary(
+        snapshot.temporaries,
+        instruction.destinationTemporary,
+        output === null
+          ? null
+          : createSerializableObject([
+              { name: "identifier", value: output.identifier },
+              { name: "displayName", value: output.displayName },
+              { name: "color", value: output.color },
+              { name: "font", value: output.font },
+              { name: "avatar", value: output.avatar },
+              { name: "speakerId", value: speaker === null ? 0 : speaker.id },
+            ]),
+      );
+      advance(snapshot);
+      return;
+    }
+    case "prepareSayText": {
+      setTemporary(
+        snapshot.temporaries,
+        instruction.destinationTemporary,
+        evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span),
+      );
+      advance(snapshot);
+      return;
+    }
     case "prepareInteractionSpeaker": {
       const speaker = instruction.speaker !== null
         ? evaluator.speakerByName(instruction.speaker, instruction.span)
@@ -2605,18 +2638,28 @@ function executeSay(
     return;
   }
 
-  const speaker =
-    instruction.speaker !== null
-      ? evaluator.speakerByName(instruction.speaker, instruction.span)
-      : snapshot.defaultSpeaker === null
-        ? null
-        : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
-  snapshot.contextualSpeaker = speaker?.id ?? null;
-  const text = evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span);
+  const preparedSpeaker = instruction.speakerTemporary === undefined
+    ? (() => {
+        const speaker = instruction.speaker === null
+          ? snapshot.defaultSpeaker === null ? null : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
+          : evaluator.speakerByName(instruction.speaker, instruction.span);
+        snapshot.contextualSpeaker = speaker?.id ?? null;
+        return {
+          output: speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events),
+          speakerId: speaker?.id ?? null,
+        };
+      })()
+    : preparedOutputSpeaker(snapshot.temporaries, instruction.speakerTemporary, instruction.span);
+  const output = preparedSpeaker.output;
+  const speaker = preparedSpeaker.speakerId === null
+    ? null
+    : evaluator.speakerById(preparedSpeaker.speakerId, instruction.span);
+  const text = instruction.textTemporary === undefined
+    ? evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span)
+    : preparedSayText(snapshot.temporaries, instruction.textTemporary, instruction.span);
   const pacingValue = typeof instruction.pacing === "object"
     ? evaluator.evaluate(instruction.pacing)
     : instruction.pacing;
-  const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
   const durationMs = sayDurationMs(instruction, text, pacingValue, snapshot);
   const skippable = effectiveSaySkippable(instruction.skipPolicy, speaker, instruction.span);
   const activeGate = snapshot.backgroundActions.find(
@@ -2648,6 +2691,44 @@ function executeSay(
   emitSay(snapshot, events, instruction.span, output, text);
   if (durationMs > 0) establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
   advance(snapshot);
+}
+
+function preparedOutputSpeaker(
+  temporaries: readonly RuntimeTemporarySnapshot[],
+  temporaryId: number,
+  span: SourceSpan,
+): { readonly output: OutputSpeaker | null; readonly speakerId: number | null } {
+  const value = readTemporary(temporaries, temporaryId, span);
+  if (value === null) return { output: null, speakerId: null };
+  if (!isObject(value)) throw fault("TSR052", "Prepared say speaker is invalid.", span);
+  const identifier = getSerializableProperty(value, "identifier");
+  const displayName = getSerializableProperty(value, "displayName");
+  const color = getSerializableProperty(value, "color");
+  const font = getSerializableProperty(value, "font");
+  const avatar = getSerializableProperty(value, "avatar");
+  const speakerId = getSerializableProperty(value, "speakerId");
+  if (
+    typeof identifier !== "string" ||
+    typeof displayName !== "string" ||
+    (typeof color !== "string" && color !== null) ||
+    (typeof font !== "string" && font !== null) ||
+    (typeof avatar !== "string" && avatar !== null) ||
+    !Number.isSafeInteger(speakerId)
+  ) throw fault("TSR052", "Prepared say speaker is invalid.", span);
+  return {
+    output: Object.freeze({ identifier, displayName, color, font, avatar }),
+    speakerId: speakerId as number,
+  };
+}
+
+function preparedSayText(
+  temporaries: readonly RuntimeTemporarySnapshot[],
+  temporaryId: number,
+  span: SourceSpan,
+): string {
+  const value = readTemporary(temporaries, temporaryId, span);
+  if (typeof value !== "string") throw fault("TSR052", "Prepared say text is invalid.", span);
+  return value;
 }
 
 function sayDurationMs(

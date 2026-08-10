@@ -312,6 +312,20 @@ function validateInstruction(
         errors.push(planError("TSC002", "Temporary boolean expectation must be boolean.", `${path}.expectBoolean`));
       }
       return;
+    case "prepareSaySpeaker":
+      if (!hasExactKeys(value, ["kind", "speaker", "destinationTemporary", "span"])) {
+        errors.push(planError("TSC002", "Prepared say speaker instruction contains unsupported fields.", path));
+      }
+      if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
+      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      return;
+    case "prepareSayText":
+      if (!hasExactKeys(value, ["kind", "value", "destinationTemporary", "span"])) {
+        errors.push(planError("TSC002", "Prepared say text instruction contains unsupported fields.", path));
+      }
+      validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      return;
     case "prepareInteractionSpeaker":
       if (!hasExactKeys(value, ["kind", "speaker", "destinationTemporary", "span"])) {
         errors.push(planError("TSC002", "Prepared interaction speaker instruction contains unsupported fields.", path));
@@ -375,6 +389,8 @@ function validateInstruction(
     case "say":
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      if (value.speakerTemporary !== undefined) validateTemporaryId(value.speakerTemporary, `${path}.speakerTemporary`, temporaryCount, errors);
+      if (value.textTemporary !== undefined) validateTemporaryId(value.textTemporary, `${path}.textTemporary`, temporaryCount, errors);
       if (value.skipPolicy !== null && value.skipPolicy !== "skippable" && value.skipPolicy !== "unskippable") {
         errors.push(planError("TSC002", "Say skip policy is invalid.", `${path}.skipPolicy`));
       }
@@ -1106,6 +1122,11 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
   if (instruction.kind === "storeTemporary") {
     value = instruction.temporaryId;
   } else if (
+    instruction.kind === "prepareSaySpeaker" ||
+    instruction.kind === "prepareSayText"
+  ) {
+    value = instruction.destinationTemporary;
+  } else if (
     instruction.kind === "prepareInteractionSpeaker" ||
     instruction.kind === "prepareReference" ||
     instruction.kind === "callFunction" ||
@@ -1145,6 +1166,7 @@ function canonicalHandoffConsumesTemporary(
     case "declareBinding":
     case "assign":
     case "storeTemporary":
+    case "prepareSayText":
     case "say":
     case "setDeclaredSpeakerProperty":
     case "returnValue":

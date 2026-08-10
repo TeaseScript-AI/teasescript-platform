@@ -1,7 +1,7 @@
 import type { SourceSpan } from "../source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 9;
+export const INSTRUCTION_PLAN_VERSION = 10;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
@@ -50,6 +50,8 @@ export type Instruction =
   | LoopStartInstruction
   | LoopControlInstruction
   | StoreTemporaryInstruction
+  | PrepareSaySpeakerInstruction
+  | PrepareSayTextInstruction
   | PrepareInteractionSpeakerInstruction
   | ClearTemporaryInstruction
   | CallFunctionInstruction
@@ -181,6 +183,20 @@ export interface StoreTemporaryInstruction extends InstructionBase {
   readonly expectBoolean: boolean;
 }
 
+/** Captures the resolved output speaker before later say operands run. */
+export interface PrepareSaySpeakerInstruction extends InstructionBase {
+  readonly kind: "prepareSaySpeaker";
+  readonly speaker: string | null;
+  readonly destinationTemporary: number;
+}
+
+/** Captures final visible text, including deterministic list selection. */
+export interface PrepareSayTextInstruction extends InstructionBase {
+  readonly kind: "prepareSayText";
+  readonly value: ExpressionPlan;
+  readonly destinationTemporary: number;
+}
+
 export interface PrepareInteractionSpeakerInstruction extends InstructionBase {
   readonly kind: "prepareInteractionSpeaker";
   readonly speaker: string | null;
@@ -248,6 +264,8 @@ export interface SayInstruction extends InstructionBase {
   readonly kind: "say";
   readonly speaker: string | null;
   readonly value: ExpressionPlan;
+  readonly speakerTemporary?: number;
+  readonly textTemporary?: number;
   readonly skipPolicy: "skippable" | "unskippable" | null;
   readonly pacing: ExpressionPlan | "smart" | "instant";
 }

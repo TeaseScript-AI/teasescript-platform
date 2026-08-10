@@ -82,6 +82,32 @@ test("instant remains an identifier when its pacing expression continues", () =>
   if (callGate?.kind === "chatPacingGate") assert.equal(callGate.deadlineMs, 2_000);
 });
 
+test("say prepares earlier inputs before a suspending pacing call and restores them exactly once", () => {
+  const compiled = plan([
+    "function pace(value) { return value }",
+    'say ["first", "second"], pace(1)',
+  ].join("\n"));
+  const kinds = compiled.instructions.map((instruction) => instruction.kind);
+  const speakerPreparation = kinds.indexOf("prepareSaySpeaker");
+  const textPreparation = kinds.indexOf("prepareSayText");
+  const pacingCall = kinds.indexOf("callFunction");
+  const say = kinds.indexOf("say");
+  assert.ok(speakerPreparation >= 0);
+  assert.ok(speakerPreparation < textPreparation);
+  assert.ok(textPreparation < pacingCall);
+  assert.ok(pacingCall < say);
+
+  let snapshot = createFreshRuntimeSnapshot(compiled, { seed: 77 });
+  snapshot = executeInstruction(compiled, snapshot).snapshot;
+  snapshot = executeInstruction(compiled, snapshot).snapshot;
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
+  const resumed = run(restored.plan, restored.snapshot);
+  const direct = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
+  assert.deepEqual(resumed.events, direct.events);
+  assert.deepEqual(resumed.snapshot, direct.snapshot);
+  assert.equal(resumed.events.filter((event) => event.kind === "say").length, 1);
+});
+
 test("first smart say creates a background gate and later say promotes it without a second request", () => {
   const compiled = plan('say "first"\nsay "second"');
   const result = run(compiled, createFreshRuntimeSnapshot(compiled));
