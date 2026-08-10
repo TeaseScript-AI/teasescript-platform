@@ -18,9 +18,10 @@ accept syntax, architecture, or implementation details.
   control flow, deterministic random built-ins, and top-level user-defined functions.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
-- **Pending-action and compact-interaction foundation:** compiler-owned blocking `wait` plus protected compact
-  `showButton`, `askText`, `askNumber`, and `choose` source forms lowered into one generic typed foreground-interaction
-  action and settlement family with deterministic checkpoint/restore and canonical transcript events.
+- **Pending-action, compact-interaction, and chat-pacing foundation:** compiler-owned blocking `wait`; protected
+  compact `showButton`, `askText`, `askNumber`, and `choose` forms lowered into one typed foreground-interaction
+  family; and ADR 0018 `say` smart/exact pacing with one resumable `chatPacingGate`, deterministic checkpoint/restore,
+  prepared output, typed skip settlement, and interaction/`wait` composition.
 - **Development and verification:** a standalone browser playground, source-to-runtime conformance coverage,
   focused runtime/checkpoint/corruption tests, and a bounded deterministic property campaign.
 
@@ -30,9 +31,9 @@ contracts and boundaries.
 ## Current major exclusions and blockers
 
 - complete V30 coverage, complete static typing, and units/date/time/duration values;
-- smart-autoplay pacing, Standard Player interaction controls, richer editor support, and final browser interaction
-  acceptance coverage;
-- populated background actions, general timers, media actions, camera lifecycle, and custom views;
+- Standard Player interaction/pacing controls, richer editor support, and final browser interaction acceptance
+  coverage;
+- background-action kinds beyond `chatPacingGate`, general timers, media actions, camera lifecycle, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
   community dependency resolution;

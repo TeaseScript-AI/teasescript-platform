@@ -22,8 +22,9 @@ implemented in `src/runtime/operations/complete-action.ts` and
 `src/runtime/operations/observe-time.ts`, with a small shared operation support
 module for validated input capture, result construction, and event-sequence
 allocation. `src/runtime/engine.ts` remains the execution facade for
-instructions, expressions, `run`, and orchestration. No new action state
-machine or pacing implementation was added.
+instructions, expressions, `run`, and orchestration. The implemented
+`chatPacingGate` reuses this pending-action machinery rather than adding a
+second pacing state machine.
 
 ## Accepted primitive boundary
 
@@ -40,11 +41,15 @@ The engine remains responsible for:
 - stable speaker/output provenance needed by runtime history;
 - bounded host/player data and security boundaries.
 
-Candidate Standard Library responsibilities include `say` policy, standard output targets, visible timer presentation, common input wrappers, validation/retry helpers, and friendly lifecycle APIs. ADR 0018 accepts the first concrete text/output slice described below. The accepted decisions do not by themselves change current runtime code or format constants.
+Candidate Standard Library responsibilities include `say` policy, standard output targets, visible timer presentation,
+common input wrappers, validation/retry helpers, and friendly lifecycle APIs. ADR 0018 accepts the first concrete
+text/output slice described below; the current compiler/runtime implements that slice through versioned engine state.
 
 ## Accepted first Standard Library runtime contract
 
-ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`, followed by a separate `say` smart-autoplay slice. The generic runtime family and the compact author-facing source/lowering slice are implemented. Standard Player UI and smart autoplay remain separate work.
+ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`,
+followed by a separate `say` smart-autoplay slice. Both engine/compiler slices are implemented. Standard Player controls
+and browser input wiring remain separate work.
 
 ### Generic foreground interactions
 
@@ -212,7 +217,9 @@ A primary click, touch activation, or eligible Space key submits a typed complet
 - a duplicate matching current `lastSettlement` returns `alreadySettled` without another event, output, RNG change, or continuation;
 - a foreground skip makes prepared output eligible only for a later runtime entry.
 
-Skip settles only the pacing gate. It does not skip arbitrary instructions, complete `wait`, cancel an interaction, or create a player transcript message.
+Skip settles only the pacing gate. It does not skip arbitrary instructions, complete `wait`, cancel an interaction,
+or create a player transcript message. The engine-side typed completion path is implemented; primary-click/touch/Space
+listeners in the Standard Player remain part of the later Player slice.
 
 #### Consumption by a foreground interaction
 
@@ -314,7 +321,11 @@ The implementation includes:
 
 The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are listed under [Format evolution](#format-evolution). They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation contains compiler-owned blocking `wait` plus the compact `showButton`, `askText`, `askNumber`, and `choose` source forms lowered into one generic foreground `interaction` instruction/action family for button, text, number, and choice. It retains the `waiting` status, persisted session time, one foreground action, an empty validated background-action collection, monotonic action IDs, bounded last-settlement replay, explicit time observation, and typed completion operations. Browser scheduling, Player controls, smart autoplay/pacing, and populated background actions remain out of scope.
+The current implementation contains compiler-owned blocking `wait`, the compact `showButton`, `askText`, `askNumber`,
+and `choose` forms lowered into one generic foreground `interaction` family, and ADR 0018 `say` pacing lowered into the
+`chatPacingGate` pending-action lifecycle. Runtime state retains persisted session time, at most one foreground action,
+zero or one background pacing gate, monotonic action IDs, bounded settlement replay, prepared `say` output, explicit
+time observation, and typed completion operations. Browser scheduling and Standard Player controls remain out of scope.
 
 ## Accepted resumable pending-action model
 
@@ -340,7 +351,21 @@ lastSettlement:
     ActionSettlement | null
 ```
 
-A valid current `waiting` snapshot contains exactly one foreground delay or interaction action. Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity, destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request sequence. A waiting result destination must still be absent. Successful interaction completion commits the canonical typed value directly into that destination and leaves the snapshot at the local compiler-defined continuation. Snapshot validation uses the independent single-use `interactionResultHandoff` as the canonical result authority while execution remains at the immediate commit or one-instruction transfer boundary, even if `lastSettlement` has already been replaced; after the first canonical consume, transfer, return, discard, or exit succeeds, the record is removed and the value is ordinary runtime state without an interaction-specific lifecycle. Every persisted interaction instruction, UI/accessibility/option shape, action, settlement, and snapshot field has an exact supported shape. Non-waiting states contain no foreground action. The background collection remains present but must be empty until the separately scoped pacing implementation versions that schema.
+A valid current `waiting` snapshot contains exactly one foreground delay, interaction, or `chatPacingGate` action.
+A foreground delay may coexist with one older background pacing gate; a foreground interaction or pacing gate may not.
+Non-waiting states contain no foreground action. `backgroundActions` is empty or contains one validated
+`chatPacingGate` with coherent identity, request sequence, deadline, ownership, and creation order.
+
+Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay
+is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity,
+destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request
+sequence. A waiting result destination must still be absent. Successful interaction completion commits the canonical
+typed value directly into that destination and leaves the snapshot at the local compiler-defined continuation. Snapshot
+validation uses the independent single-use `interactionResultHandoff` as the canonical result authority while
+execution remains at the immediate commit or one-instruction transfer boundary, even if `lastSettlement` has already
+been replaced; after the first canonical consume, transfer, return, discard, or exit succeeds, the record is removed,
+and the value becomes ordinary runtime state without an interaction-specific lifecycle. Every persisted interaction
+instruction, UI/accessibility/option shape, action, settlement, and snapshot field has an exact supported shape.
 
 `currentSessionTimeMs` is canonical runtime state. It preserves the nondecreasing session coordinate across checkpoint and restore. A fresh snapshot receives a validated initial coordinate; deterministic tests may use `0`.
 
@@ -364,7 +389,10 @@ settle actions due at effectiveNow
 
 No checkpoint may contain due-action processing performed against a newer observation while retaining the older session-time value.
 
-Blocking `wait` remains the first source-to-runtime slice. The generic interaction runtime is the second foreground use of ADR 0016 and is now exercised through the compact `showButton`, `askText`, `askNumber`, and `choose` parser/compiler slice as well as focused low-level plan tests. Smart-autoplay and `chatPacingGate` remain unimplemented.
+Blocking `wait` remains the first source-to-runtime slice. The generic interaction runtime is the second foreground use
+of ADR 0016. ADR 0018 `say` pacing now adds the first populated background-action slice through `chatPacingGate`,
+including background-to-foreground promotion, prepared output, typed/time settlement, `wait` coexistence, interaction
+consumption, and checkpoint/restore.
 
 ## Compiler and execution entry points
 
@@ -436,7 +464,9 @@ Under ADR 0017, Standard Library and package-library wrappers may call documente
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, and `null` according to the current implemented subset. When the value is a list, the runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects, sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively select or stringify them.
 
-The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 now defines the accepted deterministic first-POC smart-autoplay and pacing-action contract. That contract remains unimplemented until the required versioned runtime changes land.
+The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 defines the
+accepted deterministic first-POC smart-autoplay and pacing-action contract, and the current engine/compiler implements
+that contract. Standard Player event wiring remains a separate slice.
 
 ## Runtime defaults and limits
 
@@ -496,9 +526,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 8 | Narrowed source positions, temporary counts/IDs, and loop IDs to JavaScript safe-integer representation domains; revision 7 accepted values that the corrected contract must reject. |
-| Runtime snapshot | 8 | Added one nullable single-use `interactionResultHandoff` authority that protects the still-unconsumed destination independently of `lastSettlement`. |
-| Checkpoint | 10 | Updated the self-contained bundle for instruction-plan revision 8 while retaining runtime-snapshot revision 8. |
+| Instruction plan | 9 | Added the accepted `say` skip-policy and pacing representation to each `say` instruction. |
+| Runtime snapshot | 12 | Replaced boolean prepared-output release evidence with exact owning-instruction lineage for pacing settlements. |
+| Checkpoint | 14 | Updated the self-contained bundle for instruction-plan revision 9 and runtime-snapshot revision 12. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -517,7 +547,11 @@ The checkpoint revision represents the complete accepted checkpoint bundle:
 
 Instruction-plan and runtime-snapshot revisions remain independent and do not need matching numbers. No nested duplicate version fields, hidden sub-format registry, migration chain, or generated documentation synchronization is introduced.
 
-During the POC, only the current revision of each format is supported. Non-current revisions may be rejected explicitly, obsolete development saves and fixtures may become invalid after an incompatible change, and migration code requires a separate owner-approved decision. Git history is sufficient for reconstructing exact older schemas. Populated background actions, prepared pacing output, or captured smart-autoplay settings require their own later explicit format changes.
+During the POC, only the current revision of each format is supported. Non-current revisions may be rejected explicitly,
+obsolete development saves and fixtures may become invalid after an incompatible change, and migration code requires
+a separate owner-approved decision. Git history is sufficient for reconstructing exact older schemas. The current
+revisions include populated `chatPacingGate` background state, prepared pacing output, captured smart-autoplay
+settings, and exact pacing-settlement release lineage.
 
 ## API stability boundary
 
@@ -525,9 +559,10 @@ The exported TypeScript source frontend, source compiler, low-level runtime, sna
 
 ## Remaining runtime work
 
-- preserve blocking `wait` and the implemented generic interaction family while adding later ADR 0018 slices only through explicit versioned schema changes;
-- implement `chatPacingGate` through ADR 0016 background/foreground action state, checked captured settings, prepared output, and exact event ordering;
-- under ADR 0017, define the minimum background timed-work primitive and pause/resume/stop lifecycle for timers separately from developer runtime pause;
+- preserve blocking `wait`, generic interactions, and `chatPacingGate` while extending later runtime capabilities
+  through explicit versioned schema changes;
+- under ADR 0017, define the minimum background timed-work primitive and pause/resume/stop lifecycle for timers
+  separately from developer runtime pause;
 - define action-kind-specific media, advanced timeout, and detailed-result contracts without unnecessary independent state machines;
 - define broader text-output targets and involved-speaker/conversation provenance before multi-context LLM work;
 - stable package/plan identity and migration policy;
