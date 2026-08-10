@@ -1914,6 +1914,13 @@ function validateStatusConsistency(
     ) {
       errors.push("Ready runtime state contains execution progress.");
     }
+    if (
+      value.preparedSayOutput !== null ||
+      hasActivePacingGate(value) ||
+      hasPacingExecutionHistory(value.lastSettlement)
+    ) {
+      errors.push("Ready runtime state must not contain pacing execution state.");
+    }
   } else if (value.status === "halted") {
     if (calls !== 0 || loops !== 0 || temporaries !== 0 || scopes !== 1 || value.failure !== null) {
       errors.push("Halted runtime state retains active execution state.");
@@ -2084,6 +2091,28 @@ function validatePendingActionState(
   if (!validActiveActionLocationCoherence(value)) {
     errors.push("Runtime foreground and background action locations are incoherent.");
   }
+  if (!validActiveActionCompletionCapacity(value)) {
+    errors.push("Runtime active actions cannot reserve their required completion events.");
+  }
+}
+
+/**
+ * Active actions reserve their unavoidable future events. This is aggregate:
+ * a foreground delay and a background pacing gate may complete in one time
+ * observation and must both remain representable.
+ */
+function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>): boolean {
+  let requiredCompletionEvents = 0;
+  const backgroundActions = Array.isArray(snapshot.backgroundActions)
+    ? snapshot.backgroundActions
+    : [];
+  const actions = [snapshot.foregroundAction, ...backgroundActions];
+  for (const action of actions) {
+    if (!isPlainRecord(action)) continue;
+    if (action.kind === "interaction") requiredCompletionEvents += 2;
+    else if (action.kind === "delay" || action.kind === "chatPacingGate") requiredCompletionEvents += 1;
+  }
+  return hasEventSequenceCapacity(snapshot.nextEventSequence, requiredCompletionEvents);
 }
 
 function validBackgroundPacingActions(
@@ -2515,12 +2544,28 @@ function validTopLevelPreparedSayOutputRelationship(
     return validReleasedPacingSettlementAfterPreparedOutputConsumption(snapshot, settlement);
   }
   return isPreparedSayOutputShape(snapshot.preparedSayOutput) &&
-    snapshot.status === "running" &&
+    (snapshot.status === "running" || snapshot.status === "failed") &&
     snapshot.foregroundAction === null &&
     Array.isArray(snapshot.backgroundActions) &&
     !snapshot.backgroundActions.some((action) => isPlainRecord(action) && action.kind === "chatPacingGate") &&
     validPacingSettlementReleaseLineage(settlement, plan) &&
     settlement.releasedPreparedOutputInstruction === snapshot.preparedSayOutput.owningInstruction;
+}
+
+function hasActivePacingGate(snapshot: Record<string, unknown>): boolean {
+  const foregroundIsPacingGate =
+    isPlainRecord(snapshot.foregroundAction) &&
+    snapshot.foregroundAction.kind === "chatPacingGate";
+  const backgroundHasPacingGate =
+    Array.isArray(snapshot.backgroundActions) &&
+    snapshot.backgroundActions.some(
+      (action) => isPlainRecord(action) && action.kind === "chatPacingGate",
+    );
+  return foregroundIsPacingGate || backgroundHasPacingGate;
+}
+
+function hasPacingExecutionHistory(settlement: unknown): boolean {
+  return isPlainRecord(settlement) && settlement.actionKind === "chatPacingGate";
 }
 
 function validReleasedPacingSettlementAfterPreparedOutputConsumption(

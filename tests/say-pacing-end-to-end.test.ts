@@ -7,7 +7,7 @@ import {
   deserializeCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { run } from "../src/runtime/engine.js";
+import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import {
@@ -78,13 +78,15 @@ test("multiple pacing cycles preserve prepared output, identities, replay, and c
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  const finalRun = run(compiled, releasedThird.snapshot);
+  const fourthOutput = executeInstruction(compiled, releasedThird.snapshot);
+  assert.equal(fourthOutput.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
+  assert.equal(fourthOutput.snapshot.backgroundActions[0]?.actionId, 4);
+  assert.equal(fourthOutput.snapshot.lastSettlement?.actionId, 3);
+  assert.equal(validateRuntimeSnapshot(fourthOutput.snapshot, compiled).valid, true);
+  assert.doesNotThrow(() => createCheckpoint(compiled, fourthOutput.snapshot));
+  const finalRun = executeInstruction(compiled, fourthOutput.snapshot);
   assert.equal(finalRun.snapshot.status, "halted");
-  assert.equal(finalRun.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
-  assert.equal(finalRun.snapshot.backgroundActions[0]?.actionId, 4);
-  assert.equal(finalRun.snapshot.lastSettlement?.actionId, 3);
-  assert.equal(validateRuntimeSnapshot(finalRun.snapshot, compiled).valid, true);
-  assert.doesNotThrow(() => createCheckpoint(compiled, finalRun.snapshot));
+  assert.equal(finalRun.snapshot.backgroundActions.length, 0);
 
   const cuts = [first.snapshot, second.snapshot, releasedSecond.snapshot, third.snapshot, releasedThird.snapshot];
   for (const cut of cuts) {
@@ -141,8 +143,7 @@ test("mixed wait, interaction, instant, and pacing composition keeps event order
   assert.deepEqual(interactionCompleted.events.map((event) => event.kind), ["playerTranscript", "actionCompleted"]);
   const finalRun = run(compiled, interactionCompleted.snapshot);
   assert.deepEqual(finalRun.events.map((event) => event.kind), ["say", "say", "actionRequested", "exit"]);
-  assert.equal(finalRun.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
-  assert.equal(finalRun.snapshot.backgroundActions[0]?.actionId, interaction!.actionId + 1);
+  assert.equal(finalRun.snapshot.backgroundActions.length, 0);
   assert.equal(validateRuntimeSnapshot(finalRun.snapshot, compiled).valid, true);
   assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, finalRun.snapshot))));
 });

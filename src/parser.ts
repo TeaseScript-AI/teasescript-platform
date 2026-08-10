@@ -422,7 +422,7 @@ class Parser {
     let pacing: SayStatement["pacing"] = null;
     let endSpan = value.span;
     if (this.#match(TokenKind.Comma)) {
-      if (this.#checkIdentifier("instant")) {
+      if (this.#canParseInstantPacingAlias()) {
         endSpan = this.#advance().span;
         pacing = "instant";
       } else {
@@ -462,7 +462,7 @@ class Parser {
     if (value === null || speculative.#diagnostics.length > 0) return false;
 
     if (speculative.#match(TokenKind.Comma)) {
-      if (speculative.#checkIdentifier("instant")) {
+      if (speculative.#canParseInstantPacingAlias()) {
         speculative.#advance();
       } else {
         const pacing = speculative.#parseExpression();
@@ -479,6 +479,15 @@ class Parser {
       this.#check(TokenKind.RightBrace) ||
       this.#check(TokenKind.EndOfFile)
     );
+  }
+
+  /** `instant` remains an identifier unless it fills the entire pacing slot. */
+  #canParseInstantPacingAlias(): boolean {
+    if (!this.#checkIdentifier("instant")) return false;
+    const speculative = new Parser(this.tokens);
+    speculative.#current = this.#current;
+    speculative.#advance();
+    return speculative.#isSayStatementBoundary();
   }
 
   #parseExitStatement(): Statement {

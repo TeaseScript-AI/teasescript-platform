@@ -134,6 +134,11 @@ function executeCapturedInstruction(
     snapshot.nextInstruction === plan.rootEndInstruction &&
     snapshot.callFrames.length === 0
   ) {
+    const completeEventAndFutureCompletions = 1 + requiredFutureActionCompletionEvents(snapshot);
+    assertEventSequenceCapacity(
+      snapshot,
+      completeEventAndFutureCompletions,
+    );
     snapshot.status = "halted";
     const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
     events.push(createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan));
@@ -162,6 +167,11 @@ function executeCapturedInstruction(
       snapshot.nextInstruction === plan.rootEndInstruction
     ) {
       snapshot.status = "halted";
+      const completeEventAndFutureCompletions = 1 + requiredFutureActionCompletionEvents(snapshot);
+      assertEventSequenceCapacity(
+        snapshot,
+        completeEventAndFutureCompletions,
+      );
       events.push(createCompleteEvent(snapshot, instruction.span));
     }
   } catch (error) {
@@ -464,7 +474,7 @@ function executePlannedInstruction(
       }
       if (durationMs === 0) { advance(snapshot); return; }
       if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
-      assertEventSequenceCapacity(snapshot, 2, instruction.span);
+      assertEventSequenceCapacity(snapshot, requiredEventSequencesForNewDelay(snapshot), instruction.span);
       const sequence = takeSequence(snapshot);
       const action = Object.freeze({ kind: "delay" as const, actionId: snapshot.nextActionId, owningInstruction: snapshot.nextInstruction, continuationInstruction: snapshot.nextInstruction + 1, ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null, scopeDepth: snapshot.frames.length, loopDepth: snapshot.loopFrames.length, createdAtMs: snapshot.currentSessionTimeMs, deadlineMs, expectedCompletion: "time" as const, requestEventSequence: sequence });
       snapshot.nextActionId += 1;
@@ -548,6 +558,8 @@ function executePlannedInstruction(
       return;
     }
     case "exit":
+      snapshot.backgroundActions.length = 0;
+      snapshot.preparedSayOutput = null;
       snapshot.defaultSpeaker = null;
       snapshot.contextualSpeaker = null;
       snapshot.frames.splice(1);
@@ -1297,7 +1309,7 @@ class Evaluator {
         return;
       }
       if (isSpeakerReference(object)) {
-        setSpeakerProperty(this.speakerById(object.speakerId, target.span), target.name, copied);
+        setSpeakerProperty(this.speakerById(object.speakerId, target.span), target.name, copied, target.span);
         return;
       }
       throw fault("TSR003", "Only objects and speakers have assignable properties.", target.span);
@@ -1978,7 +1990,11 @@ function setSpeakerProperty(
   speaker: RuntimeSpeakerSnapshot,
   name: string,
   value: SerializableRuntimeValue,
+  span: SourceSpan,
 ): void {
+  if (name === "defaultSaySkippable" && typeof value !== "boolean") {
+    throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
+  }
   const property = speaker.properties.find((item) => item.name === name);
   if (property === undefined) speaker.properties.push({ name, value: cloneSerializableValue(value) });
   else property.value = cloneSerializableValue(value);
@@ -2553,7 +2569,7 @@ function executeSay(
 ): void {
   const prepared = snapshot.preparedSayOutput;
   if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) {
-    validatePacingCreation(snapshot, instruction.span, prepared.durationMs, 2);
+    validatePacingCreation(snapshot, instruction.span, prepared.durationMs);
     snapshot.preparedSayOutput = null;
     emitSay(snapshot, events, instruction.span, prepared.speaker, prepared.text);
     establishPacingAfterSay(
@@ -2606,7 +2622,7 @@ function executeSay(
     snapshot.status = "waiting";
     return;
   }
-  if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs, 2);
+  if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs);
   emitSay(snapshot, events, instruction.span, output, text);
   if (durationMs > 0) establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
   advance(snapshot);
@@ -2704,17 +2720,42 @@ function validatePacingCreation(
   snapshot: RuntimeSnapshot,
   span: SourceSpan,
   durationMs: number,
-  eventCount = 1,
 ): void {
   if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) {
     throw fault("TSR051", "Runtime action ID space is exhausted.", span);
   }
-  assertEventSequenceCapacity(snapshot, eventCount, span);
+  assertEventSequenceCapacity(snapshot, requiredEventSequencesForNewPacingGate(), span);
   try {
     calculatePacingDeadlineMs(snapshot.currentSessionTimeMs, durationMs);
   } catch (error) {
     throw fault("TSR050", error instanceof Error ? error.message : "Say pacing deadline is invalid.", span);
   }
+}
+
+/** A positive say emits output, requests its gate, and reserves its completion. */
+function requiredEventSequencesForNewPacingGate(): number {
+  const sayOutput = 1;
+  const pacingRequest = 1;
+  const pacingCompletion = 1;
+  return sayOutput + pacingRequest + pacingCompletion;
+}
+
+/** A new wait needs its request and completion, plus a background gate completion. */
+function requiredEventSequencesForNewDelay(snapshot: RuntimeSnapshot): number {
+  const delayRequestAndCompletion = 2;
+  const backgroundPacingCompletion = snapshot.backgroundActions.some(
+    (action) => action.kind === "chatPacingGate",
+  ) ? 1 : 0;
+  return delayRequestAndCompletion + backgroundPacingCompletion;
+}
+
+function requiredFutureActionCompletionEvents(snapshot: RuntimeSnapshot): number {
+  const actions = [snapshot.foregroundAction, ...snapshot.backgroundActions];
+  return actions.reduce((count, action) => {
+    if (action?.kind === "interaction") return count + 2;
+    if (action?.kind === "delay" || action?.kind === "chatPacingGate") return count + 1;
+    return count;
+  }, 0);
 }
 
 

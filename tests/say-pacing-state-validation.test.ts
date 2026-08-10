@@ -226,7 +226,7 @@ test("retained replay remains bounded across the legal cross-kind relations", ()
 });
 
 test("current pacing serialization versions accept only their exact schemas", () => {
-  const compiled = plan('say "first"\nexit');
+  const compiled = plan('say "first"');
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
   assert.equal(compiled.version, 9);
@@ -271,14 +271,14 @@ test("snapshot and checkpoint reject malformed pacing prepared output", () => {
 });
 
 test("snapshot and checkpoint reject representative malformed pacing action state", () => {
-  const backgroundPlan = plan('say "first"\nexit');
+  const backgroundPlan = plan('say "first"');
   const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
   const foregroundPlan = plan('say "first"\nsay "second"');
   const foreground = run(foregroundPlan, createFreshRuntimeSnapshot(foregroundPlan));
   const foregroundGate = foreground.snapshot.foregroundAction;
   assert.equal(foregroundGate?.kind, "chatPacingGate");
   if (foregroundGate?.kind !== "chatPacingGate") throw new Error("Expected a promoted pacing gate.");
-  const functionPlan = plan('function f { say "first" }\nf()\nexit');
+  const functionPlan = plan('function f { say "first" }\nf()');
   const functionBackground = run(functionPlan, createFreshRuntimeSnapshot(functionPlan));
   const settled = completeAction(backgroundPlan, background.snapshot, {
     actionId: 1,
@@ -388,7 +388,7 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
 });
 
 test("background pacing actions require dense JSON-safe array entries", () => {
-  const compiled = plan('say "first"\nexit');
+  const compiled = plan('say "first"');
   const background = run(compiled, createFreshRuntimeSnapshot(compiled));
   const baselineCheckpoint = JSON.parse(serializeCheckpoint(
     createCheckpoint(compiled, background.snapshot),
@@ -500,7 +500,7 @@ test("background pacing actions require dense JSON-safe array entries", () => {
 });
 
 test("#112 persisted arrays reject custom own keys that JSON would omit", () => {
-  const backgroundPlan = plan('say "first"\nexit');
+  const backgroundPlan = plan('say "first"');
   const background = run(
     backgroundPlan,
     createFreshRuntimeSnapshot(backgroundPlan),
@@ -549,6 +549,16 @@ test("#112 persisted arrays reject custom own keys that JSON would omit", () => 
       corruption.name,
     );
   }
+});
+
+test("ready snapshots reject pacing progress", () => {
+  const compiled = plan('say "first", 5\nexit');
+  const afterSay = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
+  const forged = structuredClone(afterSay.snapshot);
+  forged.status = "ready";
+  forged.nextInstruction = 0;
+  assert.equal(validateRuntimeSnapshot(forged, compiled).valid, false);
+  assert.throws(() => createCheckpoint(compiled, forged));
 });
 
 test("runtime-produced pacing states validate and checkpoint through their lifecycle", () => {
@@ -1310,9 +1320,9 @@ test("pacing settlements retain exact prepared-output lineage through release an
     },
     {
       name: "lineage must be null for background completion",
-      compiled: plan('say "first"\nexit'),
+      compiled: plan('say "first"'),
       checkpoint: (() => {
-        const backgroundPlan = plan('say "first"\nexit');
+        const backgroundPlan = plan('say "first"');
         const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
         const gate = background.snapshot.backgroundActions[0];
         if (gate?.kind !== "chatPacingGate") throw new Error("Expected a background pacing gate.");
