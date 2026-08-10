@@ -234,10 +234,11 @@ state.
 Do not use a stronger model or higher reasoning to compensate for excessive execution volume. Internal milestones are
 planning structure, not automatic prompt, branch, pull-request, context, or model-selection boundaries.
 
-Remove repetition and narrative filler, not meaning. Review prompts and phase plans for recurring token/context cost;
-remove detail that does not guide current execution, especially duplicated facts or unrelated future-phase material.
-Preserve necessary conditions, ordering, exceptions, and execution clarity. Do not write the patch in prose or leave
-the objective underspecified.
+Optimize for useful execution guidance, not prompt length. Specify outcomes, invariants, boundaries, and acceptance
+criteria; leave ordinary implementation choices to Codex. Add low-level steps only when they enforce a real contract
+or materially reduce ambiguity. When adding work, add coherent deliverables or coverage—not prose, repeated context,
+micro-steps, or reporting ceremony. Treat checklists as compact progress aids; require per-item evidence only when that
+evidence is itself required. Preserve necessary conditions, ordering, exceptions, and execution clarity.
 
 ### Internal routing recommendation
 
