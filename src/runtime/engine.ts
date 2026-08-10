@@ -22,6 +22,7 @@ import {
   assertEventSequenceCapacity,
   captureExecutableData,
   copySpan,
+  requiredFutureActionCompletionEvents,
   result,
   setTemporary,
   takeSequence,
@@ -248,14 +249,6 @@ export function run(
   }
   return result(current, events, instructionsExecuted);
 }
-
-/** Atomically records a host-supplied session-time observation and settles a due delay. */
-
-
-/** Validated host completion route. Delay payloads carry the observed session time. */
-
-
-
 
 function executePlannedInstruction(
   plan: InstructionPlan,
@@ -1587,11 +1580,12 @@ class Evaluator {
       fallback = derived.length === 0;
     }
     if (fallback && !this.snapshot.warnedSpeakerIds.includes(speaker.id)) {
+      const warningSequence = takeSequence(this.snapshot);
       this.snapshot.warnedSpeakerIds.push(speaker.id);
       events.push(
         Object.freeze({
           kind: "developerWarning",
-          sequence: takeSequence(this.snapshot),
+          sequence: warningSequence,
           severity: "warning",
           code: "TSW001",
           message: `Speaker '${speaker.identifier}' uses its identifier as the display name.`,
@@ -2863,15 +2857,6 @@ function requiredEventSequencesForNewDelay(snapshot: RuntimeSnapshot): number {
   return delayRequestAndCompletion + backgroundPacingCompletion;
 }
 
-function requiredFutureActionCompletionEvents(snapshot: RuntimeSnapshot): number {
-  const actions = [snapshot.foregroundAction, ...snapshot.backgroundActions];
-  return actions.reduce((count, action) => {
-    if (action?.kind === "interaction") return count + 2;
-    if (action?.kind === "delay" || action?.kind === "chatPacingGate") return count + 1;
-    return count;
-  }, 0);
-}
-
 function requiredEventSequencesForRootCompletion(snapshot: RuntimeSnapshot): number {
   const rootCompleteEvent = 1;
   return rootCompleteEvent + requiredFutureActionCompletionEvents(snapshot);
@@ -2896,6 +2881,7 @@ function failSnapshot(
   failure: RuntimeErrorInfo,
   events: InterpreterEvent[],
 ): void {
+  const failureSequence = takeSequence(snapshot);
   snapshot.status = "failed";
   snapshot.failure = {
     code: failure.code,
@@ -2905,7 +2891,7 @@ function failSnapshot(
   events.push(
     Object.freeze({
       kind: "runtimeFailure",
-      sequence: takeSequence(snapshot),
+      sequence: failureSequence,
       code: failure.code,
       message: failure.message,
       span: copySpan(failure.span),

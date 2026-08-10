@@ -90,7 +90,7 @@ function completePacingGate(
     return pendingResult(current, events, { kind: "completed", settlement });
   }
   assertEventSequenceCapacity(current, 1);
-  const completionEventSequence = takeSequence(current);
+  const completionEventSequence = takeSequence(current, 1);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
     actionId: action.actionId,
     actionKind: "chatPacingGate",
@@ -146,8 +146,8 @@ function completeInteraction(
   if (!resolved.ok) return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
   assertEventSequenceCapacity(current, 2);
   if (action.destinationTemporary !== null && resolved.result !== null) setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
-  const transcriptSequence = takeSequence(current);
-  const completionSequence = takeSequence(current);
+  const transcriptSequence = takeSequence(current, 2);
+  const completionSequence = takeSequence(current, 2);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
     actionId: action.actionId,
     actionKind: "interaction",

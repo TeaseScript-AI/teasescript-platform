@@ -8,7 +8,7 @@ import {
   deserializeCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { executeInstruction, run } from "../src/runtime/engine.js";
+import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import {
@@ -800,11 +800,12 @@ test("pacing capacity and action-ID failures do not partially commit transitions
   );
   const supersedeInput = structuredClone(afterFirst.snapshot);
   supersedeInput.nextEventSequence = max - 1;
-  const supersedeFailure = executeInstruction(supersedePlan, supersedeInput);
-  assert.equal(supersedeFailure.snapshot.status, "failed");
-  assert.equal(supersedeFailure.snapshot.backgroundActions.length, 1);
-  assert.equal(supersedeFailure.snapshot.lastSettlement, null);
-  assert.equal(supersedeFailure.events.filter((event) => event.kind === "say").length, 0);
+  const supersedeBefore = JSON.stringify(supersedeInput);
+  assert.throws(
+    () => executeInstruction(supersedePlan, supersedeInput),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+  );
+  assert.equal(JSON.stringify(supersedeInput), supersedeBefore);
 
   const interactionPlan = plan('say "first"\nshowButton "Continue"');
   const beforeInteraction = executeInstruction(
@@ -877,6 +878,120 @@ test("pacing actions reserve all mandatory future event sequences", () => {
   assert.equal(rejectedWait.snapshot.status, "failed");
   assert.equal(rejectedWait.snapshot.foregroundAction, null);
   assert.equal(rejectedWait.snapshot.backgroundActions.length, 1);
+});
+
+test("ordinary events preserve active pacing completion capacity", () => {
+  const max = Number.MAX_SAFE_INTEGER;
+
+  const warningPlan = plan('say "first", 5\nlet values = []\nvalues.remove("missing")\nexit');
+  const warningInstruction = warningPlan.instructions.findIndex(
+    (instruction) => instruction.kind === "evaluate",
+  );
+  assert.notEqual(warningInstruction, -1);
+  let beforeWarning = createFreshRuntimeSnapshot(warningPlan);
+  while (beforeWarning.nextInstruction < warningInstruction) {
+    beforeWarning = executeInstruction(warningPlan, beforeWarning).snapshot;
+  }
+
+  const warningEnough = structuredClone(beforeWarning);
+  warningEnough.nextEventSequence = max - 2;
+  const warned = executeInstruction(warningPlan, warningEnough);
+  assert.deepEqual(warned.events.map((event) => event.kind), ["developerWarning"]);
+  assert.equal(validateRuntimeSnapshot(warned.snapshot, warningPlan).valid, true);
+
+  const warningOneLess = structuredClone(beforeWarning);
+  warningOneLess.nextEventSequence = max - 1;
+  const warningBefore = JSON.stringify(warningOneLess);
+  assert.throws(
+    () => executeInstruction(warningPlan, warningOneLess),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+  );
+  assert.equal(JSON.stringify(warningOneLess), warningBefore);
+
+  const fallbackPlan = plan([
+    'speaker ada { displayName: "Ada" }',
+    "speaker vera {}",
+    'say as ada "first", 5',
+    'say as vera "second", 5',
+  ].join("\n"));
+  const secondSay = fallbackPlan.instructions
+    .map((instruction, index) => instruction.kind === "say" ? index : -1)
+    .filter((index) => index >= 0)[1];
+  if (secondSay === undefined) throw new Error("Expected a second say instruction.");
+  let beforeFallback = createFreshRuntimeSnapshot(fallbackPlan);
+  while (beforeFallback.nextInstruction < secondSay) {
+    beforeFallback = executeInstruction(fallbackPlan, beforeFallback).snapshot;
+  }
+
+  const fallbackEnough = structuredClone(beforeFallback);
+  fallbackEnough.nextEventSequence = max - 2;
+  const promoted = executeInstruction(fallbackPlan, fallbackEnough);
+  assert.deepEqual(promoted.events.map((event) => event.kind), ["developerWarning"]);
+  assert.equal(promoted.snapshot.foregroundAction?.kind, "chatPacingGate");
+  assert.equal(validateRuntimeSnapshot(promoted.snapshot, fallbackPlan).valid, true);
+
+  const fallbackOneLess = structuredClone(beforeFallback);
+  fallbackOneLess.nextEventSequence = max - 1;
+  const fallbackBefore = JSON.stringify(fallbackOneLess);
+  assert.throws(
+    () => executeInstruction(fallbackPlan, fallbackOneLess),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+  );
+  assert.equal(JSON.stringify(fallbackOneLess), fallbackBefore);
+
+  const failurePlan = plan('say "first", 5\nlet pacing = -1\nsay "second", pacing');
+  const failingSay = failurePlan.instructions.findIndex(
+    (instruction, index) => instruction.kind === "say" && index > 0,
+  );
+  let beforeFailure = createFreshRuntimeSnapshot(failurePlan);
+  while (beforeFailure.nextInstruction < failingSay) {
+    beforeFailure = executeInstruction(failurePlan, beforeFailure).snapshot;
+  }
+
+  const failureEnough = structuredClone(beforeFailure);
+  failureEnough.nextEventSequence = max - 2;
+  const failed = executeInstruction(failurePlan, failureEnough);
+  assert.deepEqual(failed.events.map((event) => event.kind), ["runtimeFailure"]);
+  assert.equal(validateRuntimeSnapshot(failed.snapshot, failurePlan).valid, true);
+
+  const failureOneLess = structuredClone(beforeFailure);
+  failureOneLess.nextEventSequence = max - 1;
+  const failureBefore = JSON.stringify(failureOneLess);
+  assert.throws(
+    () => executeInstruction(failurePlan, failureOneLess),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+  );
+  assert.equal(JSON.stringify(failureOneLess), failureBefore);
+
+  const budgetPlan = plan('say "first", 5\nlet value = 1\nexit');
+  const first = executeInstruction(budgetPlan, createFreshRuntimeSnapshot(budgetPlan));
+  const budgetEnough = structuredClone(first.snapshot);
+  budgetEnough.nextEventSequence = max - 2;
+  const budgetFailed = run(budgetPlan, budgetEnough, {}, { instructionBudget: 1 });
+  assert.deepEqual(budgetFailed.events.map((event) => event.kind), ["runtimeFailure"]);
+  assert.equal(validateRuntimeSnapshot(budgetFailed.snapshot, budgetPlan).valid, true);
+
+  const budgetOneLess = structuredClone(first.snapshot);
+  budgetOneLess.nextEventSequence = max - 1;
+  const budgetBefore = JSON.stringify(budgetOneLess);
+  assert.throws(
+    () => run(budgetPlan, budgetOneLess, {}, { instructionBudget: 1 }),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+  );
+  assert.equal(JSON.stringify(budgetOneLess), budgetBefore);
+
+  const settlementInput = structuredClone(first.snapshot);
+  settlementInput.nextEventSequence = max - 1;
+  const gate = settlementInput.backgroundActions[0];
+  assert.equal(gate?.kind, "chatPacingGate");
+  const settled = completeAction(budgetPlan, settlementInput, {
+    actionId: gate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(settled.outcome.kind, "completed");
+  assert.equal(settled.snapshot.nextEventSequence, max);
+  assert.equal(validateRuntimeSnapshot(settled.snapshot, budgetPlan).valid, true);
 });
 
 test("terminal say transitions reserve complete and future action events atomically", () => {

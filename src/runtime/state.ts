@@ -46,7 +46,7 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 13;
+export const RUNTIME_SNAPSHOT_VERSION = 14;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -2477,7 +2477,7 @@ function validPacingGateCreationProvenance(
   plan: InstructionPlan | undefined,
 ): boolean {
   if (
-    !nonNegativeSafeInteger(action.scopeDepth) ||
+    !positiveSafeInteger(action.scopeDepth) ||
     !nonNegativeSafeInteger(action.loopDepth) ||
     action.loopDepth > action.scopeDepth ||
     !positiveSafeInteger(snapshot.nextScopeId) ||

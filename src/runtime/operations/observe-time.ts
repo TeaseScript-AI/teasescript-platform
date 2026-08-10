@@ -63,7 +63,7 @@ function settleForegroundTimedAction(
   action: RuntimeDelayActionSnapshot | RuntimeChatPacingGateActionSnapshot,
   events: InterpreterEvent[],
 ): RuntimeActionSettlementSnapshot {
-  const completionEventSequence = takeSequence(snapshot);
+  const completionEventSequence = takeSequence(snapshot, 1);
   const settlement = action.kind === "delay"
     ? createDelaySettlement(action, completionEventSequence, snapshot.currentSessionTimeMs)
     : createPacingSettlement(action, completionEventSequence, snapshot.currentSessionTimeMs);

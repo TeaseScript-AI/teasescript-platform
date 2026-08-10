@@ -326,16 +326,86 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
   assert.equal(compiled.version, 10);
-  assert.equal(snapshot.version, 13);
-  assert.equal(checkpoint.version, 16);
+  assert.equal(snapshot.version, 14);
+  assert.equal(checkpoint.version, 17);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot) as any;
-  oldSnapshot.version = 11;
+  oldSnapshot.version = 13;
   assert.equal(validateRuntimeSnapshot(oldSnapshot, compiled).valid, false);
   const oldCheckpoint = structuredClone(checkpoint);
-  oldCheckpoint.version = 13;
+  oldCheckpoint.version = 16;
   assert.throws(() => deserializeCheckpoint(JSON.stringify(oldCheckpoint)));
+});
+
+test("say pacing expression temporaries are required before checkpoint restore", () => {
+  const compiled = plan([
+    "function pace(value) { return value }",
+    'say "first", 5',
+    'say "second", pace(5)',
+  ].join("\n"));
+  const say = compiled.instructions.find(
+    (instruction) =>
+      instruction.kind === "say" &&
+      typeof instruction.pacing === "object" &&
+      instruction.pacing.kind === "temporary",
+  );
+  assert.notEqual(say, undefined);
+  assert.equal(say?.kind, "say");
+  if (say?.kind !== "say" || typeof say.pacing !== "object" || say.pacing.kind !== "temporary") {
+    throw new Error("Expected a materialized say pacing expression.");
+  }
+
+  const pacingTemporary = say.pacing.temporaryId;
+  let pending = createFreshRuntimeSnapshot(compiled);
+  while (pending.nextInstruction !== compiled.instructions.indexOf(say)) {
+    pending = executeInstruction(compiled, pending).snapshot;
+  }
+  assert.ok(pending.temporaries.some((temporary) => temporary.id === pacingTemporary));
+  assert.equal(validateRuntimeSnapshot(pending, compiled).valid, true);
+
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, pending)));
+  const promoted = executeInstruction(restored.plan, restored.snapshot);
+  assert.equal(promoted.snapshot.foregroundAction?.kind, "chatPacingGate");
+
+  const missingPacingTemporary = structuredClone(pending) as any;
+  missingPacingTemporary.temporaries = missingPacingTemporary.temporaries.filter(
+    (temporary: { id: number }) => temporary.id !== pacingTemporary,
+  );
+  assert.equal(validateRuntimeSnapshot(missingPacingTemporary, compiled).valid, false);
+  assert.throws(() => createCheckpoint(compiled, missingPacingTemporary));
+
+  for (const temporaryId of [say.speakerTemporary, say.textTemporary]) {
+    assert.equal(typeof temporaryId, "number");
+    const missingPreparedTemporary = structuredClone(pending) as any;
+    missingPreparedTemporary.temporaries = missingPreparedTemporary.temporaries.filter(
+      (temporary: { id: number }) => temporary.id !== temporaryId,
+    );
+    assert.equal(validateRuntimeSnapshot(missingPreparedTemporary, compiled).valid, false);
+  }
+});
+
+test("pacing creation provenance requires a positive historical scope depth", () => {
+  const rootPlan = plan('say "root", 5\nexit');
+  const root = executeInstruction(rootPlan, createFreshRuntimeSnapshot(rootPlan)).snapshot;
+  assert.equal(root.backgroundActions[0]?.kind, "chatPacingGate");
+  assert.equal(root.backgroundActions[0]?.scopeDepth, 1);
+  assert.equal(validateRuntimeSnapshot(root, rootPlan).valid, true);
+  assert.doesNotThrow(() => createCheckpoint(rootPlan, root));
+
+  const zeroDepth = structuredClone(root) as any;
+  zeroDepth.backgroundActions[0].scopeDepth = 0;
+  assert.equal(validateRuntimeSnapshot(zeroDepth, rootPlan).valid, false);
+  assert.throws(() => createCheckpoint(rootPlan, zeroDepth));
+
+  const functionPlan = plan('function f { say "inside", 5 }\nf()');
+  const unwound = run(functionPlan, createFreshRuntimeSnapshot(functionPlan)).snapshot;
+  assert.equal(unwound.status, "halted");
+  assert.equal(unwound.frames.length, 1);
+  assert.equal(unwound.backgroundActions[0]?.kind, "chatPacingGate");
+  assert.ok((unwound.backgroundActions[0]?.scopeDepth ?? 0) > unwound.frames.length);
+  assert.equal(validateRuntimeSnapshot(unwound, functionPlan).valid, true);
+  assert.doesNotThrow(() => createCheckpoint(functionPlan, unwound));
 });
 
 test("snapshot and checkpoint reject malformed pacing prepared output", () => {

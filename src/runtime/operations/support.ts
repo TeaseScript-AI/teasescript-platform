@@ -89,8 +89,34 @@ export function assertEventSequenceCapacity(snapshot: RuntimeSnapshot, count: nu
   throw new RuntimeDataError("TSR101", "Runtime nextEventSequence cannot satisfy the pending action atomically.");
 }
 
-export function takeSequence(snapshot: RuntimeSnapshot): number {
+/**
+ * Count the completion events that active actions must still be able to emit.
+ * The count is derived from canonical action state, not persisted separately.
+ */
+export function requiredFutureActionCompletionEvents(snapshot: RuntimeSnapshot): number {
+  const actions = [snapshot.foregroundAction, ...snapshot.backgroundActions];
+  return actions.reduce((count, action) => {
+    if (action?.kind === "interaction") return count + 2;
+    if (action?.kind === "delay" || action?.kind === "chatPacingGate") return count + 1;
+    return count;
+  }, 0);
+}
+
+/**
+ * Allocate one event while retaining capacity for active actions. A settlement
+ * may declare the completion events it is discharging before it removes its
+ * action from canonical state.
+ */
+export function takeSequence(
+  snapshot: RuntimeSnapshot,
+  dischargedActionCompletionEvents = 0,
+): number {
   assertCounterCanAdvance(snapshot.nextEventSequence, "nextEventSequence");
+  const remainingCompletionEvents = Math.max(
+    0,
+    requiredFutureActionCompletionEvents(snapshot) - dischargedActionCompletionEvents,
+  );
+  assertEventSequenceCapacity(snapshot, 1 + remainingCompletionEvents);
   const sequence = snapshot.nextEventSequence;
   snapshot.nextEventSequence += 1;
   return sequence;
