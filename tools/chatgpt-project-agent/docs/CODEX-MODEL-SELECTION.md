@@ -229,8 +229,10 @@ preserve interacting invariants, produces superficially green but incomplete wor
 through retries and repair. Before escalating a well-understood repair, distinguish a model reasoning limit from a
 prompt-packaging failure: if accepted semantics are clear but the assignment unnecessarily makes one executor choose a
 moving foundation, downstream repair order, and publication boundary at once, first tighten the work package and
-implementation direction. A successful bounded retry is evidence that the earlier package was the problem; failure of
-that better-specified retry is stronger evidence for increased reasoning or model capability.
+implementation direction. A successful bounded retry is evidence that the earlier package was the problem. If the
+better-specified retry still fails, treat that as escalation evidence only when the failure exposes a remaining
+reasoning, semantic or invariant-preservation, or diagnostic capability burden; execution volume, tooling, environment,
+test-harness, publication, or other non-capability failures are not evidence for a stronger model or reasoning level.
 
 A scope-stop condition is not a model-escalation trigger. It prevents automatic scope expansion. Do not repeat the same
 failed prompt and configuration more than once without changing the instructions, reasoning effort, model, or task
