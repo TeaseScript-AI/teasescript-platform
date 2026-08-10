@@ -46,7 +46,7 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 12;
+export const RUNTIME_SNAPSHOT_VERSION = 13;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -80,6 +80,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextActionId",
   "lastSettlement",
   "interactionResultHandoff",
+  "terminalContinuationHandoff",
   "preparedSayOutput",
   "maxCallDepth",
   "status",
@@ -184,6 +185,18 @@ export interface RuntimeInteractionResultHandoffSnapshot {
   readonly result: string | number;
 }
 
+/**
+ * Single-use authority for a settled terminal foreground action. Unlike
+ * `lastSettlement`, this remains meaningful when later background work
+ * settles before the next normal runtime entry completes the root.
+ */
+export interface RuntimeTerminalContinuationHandoffSnapshot {
+  readonly actionId: number;
+  readonly actionKind: "delay" | "interaction";
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+}
+
 export interface ChatPacingSettings {
   readonly baseDelayMs: number;
   readonly delayPerWordMs: number;
@@ -214,6 +227,7 @@ export interface RuntimeSnapshot {
   nextActionId: number;
   lastSettlement: RuntimeActionSettlementSnapshot | null;
   interactionResultHandoff: RuntimeInteractionResultHandoffSnapshot | null;
+  terminalContinuationHandoff: RuntimeTerminalContinuationHandoffSnapshot | null;
   preparedSayOutput: RuntimePreparedSayOutputSnapshot | null;
   readonly maxCallDepth: number;
   status: RuntimeStatus;
@@ -319,6 +333,7 @@ export function createFreshRuntimeSnapshot(
     nextActionId: 1,
     lastSettlement: null,
     interactionResultHandoff: null,
+    terminalContinuationHandoff: null,
     preparedSayOutput: null,
     maxCallDepth,
     status: capturedPlan.plan.rootEndInstruction === 0 ? "halted" : "ready",
@@ -407,6 +422,10 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       snapshot.interactionResultHandoff === null
         ? null
         : cloneInteractionResultHandoff(snapshot.interactionResultHandoff),
+    terminalContinuationHandoff:
+      snapshot.terminalContinuationHandoff === null
+        ? null
+        : cloneTerminalContinuationHandoff(snapshot.terminalContinuationHandoff),
     preparedSayOutput: snapshot.preparedSayOutput === null ? null : clonePreparedSayOutput(snapshot.preparedSayOutput),
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
@@ -431,6 +450,17 @@ function cloneInteractionResultHandoff(
     ownerCallFrameId: handoff.ownerCallFrameId,
     destinationTemporary: handoff.destinationTemporary,
     result: handoff.result,
+  };
+}
+
+function cloneTerminalContinuationHandoff(
+  handoff: RuntimeTerminalContinuationHandoffSnapshot,
+): RuntimeTerminalContinuationHandoffSnapshot {
+  return {
+    actionId: handoff.actionId,
+    actionKind: handoff.actionKind,
+    owningInstruction: handoff.owningInstruction,
+    continuationInstruction: handoff.continuationInstruction,
   };
 }
 
@@ -742,6 +772,7 @@ export function validateCapturedRuntimeSnapshot(
   }
   validatePendingActionState(value, plan, analysis, errors);
   validateInteractionResultHandoffState(value, plan, analysis, errors);
+  validateTerminalContinuationHandoffState(value, plan, errors);
   if (
     analysis?.detailedWorkExceeded === true &&
     !errors.includes("Runtime snapshot exceeds the detailed validation work limit.")
@@ -1931,6 +1962,9 @@ function validateStatusConsistency(
     if (plan !== undefined && !isLegalHaltPosition(value.nextInstruction, plan)) {
       errors.push("Halted runtime state is not at a legal halt position.");
     }
+    if (isExplicitExitHaltState(value, plan) && hasActivePacingGate(value)) {
+      errors.push("Explicit exit runtime state must not retain active pacing work.");
+    }
   } else if (value.status === "running") {
     if (value.failure !== null) errors.push("Running runtime state contains failure information.");
     if (
@@ -1945,10 +1979,9 @@ function validateStatusConsistency(
 
 /**
  * A terminal delay or result-free button may settle at the root-end
- * coordinate while awaiting its ordinary completion entry. Do not treat the
- * coordinate as a general running-state escape hatch: result-bearing
- * interactions require an in-region continuation that consumes or clears
- * their destination temporary.
+ * coordinate while awaiting its ordinary completion entry. The separate
+ * handoff remains authoritative even when a background pacing settlement
+ * replaces bounded replay data before that entry occurs.
  */
 function validateRootEndTransition(
   value: Record<string, unknown>,
@@ -1963,8 +1996,6 @@ function validateRootEndTransition(
     value.callFrames.length !== 0
   ) return;
 
-  const settlement = value.lastSettlement;
-  const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
   const common =
     Array.isArray(value.frames) &&
     value.frames.length === 1 &&
@@ -1977,22 +2008,9 @@ function validateRootEndTransition(
     Array.isArray(value.temporaries) &&
     value.temporaries.length === 0 &&
     value.foregroundAction === null &&
-    Array.isArray(value.backgroundActions) &&
-    value.backgroundActions.length === 0 &&
     value.failure === null &&
-    value.contextualSpeaker === null &&
-    isPlainRecord(settlement) &&
-    settlement.settlementKind === "completed" &&
-    positiveSafeInteger(settlement.actionId) &&
-    positiveSafeInteger(value.nextActionId) &&
-    settlement.actionId === value.nextActionId - 1 &&
-    settlement.owningInstruction === plan.rootEndInstruction - 1 &&
-    settlement.continuationInstruction === plan.rootEndInstruction;
-  const canonical = common && (
-    (settlement.actionKind === "delay" && terminalInstruction?.kind === "wait") ||
-    (settlement.actionKind === "interaction" && settlement.interactionKind === "button" && terminalInstruction?.kind === "interaction" && terminalInstruction.interactionKind === "button")
-  );
-  if (!canonical) {
+    value.contextualSpeaker === null;
+  if (!common || value.terminalContinuationHandoff === null) {
     errors.push("Running root-end state is not a canonical settled terminal foreground transition.");
   }
 }
@@ -2544,7 +2562,7 @@ function validTopLevelPreparedSayOutputRelationship(
 ): boolean {
   const settlement = snapshot.lastSettlement;
   if (snapshot.preparedSayOutput === null) {
-    return validReleasedPacingSettlementAfterPreparedOutputConsumption(snapshot, settlement);
+    return validReleasedPacingSettlementAfterPreparedOutputConsumption(snapshot, settlement, plan);
   }
   return isPreparedSayOutputShape(snapshot.preparedSayOutput) &&
     (snapshot.status === "running" || snapshot.status === "failed") &&
@@ -2574,17 +2592,32 @@ function hasPacingExecutionHistory(settlement: unknown): boolean {
 function validReleasedPacingSettlementAfterPreparedOutputConsumption(
   snapshot: Record<string, unknown>,
   settlement: unknown,
+  plan: InstructionPlan | undefined,
 ): boolean {
   if (!isPlainRecord(settlement) || settlement.actionKind !== "chatPacingGate") return true;
   const releasedInstruction = settlement.releasedPreparedOutputInstruction;
   if (releasedInstruction === null) return true;
   if (!nonNegativeSafeInteger(releasedInstruction)) return false;
 
+  if (isExplicitExitHaltState(snapshot, plan)) return false;
+
   return activePacingActions(snapshot).some(
     (action) =>
       action.owningInstruction === releasedInstruction &&
       validActionCreatedAfterSettlement(action, settlement),
   );
+}
+
+function isExplicitExitHaltState(
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  if (
+    plan === undefined ||
+    snapshot.status !== "halted" ||
+    snapshot.nextInstruction !== plan.rootEndInstruction
+  ) return false;
+  return plan.instructions[plan.rootEndInstruction - 1]?.kind === "exit";
 }
 
 function activePacingActions(snapshot: Record<string, unknown>): Record<string, unknown>[] {
@@ -2724,6 +2757,74 @@ function validInteractionResultHandoffOwner(
   }
   const ownerFunctionId = analysis.functionIdsByInstruction[handoff.owningInstruction];
   return ownerFunctionId !== null && activeOwner.functionId === ownerFunctionId;
+}
+
+function validateTerminalContinuationHandoffState(
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  const handoff = snapshot.terminalContinuationHandoff;
+  if (handoff === null) return;
+  if (
+    !isPlainRecord(handoff) ||
+    !hasExactKeys(handoff, [
+      "actionId",
+      "actionKind",
+      "owningInstruction",
+      "continuationInstruction",
+    ]) ||
+    !positiveSafeInteger(handoff.actionId) ||
+    (handoff.actionKind !== "delay" && handoff.actionKind !== "interaction") ||
+    !nonNegativeSafeInteger(handoff.owningInstruction) ||
+    !nonNegativeSafeInteger(handoff.continuationInstruction) ||
+    !positiveSafeInteger(snapshot.nextActionId) ||
+    handoff.actionId !== snapshot.nextActionId - 1 ||
+    snapshot.status !== "running" ||
+    snapshot.foregroundAction !== null ||
+    snapshot.interactionResultHandoff !== null ||
+    !validTerminalContinuationHandoffSettlement(handoff, snapshot.lastSettlement)
+  ) {
+    errors.push("Runtime terminal continuation handoff is malformed.");
+    return;
+  }
+  if (plan === undefined) return;
+  const instruction = plan.instructions[handoff.owningInstruction];
+  const terminalHandoffMatchesPlan =
+    handoff.continuationInstruction === plan.rootEndInstruction &&
+    snapshot.nextInstruction === plan.rootEndInstruction &&
+    handoff.owningInstruction + 1 === handoff.continuationInstruction &&
+    (
+      (handoff.actionKind === "delay" && instruction?.kind === "wait") ||
+      (
+        handoff.actionKind === "interaction" &&
+        instruction?.kind === "interaction" &&
+        instruction.interactionKind === "button" &&
+        instruction.destinationTemporary === null
+      )
+    );
+  if (!terminalHandoffMatchesPlan) {
+    errors.push("Runtime terminal continuation handoff does not match its canonical terminal instruction.");
+  }
+}
+
+function validTerminalContinuationHandoffSettlement(
+  handoff: Record<string, unknown>,
+  settlement: unknown,
+): boolean {
+  if (!positiveSafeInteger(handoff.actionId) || !isPlainRecord(settlement)) return false;
+  if (settlement.actionId === handoff.actionId) {
+    return settlement.actionKind === handoff.actionKind &&
+      settlement.owningInstruction === handoff.owningInstruction &&
+      settlement.continuationInstruction === handoff.continuationInstruction;
+  }
+
+  // Only the older background pacing gate can settle after a terminal delay
+  // and replace bounded replay before root completion is entered.
+  return handoff.actionKind === "delay" &&
+    settlement.actionKind === "chatPacingGate" &&
+    positiveSafeInteger(settlement.actionId) &&
+    settlement.actionId < handoff.actionId;
 }
 
 function validInteractionResultForInstruction(

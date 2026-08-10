@@ -9,6 +9,7 @@ import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import type { PendingActionOperationResult, TimeObservationOutcome } from "./model.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
+import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import {
   assertEventSequenceCapacity,
   captureExecutableData,
@@ -68,6 +69,10 @@ function settleForegroundTimedAction(
     : createPacingSettlement(action, completionEventSequence, snapshot.currentSessionTimeMs);
   snapshot.foregroundAction = null;
   snapshot.lastSettlement = settlement;
+  snapshot.terminalContinuationHandoff =
+    action.kind === "delay"
+      ? terminalContinuationHandoffFor(plan, action)
+      : null;
   snapshot.status = "running";
   if (action.kind === "chatPacingGate" && action.preparedOutput !== null) {
     snapshot.preparedSayOutput = action.preparedOutput;

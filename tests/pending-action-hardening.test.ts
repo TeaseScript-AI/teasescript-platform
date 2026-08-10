@@ -111,8 +111,8 @@ test("rejects every forged running root-end shape outside the settled terminal d
     retainedCallFrame: (snapshot) => { snapshot.callFrames.push({}); },
     foregroundAction: (snapshot) => { snapshot.foregroundAction = structuredClone(second.snapshot.foregroundAction); },
     backgroundAction: (snapshot) => { snapshot.backgroundActions.push({}); },
-    missingSettlement: (snapshot) => { snapshot.lastSettlement = null; },
-    incompatibleSettlement: (snapshot) => { snapshot.lastSettlement.actionId = 1; },
+    missingTerminalHandoff: (snapshot) => { snapshot.terminalContinuationHandoff = null; },
+    incompatibleTerminalHandoff: (snapshot) => { snapshot.terminalContinuationHandoff.actionId = 1; },
   };
   for (const [name, mutate] of Object.entries(invalid)) {
     const candidate = mutable(settled);

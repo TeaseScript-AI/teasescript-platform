@@ -108,6 +108,102 @@ test("older pacing gate promotes after a newer delay settlement and resumes prep
   assert.equal(resumed.events.filter((event) => event.kind === "say" && event.text === "second").length, 1);
 });
 
+test("explicit exit cleans released pacing lineage without admitting forged pacing work", () => {
+  const compiled = plan('say "first", 5\nsay "second", 5\nexit');
+  const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const gate = promoted.snapshot.foregroundAction;
+  assert.equal(gate?.kind, "chatPacingGate");
+  const released = completeAction(compiled, promoted.snapshot, {
+    actionId: gate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  const beforeExit = executeInstruction(compiled, released.snapshot);
+  const replacement = beforeExit.snapshot.backgroundActions[0];
+  assert.equal(replacement?.kind, "chatPacingGate");
+  const exited = executeInstruction(compiled, beforeExit.snapshot);
+
+  assert.equal(exited.snapshot.status, "halted");
+  assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);
+  expectCheckpointJsonRoundTrip("explicit exit after released pacing output", compiled, exited.snapshot);
+
+  const forgedPacing = checkpointSnapshot(compiled, exited.snapshot);
+  forgedPacing.backgroundActions.push(structuredClone(replacement));
+  expectInvalidSnapshot("explicit exit cannot retain pacing work", compiled, forgedPacing);
+
+  const forgedPreparedOutput = checkpointSnapshot(compiled, exited.snapshot);
+  forgedPreparedOutput.preparedSayOutput = structuredClone(released.snapshot.preparedSayOutput);
+  expectInvalidSnapshot("explicit exit cannot retain prepared pacing output", compiled, forgedPreparedOutput);
+
+  const naturalRoot = plan('say "first", 5');
+  const naturallyHalted = run(naturalRoot, createFreshRuntimeSnapshot(naturalRoot));
+  assert.equal(naturallyHalted.snapshot.status, "halted");
+  assert.equal(naturallyHalted.snapshot.backgroundActions.length, 1);
+  expectCheckpointJsonRoundTrip("natural root may retain background pacing", naturalRoot, naturallyHalted.snapshot);
+});
+
+test("terminal continuation handoffs reject malformed external state and preserve result-free buttons", () => {
+  const delayPlan = plan('say "first", 5\nwait 1 ms');
+  const waiting = run(delayPlan, createFreshRuntimeSnapshot(delayPlan));
+  const delay = waiting.snapshot.foregroundAction;
+  assert.equal(delay?.kind, "delay");
+  const settled = observeTime(delayPlan, waiting.snapshot, delay!.deadlineMs);
+  assert.notEqual(settled.snapshot.terminalContinuationHandoff, null);
+  expectCheckpointJsonRoundTrip("terminal delay handoff", delayPlan, settled.snapshot);
+
+  const corruptions = [
+    {
+      name: "missing terminal continuation handoff",
+      checkpoint: mutateCheckpoint(delayPlan, settled.snapshot, (snapshot) => {
+        snapshot.terminalContinuationHandoff = null;
+      }),
+    },
+    {
+      name: "terminal handoff cannot claim a pacing instruction",
+      checkpoint: mutateCheckpoint(delayPlan, settled.snapshot, (snapshot) => {
+        snapshot.terminalContinuationHandoff.owningInstruction = 0;
+      }),
+    },
+    {
+      name: "terminal handoff action identity cannot be stale",
+      checkpoint: mutateCheckpoint(delayPlan, settled.snapshot, (snapshot) => {
+        snapshot.terminalContinuationHandoff.actionId = 1;
+      }),
+    },
+    {
+      name: "terminal handoff requires its settlement or later pacing replacement",
+      checkpoint: mutateCheckpoint(delayPlan, settled.snapshot, (snapshot) => {
+        snapshot.lastSettlement = null;
+      }),
+    },
+    {
+      name: "terminal handoff cannot survive root completion",
+      checkpoint: mutateCheckpoint(delayPlan, settled.snapshot, (snapshot) => {
+        snapshot.status = "halted";
+      }),
+    },
+  ];
+  for (const corruption of corruptions) {
+    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
+    assert.equal(validateRuntimeSnapshot(snapshot, delayPlan).valid, false, corruption.name);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+  }
+
+  const buttonPlan = plan('showButton "Continue"');
+  const buttonWaiting = run(buttonPlan, createFreshRuntimeSnapshot(buttonPlan));
+  const button = buttonWaiting.snapshot.foregroundAction;
+  assert.equal(button?.kind, "interaction");
+  const buttonSettled = completeAction(buttonPlan, buttonWaiting.snapshot, {
+    actionId: button!.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  });
+  assert.equal(buttonSettled.snapshot.terminalContinuationHandoff?.actionKind, "interaction");
+  assert.equal(validateRuntimeSnapshot(buttonSettled.snapshot, buttonPlan).valid, true);
+  assert.deepEqual(run(buttonPlan, buttonSettled.snapshot).events.map((event) => event.kind), ["complete"]);
+});
+
 test("active-action and retained-settlement relations admit only canonical cross-kind timing", () => {
   const promotionPlan = plan('say "first"\nwait 1 s\nsay "second"\nexit');
   const initial = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
@@ -230,8 +326,8 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
   assert.equal(compiled.version, 10);
-  assert.equal(snapshot.version, 12);
-  assert.equal(checkpoint.version, 15);
+  assert.equal(snapshot.version, 13);
+  assert.equal(checkpoint.version, 16);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot) as any;

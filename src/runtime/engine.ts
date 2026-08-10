@@ -139,6 +139,7 @@ function executeCapturedInstruction(
       snapshot,
       completeEventAndFutureCompletions,
     );
+    snapshot.terminalContinuationHandoff = null;
     snapshot.status = "halted";
     const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
     events.push(createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan));
@@ -593,6 +594,16 @@ function executePlannedInstruction(
     case "exit":
       snapshot.backgroundActions.length = 0;
       snapshot.preparedSayOutput = null;
+      if (
+        snapshot.lastSettlement?.actionKind === "chatPacingGate" &&
+        snapshot.lastSettlement.releasedPreparedOutputInstruction !== null
+      ) {
+        snapshot.lastSettlement = Object.freeze({
+          ...snapshot.lastSettlement,
+          releasedPreparedOutputInstruction: null,
+        });
+      }
+      snapshot.terminalContinuationHandoff = null;
       snapshot.defaultSpeaker = null;
       snapshot.contextualSpeaker = null;
       snapshot.frames.splice(1);

@@ -12,6 +12,7 @@ import { resolveInteractionCompletion } from "../actions/interaction.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { observeTime } from "./observe-time.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
+import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import {
   RuntimeDataError,
   assertEventSequenceCapacity,
@@ -176,6 +177,7 @@ function completeInteraction(
   current.foregroundAction = null;
   current.lastSettlement = settlement;
   current.interactionResultHandoff = handoff;
+  current.terminalContinuationHandoff = terminalContinuationHandoffFor(plan, action);
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
