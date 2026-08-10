@@ -3112,7 +3112,9 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   if (expected.kind === "button") return actual.buttonLabel === expected.buttonLabel;
   if (expected.kind === "text" || expected.kind === "number") return actual.hint === expected.hint;
   if (expected.kind !== "choice") return false;
-  if (actual.labelType !== expected.labelType || !Array.isArray(actual.options) || actual.options.length !== expected.options.length) return false;
+  if (actual.labelType !== expected.labelType) return false;
+  if (!Array.isArray(actual.options)) return false;
+  if (actual.options.length !== expected.options.length) return false;
   const options = actual.options;
   return expected.options.every((option, index) => {
     const candidate = options[index];

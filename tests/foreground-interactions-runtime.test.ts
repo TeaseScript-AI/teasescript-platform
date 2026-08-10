@@ -374,7 +374,10 @@ test("interaction definitions preflight each field against remaining aggregate b
   });
   assert.equal(validateInstructionPlan(exact).valid, true);
   const tooLong = structuredClone(exact) as unknown as { instructions: Array<Record<string, unknown>> };
-  (tooLong.instructions.find((instruction) => instruction.kind === "interaction")!.ui as { buttonLabel: string }).buttonLabel += "x";
+  const tooLongInteraction = tooLong.instructions.find((instruction) => instruction.kind === "interaction");
+  assert.ok(tooLongInteraction);
+  const tooLongUi = tooLongInteraction.ui as { buttonLabel: string };
+  tooLongUi.buttonLabel += "x";
   assert.equal(validateInstructionPlan(tooLong).valid, false);
 
   const options = Array.from({ length: MAX_INTERACTION_OPTION_ENTRIES }, (_, index) => ({ text: "", label: index }));
@@ -476,7 +479,9 @@ test("malformed interaction snapshot and settlement data are rejected", () => {
   wrongTranscript.lastSettlement.transcriptText = "different";
   assert.equal(validateRuntimeSnapshot(wrongTranscript, plan).valid, false);
   const wrongDestination = structuredClone(done.snapshot) as any;
-  wrongDestination.temporaries.find((temporary: any) => temporary.id === 1).value = "other";
+  const wrongTemporary = wrongDestination.temporaries.find((temporary: any) => temporary.id === 1);
+  assert.ok(wrongTemporary);
+  wrongTemporary.value = "other";
   assert.equal(validateRuntimeSnapshot(wrongDestination, plan).valid, false);
 
   const standaloneUi = structuredClone(pending.snapshot) as any;
@@ -560,12 +565,18 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
   assert.equal(validateRuntimeSnapshot(swappedIdentifiers, speakerPlan).valid, false);
 
   const alteredBinding = structuredClone(pending.snapshot) as any;
-  const aliceBinding = alteredBinding.frames.flatMap((frame: any) => frame.bindings).find((binding: any) => binding.name === "alice");
+  const aliceBinding = alteredBinding.frames
+    .flatMap((frame: any) => frame.bindings)
+    .find((binding: any) => binding.name === "alice");
+  assert.ok(aliceBinding);
   aliceBinding.value.speakerId = bob.id;
   assert.equal(validateRuntimeSnapshot(alteredBinding, speakerPlan).valid, false);
 
   const bindingResolved = structuredClone(pending.snapshot) as any;
-  const binding = bindingResolved.frames.flatMap((frame: any) => frame.bindings).find((candidate: any) => candidate.name === "alice");
+  const binding = bindingResolved.frames
+    .flatMap((frame: any) => frame.bindings)
+    .find((candidate: any) => candidate.name === "alice");
+  assert.ok(binding);
   binding.value.speakerId = bob.id;
   bindingResolved.foregroundAction.speakerId = bob.id;
   assert.equal(validateRuntimeSnapshot(bindingResolved, speakerPlan).valid, true);
@@ -583,19 +594,32 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
   const explicitMutations: Array<(snapshot: any) => void> = [
     (snapshot) => {
       const frame = snapshot.frames.find((candidate: any) => candidate.bindings.some((binding: any) => binding.name === "alice"));
+      assert.ok(frame);
       frame.bindings = frame.bindings.filter((binding: any) => binding.name !== "alice");
       snapshot.foregroundAction.speakerId = null;
     },
     (snapshot) => {
-      snapshot.frames.flatMap((frame: any) => frame.bindings).find((binding: any) => binding.name === "alice").value = "ordinary";
+      const binding = snapshot.frames
+        .flatMap((frame: any) => frame.bindings)
+        .find((candidate: any) => candidate.name === "alice");
+      assert.ok(binding);
+      binding.value = "ordinary";
       snapshot.foregroundAction.speakerId = null;
     },
     (snapshot) => {
-      snapshot.frames.flatMap((frame: any) => frame.bindings).find((binding: any) => binding.name === "alice").value = { kind: "speakerReference", speakerId: "bad", identifier: "alice" };
+      const binding = snapshot.frames
+        .flatMap((frame: any) => frame.bindings)
+        .find((candidate: any) => candidate.name === "alice");
+      assert.ok(binding);
+      binding.value = { kind: "speakerReference", speakerId: "bad", identifier: "alice" };
       snapshot.foregroundAction.speakerId = null;
     },
     (snapshot) => {
-      snapshot.frames.flatMap((frame: any) => frame.bindings).find((binding: any) => binding.name === "alice").value = { kind: "speakerReference", speakerId: 999, identifier: "alice" };
+      const binding = snapshot.frames
+        .flatMap((frame: any) => frame.bindings)
+        .find((candidate: any) => candidate.name === "alice");
+      assert.ok(binding);
+      binding.value = { kind: "speakerReference", speakerId: 999, identifier: "alice" };
       snapshot.foregroundAction.speakerId = null;
     },
     (snapshot) => { snapshot.foregroundAction.speakerId = null; },
@@ -616,8 +640,18 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
     interaction.speaker = source.includes("requested") ? "requested" : "alice";
     assert.equal(validateInstructionPlan(scoped).valid, true);
     const scopedPending = waiting(scoped);
-    const binding = scopedPending.snapshot.frames.slice().reverse().flatMap((frame) => frame.bindings).find((candidate) => candidate.name === interaction.speaker);
-    assert.equal(scopedPending.snapshot.foregroundAction?.kind === "interaction" && scopedPending.snapshot.foregroundAction.speakerId, (binding?.value as any).speakerId);
+    const binding = scopedPending.snapshot.frames
+      .slice()
+      .reverse()
+      .flatMap((frame) => frame.bindings)
+      .find((candidate) => candidate.name === interaction.speaker);
+    assert.ok(binding);
+    const bindingSpeakerId = (binding.value as any).speakerId;
+    assert.equal(
+      scopedPending.snapshot.foregroundAction?.kind === "interaction"
+        && scopedPending.snapshot.foregroundAction.speakerId,
+      bindingSpeakerId,
+    );
     assert.equal(validateRuntimeSnapshot(scopedPending.snapshot, scoped).valid, true);
   }
 
@@ -809,7 +843,16 @@ test("result-bearing interactions require an in-region continuation while functi
   for (const [kind, ui, payload] of [
     ["text", { kind: "text", hint: null, accessibleName: defaults.text }, { kind: "submittedText", submittedText: "value" }],
     ["number", { kind: "number", hint: null, accessibleName: defaults.number }, { kind: "submittedText", submittedText: "1" }],
-    ["choice", { kind: "choice", labelType: "none", options: [{ text: "One", label: null }], accessibleName: defaults.choice }, { kind: "selectedText", selectedText: "One" }],
+    [
+      "choice",
+      {
+        kind: "choice",
+        labelType: "none",
+        options: [{ text: "One", label: null }],
+        accessibleName: defaults.choice,
+      },
+      { kind: "selectedText", selectedText: "One" },
+    ],
   ] as const) {
     const root = interactionPlan(kind, ui);
     const terminalRoot = { ...root, rootEndInstruction: 1, instructions: root.instructions.slice(0, 1) };
