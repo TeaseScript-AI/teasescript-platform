@@ -348,19 +348,90 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
   assert.equal(compiled.version, 12);
-  assert.equal(snapshot.version, 15);
-  assert.equal(checkpoint.version, 19);
+  assert.equal(snapshot.version, 16);
+  assert.equal(checkpoint.version, 20);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot) as any;
-  oldSnapshot.version = 14;
+  oldSnapshot.version = 15;
   assert.equal(validateRuntimeSnapshot(oldSnapshot, compiled).valid, false);
   const oldPlan = structuredClone(compiled) as any;
   oldPlan.version = 11;
   assert.equal(validateInstructionPlan(oldPlan).valid, false);
   const oldCheckpoint = structuredClone(checkpoint);
-  oldCheckpoint.version = 18;
+  oldCheckpoint.version = 19;
   assert.throws(() => deserializeCheckpoint(JSON.stringify(oldCheckpoint)));
+});
+
+test("prepared say text retains caller temporaries through a suspended text call", () => {
+  const compiled = plan([
+    "let paceCalls = 0",
+    'function prefix { return "prefix " }',
+    "function textValue {",
+    "  wait 1 ms",
+    '  return "hello"',
+    "}",
+    "function pace { paceCalls = paceCalls + 1\nreturn 1 }",
+    "say `${prefix()}${textValue()}`, pace()",
+  ].join("\n"));
+  const textPreparation = compiled.instructions.find(
+    (instruction) => instruction.kind === "prepareSayText",
+  );
+  assert.ok(textPreparation !== undefined);
+  assert.equal(textPreparation.value.kind, "template");
+  assert.equal(validateInstructionPlan(compiled).valid, true);
+
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
+  assert.equal(waiting.status, "waiting");
+  assert.equal(waiting.callFrames.at(-1)?.functionName, "textValue");
+  assert.equal(validateRuntimeSnapshot(waiting, compiled).valid, true);
+
+  const activeCall = waiting.callFrames.at(-1)!;
+  const preparedTextTemporaryIds = textPreparation.value.parts.flatMap(
+    (part) => part.kind === "expression" && part.expression.kind === "temporary"
+      ? [part.expression.temporaryId]
+      : [],
+  );
+  const retainedTemporaryId = preparedTextTemporaryIds.find(
+    (temporaryId) => temporaryId !== activeCall.destinationTemporary,
+  );
+  assert.notEqual(retainedTemporaryId, undefined);
+  assert.ok(activeCall.callerTemporaries.some(
+    (temporary) => temporary.id === retainedTemporaryId,
+  ));
+
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, waiting)));
+  assert.deepEqual(restored.snapshot, waiting);
+
+  const delay = waiting.foregroundAction;
+  assert.equal(delay?.kind, "delay");
+  const uninterrupted = run(
+    compiled,
+    observeTime(compiled, waiting, delay!.deadlineMs).snapshot,
+  );
+  const resumed = run(
+    restored.plan,
+    observeTime(restored.plan, restored.snapshot, delay!.deadlineMs).snapshot,
+  );
+  assert.deepEqual(resumed.events, uninterrupted.events);
+  assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
+  assert.deepEqual(
+    resumed.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["prefix hello"],
+  );
+  assert.equal(
+    resumed.snapshot.frames[0]?.bindings.find((binding) => binding.name === "paceCalls")?.value,
+    1,
+  );
+
+  const malformed = structuredClone(waiting) as any;
+  malformed.callFrames.at(-1).callerTemporaries = malformed.callFrames.at(-1).callerTemporaries
+    .filter((temporary: { id: number }) => temporary.id !== retainedTemporaryId);
+  expectInvalidSnapshot(
+    "missing a prepared say text continuation temporary",
+    compiled,
+    malformed,
+  );
 });
 
 test("say pacing expression temporaries are required before checkpoint restore", () => {

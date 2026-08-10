@@ -532,8 +532,8 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
 | Instruction plan | 12 | The #112 source-ordered `say` preparation instructions capture speaker provenance and final visible text before a text or pacing call or interaction may suspend; prepared fields require their canonical producer/consumer path, cannot be clobbered or cleared before consumption, and cannot be re-entered without preparation. |
-| Runtime snapshot | 15 | The #112 pacing schema captures session pacing settings, active/promoted gates, prepared-output lineage, the single-use terminal-continuation handoff that remains valid when bounded replay data is replaced, and rejects unsafe pacing provenance, retained work after every explicit exit position, or missing temporaries that the next instruction actually reads. |
-| Checkpoint | 19 | Updated the self-contained bundle for instruction-plan revision 12 and runtime-snapshot revision 15. |
+| Runtime snapshot | 16 | The #112 pacing schema captures session pacing settings, active/promoted gates, prepared-output lineage, the single-use terminal-continuation handoff that remains valid when bounded replay data is replaced, and rejects unsafe pacing provenance, retained work after every explicit exit position, or missing temporaries that the next instruction actually reads, including prepared `say` text continuations. |
+| Checkpoint | 20 | Updated the self-contained bundle for instruction-plan revision 12 and runtime-snapshot revision 16. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
