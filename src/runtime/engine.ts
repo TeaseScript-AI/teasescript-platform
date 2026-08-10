@@ -134,7 +134,7 @@ function executeCapturedInstruction(
     snapshot.nextInstruction === plan.rootEndInstruction &&
     snapshot.callFrames.length === 0
   ) {
-    const completeEventAndFutureCompletions = 1 + requiredFutureActionCompletionEvents(snapshot);
+    const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
     assertEventSequenceCapacity(
       snapshot,
       completeEventAndFutureCompletions,
@@ -167,7 +167,7 @@ function executeCapturedInstruction(
       snapshot.nextInstruction === plan.rootEndInstruction
     ) {
       snapshot.status = "halted";
-      const completeEventAndFutureCompletions = 1 + requiredFutureActionCompletionEvents(snapshot);
+      const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
       assertEventSequenceCapacity(
         snapshot,
         completeEventAndFutureCompletions,
@@ -2541,8 +2541,30 @@ function executeSayAtomically(
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
   executeSay(plan, instruction, stagedSnapshot, stagedEvaluator, stagedEvents);
+  validateTerminalCompletionCapacityAfterSay(plan, stagedSnapshot, instruction.span);
   Object.assign(snapshot, stagedSnapshot);
   events.push(...stagedEvents);
+}
+
+/**
+ * A terminal say and root completion are one public instruction result. Check
+ * the complete event and later action completions before committing the say.
+ */
+function validateTerminalCompletionCapacityAfterSay(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+): void {
+  if (
+    snapshot.status !== "running" ||
+    snapshot.callFrames.length !== 0 ||
+    snapshot.nextInstruction !== plan.rootEndInstruction
+  ) return;
+  assertEventSequenceCapacity(
+    snapshot,
+    requiredEventSequencesForRootCompletion(snapshot),
+    span,
+  );
 }
 
 function executeSpeakerAtomically(
@@ -2756,6 +2778,11 @@ function requiredFutureActionCompletionEvents(snapshot: RuntimeSnapshot): number
     if (action?.kind === "delay" || action?.kind === "chatPacingGate") return count + 1;
     return count;
   }, 0);
+}
+
+function requiredEventSequencesForRootCompletion(snapshot: RuntimeSnapshot): number {
+  const rootCompleteEvent = 1;
+  return rootCompleteEvent + requiredFutureActionCompletionEvents(snapshot);
 }
 
 

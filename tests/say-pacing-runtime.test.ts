@@ -727,6 +727,86 @@ test("pacing actions reserve all mandatory future event sequences", () => {
   assert.equal(rejectedWait.snapshot.backgroundActions.length, 1);
 });
 
+test("terminal say transitions reserve complete and future action events atomically", () => {
+  const max = Number.MAX_SAFE_INTEGER;
+
+  const positive = plan('say "last", 5');
+  const positiveEnough = createFreshRuntimeSnapshot(positive);
+  positiveEnough.nextEventSequence = max - 4;
+  const positiveCompleted = executeInstruction(positive, positiveEnough);
+  assert.deepEqual(positiveCompleted.events.map((event) => event.kind), ["say", "actionRequested", "complete"]);
+  assert.equal(positiveCompleted.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
+  assert.equal(validateRuntimeSnapshot(positiveCompleted.snapshot, positive).valid, true);
+
+  const positiveOneLess = createFreshRuntimeSnapshot(positive);
+  positiveOneLess.nextEventSequence = max - 3;
+  const positiveRejected = executeInstruction(positive, positiveOneLess);
+  assert.equal(positiveRejected.snapshot.status, "failed");
+  assert.equal(positiveRejected.snapshot.nextInstruction, 0);
+  assert.equal(positiveRejected.snapshot.backgroundActions.length, 0);
+  assert.deepEqual(positiveRejected.events.map((event) => event.kind), ["runtimeFailure"]);
+  assert.equal(validateRuntimeSnapshot(positiveRejected.snapshot, positive).valid, true);
+
+  for (const pacing of ["0", "instant"]) {
+    const immediate = plan(`say "last", ${pacing}`);
+    const enough = createFreshRuntimeSnapshot(immediate);
+    enough.nextEventSequence = max - 2;
+    const completed = executeInstruction(immediate, enough);
+    assert.deepEqual(completed.events.map((event) => event.kind), ["say", "complete"], pacing);
+
+    const oneLess = createFreshRuntimeSnapshot(immediate);
+    oneLess.nextEventSequence = max - 1;
+    const rejected = executeInstruction(immediate, oneLess);
+    assert.equal(rejected.snapshot.status, "failed", pacing);
+    assert.equal(rejected.snapshot.nextInstruction, 0, pacing);
+    assert.deepEqual(rejected.events.map((event) => event.kind), ["runtimeFailure"], pacing);
+    assert.equal(validateRuntimeSnapshot(rejected.snapshot, immediate).valid, true, pacing);
+  }
+
+  for (const pacing of ["0", "instant"]) {
+    const supersession = plan(`say "first", 5\nsay "last", ${pacing}`);
+    const afterFirst = executeInstruction(supersession, createFreshRuntimeSnapshot(supersession));
+    const enough = structuredClone(afterFirst.snapshot);
+    enough.nextEventSequence = max - 3;
+    const completed = executeInstruction(supersession, enough);
+    assert.deepEqual(completed.events.map((event) => event.kind), ["actionCompleted", "say", "complete"], pacing);
+    assert.equal(completed.snapshot.backgroundActions.length, 0, pacing);
+
+    const oneLess = structuredClone(afterFirst.snapshot);
+    oneLess.nextEventSequence = max - 2;
+    const rejected = executeInstruction(supersession, oneLess);
+    assert.equal(rejected.snapshot.status, "failed", pacing);
+    assert.equal(rejected.snapshot.nextInstruction, 1, pacing);
+    assert.equal(rejected.snapshot.backgroundActions.length, 1, pacing);
+    assert.equal(rejected.snapshot.lastSettlement, null, pacing);
+    assert.equal(validateRuntimeSnapshot(rejected.snapshot, supersession).valid, true, pacing);
+  }
+
+  const prepared = plan('say "first", 5\nsay "last", 5');
+  const promoted = run(prepared, createFreshRuntimeSnapshot(prepared));
+  const gate = promoted.snapshot.foregroundAction;
+  assert.equal(gate?.kind, "chatPacingGate");
+  const released = completeAction(prepared, promoted.snapshot, {
+    actionId: gate!.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  const preparedEnough = structuredClone(released.snapshot);
+  preparedEnough.nextEventSequence = max - 4;
+  const preparedCompleted = run(prepared, preparedEnough);
+  assert.deepEqual(preparedCompleted.events.map((event) => event.kind), ["say", "actionRequested", "complete"]);
+  assert.equal(preparedCompleted.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
+
+  const preparedOneLess = structuredClone(released.snapshot);
+  preparedOneLess.nextEventSequence = max - 3;
+  const preparedRejected = run(prepared, preparedOneLess);
+  assert.equal(preparedRejected.snapshot.status, "failed");
+  assert.equal(preparedRejected.snapshot.preparedSayOutput?.text, "last");
+  assert.equal(preparedRejected.snapshot.backgroundActions.length, 0);
+  assert.deepEqual(preparedRejected.events.map((event) => event.kind), ["runtimeFailure"]);
+  assert.equal(validateRuntimeSnapshot(preparedRejected.snapshot, prepared).valid, true);
+});
+
 test("speaker assignment keeps defaultSaySkippable boolean and exit cleans pacing work", () => {
   const assignmentPlan = plan('speaker vera { defaultSaySkippable: true }\nvera.defaultSaySkippable = "no"\nexit');
   const rejected = run(assignmentPlan, createFreshRuntimeSnapshot(assignmentPlan));
