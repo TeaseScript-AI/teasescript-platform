@@ -341,11 +341,17 @@ test("does not apply the list.remove warning to sets or other list removals", ()
   assert.equal(result.warnings.some((warning) => warning.code === "TSW002"), false);
 });
 
+interface SourceExecutionResult {
+  readonly events: readonly InterpreterEvent[];
+  readonly errors: readonly Extract<InterpreterEvent, { kind: "runtimeFailure" }>[];
+  readonly warnings: readonly Extract<InterpreterEvent, { kind: "developerWarning" }>[];
+}
+
 function executeSource(
   source: string | readonly string[],
   builtins?: Readonly<Record<string, RuntimeBuiltinFunction>>,
   random: RandomSource = { next: () => 0 },
-): { readonly events: readonly InterpreterEvent[]; readonly errors: readonly Extract<InterpreterEvent, { kind: "runtimeFailure" }>[]; readonly warnings: readonly Extract<InterpreterEvent, { kind: "developerWarning" }>[] } {
+): SourceExecutionResult {
   const text = typeof source === "string" ? source : source.join("\n");
   const compiled = compileSource(text, {
     builtins: builtins === undefined ? [] : Object.keys(builtins),
@@ -359,8 +365,14 @@ function executeSource(
   );
   return {
     events: result.events,
-    errors: result.events.filter((event): event is Extract<InterpreterEvent, { kind: "runtimeFailure" }> => event.kind === "runtimeFailure"),
-    warnings: result.events.filter((event): event is Extract<InterpreterEvent, { kind: "developerWarning" }> => event.kind === "developerWarning"),
+    errors: result.events.filter(
+      (event): event is Extract<InterpreterEvent, { kind: "runtimeFailure" }> =>
+        event.kind === "runtimeFailure",
+    ),
+    warnings: result.events.filter(
+      (event): event is Extract<InterpreterEvent, { kind: "developerWarning" }> =>
+        event.kind === "developerWarning",
+    ),
   };
 }
 

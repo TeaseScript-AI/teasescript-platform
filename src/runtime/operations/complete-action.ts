@@ -26,13 +26,27 @@ import {
   takeSequence,
 } from "./support.js";
 
-export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot, request: unknown): PendingActionOperationResult<ActionCompletionOutcome> {
+export function completeAction(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  request: unknown,
+): PendingActionOperationResult<ActionCompletionOutcome> {
   const captured = captureExecutableData(plan, snapshot);
   const current = cloneCapturedRuntimeSnapshot(captured.snapshot);
   const external = captureExternalData(request);
-  if (!external.ok || !isPlainRecord(external.value)) return pendingResult(current, [], { kind: "invalidPayload", message: "Action completion request must be bounded JSON-safe object data." });
+  if (!external.ok || !isPlainRecord(external.value)) {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "Action completion request must be bounded JSON-safe object data.",
+    });
+  }
   const value = external.value;
-  if (!positiveSafeInteger(value.actionId)) return pendingResult(current, [], { kind: "invalidPayload", message: "Action completion actionId must be a positive safe integer." });
+  if (!positiveSafeInteger(value.actionId)) {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "Action completion actionId must be a positive safe integer.",
+    });
+  }
   const actionId = value.actionId;
   const active = current.foregroundAction?.actionId === actionId
     ? current.foregroundAction
@@ -41,8 +55,16 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
         action.kind === "chatPacingGate" && action.actionId === actionId,
     ) ?? null;
   if (active === null) {
-    if (current.lastSettlement?.actionId === actionId) return pendingResult(current, [], { kind: "alreadySettled", settlement: cloneSettlement(current.lastSettlement) });
-    return pendingResult(current, [], actionId < current.nextActionId ? { kind: "staleAction", actionId } : { kind: "unknownAction", actionId });
+    if (current.lastSettlement?.actionId === actionId) {
+      return pendingResult(current, [], {
+        kind: "alreadySettled",
+        settlement: cloneSettlement(current.lastSettlement),
+      });
+    }
+    const outcome = actionId < current.nextActionId
+      ? { kind: "staleAction" as const, actionId }
+      : { kind: "unknownAction" as const, actionId };
+    return pendingResult(current, [], outcome);
   }
   if (value.actionKind !== active.kind) {
     const receivedActionKind = validRequestedActionKind(value.actionKind)
@@ -55,13 +77,38 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
       receivedActionKind,
     });
   }
-  if (active.kind === "interaction") return completeInteraction(captured.plan, current, active, value);
-  if (active.kind === "chatPacingGate") return completePacingGate(captured.plan, current, active, value);
-  if (!isPlainRecord(value.payload) || value.payload.kind !== "time" || !isValidSessionTime(value.payload.currentSessionTimeMs)) return pendingResult(current, [], { kind: "invalidPayload", message: "Delay completion payload must contain a valid time observation." });
+  if (active.kind === "interaction") {
+    return completeInteraction(captured.plan, current, active, value);
+  }
+  if (active.kind === "chatPacingGate") {
+    return completePacingGate(captured.plan, current, active, value);
+  }
+  if (
+    !isPlainRecord(value.payload) ||
+    value.payload.kind !== "time" ||
+    !isValidSessionTime(value.payload.currentSessionTimeMs)
+  ) {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "Delay completion payload must contain a valid time observation.",
+    });
+  }
   const effectiveNow = Math.max(current.currentSessionTimeMs, value.payload.currentSessionTimeMs);
-  if (effectiveNow < active.deadlineMs) return pendingResult(current, [], { kind: "notDue", actionId, currentSessionTimeMs: current.currentSessionTimeMs, deadlineMs: active.deadlineMs });
+  if (effectiveNow < active.deadlineMs) {
+    return pendingResult(current, [], {
+      kind: "notDue",
+      actionId,
+      currentSessionTimeMs: current.currentSessionTimeMs,
+      deadlineMs: active.deadlineMs,
+    });
+  }
   const observed = observeTime(captured.plan, current, effectiveNow);
-  if (observed.outcome.kind !== "observed" || observed.outcome.completion === null) throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
+  if (
+    observed.outcome.kind !== "observed" ||
+    observed.outcome.completion === null
+  ) {
+    throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
+  }
   const requestedCompletion = observed.events.find(
     (event): event is ActionCompletedEvent =>
       event.kind === "actionCompleted" && event.settlement.actionId === actionId,
@@ -69,7 +116,13 @@ export function completeAction(plan: InstructionPlan, snapshot: RuntimeSnapshot,
   if (requestedCompletion === undefined) {
     throw new RuntimeDataError("TSR101", "Due delay completion did not settle the requested action.");
   }
-  return Object.freeze({ ...observed, outcome: { kind: "completed" as const, settlement: requestedCompletion.settlement } });
+  return Object.freeze({
+    ...observed,
+    outcome: {
+      kind: "completed" as const,
+      settlement: requestedCompletion.settlement,
+    },
+  });
 }
 
 function completePacingGate(
@@ -137,15 +190,30 @@ function completeInteraction(
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   if (request.interactionKind !== action.interactionKind) {
     const receivedInteractionKind = request.interactionKind;
-    const receivedActionKind = receivedInteractionKind === "button" || receivedInteractionKind === "text" || receivedInteractionKind === "number" || receivedInteractionKind === "choice"
+    const receivedActionKind = receivedInteractionKind === "button" ||
+      receivedInteractionKind === "text" ||
+      receivedInteractionKind === "number" ||
+      receivedInteractionKind === "choice"
       ? `interaction:${receivedInteractionKind}`
       : "<invalid>";
-    return pendingResult(current, [], { kind: "wrongActionKind", actionId: action.actionId, expectedActionKind: "interaction", receivedActionKind });
+    return pendingResult(current, [], {
+      kind: "wrongActionKind",
+      actionId: action.actionId,
+      expectedActionKind: "interaction",
+      receivedActionKind,
+    });
   }
   const resolved = resolveInteractionCompletion(action, request.payload);
-  if (!resolved.ok) return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
+  if (!resolved.ok) {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: resolved.message,
+    });
+  }
   assertEventSequenceCapacity(current, 2);
-  if (action.destinationTemporary !== null && resolved.result !== null) setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
+  if (action.destinationTemporary !== null && resolved.result !== null) {
+    setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
+  }
   const transcriptSequence = takeSequence(current, 2);
   const completionSequence = takeSequence(current, 2);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
@@ -182,8 +250,20 @@ function completeInteraction(
   current.nextInstruction = action.continuationInstruction;
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
   const events: InterpreterEvent[] = [
-    Object.freeze({ kind: "playerTranscript", sequence: transcriptSequence, target: action.target, requestingSpeakerId: action.speakerId, text: resolved.transcriptText, span: copySpan(span) } satisfies PlayerTranscriptEvent),
-    Object.freeze({ kind: "actionCompleted", sequence: completionSequence, settlement, span: copySpan(span) } satisfies ActionCompletedEvent),
+    Object.freeze({
+      kind: "playerTranscript",
+      sequence: transcriptSequence,
+      target: action.target,
+      requestingSpeakerId: action.speakerId,
+      text: resolved.transcriptText,
+      span: copySpan(span),
+    } satisfies PlayerTranscriptEvent),
+    Object.freeze({
+      kind: "actionCompleted",
+      sequence: completionSequence,
+      settlement,
+      span: copySpan(span),
+    } satisfies ActionCompletedEvent),
   ];
   return pendingResult(current, events, { kind: "completed", settlement });
 }

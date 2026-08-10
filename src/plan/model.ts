@@ -286,17 +286,53 @@ export type InteractionChoiceOption =
   | { readonly text: string; readonly label: string }
   | { readonly text: string; readonly label: number };
 export type InteractionUiPayload =
-  | { readonly kind: "button"; readonly buttonLabel: string; readonly accessibleName: InteractionAccessibleName }
-  | { readonly kind: "text"; readonly hint: string | null; readonly accessibleName: InteractionAccessibleName }
-  | { readonly kind: "number"; readonly hint: string | null; readonly accessibleName: InteractionAccessibleName }
-  | { readonly kind: "choice"; readonly labelType: "none" | "identifier" | "number"; readonly options: readonly InteractionChoiceOption[]; readonly accessibleName: InteractionAccessibleName };
+  | {
+      readonly kind: "button";
+      readonly buttonLabel: string;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "text";
+      readonly hint: string | null;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "number";
+      readonly hint: string | null;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "choice";
+      readonly labelType: "none" | "identifier" | "number";
+      readonly options: readonly InteractionChoiceOption[];
+      readonly accessibleName: InteractionAccessibleName;
+    };
 
 export type PreparedInteractionChoiceLabel = string | number;
 export type PreparedInteractionUiPayload =
-  | { readonly kind: "button"; readonly buttonLabelTemporary: number; readonly accessibleName: InteractionAccessibleName }
-  | { readonly kind: "text"; readonly hintTemporary: number | null; readonly accessibleName: InteractionAccessibleName }
-  | { readonly kind: "number"; readonly hintTemporary: number | null; readonly accessibleName: InteractionAccessibleName }
-  | { readonly kind: "choice"; readonly labelType: "none" | "identifier" | "number"; readonly optionsTemporary: number; readonly optionCount: number; readonly labels: readonly PreparedInteractionChoiceLabel[] | null; readonly accessibleName: InteractionAccessibleName };
+  | {
+      readonly kind: "button";
+      readonly buttonLabelTemporary: number;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "text";
+      readonly hintTemporary: number | null;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "number";
+      readonly hintTemporary: number | null;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "choice";
+      readonly labelType: "none" | "identifier" | "number";
+      readonly optionsTemporary: number;
+      readonly optionCount: number;
+      readonly labels: readonly PreparedInteractionChoiceLabel[] | null;
+      readonly accessibleName: InteractionAccessibleName;
+    };
 
 /** Static compiler/Standard-Library foreground interaction. */
 export interface StaticInteractionInstruction extends InstructionBase {

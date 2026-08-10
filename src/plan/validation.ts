@@ -438,9 +438,21 @@ function validateInteractionInstruction(
     : kind === "number" || (kind === "choice" && labelType === "number")
       ? "number"
       : "string";
-  if (value.expectedResult !== expected) errors.push(planError("TSC002", "Interaction result domain does not match its kind.", `${path}.expectedResult`));
+  if (value.expectedResult !== expected) {
+    errors.push(planError(
+      "TSC002",
+      "Interaction result domain does not match its kind.",
+      `${path}.expectedResult`,
+    ));
+  }
   if (kind === "button") {
-    if (value.destinationTemporary !== null) errors.push(planError("TSC002", "Button interaction must not have a result destination.", `${path}.destinationTemporary`));
+    if (value.destinationTemporary !== null) {
+      errors.push(planError(
+        "TSC002",
+        "Button interaction must not have a result destination.",
+        `${path}.destinationTemporary`,
+      ));
+    }
   } else {
     validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
   }
@@ -448,7 +460,11 @@ function validateInteractionInstruction(
   if (prepared) {
     validateTemporaryId(value.speakerTemporary, `${path}.speakerTemporary`, temporaryCount, errors);
     if (value.destinationTemporary === value.speakerTemporary) {
-      errors.push(planError("TSC002", "Interaction result destination must not alias its prepared speaker temporary.", `${path}.destinationTemporary`));
+      errors.push(planError(
+        "TSC002",
+        "Interaction result destination must not alias its prepared speaker temporary.",
+        `${path}.destinationTemporary`,
+      ));
     }
     validatePreparedInteractionUi(kind, ui, `${path}.preparedUi`, temporaryCount, value.speakerTemporary, value.destinationTemporary, errors);
     return;
@@ -503,14 +519,23 @@ function validateStaticInteractionUi(
     aggregate += bytes;
     return true;
   };
-  validateInteractionAccessibleName(kind, ui.accessibleName, `${path}.accessibleName`, countString, measurementExhausted, errors);
+  validateInteractionAccessibleName(
+    kind,
+    ui.accessibleName,
+    `${path}.accessibleName`,
+    countString,
+    measurementExhausted,
+    errors,
+  );
   if (kind === "button") countString(ui.buttonLabel, `${path}.buttonLabel`);
   if (kind === "text" || kind === "number") {
     if (ui.hint !== null) countString(ui.hint, `${path}.hint`);
   }
   if (kind === "choice") {
     const labelType = ui.labelType;
-    if (!["none", "identifier", "number"].includes(String(labelType))) errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
+    if (!["none", "identifier", "number"].includes(String(labelType))) {
+      errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
+    }
     if (!Array.isArray(ui.options) || ui.options.length === 0 || ui.options.length > MAX_INTERACTION_OPTION_ENTRIES) {
       errors.push(planError("TSC002", "Choice options exceed the shared collection boundary or are empty.", `${path}.options`));
     } else {
@@ -523,21 +548,41 @@ function validateStaticInteractionUi(
           errors.push(planError("TSC002", "Choice option must be an object.", optionPath));
           continue;
         }
-        if (!hasExactKeys(option, ["text", "label"])) errors.push(planError("TSC002", "Choice option contains unsupported fields.", optionPath));
+        if (!hasExactKeys(option, ["text", "label"])) {
+          errors.push(planError(
+            "TSC002",
+            "Choice option contains unsupported fields.",
+            optionPath,
+          ));
+        }
         const textValid = countString(option.text, `${optionPath}.text`);
         const label = option.label;
         const validLabel = labelType === "none"
           ? label === null
           : labelType === "identifier"
-            ? typeof label === "string" && countString(label, `${optionPath}.label`) && (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
-            : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
-        if (!validLabel) errors.push(planError("TSC002", "Choice option label does not match the choice label type.", `${optionPath}.label`));
+            ? typeof label === "string" &&
+              countString(label, `${optionPath}.label`) &&
+              (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
+            : typeof label === "number" &&
+              Number.isFinite(label) &&
+              !Object.is(label, -0);
+        if (!validLabel) {
+          errors.push(planError(
+            "TSC002",
+            "Choice option label does not match the choice label type.",
+            `${optionPath}.label`,
+          ));
+        }
         if (!measurementExhausted && validLabel && (typeof label === "string" || typeof label === "number")) {
-          if (labels.has(label)) errors.push(planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`));
+          if (labels.has(label)) {
+            errors.push(planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`));
+          }
           labels.add(label);
         }
         if (!measurementExhausted && textValid && labelType === "none") {
-          if (visible.has(option.text as string)) errors.push(planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`));
+          if (visible.has(option.text as string)) {
+            errors.push(planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`));
+          }
           visible.add(option.text as string);
         }
       }
@@ -563,7 +608,9 @@ function validatePreparedInteractionUi(
     : kind === "text" || kind === "number"
       ? ["kind", "hintTemporary", "accessibleName"]
       : ["kind", "labelType", "optionsTemporary", "optionCount", "labels", "accessibleName"];
-  if (!hasExactKeys(ui, keys)) errors.push(planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path));
+  if (!hasExactKeys(ui, keys)) {
+    errors.push(planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path));
+  }
   let aggregate = 0;
   let measurementExhausted = false;
   const countString = (candidate: unknown, fieldPath: string): candidate is string => {
@@ -604,7 +651,11 @@ function validatePreparedInteractionUi(
     validateTemporaryId(value, fieldPath, temporaryCount, errors);
     if (typeof value === "number") {
       if (value === speakerTemporary || value === destinationTemporary || used.has(value)) {
-        errors.push(planError("TSC002", "Prepared interaction temporaries must be pairwise distinct.", fieldPath));
+        errors.push(planError(
+          "TSC002",
+          "Prepared interaction temporaries must be pairwise distinct.",
+          fieldPath,
+        ));
       }
       used.add(value);
     }
@@ -618,13 +669,25 @@ function validatePreparedInteractionUi(
     return;
   }
   if (kind !== "choice") return;
-  if (!["none", "identifier", "number"].includes(String(ui.labelType))) errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
+  if (!["none", "identifier", "number"].includes(String(ui.labelType))) {
+    errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
+  }
   addTemporary(ui.optionsTemporary, `${path}.optionsTemporary`);
-  if (!Number.isSafeInteger(ui.optionCount) || (ui.optionCount as number) < 1 || (ui.optionCount as number) > MAX_INTERACTION_OPTION_ENTRIES) {
+  if (
+    !Number.isSafeInteger(ui.optionCount) ||
+    (ui.optionCount as number) < 1 ||
+    (ui.optionCount as number) > MAX_INTERACTION_OPTION_ENTRIES
+  ) {
     errors.push(planError("TSC002", "Prepared choice option count exceeds the shared collection boundary or is empty.", `${path}.optionCount`));
   }
   if (ui.labelType === "none") {
-    if (ui.labels !== null) errors.push(planError("TSC002", "Unlabelled prepared choice must not carry labels.", `${path}.labels`));
+    if (ui.labels !== null) {
+      errors.push(planError(
+        "TSC002",
+        "Unlabelled prepared choice must not carry labels.",
+        `${path}.labels`,
+      ));
+    }
     return;
   }
   if (!Array.isArray(ui.labels) || ui.labels.length !== ui.optionCount) {
@@ -636,10 +699,20 @@ function validatePreparedInteractionUi(
     const label = ui.labels[index];
     const labelPath = `${path}.labels[${index}]`;
     const valid = ui.labelType === "identifier"
-      ? countString(label, labelPath) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
-      : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
-    if (!valid) errors.push(planError("TSC002", "Prepared choice label does not match the label type.", labelPath));
-    if ((typeof label === "string" || typeof label === "number") && labels.has(label)) errors.push(planError("TSC002", "Prepared choice labels must be unique.", labelPath));
+      ? countString(label, labelPath) &&
+        /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
+      : typeof label === "number" &&
+        Number.isFinite(label) &&
+        !Object.is(label, -0);
+    if (!valid) {
+      errors.push(planError("TSC002", "Prepared choice label does not match the label type.", labelPath));
+    }
+    if (
+      (typeof label === "string" || typeof label === "number") &&
+      labels.has(label)
+    ) {
+      errors.push(planError("TSC002", "Prepared choice labels must be unique.", labelPath));
+    }
     if (typeof label === "string" || typeof label === "number") labels.add(label);
   }
 }
@@ -657,15 +730,35 @@ function validateInteractionAccessibleName(
     return;
   }
   if (accessible.kind === "text") {
-    if (!hasExactKeys(accessible, ["kind", "text"])) errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", path));
-    if (countString(accessible.text, `${path}.text`) && !measurementExhausted && !interactionStringHasNonWhitespace(accessible.text)) {
+    if (!hasExactKeys(accessible, ["kind", "text"])) {
+      errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", path));
+    }
+    if (
+      countString(accessible.text, `${path}.text`) &&
+      !measurementExhausted &&
+      !interactionStringHasNonWhitespace(accessible.text)
+    ) {
       errors.push(planError("TSC002", "Explicit interaction accessible name must contain a non-whitespace character.", `${path}.text`));
     }
     return;
   }
-  if (!hasExactKeys(accessible, ["kind", "key"])) errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", path));
-  const expectedKey = kind === "button" ? "continue" : kind === "number" ? "number" : kind === "choice" ? "chooseOption" : "answer";
-  if (accessible.key !== expectedKey) errors.push(planError("TSC002", "Interaction localized accessible-name key does not match its kind.", `${path}.key`));
+  if (!hasExactKeys(accessible, ["kind", "key"])) {
+    errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", path));
+  }
+  const expectedKey = kind === "button"
+    ? "continue"
+    : kind === "number"
+      ? "number"
+      : kind === "choice"
+        ? "chooseOption"
+        : "answer";
+  if (accessible.key !== expectedKey) {
+    errors.push(planError(
+      "TSC002",
+      "Interaction localized accessible-name key does not match its kind.",
+      `${path}.key`,
+    ));
+  }
 }
 
 function validateExpression(

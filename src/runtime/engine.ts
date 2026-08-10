@@ -491,23 +491,66 @@ function executePlannedInstruction(
     }
     case "wait": {
       const value = evaluator.evaluate(instruction.duration);
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw fault("TSR050", "Wait duration must be a finite non-negative number.", instruction.duration.span);
-      const multiplier = instruction.unit === "ms" ? 1 : instruction.unit === "min" ? 60_000 : instruction.unit === "h" ? 3_600_000 : 1_000;
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+        throw fault(
+          "TSR050",
+          "Wait duration must be a finite non-negative number.",
+          instruction.duration.span,
+        );
+      }
+      const multiplier = instruction.unit === "ms"
+        ? 1
+        : instruction.unit === "min"
+          ? 60_000
+          : instruction.unit === "h"
+            ? 3_600_000
+            : 1_000;
       const durationMs = value * multiplier;
       const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
-      if (!Number.isFinite(durationMs) || !isValidSessionTime(deadlineMs)) throw fault("TSR050", "Wait duration is outside the supported session-time range.", instruction.duration.span);
+      if (!Number.isFinite(durationMs) || !isValidSessionTime(deadlineMs)) {
+        throw fault(
+          "TSR050",
+          "Wait duration is outside the supported session-time range.",
+          instruction.duration.span,
+        );
+      }
       if (value > 0 && (durationMs <= 0 || deadlineMs <= snapshot.currentSessionTimeMs)) {
         throw fault("TSR050", "Wait duration cannot produce a representable future deadline.", instruction.duration.span);
       }
-      if (durationMs === 0) { advance(snapshot); return; }
-      if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      if (durationMs === 0) {
+        advance(snapshot);
+        return;
+      }
+      if (
+        !Number.isSafeInteger(snapshot.nextActionId) ||
+        snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+      ) {
+        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      }
       assertEventSequenceCapacity(snapshot, requiredEventSequencesForNewDelay(snapshot), instruction.span);
       const sequence = takeSequence(snapshot);
-      const action = Object.freeze({ kind: "delay" as const, actionId: snapshot.nextActionId, owningInstruction: snapshot.nextInstruction, continuationInstruction: snapshot.nextInstruction + 1, ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null, scopeDepth: snapshot.frames.length, loopDepth: snapshot.loopFrames.length, createdAtMs: snapshot.currentSessionTimeMs, deadlineMs, expectedCompletion: "time" as const, requestEventSequence: sequence });
+      const action = Object.freeze({
+        kind: "delay" as const,
+        actionId: snapshot.nextActionId,
+        owningInstruction: snapshot.nextInstruction,
+        continuationInstruction: snapshot.nextInstruction + 1,
+        ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null,
+        scopeDepth: snapshot.frames.length,
+        loopDepth: snapshot.loopFrames.length,
+        createdAtMs: snapshot.currentSessionTimeMs,
+        deadlineMs,
+        expectedCompletion: "time" as const,
+        requestEventSequence: sequence,
+      });
       snapshot.nextActionId += 1;
       snapshot.foregroundAction = action;
       snapshot.status = "waiting";
-      events.push(Object.freeze({ kind: "actionRequested", sequence, action: { ...action }, span: copySpan(instruction.span) } satisfies ActionRequestedEvent));
+      events.push(Object.freeze({
+        kind: "actionRequested",
+        sequence,
+        action: { ...action },
+        span: copySpan(instruction.span),
+      } satisfies ActionRequestedEvent));
       return;
     }
     case "interaction": {
@@ -523,7 +566,12 @@ function executePlannedInstruction(
           instruction.span,
         );
       }
-      if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      if (
+        !Number.isSafeInteger(snapshot.nextActionId) ||
+        snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+      ) {
+        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      }
       const backgroundPacingGate = snapshot.backgroundActions.some(
         (action) => action.kind === "chatPacingGate",
       );
@@ -581,7 +629,12 @@ function executePlannedInstruction(
       snapshot.nextActionId += 1;
       snapshot.foregroundAction = action;
       snapshot.status = "waiting";
-      events.push(Object.freeze({ kind: "actionRequested", sequence, action: cloneInteractionAction(action), span: copySpan(instruction.span) } satisfies ActionRequestedEvent));
+      events.push(Object.freeze({
+        kind: "actionRequested",
+        sequence,
+        action: cloneInteractionAction(action),
+        span: copySpan(instruction.span),
+      } satisfies ActionRequestedEvent));
       return;
     }
     case "exit":
@@ -662,7 +715,11 @@ function materializeInteractionUi(
 
   let ui: InteractionUiPayload;
   if (prepared.kind === "button") {
-    ui = { kind: "button", buttonLabel: readText(prepared.buttonLabelTemporary), accessibleName: prepared.accessibleName };
+    ui = {
+      kind: "button",
+      buttonLabel: readText(prepared.buttonLabelTemporary),
+      accessibleName: prepared.accessibleName,
+    };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
     ui = {
       kind: prepared.kind,

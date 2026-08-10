@@ -25,8 +25,14 @@ import { createFreshRuntimeSnapshot, type RuntimeSnapshot, validateRuntimeSnapsh
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import type { SourceSpan } from "../src/source.js";
 
-function interactionPlan(interactionKind: InteractionInstruction["interactionKind"], ui: InteractionUiPayload, options: { speaker?: string | null } = {}): InstructionPlan {
-  const source = options.speaker === undefined ? "wait 1\nexit" : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;
+function interactionPlan(
+  interactionKind: InteractionInstruction["interactionKind"],
+  ui: InteractionUiPayload,
+  options: { speaker?: string | null } = {},
+): InstructionPlan {
+  const source = options.speaker === undefined
+    ? "wait 1\nexit"
+    : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;
   const compiled = compileSource(source);
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
@@ -48,7 +54,14 @@ function interactionPlan(interactionKind: InteractionInstruction["interactionKin
     ui,
     span: base.instructions[waitIndex]!.span,
   };
-  const plan = { ...base, temporaryCount: interactionKind === "button" ? 0 : 1, instructions: base.instructions.map((instruction, index) => index === waitIndex ? interaction : instruction) };
+  const instructions = base.instructions.map((instruction, index) =>
+    index === waitIndex ? interaction : instruction,
+  );
+  const plan = {
+    ...base,
+    temporaryCount: interactionKind === "button" ? 0 : 1,
+    instructions,
+  };
   assert.equal(validateInstructionPlan(plan).valid, true, JSON.stringify(validateInstructionPlan(plan).errors));
   return plan;
 }

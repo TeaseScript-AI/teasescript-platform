@@ -1492,7 +1492,12 @@ class Parser {
         break;
       }
     }
-    if (options.length === 0 && !this.#diagnostics.some((item) => item.code === parserDiagnosticCode.expectedChoiceOption && item.span.start.offset >= command.span.start.offset)) {
+    const missingChoiceOptionWasReported = this.#diagnostics.some(
+      (item) =>
+        item.code === parserDiagnosticCode.expectedChoiceOption &&
+        item.span.start.offset >= command.span.start.offset,
+    );
+    if (options.length === 0 && !missingChoiceOptionWasReported) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedChoiceOption,
         "Expected at least one choice option.",
