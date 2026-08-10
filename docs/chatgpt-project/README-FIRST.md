@@ -169,8 +169,11 @@ Read completely and apply in this order:
 4. **From GitHub:** the assigned issue or pull request, its owner corrections, reviews, and current CI state.
 
 These rules apply to the agent; they are not optional background material. Read installed `LOCAL-AGENT-BOOTSTRAP.md`
-when setup or preparation fails. Read `CODEX-MODEL-SELECTION.md` before selecting or reclassifying Codex, and re-read
-`CODEX-PROMPTING.md` immediately before every Codex-facing prompt, including repair and follow-up prompts. Work locally
-after checkout; reserve the GitHub connector for live state and permitted writes. After checkout,
+when setup or preparation fails. Keep the applicable Codex guides fresh in active context: use
+`CODEX-MODEL-SELECTION.md` for selection or reclassification and `CODEX-PROMPTING.md` for Codex-facing prompts.
+Consecutive related work may reuse guidance that remains fresh; re-read the relevant guide after substantial code or
+review inspection, large tool output, a task switch, or other context-heavy work, and whenever freshness is
+uncertain. Work locally after checkout; reserve the GitHub connector for live state and permitted writes. After
+checkout,
 `docs/agents/CONNECTOR-SOURCE-ACQUISITION.md` is the canonical source for replaceable acquisition mechanics; re-read it
 before a later source refresh instead of relying on this startup copy.

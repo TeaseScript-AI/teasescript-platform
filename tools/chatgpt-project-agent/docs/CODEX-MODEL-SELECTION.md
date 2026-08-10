@@ -2,8 +2,12 @@
 
 Use this guide to choose the executor and, when Codex is selected, the model and reasoning level. Prompt construction,
 work-package boundaries, milestone handling, and per-prompt quality checks are owned by
-[`CODEX-PROMPTING.md`](CODEX-PROMPTING.md). Re-read that guide immediately before every Codex-facing prompt, including
-repair and follow-up prompts.
+[`CODEX-PROMPTING.md`](CODEX-PROMPTING.md).
+
+Do not mechanically re-read either guide before every consecutive action. Re-read the relevant guide when its rules are
+no longer fresh in active context, especially after substantial code or review inspection, large tool output,
+a task switch, or other context-heavy work. Consecutive related selection and prompting steps may reuse guidance that
+remains fresh. When uncertain whether it is still fresh, re-read it.
 
 Choose the lowest-cost executor likely to produce an accepted result. When Codex is selected, choose its lowest-cost
 model and reasoning level. Optimize for expected total cost, including handoff/context transfer, retries, debugging,

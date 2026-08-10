@@ -1,7 +1,11 @@
 # Codex prompt construction
 
-Re-read this guide immediately before **every** Codex-facing prompt, including implementation, continuation,
-review-repair, and follow-up prompts. Do not rely on an earlier prompt or remembered guidance after the task evolves.
+Use this guide whenever constructing a Codex-facing prompt, including implementation, continuation, review-repair,
+and follow-up prompts. If its guidance is still fresh because prompt-authoring work has continued without a
+context-heavy detour, reuse it rather than re-reading mechanically. Re-read it after substantial code or review
+inspection, large tool output, a task switch, or other work likely to have displaced the guidance from active
+context. When uncertain whether it is still fresh, re-read it.
+
 This file owns work-package boundaries, milestone handling, prompt content, and the author preflight;
 [`CODEX-MODEL-SELECTION.md`](CODEX-MODEL-SELECTION.md) owns executor, model, reasoning, and escalation selection.
 
