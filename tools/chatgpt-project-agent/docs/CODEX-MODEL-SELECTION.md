@@ -231,8 +231,9 @@ specification.
 ### Handoff to prompt construction
 
 Executor choice, classification, model selection, reasoning justification, cost analysis, and escalation logic are
-internal routing work. Record one primary configuration and only the escalation trigger needed to revisit it; do not
-copy this analysis into the Codex prompt.
+internal routing work. Record one primary configuration and only the escalation trigger needed to revisit it. Translate
+only task-relevant routing findings into concrete execution constraints or checks; do not copy classification labels,
+pricing, rejected configurations, or model-selection rationale into the Codex prompt.
 
 ```text
 Executor: Sol agent or Codex
@@ -240,6 +241,10 @@ Execution volume: one run or requires bounded work-package planning
 Codex model/reasoning, when applicable:
 Escalation trigger:
 ```
+
+When uncertain between model tiers, choose the cheaper model only when failure is quickly and reliably detectable.
+When uncertain between Medium and High, choose Medium unless a specific unresolved uncertainty, strategy choice, or
+diagnostic burden requires High.
 
 If Codex will receive a prompt, continue with [`CODEX-PROMPTING.md`](CODEX-PROMPTING.md) and complete its mandatory
 author preflight.

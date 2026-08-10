@@ -86,9 +86,10 @@ do not require per-item evidence, commentary, logs, or deletion proofs unless th
 progress reports, inventories, or intermediate proofs only when they have a concrete execution or handoff consumer.
 
 Match specificity to the selected configuration: Luna needs narrower decisions and concrete checks; Terra needs
-implementation direction with normal local freedom; Sol needs precise contracts and critical invariants with broader
-implementation freedom. Low reasoning needs a well-bounded path, Medium normal repository investigation, and High the
-actual unresolved questions or diagnostic burden rather than extra procedure.
+implementation direction, ownership boundaries, and normal local freedom; Sol needs precise contracts, relevant
+evidence, and critical invariants with broader implementation freedom. Low reasoning needs a well-bounded path, Medium
+normal repository investigation, and High the actual unresolved questions, trade-offs, or diagnostic burden rather than
+extra procedure.
 
 ## Mandatory prompt-author preflight
 
