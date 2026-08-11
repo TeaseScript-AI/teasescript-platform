@@ -49,6 +49,31 @@ test("lowers nested calls and arguments in source order", () => {
   assert.ok(outer.arguments[0]!.temporaryId < outer.arguments[1]!.temporaryId);
 });
 
+test("clears one call's prepared argument temporaries in one return-continuation instruction", () => {
+  const compiled = plan([
+    "function combine(first, second, third) { return first + second + third }",
+    "combine(1, 2, 3)",
+  ].join("\n"));
+  const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
+  const callIndex = root.findIndex((instruction) => instruction.kind === "callFunction");
+  const call = root[callIndex];
+  assert.equal(call?.kind, "callFunction");
+  if (call?.kind !== "callFunction") return;
+
+  const cleanup = root[call.returnInstruction];
+  assert.equal(cleanup?.kind, "clearTemporaries");
+  if (cleanup?.kind !== "clearTemporaries") return;
+  assert.deepEqual(
+    cleanup.temporaryIds,
+    call.arguments.map((argument) => argument.temporaryId),
+  );
+  assert.equal(cleanup.temporaryIds.includes(call.destinationTemporary), false);
+  assert.equal(
+    root.filter((instruction) => instruction.kind === "clearTemporaries").length,
+    1,
+  );
+});
+
 test("lowers property receivers and assignment targets in source order", () => {
   const compiled = plan([
     "let items = [0]",
@@ -92,8 +117,8 @@ test("lowers calls in templates, conditions, loop conditions, and returns", () =
 
 test("compiles defaults as executable prologues and inserts implicit returns", () => {
   const compiled = plan([
-    "function helper { return 2 }",
-    "function sample(required, optional = helper()) { say optional }",
+    "function helper(value) { return value }",
+    "function sample(required, optional = helper(2)) { say optional }",
     "sample(1)",
   ].join("\n"));
   const sample = compiled.functions[1]!;
@@ -106,6 +131,7 @@ test("compiles defaults as executable prologues and inserts implicit returns", (
   assert.ok(prologue.some((instruction) => instruction.kind === "bindSuppliedParameter"));
   assert.ok(prologue.some((instruction) => instruction.kind === "prepareParameterDefault"));
   assert.ok(prologue.some((instruction) => instruction.kind === "callFunction"));
+  assert.ok(prologue.some((instruction) => instruction.kind === "clearTemporaries"));
   assert.ok(prologue.some((instruction) => instruction.kind === "bindDefaultParameter"));
   assert.equal(compiled.instructions[sample.implicitReturnInstruction]?.kind, "returnVoid");
 });
@@ -251,6 +277,27 @@ test("rejects malformed function regions and aliased call temporaries", () => {
   )!;
   duplicateCall.arguments[1]!.temporaryId = duplicateCall.arguments[0]!.temporaryId;
   assertInvalid(duplicateArgument, /temporary IDs must be unique/u);
+
+  const emptyCleanup = mutable(calls);
+  const emptyBatch = emptyCleanup.instructions.find(
+    (instruction) => instruction.kind === "clearTemporaries",
+  )!;
+  emptyBatch.temporaryIds = [];
+  assertInvalid(emptyCleanup, /non-empty array/u);
+
+  const duplicateCleanup = mutable(calls);
+  const duplicateBatch = duplicateCleanup.instructions.find(
+    (instruction) => instruction.kind === "clearTemporaries",
+  )!;
+  duplicateBatch.temporaryIds.push(duplicateBatch.temporaryIds[0]);
+  assertInvalid(duplicateCleanup, /must not contain duplicates/u);
+
+  const unknownCleanup = mutable(calls);
+  const unknownBatch = unknownCleanup.instructions.find(
+    (instruction) => instruction.kind === "clearTemporaries",
+  )!;
+  unknownBatch.temporaryIds[0] = unknownCleanup.temporaryCount + 1;
+  assertInvalid(unknownCleanup, /Temporary/u);
 
   const unpreparedAssignment = mutable(plan("let items = [0]\nitems[0] = 1"));
   const assignment = unpreparedAssignment.instructions.find(

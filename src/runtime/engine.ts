@@ -480,6 +480,16 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     }
+    case "clearTemporaries": {
+      const temporaryIds = new Set(instruction.temporaryIds);
+      for (let index = snapshot.temporaries.length - 1; index >= 0; index -= 1) {
+        if (temporaryIds.has(snapshot.temporaries[index]!.id)) {
+          snapshot.temporaries.splice(index, 1);
+        }
+      }
+      advance(snapshot);
+      return;
+    }
     case "callFunction":
       enterFunction(plan, instruction, snapshot);
       return;

@@ -7,7 +7,9 @@ import {
   CHECKPOINT_VERSION,
   CheckpointError,
   createCheckpoint,
+  deserializeCheckpoint,
   restoreCheckpoint,
+  serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import {
   executeInstruction,
@@ -15,6 +17,7 @@ import {
   RuntimeDataError,
   type RuntimeBuiltinFunction,
 } from "../src/runtime/engine.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
 import {
   createFreshRuntimeSnapshot,
@@ -128,6 +131,71 @@ test("restores exact RNG state through nested calls", () => {
   ].join("\n"));
 
   assert.ok(new Set(observations.map((snapshot) => snapshot.rng.state)).size > 1);
+});
+
+test("preserves prepared earlier arguments through a later suspension and a suspended callee", () => {
+  const compiled = plan([
+    "let order = []",
+    'function earlier { order.add("earlier")\nreturn random() }',
+    'function later { wait 1 ms\norder.add("later")\nreturn random() }',
+    "function combine(first, second) { wait 2 ms\nreturn first + second }",
+    "combine(earlier(), later())",
+  ].join("\n"));
+  const combine = compiled.functions.find((definition) => definition.name === "combine")!;
+  const combineCall = compiled.instructions.find(
+    (instruction) => instruction.kind === "callFunction" && instruction.functionId === combine.id,
+  );
+  assert.equal(combineCall?.kind, "callFunction");
+  if (combineCall?.kind !== "callFunction") return;
+
+  const firstPending = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 0x2468_ace1 }));
+  assert.equal(firstPending.snapshot.status, "waiting");
+  assert.equal(firstPending.snapshot.callFrames.at(-1)?.functionName, "later");
+  assert.ok(firstPending.snapshot.callFrames.at(-1)?.callerTemporaries.some(
+    (temporary) => temporary.id === combineCall.arguments[0]!.temporaryId,
+  ));
+  const firstAction = firstPending.snapshot.foregroundAction;
+  assert.equal(firstAction?.kind, "delay");
+  const firstRestored = deserializeCheckpoint(serializeCheckpoint(
+    createCheckpoint(compiled, firstPending.snapshot),
+  ));
+  const directSecondPending = run(
+    compiled,
+    observeTime(compiled, firstPending.snapshot, firstAction!.deadlineMs).snapshot,
+  );
+  const restoredSecondPending = run(
+    firstRestored.plan,
+    observeTime(firstRestored.plan, firstRestored.snapshot, firstAction!.deadlineMs).snapshot,
+  );
+  assert.deepEqual(restoredSecondPending, directSecondPending);
+  assert.equal(directSecondPending.snapshot.status, "waiting");
+  assert.equal(directSecondPending.snapshot.callFrames.at(-1)?.functionName, "combine");
+  assert.deepEqual(
+    directSecondPending.snapshot.callFrames.at(-1)?.arguments.map((argument) => argument.supplied),
+    [true, true],
+  );
+  const forgedWaiting = mutableCheckpoint(createCheckpoint(compiled, directSecondPending.snapshot));
+  forgedWaiting.snapshot.callFrames.at(-1)!.arguments[0]!.value = 99;
+  assert.equal(validateRuntimeSnapshot(forgedWaiting.snapshot, compiled).valid, false);
+  assertCheckpointRejected(forgedWaiting, "TSK002");
+
+  const secondAction = directSecondPending.snapshot.foregroundAction;
+  assert.equal(secondAction?.kind, "delay");
+  const secondRestored = deserializeCheckpoint(serializeCheckpoint(
+    createCheckpoint(compiled, directSecondPending.snapshot),
+  ));
+  const direct = run(
+    compiled,
+    observeTime(compiled, directSecondPending.snapshot, secondAction!.deadlineMs).snapshot,
+  );
+  const resumed = run(
+    secondRestored.plan,
+    observeTime(secondRestored.plan, secondRestored.snapshot, secondAction!.deadlineMs).snapshot,
+  );
+  assert.deepEqual(resumed, direct);
+  assert.equal(direct.snapshot.status, "halted");
+  assert.equal(direct.snapshot.callFrames.length, 0);
+  assert.equal(direct.snapshot.temporaries.length, 0);
 });
 
 test("builds snapshot indexes once and reuses liveness for same-signature call frames", () => {
@@ -268,12 +336,44 @@ test("rejects inconsistent argument temporaries and parameter bindings", () => {
 
   const changedArgument = mutableCheckpoint(createCheckpoint(compiled, snapshot));
   changedArgument.snapshot.callFrames[0]!.arguments[0]!.value = 99;
+  assert.equal(validateRuntimeSnapshot(changedArgument.snapshot, compiled).valid, false);
   assertCheckpointRejected(changedArgument, "TSK002");
+
+  const missingProvenance = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  missingProvenance.snapshot.callFrames[0]!.arguments[0] = {
+    parameterName: "input",
+    supplied: false,
+  };
+  assert.equal(validateRuntimeSnapshot(missingProvenance.snapshot, compiled).valid, false);
+  assertCheckpointRejected(missingProvenance, "TSK002");
+
+  const wrongParameter = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  wrongParameter.snapshot.callFrames[0]!.arguments[0]!.parameterName = "forged";
+  assert.equal(validateRuntimeSnapshot(wrongParameter.snapshot, compiled).valid, false);
+  assertCheckpointRejected(wrongParameter, "TSK002");
+
+  const duplicateParameter = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  duplicateParameter.snapshot.callFrames[0]!.arguments.push(
+    structuredClone(duplicateParameter.snapshot.callFrames[0]!.arguments[0]!),
+  );
+  assert.equal(validateRuntimeSnapshot(duplicateParameter.snapshot, compiled).valid, false);
+  assertCheckpointRejected(duplicateParameter, "TSK002");
 
   const occupiedDestination = mutableCheckpoint(createCheckpoint(compiled, snapshot));
   const frame = occupiedDestination.snapshot.callFrames[0]!;
   frame.callerTemporaries.push({ id: frame.destinationTemporary, value: null });
   assertCheckpointRejected(occupiedDestination, "TSK002");
+
+  const optional = plan("function sample(required, optional = 2) { return required }\nsample(1)");
+  const optionalFrame = executeUntil(optional, (candidate) => candidate.callFrames.length === 1);
+  const forgedSupplied = mutableCheckpoint(createCheckpoint(optional, optionalFrame));
+  forgedSupplied.snapshot.callFrames[0]!.arguments[1] = {
+    parameterName: "optional",
+    supplied: true,
+    value: 2,
+  };
+  assert.equal(validateRuntimeSnapshot(forgedSupplied.snapshot, optional).valid, false);
+  assertCheckpointRejected(forgedSupplied, "TSK002");
 
   snapshot = executeInstruction(compiled, snapshot).snapshot;
   const missingBinding = mutableCheckpoint(createCheckpoint(compiled, snapshot));

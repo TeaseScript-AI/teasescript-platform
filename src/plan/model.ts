@@ -1,7 +1,7 @@
 import type { SourceSpan } from "../source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 16;
+export const INSTRUCTION_PLAN_VERSION = 17;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
@@ -55,6 +55,7 @@ export type Instruction =
   | PrepareSayTextInstruction
   | PrepareInteractionSpeakerInstruction
   | ClearTemporaryInstruction
+  | ClearTemporariesInstruction
   | CallFunctionInstruction
   | BindSuppliedParameterInstruction
   | BeginFunctionDefaultsInstruction
@@ -214,6 +215,11 @@ export interface PrepareInteractionSpeakerInstruction extends InstructionBase {
 export interface ClearTemporaryInstruction extends InstructionBase {
   readonly kind: "clearTemporary";
   readonly temporaryId: number;
+}
+
+export interface ClearTemporariesInstruction extends InstructionBase {
+  readonly kind: "clearTemporaries";
+  readonly temporaryIds: readonly number[];
 }
 
 export interface PreparedCallArgument {
