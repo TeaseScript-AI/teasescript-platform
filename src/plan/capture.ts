@@ -1,5 +1,4 @@
 import type { InstructionPlan } from "./model.js";
-import { freezeInstructionPlan } from "./freeze.js";
 import {
   captureFailureValidation,
   capturePlanData,
@@ -23,8 +22,6 @@ export function captureInstructionPlan(value: unknown): CapturedInstructionPlanR
   const validation = validateCapturedInstructionPlan(capture.value);
   return Object.freeze({
     validation,
-    plan: validation.valid
-      ? freezeInstructionPlan(capture.value as InstructionPlan)
-      : null,
+    plan: validation.valid ? (capture.value as InstructionPlan) : null,
   });
 }

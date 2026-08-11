@@ -14,7 +14,9 @@ export interface PlanCaptureFailure {
 }
 
 export function capturePlanData(value: unknown): CapturedPlanData | PlanCaptureFailure {
-  const capture = captureExternalData(value);
+  const capture = captureExternalData(value, "$", {
+    freezeCapturedContainers: true,
+  });
   if (!capture.ok) {
     return Object.freeze({
       message: planExternalDataFailureMessage(capture.failure.kind),

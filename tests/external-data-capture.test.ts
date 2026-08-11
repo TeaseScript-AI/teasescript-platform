@@ -198,6 +198,64 @@ test("compiler and runtime paths avoid duplicate whole-plan capture", () => {
   assert.equal(serializationStatistics.externalCaptureVisits, undefined);
 });
 
+test("external plan capture freezes the detached graph without freezing generic capture", () => {
+  const plan = mutablePlan("let value = [1, { nested: 2 }]\nexit");
+  const captured = captureInstructionPlan(plan);
+  assert.ok(captured.validation.valid);
+  assert.notEqual(captured.plan, null);
+
+  const capturedPlan = captured.plan! as unknown as {
+    instructions: Array<{
+      span: { start: { offset: number } };
+    }>;
+  };
+  const capturedInstruction = capturedPlan.instructions[0]!;
+  const capturedSpan = capturedInstruction.span;
+  const capturedStart = capturedSpan.start;
+  assert.equal(Object.isFrozen(captured.plan), true);
+  assert.equal(Object.isFrozen(capturedPlan.instructions), true);
+  assert.equal(Object.isFrozen(capturedInstruction), true);
+  assert.equal(Object.isFrozen(capturedSpan), true);
+  assert.equal(Object.isFrozen(capturedStart), true);
+
+  const originalInstruction = (plan.instructions as Array<{
+    span: { start: { offset: number } };
+  }>)[0]!;
+  originalInstruction.span.start.offset = 3;
+  assert.notEqual(capturedStart.offset, 3);
+
+  const generic = captureExternalData({ nested: [1, { value: 2 }] });
+  assert.equal(generic.ok, true);
+  const genericValue = generic.value as { nested: Array<{ value?: number }> };
+  assert.equal(Object.isFrozen(genericValue), false);
+  assert.equal(Object.isFrozen(genericValue.nested), false);
+  assert.equal(Object.isFrozen(genericValue.nested[1]!), false);
+});
+
+test("runtime snapshot capture remains mutable after plan capture freezes on leave", () => {
+  const plan = compiledPlan();
+  const snapshot = captureRuntimeSnapshotWithValidatedPlan(
+    mutableSnapshot(plan),
+    plan,
+  );
+  assert.notEqual(snapshot.snapshot, null);
+  assert.equal(Object.isFrozen(snapshot.snapshot), false);
+  assert.equal(Object.isFrozen(snapshot.snapshot!.frames), false);
+  snapshot.snapshot!.nextInstruction = 1;
+  assert.equal(snapshot.snapshot!.nextInstruction, 1);
+});
+
+test("parsed checkpoint plans retain the independent freeze path", () => {
+  const plan = compiledPlan("say \"ready\"");
+  const restored = deserializeCheckpoint(JSON.stringify(
+    createCheckpoint(plan, createFreshRuntimeSnapshot(plan)),
+  ));
+  assert.equal(Object.isFrozen(restored.plan), true);
+  assert.equal(Object.isFrozen(restored.plan.instructions), true);
+  assert.equal(Object.isFrozen(restored.plan.instructions[0]!), true);
+  assert.equal(Object.isFrozen(restored.plan.instructions[0]!.span), true);
+});
+
 test("ordinary source compiles beyond the removed generic capture threshold", () => {
   const count = 5_000;
   const source = Array.from({ length: count }, (_, index) => `say "Line ${index}"`).join("\n");

@@ -24,6 +24,10 @@ export type ExternalDataCaptureResult =
       readonly failure: ExternalDataFailure;
     };
 
+export interface ExternalDataCaptureOptions {
+  readonly freezeCapturedContainers?: boolean;
+}
+
 const CAPTURED_ARRAY_PROTOTYPE = createCapturedArrayPrototype();
 
 interface PathNode {
@@ -58,6 +62,7 @@ type WorkItem =
   | {
       readonly kind: "leave";
       readonly value: object;
+      readonly captured: unknown[] | Record<string, unknown>;
     };
 
 /**
@@ -70,6 +75,7 @@ type WorkItem =
 export function captureExternalData(
   value: unknown,
   rootPath = "$",
+  options?: ExternalDataCaptureOptions,
 ): ExternalDataCaptureResult {
   const active = new Set<object>();
   const work: WorkItem[] = [
@@ -80,6 +86,7 @@ export function captureExternalData(
   while (work.length > 0) {
     const item = work.pop()!;
     if (item.kind === "leave") {
+      if (options?.freezeCapturedContainers) Object.freeze(item.captured);
       active.delete(item.value);
       continue;
     }
@@ -231,7 +238,7 @@ export function captureExternalData(
     });
 
     active.add(current);
-    work.push({ kind: "leave", value: current });
+    work.push({ kind: "leave", value: current, captured });
     work.push({
       kind: "iterate",
       value: current,
