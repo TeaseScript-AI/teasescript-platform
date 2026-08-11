@@ -57,7 +57,8 @@ Do not categorically forbid superlinear algorithms, recursion, copying, or other
 judge realistic workloads, normal-path CPU/memory cost, implementation complexity, and alternatives.
 When a material limitation is found but a proportionate repair would require broad redesign or would
 impose a material recurring cost, classify it through the normal finding rules and preserve the evidence
-in the active issue/PR or a concrete follow-up. Record the controlling input shape, observed consequence,
+in the active issue/PR. If the limitation remains open when that work closes, create or update a concrete
+follow-up before closure so it stays discoverable. Record the controlling input shape, observed consequence,
 likely or measured benefit, repair scope, and reason for deferral so related findings can support a later
 redesign decision. Do not silently ignore the limitation or turn an incidental JavaScript/V8 failure into
 TeaseScript product policy.

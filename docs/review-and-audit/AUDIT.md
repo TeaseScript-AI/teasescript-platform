@@ -157,16 +157,17 @@ validation, or capture across layers; input-sized work nested in other input-siz
 representation and allocation amplification; per-instruction/call/event/checkpoint multipliers; and
 input-controlled recursion, argument spreading, materialization, indexing, allocation, or other
 native-JavaScript failure modes. For compiler-facing scope, follow representative valid `.tease`
-width/depth through every affected parser, semantic, lowering, plan, validation, and downstream stage;
-surviving one layer does not close a later native-stack or allocation failure.
+width/depth through every affected lexer/parser, semantic, lowering, plan-validation, runtime, and
+checkpoint/restore stage; surviving one layer does not close a later native-stack or allocation failure.
 
 The audit does not require every algorithm to be linear or every traversal to be iterative. Prefer a
 simple structural repair when a material amplification or native failure is avoidable. When the
 credible repair would require disproportionate redesign or impose a material recurring normal-path
 cost, record the limitation, controlling input shape, consequence, alternatives, likely or measured
 benefit, and repair scope through the existing finding/follow-up and Owner-escalation route. Preserve
-related deferred findings as evidence that can later justify a broader redesign; do not silently
-convert an incidental JavaScript/V8 limitation into TeaseScript product policy.
+related deferred findings as evidence that can later justify a broader redesign; if they remain open
+when the audited work closes, route them to a concrete follow-up before closure so they stay discoverable.
+Do not silently convert an incidental JavaScript/V8 limitation into TeaseScript product policy.
 
 Do not add speculative defenses or micro-optimizations without a real requirement or boundary.
 Useful improvements without a real violation or material risk may use the appropriate
