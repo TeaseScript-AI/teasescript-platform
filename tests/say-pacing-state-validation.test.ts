@@ -347,19 +347,19 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const compiled = plan('say "first"');
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
-  assert.equal(compiled.version, 15);
-  assert.equal(snapshot.version, 17);
-  assert.equal(checkpoint.version, 23);
+  assert.equal(compiled.version, 16);
+  assert.equal(snapshot.version, 18);
+  assert.equal(checkpoint.version, 24);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot) as any;
-  oldSnapshot.version = 16;
+  oldSnapshot.version = 17;
   assert.equal(validateRuntimeSnapshot(oldSnapshot, compiled).valid, false);
   const oldPlan = structuredClone(compiled) as any;
-  oldPlan.version = 14;
+  oldPlan.version = 15;
   assert.equal(validateInstructionPlan(oldPlan).valid, false);
   const oldCheckpoint = structuredClone(checkpoint);
-  oldCheckpoint.version = 22;
+  oldCheckpoint.version = 23;
   assert.throws(() => deserializeCheckpoint(JSON.stringify(oldCheckpoint)));
 });
 
@@ -507,8 +507,48 @@ test("prepared say temporary values reject malformed top-level and caller state"
   );
   assert.equal(speakerProperties.find((property) => property.name === "identifier")?.value, "vera");
 
+  const presentationDrift = structuredClone(atSay) as any;
+  presentationDrift.temporaries.find(
+    (temporary: { id: number }) => temporary.id === say.speakerTemporary,
+  ).value.properties.find(
+    (property: { name: string }) => property.name === "displayName",
+  ).value = "Captured before a later mutation";
+  expectCheckpointJsonRoundTrip(
+    "prepared explicit speaker retains captured mutable presentation fields",
+    compiled,
+    presentationDrift,
+  );
+
+  const forgeExplicitSpeaker = (
+    temporaries: any[],
+    speakerTemporary: number,
+    contextualSpeakerTemporary: number,
+  ): void => {
+    const output = temporaries.find((temporary) => temporary.id === speakerTemporary);
+    output.value.properties.find((property: { name: string }) => property.name === "speakerId").value = 2;
+    output.value.properties.find((property: { name: string }) => property.name === "identifier").value = "other";
+    temporaries.find((temporary) => temporary.id === contextualSpeakerTemporary).value = {
+      kind: "speakerReference",
+      speakerId: 2,
+      identifier: "other",
+    };
+  };
+  const forgedTopLevel = structuredClone(atSay) as any;
+  forgeExplicitSpeaker(
+    forgedTopLevel.temporaries,
+    say.speakerTemporary,
+    say.contextualSpeakerTemporary,
+  );
+  expectInvalidSnapshot("explicit prepared speaker replaced with another valid speaker", compiled, forgedTopLevel);
+  assert.throws(() => createCheckpoint(compiled, forgedTopLevel));
+  assert.throws(() => run(compiled, forgedTopLevel), {
+    name: "RuntimeDataError",
+    code: "TSR101",
+  });
+
   const suspended = plan([
     'speaker vera { title: "Captain"\ndelay: 1 }',
+    "speaker other {}",
     'function textValue { return "hello" }',
     "function pace { wait 1 ms\nreturn 1 }",
     'say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()',
@@ -540,6 +580,23 @@ test("prepared say temporary values reject malformed top-level and caller state"
     (property: { name: string }) => property.name === "speakerId",
   ).value = "bad";
   expectInvalidSnapshot("malformed prepared speaker in caller state", suspended, malformedCallerSpeaker);
+  const forgedCaller = structuredClone(waiting) as any;
+  const forgedCallerTemporaries = forgedCaller.callFrames.at(-1).callerTemporaries;
+  forgeExplicitSpeaker(
+    forgedCallerTemporaries,
+    suspendedSay.speakerTemporary,
+    suspendedSay.contextualSpeakerTemporary,
+  );
+  expectInvalidSnapshot(
+    "explicit prepared speaker replaced with another valid speaker in caller state",
+    suspended,
+    forgedCaller,
+  );
+  assert.throws(() => createCheckpoint(suspended, forgedCaller));
+  assert.throws(() => run(suspended, forgedCaller), {
+    name: "RuntimeDataError",
+    code: "TSR101",
+  });
 });
 
 test("say pacing expression temporaries are required before checkpoint restore", () => {

@@ -1355,10 +1355,85 @@ function preparedSayContextualSpeakerIsUsedBeforeCapture(
     if (
       isRecord(instruction) &&
       index.owners[instructionIndex] === region &&
-      canonicalHandoffConsumesTemporary(instruction, temporaryId)
+      preparedSayPayloadMayReferenceTemporary(instruction, temporaryId)
     ) return true;
   }
   return false;
+}
+
+function preparedSayPayloadMayReferenceTemporary(
+  instruction: Record<string, unknown>,
+  temporaryId: number,
+): boolean {
+  let expression: unknown;
+  switch (instruction.kind) {
+    case "evaluate":
+    case "prepareReference":
+      expression = instruction.expression;
+      break;
+    case "declareBinding":
+    case "assign":
+    case "storeTemporary":
+    case "prepareSayText":
+    case "say":
+    case "setDeclaredSpeakerProperty":
+    case "returnValue":
+      expression = instruction.value;
+      break;
+    default:
+      expression = undefined;
+  }
+  return expressionMayReferenceTemporary(expression, temporaryId);
+}
+
+function expressionMayReferenceTemporary(value: unknown, temporaryId: number): boolean {
+  if (!isRecord(value)) return false;
+  switch (value.kind) {
+    case "temporary":
+      return value.temporaryId === temporaryId;
+    case "list":
+    case "set":
+      return Array.isArray(value.elements) && value.elements.some((item) =>
+        expressionMayReferenceTemporary(item, temporaryId)
+      );
+    case "object":
+      return Array.isArray(value.properties) && value.properties.some((property) =>
+        isRecord(property) && expressionMayReferenceTemporary(property.value, temporaryId)
+      );
+    case "group":
+      return expressionMayReferenceTemporary(value.expression, temporaryId);
+    case "template":
+      return Array.isArray(value.parts) && value.parts.some((part) =>
+        isRecord(part) &&
+        part.kind === "expression" &&
+        expressionMayReferenceTemporary(part.expression, temporaryId)
+      );
+    case "property":
+      return expressionMayReferenceTemporary(value.object, temporaryId);
+    case "index":
+      return expressionMayReferenceTemporary(value.object, temporaryId) ||
+        expressionMayReferenceTemporary(value.index, temporaryId);
+    case "call": {
+      const calleeReferences =
+        isRecord(value.callee) &&
+        value.callee.kind === "property" &&
+        expressionMayReferenceTemporary(value.callee.object, temporaryId);
+      const argumentReferences = Array.isArray(value.arguments) && value.arguments.some((argument) =>
+        isRecord(argument) && expressionMayReferenceTemporary(argument.value, temporaryId)
+      );
+      return calleeReferences || argumentReferences;
+    }
+    case "unary":
+      return expressionMayReferenceTemporary(value.operand, temporaryId);
+    case "binary":
+      return expressionMayReferenceTemporary(value.left, temporaryId) ||
+        expressionMayReferenceTemporary(value.right, temporaryId);
+    case "range":
+      return expressionMayReferenceTemporary(value.start, temporaryId) ||
+        expressionMayReferenceTemporary(value.end, temporaryId);
+    default:
+      return false;
+  }
 }
 
 function preparedSayTemporaryIsCleared(

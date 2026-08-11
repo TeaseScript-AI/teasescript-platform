@@ -47,7 +47,7 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 17;
+export const RUNTIME_SNAPSHOT_VERSION = 18;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -1011,6 +1011,7 @@ function collectPreparedReferenceTemporaryIds(
 interface PreparedSayTemporaryOwnership {
   readonly outputSpeakerIds: ReadonlySet<number>;
   readonly nullableOutputSpeakerIds: ReadonlySet<number>;
+  readonly explicitOutputSpeakerIdentifiers: ReadonlyMap<number, string>;
   readonly textIds: ReadonlySet<number>;
   readonly contextualSpeakerIds: ReadonlySet<number>;
   readonly nullableContextualSpeakerIds: ReadonlySet<number>;
@@ -1025,12 +1026,14 @@ function collectPreparedSayTemporaryOwnership(
   const contextualSpeakerIds = new Set<number>();
   const nullableContextualSpeakerIds = new Set<number>();
   const contextualSpeakerSources = new Map<number, number>();
+  const explicitOutputSpeakerIdentifiers = new Map<number, string>();
   const nullableSaySpeakerSources = new Set<number>();
   if (plan !== undefined) {
     for (const instruction of plan.instructions) {
       if (instruction.kind === "prepareSaySpeaker") {
         outputSpeakerIds.add(instruction.destinationTemporary);
         if (instruction.speaker === null) nullableSaySpeakerSources.add(instruction.destinationTemporary);
+        else explicitOutputSpeakerIdentifiers.set(instruction.destinationTemporary, instruction.speaker);
       } else if (instruction.kind === "prepareSayText") {
         textIds.add(instruction.destinationTemporary);
       } else if (instruction.kind === "prepareSayContextualSpeaker") {
@@ -1045,6 +1048,7 @@ function collectPreparedSayTemporaryOwnership(
   return {
     outputSpeakerIds,
     nullableOutputSpeakerIds: nullableSaySpeakerSources,
+    explicitOutputSpeakerIdentifiers,
     textIds,
     contextualSpeakerIds,
     nullableContextualSpeakerIds,
@@ -1068,6 +1072,7 @@ function validatePreparedSayTemporaries(
         temporary.value,
         speakers,
         ownership.nullableOutputSpeakerIds.has(temporary.id),
+        ownership.explicitOutputSpeakerIdentifiers.get(temporary.id),
       );
     } else if (ownership.textIds.has(temporary.id)) {
       valid = typeof temporary.value === "string";
@@ -1115,6 +1120,7 @@ function validPreparedSayTemporarySpeaker(
   value: unknown,
   speakers: unknown,
   allowsNull: boolean,
+  expectedIdentifier: string | undefined,
 ): boolean {
   if (value === null) return allowsNull;
   const properties = serializedObjectPropertyMap(value);
@@ -1137,7 +1143,8 @@ function validPreparedSayTemporarySpeaker(
     (typeof avatar !== "string" && avatar !== null) ||
     !positiveSafeInteger(speakerId)
   ) return false;
-  return Array.isArray(speakers) && speakers.some((speaker) =>
+  return (expectedIdentifier === undefined || identifier === expectedIdentifier) &&
+    Array.isArray(speakers) && speakers.some((speaker) =>
     isPlainRecord(speaker) && speaker.id === speakerId && speaker.identifier === identifier
   );
 }
