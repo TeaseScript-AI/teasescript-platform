@@ -100,6 +100,21 @@ test("contains no non-JSON-safe values and rejects them when supplied", () => {
   assert.equal(validateInstructionPlan(malformed).valid, false);
 });
 
+
+test("compiler-produced plans remain deeply frozen", () => {
+  const compiled = plan('let value = { nested: [1, { deeper: 2 }] }\nexit');
+  const instruction = compiled.instructions[0];
+  assert.equal(Object.isFrozen(compiled), true);
+  assert.equal(Object.isFrozen(compiled.instructions), true);
+  assert.equal(Object.isFrozen(instruction), true);
+  if (instruction?.kind !== "declareBinding" || instruction.value.kind !== "object") {
+    assert.fail("Expected object declaration plan.");
+  }
+  assert.equal(Object.isFrozen(instruction.value.properties), true);
+  assert.equal(Object.isFrozen(instruction.value.properties[0]), true);
+  assert.equal(Object.isFrozen(instruction.value.properties[0]!.value), true);
+});
+
 function plan(source: string): InstructionPlan {
   const result = compileSource(source);
   assert.deepEqual(result.diagnostics, []);

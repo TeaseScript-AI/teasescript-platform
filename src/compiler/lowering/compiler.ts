@@ -513,6 +513,7 @@ export class InstructionCompiler {
   }
 
   #lowerExpression(expression: Expression): LoweredExpression {
+    expression = unwrapParentheses(expression);
     if (expression.kind === "interactionExpression") {
       return this.#lowerInteraction(expression);
     }
@@ -544,13 +545,8 @@ export class InstructionCompiler {
           };
         }
         return { plan: compileExpression(expression), temporaryIds: [] };
-      case "parenthesizedExpression": {
-        const nested = this.#lowerExpression(expression.expression);
-        return {
-          plan: { kind: "group", expression: nested.plan, span: copySpan(expression.span) },
-          temporaryIds: nested.temporaryIds,
-        };
-      }
+      case "parenthesizedExpression":
+        return this.#lowerExpression(expression.expression);
       case "listLiteral":
       case "setLiteral": {
         const lowered = this.#lowerOrderedExpressions(expression.elements);
@@ -596,7 +592,7 @@ export class InstructionCompiler {
             return { kind: "text", value: part.value, span: copySpan(part.span) };
           }
           const lowered = loweredInterpolations[interpolationIndex++]!;
-          ids.push(...lowered.temporaryIds);
+          for (const temporaryId of lowered.temporaryIds) ids.push(temporaryId);
           return {
             kind: "expression",
             expression: lowered.plan,
@@ -676,11 +672,18 @@ export class InstructionCompiler {
         };
       }
       case "unaryExpression": {
-        const operand = this.#lowerExpression(expression.operand);
-        return {
-          plan: { kind: "unary", operator: expression.operator, operand: operand.plan, span: copySpan(expression.span) },
-          temporaryIds: operand.temporaryIds,
-        };
+        const normalized = normalizeUnaryExpression(expression);
+        const operand = this.#lowerExpression(normalized.operand);
+        let plan = operand.plan;
+        for (let index = normalized.operators.length - 1; index >= 0; index -= 1) {
+          plan = {
+            kind: "unary",
+            operator: normalized.operators[index]!,
+            operand: plan,
+            span: copySpan(expression.span),
+          };
+        }
+        return { plan, temporaryIds: operand.temporaryIds };
       }
       case "binaryExpression": {
         const [left, right] = this.#lowerOrderedExpressions([
@@ -1036,14 +1039,18 @@ export class InstructionCompiler {
   #lowerOrderedExpressions(
     expressions: readonly Expression[],
   ): LoweredExpression[] {
+    const laterEmitsInstructions = new Array<boolean>(expressions.length);
+    let suffixEmitsInstructions = false;
+    for (let index = expressions.length - 1; index >= 0; index -= 1) {
+      laterEmitsInstructions[index] = suffixEmitsInstructions;
+      if (this.#containsUserCall(expressions[index]!)) suffixEmitsInstructions = true;
+    }
+
     const lowered: LoweredExpression[] = [];
     for (let index = 0; index < expressions.length; index += 1) {
       const expression = expressions[index]!;
       let item = this.#lowerExpression(expression);
-      const laterEmitsInstructions = expressions
-        .slice(index + 1)
-        .some((later) => this.#containsUserCall(later));
-      if (laterEmitsInstructions) {
+      if (laterEmitsInstructions[index]) {
         item = item.plan.kind === "temporary"
           ? item
           : this.#materializeExpression(item, expression.span);
@@ -1062,7 +1069,7 @@ export class InstructionCompiler {
     const prepared: PreparedCallArgument[] = [];
     expression.arguments.forEach((argument, index) => {
       const lowered = this.#lowerExpression(argument.value);
-      temporaryIds.push(...lowered.temporaryIds);
+      for (const temporaryId of lowered.temporaryIds) temporaryIds.push(temporaryId);
       const temporaryId = this.#allocateTemporary();
       temporaryIds.push(temporaryId);
       this.instructions.push({
@@ -1187,46 +1194,61 @@ export class InstructionCompiler {
   }
 
   #containsUserCall(expression: Expression): boolean {
-    if (expression.kind === "interactionExpression") return true;
-    if (
-      expression.kind === "callExpression" &&
-      expression.callee.kind === "identifier" &&
-      this.#functionByName.has(expression.callee.name)
-    ) {
-      return true;
+    const work: Expression[] = [expression];
+    while (work.length > 0) {
+      const current = work.pop()!;
+      if (current.kind === "interactionExpression") return true;
+      if (
+        current.kind === "callExpression" &&
+        current.callee.kind === "identifier" &&
+        this.#functionByName.has(current.callee.name)
+      ) {
+        return true;
+      }
+      switch (current.kind) {
+        case "booleanLiteral":
+        case "nullLiteral":
+        case "numberLiteral":
+        case "stringLiteral":
+        case "identifier":
+          break;
+        case "parenthesizedExpression":
+          work.push(current.expression);
+          break;
+        case "listLiteral":
+        case "setLiteral":
+          for (const item of current.elements) work.push(item);
+          break;
+        case "objectLiteral":
+          for (const property of current.properties) work.push(property.value);
+          break;
+        case "templateLiteral":
+          for (const part of current.parts) {
+            if (part.kind === "templateInterpolation") work.push(part.expression);
+          }
+          break;
+        case "propertyAccessExpression":
+          work.push(current.object);
+          break;
+        case "indexExpression":
+          work.push(current.object, current.index);
+          break;
+        case "callExpression":
+          work.push(current.callee);
+          for (const argument of current.arguments) work.push(argument.value);
+          break;
+        case "unaryExpression":
+          work.push(current.operand);
+          break;
+        case "binaryExpression":
+          work.push(current.left, current.right);
+          break;
+        case "rangeExpression":
+          work.push(current.start, current.end);
+          break;
+      }
     }
-    switch (expression.kind) {
-      case "booleanLiteral":
-      case "nullLiteral":
-      case "numberLiteral":
-      case "stringLiteral":
-      case "identifier":
-        return false;
-      case "parenthesizedExpression":
-        return this.#containsUserCall(expression.expression);
-      case "listLiteral":
-      case "setLiteral":
-        return expression.elements.some((item) => this.#containsUserCall(item));
-      case "objectLiteral":
-        return expression.properties.some((item) => this.#containsUserCall(item.value));
-      case "templateLiteral":
-        return expression.parts.some((part) =>
-          part.kind === "templateInterpolation" && this.#containsUserCall(part.expression)
-        );
-      case "propertyAccessExpression":
-        return this.#containsUserCall(expression.object);
-      case "indexExpression":
-        return this.#containsUserCall(expression.object) || this.#containsUserCall(expression.index);
-      case "callExpression":
-        return this.#containsUserCall(expression.callee) ||
-          expression.arguments.some((argument) => this.#containsUserCall(argument.value));
-      case "unaryExpression":
-        return this.#containsUserCall(expression.operand);
-      case "binaryExpression":
-        return this.#containsUserCall(expression.left) || this.#containsUserCall(expression.right);
-      case "rangeExpression":
-        return this.#containsUserCall(expression.start) || this.#containsUserCall(expression.end);
-    }
+    return false;
   }
 
   #allocateTemporary(): number {
@@ -1251,7 +1273,48 @@ interface LoweredExpression {
   readonly temporaryIds: readonly number[];
 }
 
+function unwrapParentheses(expression: Expression): Expression {
+  let current = expression;
+  while (current.kind === "parenthesizedExpression") current = current.expression;
+  return current;
+}
+
+function normalizeUnaryExpression(
+  expression: Extract<Expression, { kind: "unaryExpression" }>,
+): {
+  readonly operand: Expression;
+  readonly operators: readonly Extract<Expression, { kind: "unaryExpression" }>["operator"][];
+} {
+  let current: Expression = expression;
+  if (expression.operator === "not") {
+    let count = 0;
+    while (true) {
+      current = unwrapParentheses(current);
+      if (current.kind !== "unaryExpression" || current.operator !== "not") break;
+      count += 1;
+      current = current.operand;
+    }
+    return {
+      operand: current,
+      operators: count % 2 === 0 ? ["not", "not"] : ["not"],
+    };
+  }
+
+  let negate = false;
+  while (true) {
+    current = unwrapParentheses(current);
+    if (
+      current.kind !== "unaryExpression" ||
+      (current.operator !== "+" && current.operator !== "-")
+    ) break;
+    if (current.operator === "-") negate = !negate;
+    current = current.operand;
+  }
+  return { operand: current, operators: [negate ? "-" : "+"] };
+}
+
 function compileExpression(expression: Expression): ExpressionPlan {
+  expression = unwrapParentheses(expression);
   switch (expression.kind) {
     case "booleanLiteral":
     case "nullLiteral":
@@ -1260,6 +1323,8 @@ function compileExpression(expression: Expression): ExpressionPlan {
       return { kind: "literal", value: expression.value, span: copySpan(expression.span) };
     case "identifier":
       return { kind: "identifier", name: expression.name, span: copySpan(expression.span) };
+    case "parenthesizedExpression":
+      return compileExpression(expression.expression);
     case "listLiteral":
       return {
         kind: "list",
@@ -1280,12 +1345,6 @@ function compileExpression(expression: Expression): ExpressionPlan {
       return {
         kind: "set",
         elements: expression.elements.map(compileExpression),
-        span: copySpan(expression.span),
-      };
-    case "parenthesizedExpression":
-      return {
-        kind: "group",
-        expression: compileExpression(expression.expression),
         span: copySpan(expression.span),
       };
     case "templateLiteral":
@@ -1323,13 +1382,19 @@ function compileExpression(expression: Expression): ExpressionPlan {
         arguments: expression.arguments.map(compileArgument),
         span: copySpan(expression.span),
       };
-    case "unaryExpression":
-      return {
-        kind: "unary",
-        operator: expression.operator,
-        operand: compileExpression(expression.operand),
-        span: copySpan(expression.span),
-      };
+    case "unaryExpression": {
+      const normalized = normalizeUnaryExpression(expression);
+      let plan = compileExpression(normalized.operand);
+      for (let index = normalized.operators.length - 1; index >= 0; index -= 1) {
+        plan = {
+          kind: "unary",
+          operator: normalized.operators[index]!,
+          operand: plan,
+          span: copySpan(expression.span),
+        };
+      }
+      return plan;
+    }
     case "binaryExpression":
       return {
         kind: "binary",

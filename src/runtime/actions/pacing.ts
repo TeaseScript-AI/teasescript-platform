@@ -4,13 +4,12 @@ export function calculateSmartPacingDurationMs(
   visibleText: string,
   settings: ChatPacingSettings,
 ): number {
-  const wordCount = countWords(visibleText);
-  const visibleCharacterCount = countCodePoints(visibleText);
-  const wordDelayMs = multiplyPacingValues(wordCount, settings.delayPerWordMs);
-  const characterDelayMs = multiplyPacingValues(
-    visibleCharacterCount,
-    settings.delayPerCharacterMs,
-  );
+  const wordDelayMs = settings.delayPerWordMs === 0
+    ? 0
+    : multiplyPacingValues(countWords(visibleText), settings.delayPerWordMs);
+  const characterDelayMs = settings.delayPerCharacterMs === 0
+    ? 0
+    : multiplyPacingValues(countCodePoints(visibleText), settings.delayPerCharacterMs);
   return addPacingValues(settings.baseDelayMs, Math.max(wordDelayMs, characterDelayMs));
 }
 
@@ -59,11 +58,16 @@ export function calculatePacingDeadlineMs(
 }
 
 function countWords(text: string): number {
-  return checkedCount(text.match(/\S+/gu)?.length ?? 0);
+  let count = 0;
+  const words = /\S+/gu;
+  while (words.exec(text) !== null) count += 1;
+  return checkedCount(count);
 }
 
 function countCodePoints(text: string): number {
-  return checkedCount(Array.from(text).length);
+  let count = 0;
+  for (const _codePoint of text) count += 1;
+  return checkedCount(count);
 }
 
 function checkedCount(value: number): number {

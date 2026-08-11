@@ -75,6 +75,29 @@ function copySpan(span: SourceSpan): SourceSpan {
 
 function deepFreeze<T>(value: T): T {
   if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
-  for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
-  return Object.freeze(value);
+  const work: Array<readonly [object, boolean]> = [[value, false]];
+  while (work.length > 0) {
+    const [current, readyToFreeze] = work.pop()!;
+    if (Object.isFrozen(current)) continue;
+    if (readyToFreeze) {
+      Object.freeze(current);
+      continue;
+    }
+    work.push([current, true]);
+    if (Array.isArray(current)) {
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        const nested = current[index];
+        if (typeof nested === "object" && nested !== null && !Object.isFrozen(nested)) {
+          work.push([nested, false]);
+        }
+      }
+      continue;
+    }
+    for (const nested of Object.values(current as Record<string, unknown>)) {
+      if (typeof nested === "object" && nested !== null && !Object.isFrozen(nested)) {
+        work.push([nested, false]);
+      }
+    }
+  }
+  return value;
 }

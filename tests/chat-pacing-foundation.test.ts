@@ -159,6 +159,17 @@ test("smart pacing duration counts words, whitespace, and Unicode code points", 
   );
 });
 
+test("smart pacing counts large text without changing word semantics", () => {
+  const text = "word ".repeat(20_000);
+  assert.equal(
+    calculateSmartPacingDurationMs(
+      text,
+      settings({ baseDelayMs: 0, delayPerWordMs: 1, delayPerCharacterMs: 0 }),
+    ),
+    20_000,
+  );
+});
+
 test("smart pacing duration rejects multiplication and addition overflow", () => {
   assert.throws(() => calculateSmartPacingDurationMs(
     "aa",
