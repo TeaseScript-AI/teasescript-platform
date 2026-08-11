@@ -417,7 +417,8 @@ At minimum:
 - expected result types match action kind and destination;
 - deadlines are finite and valid on the same session coordinate as `currentSessionTimeMs`;
 - timeout and cancellation policy is valid for the action kind;
-- payloads and settlements are JSON-safe stable plain data within existing depth/work limits;
+- payloads and settlements are JSON-safe stable plain data and satisfy their versioned representation and invariant
+  rules;
 - unknown fields follow the accepted versioned-schema policy rather than being silently trusted;
 - no raw host or browser exception crosses the runtime boundary.
 
@@ -448,7 +449,7 @@ Every implemented pending-action kind requires shared state-machine coverage plu
 - event sequence and action ID monotonicity after restore;
 - malformed action and settlement state;
 - invalid status/action combinations;
-- bounded external-data validation;
+- stable external-data capture and invariant validation;
 - no raw host exception;
 - no real-time sleep in tests.
 

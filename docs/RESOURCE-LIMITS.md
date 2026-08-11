@@ -3,10 +3,11 @@
 This is the canonical inventory and repair router required by
 [ADR 0019](decisions/0019-resource-limit-governance.md). Code is canonical for current enforcement; accepted ADRs and
 current topic specifications are canonical for policy. Recording a current value here does **not** make it an officially
-supported capacity. Issue #288 removed, structurally repaired, or deliberately routed every formerly `suspicious` entry.
-The implementation tracked by issue #304 removes generic capture work/depth and detailed-validation work rejection;
-retained POC values below are explicit Owner policy rather than retroactive technical derivations of their historical
-numbers.
+supported capacity. Issue #288 removed, structurally repaired, or deliberately routed every formerly `suspicious`
+entry. The #304 implementation removes generic capture depth/work, sparse-array preflight, and detailed-validation work
+rejection; current POC policy does not treat those dimensions as rejection requirements without a concrete current
+protected boundary. Remaining numeric policies below are separate decisions and are not justified by that removed
+capture threat model.
 
 ## Conventions
 
@@ -49,11 +50,19 @@ the old nesting guard, so these exact depths are historical observations rather 
 They are retained only as evidence that host-stack failure varies materially by syntax and implementation shape; they are
 not TeaseScript limits, supported capacity, CI thresholds, safety margins, or production-classifier inputs.
 
+## Non-rejecting scale diagnostics
+
+Traversal work, observed depth, node or instruction counts, temporary counts, validation work, and serialized byte
+sizes may be collected when they cheaply expose scaling or representation amplification. These measurements are
+engineering diagnostics only: they do not make otherwise valid source or structurally valid plan/snapshot/checkpoint
+data invalid. An observed JavaScript stack, allocation, array/index, or other host failure is an implementation or
+representation constraint to diagnose and repair where practical, not a replacement TeaseScript maximum.
+
 ## Proven domains and state invariants
 
 | ID | Source / boundary | Current | Category | Status | Authority / change | Evidence / repair |
 |---|---|---|---|---|---|---|
-| `capture.array-index-domain` | `src/external-data-limits.ts`, `src/ast-validation.ts`; stable array capture | Safe-integer length/indexes; indexes `< 0xffff_ffff` and `< length`; direct-AST arrays are dense own-index arrays. | representation invariant | `proven` | JS array representation + ADR 0019; version/ADR review only if representation changes | issue #87 plus hostile/proxy regressions establish the index/density relation. Separate from the work-coupled preflights below. |
+| `capture.array-index-domain` | stable external/direct-AST array capture and validation | Safe-integer length/indexes; indexes `< 0xffff_ffff` and `< length`; direct-AST arrays are dense own-index arrays. | representation invariant | `proven` | JS array representation + ADR 0019; version/ADR review only if representation changes | issue #87 plus stable-capture and array-representation regressions establish the index/density relation. This is a representation predicate, not a capture-work policy. |
 | `plan.instruction-address-domain` | `src/plan/validation.ts`; plan validation | Safe-integer instruction boundaries within the plan; function targets must resolve to validated definitions. | representation invariant | `proven` | ADRs 0015/0019; Version review if serialized domain changes | Range-validation regressions; no independent instruction-count capacity claim. |
 | `ast.source-position-domain` | `src/source.ts`, direct-AST and plan validation; source positions | Offset, line, and column are non-negative safe integers. | representation invariant | `proven` | ADR 0019 + [`RUNTIME.md`](RUNTIME.md); Version review if the serialized domain changes | Source-helper, direct-AST, plan, and runtime-snapshot regressions enforce one exact-integer domain; no source-capacity claim. |
 | `plan.temporary-id-domain` | plan validation and persisted runtime temporaries | `temporaryCount` is a non-negative safe integer; temporary IDs are positive safe integers within that count. | representation invariant | `proven` | ADRs 0015/0019 + [`RUNTIME.md`](RUNTIME.md); Version review if the serialized domain changes | Plan-range and runtime-snapshot regressions align the plan and persisted temporary domains. |
@@ -66,16 +75,18 @@ not TeaseScript limits, supported capacity, CI thresholds, safety margins, or pr
 
 ## Retained POC policies and defaults
 
-After the #288 removal and structural analysis, the Owner chose on 2026-08-09 to retain the remaining numeric values in
-this table through the POC to preserve existing rejection/default behavior while the product and representative
-workloads are still changing. The #304 implementation separately removes the generic capture and detailed-validation
-work policies. The compatibility-preservation reason for each remaining row makes its selected boundary appropriate
-only as temporary POC policy; it does **not** establish that the historical number was technically derived, measured as
-safe capacity, or suitable as a permanent compatibility promise.
+The remaining rows are separate POC policies/defaults with their own accepted or Owner-selected rationale. The Owner
+chose on 2026-08-09 to retain their current numeric values through the POC while the product and representative
+workloads are still changing. That compatibility-preservation rationale does **not** establish that a historical number
+was technically derived, measured as safe capacity, or suitable as a permanent compatibility promise. The #304
+reassessment does not make these remaining policies security requirements and does not re-decide them merely because
+the generic capture threat model changed.
 
-Every row in this table is therefore `provisional` and must be reassessed before its numeric value is carried forward as
-supported non-POC compatibility behavior, no later than the Beta runtime-performance baseline, and earlier if
-representative valid workloads or new performance/security evidence show that the value is inappropriate.
+Every row in this table therefore remains `provisional` and must follow its own ADR 0019 change route. It must be
+reassessed before its numeric value is carried forward as supported non-POC compatibility behavior, no later than the
+Beta runtime-performance baseline, and earlier if representative valid workloads or new evidence show that the value
+is inappropriate. Interaction-specific bounds, call-depth policy, and runtime instruction-budget policy are distinct
+from the removed capture/traversal and detailed-validation acceptance counters.
 
 | ID | Source / boundary | Current | Category | Status | Authority / change | Evidence / policy |
 |---|---|---|---|---|---|---|
@@ -105,4 +116,5 @@ behavior. The configured listener port remains the only current playground tooli
 Update this file when implementation, evidence, or an Owner policy decision changes an entry. Historical roundness,
 another boundary's number, and empirical first-failure points do not justify retention. When temporary compatibility is
 the selected POC reason, record that policy and its mandatory reassessment trigger explicitly rather than presenting the
-value as technically derived or permanent capacity.
+value as technically derived or permanent capacity. A resource rejection justified as security must also name a
+concrete current protected boundary; self-only local misuse or shared-helper convenience is not sufficient.
