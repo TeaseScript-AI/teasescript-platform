@@ -4,7 +4,9 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import {
+  executeInstruction,
   run,
+  stepToEvent,
   type RuntimeBuiltinFunction,
   type RuntimeCapabilityCall,
 } from "../src/runtime/engine.js";
@@ -104,6 +106,121 @@ test("detects duplicate prototype-sensitive named arguments", () => {
   assert.match(
     result.snapshot.failure?.message ?? "",
     /Duplicate named argument '__proto__'/u,
+  );
+});
+
+test("stabilizes builtin registration within one operation and refreshes it between operations", () => {
+  const compiled = compile(
+    [
+      "let first = probe()",
+      "let second = probe()",
+      "say `${first}:${second}`, instant",
+    ].join("\n"),
+    ["probe"],
+  );
+  const calls: string[] = [];
+  const builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
+  const replacement: RuntimeBuiltinFunction = () => {
+    calls.push("replacement");
+    return "replacement";
+  };
+  builtins.probe = () => {
+    calls.push("original");
+    builtins.probe = replacement;
+    return "original";
+  };
+
+  const first = stepToEvent(
+    compiled,
+    createFreshRuntimeSnapshot(compiled),
+    { builtins },
+  );
+  const second = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled),
+    { builtins },
+  );
+
+  assert.deepEqual(calls, [
+    "original",
+    "original",
+    "replacement",
+    "replacement",
+  ]);
+  assert.deepEqual(
+    first.events
+      .filter((event) => event.kind === "say")
+      .map((event) => event.text),
+    ["original:original"],
+  );
+  assert.deepEqual(
+    second.events
+      .filter((event) => event.kind === "say")
+      .map((event) => event.text),
+    ["replacement:replacement"],
+  );
+});
+
+test("keeps public single-instruction event results isolated", () => {
+  const compiled = compile([
+    'say "first", instant',
+    'say "second", instant',
+  ].join("\n"), []);
+  const first = executeInstruction(
+    compiled,
+    createFreshRuntimeSnapshot(compiled),
+  );
+  const second = executeInstruction(compiled, first.snapshot);
+
+  assert.deepEqual(first.events.map((event) => event.kind), ["say"]);
+  assert.deepEqual(second.events.map((event) => event.kind), ["say", "complete"]);
+  assert.deepEqual(first.events.map((event) => event.sequence), [1]);
+  assert.deepEqual(second.events.map((event) => event.sequence), [2, 3]);
+});
+
+test("keeps re-entrant runtime operation contexts isolated", () => {
+  const inner = compile([
+    "let value = randomInteger(1..=1)",
+    "say value, instant",
+  ].join("\n"), []);
+  const outer = compile("say nested() + nested(), instant", ["nested"]);
+  const innerEvents: string[][] = [];
+  const capabilities = {
+    builtins: {
+      nested: () => {
+        const nested = run(
+          inner,
+          createFreshRuntimeSnapshot(inner, { seed: 0x2468_ace1 }),
+          capabilities,
+        );
+        innerEvents.push(nested.events.map((event) => event.kind));
+        const output = nested.events.find((event) => event.kind === "say");
+        assert.notEqual(output, undefined);
+        return Number(output!.text);
+      },
+    },
+  } satisfies { builtins: Record<string, RuntimeBuiltinFunction> };
+  const initial = createFreshRuntimeSnapshot(outer, { seed: 0x1357_9bdf });
+  const initialRngState = initial.rng.state;
+
+  const result = run(outer, initial, capabilities);
+
+  assert.equal(result.snapshot.status, "halted");
+  assert.equal(result.snapshot.rng.state, initialRngState);
+  assert.deepEqual(innerEvents, [
+    ["say", "complete"],
+    ["say", "complete"],
+  ]);
+  assert.deepEqual(
+    result.events.map((event) =>
+      event.kind === "say"
+        ? [event.kind, event.sequence, event.text]
+        : [event.kind, event.sequence]
+    ),
+    [
+      ["say", 1, "2"],
+      ["complete", 2],
+    ],
   );
 });
 

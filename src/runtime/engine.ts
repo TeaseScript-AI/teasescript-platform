@@ -114,23 +114,24 @@ export function executeInstruction(
   capabilities: RuntimeCapabilities = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, inputSnapshot);
-  return executeCapturedInstruction(
+  const context = new RuntimeExecutionContext(captured.snapshot, capabilities);
+  const instructionsExecuted = executeCapturedInstruction(
     captured.plan,
     captured.snapshot,
-    capabilities,
+    context,
   );
+  return result(captured.snapshot, context.events, instructionsExecuted);
 }
 
 function executeCapturedInstruction(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
-  capabilities: RuntimeCapabilities,
-): RuntimeOperationResult {
+  context: RuntimeExecutionContext,
+): number {
   if (snapshot.status === "halted" || snapshot.status === "failed") {
-    return result(snapshot, [], 0);
+    return 0;
   }
-  if (snapshot.status === "waiting") return result(snapshot, [], 0);
-  const events: InterpreterEvent[] = [];
+  if (snapshot.status === "waiting") return 0;
   if (
     snapshot.nextInstruction === plan.rootEndInstruction &&
     snapshot.callFrames.length === 0
@@ -143,20 +144,31 @@ function executeCapturedInstruction(
     snapshot.terminalContinuationHandoff = null;
     snapshot.status = "halted";
     const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
-    events.push(createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan));
-    return result(snapshot, events, 1);
+    context.events.push(
+      createCompleteEvent(
+        snapshot,
+        terminalInstruction?.span ?? plan.sourceSpan,
+      ),
+    );
+    return 1;
   }
   const instructionIndex = snapshot.nextInstruction;
   const instruction = plan.instructions[instructionIndex];
   if (instruction === undefined) {
     snapshot.status = "halted";
-    return result(snapshot, [], 0);
+    return 0;
   }
 
   snapshot.status = "running";
-  const evaluator = new Evaluator(snapshot, capabilities, events);
+  const evaluator = context.evaluator();
   try {
-    executePlannedInstruction(plan, instruction, snapshot, evaluator, events);
+    executePlannedInstruction(
+      plan,
+      instruction,
+      snapshot,
+      evaluator,
+      context.events,
+    );
     if (
       snapshot.interactionResultHandoff?.continuationInstruction ===
       instructionIndex
@@ -174,15 +186,15 @@ function executeCapturedInstruction(
         snapshot,
         completeEventAndFutureCompletions,
       );
-      events.push(createCompleteEvent(snapshot, instruction.span));
+      context.events.push(createCompleteEvent(snapshot, instruction.span));
     }
   } catch (error) {
     if (!(error instanceof RuntimeFault)) throw error;
-    failSnapshot(snapshot, error.toInfo(), events);
+    failSnapshot(snapshot, error.toInfo(), context.events);
   } finally {
     snapshot.contextualSpeaker = null;
   }
-  return result(snapshot, events, 1);
+  return 1;
 }
 
 export function stepToEvent(
@@ -208,31 +220,25 @@ export function stepValidatedStateToEvent(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  let current = snapshot;
-  const events: InterpreterEvent[] = [];
+  const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
   while (
-    current.status !== "waiting" &&
-    current.status !== "halted" &&
-    current.status !== "failed" &&
-    events.length === 0
+    snapshot.status !== "waiting" &&
+    snapshot.status !== "halted" &&
+    snapshot.status !== "failed" &&
+    context.events.length === 0
   ) {
     if (instructionsExecuted >= budget) {
-      const budgetResult = failForBudget(plan, current);
-      events.push(...budgetResult.events);
-      current = budgetResult.snapshot;
+      failForBudget(plan, snapshot, context.events);
       break;
     }
-    const operation = executeCapturedInstruction(
+    instructionsExecuted += executeCapturedInstruction(
       plan,
-      current,
-      capabilities,
+      snapshot,
+      context,
     );
-    current = operation.snapshot;
-    instructionsExecuted += operation.instructionsExecuted;
-    events.push(...operation.events);
   }
-  return result(current, events, instructionsExecuted);
+  return result(snapshot, context.events, instructionsExecuted);
 }
 
 export function run(
@@ -258,26 +264,20 @@ export function runValidatedState(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  let current = snapshot;
-  const events: InterpreterEvent[] = [];
+  const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
-  while (current.status !== "waiting" && current.status !== "halted" && current.status !== "failed") {
+  while (snapshot.status !== "waiting" && snapshot.status !== "halted" && snapshot.status !== "failed") {
     if (instructionsExecuted >= budget) {
-      const budgetResult = failForBudget(plan, current);
-      current = budgetResult.snapshot;
-      events.push(...budgetResult.events);
+      failForBudget(plan, snapshot, context.events);
       break;
     }
-    const operation = executeCapturedInstruction(
+    instructionsExecuted += executeCapturedInstruction(
       plan,
-      current,
-      capabilities,
+      snapshot,
+      context,
     );
-    current = operation.snapshot;
-    instructionsExecuted += operation.instructionsExecuted;
-    events.push(...operation.events);
   }
-  return result(current, events, instructionsExecuted);
+  return result(snapshot, context.events, instructionsExecuted);
 }
 
 function executePlannedInstruction(
@@ -1268,27 +1268,49 @@ function assertIntegerRange(range: SerializableRuntimeRange, span: SourceSpan): 
   }
 }
 
-class Evaluator {
-  readonly #builtins: Readonly<Record<string, RuntimeBuiltinFunction>>;
+interface EvaluatorInfrastructure {
+  readonly builtins: Readonly<Record<string, RuntimeBuiltinFunction>>;
+  readonly random: RandomSource | undefined;
+}
+
+class RuntimeExecutionContext {
+  public readonly events: InterpreterEvent[] = [];
+  #evaluator: Evaluator | null = null;
 
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
-    private readonly events: InterpreterEvent[],
-  ) {
+  ) {}
+
+  public evaluator(): Evaluator {
+    if (this.#evaluator !== null) return this.#evaluator;
     const builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
-    Object.assign(builtins, capabilities.builtins ?? {});
-    builtins.random = (call) => this.#randomBuiltin(call);
-    builtins.chance = (call) => this.#chanceBuiltin(call);
-    builtins.randomInteger = (call) => this.#randomIntegerBuiltin(call);
-    this.#builtins = Object.freeze(builtins);
+    Object.assign(builtins, this.capabilities.builtins ?? {});
+    const infrastructure: EvaluatorInfrastructure = Object.freeze({
+      builtins: Object.freeze(builtins),
+      random: this.capabilities.random,
+    });
+    this.#evaluator = new Evaluator(
+      this.snapshot,
+      infrastructure,
+      this.events,
+    );
+    return this.#evaluator;
   }
+}
+
+class Evaluator {
+  public constructor(
+    private readonly snapshot: RuntimeSnapshot,
+    private readonly infrastructure: EvaluatorInfrastructure,
+    private readonly events: InterpreterEvent[],
+  ) {}
 
   public forSnapshot(
     snapshot: RuntimeSnapshot,
     events: InterpreterEvent[],
   ): Evaluator {
-    return new Evaluator(snapshot, this.capabilities, events);
+    return new Evaluator(snapshot, this.infrastructure, events);
   }
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
@@ -1812,19 +1834,35 @@ class Evaluator {
       }
     }
     if (expression.callee.kind === "identifier") {
-      const builtin = Object.hasOwn(this.#builtins, expression.callee.name)
-        ? this.#builtins[expression.callee.name]
+      const name = expression.callee.name;
+      const coreBuiltin =
+        name === "random" || name === "chance" || name === "randomInteger";
+      const builtin = Object.hasOwn(this.infrastructure.builtins, name)
+        ? this.infrastructure.builtins[name]
         : undefined;
-      if (builtin === undefined) {
+      if (!coreBuiltin && builtin === undefined) {
         throw fault("TSR011", `Unknown built-in function '${expression.callee.name}'.`, expression.callee.span);
       }
+      const call = Object.freeze({
+        positional: Object.freeze(positional),
+        named: Object.freeze(named),
+        span: copySpan(expression.span),
+      });
       let returned: SerializableRuntimeValue;
       try {
-        returned = builtin(Object.freeze({
-          positional: Object.freeze(positional),
-          named: Object.freeze(named),
-          span: copySpan(expression.span),
-        }));
+        switch (name) {
+          case "random":
+            returned = this.#randomBuiltin(call);
+            break;
+          case "chance":
+            returned = this.#chanceBuiltin(call);
+            break;
+          case "randomInteger":
+            returned = this.#randomIntegerBuiltin(call);
+            break;
+          default:
+            returned = builtin!(call);
+        }
       } catch (error) {
         if (error instanceof SerializableValueError) {
           const code =
@@ -2003,7 +2041,7 @@ class Evaluator {
   }
 
   #findRandom(span: SourceSpan, rng = this.snapshot.rng): number {
-    const random = this.capabilities.random?.next() ?? nextXorShift32(rng);
+    const random = this.infrastructure.random?.next() ?? nextXorShift32(rng);
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
       throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
     }
@@ -3025,11 +3063,13 @@ function failSnapshot(
   );
 }
 
-function failForBudget(plan: InstructionPlan, snapshot: RuntimeSnapshot): RuntimeOperationResult {
+function failForBudget(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+): void {
   const span = plan.instructions[snapshot.nextInstruction]?.span ?? plan.sourceSpan;
-  const events: InterpreterEvent[] = [];
   failSnapshot(snapshot, { code: "TSR037", message: "Runtime instruction budget exceeded.", span }, events);
-  return result(snapshot, events, 0);
 }
 
 function instructionBudget(value: number | undefined): number {
