@@ -76,8 +76,7 @@ LANGUAGE AND RUNTIME MODEL
 - The deterministic engine remains authoritative. LLMs may provide constrained dialogue or typed results but may not silently rewrite canonical state, bypass rules, or directly control the main site, OS, or devices.
 
 WORKING RULES
-- Do not silently change architecture, language semantics, security boundaries, or product scope.
-- Do not turn open questions into decisions without user approval and the appropriate ADR/status update.
+- Do not silently change architecture, semantics, security boundaries, product scope, or resolve open questions; use the required decision route and precise wording without needless security framing.
 - Do not invent unrequested properties, systems, or product decisions.
 - Explain unfamiliar terms briefly and use concrete examples; the user knows Arduino C++ and some Python.
 - Add dependencies only after explaining need, alternatives, maintenance impact, and security implications.
