@@ -15,7 +15,7 @@ import { captureInstructionPlan } from "../plan/capture.js";
 import {
   captureExternalData,
   type ExternalDataFailureKind,
-} from "../external-data-limits.js";
+} from "../external-data-capture.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -42,7 +42,7 @@ import {
 import { recordValidationTestWork } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 18;
+export const RUNTIME_SNAPSHOT_VERSION = 19;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -1528,9 +1528,8 @@ function validateCallFrames(
     }
     if (nonNegativeSafeInteger(frame.loopBaseDepth)) previousLoopBase = frame.loopBaseDepth;
     validateCallArguments(frame.arguments, definition, errors);
-    validateCallArgumentConsistency(
+    validateCallArgumentSupply(
       frame.arguments,
-      frame.callerTemporaries,
       callInstruction,
       errors,
     );
@@ -1618,40 +1617,28 @@ function validateCallFrames(
   return ids;
 }
 
-function validateCallArgumentConsistency(
+function validateCallArgumentSupply(
   argumentsValue: unknown,
-  callerTemporaries: unknown,
   callInstruction: InstructionPlan["instructions"][number] | undefined,
   errors: string[],
 ): void {
   if (
     !Array.isArray(argumentsValue) ||
-    !Array.isArray(callerTemporaries) ||
     callInstruction?.kind !== "callFunction"
   ) {
     return;
   }
-  const preparedByParameter = new Map(
-    callInstruction.arguments.map((argument) => [argument.parameterName, argument]),
+  const suppliedParameters = new Set(
+    callInstruction.arguments.map((argument) => argument.parameterName),
   );
-  recordValidationTestWork("preparedArgumentMapBuilds");
-  const callerTemporariesById = createTemporaryMap(callerTemporaries);
   for (const argument of argumentsValue) {
-    if (!isPlainRecord(argument) || typeof argument.parameterName !== "string") continue;
-    const prepared = preparedByParameter.get(argument.parameterName);
-    if (argument.supplied === true) {
-      const temporary = prepared === undefined
-        ? undefined
-        : callerTemporariesById.get(prepared.temporaryId);
-      if (
-        !isPlainRecord(temporary) ||
-        !("value" in temporary) ||
-        !sameValidatedSerializableValue(temporary.value, argument.value)
-      ) {
-        errors.push("Runtime supplied argument does not match caller temporary state.");
-      }
-    } else if (prepared !== undefined) {
-      errors.push("Runtime missing argument is marked as supplied by the call instruction.");
+    if (
+      !isPlainRecord(argument) ||
+      typeof argument.parameterName !== "string" ||
+      typeof argument.supplied !== "boolean"
+    ) continue;
+    if (argument.supplied !== suppliedParameters.has(argument.parameterName)) {
+      errors.push("Runtime supplied arguments do not match the call instruction.");
     }
   }
 }
@@ -1665,75 +1652,6 @@ function createTemporaryMap(temporaries: readonly unknown[]): ReadonlyMap<number
     }
   }
   return result;
-}
-
-/** Structural equality for values that have already passed serializable-value validation. */
-function sameValidatedSerializableValue(left: unknown, right: unknown): boolean {
-  const work: Array<readonly [unknown, unknown]> = [[left, right]];
-  while (work.length > 0) {
-    recordValidationTestWork("structuralValueComparisons");
-    const [currentLeft, currentRight] = work.pop()!;
-    if (currentLeft === currentRight) continue;
-    if (
-      !isPlainRecord(currentLeft) ||
-      !isPlainRecord(currentRight) ||
-      currentLeft.kind !== currentRight.kind
-    ) return false;
-    switch (currentLeft.kind) {
-      case "speakerReference":
-        if (
-          currentLeft.speakerId !== currentRight.speakerId ||
-          currentLeft.identifier !== currentRight.identifier
-        ) return false;
-        break;
-      case "range":
-        if (
-          currentLeft.start !== currentRight.start ||
-          currentLeft.end !== currentRight.end ||
-          currentLeft.inclusive !== currentRight.inclusive
-        ) return false;
-        break;
-      case "list":
-      case "set": {
-        const leftItems = Array.isArray(currentLeft.items) ? currentLeft.items : null;
-        const rightItems = Array.isArray(currentRight.items) ? currentRight.items : null;
-        if (leftItems === null || rightItems === null || leftItems.length !== rightItems.length) {
-          return false;
-        }
-        for (let index = leftItems.length - 1; index >= 0; index -= 1) {
-          work.push([leftItems[index], rightItems[index]]);
-        }
-        break;
-      }
-      case "object": {
-        const leftProperties = Array.isArray(currentLeft.properties)
-          ? currentLeft.properties
-          : null;
-        const rightProperties = Array.isArray(currentRight.properties)
-          ? currentRight.properties
-          : null;
-        if (
-          leftProperties === null ||
-          rightProperties === null ||
-          leftProperties.length !== rightProperties.length
-        ) return false;
-        for (let index = leftProperties.length - 1; index >= 0; index -= 1) {
-          const leftProperty = leftProperties[index];
-          const rightProperty = rightProperties[index];
-          if (
-            !isPlainRecord(leftProperty) ||
-            !isPlainRecord(rightProperty) ||
-            leftProperty.name !== rightProperty.name
-          ) return false;
-          work.push([leftProperty.value, rightProperty.value]);
-        }
-        break;
-      }
-      default:
-        return false;
-    }
-  }
-  return true;
 }
 
 function validateParameterBindings(
@@ -3661,6 +3579,12 @@ function validateCurrentTemporaryRequirements(
   ) {
     errors.push("Runtime interaction result destination is already occupied.");
   }
+  if (
+    instruction.kind === "callFunction" &&
+    present.has(instruction.destinationTemporary)
+  ) {
+    errors.push("Runtime function result destination is already occupied.");
+  }
 }
 
 function requiredInstructionTemporaries(
@@ -3721,7 +3645,9 @@ function requiredInstructionTemporaries(
       output.add(instruction.speakerTemporary);
       break;
     case "callFunction":
-      instruction.arguments.forEach((argument) => output.add(argument.temporaryId));
+      instruction.arguments.forEach((argument) =>
+        collectExpressionTemporaries(argument.value, output)
+      );
       break;
     case "setDefaultSpeaker":
     case "prepareInteractionSpeaker":

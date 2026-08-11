@@ -20,9 +20,8 @@ import {
   type RuntimeSnapshot,
   type SerializableRuntimeValue,
 } from "../src/index.js";
-import { captureExternalData } from "../src/external-data-limits.js";
+import { captureExternalData } from "../src/external-data-capture.js";
 import { captureInstructionPlan } from "../src/plan/capture.js";
-import { serializeCapturedCheckpoint } from "../src/runtime/checkpoint.js";
 import { captureExecutableData } from "../src/runtime/operations/support.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
 import { captureRuntimeSnapshotWithValidatedPlan } from "../src/runtime/state.js";
@@ -193,7 +192,7 @@ test("compiler and runtime paths avoid duplicate whole-plan capture", () => {
 
   const capturedCheckpoint = createCheckpoint(plan, snapshot);
   const serializationStatistics = withValidationTestStatistics((finish) => {
-    serializeCapturedCheckpoint(capturedCheckpoint);
+    JSON.stringify(capturedCheckpoint);
     return finish();
   }).counts;
   assert.equal(serializationStatistics.externalCaptureVisits, undefined);
@@ -230,7 +229,6 @@ test("snapshot validation accepts a deeply nested supplied call argument", () =>
   const argument = snapshot.callFrames[0]!.arguments[0];
   assert.ok(argument?.supplied);
   (argument as { value: SerializableRuntimeValue }).value = deepList(5_000);
-  snapshot.callFrames[0]!.callerTemporaries[0]!.value = deepList(5_000);
 
   assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
 });

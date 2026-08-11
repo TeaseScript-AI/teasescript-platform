@@ -489,7 +489,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
         "function use(x) { return x.title }",
         "say as vera use(speaker), instant",
       ].join("\n"),
-      consumerKind: "storeTemporary",
+      consumerKind: "callFunction",
     },
     {
       name: "contextual capture pair after prepared text short-circuit payload",
@@ -507,7 +507,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
         "function use(x) { return x.title }",
         "say as vera use(true or speaker), instant",
       ].join("\n"),
-      consumerKind: "storeTemporary",
+      consumerKind: "callFunction",
     },
   ] as const;
   for (const scenario of contextualPayloadCases) {

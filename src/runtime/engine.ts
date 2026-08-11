@@ -521,7 +521,7 @@ function executePlannedInstruction(
       return;
     }
     case "callFunction":
-      enterFunction(plan, instruction, snapshot);
+      enterFunction(plan, instruction, snapshot, evaluator);
       return;
     case "bindSuppliedParameter":
       bindSuppliedParameter(plan, instruction, snapshot);
@@ -864,8 +864,15 @@ function enterFunction(
   plan: InstructionPlan,
   instruction: Extract<Instruction, { kind: "callFunction" }>,
   snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
 ): void {
   const definition = functionDefinition(plan, instruction.functionId, instruction.span);
+  const supplied = new Map(
+    instruction.arguments.map((argument) => [
+      argument.parameterName,
+      cloneSerializableValue(evaluator.evaluate(argument.value)),
+    ]),
+  );
   if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
     throw fault(
       "TSR047",
@@ -875,14 +882,6 @@ function enterFunction(
   }
   assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");
   assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
-  const supplied = new Map(
-    instruction.arguments.map((argument) => [
-      argument.parameterName,
-      cloneSerializableValue(
-        readTemporary(snapshot.temporaries, argument.temporaryId, argument.span),
-      ),
-    ]),
-  );
   const frame: RuntimeCallFrameSnapshot = {
     id: snapshot.nextCallFrameId,
     functionId: definition.id,

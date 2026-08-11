@@ -1,7 +1,7 @@
 import {
   captureExternalData,
   type ExternalDataFailure,
-} from "../external-data-limits.js";
+} from "../external-data-capture.js";
 
 export type SerializableRuntimeScalar = string | number | boolean | null;
 

@@ -14,7 +14,7 @@ import {
   type RuntimeCheckpoint,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { captureExternalData } from "../src/external-data-limits.js";
+import { captureExternalData } from "../src/external-data-capture.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
 
 function compiledPlan(): InstructionPlan {

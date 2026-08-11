@@ -5,7 +5,7 @@ import {
   type InterpreterEvent,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { createCheckpoint, serializeCapturedCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint } from "../src/runtime/checkpoint.js";
 import { checkpointStorageKey, exampleUrl, isPlaygroundExampleName, PLAYGROUND_EXAMPLES, type PlaygroundExampleName } from "./examples.js";
 import {
   compileWorkspaceSource,
@@ -113,7 +113,7 @@ function saveCheckpoint(): void {
     );
     localStorage.setItem(
       checkpointStorageKey(currentExample),
-      serializeCapturedCheckpoint(checkpoint),
+      JSON.stringify(checkpoint),
     );
     setActionStatus("Checkpoint saved locally.");
   } catch (error) { setActionStatus(errorMessage(error)); }

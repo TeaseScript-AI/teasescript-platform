@@ -133,11 +133,9 @@ test("restores exact RNG state through nested calls", () => {
 
 test("preserves prepared earlier arguments through a later suspension and a suspended callee", () => {
   const compiled = plan([
-    "let order = []",
-    'function earlier { order.add("earlier")\nreturn random() }',
-    'function later { wait 1 ms\norder.add("later")\nreturn random() }',
+    "function later { wait 1 ms\nreturn random() }",
     "function combine(first, second) { wait 2 ms\nreturn first + second }",
-    "combine(earlier(), later())",
+    "combine(random(), later())",
   ].join("\n"));
   const combine = compiled.functions.find((definition) => definition.name === "combine")!;
   const combineCall = compiled.instructions.find(
@@ -149,8 +147,12 @@ test("preserves prepared earlier arguments through a later suspension and a susp
   const firstPending = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 0x2468_ace1 }));
   assert.equal(firstPending.snapshot.status, "waiting");
   assert.equal(firstPending.snapshot.callFrames.at(-1)?.functionName, "later");
+  assert.equal(combineCall.arguments[0]!.value.kind, "temporary");
+  const earlierTemporary = combineCall.arguments[0]!.value.kind === "temporary"
+    ? combineCall.arguments[0]!.value.temporaryId
+    : -1;
   assert.ok(firstPending.snapshot.callFrames.at(-1)?.callerTemporaries.some(
-    (temporary) => temporary.id === combineCall.arguments[0]!.temporaryId,
+    (temporary) => temporary.id === earlierTemporary,
   ));
   const firstAction = firstPending.snapshot.foregroundAction;
   assert.equal(firstAction?.kind, "delay");
@@ -173,7 +175,10 @@ test("preserves prepared earlier arguments through a later suspension and a susp
     [true, true],
   );
   const forgedWaiting = mutableCheckpoint(createCheckpoint(compiled, directSecondPending.snapshot));
-  forgedWaiting.snapshot.callFrames.at(-1)!.arguments[0]!.value = 99;
+  forgedWaiting.snapshot.callFrames.at(-1)!.arguments[0] = {
+    parameterName: "first",
+    supplied: false,
+  };
   assert.equal(validateRuntimeSnapshot(forgedWaiting.snapshot, compiled).valid, false);
   assertCheckpointRejected(forgedWaiting, "TSK002");
 
@@ -206,14 +211,13 @@ test("builds snapshot indexes once and reuses liveness for same-signature call f
   assert.equal(statistics.snapshotAnalysisBuilds, 1);
   assert.equal(statistics.defaultBindingIndexBuilds, 1);
   assert.equal(statistics.parameterNameIndexBuilds, 1);
-  assert.equal(statistics.preparedArgumentMapBuilds, snapshot.callFrames.length);
   assert.equal(statistics.livenessComputations, 1);
   assert.equal(statistics.livenessTableAllocations, 1);
   assert.equal(statistics.livenessCacheInsertions, 1);
   assert.equal(statistics.livenessCacheHits, snapshot.callFrames.length - 1);
 });
 
-test("indexes prepared arguments and caller temporaries once per suspended frame", () => {
+test("validates suspended caller liveness without historical argument-value comparison", () => {
   const compiled = plan([
     "function recurse(value, first, second, third, fourth, fifth) {",
     "  if value == 0 { return first }",
@@ -222,46 +226,26 @@ test("indexes prepared arguments and caller temporaries once per suspended frame
     "say recurse(3, 1, 2, 3, 4, 5)",
   ].join("\n"));
   const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === 3);
-  const statistics = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
-    return finish();
-  }).counts;
-
-  assert.equal(statistics.preparedArgumentMapBuilds, 3);
-  assert.equal(statistics.temporaryMapBuilds, 9);
-  assert.equal(statistics.structuralValueComparisons, 18);
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
 
   const missing = structuredClone(snapshot) as any;
   missing.callFrames[0].callerTemporaries = [];
   assert.equal(validateRuntimeSnapshot(missing, compiled).valid, false);
-  const mismatched = structuredClone(snapshot) as any;
-  mismatched.callFrames[0].callerTemporaries[1].value = 99;
-  assert.equal(validateRuntimeSnapshot(mismatched, compiled).valid, false);
+  const changed = structuredClone(snapshot) as any;
+  changed.callFrames[0].arguments[0].value = 99;
+  assert.equal(validateRuntimeSnapshot(changed, compiled).valid, true);
 });
 
-test("structurally compares captured scalar and composite argument values", () => {
-  const expressions = [
-    "42",
-    "1..=3",
-    '[1, "two", [3]]',
-    'set["first", "second"]',
-    '{ outer: { items: [1, 2] } }',
-  ];
-  for (const expression of expressions) {
-    const compiled = plan(`function identity(value) { return value }\nsay identity(${expression})`);
-    const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === 1);
-    const statistics = withValidationTestStatistics((finish) => {
-      assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, expression);
-      return finish();
-    }).counts;
-    assert.ok((statistics.structuralValueComparisons ?? 0) >= 1, expression);
-  }
-
+test("treats unbound call-frame argument values as canonical resumable state", () => {
   const compiled = plan("function identity(value) { return value }\nsay identity({ outer: { items: [1, 2] } })");
-  const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === 1);
-  const mismatched = structuredClone(snapshot) as any;
-  mismatched.callFrames[0].arguments[0].value.properties[0].value.properties[0].value.items[1] = 99;
-  assert.equal(validateRuntimeSnapshot(mismatched, compiled).valid, false);
+  const snapshot = executeUntil(compiled, (candidate) =>
+    candidate.callFrames.at(-1)?.parameterState.phase === "supplied" &&
+    candidate.callFrames.at(-1)?.parameterState.parameterIndex === 0
+  );
+  const changed = structuredClone(snapshot) as any;
+  changed.callFrames[0].arguments[0].value.properties[0].value.properties[0].value.items[1] = 99;
+  assert.equal(validateRuntimeSnapshot(changed, compiled).valid, true);
+  assert.doesNotThrow(() => restoreCheckpoint(createCheckpoint(compiled, changed)));
 });
 
 test("detailed validation records liveness work without rejecting valid state", () => {
@@ -316,24 +300,36 @@ test("rejects malformed active call-frame identity and return state", () => {
   }
 });
 
-test("rejects inconsistent argument temporaries and parameter bindings", () => {
+test("rejects inconsistent argument supply and parameter bindings", () => {
   const compiled = plan("function echo(input) { return input }\necho(1)");
+  const call = compiled.instructions.find(
+    (instruction) => instruction.kind === "callFunction",
+  );
+  assert.equal(call?.kind, "callFunction");
+  if (call?.kind !== "callFunction") return;
+  const occupiedBeforeCall = structuredClone(createFreshRuntimeSnapshot(compiled));
+  occupiedBeforeCall.temporaries.push({
+    id: call.destinationTemporary,
+    value: null,
+  });
+  assert.equal(validateRuntimeSnapshot(occupiedBeforeCall, compiled).valid, false);
+
   let snapshot = createFreshRuntimeSnapshot(compiled);
   snapshot = executeInstruction(compiled, snapshot).snapshot;
   snapshot = executeInstruction(compiled, snapshot).snapshot;
 
   const changedArgument = mutableCheckpoint(createCheckpoint(compiled, snapshot));
   changedArgument.snapshot.callFrames[0]!.arguments[0]!.value = 99;
-  assert.equal(validateRuntimeSnapshot(changedArgument.snapshot, compiled).valid, false);
-  assertCheckpointRejected(changedArgument, "TSK002");
+  assert.equal(validateRuntimeSnapshot(changedArgument.snapshot, compiled).valid, true);
+  assert.doesNotThrow(() => restoreCheckpoint(changedArgument));
 
-  const missingProvenance = mutableCheckpoint(createCheckpoint(compiled, snapshot));
-  missingProvenance.snapshot.callFrames[0]!.arguments[0] = {
+  const inconsistentSupply = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  inconsistentSupply.snapshot.callFrames[0]!.arguments[0] = {
     parameterName: "input",
     supplied: false,
   };
-  assert.equal(validateRuntimeSnapshot(missingProvenance.snapshot, compiled).valid, false);
-  assertCheckpointRejected(missingProvenance, "TSK002");
+  assert.equal(validateRuntimeSnapshot(inconsistentSupply.snapshot, compiled).valid, false);
+  assertCheckpointRejected(inconsistentSupply, "TSK002");
 
   const wrongParameter = mutableCheckpoint(createCheckpoint(compiled, snapshot));
   wrongParameter.snapshot.callFrames[0]!.arguments[0]!.parameterName = "forged";
@@ -581,7 +577,9 @@ test("rejects missing suspended results at multiple recursion depths", () => {
     const frame = checkpoint.snapshot.callFrames[frameIndex]!;
     const call = checkpoint.plan.instructions[frame.returnInstruction - 1];
     assert.equal(call.kind, "callFunction");
-    const argumentIds = new Set(call.arguments.map((argument: any) => argument.temporaryId));
+    const argumentIds = new Set(call.arguments.flatMap((argument: any) =>
+      argument.value.kind === "temporary" ? [argument.value.temporaryId] : []
+    ));
     const missingIndex = frame.callerTemporaries.findIndex(
       (temporary: any) => !argumentIds.has(temporary.id),
     );
@@ -689,14 +687,18 @@ test("rejects malformed function-region plans inside checkpoints", () => {
   const aliasedCall = aliasedDestination.instructions.find(
     (instruction: any) => instruction.kind === "callFunction",
   );
-  aliasedCall.destinationTemporary = aliasedCall.arguments[0].temporaryId;
+  aliasedCall.arguments[0].value = {
+    kind: "temporary",
+    temporaryId: aliasedCall.destinationTemporary,
+    span: aliasedCall.arguments[0].value.span,
+  };
   plans.push(aliasedDestination);
 
   const duplicateArgument = mutablePlan(calls);
   const duplicateCall = duplicateArgument.instructions.find(
     (instruction: any) => instruction.kind === "callFunction",
   );
-  duplicateCall.arguments[1].temporaryId = duplicateCall.arguments[0].temporaryId;
+  duplicateCall.arguments[1].parameterName = duplicateCall.arguments[0].parameterName;
   plans.push(duplicateArgument);
 
   for (const malformedPlan of plans) {

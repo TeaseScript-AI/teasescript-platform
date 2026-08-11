@@ -299,11 +299,16 @@ function injectInteraction(
   );
 
   const destinationTemporary = base.temporaryCount + 1;
-  const original = replaceLiteralMarker(
+  const markerInstruction = base.instructions[targetIndex]!;
+  const callTransferTemporary = markerInstruction.kind === "callFunction"
+    ? destinationTemporary + 1
+    : null;
+  const insertedInstructionCount = callTransferTemporary === null ? 2 : 3;
+  const original = shiftInstructionTargets(replaceLiteralMarker(
     base.instructions[targetIndex],
     marker,
-    destinationTemporary,
-  ) as Instruction;
+    callTransferTemporary ?? destinationTemporary,
+  ) as Instruction, targetIndex, insertedInstructionCount);
   const span = original.span;
   const expectedResult = interactionKind === "number" ||
     (ui.kind === "choice" && ui.labelType === "number")
@@ -321,23 +326,36 @@ function injectInteraction(
   };
   const plan: InstructionPlan = {
     ...base,
-    temporaryCount: destinationTemporary,
-    rootEndInstruction: shiftBoundary(base.rootEndInstruction, targetIndex),
+    temporaryCount: callTransferTemporary ?? destinationTemporary,
+    rootEndInstruction: shiftBoundary(
+      base.rootEndInstruction,
+      targetIndex,
+      insertedInstructionCount,
+    ),
     functions: base.functions.map((definition) => ({
       ...definition,
-      entryInstruction: shiftBoundary(definition.entryInstruction, targetIndex),
-      bodyEntryInstruction: shiftBoundary(definition.bodyEntryInstruction, targetIndex),
-      implicitReturnInstruction: shiftBoundary(definition.implicitReturnInstruction, targetIndex),
-      endInstruction: shiftBoundary(definition.endInstruction, targetIndex),
+      entryInstruction: shiftBoundary(definition.entryInstruction, targetIndex, insertedInstructionCount),
+      bodyEntryInstruction: shiftBoundary(definition.bodyEntryInstruction, targetIndex, insertedInstructionCount),
+      implicitReturnInstruction: shiftBoundary(definition.implicitReturnInstruction, targetIndex, insertedInstructionCount),
+      endInstruction: shiftBoundary(definition.endInstruction, targetIndex, insertedInstructionCount),
     })),
     instructions: [
       ...base.instructions.slice(0, targetIndex).map((instruction) =>
-        shiftInstructionTargets(instruction, targetIndex)),
+        shiftInstructionTargets(instruction, targetIndex, insertedInstructionCount)),
       interaction,
-      original,
+      ...(callTransferTemporary === null
+        ? [original]
+        : [{
+            kind: "storeTemporary" as const,
+            temporaryId: callTransferTemporary,
+            value: temporaryExpression(destinationTemporary, span),
+            expectBoolean: false,
+            span,
+          }]),
       { kind: "clearTemporary", temporaryId: destinationTemporary, span },
+      ...(callTransferTemporary === null ? [] : [original]),
       ...base.instructions.slice(targetIndex + 1).map((instruction) =>
-        shiftInstructionTargets(instruction, targetIndex)),
+        shiftInstructionTargets(instruction, targetIndex, insertedInstructionCount)),
     ],
   };
 
@@ -449,27 +467,31 @@ test("injectInteraction inserts one exact canonical boundary without collateral 
   }
 });
 
-function shiftBoundary(value: number, insertionIndex: number): number {
-  return value > insertionIndex ? value + 2 : value;
+function shiftBoundary(value: number, insertionIndex: number, amount = 2): number {
+  return value > insertionIndex ? value + amount : value;
 }
 
-function shiftInstructionTargets(instruction: Instruction, insertionIndex: number): Instruction {
+function shiftInstructionTargets(
+  instruction: Instruction,
+  insertionIndex: number,
+  amount = 2,
+): Instruction {
   switch (instruction.kind) {
     case "jump":
     case "jumpIfFalse":
     case "loopControl":
     case "prepareParameterDefault":
-      return { ...instruction, target: shiftBoundary(instruction.target, insertionIndex) };
+      return { ...instruction, target: shiftBoundary(instruction.target, insertionIndex, amount) };
     case "loopStart":
       return {
         ...instruction,
-        continueTarget: shiftBoundary(instruction.continueTarget, insertionIndex),
-        target: shiftBoundary(instruction.target, insertionIndex),
+        continueTarget: shiftBoundary(instruction.continueTarget, insertionIndex, amount),
+        target: shiftBoundary(instruction.target, insertionIndex, amount),
       };
     case "callFunction":
       return {
         ...instruction,
-        returnInstruction: shiftBoundary(instruction.returnInstruction, insertionIndex),
+        returnInstruction: shiftBoundary(instruction.returnInstruction, insertionIndex, amount),
       };
     default:
       return instruction;

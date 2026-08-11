@@ -6,7 +6,7 @@ import {
 } from "./diagnostics.js";
 import {
   createCapturedArray,
-} from "./external-data-limits.js";
+} from "./external-data-capture.js";
 import {
   createSourcePosition,
   createSourceSpan,

@@ -1,7 +1,7 @@
 import {
   captureExternalData,
   type ExternalDataFailureKind,
-} from "../external-data-limits.js";
+} from "../external-data-capture.js";
 import type { PlanValidationError, PlanValidationResult } from "./validation.js";
 
 export interface CapturedPlanData {

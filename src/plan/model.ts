@@ -1,7 +1,7 @@
 import type { SourceSpan } from "../source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 17;
+export const INSTRUCTION_PLAN_VERSION = 18;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
@@ -222,16 +222,16 @@ export interface ClearTemporariesInstruction extends InstructionBase {
   readonly temporaryIds: readonly number[];
 }
 
-export interface PreparedCallArgument {
+export interface CallArgumentPlan {
   readonly parameterName: string;
-  readonly temporaryId: number;
+  readonly value: ExpressionPlan;
   readonly span: SourceSpan;
 }
 
 export interface CallFunctionInstruction extends InstructionBase {
   readonly kind: "callFunction";
   readonly functionId: number;
-  readonly arguments: readonly PreparedCallArgument[];
+  readonly arguments: readonly CallArgumentPlan[];
   readonly destinationTemporary: number;
   readonly returnInstruction: number;
 }

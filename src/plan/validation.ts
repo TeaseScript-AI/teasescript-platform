@@ -383,7 +383,7 @@ function validateInstruction(
       return;
     case "callFunction":
       validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
-      validatePreparedArguments(value.arguments, `${path}.arguments`, temporaryCount, errors);
+      validateCallArguments(value.arguments, `${path}.arguments`, temporaryCount, errors);
       validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
       if (
         Number.isInteger(value.destinationTemporary) &&
@@ -391,7 +391,10 @@ function validateInstruction(
         value.arguments.some(
           (argument) =>
             isRecord(argument) &&
-            argument.temporaryId === value.destinationTemporary,
+            expressionMayReferenceTemporary(
+              argument.value,
+              value.destinationTemporary as number,
+            ),
         )
       ) {
         errors.push(planError(
@@ -2282,35 +2285,27 @@ function validateFunctionParameters(
   });
 }
 
-function validatePreparedArguments(
+function validateCallArguments(
   value: unknown,
   path: string,
   temporaryCount: number,
   errors: PlanValidationError[],
 ): void {
   if (!Array.isArray(value)) {
-    errors.push(planError("TSC002", "Prepared function arguments must be an array.", path));
+    errors.push(planError("TSC002", "Function arguments must be an array.", path));
     return;
   }
-  const temporaryIds = new Set<number>();
   value.forEach((argument, index) => {
     const argumentPath = `${path}[${index}]`;
     if (!isRecord(argument)) {
-      errors.push(planError("TSC002", "Prepared function argument must be an object.", argumentPath));
+      errors.push(planError("TSC002", "Function argument must be an object.", argumentPath));
       return;
     }
-    requireString(argument.parameterName, `${argumentPath}.parameterName`, errors);
-    validateTemporaryId(argument.temporaryId, `${argumentPath}.temporaryId`, temporaryCount, errors);
-    if (typeof argument.temporaryId === "number") {
-      if (temporaryIds.has(argument.temporaryId)) {
-        errors.push(planError(
-          "TSC002",
-          "Prepared function argument temporary IDs must be unique.",
-          `${argumentPath}.temporaryId`,
-        ));
-      }
-      temporaryIds.add(argument.temporaryId);
+    if (!hasExactKeys(argument, ["parameterName", "value", "span"])) {
+      errors.push(planError("TSC002", "Function argument contains unsupported fields.", argumentPath));
     }
+    requireString(argument.parameterName, `${argumentPath}.parameterName`, errors);
+    validateExpression(argument.value, `${argumentPath}.value`, errors, false, temporaryCount);
     validateSpan(argument.span, `${argumentPath}.span`, errors);
   });
 }

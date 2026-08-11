@@ -696,6 +696,16 @@ test("interaction expressions preserve function-argument source order across sus
       },
     },
   };
+  const call = plan.instructions.find(
+    (instruction) => instruction.kind === "callFunction",
+  );
+  assert.equal(call?.kind, "callFunction");
+  if (call?.kind !== "callFunction") return;
+  assert.deepEqual(call.arguments.map((argument) => argument.value.kind), [
+    "temporary",
+    "temporary",
+    "call",
+  ]);
   const pending = run(plan, createFreshRuntimeSnapshot(plan), capabilities);
   assert.deepEqual(marks, ["before"]);
   assert.equal(pending.snapshot.status, "waiting");

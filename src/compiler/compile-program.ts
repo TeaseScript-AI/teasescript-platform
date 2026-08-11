@@ -10,6 +10,7 @@ import {
   INSTRUCTION_PLAN_VERSION,
   type InstructionPlan,
 } from "../plan/model.js";
+import { freezeInstructionPlan } from "../plan/freeze.js";
 import { InstructionCompiler } from "./lowering/compiler.js";
 import { InstructionCompilationError } from "./errors.js";
 
@@ -58,7 +59,7 @@ export function compileStableProgram(program: Program): InstructionPlan {
   );
   const rootEndInstruction = compiler.instructions.length;
   compiler.compileFunctions();
-  return deepFreeze({
+  return freezeInstructionPlan({
     format: INSTRUCTION_PLAN_FORMAT,
     version: INSTRUCTION_PLAN_VERSION,
     sourceSpan: copySpan(program.span),
@@ -71,33 +72,4 @@ export function compileStableProgram(program: Program): InstructionPlan {
 
 function copySpan(span: SourceSpan): SourceSpan {
   return createSourceSpan(span.start, span.end);
-}
-
-function deepFreeze<T>(value: T): T {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
-  const work: Array<readonly [object, boolean]> = [[value, false]];
-  while (work.length > 0) {
-    const [current, readyToFreeze] = work.pop()!;
-    if (Object.isFrozen(current)) continue;
-    if (readyToFreeze) {
-      Object.freeze(current);
-      continue;
-    }
-    work.push([current, true]);
-    if (Array.isArray(current)) {
-      for (let index = current.length - 1; index >= 0; index -= 1) {
-        const nested = current[index];
-        if (typeof nested === "object" && nested !== null && !Object.isFrozen(nested)) {
-          work.push([nested, false]);
-        }
-      }
-      continue;
-    }
-    for (const nested of Object.values(current as Record<string, unknown>)) {
-      if (typeof nested === "object" && nested !== null && !Object.isFrozen(nested)) {
-        work.push([nested, false]);
-      }
-    }
-  }
-  return value;
 }

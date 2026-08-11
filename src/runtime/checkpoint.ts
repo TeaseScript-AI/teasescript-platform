@@ -3,8 +3,9 @@ import {
 } from "../plan/model.js";
 import {
   captureInstructionPlan,
-  validateAndFreezeInstructionPlan,
 } from "../plan/capture.js";
+import { freezeInstructionPlan } from "../plan/freeze.js";
+import { validateCapturedInstructionPlan } from "../plan/validation.js";
 import {
   captureRuntimeSnapshotWithValidatedPlan,
   validateCapturedRuntimeSnapshot,
@@ -12,7 +13,7 @@ import {
 } from "./state.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 25;
+export const CHECKPOINT_VERSION = 26;
 
 export interface RuntimeCheckpoint {
   readonly format: typeof CHECKPOINT_FORMAT;
@@ -50,12 +51,7 @@ export function createCheckpoint(
 
 export function serializeCheckpoint(checkpoint: RuntimeCheckpoint): string {
   const restored = restoreCheckpoint(checkpoint);
-  return serializeCapturedCheckpoint(restored);
-}
-
-/** Serializes a checkpoint produced and retained only by the current engine operation. */
-export function serializeCapturedCheckpoint(checkpoint: RuntimeCheckpoint): string {
-  return JSON.stringify(checkpoint);
+  return JSON.stringify(restored);
 }
 
 export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {
@@ -165,18 +161,19 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
   if (envelope.version !== CHECKPOINT_VERSION) {
     throw checkpointError("TSK001", "Unsupported checkpoint version.", "$.version");
   }
-  const capturedPlan = validateAndFreezeInstructionPlan(envelope.plan);
-  if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
-    const first = capturedPlan.validation.errors[0];
+  const planValidation = validateCapturedInstructionPlan(envelope.plan);
+  if (!planValidation.valid) {
+    const first = planValidation.errors[0];
     throw checkpointError(
       first?.code === "TSC001" ? "TSK001" : "TSK002",
       checkpointComponentCaptureMessage(first?.message ?? "Instruction plan is malformed."),
       `$.plan${first?.path.slice(1) ?? ""}`,
     );
   }
+  const plan = freezeInstructionPlan(envelope.plan as InstructionPlan);
   const snapshotValidation = validateCapturedRuntimeSnapshot(
     envelope.snapshot,
-    capturedPlan.plan,
+    plan,
   );
   if (!snapshotValidation.valid) {
     const message = checkpointComponentCaptureMessage(
@@ -191,7 +188,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
   return Object.freeze({
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
-    plan: capturedPlan.plan,
+    plan,
     snapshot: envelope.snapshot as RuntimeSnapshot,
   });
 }

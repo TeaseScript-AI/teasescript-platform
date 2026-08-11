@@ -20,7 +20,7 @@ import type {
   LoopControlInstruction,
   LoopStartInstruction,
   PrepareParameterDefaultInstruction,
-  PreparedCallArgument,
+  CallArgumentPlan,
   TemplatePartPlan,
   TemporaryExpressionPlan,
   InteractionUiPayload,
@@ -1066,19 +1066,13 @@ export class InstructionCompiler {
     const name = (expression.callee as Extract<Expression, { kind: "identifier" }>).name;
     const registered = this.#functionByName.get(name)!;
     const temporaryIds: number[] = [];
-    const prepared: PreparedCallArgument[] = [];
+    const planned: CallArgumentPlan[] = [];
+    const loweredArguments = this.#lowerOrderedExpressions(
+      expression.arguments.map((argument) => argument.value),
+    );
     expression.arguments.forEach((argument, index) => {
-      const lowered = this.#lowerExpression(argument.value);
+      const lowered = loweredArguments[index]!;
       for (const temporaryId of lowered.temporaryIds) temporaryIds.push(temporaryId);
-      const temporaryId = this.#allocateTemporary();
-      temporaryIds.push(temporaryId);
-      this.instructions.push({
-        kind: "storeTemporary",
-        temporaryId,
-        value: lowered.plan,
-        expectBoolean: false,
-        span: copySpan(argument.span),
-      });
       let parameterName: string;
       if (argument.kind === "namedArgument") {
         parameterName = argument.name.name;
@@ -1093,9 +1087,9 @@ export class InstructionCompiler {
         }
         parameterName = parameter.name.name;
       }
-      prepared.push({
+      planned.push({
         parameterName,
-        temporaryId,
+        value: lowered.plan,
         span: copySpan(argument.span),
       });
     });
@@ -1104,7 +1098,7 @@ export class InstructionCompiler {
     this.instructions.push({
       kind: "callFunction",
       functionId: registered.id,
-      arguments: prepared,
+      arguments: planned,
       destinationTemporary,
       returnInstruction: callIndex + 1,
       span: copySpan(expression.span),

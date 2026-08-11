@@ -1,5 +1,5 @@
 import type { InstructionPlan } from "../../plan/model.js";
-import { captureExternalData } from "../../external-data-limits.js";
+import { captureExternalData } from "../../external-data-capture.js";
 import {
   type RuntimeInteractionResultHandoffSnapshot,
   type RuntimeSnapshot,

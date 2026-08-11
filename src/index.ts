@@ -43,7 +43,7 @@ export {
   type CompiledFunctionDefinition,
   type CompiledFunctionParameter,
   type CallFunctionInstruction,
-  type PreparedCallArgument,
+  type CallArgumentPlan,
   type TemporaryExpressionPlan,
 } from "./plan/model.js";
 export {

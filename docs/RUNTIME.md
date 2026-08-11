@@ -501,7 +501,8 @@ when validating the snapshot, and checkpoint data freshly produced by `JSON.pars
 structural validation. Checkpoint restore validates its envelope, plan, snapshot, and their consistency before execution
 resumes. A generic capture depth/work or detailed-validation counter alone does not make otherwise structurally valid
 data malformed. Malformed or inconsistent plan and snapshot data still produces the existing public invalid results,
-`TSR100`, `TSR101`, or `TSK002`. This implementation-only change does not alter serialized shapes or format versions.
+`TSR100`, `TSR101`, or `TSK002`. The compact user-function call representation and its format consequences are
+described under [Format evolution](#format-evolution).
 
 Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality and duplicate handling are unchanged.
 
@@ -539,9 +540,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 17 | User-function calls retain each supplied-argument temporary as immutable suspended-call provenance, then clear all call-preparation temporaries with one instruction immediately after return. Source-ordered preparation and the caller evidence used to authenticate suspended call frames are unchanged. |
-| Runtime snapshot | 18 | The #112 pacing schema captures session pacing settings, active/promoted gates, prepared-output lineage, the single-use terminal-continuation handoff that remains valid when bounded replay data is replaced, and rejects unsafe pacing provenance, retained work after every explicit exit position, missing temporaries that the next instruction actually reads including prepared `say` text continuations, malformed plan-owned prepared `say` speaker/text/context values, and explicit prepared speakers that do not match their plan-owned identity. |
-| Checkpoint | 25 | Updated the self-contained bundle for instruction-plan revision 17 and runtime-snapshot revision 18. |
+| Instruction plan | 18 | User-function call arguments contain source-ordered expression plans. Lowering materializes an argument result when that argument emits instructions or when its value must survive a later instruction-emitting argument; otherwise the runtime evaluates the expression atomically at the call boundary. This removes the former one-preparation-instruction and one-evidence-temporary cost per supplied argument. |
+| Runtime snapshot | 19 | Call-frame argument values are the canonical exactly-once inputs retained for parameter binding, default prologues, suspension, and resume. Validation checks supplied/missing argument state against the owning call instruction without requiring historical duplicate values in caller temporaries, and rejects a pre-call snapshot whose result destination is already occupied. |
+| Checkpoint | 26 | Updated the self-contained bundle for instruction-plan revision 18 and runtime-snapshot revision 19. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
