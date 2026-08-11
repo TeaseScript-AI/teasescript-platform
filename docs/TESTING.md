@@ -485,6 +485,26 @@ Performance benchmarks are separate from correctness tests. [`planning/RELEASE-R
 
 Performance workloads should measure long-running runtime-state growth as well as instruction throughput. This includes growth in runtime-managed identities, snapshots, checkpoints, cloning, validation, and serialization costs. Repeated scoped speaker creation is a representative workload, but measurements and reachability/lifetime analysis must precede any reclamation or garbage-collection rule.
 
+### Scaling diagnostics
+
+When a change introduces or materially alters a path whose work, memory/allocation, serialized representation, or
+native-JavaScript exposure grows with valid `.tease` input or derived engine data, use the smallest bounded scale
+probe that resolves a material uncertainty. A `1x`/`2x`/`4x`/`8x` series is often enough to expose repeated work,
+representation amplification, allocation jumps, or a native-engine cliff. Vary the dimension actually at risk—such
+as source width or nesting, expression/instruction count, calls or arguments, temporaries, collection width, or text
+bytes—rather than treating file size alone as the scale model.
+
+Prefer deterministic structural measurements before wall-clock timing: emitted instructions, temporaries/frames,
+traversal or validation visits, serialized plan/checkpoint bytes, and observed depth are examples. Use timing and peak
+memory/RSS when CPU or memory cost is the actual question. Exercise the relevant public or trusted pipeline when a
+native failure is the concern so a helper-specific or host-library failure is not mistaken for engine behavior.
+
+These probes are diagnostic evidence, not capacity contracts. The largest passing fixture, first observed JavaScript
+`RangeError` or other native failure, host timing, and peak memory do not become supported TeaseScript maxima. Test an
+accepted product or technical limit separately against its authoritative boundary. Do not require scale probes for
+every PR or create permanent benchmark infrastructure for a bounded question; use them when changed scalable code or
+inspection leaves a credible amplification, memory, representation, or native-failure risk unresolved.
+
 ## Reproducibility requirements
 
 Tests and benchmarks should use:

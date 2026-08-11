@@ -151,10 +151,28 @@ proportionate to the reachable scope, actual risk, and realistic workloads. Appl
 scrutiny to real boundaries and inspect actual hot paths, algorithmic or resource growth,
 unbounded work, and credible operating costs.
 
+For relevant scalable paths, trace growth across the complete affected pipeline and lifecycle rather
+than approving each local helper in isolation. Inspect repeated whole-structure scans, copies,
+validation, or capture across layers; input-sized work nested in other input-sized work;
+representation and allocation amplification; per-instruction/call/event/checkpoint multipliers; and
+input-controlled recursion, argument spreading, materialization, indexing, allocation, or other
+native-JavaScript failure modes. For compiler-facing scope, follow representative valid `.tease`
+width/depth through every affected parser, semantic, lowering, plan, validation, and downstream stage;
+surviving one layer does not close a later native-stack or allocation failure.
+
+The audit does not require every algorithm to be linear or every traversal to be iterative. Prefer a
+simple structural repair when a material amplification or native failure is avoidable. When the
+credible repair would require disproportionate redesign or impose a material recurring normal-path
+cost, record the limitation, controlling input shape, consequence, alternatives, likely or measured
+benefit, and repair scope through the existing finding/follow-up and Owner-escalation route. Preserve
+related deferred findings as evidence that can later justify a broader redesign; do not silently
+convert an incidental JavaScript/V8 limitation into TeaseScript product policy.
+
 Do not add speculative defenses or micro-optimizations without a real requirement or boundary.
 Useful improvements without a real violation or material risk may use the appropriate
 non-blocking finding class; do not inflate them into blockers merely because further improvement
-is possible.
+is possible. When inspection cannot bound a material scaling risk, use the proportionate scaling
+evidence guidance in [`TESTING.md`](../TESTING.md) rather than inventing a local capacity guard.
 
 ### Evidence and findings
 
