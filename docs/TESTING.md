@@ -74,14 +74,17 @@ The testing strategy uses complementary layers:
 lexer/parser/semantic unit tests
 source-to-runtime contract tests
 runtime invariant and checkpoint tests
-external-data validation and corruption tests
+external-data and runtime-state validation tests
 deterministic property and bounded source-fuzz tests
 player/host integration tests
 browser E2E tests
 performance benchmarks
 ```
 
-Focused tests isolate syntax, diagnostics, lowering, validators, and runtime operations. Source-to-runtime tests prove that the public compilation and execution path preserves the accepted behavior. Runtime invariant and corruption tests cover explicit serializable state and restore boundaries. Future integration and browser tests cover concrete player/host surfaces after those surfaces exist.
+Focused tests isolate syntax, diagnostics, lowering, validators, and runtime operations. Source-to-runtime tests prove
+that the public compilation and execution path preserves the accepted behavior. Runtime invariant and state-validation
+tests cover explicit serializable state and restore boundaries. Future integration and browser tests cover concrete
+player/host surfaces after those surfaces exist.
 
 New author-facing syntax and source-reachable observable behavior require
 representative source-to-runtime coverage. Runtime-only primitives without a
@@ -108,7 +111,7 @@ Do not weaken tests to hide failures. Do not fold unrelated speculative cases in
 
 A failing test is evidence, not by itself a new product contract or review
 blocker. Classify whether it demonstrates accepted behavior failing through a
-supported public or trusted path, corruption of canonical/persisted state, or a
+supported public or trusted path, invalid canonical or persisted state, or a
 real determinism or security boundary failure. A fixture, generator, replay
 record, private helper, or manually fabricated unreachable state that fails
 without such a consequence is normally a test-harness issue, optional
@@ -320,9 +323,9 @@ same source + same inputs/time observations + same seed
 
 The campaign deliberately does not pin an ordered catalog/count, PRNG vectors,
 successful signatures, complete traces, work/mutation accounting, fixture
-identity, profiles, or CLI compatibility. Exact technical limits, hostile-data
-shapes, interaction variants, and confirmed defects remain in their focused
-runtime/checkpoint/corruption/regression suites. Canonical limit classification,
+identity, profiles, or CLI compatibility. Exact technical limits, external-data
+edge cases, interaction variants, and confirmed defects remain in their focused
+runtime/checkpoint/validation/regression suites. Canonical limit classification,
 evidence status, and coupling/repair routing live in
 [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). A test around a production constant proves only current implementation
 behavior unless independent evidence justifies that boundary. Tests for values whose retention is unsupported move or
@@ -391,7 +394,7 @@ exact bounded source before the replay command.
 
 This is deliberately not a complete grammar, abstract runtime model, reducer,
 dependency, browser/Laravel/device fuzzing route, or self-hosted untrusted-PR
-runner. Focused parser, compiler, checkpoint, corruption, and source-to-runtime
+runner. Focused parser, compiler, checkpoint, validation, and source-to-runtime
 tests remain the evidence for their detailed boundaries.
 
 ## Interactive runtime state-machine testing
@@ -470,7 +473,7 @@ Real browser automation becomes required after the cross-origin host shell and p
 - Standard UI, extending the same browser matrix to package custom UI once custom views are implemented;
 - focus and keyboard behavior;
 - fullscreen and navigation;
-- hostile or malformed host/player messages.
+- invalid host/player messages.
 
 No browser framework is selected yet. Playwright or another dependency should be chosen only when a concrete browser surface and its maintenance requirements can be evaluated.
 

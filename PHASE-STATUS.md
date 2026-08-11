@@ -23,7 +23,7 @@ accept syntax, architecture, or implementation details.
   family; and ADR 0018 `say` smart/exact pacing with one resumable `chatPacingGate`, deterministic checkpoint/restore,
   prepared output, typed skip settlement, and interaction/`wait` composition.
 - **Development and verification:** a standalone browser playground, source-to-runtime conformance coverage,
-  focused runtime/checkpoint/corruption tests, and a bounded deterministic property campaign.
+  focused runtime/checkpoint/state-validation tests, and a bounded deterministic property campaign.
 
 These summaries are orientation only. The current topic documents below are canonical for the detailed implementation
 contracts and boundaries.
