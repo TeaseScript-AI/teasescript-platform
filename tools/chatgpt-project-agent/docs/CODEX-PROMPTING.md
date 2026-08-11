@@ -15,14 +15,20 @@ trigger is met.
 ## Build the work package first
 
 Prefer the largest coherent, dependency-closed work package within scope that Codex can reliably complete and verify in
-one execution. Extra prompts repeat reading, context reacquisition, handoff, setup, and verification. Split only when
-execution volume, an intervening owner decision or capability change, independent review value, or dependency/ownership
-safety materially favors separation. When splitting, end each package in a durable repository state and start dependent
-work from its verified head or explicit handoff state.
+one execution. Reliability depends on unresolved decision space as well as execution volume: a technically difficult
+change may still be a compact package when its semantics, architectural boundary, dependency order, and verification are
+already prescribed. Extra prompts repeat reading, context reacquisition, handoff, setup, and verification. Split only
+when execution volume, unresolved implementation strategy, an intervening owner decision or capability change,
+independent review value, or dependency/ownership safety materially favors separation. When splitting, end each package
+in a durable repository state and start dependent work from its verified head or explicit handoff state.
 
 Before splitting behavior-changing work, trace its immediate dependencies. Include every transition, state,
-serialization, validation, or other path that ordinary successful execution can immediately reach. A behavior-neutral
-prerequisite may stand alone when it leaves a useful durable state.
+serialization, validation, or other path that ordinary successful execution can immediately reach. When a
+representation-changing foundation makes later repairs depend on a still-moving representation, prefer a durable
+verified foundation state before assigning those dependent repairs unless the complete implementation route is already
+prescribed and reliably executable together. Do not turn that rule into microtasking: recombine adjacent work whenever
+the representation and required invariants are stable enough for one reliable package. A behavior-neutral prerequisite
+may stand alone when it leaves a useful durable state.
 
 Define milestones by dependency order and **measurable durable capability states**, not by prompt or repair count. A
 milestone stays open until its acceptance state is satisfied; reviews, retries, and repairs do not create new
@@ -62,7 +68,9 @@ contract or materially reduce ambiguity. Do not write the patch in prose.
 
 Adding more work means adding coherent deliverables or coverage, not explanation, repeated context, micro-steps,
 reporting, or ceremony. A plan, focused check, commit, or push is intermediate while the assigned `Done when` state
-remains unsatisfied.
+remains unsatisfied. A temporarily red suite, inconsistent in-progress worktree, or result that is not yet safe to
+publish is likewise an intermediate implementation state when the assigned semantics still determine a recoverable
+path; it is not by itself a reason to stop or hand back partial work.
 
 Define stop conditions only for genuine blockers such as an unresolved owner/architecture decision, an invalidated
 required branch or immutable head, unavailable permission/evidence with no permitted alternative, a trust-boundary
@@ -75,7 +83,18 @@ A reference SHA is not a stop condition when the task starts from current `main`
 stale local branch or remote-tracking ref is synchronization work, not completion.
 
 When dense implementation is a plausible failure mode, make readability/KISS explicit: fewer lines or characters are
-not a goal; clarity, maintainability, debuggability, and reviewability are.
+not a goal; clarity, maintainability, debuggability, and reviewability are. For behavior-neutral readability or
+refactoring work, do not assume tests provide a completeness oracle: Codex can improve representative examples while
+leaving sibling regions untouched. Identify the concrete code regions or recurring patterns already found and explicitly
+enumerate the independently skippable regions or recurring pattern classes that must all be covered; use a bounded final
+scan of named files for the same pattern when useful. Describe semantic density such as combined predicates, mutations,
+nested object construction, or control decisions rather than inventing a numeric line-length target. Long but clear
+literals, signatures, regular expressions, and table-driven data are not automatic targets.
+
+For that maintenance class, state the behavior that must remain unchanged and verify completion against the actual diff
+and named regions rather than treating Codex's completion report as proof. Do not impose this inventory ceremony on a
+correctness repair whose failing tests or other strong oracle already bound completeness unless the remaining behavior
+space is itself uncertain.
 
 ## Do not invent prompt content
 
@@ -94,9 +113,12 @@ progress reports, inventories, or intermediate proofs only when they have a conc
 
 Match specificity to the selected configuration: Luna needs narrower decisions and concrete checks; Terra needs
 implementation direction, ownership boundaries, and normal local freedom; Sol needs precise contracts, relevant
-evidence, and critical invariants with broader implementation freedom. Low reasoning needs a well-bounded path, Medium
-normal repository investigation, and High the actual unresolved questions, trade-offs, or diagnostic burden rather than
-extra procedure.
+evidence, and critical invariants with broader implementation freedom. For Terra, resolve known semantic choices,
+architectural boundaries, dependency order, and relevant existing precedent before delegation when those materially
+narrow the correct route. Prescribe the contract and constraints, not the patch: do not make Terra rediscover a strategy
+the prompt author can already establish from authority and repository evidence, but leave ordinary code structure and
+local implementation choices free. Low reasoning needs a well-bounded path, Medium normal repository investigation,
+and High the actual unresolved questions, trade-offs, or diagnostic burden rather than extra procedure.
 
 ## Mandatory prompt-author preflight
 
@@ -116,6 +138,13 @@ If any item fails, revise the prompt first.
 - **Density:** Is each requirement stated once, with duplicated context and acceptance wording consolidated?
 - **Implementation freedom:** Does the prompt state the contract instead of ordinary coding steps Codex can determine
   safely from the repository?
+- **Decision space:** For the selected configuration, have known semantic choices, architectural boundaries, dependency
+  order, and relevant precedent been resolved far enough that Codex is implementing rather than rediscovering the work
+  strategy? Tighten the package or direction when the prompt author can already establish those constraints.
+- **Maintenance oracle:** For behavior-neutral readability or refactoring without a strong failing oracle, are the
+  independently skippable regions or recurring pattern classes that must all be covered explicit, behavior-preservation
+  constraints clear, and any final same-pattern scan bounded to named files? Avoid numeric formatting proxies for
+  semantic readability.
 - **Administration:** Does every checklist, log, evidence, progress, or reporting request have a concrete purpose?
   Remove ceremonial work.
 - **Completion:** Does `Done when` cover actual checks, complete diff review, assigned publication, and final state

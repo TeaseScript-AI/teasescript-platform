@@ -116,7 +116,9 @@ Run configured formatting, linting, type checking, build, relevant tests,
 playground checks, and `git diff --check`. Report exact commands, failures,
 warnings, skipped checks, and remaining risks. `npm run check` is the normal
 complete suite; use full-output variants only as diagnostic reruns when compact
-output is insufficient.
+output is insufficient. Run focused compiled Node test files through
+`tools/test-output-filter.mjs` by default; use direct full reporter output only
+when compact failure information is insufficient for diagnosis.
 
 Immediately before changing repository content or a ref, reselect the applicable
 route in `docs/agents/README.md` and use only the writes and publication method
