@@ -211,10 +211,10 @@ trust-boundary requirement, an unmet owner-approved criterion, or a concrete blo
 to normal development, deployment, or maintenance.
 
 Manually fabricated impossible internal states, unsupported inputs, private
-implementation details, hypothetical future compatibility, and malformed objects
-that cannot cross a real boundary are not blockers by default. Classify them as
-hardening, future work, a harness issue, or out of scope unless evidence shows a
-reachable supported path or real boundary consequence.
+implementation details, hypothetical future compatibility, and unsupported
+object shapes or behaviors that cannot cross a real boundary are not blockers by
+default. Classify them as hardening, future work, a harness issue, or out of scope
+unless evidence shows a reachable supported path or real boundary consequence.
 
 ### Review convergence
 
@@ -394,7 +394,7 @@ pull request depends on the behavior it changes:
 | --- | --- |
 | Confirmed defect on a supported path or real boundary | Focused regression test and failing-before evidence for the reported root cause, or a documented reason that failing-before evidence cannot reasonably be supplied |
 | Stateful runtime change | Functional tests plus runtime resume-equivalence |
-| External plan, snapshot, or checkpoint boundary | Valid cases and malformed-data rejection tests through the documented public boundary |
+| External plan, snapshot, or checkpoint boundary | Valid cases and invalid-data rejection tests through the documented public boundary |
 | RNG-dependent behavior | Fixed-seed deterministic comparison |
 | Time-dependent behavior | Fake clock or equivalent deterministic source; no real waiting |
 | Security boundary | Structured rejection, bounded work, and no uncontrolled host exception at the real documented boundary |
