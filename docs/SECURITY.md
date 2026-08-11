@@ -13,22 +13,26 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 - Run the complete player and package code in a sandboxed cross-origin iframe, preferably on a separate player origin.
 - Keep main-site cookies host-only and unavailable to the player.
 - Validate every parent/player message, checkpoint, package manifest, server response, and future integration result.
-- Capture external instruction-plan, runtime-snapshot, checkpoint, globals, and serializable-value data into one stable
-  plain-data graph under current depth/work guards. Reject accessors, trap failures, cycles, unsupported prototypes, and
-  over-limit input before recursive validation, cloning, freezing, state construction, execution, event emission, or RNG
-  consumption. Captured arrays use an engine-owned prototype isolated from ambient numeric `Array.prototype` properties,
-  and density checks require own indexes. [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) tracks the current guard values,
-  evidence/policy status, coupling, and reassessment route; capture depth, aggregate graph work, and generic
-  sparse-array length remain distinct resource dimensions.
+- Validate instruction plans, runtime snapshots, checkpoints, globals, and serializable values for supported shape,
+  format/version, representation domains, references, control flow, and cross-state invariants before they can affect
+  canonical execution. Live JavaScript input may first be stabilized into plain data; accessors, trap failures, cycles,
+  unsupported prototypes, non-JSON values, invalid array indexes/density, and similar representation failures may be
+  rejected when deterministic inspection requires it. This defensive capture is correctness/robustness behavior, not by
+  itself a TeaseScript content-capacity or security policy. Compiler-owned or already validated internal
+  representations are not reclassified as hostile merely because they share the same capture or validation helper.
+- A resource-based security rejection requires a concrete current attacker, a distinct victim or protected platform
+  asset, a reachable boundary, and the consequence being prevented. Self-only local misuse is not sufficient. Generic
+  work, node, size, or traversal-depth counters may be useful diagnostics, but they do not reject otherwise valid
+  TeaseScript or structurally valid engine data without a separately justified current boundary. Future shared/server
+  resource controls belong at the actual shared-resource or submission boundary rather than in speculative TeaseScript
+  plan/snapshot/checkpoint size limits.
 - Keep serializable-set validation and reconstruction linear while preserving insertion order, scalar equality, and the canonical array representation.
 - Fresh-runtime global initialization consumes each already captured unique own global property once; it does not rescan previously constructed bindings.
 - Detailed instruction-plan validation builds one local instruction-owner/function index. Detailed snapshot validation
   builds one local function/region index, call-frame argument and temporary maps, and reuses suspended-continuation
-  liveness results for each validated active-loop variant. These are operation-local only; no untrusted plan or snapshot
-  data enters a global cache. The current implementation also applies a deterministic detailed-validation work guard;
-  its current value and provisional Owner POC reassessment route are tracked in
-  [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion is rejected through runtime-snapshot validation before
-  execution, mutation, event emission, or RNG advancement.
+  liveness results for each validated active-loop variant. These are operation-local only; no caller-supplied plan or
+  snapshot data enters a global cache. Validation work may be measured diagnostically, but structural validity is not
+  conditioned on a generic validation-work budget.
 - [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) owns resource-limit classification, coupling evidence, and follow-up routing; this security document owns the trust-boundary behavior.
 - Interaction-result handoff validation is a fixed local structural check and does not add another control-flow fixed point, future-writer scan, or settlement-provenance cache.
 - Package code has no unrestricted external network access; published media uses platform-managed storage/CDN.

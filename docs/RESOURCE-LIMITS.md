@@ -3,9 +3,9 @@
 This is the canonical inventory and repair router required by
 [ADR 0019](decisions/0019-resource-limit-governance.md). Code is canonical for current enforcement; accepted ADRs and
 current topic specifications are canonical for policy. Recording a current value here does **not** make it an officially
-supported capacity. Issue #288 removed, structurally repaired, or deliberately routed every formerly `suspicious` entry;
-retained POC values below are explicit Owner policy rather than retroactive technical derivations of their historical
-numbers.
+supported capacity. The current POC policy no longer treats generic capture depth/work, sparse-array preflight,
+or detailed-validation work as rejection requirements without a concrete current protected boundary. Remaining
+numeric policies below are separate decisions and are not justified by that removed capture threat model.
 
 ## Conventions
 
@@ -48,11 +48,19 @@ the old nesting guard, so these exact depths are historical observations rather 
 They are retained only as evidence that host-stack failure varies materially by syntax and implementation shape; they are
 not TeaseScript limits, supported capacity, CI thresholds, safety margins, or production-classifier inputs.
 
+## Non-rejecting scale diagnostics
+
+Traversal work, observed depth, node or instruction counts, temporary counts, validation work, and serialized byte
+sizes may be collected when they cheaply expose scaling or representation amplification. These measurements are
+engineering diagnostics only: they do not make otherwise valid source or structurally valid plan/snapshot/checkpoint
+data invalid. An observed JavaScript stack, allocation, array/index, or other host failure is an implementation or
+representation constraint to diagnose and repair where practical, not a replacement TeaseScript maximum.
+
 ## Proven domains and state invariants
 
 | ID | Source / boundary | Current | Category | Status | Authority / change | Evidence / repair |
 |---|---|---|---|---|---|---|
-| `capture.array-index-domain` | `src/external-data-limits.ts`, `src/ast-validation.ts`; stable array capture | Safe-integer length/indexes; indexes `< 0xffff_ffff` and `< length`; direct-AST arrays are dense own-index arrays. | representation invariant | `proven` | JS array representation + ADR 0019; version/ADR review only if representation changes | issue #87 plus hostile/proxy regressions establish the index/density relation. Separate from the work-coupled preflights below. |
+| `capture.array-index-domain` | stable external/direct-AST array capture and validation | Safe-integer length/indexes; indexes `< 0xffff_ffff` and `< length`; direct-AST arrays are dense own-index arrays. | representation invariant | `proven` | JS array representation + ADR 0019; version/ADR review only if representation changes | issue #87 plus stable-capture and array-representation regressions establish the index/density relation. This is a representation predicate, not a capture-work policy. |
 | `plan.instruction-address-domain` | `src/plan/validation.ts`; plan validation | Safe-integer instruction boundaries within the plan; function targets must resolve to validated definitions. | representation invariant | `proven` | ADRs 0015/0019; Version review if serialized domain changes | Range-validation regressions; no independent instruction-count capacity claim. |
 | `ast.source-position-domain` | `src/source.ts`, direct-AST and plan validation; source positions | Offset, line, and column are non-negative safe integers. | representation invariant | `proven` | ADR 0019 + [`RUNTIME.md`](RUNTIME.md); Version review if the serialized domain changes | Source-helper, direct-AST, plan, and runtime-snapshot regressions enforce one exact-integer domain; no source-capacity claim. |
 | `plan.temporary-id-domain` | plan validation and persisted runtime temporaries | `temporaryCount` is a non-negative safe integer; temporary IDs are positive safe integers within that count. | representation invariant | `proven` | ADRs 0015/0019 + [`RUNTIME.md`](RUNTIME.md); Version review if the serialized domain changes | Plan-range and runtime-snapshot regressions align the plan and persisted temporary domains. |
@@ -65,24 +73,14 @@ not TeaseScript limits, supported capacity, CI thresholds, safety margins, or pr
 
 ## Retained POC policies and defaults
 
-After the #288 removal and structural analysis, the Owner chose on 2026-08-09 to retain the numeric values in this table
-through the POC to preserve existing rejection/default behavior while the product and representative workloads are still
-changing. That compatibility-preservation reason makes each selected boundary appropriate only as temporary POC policy;
-it does **not** establish that the historical number was technically derived, measured as safe capacity, or suitable as a
-permanent compatibility promise.
-
-Every row in this table is therefore `provisional` and must be reassessed before its numeric value is carried forward as
-supported non-POC compatibility behavior, no later than the Beta runtime-performance baseline, and earlier if
-representative valid workloads or new performance/security evidence show that the value is inappropriate. `capture.depth`
-also requires an explicit later choice between retaining a then-justified finite policy and scheduling the already
-identified stack-independent traversal refactor.
+The remaining rows are separate POC policies/defaults with their own accepted or Owner-selected rationale. This
+reassessment does not make them security requirements and does not re-decide them merely because the generic capture
+threat model changed. They remain `provisional` and must follow their own ADR 0019 change route. In particular,
+interaction-specific bounds, call-depth policy, and runtime instruction-budget policy are distinct from removed
+capture/traversal and detailed-validation acceptance counters.
 
 | ID | Source / boundary | Current | Category | Status | Authority / change | Evidence / policy |
 |---|---|---|---|---|---|---|
-| `capture.depth` | external/direct-AST capture | `MAX_EXTERNAL_RUNTIME_DATA_DEPTH = 128`, root depth `0`. | hostile-input capture budget | `provisional` | ADR 0019; Owner POC policy; ADR only if capture architecture changes | Deep hostile data remains a real stack-safety risk because accepted downstream serializable, validation, lowering/runtime, and checkpoint paths still contain recursive traversal. #288 established that complete structural removal is feasible only through a coordinated cross-component stack-independent refactor. The Owner retained `128` only to preserve POC rejection compatibility pending the required reassessment; it is not measured capacity. |
-| `capture.work` | external/direct-AST graph capture and dependent plan/snapshot/checkpoint/globals/completion capture | `MAX_EXTERNAL_RUNTIME_DATA_WORK = 100,000` aggregate capture-work units covering unreserved visits plus reserved post-enumeration descriptor/future-child work. | hostile-input capture budget | `provisional` | ADR 0019; Owner POC policy; ADR if threat-model/coupling architecture changes | #288 confirmed that broad shallow caller-controlled graphs otherwise permit unbounded capture work. PR #293 consolidates direct-AST known child work and post-`Reflect.ownKeys()` descriptor/scheduling work into this aggregate without double-charging the reserved enumerable child visit. The standalone own-key count rejection was removed because it could not bound the initial key-list materialization. The Owner retained `100,000` only for POC rejection compatibility. |
-| `capture.array-length-preflight` | generic external array capture | Generic sparse array `length <= 100,000`; direct-AST dense arrays derive their known child work from `capture.work` instead of this policy. | hostile-input capture budget | `provisional` | ADR 0019; Owner POC policy; independent from `capture.work` even though the values currently match | #288 proved that a sparse array can have huge `.length` with almost no visited values while still forcing length-sized allocation and later indexed traversal. PR #293 therefore keeps generic sparse-array length as an independent resource dimension and removes the old direct-AST coupling. The Owner retained `100,000` only for POC rejection compatibility. |
-| `snapshot.detailed-validation-work` | `src/runtime/state.ts`; detailed snapshot validation | `MAX_DETAILED_VALIDATION_WORK = 1,000,000` validation-work units. | parser, compiler, or runtime implementation guard | `provisional` | ADR 0019; Owner POC policy | #288 derived remaining work across plan instructions, temporary facts, active-loop signatures, and cyclic CFG propagation. Worklist/SCC processing may reduce repeated sweeps but cannot eliminate those independent dimensions or the need for structured exhaustion. The Owner retained `1,000,000` only for POC rejection compatibility; later algorithm/workload evidence must reassess it. |
 | `interaction.string-bytes` | `src/interaction-limits.ts`; completion/result/transcript retention | `MAX_INTERACTION_STRING_UTF8_BYTES = 65,536` UTF-8 bytes for completion/result/transcript strings. Authored/materialized UI fields have no independent per-field policy and instead preflight against remaining definition aggregate bytes. | parser, compiler, or runtime implementation guard | `provisional` | ADRs 0018/0019; Owner POC policy; Owner decision for later public rejection-policy change | #288 separated completion-retained bytes from definition bytes. PR #293 removes the independent authored-field policy while preserving this completion/result/transcript boundary. The Owner retained `65,536` only for POC rejection compatibility; equality with the definition aggregate is not a structural coupling. |
 | `interaction.aggregate-bytes` | interaction plan/runtime definition validation; one retained interaction definition | `MAX_INTERACTION_AGGREGATE_UTF8_BYTES = 65,536` UTF-8 bytes across all retained definition strings; each field preflights against the remaining aggregate budget. | parser, compiler, or runtime implementation guard | `provisional` | ADRs 0018/0019; Owner POC policy; Owner decision for later public rejection-policy change | #288 proved aggregate definition bytes are independent of both single completion strings and option count. PR #293 makes this the sole byte-policy axis for authored/materialized UI definition strings. The Owner retained `65,536` only for POC rejection compatibility. |
 | `interaction.option-entries` | interaction definition/materialization and completion matching | `MAX_INTERACTION_OPTION_ENTRIES = 4,096`. | parser, compiler, or runtime implementation guard | `provisional` | ADRs 0018/0019; Owner POC policy; Owner decision for later public rejection-policy change | #288 confirmed that many empty/short or numeric-label options keep byte totals small while validation, materialization, snapshot handling, and matching still grow with entry count. The mechanism remains necessary under the current materialized representation. The Owner retained `4,096` only for POC rejection compatibility. |
@@ -105,4 +103,5 @@ behavior. The configured listener port remains the only current playground tooli
 Update this file when implementation, evidence, or an Owner policy decision changes an entry. Historical roundness,
 another boundary's number, and empirical first-failure points do not justify retention. When temporary compatibility is
 the selected POC reason, record that policy and its mandatory reassessment trigger explicitly rather than presenting the
-value as technically derived or permanent capacity.
+value as technically derived or permanent capacity. A resource rejection justified as security must also name a
+concrete current protected boundary; self-only local misuse or shared-helper convenience is not sufficient.

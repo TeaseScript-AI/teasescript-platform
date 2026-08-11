@@ -39,7 +39,7 @@ The engine remains responsible for:
 - opaque engine-managed references;
 - checkpoint, restore, cleanup, and resume equivalence;
 - stable speaker/output provenance needed by runtime history;
-- bounded host/player data and security boundaries.
+- validated host/player data and concrete security/resource boundaries.
 
 Candidate Standard Library responsibilities include `say` policy, standard output targets, visible timer presentation,
 common input wrappers, validation/retry helpers, and friendly lifecycle APIs. ADR 0018 accepts the first concrete
@@ -461,7 +461,9 @@ The low-level `RuntimeCapabilities.random` hook is a compatibility/testing overr
 
 The override's own state is external to the runtime snapshot. A checkpoint is therefore not self-contained with respect to an arbitrary injected random source. Canonical checkpoint-equivalence guarantees use the serialized runtime RNG; tests that use the override must explicitly recreate an equivalent deterministic external source.
 
-Future player capabilities must return typed, bounded, JSON-safe outcomes correlated to one action ID. Raw DOM exceptions, browser handles, streams, callbacks, and mutable host objects do not enter the snapshot.
+Future player capabilities must return typed, validated, JSON-safe outcomes correlated to one action ID and obey
+any separately justified capability/interaction boundary. Raw DOM exceptions, browser handles, streams, callbacks, and
+mutable host objects do not enter the snapshot.
 
 Under ADR 0017, Standard Library and package-library wrappers may call documented typed capabilities, but they do not bypass these boundaries or become alternate owners of canonical action state.
 
@@ -475,10 +477,10 @@ that contract. Standard Player event wiring remains a separate slice.
 
 ## Runtime defaults and limits
 
-Current code contains call-depth, hostile-data capture, detailed-validation, interaction, and instruction-work guards.
-Exact numeric implementation values, their current evidence status, and any provisional POC policy/reassessment route
-live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). This document keeps the behavior and safety semantics without
-promoting provisional implementation values or product defaults into supported runtime-capacity claims.
+Current runtime policy still includes separately governed call-depth, interaction, and instruction-work behavior. Exact
+numeric values, evidence status, and change routes live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Generic
+capture/traversal depth or work and detailed-validation work are not TeaseScript acceptance limits merely because
+runtime validation or stable capture observes those dimensions.
 
 The playground RNG algorithm remains `xorshift32-v1` with default seed `0x6d2b79f5`; those deterministic identity
 choices are unrelated to resource capacity.
@@ -488,14 +490,14 @@ tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion fails determin
 `TSR037` instead of hanging and leaves the returned snapshot failed rather than resumable through a later `run(...)`.
 Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
 
-Externally supplied instruction plans, runtime snapshots, globals, and serializable runtime values are captured into
-bounded stable plain-data graphs before detailed validation, cloning, freezing, state construction, execution, event
-emission, or RNG consumption. Checkpoint restore validates its fixed envelope without invoking accessors, then captures
-its plan and snapshot independently through those existing boundaries. Proxy behavior is not retained, and later phases
-consume only captured plain data. Depth is counted from each captured root at zero, and the work limit applies to each
-bounded capture. Exceeding either implementation limit or failing stable capture is malformed external runtime data.
-Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`,
-and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
+Externally supplied instruction plans, runtime snapshots, globals, and serializable runtime values are stabilized into
+plain data as needed and then validated for supported format, shape, representation domains, references, and
+cross-state invariants before detailed runtime use. Checkpoint restore validates its envelope, plan, snapshot, and their
+consistency before execution resumes. Accessors, proxy/trap failures, cycles, unsupported prototypes, non-JSON values,
+invalid array representations, and other failures that prevent deterministic stable inspection may still be rejected.
+A generic capture depth/work or detailed-validation counter alone does not make otherwise structurally valid data
+malformed. Public plan and snapshot validators and runtime/checkpoint entry points retain their structured invalid-data
+outcomes for actual malformed or inconsistent data.
 
 Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality and duplicate handling are unchanged.
 
@@ -503,7 +505,9 @@ A halted snapshot is accepted only at the root completion boundary, including an
 
 Persisted runtime counters, identities, instruction positions, collection-iteration positions, depths, temporary IDs, warning-deduplication IDs, speaker references, and source-span positions must be JavaScript safe integers in their existing non-negative or positive ranges. Ordinary finite script numbers retain their existing semantics. The allocator counters `nextEventSequence`, `nextScopeId`, `nextSpeakerId`, and `nextCallFrameId` may hold `Number.MAX_SAFE_INTEGER` as stored state, but an operation that would increment such a value is rejected with `RuntimeDataError` `TSR101` before an event sequence or runtime identity is reused.
 
-The accepted `nextActionId` follows the same no-reuse and pre-increment failure rule. `lastSettlement` is bounded to one record. `currentSessionTimeMs` is finite, non-negative, persisted, and subject to the accepted numeric magnitude and external-data limits.
+The accepted `nextActionId` follows the same no-reuse and pre-increment failure rule. `lastSettlement` is bounded to
+one record. `currentSessionTimeMs` is finite, non-negative, persisted, and subject to its accepted representation and
+deadline-arithmetic domains.
 
 ## Deterministic RNG invariant
 

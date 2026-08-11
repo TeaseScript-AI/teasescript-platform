@@ -46,7 +46,8 @@ askNumber
 choose
 ```
 
-This slice establishes the generic interaction action, bounded completion validation, checkpoint/restore behavior, Standard UI reconstruction, transcript integration, and compact source forms.
+This slice establishes the generic interaction action, typed completion validation, checkpoint/restore behavior,
+Standard UI reconstruction, transcript integration, and compact source forms.
 
 ### Slice B — `say` and smart autoplay
 
@@ -237,9 +238,12 @@ Pacing values mean:
 
 `0` and `instant` also settle and bypass an earlier active pacing gate so the current message is actually immediate.
 
-## Bounded interaction data
+## Interaction data boundaries
 
-Interaction definitions, Standard UI payloads, choice collections, text completions, and host messages must remain within versioned platform string, collection, message, plan, snapshot, checkpoint, nesting, and validation-work limits.
+Interaction definitions, Standard UI payloads, choice collections, text completions, and host messages must satisfy
+their versioned shape and representation contracts plus any interaction-specific platform bounds justified under
+ADR 0019. They do not inherit generic plan/snapshot/checkpoint capture depth or validation-work limits merely because
+the same capture or validation helpers observe those dimensions.
 
 ADR 0018 defines no separate product-facing character counts for `askText`, hints, buttons, or choices. Any retained
 hard limit must satisfy ADR 0019; tests verify, not justify, its boundary.
@@ -247,13 +251,16 @@ hard limit must satisfy ADR 0019; tests verify, not justify, its boundary.
 Required behavior is fixed:
 
 - no silent truncation, clamping, or partial collection acceptance;
-- over-limit author data fails compilation or plan validation as appropriate;
-- over-limit completion data receives a structured rejection;
-- an invalid or over-limit completion does not mutate the action, result, transcript, RNG, event sequence, or continuation;
+- author data that violates an applicable interaction or representation limit fails compilation or plan validation as
+  appropriate;
+- completion data that violates an applicable interaction or representation limit receives a structured rejection;
+- an invalid or applicable-over-limit completion does not mutate the action, result, transcript, RNG, event sequence, or
+  continuation;
 - the same mandatory interaction remains active after a rejected player attempt.
 
-These are technical safety limits against uncontrolled memory, validation, storage, rendering, and transport work. They
-are not recommendations that ordinary UI labels should approach the technical maximum.
+Any retained interaction-specific technical limit protects a concrete rendering, storage, transport, representation, or
+other boundary justified under ADR 0019. It is not a generic defense against local validation work and is not a
+recommendation that ordinary UI labels should approach the technical maximum.
 
 ## Generic typed foreground interaction
 

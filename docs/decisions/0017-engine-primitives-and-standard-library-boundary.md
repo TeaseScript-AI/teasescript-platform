@@ -71,7 +71,8 @@ This includes:
 - foreground and background pending-action identity and lifecycle;
 - deterministic session-time observation and timed-action settlement;
 - opaque engine-managed handles and reference validation;
-- typed, bounded, JSON-safe data crossing runtime, player, host, checkpoint, and package boundaries;
+- typed, validated, JSON-safe data crossing runtime, player, host, checkpoint, and package boundaries, with
+  resource/security bounds only at separately justified concrete boundaries;
 - stable output provenance such as output target identity and speaker identity where required;
 - engine-managed serializable continuations for resumable library workflows;
 - validation of required Standard Library identity/version when behavior was not fully lowered into the plan;
