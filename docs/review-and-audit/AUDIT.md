@@ -27,7 +27,9 @@ Record:
   boundaries that may be relevant;
 - conceivable audit angles, risks, edge cases, failure modes, indirect effects, and likely
   misinterpretations;
-- the concrete investigations, probes, and evidence needed;
+- the concrete investigations, probes, and evidence needed, using precise software-QA terms for
+  ordinary local work (`invalid`, `malformed`, `negative probe`, `boundary validation`, or
+  `temporary local mutation`) and security terms only for actual security requirements or findings;
 - how each applicable minimum focus below will be investigated and evidenced, or the inspected
   reason it is immaterial; and
 - provisional moving facts that must be refreshed before they support a verdict.
@@ -145,7 +147,7 @@ resistance to misinterpretation merely to reduce length.
 ### Security, trust boundaries, performance, and resources
 
 Always consider security, trust boundaries, performance, and resource use, with depth
-proportionate to the reachable scope, actual risk, and realistic workloads. Apply adversarial
+proportionate to the reachable scope, actual risk, and realistic workloads. Apply rigorous
 scrutiny to real boundaries and inspect actual hot paths, algorithmic or resource growth,
 unbounded work, and credible operating costs.
 
