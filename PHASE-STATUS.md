@@ -22,7 +22,7 @@ accept syntax, architecture, or implementation details.
   `showButton`, `askText`, `askNumber`, and `choose` source forms lowered into one generic typed foreground-interaction
   action and settlement family with deterministic checkpoint/restore and canonical transcript events.
 - **Development and verification:** a standalone browser playground, source-to-runtime conformance coverage,
-  focused runtime/checkpoint/corruption tests, and a bounded deterministic property campaign.
+  focused runtime/checkpoint/malformed-state tests, and a bounded deterministic property campaign.
 
 These summaries are orientation only. The current topic documents below are canonical for the detailed implementation
 contracts and boundaries.
