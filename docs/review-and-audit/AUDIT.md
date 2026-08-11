@@ -29,7 +29,7 @@ Record:
   misinterpretations;
 - the concrete investigations, probes, and evidence needed, using precise software-QA terms for
   ordinary local work (`invalid`, `malformed`, `negative probe`, `boundary validation`, or
-  `temporary local mutation`) and security terms only for actual security requirements or findings;
+  `temporary local mutation`) and security terms only when security is actually in scope;
 - how each applicable minimum focus below will be investigated and evidenced, or the inspected
   reason it is immaterial; and
 - provisional moving facts that must be refreshed before they support a verdict.
