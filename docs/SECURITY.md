@@ -14,21 +14,17 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 - Keep main-site cookies host-only and unavailable to the player.
 - Validate every parent/player message, checkpoint, package manifest, server response, and future integration result.
 - Capture external instruction-plan, runtime-snapshot, checkpoint, globals, and serializable-value data into one stable
-  plain-data graph under current depth/work guards. Reject accessors, trap failures, cycles, unsupported prototypes, and
-  over-limit input before recursive validation, cloning, freezing, state construction, execution, event emission, or RNG
-  consumption. Captured arrays use an engine-owned prototype isolated from ambient numeric `Array.prototype` properties,
-  and density checks require own indexes. [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) tracks the current guard values,
-  evidence/policy status, coupling, and reassessment route; capture depth, aggregate graph work, and generic
-  sparse-array length remain distinct resource dimensions.
+  plain-data graph. Reject accessors, trap failures, cycles, unsupported prototypes, non-finite numbers, and sparse or
+  otherwise non-canonical arrays before detailed validation, freezing, state construction, execution, event emission, or
+  RNG consumption. Captured arrays use an engine-owned prototype isolated from ambient numeric `Array.prototype`
+  properties, and density checks require own indexes. Compiler-owned plans use complete inspect-only validation without
+  this defensive copy.
 - Keep serializable-set validation and reconstruction linear while preserving insertion order, scalar equality, and the canonical array representation.
 - Fresh-runtime global initialization consumes each already captured unique own global property once; it does not rescan previously constructed bindings.
 - Detailed instruction-plan validation builds one local instruction-owner/function index. Detailed snapshot validation
   builds one local function/region index, call-frame argument and temporary maps, and reuses suspended-continuation
   liveness results for each validated active-loop variant. These are operation-local only; no untrusted plan or snapshot
-  data enters a global cache. The current implementation also applies a deterministic detailed-validation work guard;
-  its current value and provisional Owner POC reassessment route are tracked in
-  [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion is rejected through runtime-snapshot validation before
-  execution, mutation, event emission, or RNG advancement.
+  data enters a global cache. Validation work remains test-measurable but does not reject otherwise valid state.
 - [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) owns resource-limit classification, coupling evidence, and follow-up routing; this security document owns the trust-boundary behavior.
 - Interaction-result handoff validation is a fixed local structural check and does not add another control-flow fixed point, future-writer scan, or settlement-provenance cache.
 - Package code has no unrestricted external network access; published media uses platform-managed storage/CDN.

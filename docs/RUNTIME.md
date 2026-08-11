@@ -475,7 +475,7 @@ that contract. Standard Player event wiring remains a separate slice.
 
 ## Runtime defaults and limits
 
-Current code contains call-depth, hostile-data capture, detailed-validation, interaction, and instruction-work guards.
+Current code contains call-depth, interaction, and instruction-work guards.
 Exact numeric implementation values, their current evidence status, and any provisional POC policy/reassessment route
 live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). This document keeps the behavior and safety semantics without
 promoting provisional implementation values or product defaults into supported runtime-capacity claims.
@@ -488,14 +488,14 @@ tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion fails determin
 `TSR037` instead of hanging and leaves the returned snapshot failed rather than resumable through a later `run(...)`.
 Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
 
-Externally supplied instruction plans, runtime snapshots, globals, and serializable runtime values are captured into
-bounded stable plain-data graphs before detailed validation, cloning, freezing, state construction, execution, event
-emission, or RNG consumption. Checkpoint restore validates its fixed envelope without invoking accessors, then captures
-its plan and snapshot independently through those existing boundaries. Proxy behavior is not retained, and later phases
-consume only captured plain data. Depth is counted from each captured root at zero, and the work limit applies to each
-bounded capture. Exceeding either implementation limit or failing stable capture is malformed external runtime data.
-Public plan and snapshot validators return their existing invalid results, runtime entry points use `TSR100` or `TSR101`,
-and checkpoint restore/deserialization use `TSK002`. These safety limits do not change any format version.
+Live externally supplied instruction plans, runtime snapshots, globals, and serializable runtime values are captured
+into stable plain-data graphs before detailed validation, freezing, state construction, execution, event emission, or
+RNG consumption. Capture rejects accessors, failed traps, cycles, unsupported prototypes, non-finite values, and
+non-canonical arrays without imposing a generic graph-work or nesting ceiling. Compiler-owned plans are validated
+directly. Runtime and checkpoint operations reuse an instruction plan already captured and validated by that operation
+when validating the snapshot, and checkpoint data freshly produced by `JSON.parse(...)` goes directly through complete
+structural validation. Malformed plan and snapshot data still produces the existing public invalid results, `TSR100`,
+`TSR101`, or `TSK002`. This implementation-only change does not alter serialized shapes or format versions.
 
 Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality and duplicate handling are unchanged.
 
