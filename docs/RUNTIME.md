@@ -531,9 +531,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 16 | The #112 source-ordered `say` preparation instructions capture speaker provenance, contextual speaker identity, and final visible text before a text or pacing call or interaction may suspend; the contextual capture directly follows its output-speaker capture and precedes every payload reference, while prepared fields require their canonical producer/consumer path, cannot be clobbered or cleared before consumption, and cannot be re-entered without preparation. |
+| Instruction plan | 17 | User-function calls retain each supplied-argument temporary as immutable suspended-call provenance, then clear all call-preparation temporaries with one instruction immediately after return. Source-ordered preparation and the caller evidence used to authenticate suspended call frames are unchanged. |
 | Runtime snapshot | 18 | The #112 pacing schema captures session pacing settings, active/promoted gates, prepared-output lineage, the single-use terminal-continuation handoff that remains valid when bounded replay data is replaced, and rejects unsafe pacing provenance, retained work after every explicit exit position, missing temporaries that the next instruction actually reads including prepared `say` text continuations, malformed plan-owned prepared `say` speaker/text/context values, and explicit prepared speakers that do not match their plan-owned identity. |
-| Checkpoint | 24 | Updated the self-contained bundle for instruction-plan revision 16 and runtime-snapshot revision 18. |
+| Checkpoint | 25 | Updated the self-contained bundle for instruction-plan revision 17 and runtime-snapshot revision 18. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

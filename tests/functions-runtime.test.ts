@@ -162,6 +162,22 @@ test("preserves left-to-right call and named-argument side effects", () => {
   assert.deepEqual(sayTexts(result), ["ab", "cd", "abdc"]);
 });
 
+test("retains earlier argument RNG progress when a later argument faults", () => {
+  const seed = 0x1234_5678;
+  const failing = plan([
+    "function take(first, second) { return first }",
+    "take(random(), randomInteger(1..1))",
+  ].join("\n"));
+  const control = plan("random()");
+  const failed = run(failing, createFreshRuntimeSnapshot(failing, { seed }));
+  const advancedOnce = run(control, createFreshRuntimeSnapshot(control, { seed }));
+
+  assert.equal(failed.snapshot.status, "failed");
+  assert.equal(failed.snapshot.failure?.code, "TSR012");
+  assert.deepEqual(failed.snapshot.rng, advancedOnce.snapshot.rng);
+  assert.deepEqual(failed.events.map((event) => event.kind), ["runtimeFailure"]);
+});
+
 test("evaluates a property-call receiver before its arguments", () => {
   const result = runSource([
     "let order = []",

@@ -346,6 +346,9 @@ function validateInstruction(
     case "clearTemporary":
       validateTemporaryId(value.temporaryId, `${path}.temporaryId`, temporaryCount, errors);
       return;
+    case "clearTemporaries":
+      validateTemporaryIds(value.temporaryIds, `${path}.temporaryIds`, temporaryCount, errors);
+      return;
     case "callFunction":
       validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
       validatePreparedArguments(value.arguments, `${path}.arguments`, temporaryCount, errors);
@@ -1479,8 +1482,10 @@ function preparedSayTemporaryIsCleared(
     const instruction = instructions[instructionIndex];
     if (
       isRecord(instruction) &&
-      instruction.kind === "clearTemporary" &&
-      instruction.temporaryId === temporaryId
+      ((instruction.kind === "clearTemporary" && instruction.temporaryId === temporaryId) ||
+        (instruction.kind === "clearTemporaries" &&
+          Array.isArray(instruction.temporaryIds) &&
+          instruction.temporaryIds.includes(temporaryId)))
     ) return true;
   }
   return false;
@@ -2094,6 +2099,7 @@ function validateFunctionPrologue(
           "storeTemporary",
           "prepareReference",
           "clearTemporary",
+          "clearTemporaries",
           "callFunction",
           "validateCallReceiver",
           "jumpIfFalse",
@@ -2138,7 +2144,11 @@ function validateFunctionPrologue(
       ) {
         const nested = instructions[instructionIndex];
         if (!isRecord(nested)) continue;
-        if (instructionIndex > bindingIndex && nested.kind !== "clearTemporary") {
+        if (
+          instructionIndex > bindingIndex &&
+          nested.kind !== "clearTemporary" &&
+          nested.kind !== "clearTemporaries"
+        ) {
           errors.push(planError(
             "TSC002",
             "Only temporary cleanup may follow a default binding.",
@@ -2282,6 +2292,27 @@ function validateTemporaryId(
   if (!positiveSafeInteger(value) || value > temporaryCount) {
     errors.push(planError("TSC002", "Temporary reference is outside the plan's temporary range.", path));
   }
+}
+
+function validateTemporaryIds(
+  value: unknown,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  if (!Array.isArray(value) || value.length === 0) {
+    errors.push(planError("TSC002", "Temporary ID list must be a non-empty array.", path));
+    return;
+  }
+  const seen = new Set<number>();
+  value.forEach((temporaryId, index) => {
+    validateTemporaryId(temporaryId, `${path}[${index}]`, temporaryCount, errors);
+    if (typeof temporaryId !== "number") return;
+    if (seen.has(temporaryId)) {
+      errors.push(planError("TSC002", "Temporary ID list must not contain duplicates.", `${path}[${index}]`));
+    }
+    seen.add(temporaryId);
+  });
 }
 
 function validateFunctionId(

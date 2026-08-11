@@ -2069,6 +2069,8 @@ function instructionKilledTemporaries(
       return new Set([instruction.destinationTemporary]);
     case "clearTemporary":
       return new Set([instruction.temporaryId]);
+    case "clearTemporaries":
+      return new Set(instruction.temporaryIds);
     case "callFunction":
       return new Set([instruction.destinationTemporary]);
     case "interaction":
@@ -3710,6 +3712,7 @@ function requiredInstructionTemporaries(
     case "jump":
     case "loopControl":
     case "clearTemporary":
+    case "clearTemporaries":
     case "bindSuppliedParameter":
     case "beginFunctionDefaults":
     case "prepareParameterDefault":

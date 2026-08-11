@@ -1100,7 +1100,6 @@ export class InstructionCompiler {
       });
     });
     const destinationTemporary = this.#allocateTemporary();
-    temporaryIds.push(destinationTemporary);
     const callIndex = this.instructions.length;
     this.instructions.push({
       kind: "callFunction",
@@ -1110,13 +1109,20 @@ export class InstructionCompiler {
       returnInstruction: callIndex + 1,
       span: copySpan(expression.span),
     });
+    if (temporaryIds.length > 0) {
+      this.instructions.push({
+        kind: "clearTemporaries",
+        temporaryIds: [...new Set(temporaryIds)],
+        span: copySpan(expression.span),
+      });
+    }
     return {
       plan: {
         kind: "temporary",
         temporaryId: destinationTemporary,
         span: copySpan(expression.span),
       },
-      temporaryIds,
+      temporaryIds: [destinationTemporary],
     };
   }
 
