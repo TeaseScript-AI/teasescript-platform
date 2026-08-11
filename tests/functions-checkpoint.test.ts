@@ -14,7 +14,6 @@ import {
 import {
   executeInstruction,
   run,
-  RuntimeDataError,
   type RuntimeBuiltinFunction,
 } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
@@ -26,7 +25,6 @@ import {
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import {
-  withDetailedValidationWorkLimitForTesting,
   withValidationTestStatistics,
 } from "../src/validation-testing.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -266,32 +264,22 @@ test("structurally compares captured scalar and composite argument values", () =
   assert.equal(validateRuntimeSnapshot(mismatched, compiled).valid, false);
 });
 
-test("detailed validation exhausts before later liveness allocation at every public boundary", () => {
+test("detailed validation records liveness work without rejecting valid state", () => {
   const { plan: compiled, snapshot } = recursiveSnapshot(3);
   const checkpoint = createCheckpoint(compiled, snapshot);
   const snapshotBefore = JSON.stringify(snapshot);
-  const statistics = withDetailedValidationWorkLimitForTesting(0, () =>
-    withValidationTestStatistics((finish) => {
-      const direct = validateRuntimeSnapshot(snapshot, compiled);
-      assert.equal(direct.valid, false);
-      assert.ok(direct.errors.includes("Runtime snapshot exceeds the detailed validation work limit."));
-      assert.throws(
-        () => run(compiled, snapshot),
-        (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
-      );
-      assert.throws(
-        () => restoreCheckpoint(checkpoint),
-        (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002",
-      );
-      return finish();
-    }).counts,
-  );
+  const statistics = withValidationTestStatistics((finish) => {
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+    assert.doesNotThrow(() => run(compiled, snapshot));
+    assert.doesNotThrow(() => restoreCheckpoint(checkpoint));
+    return finish();
+  }).counts;
 
   assert.equal(JSON.stringify(snapshot), snapshotBefore);
-  assert.equal(statistics.livenessTableAllocations, undefined);
-  assert.equal(statistics.livenessComputations, undefined);
-  assert.equal(statistics.livenessCacheInsertions, undefined);
-  assert.equal(statistics.budgetExhaustions, 9);
+  assert.ok((statistics.livenessTableAllocations ?? 0) > 0);
+  assert.ok((statistics.livenessComputations ?? 0) > 0);
+  assert.ok((statistics.livenessCacheInsertions ?? 0) > 0);
+  assert.ok((statistics.detailedWorkConsumed ?? 0) > 0);
 });
 
 test("checkpoint creation defensively isolates the supplied plan", () => {

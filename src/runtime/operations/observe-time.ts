@@ -1,5 +1,5 @@
 import type { InstructionPlan } from "../../plan/model.js";
-import { MAX_RUNTIME_SESSION_TIME_MS, cloneCapturedRuntimeSnapshot, type RuntimeSnapshot } from "../state.js";
+import { MAX_RUNTIME_SESSION_TIME_MS, type RuntimeSnapshot } from "../state.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeChatPacingGateActionSnapshot,
@@ -20,7 +20,7 @@ import {
 
 export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, suppliedNowMs: unknown): PendingActionOperationResult<TimeObservationOutcome> {
   const captured = captureExecutableData(plan, snapshot);
-  const current = cloneCapturedRuntimeSnapshot(captured.snapshot);
+  const current = captured.snapshot;
   if (!isValidSessionTime(suppliedNowMs)) return pendingResult(current, [], { kind: "invalidObservation", message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.` });
   const effectiveNow = Math.max(current.currentSessionTimeMs, suppliedNowMs);
   const due = timedActionsDue(current, effectiveNow);

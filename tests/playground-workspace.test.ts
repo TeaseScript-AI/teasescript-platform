@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSource } from "../playground/workspace/controller.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
 
 test("workspace helper exposes production say pacing and returns JSON-safe data", () => {
   const compiled = compileWorkspaceSource('say "Hello"');
@@ -15,6 +16,15 @@ test("workspace helper exposes production say pacing and returns JSON-safe data"
 test("workspace helper reports parser and semantic diagnostics", () => {
   assert.equal(compileWorkspaceSource("let =").plan, null);
   assert.equal(compileWorkspaceSource("missing = 1").plan, null);
+});
+
+test("workspace compilation reuses the compiler-validated plan", () => {
+  const statistics = withValidationTestStatistics((finish) => {
+    assert.ok(compileWorkspaceSource(Array.from({ length: 100 }, () => 'say "Hello"').join("\n")).plan);
+    return finish();
+  }).counts;
+
+  assert.equal(statistics.externalCaptureVisits, 1, "only the empty fresh-runtime options object is captured");
 });
 
 test("workspace helper stops blocking waits in waiting with action events", () => {

@@ -1,7 +1,4 @@
 import {
-  EXTERNAL_DATA_DEPTH_MESSAGE,
-  EXTERNAL_DATA_WORK_MESSAGE,
-  MAX_EXTERNAL_RUNTIME_DATA_WORK,
   captureExternalData,
   type ExternalDataFailureKind,
 } from "../external-data-limits.js";
@@ -47,10 +44,6 @@ export function captureFailureValidation(
 
 function planExternalDataFailureMessage(kind: ExternalDataFailureKind): string {
   switch (kind) {
-    case "depth":
-      return EXTERNAL_DATA_DEPTH_MESSAGE;
-    case "work":
-      return EXTERNAL_DATA_WORK_MESSAGE;
     case "nonFiniteNumber":
       return "Plan contains a non-finite number.";
     case "nonJsonSafeValue":
@@ -61,5 +54,3 @@ function planExternalDataFailureMessage(kind: ExternalDataFailureKind): string {
       return "Plan contains a non-plain object.";
   }
 }
-
-export { MAX_EXTERNAL_RUNTIME_DATA_WORK };

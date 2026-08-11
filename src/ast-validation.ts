@@ -6,16 +6,16 @@ import {
 } from "./diagnostics.js";
 import {
   createCapturedArray,
-  EXTERNAL_DATA_DEPTH_MESSAGE,
-  EXTERNAL_DATA_WORK_MESSAGE,
-  MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
-  MAX_EXTERNAL_RUNTIME_DATA_WORK,
 } from "./external-data-limits.js";
 import {
   createSourcePosition,
   createSourceSpan,
   type SourceSpan,
 } from "./source.js";
+import {
+  recordValidationTestMaximum,
+  recordValidationTestWork,
+} from "./validation-testing.js";
 
 export const AST_VALIDATION_CODES = {
   nonFiniteNumericLiteral: "TSC001",
@@ -38,7 +38,6 @@ type WorkItem =
       readonly value: unknown;
       readonly depth: number;
       readonly target: AssignmentTarget | null;
-      readonly precharged: boolean;
     }
   | {
       readonly kind: "leave";
@@ -60,15 +59,8 @@ const FALLBACK_SPAN = createSourceSpan(
 export function captureProgramAst(value: unknown): CapturedProgramAstResult {
   const active = new Set<object>();
   const work = createCapturedArray(0) as WorkItem[];
-  work.push({ kind: "visit", value, depth: 0, target: null, precharged: false });
-  let consumedWork = 0;
+  work.push({ kind: "visit", value, depth: 0, target: null });
   let capturedRoot: unknown;
-
-  const reserveWork = (amount = 1): boolean => {
-    if (amount > MAX_EXTERNAL_RUNTIME_DATA_WORK - consumedWork) return false;
-    consumedWork += amount;
-    return true;
-  };
 
   while (work.length > 0) {
     const item = work.pop()!;
@@ -78,12 +70,8 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
       continue;
     }
 
-    if (!item.precharged && !reserveWork()) {
-      return captureFailure(EXTERNAL_DATA_WORK_MESSAGE);
-    }
-    if (item.depth > MAX_EXTERNAL_RUNTIME_DATA_DEPTH) {
-      return captureFailure(EXTERNAL_DATA_DEPTH_MESSAGE);
-    }
+    recordValidationTestWork("directAstCaptureVisits");
+    recordValidationTestMaximum("directAstCaptureMaximumDepth", item.depth);
 
     const current = item.value;
     if (
@@ -112,10 +100,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     }
 
     if (array) {
-      const captured = captureArrayHeader(current, reserveWork);
-      if (captured === "work") {
-        return captureFailure(EXTERNAL_DATA_WORK_MESSAGE);
-      }
+      const captured = captureArrayHeader(current);
       if (captured === null) {
         return captureFailure("Direct AST arrays must be dense stable data arrays.");
       }
@@ -130,7 +115,6 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
           value: captured.values[index],
           depth: item.depth + 1,
           target: { container: captured.output, key: String(index) },
-          precharged: true,
         });
       }
       continue;
@@ -147,13 +131,10 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     if (prototype !== Object.prototype && prototype !== null) {
       return captureFailure("Direct AST input must contain only plain objects and arrays.");
     }
-    if (!reserveWork(keys.length)) {
-      return captureFailure(EXTERNAL_DATA_WORK_MESSAGE);
-    }
-
     const captured = Object.create(null) as Record<string, unknown>;
     const values = createCapturedArray(0) as Array<readonly [string, unknown]>;
     for (const key of keys) {
+      recordValidationTestWork("directAstCaptureDescriptors");
       if (typeof key === "symbol") {
         return captureFailure("Direct AST input may not contain symbol properties.");
       }
@@ -185,7 +166,6 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
         value: nested,
         depth: item.depth + 1,
         target: { container: captured, key },
-        precharged: true,
       });
     }
   }
@@ -254,8 +234,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
 
 function captureArrayHeader(
   value: object,
-  reserveWork: (amount: number) => boolean,
-): { readonly output: unknown[]; readonly values: readonly unknown[] } | "work" | null {
+): { readonly output: unknown[]; readonly values: readonly unknown[] } | null {
   let lengthDescriptor: PropertyDescriptor | undefined;
   let keys: readonly (string | symbol)[];
   try {
@@ -276,11 +255,11 @@ function captureArrayHeader(
   }
 
   const length = lengthDescriptor.value;
-  if (!reserveWork(length)) return "work";
   const values = createCapturedArray(length);
   const seen = new Set<number>();
   for (const key of keys) {
     if (key === "length") continue;
+    recordValidationTestWork("directAstCaptureDescriptors");
     if (typeof key !== "string" || !/^(0|[1-9]\d*)$/.test(key)) return null;
     const index = Number(key);
     if (!Number.isSafeInteger(index) || index < 0 || index >= length || seen.has(index)) {

@@ -7,8 +7,7 @@ import {
 } from "./diagnostics.js";
 import { compileStableProgram, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
-import { findExternalDataFailure } from "./external-data-limits.js";
-import { validateInstructionPlan } from "./plan/validation.js";
+import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import {
   validateSemantics,
@@ -51,8 +50,7 @@ export function compileSource(
   const loweringDiagnostics: Diagnostic[] = [];
   if (!hasParserErrors && !hasErrors(semantic.diagnostics)) {
     const compiled = compileStableProgram(parsed.program);
-    const diagnostic = planCaptureBudgetDiagnostic(compiled)
-      ?? interactionPlanValidationDiagnostic(compiled);
+    const diagnostic = compiledPlanValidationDiagnostic(compiled);
     if (diagnostic === null) {
       plan = compiled;
     } else {
@@ -73,29 +71,11 @@ export function compileSource(
   });
 }
 
-function planCaptureBudgetDiagnostic(
+function compiledPlanValidationDiagnostic(
   plan: InstructionPlan,
 ): Diagnostic | null {
-  const failure = findExternalDataFailure(plan);
-  if (failure === null || (failure.kind !== "work" && failure.kind !== "depth")) {
-    return null;
-  }
-
-  return createDiagnostic(
-    DiagnosticSeverity.Error,
-    "TSC006",
-    "This source lowers to an instruction plan that exceeds the current plan-validation budget for this source shape.",
-    plan.sourceSpan,
-  );
-}
-
-function interactionPlanValidationDiagnostic(
-  plan: InstructionPlan,
-): Diagnostic | null {
-  if (!plan.instructions.some((instruction) => instruction.kind === "interaction")) {
-    return null;
-  }
-  const validation = validateInstructionPlan(plan);
+  const validation = validateCapturedInstructionPlan(plan);
+  if (validation.valid) return null;
   const match = validation.errors.flatMap((error) => {
     const instructionMatch = /^\$\.instructions\[(\d+)\]/u.exec(error.path);
     if (instructionMatch === null) return [];
@@ -105,7 +85,14 @@ function interactionPlanValidationDiagnostic(
     }
     return [{ error, instructionIndex }];
   })[0];
-  if (match === undefined) return null;
+  if (match === undefined) {
+    return createDiagnostic(
+      DiagnosticSeverity.Error,
+      "TSC006",
+      `Compiled instruction plan is invalid: ${validation.errors[0]!.message}`,
+      plan.sourceSpan,
+    );
+  }
 
   return createDiagnostic(
     DiagnosticSeverity.Error,

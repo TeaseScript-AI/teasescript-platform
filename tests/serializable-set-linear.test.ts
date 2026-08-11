@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  EXTERNAL_DATA_WORK_MESSAGE,
-  MAX_EXTERNAL_RUNTIME_DATA_WORK,
   createSerializableSet,
   type SerializableRuntimeScalar,
   type SerializableRuntimeSet,
@@ -48,8 +46,8 @@ test("serializable-set validation and construction avoid repeated linear scans",
   assert.equal(constructionSomeCalls, 0);
 });
 
-test("serializable-set validation accepts the largest unique set within the work limit", () => {
-  const acceptedSize = MAX_EXTERNAL_RUNTIME_DATA_WORK - 3;
+test("serializable-set validation does not impose the removed capture-work threshold", () => {
+  const acceptedSize = 100_001;
   const accepted = Array.from({ length: acceptedSize }, (_, index) => index);
 
   assert.equal(
@@ -58,11 +56,12 @@ test("serializable-set validation accepts the largest unique set within the work
   );
   assert.equal(createSerializableSet(accepted).items.length, acceptedSize);
 
-  const rejected = [...accepted, acceptedSize];
+  const extended = [...accepted, acceptedSize];
   assert.equal(
-    validateSerializableValue({ kind: "set", items: rejected }),
-    EXTERNAL_DATA_WORK_MESSAGE,
+    validateSerializableValue({ kind: "set", items: extended }),
+    null,
   );
+  assert.equal(createSerializableSet(extended).items.length, extended.length);
 });
 
 test("serializable-set validation rejects early and late duplicates consistently", () => {

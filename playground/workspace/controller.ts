@@ -1,6 +1,5 @@
 import {
   compileSource,
-  createFreshRuntimeSnapshot,
   run,
   stepToEvent,
   type Diagnostic,
@@ -8,6 +7,7 @@ import {
   type InterpreterEvent,
   type RuntimeSnapshot,
 } from "../../src/index.js";
+import { createFreshRuntimeSnapshotWithValidatedPlan } from "../../src/runtime/state.js";
 
 export interface WorkspaceDiagnostic {
   readonly code: string;
@@ -32,7 +32,7 @@ export function compileWorkspaceSource(source: string): WorkspaceResult {
   if (compilation.plan === null) {
     return freezeResult({ diagnostics: diagnostics(compilation.diagnostics), plan: null, snapshot: null, events: [], status: "compileError", instructionsExecuted: 0 });
   }
-  const snapshot = createFreshRuntimeSnapshot(compilation.plan);
+  const snapshot = createFreshRuntimeSnapshotWithValidatedPlan(compilation.plan);
   return freezeResult({ diagnostics: diagnostics(compilation.diagnostics), plan: compilation.plan, snapshot, events: [], status: snapshot.status, instructionsExecuted: 0 });
 }
 
@@ -66,6 +66,7 @@ function diagnostics(values: readonly Diagnostic[]): readonly WorkspaceDiagnosti
 }
 
 function freezeResult(value: WorkspaceResult): WorkspaceResult {
-  // Public runtime values are JSON-safe; clone so callers never receive mutable engine state.
-  return Object.freeze(JSON.parse(JSON.stringify(value)) as WorkspaceResult);
+  // Compiler and runtime operations already return caller-owned data; the
+  // workspace retains no engine state that needs another whole-result copy.
+  return Object.freeze(value);
 }

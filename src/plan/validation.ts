@@ -170,7 +170,12 @@ function validateLoopStructure(
   instructions: readonly unknown[],
   errors: PlanValidationError[],
 ): void {
-  const starts = new Map<number, { index: number; target: number; continueTarget: number }>();
+  const starts = new Map<number, {
+    index: number;
+    target: number;
+    breakTarget: number;
+    continueTarget: number;
+  }>();
   for (let index = 0; index < instructions.length; index += 1) {
     const instruction = instructions[index];
     if (!isRecord(instruction) || instruction.kind !== "loopStart") continue;
@@ -186,6 +191,7 @@ function validateLoopStructure(
       starts.set(loopId, {
         index,
         target: instruction.target as number,
+        breakTarget: loopBreakTarget(instructions, instruction),
         continueTarget: instruction.continueTarget as number,
       });
     }
@@ -208,11 +214,57 @@ function validateLoopStructure(
       errors.push(planError("TSC002", "Loop control refers to an unknown loop.", `$.instructions[${index}].loopId`));
       continue;
     }
-    const expected = instruction.action === "continue" ? start.continueTarget : start.target;
+    const expected = instruction.action === "continue"
+      ? start.continueTarget
+      : start.breakTarget;
     if (instruction.target !== expected || index <= start.index || index >= start.target) {
       errors.push(planError("TSC002", "Loop-control target does not match its loop.", `$.instructions[${index}].target`));
     }
   }
+}
+
+function loopBreakTarget(
+  instructions: readonly unknown[],
+  loopStart: Record<string, unknown>,
+): number {
+  let target = loopStart.target as number;
+  const temporaryIds = collectExpressionTemporaryIds(loopStart.expression);
+  while (temporaryIds.size > 0) {
+    const instruction = instructions[target];
+    if (
+      !isRecord(instruction) ||
+      instruction.kind !== "clearTemporary" ||
+      !positiveSafeInteger(instruction.temporaryId) ||
+      !temporaryIds.delete(instruction.temporaryId as number)
+    ) break;
+    target += 1;
+  }
+  return target;
+}
+
+function collectExpressionTemporaryIds(value: unknown): Set<number> {
+  const output = new Set<number>();
+  const work: unknown[] = [value];
+  while (work.length > 0) {
+    const current = work.pop();
+    if (current === null || typeof current !== "object") continue;
+    if (Array.isArray(current)) {
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        work.push(current[index]);
+      }
+      continue;
+    }
+    if (
+      isRecord(current) &&
+      (current.kind === "temporary" || current.kind === "preparedReference") &&
+      positiveSafeInteger(current.temporaryId)
+    ) {
+      output.add(current.temporaryId as number);
+      continue;
+    }
+    for (const nested of Object.values(current)) work.push(nested);
+  }
+  return output;
 }
 
 function validateInstruction(

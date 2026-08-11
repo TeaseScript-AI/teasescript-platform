@@ -32,8 +32,8 @@ export function compileProgram(program: Program): InstructionPlan {
  * Lowers parser-owned or already-captured stable AST data.
  *
  * The canonical source route calls this after parsing and semantic validation so
- * parser-owned AST size is not conflated with the hostile direct-AST capture
- * budget. `compileProgram(...)` remains the guarded internal entry point for
+ * parser-owned AST data is not copied through the direct caller-data capture
+ * path. `compileProgram(...)` remains the guarded internal entry point for
  * caller-constructed AST data.
  */
 export function compileStableProgram(program: Program): InstructionPlan {

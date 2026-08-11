@@ -91,6 +91,35 @@ test("rejects cross-region loopControl targets", () => {
   assertRegionError(validateInstructionPlan(malformed), `$.instructions[${controlIndex}].target`);
 });
 
+test("validates break targets after user-call condition cleanup", () => {
+  const compiled = plan([
+    "function truth { return true }",
+    "while truth() { break }",
+  ].join("\n"));
+  const loopIndex = rootInstructionIndex(compiled, "loopStart");
+  const breakIndex = compiled.instructions.findIndex(
+    (instruction) => instruction.kind === "loopControl" && instruction.action === "break",
+  );
+  assert.ok(breakIndex >= 0);
+  assert.equal(validateInstructionPlan(compiled).valid, true);
+
+  const malformed = mutateTarget(
+    compiled,
+    breakIndex,
+    "target",
+    targetOf(compiled, loopIndex, "target"),
+  );
+  const validation = validateInstructionPlan(malformed);
+  assert.equal(validation.valid, false);
+  assert.equal(
+    validation.errors.some((error) =>
+      error.path === `$.instructions[${breakIndex}].target` &&
+      error.message === "Loop-control target does not match its loop."
+    ),
+    true,
+  );
+});
+
 test("preserves valid root-local and function-local jumps", () => {
   const compiled = plan(functionBranches());
   const rootJump = rootInstructionIndex(compiled, "jump");

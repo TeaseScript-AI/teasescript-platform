@@ -13,8 +13,6 @@ import type {
 } from "../plan/model.js";
 import { captureInstructionPlan } from "../plan/capture.js";
 import {
-  EXTERNAL_DATA_DEPTH_MESSAGE,
-  EXTERNAL_DATA_WORK_MESSAGE,
   captureExternalData,
   type ExternalDataFailureKind,
 } from "../external-data-limits.js";
@@ -33,18 +31,15 @@ import {
   type XorShift32State,
 } from "./random.js";
 import {
-  cloneSerializableValue,
-  validateSerializableValue,
+  cloneCapturedSerializableValue,
+  validateCapturedSerializableValue,
   type SerializableRuntimeProperty,
   type SerializableRuntimeList,
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
-import {
-  detailedValidationWorkLimitForTesting,
-  recordValidationTestWork,
-} from "../validation-testing.js";
+import { recordValidationTestWork } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
 export const RUNTIME_SNAPSHOT_VERSION = 18;
@@ -56,7 +51,6 @@ const DEFAULT_CHAT_PACING_SETTINGS = Object.freeze({
   delayPerWordMs: 300,
   delayPerCharacterMs: 30,
 });
-const MAX_DETAILED_VALIDATION_WORK = 1_000_000;
 const RUNTIME_SNAPSHOT_KEYS = [
   "format",
   "version",
@@ -260,6 +254,14 @@ export function createFreshRuntimeSnapshot(
       capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
     );
   }
+  return createFreshRuntimeSnapshotWithValidatedPlan(capturedPlan.plan, options);
+}
+
+/** Creates fresh state for an engine-owned plan that was already fully validated. */
+export function createFreshRuntimeSnapshotWithValidatedPlan(
+  plan: InstructionPlan,
+  options: FreshRuntimeOptions = {},
+): RuntimeSnapshot {
   const optionsCapture = captureExternalData(options);
   if (!optionsCapture.ok) {
     throw new TypeError(runtimeInputDataFailureMessage(
@@ -297,11 +299,11 @@ export function createFreshRuntimeSnapshot(
   }
   for (const [name, value] of Object.entries(globals)) {
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
-    const failure = validateSerializableValue(value, `globals.${name}`);
+    const failure = validateCapturedSerializableValue(value, `globals.${name}`);
     if (failure !== null) throw new TypeError(failure);
     bindings.push({
       name,
-      value: cloneSerializableValue(value as SerializableRuntimeValue),
+      value: value as SerializableRuntimeValue,
     });
   }
   return {
@@ -337,7 +339,7 @@ export function createFreshRuntimeSnapshot(
     terminalContinuationHandoff: null,
     preparedSayOutput: null,
     maxCallDepth,
-    status: capturedPlan.plan.rootEndInstruction === 0 ? "halted" : "ready",
+    status: plan.rootEndInstruction === 0 ? "halted" : "ready",
     failure: null,
   };
 }
@@ -349,7 +351,7 @@ export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot
       captured.validation.errors[0] ?? "Malformed runtime snapshot.",
     );
   }
-  return cloneCapturedRuntimeSnapshot(captured.snapshot);
+  return captured.snapshot;
 }
 
 /**
@@ -364,7 +366,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       id: frame.id,
       bindings: frame.bindings.map((binding) => ({
         name: binding.name,
-        value: cloneSerializableValue(binding.value),
+        value: cloneCapturedSerializableValue(binding.value),
       })),
     })),
     speakers: snapshot.speakers.map((speaker) => ({
@@ -372,7 +374,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       identifier: speaker.identifier,
       properties: speaker.properties.map((property) => ({
         name: property.name,
-        value: cloneSerializableValue(property.value),
+        value: cloneCapturedSerializableValue(property.value),
       })),
     })),
     defaultSpeaker: snapshot.defaultSpeaker,
@@ -384,7 +386,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       if (frame.kind === "while") return { ...frame };
       return {
         ...frame,
-        source: cloneSerializableValue(frame.source) as RuntimeForLoopFrameSnapshot["source"],
+        source: cloneCapturedSerializableValue(frame.source) as RuntimeForLoopFrameSnapshot["source"],
       };
     }),
     temporaries: snapshot.temporaries.map(cloneTemporary),
@@ -403,7 +405,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
           ? {
               parameterName: argument.parameterName,
               supplied: true,
-              value: cloneSerializableValue(argument.value),
+              value: cloneCapturedSerializableValue(argument.value),
             }
           : { parameterName: argument.parameterName, supplied: false },
       ),
@@ -571,6 +573,27 @@ export function captureRuntimeSnapshot(
   value: unknown,
   plan?: InstructionPlan,
 ): CapturedRuntimeSnapshotResult {
+  if (plan === undefined) return captureRuntimeSnapshotWithValidatedPlan(value);
+  const capturedPlan = captureInstructionPlan(plan);
+  if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
+    return Object.freeze({
+      validation: Object.freeze({
+        valid: false,
+        errors: Object.freeze([
+          capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
+        ]),
+      }),
+      snapshot: null,
+    });
+  }
+  return captureRuntimeSnapshotWithValidatedPlan(value, capturedPlan.plan);
+}
+
+/** Captures a caller snapshot against an instruction plan already captured and validated by this operation. */
+export function captureRuntimeSnapshotWithValidatedPlan(
+  value: unknown,
+  plan?: InstructionPlan,
+): CapturedRuntimeSnapshotResult {
   const snapshotCapture = captureExternalData(value);
   if (!snapshotCapture.ok) {
     return Object.freeze({
@@ -584,26 +607,9 @@ export function captureRuntimeSnapshot(
     });
   }
 
-  let capturedPlan: InstructionPlan | undefined;
-  if (plan !== undefined) {
-    const planCapture = captureExternalData(plan);
-    if (!planCapture.ok) {
-      return Object.freeze({
-        validation: Object.freeze({
-          valid: false,
-          errors: Object.freeze([
-            snapshotExternalDataFailureMessage(planCapture.failure.kind),
-          ]),
-        }),
-        snapshot: null,
-      });
-    }
-    capturedPlan = planCapture.value as InstructionPlan;
-  }
-
   const validation = validateCapturedRuntimeSnapshot(
     snapshotCapture.value,
-    capturedPlan,
+    plan,
   );
   return Object.freeze({
     validation,
@@ -776,12 +782,6 @@ export function validateCapturedRuntimeSnapshot(
   validatePendingActionState(value, plan, analysis, errors);
   validateInteractionResultHandoffState(value, plan, analysis, errors);
   validateTerminalContinuationHandoffState(value, plan, errors);
-  if (
-    analysis?.detailedWorkExceeded === true &&
-    !errors.includes("Runtime snapshot exceeds the detailed validation work limit.")
-  ) {
-    errors.push("Runtime snapshot exceeds the detailed validation work limit.");
-  }
   if (!["ready", "running", "waiting", "halted", "failed"].includes(String(value.status))) {
     errors.push("Runtime status is invalid.");
   }
@@ -889,7 +889,7 @@ function validateLoopFrames(
     } else if (frame.kind === "while") {
       // While loops need no additional hidden state.
     } else if (frame.kind === "for") {
-      const failure = validateSerializableValue(frame.source, "loop.source");
+      const failure = validateCapturedSerializableValue(frame.source, "loop.source");
       if (
         typeof frame.variable !== "string" ||
         frame.variable.length === 0 ||
@@ -947,7 +947,7 @@ function validateTemporaries(
     }
     if (ids.has(temporary.id)) errors.push(`${label} contain duplicate temporary IDs.`);
     ids.add(temporary.id);
-    const failure = validateSerializableValue(temporary.value);
+    const failure = validateCapturedSerializableValue(temporary.value);
     if (failure !== null) errors.push(failure);
   }
 }
@@ -1773,7 +1773,7 @@ function validateCallArguments(
       if (!("value" in argument)) {
         errors.push("Supplied runtime argument is missing its value.");
       } else {
-        const failure = validateSerializableValue(argument.value);
+        const failure = validateCapturedSerializableValue(argument.value);
         if (failure !== null) errors.push(failure);
       }
     } else if ("value" in argument) {
@@ -1878,8 +1878,6 @@ interface SnapshotValidationAnalysis {
   readonly continuationLiveness: Map<string, readonly ReadonlySet<number>[]>;
   readonly defaultBindingPositions: ReadonlyMap<string, number>;
   readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
-  remainingDetailedWork: number;
-  detailedWorkExceeded: boolean;
 }
 
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
@@ -1917,9 +1915,6 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     continuationLiveness: new Map(),
     defaultBindingPositions,
     parameterNames,
-    remainingDetailedWork:
-      detailedValidationWorkLimitForTesting() ?? MAX_DETAILED_VALIDATION_WORK,
-    detailedWorkExceeded: false,
   };
 }
 
@@ -1938,10 +1933,6 @@ function validateSuspendedContinuationTemporaries(
     returnInstruction,
     callerLoopFrames,
   );
-  if (analysis.detailedWorkExceeded) {
-    errors.push("Runtime snapshot exceeds the detailed validation work limit.");
-    return;
-  }
   if ([...required].some((temporaryId) => !present.has(temporaryId))) {
     errors.push("Runtime caller temporaries cannot resume the suspended continuation.");
   }
@@ -1958,18 +1949,12 @@ function requiredContinuationTemporaries(
     : "none";
   let liveIn = analysis.continuationLiveness.get(loopSignature);
   if (liveIn === undefined) {
-    // Charge the full table allocation before allocating or caching it.
-    if (!consumeDetailedValidationWork(analysis, analysis.plan.instructions.length)) {
-      recordValidationTestWork("budgetExhaustions");
-      return new Set<number>();
-    }
+    recordDetailedValidationWork(analysis.plan.instructions.length);
     recordValidationTestWork("livenessComputations");
     recordValidationTestWork("livenessTableAllocations");
     liveIn = computeContinuationLiveness(analysis, loopFrames);
-    if (!analysis.detailedWorkExceeded) {
-      analysis.continuationLiveness.set(loopSignature, liveIn);
-      recordValidationTestWork("livenessCacheInsertions");
-    }
+    analysis.continuationLiveness.set(loopSignature, liveIn);
+    recordValidationTestWork("livenessCacheInsertions");
   } else {
     recordValidationTestWork("livenessCacheHits");
   }
@@ -1987,12 +1972,12 @@ function computeContinuationLiveness(
   while (changed) {
     changed = false;
     for (let index = count - 1; index >= 0; index -= 1) {
-      if (!consumeDetailedValidationWork(analysis)) return liveIn;
+      recordDetailedValidationWork();
       const instruction = plan.instructions[index]!;
       const liveOut = new Set<number>();
       for (const successor of instructionSuccessors(analysis, index)) {
         for (const temporaryId of liveIn[successor] ?? []) {
-          if (!consumeDetailedValidationWork(analysis)) return liveIn;
+          recordDetailedValidationWork();
           liveOut.add(temporaryId);
         }
       }
@@ -2011,14 +1996,8 @@ function computeContinuationLiveness(
   return liveIn;
 }
 
-function consumeDetailedValidationWork(analysis: SnapshotValidationAnalysis, amount = 1): boolean {
+function recordDetailedValidationWork(amount = 1): void {
   recordValidationTestWork("detailedWorkConsumed", amount);
-  if (analysis.remainingDetailedWork < amount) {
-    analysis.detailedWorkExceeded = true;
-    return false;
-  }
-  analysis.remainingDetailedWork -= amount;
-  return true;
 }
 
 function instructionSuccessors(
@@ -3825,7 +3804,7 @@ function validateFrames(value: unknown, errors: string[]): void {
       }
       if (names.has(binding.name)) errors.push("Runtime frame contains a duplicate binding.");
       names.add(binding.name);
-      const failure = validateSerializableValue(binding.value);
+      const failure = validateCapturedSerializableValue(binding.value);
       if (failure !== null) errors.push(failure);
     }
   }
@@ -3865,7 +3844,7 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
       }
       if (names.has(property.name)) errors.push("Runtime speaker property names must be unique.");
       names.add(property.name);
-      const failure = validateSerializableValue(property.value);
+      const failure = validateCapturedSerializableValue(property.value);
       if (failure !== null) errors.push(failure);
       if (
         property.name === "defaultSaySkippable" &&
@@ -3999,7 +3978,7 @@ function cloneTemporary(
 ): RuntimeTemporarySnapshot {
   return {
     id: temporary.id,
-    value: cloneSerializableValue(temporary.value),
+    value: cloneCapturedSerializableValue(temporary.value),
   };
 }
 
@@ -4056,10 +4035,6 @@ function runtimeInputDataFailureMessage(
   path: string,
 ): string {
   switch (kind) {
-    case "depth":
-      return EXTERNAL_DATA_DEPTH_MESSAGE;
-    case "work":
-      return EXTERNAL_DATA_WORK_MESSAGE;
     case "nonFiniteNumber":
       return `${path} must be a finite number.`;
     case "nonJsonSafeValue":
@@ -4074,10 +4049,6 @@ function snapshotExternalDataFailureMessage(
   kind: ExternalDataFailureKind,
 ): string {
   switch (kind) {
-    case "depth":
-      return EXTERNAL_DATA_DEPTH_MESSAGE;
-    case "work":
-      return EXTERNAL_DATA_WORK_MESSAGE;
     case "nonFiniteNumber":
       return "Runtime snapshot contains a non-finite number.";
     case "nonJsonSafeValue":

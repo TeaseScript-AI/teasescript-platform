@@ -5,7 +5,7 @@ import { RuntimeFault } from "../errors.js";
 import type { InterpreterEvent } from "../events.js";
 import { cloneSerializableValue, type SerializableRuntimeValue } from "../serializable-values.js";
 import {
-  captureRuntimeSnapshot,
+  captureRuntimeSnapshotWithValidatedPlan,
   type RuntimeSnapshot,
   type RuntimeTemporarySnapshot,
 } from "../state.js";
@@ -132,7 +132,10 @@ export function captureExecutableData(
       capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
     );
   }
-  const capturedSnapshot = captureRuntimeSnapshot(snapshot, capturedPlan.plan);
+  const capturedSnapshot = captureRuntimeSnapshotWithValidatedPlan(
+    snapshot,
+    capturedPlan.plan,
+  );
   if (!capturedSnapshot.validation.valid || capturedSnapshot.snapshot === null) {
     throw new RuntimeDataError(
       "TSR101",

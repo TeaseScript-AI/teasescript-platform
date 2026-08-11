@@ -4,7 +4,6 @@ export interface ValidationTestStatistics {
 }
 
 let active: Record<string, number> | null = null;
-let detailedValidationWorkLimit: number | null = null;
 
 export function beginValidationTestStatistics(): () => ValidationTestStatistics {
   if (active !== null) {
@@ -33,29 +32,10 @@ export function withValidationTestStatistics<T>(
   }
 }
 
-/** Test-only override; it never reaches a supported runtime API or serialized data. */
-export function withDetailedValidationWorkLimitForTesting<T>(
-  limit: number,
-  callback: () => T,
-): T {
-  if (!Number.isSafeInteger(limit) || limit < 0) {
-    throw new Error("The detailed validation test work limit must be a non-negative safe integer.");
-  }
-  if (detailedValidationWorkLimit !== null) {
-    throw new Error("A detailed validation test work limit is already active.");
-  }
-  detailedValidationWorkLimit = limit;
-  try {
-    return callback();
-  } finally {
-    detailedValidationWorkLimit = null;
-  }
-}
-
-export function detailedValidationWorkLimitForTesting(): number | null {
-  return detailedValidationWorkLimit;
-}
-
 export function recordValidationTestWork(name: string, amount = 1): void {
   if (active !== null) active[name] = (active[name] ?? 0) + amount;
+}
+
+export function recordValidationTestMaximum(name: string, value: number): void {
+  if (active !== null) active[name] = Math.max(active[name] ?? 0, value);
 }

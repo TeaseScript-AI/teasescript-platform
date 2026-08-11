@@ -46,19 +46,16 @@ function withArrayPrototypeIndex(
   }
 }
 
-test("captured sparse arrays ignore inherited numeric values", () => {
+test("sparse arrays are rejected without reading inherited numeric values", () => {
   const sparse = new Array<unknown>(1);
   withArrayPrototypeIndex(
     { value: "inherited", writable: true },
     () => {
       const captured = captureExternalData(sparse);
-      assert.equal(captured.ok, true);
-      if (!captured.ok) return;
-      assert.equal(Array.isArray(captured.value), true);
-      assert.notEqual(Object.getPrototypeOf(captured.value), Array.prototype);
-      assert.equal(Object.hasOwn(captured.value as object, 0), false);
-      assert.equal(0 in (captured.value as unknown[]), false);
-      assert.equal(typeof (captured.value as unknown[]).map, "function");
+      assert.deepEqual(captured, {
+        ok: false,
+        failure: { kind: "nonJsonSafeValue", path: "$" },
+      });
     },
   );
 });
