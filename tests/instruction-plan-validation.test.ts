@@ -316,7 +316,12 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   const sayIndex = prepared.instructions.findIndex((instruction) => instruction.kind === "say");
   const say = prepared.instructions[sayIndex];
   assert.equal(say?.kind, "say");
-  if (say?.kind !== "say" || typeof say.speakerTemporary !== "number" || typeof say.textTemporary !== "number") {
+  if (
+    say?.kind !== "say" ||
+    typeof say.speakerTemporary !== "number" ||
+    typeof say.textTemporary !== "number" ||
+    typeof say.contextualSpeakerTemporary !== "number"
+  ) {
     throw new Error("Expected prepared say fields.");
   }
 
@@ -347,6 +352,12 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     }],
     ["aliased preparation temporaries", (candidate) => {
       candidate.instructions[sayIndex].textTemporary = say.speakerTemporary;
+    }],
+    ["aliased contextual speaker temporary", (candidate) => {
+      candidate.instructions[sayIndex].contextualSpeakerTemporary = say.speakerTemporary;
+    }],
+    ["missing contextual speaker producer", (candidate) => {
+      delete candidate.instructions[sayIndex].contextualSpeakerTemporary;
     }],
     ["orphaned preparation instructions", (candidate) => {
       delete candidate.instructions[sayIndex].speakerTemporary;

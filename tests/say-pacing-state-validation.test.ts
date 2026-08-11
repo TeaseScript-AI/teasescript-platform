@@ -347,19 +347,19 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const compiled = plan('say "first"');
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
-  assert.equal(compiled.version, 12);
-  assert.equal(snapshot.version, 16);
-  assert.equal(checkpoint.version, 20);
+  assert.equal(compiled.version, 13);
+  assert.equal(snapshot.version, 17);
+  assert.equal(checkpoint.version, 21);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot) as any;
-  oldSnapshot.version = 15;
+  oldSnapshot.version = 16;
   assert.equal(validateRuntimeSnapshot(oldSnapshot, compiled).valid, false);
   const oldPlan = structuredClone(compiled) as any;
-  oldPlan.version = 11;
+  oldPlan.version = 12;
   assert.equal(validateInstructionPlan(oldPlan).valid, false);
   const oldCheckpoint = structuredClone(checkpoint);
-  oldCheckpoint.version = 19;
+  oldCheckpoint.version = 20;
   assert.throws(() => deserializeCheckpoint(JSON.stringify(oldCheckpoint)));
 });
 
@@ -432,6 +432,114 @@ test("prepared say text retains caller temporaries through a suspended text call
     compiled,
     malformed,
   );
+});
+
+test("prepared say temporary values reject malformed top-level and caller state", () => {
+  const source = [
+    'speaker vera { title: "Captain"\ndelay: 1 }',
+    "speaker other {}",
+    'function textValue { return "hello" }',
+    "function pace { return 1 }",
+    'say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()',
+  ].join("\n");
+  const compiled = plan(source);
+  const say = compiled.instructions.find((instruction) => instruction.kind === "say");
+  assert.equal(say?.kind, "say");
+  if (
+    say?.kind !== "say" ||
+    typeof say.speakerTemporary !== "number" ||
+    typeof say.textTemporary !== "number" ||
+    typeof say.contextualSpeakerTemporary !== "number"
+  ) throw new Error("Expected a fully prepared say.");
+
+  let atSay = createFreshRuntimeSnapshot(compiled);
+  while (atSay.nextInstruction !== compiled.instructions.indexOf(say)) {
+    atSay = executeInstruction(compiled, atSay).snapshot;
+  }
+  assert.equal(validateRuntimeSnapshot(atSay, compiled).valid, true);
+  const replaceTopLevel = (temporaryId: number, value: unknown): any => {
+    const malformed = structuredClone(atSay) as any;
+    const temporary = malformed.temporaries.find((entry: { id: number }) => entry.id === temporaryId);
+    assert.notEqual(temporary, undefined);
+    temporary.value = value;
+    return malformed;
+  };
+  const preparedSpeaker = atSay.temporaries.find((temporary) => temporary.id === say.speakerTemporary)!;
+  const speakerProperties = (preparedSpeaker.value as { properties: Array<{ name: string; value: unknown }> }).properties;
+  const mutateSpeaker = (mutate: (properties: Array<{ name: string; value: unknown }>) => void): any => {
+    const malformed = structuredClone(atSay) as any;
+    const temporary = malformed.temporaries.find((entry: { id: number }) => entry.id === say.speakerTemporary);
+    mutate(temporary.value.properties);
+    return malformed;
+  };
+
+  expectInvalidSnapshot("prepared speaker with a non-numeric ID", compiled, mutateSpeaker((properties) => {
+    properties.find((property) => property.name === "speakerId")!.value = "bad";
+  }));
+  expectInvalidSnapshot("prepared speaker with an unknown ID", compiled, mutateSpeaker((properties) => {
+    properties.find((property) => property.name === "speakerId")!.value = 999;
+  }));
+  expectInvalidSnapshot("prepared speaker with the wrong immutable identifier", compiled, mutateSpeaker((properties) => {
+    properties.find((property) => property.name === "identifier")!.value = "other";
+  }));
+  expectInvalidSnapshot("prepared speaker with extra fields", compiled, mutateSpeaker((properties) => {
+    properties.push({ name: "extra", value: true });
+  }));
+  expectInvalidSnapshot(
+    "explicit prepared speaker replaced with null",
+    compiled,
+    replaceTopLevel(say.speakerTemporary, null),
+  );
+  expectInvalidSnapshot(
+    "prepared text with a non-string value",
+    compiled,
+    replaceTopLevel(say.textTemporary, 123),
+  );
+  expectInvalidSnapshot(
+    "prepared contextual speaker with malformed reference state",
+    compiled,
+    replaceTopLevel(say.contextualSpeakerTemporary, { kind: "speakerReference", speakerId: 1, identifier: "other" }),
+  );
+  expectInvalidSnapshot(
+    "prepared contextual speaker for a different captured speaker",
+    compiled,
+    replaceTopLevel(say.contextualSpeakerTemporary, { kind: "speakerReference", speakerId: 2, identifier: "other" }),
+  );
+  assert.equal(speakerProperties.find((property) => property.name === "identifier")?.value, "vera");
+
+  const suspended = plan([
+    'speaker vera { title: "Captain"\ndelay: 1 }',
+    'function textValue { return "hello" }',
+    "function pace { wait 1 ms\nreturn 1 }",
+    'say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()',
+  ].join("\n"));
+  const suspendedSay = suspended.instructions.find((instruction) => instruction.kind === "say");
+  assert.equal(suspendedSay?.kind, "say");
+  if (
+    suspendedSay?.kind !== "say" ||
+    typeof suspendedSay.speakerTemporary !== "number" ||
+    typeof suspendedSay.textTemporary !== "number" ||
+    typeof suspendedSay.contextualSpeakerTemporary !== "number"
+  ) throw new Error("Expected prepared say temporaries.");
+  const waiting = run(suspended, createFreshRuntimeSnapshot(suspended)).snapshot;
+  assert.equal(waiting.status, "waiting");
+  const callerTemporaries = waiting.callFrames.at(-1)?.callerTemporaries;
+  assert.ok(callerTemporaries?.some((temporary) => temporary.id === suspendedSay.speakerTemporary));
+  assert.ok(callerTemporaries?.some((temporary) => temporary.id === suspendedSay.textTemporary));
+  assert.ok(callerTemporaries?.some((temporary) => temporary.id === suspendedSay.contextualSpeakerTemporary));
+  const malformedCaller = structuredClone(waiting) as any;
+  malformedCaller.callFrames.at(-1).callerTemporaries.find(
+    (temporary: { id: number }) => temporary.id === suspendedSay.textTemporary,
+  ).value = 123;
+  expectInvalidSnapshot("malformed prepared text in caller state", suspended, malformedCaller);
+  const malformedCallerSpeaker = structuredClone(waiting) as any;
+  const callerSpeaker = malformedCallerSpeaker.callFrames.at(-1).callerTemporaries.find(
+    (temporary: { id: number }) => temporary.id === suspendedSay.speakerTemporary,
+  );
+  callerSpeaker.value.properties.find(
+    (property: { name: string }) => property.name === "speakerId",
+  ).value = "bad";
+  expectInvalidSnapshot("malformed prepared speaker in caller state", suspended, malformedCallerSpeaker);
 });
 
 test("say pacing expression temporaries are required before checkpoint restore", () => {

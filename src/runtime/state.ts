@@ -4,6 +4,7 @@ import type {
   RuntimePendingActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
 } from "./actions/model.js";
+import { requiredActionCompletionEvents } from "./actions/model.js";
 import type {
   ExpressionPlan,
   Instruction,
@@ -46,7 +47,7 @@ import {
 } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 16;
+export const RUNTIME_SNAPSHOT_VERSION = 17;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -497,14 +498,7 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
     scopeDepth: action.scopeDepth, loopDepth: action.loopDepth,
     createdAtMs: action.createdAtMs, deadlineMs: action.deadlineMs,
     skippable: action.skippable, requestEventSequence: action.requestEventSequence,
-    preparedOutput: action.preparedOutput === null ? null : {
-      owningInstruction: action.preparedOutput.owningInstruction,
-      continuationInstruction: action.preparedOutput.continuationInstruction,
-      speaker: action.preparedOutput.speaker === null ? null : { ...action.preparedOutput.speaker },
-      text: action.preparedOutput.text,
-      durationMs: action.preparedOutput.durationMs,
-      skippable: action.preparedOutput.skippable,
-    },
+    preparedOutput: action.preparedOutput === null ? null : clonePreparedSayOutput(action.preparedOutput),
   };
   return {
     kind: "interaction",
@@ -653,12 +647,20 @@ export function validateCapturedRuntimeSnapshot(
   validateFrames(value.frames, errors);
   const speakerIds = validateSpeakers(value.speakers, errors);
   const preparedReferenceTemporaryIds = collectPreparedReferenceTemporaryIds(plan);
+  const preparedSayTemporaryOwnership = collectPreparedSayTemporaryOwnership(plan);
   validateTemporaries(value.temporaries, plan, "Runtime temporaries", errors);
   validatePreparedReferenceTemporaries(
     value.temporaries,
     value.frames,
     value.speakers,
     preparedReferenceTemporaryIds,
+    "Runtime temporaries",
+    errors,
+  );
+  validatePreparedSayTemporaries(
+    value.temporaries,
+    value.speakers,
+    preparedSayTemporaryOwnership,
     "Runtime temporaries",
     errors,
   );
@@ -672,6 +674,7 @@ export function validateCapturedRuntimeSnapshot(
     plan,
     analysis,
     preparedReferenceTemporaryIds,
+    preparedSayTemporaryOwnership,
     errors,
   );
   validateSpeakerReferences(
@@ -1005,6 +1008,158 @@ function collectPreparedReferenceTemporaryIds(
   );
 }
 
+interface PreparedSayTemporaryOwnership {
+  readonly outputSpeakerIds: ReadonlySet<number>;
+  readonly nullableOutputSpeakerIds: ReadonlySet<number>;
+  readonly textIds: ReadonlySet<number>;
+  readonly contextualSpeakerIds: ReadonlySet<number>;
+  readonly nullableContextualSpeakerIds: ReadonlySet<number>;
+  readonly contextualSpeakerSources: ReadonlyMap<number, number>;
+}
+
+function collectPreparedSayTemporaryOwnership(
+  plan: InstructionPlan | undefined,
+): PreparedSayTemporaryOwnership {
+  const outputSpeakerIds = new Set<number>();
+  const textIds = new Set<number>();
+  const contextualSpeakerIds = new Set<number>();
+  const nullableContextualSpeakerIds = new Set<number>();
+  const contextualSpeakerSources = new Map<number, number>();
+  const nullableSaySpeakerSources = new Set<number>();
+  if (plan !== undefined) {
+    for (const instruction of plan.instructions) {
+      if (instruction.kind === "prepareSaySpeaker") {
+        outputSpeakerIds.add(instruction.destinationTemporary);
+        if (instruction.speaker === null) nullableSaySpeakerSources.add(instruction.destinationTemporary);
+      } else if (instruction.kind === "prepareSayText") {
+        textIds.add(instruction.destinationTemporary);
+      } else if (instruction.kind === "prepareSayContextualSpeaker") {
+        contextualSpeakerIds.add(instruction.destinationTemporary);
+        contextualSpeakerSources.set(instruction.destinationTemporary, instruction.speakerTemporary);
+        if (nullableSaySpeakerSources.has(instruction.speakerTemporary)) {
+          nullableContextualSpeakerIds.add(instruction.destinationTemporary);
+        }
+      }
+    }
+  }
+  return {
+    outputSpeakerIds,
+    nullableOutputSpeakerIds: nullableSaySpeakerSources,
+    textIds,
+    contextualSpeakerIds,
+    nullableContextualSpeakerIds,
+    contextualSpeakerSources,
+  };
+}
+
+function validatePreparedSayTemporaries(
+  value: unknown,
+  speakers: unknown,
+  ownership: PreparedSayTemporaryOwnership,
+  label: string,
+  errors: string[],
+): void {
+  if (!Array.isArray(value)) return;
+  for (const temporary of value) {
+    if (!isPlainRecord(temporary) || !nonNegativeSafeInteger(temporary.id) || !("value" in temporary)) continue;
+    let valid = true;
+    if (ownership.outputSpeakerIds.has(temporary.id)) {
+      valid = validPreparedSayTemporarySpeaker(
+        temporary.value,
+        speakers,
+        ownership.nullableOutputSpeakerIds.has(temporary.id),
+      );
+    } else if (ownership.textIds.has(temporary.id)) {
+      valid = typeof temporary.value === "string";
+    } else if (ownership.contextualSpeakerIds.has(temporary.id)) {
+      valid = validPreparedSayContextualSpeaker(
+        temporary.value,
+        speakers,
+        ownership.nullableContextualSpeakerIds.has(temporary.id),
+      );
+    }
+    if (!valid) errors.push(`${label} contain malformed prepared-say state.`);
+  }
+  for (const [contextualTemporaryId, outputTemporaryId] of ownership.contextualSpeakerSources) {
+    const contextual = runtimeTemporaryValueRecord(value, contextualTemporaryId);
+    const output = runtimeTemporaryValueRecord(value, outputTemporaryId);
+    if (
+      contextual !== undefined &&
+      output !== undefined &&
+      !preparedSaySpeakerValuesMatch(output.value, contextual.value)
+    ) {
+      errors.push(`${label} contain inconsistent prepared-say speaker state.`);
+    }
+  }
+}
+
+function runtimeTemporaryValueRecord(
+  temporaries: readonly unknown[],
+  temporaryId: number,
+): Record<string, unknown> | undefined {
+  return temporaries.find(
+    (temporary): temporary is Record<string, unknown> =>
+      isPlainRecord(temporary) && temporary.id === temporaryId,
+  );
+}
+
+function preparedSaySpeakerValuesMatch(output: unknown, contextual: unknown): boolean {
+  if (output === null || contextual === null) return output === contextual;
+  const outputProperties = serializedObjectPropertyMap(output);
+  if (outputProperties === null || !isPlainRecord(contextual)) return false;
+  return outputProperties.get("speakerId") === contextual.speakerId &&
+    outputProperties.get("identifier") === contextual.identifier;
+}
+
+function validPreparedSayTemporarySpeaker(
+  value: unknown,
+  speakers: unknown,
+  allowsNull: boolean,
+): boolean {
+  if (value === null) return allowsNull;
+  const properties = serializedObjectPropertyMap(value);
+  if (
+    properties === null ||
+    properties.size !== 6 ||
+    !["identifier", "displayName", "color", "font", "avatar", "speakerId"].every((name) => properties.has(name))
+  ) return false;
+  const identifier = properties.get("identifier");
+  const displayName = properties.get("displayName");
+  const color = properties.get("color");
+  const font = properties.get("font");
+  const avatar = properties.get("avatar");
+  const speakerId = properties.get("speakerId");
+  if (
+    typeof identifier !== "string" ||
+    typeof displayName !== "string" ||
+    (typeof color !== "string" && color !== null) ||
+    (typeof font !== "string" && font !== null) ||
+    (typeof avatar !== "string" && avatar !== null) ||
+    !positiveSafeInteger(speakerId)
+  ) return false;
+  return Array.isArray(speakers) && speakers.some((speaker) =>
+    isPlainRecord(speaker) && speaker.id === speakerId && speaker.identifier === identifier
+  );
+}
+
+function validPreparedSayContextualSpeaker(
+  value: unknown,
+  speakers: unknown,
+  allowsNull: boolean,
+): boolean {
+  if (value === null) return allowsNull;
+  if (
+    !isPlainRecord(value) ||
+    !hasExactKeys(value, ["kind", "speakerId", "identifier"]) ||
+    value.kind !== "speakerReference" ||
+    !positiveSafeInteger(value.speakerId) ||
+    typeof value.identifier !== "string"
+  ) return false;
+  return Array.isArray(speakers) && speakers.some((speaker) =>
+    isPlainRecord(speaker) && speaker.id === value.speakerId && speaker.identifier === value.identifier
+  );
+}
+
 function validatePreparedReferenceDescriptor(
   value: unknown,
   frames: unknown,
@@ -1251,6 +1406,7 @@ function validateCallFrames(
   plan: InstructionPlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
   preparedReferenceTemporaryIds: ReadonlySet<number>,
+  preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership,
   errors: string[],
 ): Set<number> {
   const ids = new Set<number>();
@@ -1330,6 +1486,13 @@ function validateCallFrames(
       frames,
       speakers,
       preparedReferenceTemporaryIds,
+      "Runtime caller temporaries",
+      errors,
+    );
+    validatePreparedSayTemporaries(
+      frame.callerTemporaries,
+      speakers,
+      preparedSayTemporaryOwnership,
       "Runtime caller temporaries",
       errors,
     );
@@ -1891,6 +2054,7 @@ function instructionKilledTemporaries(
       return new Set([instruction.temporaryId]);
     case "prepareSayText":
     case "prepareSaySpeaker":
+    case "prepareSayContextualSpeaker":
       return new Set([instruction.destinationTemporary]);
     case "prepareInteractionSpeaker":
       return new Set([instruction.destinationTemporary]);
@@ -2128,16 +2292,16 @@ function validatePendingActionState(
  * observation and must both remain representable.
  */
 function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>): boolean {
-  let requiredCompletionEvents = 0;
   const backgroundActions = Array.isArray(snapshot.backgroundActions)
     ? snapshot.backgroundActions
     : [];
   const actions = [snapshot.foregroundAction, ...backgroundActions];
-  for (const action of actions) {
-    if (!isPlainRecord(action)) continue;
-    if (action.kind === "interaction") requiredCompletionEvents += 2;
-    else if (action.kind === "delay" || action.kind === "chatPacingGate") requiredCompletionEvents += 1;
-  }
+  const requiredCompletionEvents = actions.reduce(
+    (count, action) => count + (isPlainRecord(action)
+      ? requiredActionCompletionEvents(action as unknown as RuntimePendingActionSnapshot)
+      : 0),
+    0,
+  );
   return hasEventSequenceCapacity(snapshot.nextEventSequence, requiredCompletionEvents);
 }
 
@@ -3525,6 +3689,9 @@ function requiredInstructionTemporaries(
     case "prepareSayText":
     case "returnValue":
       collect(instruction.value);
+      break;
+    case "prepareSayContextualSpeaker":
+      output.add(instruction.speakerTemporary);
       break;
     case "callFunction":
       instruction.arguments.forEach((argument) => output.add(argument.temporaryId));

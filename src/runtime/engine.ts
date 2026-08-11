@@ -435,6 +435,25 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     }
+    case "prepareSayContextualSpeaker": {
+      const prepared = preparedOutputSpeaker(
+        snapshot.temporaries,
+        instruction.speakerTemporary,
+        instruction.span,
+      );
+      setTemporary(
+        snapshot.temporaries,
+        instruction.destinationTemporary,
+        prepared.speakerId === null
+          ? null
+          : (() => {
+              const speaker = evaluator.speakerById(prepared.speakerId, instruction.span);
+              return { kind: "speakerReference", speakerId: speaker.id, identifier: speaker.identifier };
+            })(),
+      );
+      advance(snapshot);
+      return;
+    }
     case "prepareInteractionSpeaker": {
       const speaker = instruction.speaker !== null
         ? evaluator.speakerByName(instruction.speaker, instruction.span)

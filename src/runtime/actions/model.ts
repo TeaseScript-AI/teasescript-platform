@@ -61,6 +61,15 @@ export interface RuntimeChatPacingGateActionSnapshot {
 
 export type RuntimePendingActionSnapshot = RuntimeDelayActionSnapshot | RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot;
 
+/** Completion events that an active action must still be able to publish. */
+export function requiredActionCompletionEvents(
+  action: RuntimePendingActionSnapshot | null,
+): number {
+  if (action?.kind === "interaction") return 2;
+  if (action?.kind === "delay" || action?.kind === "chatPacingGate") return 1;
+  return 0;
+}
+
 export interface RuntimeDelayActionSettlementSnapshot {
   readonly actionId: number;
   readonly actionKind: "delay";

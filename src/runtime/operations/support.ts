@@ -9,7 +9,10 @@ import {
   type RuntimeSnapshot,
   type RuntimeTemporarySnapshot,
 } from "../state.js";
-import type { RuntimeActionSettlementSnapshot } from "../actions/model.js";
+import {
+  requiredActionCompletionEvents,
+  type RuntimeActionSettlementSnapshot,
+} from "../actions/model.js";
 import type { PendingActionOperationResult, RuntimeOperationResult } from "./model.js";
 
 export class RuntimeDataError extends Error {
@@ -95,11 +98,7 @@ export function assertEventSequenceCapacity(snapshot: RuntimeSnapshot, count: nu
  */
 export function requiredFutureActionCompletionEvents(snapshot: RuntimeSnapshot): number {
   const actions = [snapshot.foregroundAction, ...snapshot.backgroundActions];
-  return actions.reduce((count, action) => {
-    if (action?.kind === "interaction") return count + 2;
-    if (action?.kind === "delay" || action?.kind === "chatPacingGate") return count + 1;
-    return count;
-  }, 0);
+  return actions.reduce((count, action) => count + requiredActionCompletionEvents(action), 0);
 }
 
 /**

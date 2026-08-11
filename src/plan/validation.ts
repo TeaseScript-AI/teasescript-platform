@@ -319,6 +319,16 @@ function validateInstruction(
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
       validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
       return;
+    case "prepareSayContextualSpeaker":
+      if (!hasExactKeys(value, ["kind", "speakerTemporary", "destinationTemporary", "span"])) {
+        errors.push(planError("TSC002", "Prepared say contextual speaker instruction contains unsupported fields.", path));
+      }
+      validateTemporaryId(value.speakerTemporary, `${path}.speakerTemporary`, temporaryCount, errors);
+      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      if (value.speakerTemporary === value.destinationTemporary) {
+        errors.push(planError("TSC002", "Prepared say contextual speaker must not alias its output speaker.", `${path}.destinationTemporary`));
+      }
+      return;
     case "prepareSayText":
       if (!hasExactKeys(value, ["kind", "value", "destinationTemporary", "span"])) {
         errors.push(planError("TSC002", "Prepared say text instruction contains unsupported fields.", path));
@@ -390,6 +400,7 @@ function validateInstruction(
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       if (value.speakerTemporary !== undefined) validateTemporaryId(value.speakerTemporary, `${path}.speakerTemporary`, temporaryCount, errors);
+      if (value.contextualSpeakerTemporary !== undefined) validateTemporaryId(value.contextualSpeakerTemporary, `${path}.contextualSpeakerTemporary`, temporaryCount, errors);
       if (value.textTemporary !== undefined) validateTemporaryId(value.textTemporary, `${path}.textTemporary`, temporaryCount, errors);
       if (value.skipPolicy !== null && value.skipPolicy !== "skippable" && value.skipPolicy !== "unskippable") {
         errors.push(planError("TSC002", "Say skip policy is invalid.", `${path}.skipPolicy`));
@@ -1113,12 +1124,37 @@ function validateCanonicalPreparedSays(
     if (region === undefined) return;
     const path = `$.instructions[${instructionIndex}]`;
     const speakerTemporary = instruction.speakerTemporary;
+    const contextualSpeakerTemporary = instruction.contextualSpeakerTemporary;
     const textTemporary = instruction.textTemporary;
+    if (speakerTemporary !== undefined && contextualSpeakerTemporary === undefined) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared say speaker requires its contextual speaker capture.",
+        `${path}.contextualSpeakerTemporary`,
+      ));
+    }
+    if (contextualSpeakerTemporary !== undefined && speakerTemporary === undefined) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared say contextual speaker requires its output speaker capture.",
+        `${path}.speakerTemporary`,
+      ));
+    }
     if (speakerTemporary !== undefined && textTemporary !== undefined && speakerTemporary === textTemporary) {
       errors.push(planError(
         "TSC002",
         "Prepared say speaker and text temporaries must not alias.",
         `${path}.textTemporary`,
+      ));
+    }
+    if (
+      contextualSpeakerTemporary !== undefined &&
+      (contextualSpeakerTemporary === speakerTemporary || contextualSpeakerTemporary === textTemporary)
+    ) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared say contextual speaker temporary must not alias another prepared say temporary.",
+        `${path}.contextualSpeakerTemporary`,
       ));
     }
     validatePreparedSayProducer(
@@ -1147,12 +1183,26 @@ function validateCanonicalPreparedSays(
       consumed,
       errors,
     );
+    validatePreparedSayContextualSpeaker(
+      contextualSpeakerTemporary,
+      speakerTemporary,
+      instructionIndex,
+      path,
+      region,
+      instructions,
+      index,
+      producers,
+      consumed,
+      errors,
+    );
   });
 
   instructions.forEach((instruction, instructionIndex) => {
     if (
       isRecord(instruction) &&
-      (instruction.kind === "prepareSaySpeaker" || instruction.kind === "prepareSayText") &&
+      (instruction.kind === "prepareSaySpeaker" ||
+        instruction.kind === "prepareSayText" ||
+        instruction.kind === "prepareSayContextualSpeaker") &&
       !consumed.has(instructionIndex)
     ) {
       errors.push(planError(
@@ -1228,6 +1278,47 @@ function validatePreparedSayProducer(
       "Prepared say instruction can be reached while bypassing its required preparation.",
       sayPath,
     ));
+  }
+}
+
+function validatePreparedSayContextualSpeaker(
+  temporaryId: unknown,
+  speakerTemporary: unknown,
+  sayIndex: number,
+  sayPath: string,
+  region: InstructionExecutionRegion,
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  producers: ReadonlyMap<number, readonly number[]>,
+  consumed: Set<number>,
+  errors: PlanValidationError[],
+): void {
+  if (!Number.isSafeInteger(temporaryId)) return;
+  const candidates = producers.get(temporaryId as number) ?? [];
+  const producerIndex = candidates.length === 1 ? candidates[0] : undefined;
+  const producer = producerIndex === undefined ? undefined : instructions[producerIndex];
+  const path = `${sayPath}.contextualSpeakerTemporary`;
+  if (
+    producerIndex === undefined ||
+    !isRecord(producer) ||
+    producer.kind !== "prepareSayContextualSpeaker" ||
+    producer.speakerTemporary !== speakerTemporary ||
+    producerIndex >= sayIndex ||
+    index.owners[producerIndex] !== region
+  ) {
+    errors.push(planError("TSC002", "Prepared say contextual speaker lacks its canonical producer.", path));
+    return;
+  }
+  if (consumed.has(producerIndex)) {
+    errors.push(planError("TSC002", "Prepared say producer must not be reused by another say instruction.", path));
+    return;
+  }
+  consumed.add(producerIndex);
+  if (preparedSayTemporaryIsCleared(instructions, producerIndex, sayIndex, temporaryId as number)) {
+    errors.push(planError("TSC002", "Prepared say contextual speaker is cleared before its consuming say instruction.", path));
+  }
+  if (preparedSayCanBeBypassed(instructions, index, region, producerIndex, sayIndex)) {
+    errors.push(planError("TSC002", "Prepared say instruction can be reached while bypassing its required preparation.", sayPath));
   }
 }
 
@@ -1411,7 +1502,8 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
     value = instruction.temporaryId;
   } else if (
     instruction.kind === "prepareSaySpeaker" ||
-    instruction.kind === "prepareSayText"
+    instruction.kind === "prepareSayText" ||
+    instruction.kind === "prepareSayContextualSpeaker"
   ) {
     value = instruction.destinationTemporary;
   } else if (

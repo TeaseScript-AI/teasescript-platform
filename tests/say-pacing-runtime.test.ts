@@ -154,6 +154,112 @@ test("text-side calls capture explicit speaker provenance before they suspend", 
   );
 });
 
+test("prepared says retain contextual speaker identity across text and pacing calls", () => {
+  const scenarios = [
+    {
+      name: "explicit speaker in text before a text-side call",
+      speaker: "say as vera",
+      text: "`${speaker.title} ${textValue()}`",
+      pacing: "instant",
+      expected: "Captain hello",
+    },
+    {
+      name: "explicit speaker in text before a pacing-side call",
+      speaker: "say as vera",
+      text: "`${speaker.title} hello`",
+      pacing: "pace()",
+      expected: "Captain hello",
+    },
+    {
+      name: "explicit speaker in pacing before a pacing-side call",
+      speaker: "say as vera",
+      text: '"hello"',
+      pacing: "speaker.delay + pace()",
+      expected: "hello",
+    },
+    {
+      name: "default speaker in text before a text-side call",
+      speaker: "say",
+      text: "`${speaker.title} ${textValue()}`",
+      pacing: "instant",
+      expected: "Captain hello",
+    },
+    {
+      name: "default speaker in pacing before a pacing-side call",
+      speaker: "say",
+      text: '"hello"',
+      pacing: "speaker.delay + pace()",
+      expected: "hello",
+    },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    const compiled = plan([
+      'speaker vera { title: "Captain"\ndelay: 1 }',
+      "speaker vera",
+      'function textValue { return "hello" }',
+      "function pace { return 1 }",
+      `${scenario.speaker} ${scenario.text}, ${scenario.pacing}`,
+    ].join("\n"));
+    const result = run(compiled, createFreshRuntimeSnapshot(compiled));
+    const output = result.events.find((event) => event.kind === "say");
+    assert.equal(output?.kind, "say", scenario.name);
+    assert.equal(output?.text, scenario.expected, scenario.name);
+    assert.equal(output?.speaker?.identifier, "vera", scenario.name);
+  }
+
+  const mutated = plan([
+    'speaker vera { title: "Captain"\ndisplayName: "Before" }',
+    "function mutate {",
+    '  vera.displayName = "After"',
+    '  return "hello"',
+    "}",
+    "function pace { return 1 }",
+    'say as vera `${speaker.title} ${mutate()}`, pace()',
+  ].join("\n"));
+  const result = run(mutated, createFreshRuntimeSnapshot(mutated));
+  const output = result.events.find((event) => event.kind === "say");
+  assert.equal(output?.kind, "say");
+  assert.equal(output?.text, "Captain hello");
+  assert.equal(output?.speaker?.displayName, "Before");
+  assert.equal(
+    result.snapshot.speakers
+      .find((speaker) => speaker.identifier === "vera")
+      ?.properties.find((property) => property.name === "displayName")?.value,
+    "After",
+  );
+});
+
+test("prepared contextual speaker values survive a suspended text call checkpoint", () => {
+  const compiled = plan([
+    'speaker vera { title: "Captain"\ndelay: 1 }',
+    "function textValue {",
+    "  wait 1 ms",
+    '  return "hello"',
+    "}",
+    "function pace { return 1 }",
+    'say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()',
+  ].join("\n"));
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
+  assert.equal(waiting.status, "waiting");
+  assert.equal(validateRuntimeSnapshot(waiting, compiled).valid, true);
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, waiting)));
+  const delay = waiting.foregroundAction;
+  assert.equal(delay?.kind, "delay");
+  const direct = run(compiled, observeTime(compiled, waiting, delay!.deadlineMs).snapshot);
+  const resumed = run(
+    restored.plan,
+    observeTime(restored.plan, restored.snapshot, delay!.deadlineMs).snapshot,
+  );
+  assert.deepEqual(resumed.events, direct.events);
+  assert.deepEqual(resumed.snapshot, direct.snapshot);
+  assert.equal(resumed.events.find((event) => event.kind === "say")?.kind, "say");
+  assert.equal(
+    resumed.events.find((event) => event.kind === "say" && event.text === "Captain hello")?.kind,
+    "say",
+  );
+});
+
 test("first smart say creates a background gate and later say promotes it without a second request", () => {
   const compiled = plan('say "first"\nsay "second"');
   const result = run(compiled, createFreshRuntimeSnapshot(compiled));

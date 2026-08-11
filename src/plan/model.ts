@@ -1,7 +1,7 @@
 import type { SourceSpan } from "../source.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 12;
+export const INSTRUCTION_PLAN_VERSION = 13;
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
@@ -51,6 +51,7 @@ export type Instruction =
   | LoopControlInstruction
   | StoreTemporaryInstruction
   | PrepareSaySpeakerInstruction
+  | PrepareSayContextualSpeakerInstruction
   | PrepareSayTextInstruction
   | PrepareInteractionSpeakerInstruction
   | ClearTemporaryInstruction
@@ -190,6 +191,13 @@ export interface PrepareSaySpeakerInstruction extends InstructionBase {
   readonly destinationTemporary: number;
 }
 
+/** Derives a contextual speaker reference from the captured say output speaker. */
+export interface PrepareSayContextualSpeakerInstruction extends InstructionBase {
+  readonly kind: "prepareSayContextualSpeaker";
+  readonly speakerTemporary: number;
+  readonly destinationTemporary: number;
+}
+
 /** Captures final visible text, including deterministic list selection. */
 export interface PrepareSayTextInstruction extends InstructionBase {
   readonly kind: "prepareSayText";
@@ -265,6 +273,7 @@ export interface SayInstruction extends InstructionBase {
   readonly speaker: string | null;
   readonly value: ExpressionPlan;
   readonly speakerTemporary?: number;
+  readonly contextualSpeakerTemporary?: number;
   readonly textTemporary?: number;
   readonly skipPolicy: "skippable" | "unskippable" | null;
   readonly pacing: ExpressionPlan | "smart" | "instant";

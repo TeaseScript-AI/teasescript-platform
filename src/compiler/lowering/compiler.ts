@@ -143,16 +143,24 @@ export class InstructionCompiler {
           destinationTemporary: speakerTemporary,
           span: copySpan(statement.span),
         });
-        const lowered = this.#lowerExpression(statement.value);
+        const contextualSpeakerTemporary = this.#allocateTemporary();
+        this.instructions.push({
+          kind: "prepareSayContextualSpeaker",
+          speakerTemporary,
+          destinationTemporary: contextualSpeakerTemporary,
+          span: copySpan(statement.span),
+        });
+        const lowered = this.#lowerSayPayload(statement.value, contextualSpeakerTemporary);
         if (!pacingCanSuspend) {
           const loweredPacing = statement.pacing === null || statement.pacing === "instant"
             ? null
-            : this.#lowerExpression(statement.pacing);
+            : this.#lowerSayPayload(statement.pacing, contextualSpeakerTemporary);
           this.instructions.push({
             kind: "say",
             speaker: statement.speaker?.name ?? null,
             value: lowered.plan,
             speakerTemporary,
+            contextualSpeakerTemporary,
             skipPolicy: statement.skipPolicy,
             pacing: statement.pacing === null
               ? "smart"
@@ -163,6 +171,7 @@ export class InstructionCompiler {
           });
           this.#emitTemporaryCleanup([
             speakerTemporary,
+            contextualSpeakerTemporary,
             ...lowered.temporaryIds,
             ...(loweredPacing?.temporaryIds ?? []),
           ], statement.span);
@@ -177,7 +186,7 @@ export class InstructionCompiler {
         });
         this.#emitTemporaryCleanup(lowered.temporaryIds, statement.value.span);
         const loweredPacing = this.#materializeExpression(
-          this.#lowerExpression(statement.pacing),
+          this.#lowerSayPayload(statement.pacing, contextualSpeakerTemporary),
           statement.pacing.span,
         );
         const pacing = loweredPacing.plan;
@@ -186,6 +195,7 @@ export class InstructionCompiler {
           speaker: statement.speaker?.name ?? null,
           value: lowered.plan,
           speakerTemporary,
+          contextualSpeakerTemporary,
           textTemporary,
           skipPolicy: statement.skipPolicy,
           pacing,
@@ -193,6 +203,7 @@ export class InstructionCompiler {
         });
         this.#emitTemporaryCleanup([
           speakerTemporary,
+          contextualSpeakerTemporary,
           textTemporary,
           ...(loweredPacing?.temporaryIds ?? []),
         ], statement.span);
@@ -901,6 +912,10 @@ export class InstructionCompiler {
     } finally {
       this.#contextualSpeakerTemporary = previous;
     }
+  }
+
+  #lowerSayPayload(expression: Expression, speakerTemporary: number): LoweredExpression {
+    return this.#lowerInteractionPayload(expression, speakerTemporary);
   }
 
   #lowerInteractionPayloads(
