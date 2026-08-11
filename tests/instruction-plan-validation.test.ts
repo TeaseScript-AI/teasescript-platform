@@ -443,6 +443,56 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     assert.deepEqual(initial, beforeExecution, `${name} rejects before script execution`);
   }
 
+  const contextualPayloadCases = [
+    {
+      name: "contextual capture pair after prepared text",
+      source: [
+        'speaker vera { title: "Captain" }',
+        "function pace { return 1 }",
+        'say as vera `${speaker.title}`, pace()',
+      ].join("\n"),
+      consumerKind: "prepareSayText",
+    },
+    {
+      name: "contextual capture pair after text-side call payload",
+      source: [
+        'speaker vera { title: "Captain" }',
+        "function use(x) { return x.title }",
+        "say as vera use(speaker), instant",
+      ].join("\n"),
+      consumerKind: "storeTemporary",
+    },
+  ] as const;
+  for (const scenario of contextualPayloadCases) {
+    const canonical = plan(scenario.source);
+    assert.equal(validateInstructionPlan(canonical).valid, true, scenario.name);
+    const speakerPreparation = canonical.instructions.findIndex(
+      (instruction) => instruction.kind === "prepareSaySpeaker",
+    );
+    const contextualPreparation = canonical.instructions.findIndex(
+      (instruction) => instruction.kind === "prepareSayContextualSpeaker",
+    );
+    const payloadConsumer = canonical.instructions.findIndex(
+      (instruction, instructionIndex) =>
+        instructionIndex > contextualPreparation && instruction.kind === scenario.consumerKind,
+    );
+    assert.ok(speakerPreparation >= 0);
+    assert.ok(contextualPreparation >= 0);
+    assert.ok(payloadConsumer >= 0);
+    const malformed = structuredClone(canonical) as any;
+    const pair = malformed.instructions.splice(speakerPreparation, 2);
+    malformed.instructions.splice(payloadConsumer - 1, 0, ...pair);
+    assert.equal(validateInstructionPlan(malformed).valid, false, scenario.name);
+    const initial = createFreshRuntimeSnapshot(canonical);
+    const beforeExecution = structuredClone(initial);
+    assert.throws(
+      () => run(malformed, initial),
+      (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+      scenario.name,
+    );
+    assert.deepEqual(initial, beforeExecution, `${scenario.name} rejects before script execution`);
+  }
+
   const malformed = JSON.parse(JSON.stringify(prepared));
   malformed.instructions[pacingStore].temporaryId = say.speakerTemporary;
   malformed.instructions[sayIndex].pacing.temporaryId = say.speakerTemporary;

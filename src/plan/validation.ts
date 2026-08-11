@@ -1325,9 +1325,40 @@ function validatePreparedSayContextualSpeaker(
   if (preparedSayTemporaryIsCleared(instructions, producerIndex, sayIndex, temporaryId as number)) {
     errors.push(planError("TSC002", "Prepared say contextual speaker is cleared before its consuming say instruction.", path));
   }
+  if (preparedSayContextualSpeakerIsUsedBeforeCapture(
+    instructions,
+    index,
+    region,
+    producerIndex,
+    temporaryId as number,
+  )) {
+    errors.push(planError(
+      "TSC002",
+      "Prepared say contextual speaker must be captured before its payload is lowered.",
+      path,
+    ));
+  }
   if (preparedSayCanBeBypassed(instructions, index, region, producerIndex, sayIndex)) {
     errors.push(planError("TSC002", "Prepared say instruction can be reached while bypassing its required preparation.", sayPath));
   }
+}
+
+function preparedSayContextualSpeakerIsUsedBeforeCapture(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  region: InstructionExecutionRegion,
+  producerIndex: number,
+  temporaryId: number,
+): boolean {
+  for (let instructionIndex = region.startInstruction; instructionIndex < producerIndex; instructionIndex += 1) {
+    const instruction = instructions[instructionIndex];
+    if (
+      isRecord(instruction) &&
+      index.owners[instructionIndex] === region &&
+      canonicalHandoffConsumesTemporary(instruction, temporaryId)
+    ) return true;
+  }
+  return false;
 }
 
 function preparedSayTemporaryIsCleared(

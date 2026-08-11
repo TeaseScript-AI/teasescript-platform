@@ -29,6 +29,7 @@ are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
 distinct task-relevant evidence.
+`npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
 
 CI and tests verify executable code, scripts, configuration, generated artifacts,
 and real machine-checkable boundaries. They must not freeze living documentation
