@@ -13,10 +13,15 @@ export interface PlanCaptureFailure {
   readonly path: string;
 }
 
-export function capturePlanData(value: unknown): CapturedPlanData | PlanCaptureFailure {
-  const capture = captureExternalData(value, "$", {
-    freezeCapturedContainers: true,
-  });
+export interface PlanCaptureOptions {
+  readonly freezeCapturedContainers?: boolean;
+}
+
+export function capturePlanData(
+  value: unknown,
+  options?: PlanCaptureOptions,
+): CapturedPlanData | PlanCaptureFailure {
+  const capture = captureExternalData(value, "$", options);
   if (!capture.ok) {
     return Object.freeze({
       message: planExternalDataFailureMessage(capture.failure.kind),

@@ -22,6 +22,7 @@ import {
 } from "../src/index.js";
 import { captureExternalData } from "../src/external-data-capture.js";
 import { captureInstructionPlan } from "../src/plan/capture.js";
+import { capturePlanData } from "../src/plan/capture-support.js";
 import { captureExecutableData } from "../src/runtime/operations/support.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
 import { captureRuntimeSnapshotWithValidatedPlan } from "../src/runtime/state.js";
@@ -230,6 +231,28 @@ test("external plan capture freezes the detached graph without freezing generic 
   assert.equal(Object.isFrozen(genericValue), false);
   assert.equal(Object.isFrozen(genericValue.nested), false);
   assert.equal(Object.isFrozen(genericValue.nested[1]!), false);
+});
+
+test("validation-only plan capture remains mutable while returned plan capture freezes", () => {
+  const plan = mutablePlan("say \"ready\"");
+  const validationCapture = capturePlanData(plan);
+  assert.ok("value" in validationCapture);
+  const validationPlan = validationCapture.value as {
+    instructions: Array<{ span: object }>;
+  };
+  assert.notEqual(validationPlan, plan);
+  assert.equal(Object.isFrozen(validationPlan), false);
+  assert.equal(Object.isFrozen(validationPlan.instructions), false);
+  assert.equal(Object.isFrozen(validationPlan.instructions[0]!), false);
+  assert.equal(Object.isFrozen(validationPlan.instructions[0]!.span), false);
+
+  const returnedCapture = captureInstructionPlan(plan);
+  assert.ok(returnedCapture.validation.valid);
+  assert.notEqual(returnedCapture.plan, null);
+  assert.equal(Object.isFrozen(returnedCapture.plan), true);
+  assert.equal(Object.isFrozen(returnedCapture.plan!.instructions), true);
+  assert.equal(Object.isFrozen(returnedCapture.plan!.instructions[0]!), true);
+  assert.equal(Object.isFrozen(returnedCapture.plan!.instructions[0]!.span), true);
 });
 
 test("runtime snapshot capture remains mutable after plan capture freezes on leave", () => {
