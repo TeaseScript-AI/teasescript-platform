@@ -19,6 +19,7 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 function delayAction(snapshot: RuntimeSnapshot): RuntimeDelayActionSnapshot {
   assert.equal(snapshot.foregroundAction?.kind, "delay");
@@ -110,8 +111,8 @@ test("rejects every forged running root-end shape outside the settled terminal d
     retainedCallFrame: (snapshot) => { snapshot.callFrames.push({}); },
     foregroundAction: (snapshot) => { snapshot.foregroundAction = structuredClone(second.snapshot.foregroundAction); },
     backgroundAction: (snapshot) => { snapshot.backgroundActions.push({}); },
-    missingSettlement: (snapshot) => { snapshot.lastSettlement = null; },
-    incompatibleSettlement: (snapshot) => { snapshot.lastSettlement.actionId = 1; },
+    missingTerminalHandoff: (snapshot) => { snapshot.terminalContinuationHandoff = null; },
+    incompatibleTerminalHandoff: (snapshot) => { snapshot.terminalContinuationHandoff.actionId = 1; },
   };
   for (const [name, mutate] of Object.entries(invalid)) {
     const candidate = mutable(settled);
@@ -180,7 +181,7 @@ test("zero waits remain immediate while terminal waits use ordinary natural comp
   assert.deepEqual(zeroResult.events.map((event) => event.kind), ["complete"]);
 
   const visible = plan('wait 0\nsay "visible"');
-  const visibleResult = run(visible, createFreshRuntimeSnapshot(visible));
+  const visibleResult = run(visible, createImmediatePacingRuntimeSnapshot(visible));
   assert.equal(visibleResult.snapshot.nextActionId, 1);
   assert.equal(visibleResult.snapshot.foregroundAction, null);
   assert.equal(visibleResult.snapshot.lastSettlement, null);
@@ -188,7 +189,7 @@ test("zero waits remain immediate while terminal waits use ordinary natural comp
 
   const ordinary = plan('say "ordinary"');
   assert.deepEqual(
-    run(ordinary, createFreshRuntimeSnapshot(ordinary)).events.map((event) => event.kind),
+    run(ordinary, createImmediatePacingRuntimeSnapshot(ordinary)).events.map((event) => event.kind),
     ["say", "complete"],
   );
 });

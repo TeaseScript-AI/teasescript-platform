@@ -4,13 +4,13 @@ import test from "node:test";
 import {
   compileSource,
   createCheckpoint,
-  createFreshRuntimeSnapshot,
   deserializeCheckpoint,
   observeTime,
   run,
   serializeCheckpoint,
   type SerializableRuntimeValue,
 } from "../src/index.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("reports parser and semantic source diagnostics through the package root", () => {
@@ -68,7 +68,7 @@ test("executes source output, speaker provenance, collection copies, and control
     "say as vera \"Override\"",
   ].join("\n"));
 
-  const result = run(plan, createFreshRuntimeSnapshot(plan, { seed: 7 }));
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: 7 }));
   assert.equal(result.snapshot.status, "halted");
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => [
@@ -87,6 +87,42 @@ test("executes source output, speaker provenance, collection copies, and control
     ["TSW001"],
   );
   assert.equal(rootBinding(result.snapshot.frames[0]?.bindings ?? [], "total"), 4);
+});
+
+test("keeps contextual say skip words available as ordinary identifier expressions", () => {
+  const plan = compiled([
+    'speaker vera {}',
+    'let skippable = ["indexed"]',
+    'let unskippable = ["unindexed"]',
+    "say skippable",
+    "say skippable[0]",
+    "say unskippable[0]",
+    "say skippable[0], instant",
+    "say as vera skippable[0]",
+  ].join("\n"));
+
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["indexed", "indexed", "unindexed", "indexed", "indexed"],
+  );
+  assert.equal(result.snapshot.status, "halted");
+});
+
+test("keeps contextual say skip words available as call expressions", () => {
+  const plan = compiled([
+    'function skippable(value) { return "called" }',
+    'function unskippable(value) { return "also called" }',
+    'say skippable("ok"), instant',
+    'say unskippable("ok"), instant',
+  ].join("\n"));
+
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["called", "also called"],
+  );
+  assert.equal(result.snapshot.status, "halted");
 });
 
 test("preserves function evaluation, deterministic random output, and checkpoint resume equivalence", () => {
@@ -110,7 +146,7 @@ test("preserves function evaluation, deterministic random output, and checkpoint
 
 test("resumes a blocking wait through public checkpoint and time APIs", () => {
   const plan = compiled('wait 1 ms\nsay "done"\nexit');
-  const pending = run(plan, createFreshRuntimeSnapshot(plan));
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(pending.snapshot.status, "waiting");
   assert.deepEqual(pending.events.map((event) => event.kind), ["actionRequested"]);
 

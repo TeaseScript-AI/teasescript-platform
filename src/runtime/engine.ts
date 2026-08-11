@@ -22,6 +22,7 @@ import {
   assertEventSequenceCapacity,
   captureExecutableData,
   copySpan,
+  requiredFutureActionCompletionEvents,
   result,
   setTemporary,
   takeSequence,
@@ -66,6 +67,7 @@ import {
   type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import {
+  cloneCapturedRuntimeSnapshot,
   type RuntimeBindingSnapshot,
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
@@ -73,8 +75,18 @@ import {
   type RuntimeCallFrameSnapshot,
   type RuntimeTemporarySnapshot,
 } from "./state.js";
-import type { RuntimeInteractionActionSnapshot } from "./actions/model.js";
+import type {
+  RuntimeChatPacingGateActionSnapshot,
+  RuntimeInteractionActionSnapshot,
+  RuntimePreparedSayOutputSnapshot,
+} from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import {
+  calculatePacingDeadlineMs,
+  calculateSmartPacingDurationMs,
+  secondsToPacingMilliseconds,
+} from "./actions/pacing.js";
+import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -123,6 +135,12 @@ function executeCapturedInstruction(
     snapshot.nextInstruction === plan.rootEndInstruction &&
     snapshot.callFrames.length === 0
   ) {
+    const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
+    assertEventSequenceCapacity(
+      snapshot,
+      completeEventAndFutureCompletions,
+    );
+    snapshot.terminalContinuationHandoff = null;
     snapshot.status = "halted";
     const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
     events.push(createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan));
@@ -151,6 +169,11 @@ function executeCapturedInstruction(
       snapshot.nextInstruction === plan.rootEndInstruction
     ) {
       snapshot.status = "halted";
+      const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
+      assertEventSequenceCapacity(
+        snapshot,
+        completeEventAndFutureCompletions,
+      );
       events.push(createCompleteEvent(snapshot, instruction.span));
     }
   } catch (error) {
@@ -227,14 +250,6 @@ export function run(
   return result(current, events, instructionsExecuted);
 }
 
-/** Atomically records a host-supplied session-time observation and settles a due delay. */
-
-
-/** Validated host completion route. Delay payloads carry the observed session time. */
-
-
-
-
 function executePlannedInstruction(
   plan: InstructionPlan,
   instruction: Instruction,
@@ -244,49 +259,61 @@ function executePlannedInstruction(
 ): void {
   switch (instruction.kind) {
     case "declareSpeaker": {
-      if (findBinding(snapshot, instruction.name) !== undefined) {
-        throw fault("TSR001", `Speaker '${instruction.name}' is already visible in this scope.`, instruction.span);
-      }
-      assertCounterCanAdvance(snapshot.nextSpeakerId, "nextSpeakerId");
-      const speaker: RuntimeSpeakerSnapshot = {
-        id: snapshot.nextSpeakerId,
-        identifier: instruction.name,
-        properties: [],
-      };
-      snapshot.nextSpeakerId += 1;
-      snapshot.speakers.push(speaker);
-      currentFrame(snapshot).bindings.push({
-        name: instruction.name,
-        value: {
-          kind: "speakerReference",
-          speakerId: speaker.id,
-          identifier: instruction.name,
-        },
-      });
-      snapshot.contextualSpeaker = speaker.id;
-      for (const property of instruction.properties) {
-        if (speaker.properties.some((item) => item.name === property.name)) {
-          throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
+      executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
+        if (findBinding(stagedSnapshot, instruction.name) !== undefined) {
+          throw fault("TSR001", `Speaker '${instruction.name}' is already visible in this scope.`, instruction.span);
         }
-        speaker.properties.push({
-          name: property.name,
-          value: cloneSerializableValue(evaluator.evaluate(property.value)),
+        assertCounterCanAdvance(stagedSnapshot.nextSpeakerId, "nextSpeakerId");
+        const speaker: RuntimeSpeakerSnapshot = {
+          id: stagedSnapshot.nextSpeakerId,
+          identifier: instruction.name,
+          properties: [],
+        };
+        stagedSnapshot.nextSpeakerId += 1;
+        stagedSnapshot.speakers.push(speaker);
+        currentFrame(stagedSnapshot).bindings.push({
+          name: instruction.name,
+          value: {
+            kind: "speakerReference",
+            speakerId: speaker.id,
+            identifier: instruction.name,
+          },
         });
-      }
-      advance(snapshot);
+        stagedSnapshot.contextualSpeaker = speaker.id;
+        for (const property of instruction.properties) {
+          if (speaker.properties.some((item) => item.name === property.name)) {
+            throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
+          }
+          const propertyValue = cloneSerializableValue(stagedEvaluator.evaluate(property.value));
+          if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
+            throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", property.span);
+          }
+          speaker.properties.push({
+            name: property.name,
+            value: propertyValue,
+          });
+        }
+        advance(stagedSnapshot);
+      });
       return;
     }
     case "setDeclaredSpeakerProperty": {
-      const speaker = evaluator.speakerByName(instruction.speaker, instruction.span);
-      if (speaker.properties.some((property) => property.name === instruction.name)) {
-        throw fault("TSR007", `Duplicate speaker property '${instruction.name}'.`, instruction.span);
-      }
-      snapshot.contextualSpeaker = speaker.id;
-      speaker.properties.push({
-        name: instruction.name,
-        value: cloneSerializableValue(evaluator.evaluate(instruction.value)),
+      executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
+        const speaker = stagedEvaluator.speakerByName(instruction.speaker, instruction.span);
+        if (speaker.properties.some((property) => property.name === instruction.name)) {
+          throw fault("TSR007", `Duplicate speaker property '${instruction.name}'.`, instruction.span);
+        }
+        stagedSnapshot.contextualSpeaker = speaker.id;
+        const propertyValue = cloneSerializableValue(stagedEvaluator.evaluate(instruction.value));
+        if (instruction.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
+          throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", instruction.span);
+        }
+        speaker.properties.push({
+          name: instruction.name,
+          value: propertyValue,
+        });
+        advance(stagedSnapshot);
       });
-      advance(snapshot);
       return;
     }
     case "setDefaultSpeaker": {
@@ -375,6 +402,58 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     }
+    case "prepareSaySpeaker": {
+      const speaker = instruction.speaker === null
+        ? snapshot.defaultSpeaker === null
+          ? null
+          : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
+        : evaluator.speakerByName(instruction.speaker, instruction.span);
+      const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
+      setTemporary(
+        snapshot.temporaries,
+        instruction.destinationTemporary,
+        output === null
+          ? null
+          : createSerializableObject([
+              { name: "identifier", value: output.identifier },
+              { name: "displayName", value: output.displayName },
+              { name: "color", value: output.color },
+              { name: "font", value: output.font },
+              { name: "avatar", value: output.avatar },
+              { name: "speakerId", value: speaker === null ? 0 : speaker.id },
+            ]),
+      );
+      advance(snapshot);
+      return;
+    }
+    case "prepareSayText": {
+      setTemporary(
+        snapshot.temporaries,
+        instruction.destinationTemporary,
+        evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span),
+      );
+      advance(snapshot);
+      return;
+    }
+    case "prepareSayContextualSpeaker": {
+      const prepared = preparedOutputSpeaker(
+        snapshot.temporaries,
+        instruction.speakerTemporary,
+        instruction.span,
+      );
+      setTemporary(
+        snapshot.temporaries,
+        instruction.destinationTemporary,
+        prepared.speakerId === null
+          ? null
+          : (() => {
+              const speaker = evaluator.speakerById(prepared.speakerId, instruction.span);
+              return { kind: "speakerReference", speakerId: speaker.id, identifier: speaker.identifier };
+            })(),
+      );
+      advance(snapshot);
+      return;
+    }
     case "prepareInteractionSpeaker": {
       const speaker = instruction.speaker !== null
         ? evaluator.speakerByName(instruction.speaker, instruction.span)
@@ -426,46 +505,71 @@ function executePlannedInstruction(
       returnFromFunction(plan, snapshot, null, instruction.span);
       return;
     case "say": {
-      const speaker =
-        instruction.speaker !== null
-          ? evaluator.speakerByName(instruction.speaker, instruction.span)
-          : snapshot.defaultSpeaker === null
-            ? null
-            : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
-      snapshot.contextualSpeaker = speaker?.id ?? null;
-      const text = evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span);
-      const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
-      events.push(
-        Object.freeze({
-          kind: "say",
-          sequence: takeSequence(snapshot),
-          speaker: output,
-          text,
-          span: copySpan(instruction.span),
-        } satisfies SayEvent),
-      );
-      advance(snapshot);
+      executeSayAtomically(plan, instruction, snapshot, evaluator, events);
       return;
     }
     case "wait": {
       const value = evaluator.evaluate(instruction.duration);
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw fault("TSR050", "Wait duration must be a finite non-negative number.", instruction.duration.span);
-      const multiplier = instruction.unit === "ms" ? 1 : instruction.unit === "min" ? 60_000 : instruction.unit === "h" ? 3_600_000 : 1_000;
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+        throw fault(
+          "TSR050",
+          "Wait duration must be a finite non-negative number.",
+          instruction.duration.span,
+        );
+      }
+      const multiplier = instruction.unit === "ms"
+        ? 1
+        : instruction.unit === "min"
+          ? 60_000
+          : instruction.unit === "h"
+            ? 3_600_000
+            : 1_000;
       const durationMs = value * multiplier;
       const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
-      if (!Number.isFinite(durationMs) || !isValidSessionTime(deadlineMs)) throw fault("TSR050", "Wait duration is outside the supported session-time range.", instruction.duration.span);
+      if (!Number.isFinite(durationMs) || !isValidSessionTime(deadlineMs)) {
+        throw fault(
+          "TSR050",
+          "Wait duration is outside the supported session-time range.",
+          instruction.duration.span,
+        );
+      }
       if (value > 0 && (durationMs <= 0 || deadlineMs <= snapshot.currentSessionTimeMs)) {
         throw fault("TSR050", "Wait duration cannot produce a representable future deadline.", instruction.duration.span);
       }
-      if (durationMs === 0) { advance(snapshot); return; }
-      if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
-      assertEventSequenceCapacity(snapshot, 2, instruction.span);
+      if (durationMs === 0) {
+        advance(snapshot);
+        return;
+      }
+      if (
+        !Number.isSafeInteger(snapshot.nextActionId) ||
+        snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+      ) {
+        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      }
+      assertEventSequenceCapacity(snapshot, requiredEventSequencesForNewDelay(snapshot), instruction.span);
       const sequence = takeSequence(snapshot);
-      const action = Object.freeze({ kind: "delay" as const, actionId: snapshot.nextActionId, owningInstruction: snapshot.nextInstruction, continuationInstruction: snapshot.nextInstruction + 1, ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null, scopeDepth: snapshot.frames.length, loopDepth: snapshot.loopFrames.length, createdAtMs: snapshot.currentSessionTimeMs, deadlineMs, expectedCompletion: "time" as const, requestEventSequence: sequence });
+      const action = Object.freeze({
+        kind: "delay" as const,
+        actionId: snapshot.nextActionId,
+        owningInstruction: snapshot.nextInstruction,
+        continuationInstruction: snapshot.nextInstruction + 1,
+        ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null,
+        scopeDepth: snapshot.frames.length,
+        loopDepth: snapshot.loopFrames.length,
+        createdAtMs: snapshot.currentSessionTimeMs,
+        deadlineMs,
+        expectedCompletion: "time" as const,
+        requestEventSequence: sequence,
+      });
       snapshot.nextActionId += 1;
       snapshot.foregroundAction = action;
       snapshot.status = "waiting";
-      events.push(Object.freeze({ kind: "actionRequested", sequence, action: { ...action }, span: copySpan(instruction.span) } satisfies ActionRequestedEvent));
+      events.push(Object.freeze({
+        kind: "actionRequested",
+        sequence,
+        action: { ...action },
+        span: copySpan(instruction.span),
+      } satisfies ActionRequestedEvent));
       return;
     }
     case "interaction": {
@@ -481,8 +585,17 @@ function executePlannedInstruction(
           instruction.span,
         );
       }
-      if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
-      assertEventSequenceCapacity(snapshot, 3, instruction.span);
+      if (
+        !Number.isSafeInteger(snapshot.nextActionId) ||
+        snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+      ) {
+        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      }
+      const backgroundPacingGate = snapshot.backgroundActions.some(
+        (action) => action.kind === "chatPacingGate",
+      );
+      const requiredEventSequences = backgroundPacingGate ? 4 : 3;
+      assertEventSequenceCapacity(snapshot, requiredEventSequences, instruction.span);
       const prepared = "preparedUi" in instruction;
       const speaker = prepared
         ? preparedInteractionSpeaker(instruction.speakerTemporary, snapshot.temporaries, evaluator, instruction.span)
@@ -504,6 +617,12 @@ function executePlannedInstruction(
             stagedWrites: [] as const,
             rngState: snapshot.rng.state,
           };
+      const backgroundGate = snapshot.backgroundActions.find(
+        (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
+      );
+      if (backgroundGate !== undefined) {
+        settleBackgroundPacingGate(plan, snapshot, backgroundGate, "consumedByForegroundInteraction", events);
+      }
       const sequence = snapshot.nextEventSequence;
       const action: RuntimeInteractionActionSnapshot = Object.freeze({
         kind: "interaction",
@@ -529,10 +648,27 @@ function executePlannedInstruction(
       snapshot.nextActionId += 1;
       snapshot.foregroundAction = action;
       snapshot.status = "waiting";
-      events.push(Object.freeze({ kind: "actionRequested", sequence, action: cloneInteractionAction(action), span: copySpan(instruction.span) } satisfies ActionRequestedEvent));
+      events.push(Object.freeze({
+        kind: "actionRequested",
+        sequence,
+        action: cloneInteractionAction(action),
+        span: copySpan(instruction.span),
+      } satisfies ActionRequestedEvent));
       return;
     }
     case "exit":
+      snapshot.backgroundActions.length = 0;
+      snapshot.preparedSayOutput = null;
+      if (
+        snapshot.lastSettlement?.actionKind === "chatPacingGate" &&
+        snapshot.lastSettlement.releasedPreparedOutputInstruction !== null
+      ) {
+        snapshot.lastSettlement = Object.freeze({
+          ...snapshot.lastSettlement,
+          releasedPreparedOutputInstruction: null,
+        });
+      }
+      snapshot.terminalContinuationHandoff = null;
       snapshot.defaultSpeaker = null;
       snapshot.contextualSpeaker = null;
       snapshot.frames.splice(1);
@@ -598,7 +734,11 @@ function materializeInteractionUi(
 
   let ui: InteractionUiPayload;
   if (prepared.kind === "button") {
-    ui = { kind: "button", buttonLabel: readText(prepared.buttonLabelTemporary), accessibleName: prepared.accessibleName };
+    ui = {
+      kind: "button",
+      buttonLabel: readText(prepared.buttonLabelTemporary),
+      accessibleName: prepared.accessibleName,
+    };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
     ui = {
       kind: prepared.kind,
@@ -1105,6 +1245,13 @@ class Evaluator {
     this.#builtins = Object.freeze(builtins);
   }
 
+  public forSnapshot(
+    snapshot: RuntimeSnapshot,
+    events: InterpreterEvent[],
+  ): Evaluator {
+    return new Evaluator(snapshot, this.capabilities, events);
+  }
+
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
     switch (expression.kind) {
       case "literal":
@@ -1275,7 +1422,7 @@ class Evaluator {
         return;
       }
       if (isSpeakerReference(object)) {
-        setSpeakerProperty(this.speakerById(object.speakerId, target.span), target.name, copied);
+        setSpeakerProperty(this.speakerById(object.speakerId, target.span), target.name, copied, target.span);
         return;
       }
       throw fault("TSR003", "Only objects and speakers have assignable properties.", target.span);
@@ -1509,11 +1656,12 @@ class Evaluator {
       fallback = derived.length === 0;
     }
     if (fallback && !this.snapshot.warnedSpeakerIds.includes(speaker.id)) {
+      const warningSequence = takeSequence(this.snapshot);
       this.snapshot.warnedSpeakerIds.push(speaker.id);
       events.push(
         Object.freeze({
           kind: "developerWarning",
-          sequence: takeSequence(this.snapshot),
+          sequence: warningSequence,
           severity: "warning",
           code: "TSW001",
           message: `Speaker '${speaker.identifier}' uses its identifier as the display name.`,
@@ -1956,7 +2104,11 @@ function setSpeakerProperty(
   speaker: RuntimeSpeakerSnapshot,
   name: string,
   value: SerializableRuntimeValue,
+  span: SourceSpan,
 ): void {
+  if (name === "defaultSaySkippable" && typeof value !== "boolean") {
+    throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
+  }
   const property = speaker.properties.find((item) => item.name === name);
   if (property === undefined) speaker.properties.push({ name, value: cloneSerializableValue(value) });
   else property.value = cloneSerializableValue(value);
@@ -2446,7 +2598,18 @@ function cloneInteractionUi(ui: RuntimeInteractionActionSnapshot["ui"]): Runtime
   const accessibleName = ui.accessibleName.kind === "text"
     ? { kind: "text" as const, text: ui.accessibleName.text }
     : { kind: "localizedDefault" as const, key: ui.accessibleName.key };
-  if (ui.kind === "choice") return { kind: "choice", labelType: ui.labelType, options: ui.options.map((option) => ({ text: option.text, label: option.label })), accessibleName };
+  if (ui.kind === "choice") {
+    const options = ui.options.map((option) => ({
+      text: option.text,
+      label: option.label,
+    }));
+    return {
+      kind: "choice",
+      labelType: ui.labelType,
+      options,
+      accessibleName,
+    };
+  }
   if (ui.kind === "button") return { kind: "button", buttonLabel: ui.buttonLabel, accessibleName };
   return { kind: ui.kind, hint: ui.hint, accessibleName };
 }
@@ -2485,6 +2648,307 @@ function advance(snapshot: RuntimeSnapshot): void {
   snapshot.nextInstruction += 1;
 }
 
+/**
+ * A `say` instruction evaluates visible text, pacing, and speaker output before
+ * it can know whether its complete transition is representable. Evaluate that
+ * work against a private canonical-state clone so a rejected pacing value cannot
+ * retain RNG, warning, event, or action changes.
+ */
+function executeSayAtomically(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "say" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const stagedSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const stagedEvents: InterpreterEvent[] = [];
+  const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
+
+  executeSay(plan, instruction, stagedSnapshot, stagedEvaluator, stagedEvents);
+  validateTerminalCompletionCapacityAfterSay(plan, stagedSnapshot, instruction.span);
+  Object.assign(snapshot, stagedSnapshot);
+  events.push(...stagedEvents);
+}
+
+/**
+ * A terminal say and root completion are one public instruction result. Check
+ * the complete event and later action completions before committing the say.
+ */
+function validateTerminalCompletionCapacityAfterSay(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+): void {
+  if (
+    snapshot.status !== "running" ||
+    snapshot.callFrames.length !== 0 ||
+    snapshot.nextInstruction !== plan.rootEndInstruction
+  ) return;
+  assertEventSequenceCapacity(
+    snapshot,
+    requiredEventSequencesForRootCompletion(snapshot),
+    span,
+  );
+}
+
+function executeSpeakerAtomically(
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+  operation: (stagedSnapshot: RuntimeSnapshot, stagedEvaluator: Evaluator) => void,
+): void {
+  const stagedSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const stagedEvents: InterpreterEvent[] = [];
+  const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
+
+  operation(stagedSnapshot, stagedEvaluator);
+  Object.assign(snapshot, stagedSnapshot);
+  events.push(...stagedEvents);
+}
+
+function executeSay(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "say" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const prepared = snapshot.preparedSayOutput;
+  if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) {
+    validatePacingCreation(snapshot, instruction.span, prepared.durationMs);
+    snapshot.preparedSayOutput = null;
+    emitSay(snapshot, events, instruction.span, prepared.speaker, prepared.text);
+    establishPacingAfterSay(
+      snapshot,
+      events,
+      instruction.span,
+      prepared.durationMs,
+      prepared.skippable,
+    );
+    snapshot.nextInstruction = prepared.continuationInstruction;
+    return;
+  }
+
+  const preparedSpeaker = instruction.speakerTemporary === undefined
+    ? (() => {
+        const speaker = instruction.speaker === null
+          ? snapshot.defaultSpeaker === null ? null : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
+          : evaluator.speakerByName(instruction.speaker, instruction.span);
+        snapshot.contextualSpeaker = speaker?.id ?? null;
+        return {
+          output: speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events),
+          speakerId: speaker?.id ?? null,
+        };
+      })()
+    : preparedOutputSpeaker(snapshot.temporaries, instruction.speakerTemporary, instruction.span);
+  const output = preparedSpeaker.output;
+  const speaker = preparedSpeaker.speakerId === null
+    ? null
+    : evaluator.speakerById(preparedSpeaker.speakerId, instruction.span);
+  const text = instruction.textTemporary === undefined
+    ? evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span)
+    : preparedSayText(snapshot.temporaries, instruction.textTemporary, instruction.span);
+  const pacingValue = typeof instruction.pacing === "object"
+    ? evaluator.evaluate(instruction.pacing)
+    : instruction.pacing;
+  const durationMs = sayDurationMs(instruction, text, pacingValue, snapshot);
+  const skippable = effectiveSaySkippable(instruction.skipPolicy, speaker, instruction.span);
+  const activeGate = snapshot.backgroundActions.find(
+    (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
+  );
+  if (activeGate !== undefined) {
+    if (durationMs === 0) {
+      assertEventSequenceCapacity(snapshot, 2, instruction.span);
+      settleBackgroundPacingGate(plan, snapshot, activeGate, "supersededByInstantOutput", events);
+      emitSay(snapshot, events, instruction.span, output, text);
+      advance(snapshot);
+      return;
+    }
+    const preparedOutput: RuntimePreparedSayOutputSnapshot = Object.freeze({
+      owningInstruction: snapshot.nextInstruction,
+      continuationInstruction: snapshot.nextInstruction + 1,
+      speaker: output === null ? null : { ...output },
+      text,
+      durationMs,
+      skippable,
+    });
+    const index = snapshot.backgroundActions.indexOf(activeGate);
+    snapshot.backgroundActions.splice(index, 1);
+    snapshot.foregroundAction = Object.freeze({ ...activeGate, preparedOutput });
+    snapshot.status = "waiting";
+    return;
+  }
+  if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs);
+  emitSay(snapshot, events, instruction.span, output, text);
+  if (durationMs > 0) establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
+  advance(snapshot);
+}
+
+function preparedOutputSpeaker(
+  temporaries: readonly RuntimeTemporarySnapshot[],
+  temporaryId: number,
+  span: SourceSpan,
+): { readonly output: OutputSpeaker | null; readonly speakerId: number | null } {
+  const value = readTemporary(temporaries, temporaryId, span);
+  if (value === null) return { output: null, speakerId: null };
+  if (!isObject(value)) throw fault("TSR052", "Prepared say speaker is invalid.", span);
+  const identifier = getSerializableProperty(value, "identifier");
+  const displayName = getSerializableProperty(value, "displayName");
+  const color = getSerializableProperty(value, "color");
+  const font = getSerializableProperty(value, "font");
+  const avatar = getSerializableProperty(value, "avatar");
+  const speakerId = getSerializableProperty(value, "speakerId");
+  if (
+    typeof identifier !== "string" ||
+    typeof displayName !== "string" ||
+    (typeof color !== "string" && color !== null) ||
+    (typeof font !== "string" && font !== null) ||
+    (typeof avatar !== "string" && avatar !== null) ||
+    !Number.isSafeInteger(speakerId)
+  ) throw fault("TSR052", "Prepared say speaker is invalid.", span);
+  return {
+    output: Object.freeze({ identifier, displayName, color, font, avatar }),
+    speakerId: speakerId as number,
+  };
+}
+
+function preparedSayText(
+  temporaries: readonly RuntimeTemporarySnapshot[],
+  temporaryId: number,
+  span: SourceSpan,
+): string {
+  const value = readTemporary(temporaries, temporaryId, span);
+  if (typeof value !== "string") throw fault("TSR052", "Prepared say text is invalid.", span);
+  return value;
+}
+
+function sayDurationMs(
+  instruction: Extract<Instruction, { kind: "say" }>,
+  text: string,
+  pacingValue: SerializableRuntimeValue | "smart" | "instant",
+  snapshot: RuntimeSnapshot,
+): number {
+  try {
+    if (pacingValue === "instant") return 0;
+    if (pacingValue === "smart") {
+      return calculateSmartPacingDurationMs(text, snapshot.chatPacingSettings);
+    }
+    return secondsToPacingMilliseconds(pacingValue);
+  } catch (error) {
+    if (error instanceof RuntimeFault) throw error;
+    throw fault("TSR050", error instanceof Error ? error.message : "Say pacing is invalid.", instruction.span);
+  }
+}
+
+function effectiveSaySkippable(
+  explicit: "skippable" | "unskippable" | null,
+  speaker: RuntimeSpeakerSnapshot | null,
+  span: SourceSpan,
+): boolean {
+  if (explicit === "skippable") return true;
+  if (explicit === "unskippable") return false;
+  const configured = speaker?.properties.find((property) => property.name === "defaultSaySkippable");
+  if (configured === undefined) return true;
+  if (typeof configured.value !== "boolean") {
+    throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
+  }
+  return configured.value;
+}
+
+function emitSay(
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+  span: SourceSpan,
+  speaker: OutputSpeaker | null,
+  text: string,
+): void {
+  events.push(Object.freeze({
+    kind: "say",
+    sequence: takeSequence(snapshot),
+    speaker,
+    text,
+    span: copySpan(span),
+  } satisfies SayEvent));
+}
+
+function establishPacingAfterSay(
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+  span: SourceSpan,
+  durationMs: number,
+  skippable: boolean,
+): void {
+  let deadlineMs: number;
+  try {
+    deadlineMs = calculatePacingDeadlineMs(snapshot.currentSessionTimeMs, durationMs);
+  } catch (error) {
+    throw fault("TSR050", error instanceof Error ? error.message : "Say pacing deadline is invalid.", span);
+  }
+  const requestEventSequence = takeSequence(snapshot);
+  const action: RuntimeChatPacingGateActionSnapshot = Object.freeze({
+    kind: "chatPacingGate",
+    actionId: snapshot.nextActionId,
+    owningInstruction: snapshot.nextInstruction,
+    continuationInstruction: snapshot.nextInstruction + 1,
+    ownerCallFrameId: currentCallFrameId(snapshot),
+    scopeDepth: snapshot.frames.length,
+    loopDepth: snapshot.loopFrames.length,
+    createdAtMs: snapshot.currentSessionTimeMs,
+    deadlineMs,
+    skippable,
+    requestEventSequence,
+    preparedOutput: null,
+  });
+  snapshot.nextActionId += 1;
+  snapshot.backgroundActions.push(action);
+  const requestEvent: ActionRequestedEvent = Object.freeze({
+    kind: "actionRequested",
+    sequence: requestEventSequence,
+    action: { ...action },
+    span: copySpan(span),
+  });
+  events.push(requestEvent);
+}
+
+function validatePacingCreation(
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+  durationMs: number,
+): void {
+  if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) {
+    throw fault("TSR051", "Runtime action ID space is exhausted.", span);
+  }
+  assertEventSequenceCapacity(snapshot, requiredEventSequencesForNewPacingGate(), span);
+  try {
+    calculatePacingDeadlineMs(snapshot.currentSessionTimeMs, durationMs);
+  } catch (error) {
+    throw fault("TSR050", error instanceof Error ? error.message : "Say pacing deadline is invalid.", span);
+  }
+}
+
+/** A positive say emits output, requests its gate, and reserves its completion. */
+function requiredEventSequencesForNewPacingGate(): number {
+  const sayOutput = 1;
+  const pacingRequest = 1;
+  const pacingCompletion = 1;
+  return sayOutput + pacingRequest + pacingCompletion;
+}
+
+/** A new wait needs its request and completion, plus a background gate completion. */
+function requiredEventSequencesForNewDelay(snapshot: RuntimeSnapshot): number {
+  const delayRequestAndCompletion = 2;
+  const backgroundPacingCompletion = snapshot.backgroundActions.some(
+    (action) => action.kind === "chatPacingGate",
+  ) ? 1 : 0;
+  return delayRequestAndCompletion + backgroundPacingCompletion;
+}
+
+function requiredEventSequencesForRootCompletion(snapshot: RuntimeSnapshot): number {
+  const rootCompleteEvent = 1;
+  return rootCompleteEvent + requiredFutureActionCompletionEvents(snapshot);
+}
+
 
 
 
@@ -2504,6 +2968,7 @@ function failSnapshot(
   failure: RuntimeErrorInfo,
   events: InterpreterEvent[],
 ): void {
+  const failureSequence = takeSequence(snapshot);
   snapshot.status = "failed";
   snapshot.failure = {
     code: failure.code,
@@ -2513,7 +2978,7 @@ function failSnapshot(
   events.push(
     Object.freeze({
       kind: "runtimeFailure",
-      sequence: takeSequence(snapshot),
+      sequence: failureSequence,
       code: failure.code,
       message: failure.message,
       span: copySpan(failure.span),

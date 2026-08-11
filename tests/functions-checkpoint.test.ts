@@ -27,6 +27,7 @@ import {
   withValidationTestStatistics,
 } from "../src/validation-testing.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 test("restores every instruction boundary during defaults and nested calls", () => {
   const { boundaries: observations } = assertRuntimeResumeEquivalent([
@@ -168,7 +169,7 @@ test("indexes prepared arguments and caller temporaries once per suspended frame
   missing.callFrames[0].callerTemporaries = [];
   assert.equal(validateRuntimeSnapshot(missing, compiled).valid, false);
   const mismatched = structuredClone(snapshot) as any;
-  mismatched.callFrames[0].callerTemporaries[0].value = 99;
+  mismatched.callFrames[0].callerTemporaries[1].value = 99;
   assert.equal(validateRuntimeSnapshot(mismatched, compiled).valid, false);
 });
 
@@ -227,7 +228,7 @@ test("detailed validation exhausts before later liveness allocation at every pub
 
 test("checkpoint creation defensively isolates the supplied plan", () => {
   const original = mutablePlan(plan("function value { return 1 }\nsay value()"));
-  const snapshot = createFreshRuntimeSnapshot(original as InstructionPlan);
+  const snapshot = createImmediatePacingRuntimeSnapshot(original as InstructionPlan);
   const checkpoint = createCheckpoint(original as InstructionPlan, snapshot);
   const originalName = checkpoint.plan.functions[0]!.name;
 
@@ -615,7 +616,7 @@ test("rejects malformed function-region plans inside checkpoints", () => {
       format: "teasescript-checkpoint",
       version: CHECKPOINT_VERSION,
       plan: malformedPlan,
-      snapshot: createFreshRuntimeSnapshot(
+      snapshot: createImmediatePacingRuntimeSnapshot(
         malformedPlan === aliasedDestination || malformedPlan === duplicateArgument
           ? calls
           : defaults,
@@ -674,7 +675,7 @@ test("cyclic builtin results become source-associated runtime failures", () => {
   const builtin: RuntimeBuiltinFunction = () => cyclic as SerializableRuntimeValue;
   const result = run(
     compiled,
-    createFreshRuntimeSnapshot(compiled),
+    createImmediatePacingRuntimeSnapshot(compiled),
     { builtins: { cyclic: builtin } },
   );
 
@@ -699,7 +700,7 @@ function executeUntil(
   compiled: InstructionPlan,
   predicate: (snapshot: RuntimeSnapshot) => boolean,
 ): RuntimeSnapshot {
-  let snapshot = createFreshRuntimeSnapshot(compiled);
+  let snapshot = createImmediatePacingRuntimeSnapshot(compiled);
   let guard = 0;
   while (!predicate(snapshot)) {
     assert.notEqual(snapshot.status, "halted");

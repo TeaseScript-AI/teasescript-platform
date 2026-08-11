@@ -3,12 +3,12 @@ import test from "node:test";
 
 import { compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSource } from "../playground/workspace/controller.js";
 
-test("workspace helper compiles, halts, and returns JSON-safe data", () => {
+test("workspace helper exposes production say pacing and returns JSON-safe data", () => {
   const compiled = compileWorkspaceSource('say "Hello"');
   assert.ok(compiled.plan);
   const result = executeWorkspaceSource('say "Hello"');
   assert.equal(result.status, "halted");
-  assert.deepEqual(result.events.map((event) => event.kind), ["say", "complete"]);
+  assert.deepEqual(result.events.map((event) => event.kind), ["say", "actionRequested", "complete"]);
   assert.doesNotThrow(() => JSON.stringify(result));
 });
 

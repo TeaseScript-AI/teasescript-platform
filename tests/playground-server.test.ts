@@ -121,7 +121,7 @@ test("workspace automation stores revisions and returns compile and run results"
   const runBody = JSON.parse(run.body) as { result: { status: string; events: { kind: string }[] } };
   assert.equal(run.status, 200);
   assert.equal(runBody.result.status, "halted");
-  assert.deepEqual(runBody.result.events.map((event) => event.kind), ["say", "complete"]);
+  assert.deepEqual(runBody.result.events.map((event) => event.kind), ["say", "actionRequested", "complete"]);
   const result = await api("GET", "/api/workspace/result");
   assert.equal(result.status, 200);
   assert.equal((JSON.parse(result.body) as { stale: boolean }).stale, false);

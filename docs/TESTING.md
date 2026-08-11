@@ -29,6 +29,7 @@ are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
 distinct task-relevant evidence.
+`npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
 
 CI and tests verify executable code, scripts, configuration, generated artifacts,
 and real machine-checkable boundaries. They must not freeze living documentation
@@ -448,6 +449,14 @@ provisional POC policies and structural separation; they are not source-capacity
 evidence-based reassessment. Every rejected completion compares
 the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot
 change unnoticed. Standard Player/browser UI coverage remains assigned to its later implementation slice.
+
+The implemented ADR 0018 `say` pacing slice adds source-to-runtime coverage for contextual skip/pacing syntax, captured
+smart-autoplay settings, Unicode code-point and word counting, exact/zero/`instant` pacing, speaker skip defaults,
+background gate creation, same-identity foreground promotion, prepared-output exact-once behavior, typed/time
+settlement, `wait` coexistence, interaction consumption, deterministic event ordering, checkpoint/JSON restore
+equivalence, and adversarial snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
+exhaustion and terminal transition atomicity. Standard Player click/touch/Space behavior remains assigned to its later
+browser slice.
 
 ## Browser E2E gate
 

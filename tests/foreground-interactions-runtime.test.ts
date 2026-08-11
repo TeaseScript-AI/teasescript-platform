@@ -21,8 +21,14 @@ import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 
-function interactionPlan(interactionKind: InteractionInstruction["interactionKind"], ui: InteractionUiPayload, options: { speaker?: string | null } = {}): InstructionPlan {
-  const source = options.speaker === undefined ? "wait 1\nexit" : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;
+function interactionPlan(
+  interactionKind: InteractionInstruction["interactionKind"],
+  ui: InteractionUiPayload,
+  options: { speaker?: string | null } = {},
+): InstructionPlan {
+  const source = options.speaker === undefined
+    ? "wait 1\nexit"
+    : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;
   const compiled = compileSource(source);
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
@@ -44,7 +50,14 @@ function interactionPlan(interactionKind: InteractionInstruction["interactionKin
     ui,
     span: base.instructions[waitIndex]!.span,
   };
-  const plan = { ...base, temporaryCount: interactionKind === "button" ? 0 : 1, instructions: base.instructions.map((instruction, index) => index === waitIndex ? interaction : instruction) };
+  const instructions = base.instructions.map((instruction, index) =>
+    index === waitIndex ? interaction : instruction,
+  );
+  const plan = {
+    ...base,
+    temporaryCount: interactionKind === "button" ? 0 : 1,
+    instructions,
+  };
   assert.equal(validateInstructionPlan(plan).valid, true, JSON.stringify(validateInstructionPlan(plan).errors));
   return plan;
 }
@@ -54,8 +67,24 @@ function buttonPlanFromSource(source: string): InstructionPlan {
   assert.deepEqual(compiled.diagnostics, []);
   const base = compiled.plan!;
   const waitIndex = base.instructions.findIndex((instruction) => instruction.kind === "wait");
-  const interaction: InteractionInstruction = { kind: "interaction", interactionKind: "button", target: "standardChat", speaker: null, destinationTemporary: null, expectedResult: "none", ui: { kind: "button", buttonLabel: "Continue", accessibleName: defaults.button }, span: base.instructions[waitIndex]!.span };
-  const plan = { ...base, instructions: base.instructions.map((instruction, index) => index === waitIndex ? interaction : instruction) };
+  const interaction: InteractionInstruction = {
+    kind: "interaction",
+    interactionKind: "button",
+    target: "standardChat",
+    speaker: null,
+    destinationTemporary: null,
+    expectedResult: "none",
+    ui: {
+      kind: "button",
+      buttonLabel: "Continue",
+      accessibleName: defaults.button,
+    },
+    span: base.instructions[waitIndex]!.span,
+  };
+  const instructions = base.instructions.map((instruction, index) =>
+    index === waitIndex ? interaction : instruction,
+  );
+  const plan = { ...base, instructions };
   assert.equal(validateInstructionPlan(plan).valid, true);
   return plan;
 }
@@ -74,10 +103,19 @@ function waiting(plan: InstructionPlan) {
   return result;
 }
 
-function complete(plan: InstructionPlan, payload: unknown, interactionKind: InteractionInstruction["interactionKind"]) {
+function complete(
+  plan: InstructionPlan,
+  payload: unknown,
+  interactionKind: InteractionInstruction["interactionKind"],
+) {
   const pending = waiting(plan);
   const actionId = pending.snapshot.foregroundAction!.actionId;
-  return completeAction(plan, pending.snapshot, { actionId, actionKind: "interaction", interactionKind, payload });
+  return completeAction(plan, pending.snapshot, {
+    actionId,
+    actionKind: "interaction",
+    interactionKind,
+    payload,
+  });
 }
 
 test("button and text complete through one interaction family with canonical transcript ordering", () => {
@@ -99,7 +137,12 @@ test("text rejects versioned whitespace-only input without any canonical-state m
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const pending = waiting(plan);
   const before = JSON.stringify(pending.snapshot);
-  const rejected = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: " \t\r\n" } });
+  const rejected = completeAction(plan, pending.snapshot, {
+    actionId: pending.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: " \t\r\n" },
+  });
   assert.equal(rejected.outcome.kind, "invalidPayload");
   assert.deepEqual(rejected.events, []);
   assert.equal(JSON.stringify(rejected.snapshot), before);
@@ -115,21 +158,41 @@ test("number accepts TeaseScript decimal/scientific text and preserves its trimm
   for (const submittedText of ["1\n2", "\u20281", "1\u2029", "1,5", "1 000", "1px", "Infinity", "1e999", "one", "+"] ) {
     const pending = waiting(plan);
     const before = JSON.stringify(pending.snapshot);
-    const rejected = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "number", payload: { kind: "submittedText", submittedText } });
+    const rejected = completeAction(plan, pending.snapshot, {
+      actionId: pending.snapshot.foregroundAction!.actionId,
+      actionKind: "interaction",
+      interactionKind: "number",
+      payload: { kind: "submittedText", submittedText },
+    });
     assert.equal(rejected.outcome.kind, "invalidPayload", submittedText);
     assert.equal(JSON.stringify(rejected.snapshot), before, submittedText);
   }
 });
 
 test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguous labelled behavior", () => {
-  const unlabelled = interactionPlan("choice", { kind: "choice", labelType: "none", options: [{ text: "Alpha", label: null }, { text: "Beta", label: null }], accessibleName: defaults.choice });
+  const unlabelled = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "none",
+    options: [{ text: "Alpha", label: null }, { text: "Beta", label: null }],
+    accessibleName: defaults.choice,
+  });
   assert.equal(complete(unlabelled, { kind: "selectedText", selectedText: "Beta" }, "choice").snapshot.temporaries[0]?.value, "Beta");
   assert.equal(complete(unlabelled, { kind: "submittedText", submittedText: "Alpha" }, "choice").snapshot.temporaries[0]?.value, "Alpha");
 
-  const labelled = interactionPlan("choice", { kind: "choice", labelType: "identifier", options: [{ text: "Same", label: "first" }, { text: "Same", label: "second" }], accessibleName: defaults.choice });
+  const labelled = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "identifier",
+    options: [{ text: "Same", label: "first" }, { text: "Same", label: "second" }],
+    accessibleName: defaults.choice,
+  });
   const ambiguous = waiting(labelled);
   const before = JSON.stringify(ambiguous.snapshot);
-  const rejected = completeAction(labelled, ambiguous.snapshot, { actionId: ambiguous.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "choice", payload: { kind: "submittedText", submittedText: "Same" } });
+  const rejected = completeAction(labelled, ambiguous.snapshot, {
+    actionId: ambiguous.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "choice",
+    payload: { kind: "submittedText", submittedText: "Same" },
+  });
   assert.equal(rejected.outcome.kind, "invalidPayload");
   assert.equal(JSON.stringify(rejected.snapshot), before);
   const selected = complete(labelled, { kind: "selectedLabel", selectedLabel: "second" }, "choice");
@@ -137,7 +200,15 @@ test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguou
   const choiceTranscript = selected.events[0]!;
   assert.equal(choiceTranscript.kind === "playerTranscript" && choiceTranscript.text, "Same");
 
-  const numeric = interactionPlan("choice", { kind: "choice", labelType: "number", options: [{ text: "One", label: 1 }, { text: "Two", label: 2 }], accessibleName: defaults.choice });
+  const numeric = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "number",
+    options: [
+      { text: "One", label: 1 },
+      { text: "Two", label: 2 },
+    ],
+    accessibleName: defaults.choice,
+  });
   const numericCompleted = complete(numeric, { kind: "selectedLabel", selectedLabel: 2 }, "choice");
   assert.equal(numericCompleted.snapshot.temporaries[0]?.value, 2);
   assert.equal(validateRuntimeSnapshot(numericCompleted.snapshot, numeric).valid, true);
@@ -148,9 +219,24 @@ test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguou
 
 test("choice completion snapshots validate without a plan for every result domain", () => {
   const cases = [
-    interactionPlan("choice", { kind: "choice", labelType: "none", options: [{ text: "Visible", label: null }], accessibleName: defaults.choice }),
-    interactionPlan("choice", { kind: "choice", labelType: "identifier", options: [{ text: "Visible", label: "named" }], accessibleName: defaults.choice }),
-    interactionPlan("choice", { kind: "choice", labelType: "number", options: [{ text: "Visible", label: 1 }], accessibleName: defaults.choice }),
+    interactionPlan("choice", {
+      kind: "choice",
+      labelType: "none",
+      options: [{ text: "Visible", label: null }],
+      accessibleName: defaults.choice,
+    }),
+    interactionPlan("choice", {
+      kind: "choice",
+      labelType: "identifier",
+      options: [{ text: "Visible", label: "named" }],
+      accessibleName: defaults.choice,
+    }),
+    interactionPlan("choice", {
+      kind: "choice",
+      labelType: "number",
+      options: [{ text: "Visible", label: 1 }],
+      accessibleName: defaults.choice,
+    }),
   ] as const;
   const payloads = [
     { kind: "selectedText", selectedText: "Visible" },
@@ -181,7 +267,12 @@ test("choice completion snapshots validate without a plan for every result domai
 });
 
 test("numeric choice rejects negative-zero labels and stores JSON-stable zero results", () => {
-  const valid = interactionPlan("choice", { kind: "choice", labelType: "number", options: [{ text: "Zero", label: 0 }], accessibleName: defaults.choice });
+  const valid = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "number",
+    options: [{ text: "Zero", label: 0 }],
+    accessibleName: defaults.choice,
+  });
   const negativeZeroPlan = structuredClone(valid) as any;
   negativeZeroPlan.instructions[0].ui.options[0].label = -0;
   assert.equal(validateInstructionPlan(negativeZeroPlan).valid, false);
@@ -209,21 +300,51 @@ test("duplicate, stale, unknown, wrong-kind, and over-limit completion preserve 
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const pending = waiting(plan);
   const actionId = pending.snapshot.foregroundAction!.actionId;
-  const wrong = completeAction(plan, pending.snapshot, { actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs: 1 } });
+  const wrong = completeAction(plan, pending.snapshot, {
+    actionId,
+    actionKind: "delay",
+    payload: { kind: "time", currentSessionTimeMs: 1 },
+  });
   assert.equal(wrong.outcome.kind, "wrongActionKind");
   assert.deepEqual(wrong.snapshot, pending.snapshot);
-  const over = completeAction(plan, pending.snapshot, { actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 1) } });
+  const over = completeAction(plan, pending.snapshot, {
+    actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: {
+      kind: "submittedText",
+      submittedText: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 1),
+    },
+  });
   assert.equal(over.outcome.kind, "invalidPayload");
   assert.deepEqual(over.snapshot, pending.snapshot);
-  const done = completeAction(plan, pending.snapshot, { actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "ok" } });
-  const duplicate = completeAction(plan, done.snapshot, { actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "different" } });
+  const done = completeAction(plan, pending.snapshot, {
+    actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "ok" },
+  });
+  const duplicate = completeAction(plan, done.snapshot, {
+    actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "different" },
+  });
   assert.equal(duplicate.outcome.kind, "alreadySettled");
   assert.deepEqual(duplicate.events, []);
   const seeded = createFreshRuntimeSnapshot(plan);
   seeded.nextActionId = 2;
   const laterPending = run(plan, seeded);
-  assert.equal(completeAction(plan, laterPending.snapshot, { actionId: 1, actionKind: "interaction" }).outcome.kind, "staleAction");
-  assert.equal(completeAction(plan, done.snapshot, { actionId: done.snapshot.nextActionId, actionKind: "interaction" }).outcome.kind, "unknownAction");
+  const stale = completeAction(plan, laterPending.snapshot, {
+    actionId: 1,
+    actionKind: "interaction",
+  });
+  assert.equal(stale.outcome.kind, "staleAction");
+  const unknown = completeAction(plan, done.snapshot, {
+    actionId: done.snapshot.nextActionId,
+    actionKind: "interaction",
+  });
+  assert.equal(unknown.outcome.kind, "unknownAction");
 });
 
 test("pending interaction survives JSON checkpoint restore with monotonic events and speaker provenance", () => {
@@ -231,7 +352,12 @@ test("pending interaction survives JSON checkpoint restore with monotonic events
   const pending = waiting(plan);
   const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, pending.snapshot)));
   assert.deepEqual(restored.snapshot, pending.snapshot);
-  const completed = completeAction(restored.plan, restored.snapshot, { actionId: restored.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "button", payload: { kind: "activate" } });
+  const completed = completeAction(restored.plan, restored.snapshot, {
+    actionId: restored.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  });
   assert.equal(completed.events[0]!.kind, "playerTranscript");
   const transcript = completed.events[0]!;
   assert.equal(transcript.kind === "playerTranscript" && transcript.requestingSpeakerId, 1);
@@ -241,25 +367,56 @@ test("pending interaction survives JSON checkpoint restore with monotonic events
 
 test("interaction definitions preflight each field against remaining aggregate bytes", () => {
   assert.equal(interactionUtf8ByteLength("x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 4_464)), 70_000);
-  const exact = interactionPlan("button", { kind: "button", buttonLabel: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES), accessibleName: defaults.button });
+  const exact = interactionPlan("button", {
+    kind: "button",
+    buttonLabel: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES),
+    accessibleName: defaults.button,
+  });
   assert.equal(validateInstructionPlan(exact).valid, true);
   const tooLong = structuredClone(exact) as unknown as { instructions: Array<Record<string, unknown>> };
-  (tooLong.instructions.find((instruction) => instruction.kind === "interaction")!.ui as { buttonLabel: string }).buttonLabel += "x";
+  const tooLongInteraction = tooLong.instructions.find((instruction) => instruction.kind === "interaction");
+  assert.ok(tooLongInteraction);
+  const tooLongUi = tooLongInteraction.ui as { buttonLabel: string };
+  tooLongUi.buttonLabel += "x";
   assert.equal(validateInstructionPlan(tooLong).valid, false);
 
   const options = Array.from({ length: MAX_INTERACTION_OPTION_ENTRIES }, (_, index) => ({ text: "", label: index }));
-  const exactOptions = interactionPlan("choice", { kind: "choice", labelType: "number", options, accessibleName: defaults.choice });
+  const exactOptions = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "number",
+    options,
+    accessibleName: defaults.choice,
+  });
   assert.equal(validateInstructionPlan(exactOptions).valid, true);
   const overOptions = structuredClone(exactOptions) as unknown as { instructions: Array<Record<string, unknown>> };
   const ui = overOptions.instructions.find((instruction) => instruction.kind === "interaction")!.ui as { options: Array<{ text: string; label: number }> };
   ui.options.push({ text: "", label: MAX_INTERACTION_OPTION_ENTRIES });
   assert.equal(validateInstructionPlan(overOptions).valid, false);
 
-  const completionPlan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
-  const accepted = complete(completionPlan, { kind: "submittedText", submittedText: "é".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2) }, "text");
+  const completionPlan = interactionPlan("text", {
+    kind: "text",
+    hint: null,
+    accessibleName: defaults.text,
+  });
+  const accepted = complete(
+    completionPlan,
+    {
+      kind: "submittedText",
+      submittedText: "é".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2),
+    },
+    "text",
+  );
   assert.equal(accepted.outcome.kind, "completed");
   const overUtf8 = waiting(completionPlan);
-  const rejected = completeAction(completionPlan, overUtf8.snapshot, { actionId: overUtf8.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: `${"é".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2)}x` } });
+  const rejected = completeAction(completionPlan, overUtf8.snapshot, {
+    actionId: overUtf8.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: {
+      kind: "submittedText",
+      submittedText: `${"é".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2)}x`,
+    },
+  });
   assert.equal(rejected.outcome.kind, "invalidPayload");
   assert.deepEqual(rejected.snapshot, overUtf8.snapshot);
 
@@ -288,7 +445,15 @@ test("interaction definitions preflight each field against remaining aggregate b
   assert.equal(validateInstructionPlan(choiceOverAggregate).valid, false);
 
   const hugePending = waiting(completionPlan);
-  const huge = completeAction(completionPlan, hugePending.snapshot, { actionId: hugePending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 16) } });
+  const huge = completeAction(completionPlan, hugePending.snapshot, {
+    actionId: hugePending.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: {
+      kind: "submittedText",
+      submittedText: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 16),
+    },
+  });
   assert.equal(huge.outcome.kind, "invalidPayload");
   assert.deepEqual(huge.snapshot, hugePending.snapshot);
 });
@@ -314,7 +479,9 @@ test("malformed interaction snapshot and settlement data are rejected", () => {
   wrongTranscript.lastSettlement.transcriptText = "different";
   assert.equal(validateRuntimeSnapshot(wrongTranscript, plan).valid, false);
   const wrongDestination = structuredClone(done.snapshot) as any;
-  wrongDestination.temporaries.find((temporary: any) => temporary.id === 1).value = "other";
+  const wrongTemporary = wrongDestination.temporaries.find((temporary: any) => temporary.id === 1);
+  assert.ok(wrongTemporary);
+  wrongTemporary.value = "other";
   assert.equal(validateRuntimeSnapshot(wrongDestination, plan).valid, false);
 
   const standaloneUi = structuredClone(pending.snapshot) as any;
@@ -380,7 +547,10 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
     ui: { kind: "button", buttonLabel: "Continue", accessibleName: defaults.button },
     span: base.instructions[waitIndex]!.span,
   };
-  const speakerPlan = { ...base, instructions: base.instructions.map((instruction, index) => index === waitIndex ? interaction : instruction) };
+  const instructions = base.instructions.map((instruction, index) =>
+    index === waitIndex ? interaction : instruction,
+  );
+  const speakerPlan = { ...base, instructions };
   const pending = waiting(speakerPlan);
   const bob = pending.snapshot.speakers.find((speaker) => speaker.identifier === "bob")!;
   const mutated = structuredClone(pending.snapshot) as any;
@@ -395,12 +565,18 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
   assert.equal(validateRuntimeSnapshot(swappedIdentifiers, speakerPlan).valid, false);
 
   const alteredBinding = structuredClone(pending.snapshot) as any;
-  const aliceBinding = alteredBinding.frames.flatMap((frame: any) => frame.bindings).find((binding: any) => binding.name === "alice");
+  const aliceBinding = alteredBinding.frames
+    .flatMap((frame: any) => frame.bindings)
+    .find((binding: any) => binding.name === "alice");
+  assert.ok(aliceBinding);
   aliceBinding.value.speakerId = bob.id;
   assert.equal(validateRuntimeSnapshot(alteredBinding, speakerPlan).valid, false);
 
   const bindingResolved = structuredClone(pending.snapshot) as any;
-  const binding = bindingResolved.frames.flatMap((frame: any) => frame.bindings).find((candidate: any) => candidate.name === "alice");
+  const binding = bindingResolved.frames
+    .flatMap((frame: any) => frame.bindings)
+    .find((candidate: any) => candidate.name === "alice");
+  assert.ok(binding);
   binding.value.speakerId = bob.id;
   bindingResolved.foregroundAction.speakerId = bob.id;
   assert.equal(validateRuntimeSnapshot(bindingResolved, speakerPlan).valid, true);
@@ -418,19 +594,32 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
   const explicitMutations: Array<(snapshot: any) => void> = [
     (snapshot) => {
       const frame = snapshot.frames.find((candidate: any) => candidate.bindings.some((binding: any) => binding.name === "alice"));
+      assert.ok(frame);
       frame.bindings = frame.bindings.filter((binding: any) => binding.name !== "alice");
       snapshot.foregroundAction.speakerId = null;
     },
     (snapshot) => {
-      snapshot.frames.flatMap((frame: any) => frame.bindings).find((binding: any) => binding.name === "alice").value = "ordinary";
+      const binding = snapshot.frames
+        .flatMap((frame: any) => frame.bindings)
+        .find((candidate: any) => candidate.name === "alice");
+      assert.ok(binding);
+      binding.value = "ordinary";
       snapshot.foregroundAction.speakerId = null;
     },
     (snapshot) => {
-      snapshot.frames.flatMap((frame: any) => frame.bindings).find((binding: any) => binding.name === "alice").value = { kind: "speakerReference", speakerId: "bad", identifier: "alice" };
+      const binding = snapshot.frames
+        .flatMap((frame: any) => frame.bindings)
+        .find((candidate: any) => candidate.name === "alice");
+      assert.ok(binding);
+      binding.value = { kind: "speakerReference", speakerId: "bad", identifier: "alice" };
       snapshot.foregroundAction.speakerId = null;
     },
     (snapshot) => {
-      snapshot.frames.flatMap((frame: any) => frame.bindings).find((binding: any) => binding.name === "alice").value = { kind: "speakerReference", speakerId: 999, identifier: "alice" };
+      const binding = snapshot.frames
+        .flatMap((frame: any) => frame.bindings)
+        .find((candidate: any) => candidate.name === "alice");
+      assert.ok(binding);
+      binding.value = { kind: "speakerReference", speakerId: 999, identifier: "alice" };
       snapshot.foregroundAction.speakerId = null;
     },
     (snapshot) => { snapshot.foregroundAction.speakerId = null; },
@@ -451,15 +640,28 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
     interaction.speaker = source.includes("requested") ? "requested" : "alice";
     assert.equal(validateInstructionPlan(scoped).valid, true);
     const scopedPending = waiting(scoped);
-    const binding = scopedPending.snapshot.frames.slice().reverse().flatMap((frame) => frame.bindings).find((candidate) => candidate.name === interaction.speaker);
-    assert.equal(scopedPending.snapshot.foregroundAction?.kind === "interaction" && scopedPending.snapshot.foregroundAction.speakerId, (binding?.value as any).speakerId);
+    const binding = scopedPending.snapshot.frames
+      .slice()
+      .reverse()
+      .flatMap((frame) => frame.bindings)
+      .find((candidate) => candidate.name === interaction.speaker);
+    assert.ok(binding);
+    const bindingSpeakerId = (binding.value as any).speakerId;
+    assert.equal(
+      scopedPending.snapshot.foregroundAction?.kind === "interaction"
+        && scopedPending.snapshot.foregroundAction.speakerId,
+      bindingSpeakerId,
+    );
     assert.equal(validateRuntimeSnapshot(scopedPending.snapshot, scoped).valid, true);
   }
 
   const nestedBase = buttonPlanFromSource("speaker root {}\nspeaker bob {}\nif true { wait 1 }\nexit");
   const nestedInstruction = nestedBase.instructions.find((instruction) => instruction.kind === "interaction") as any;
   nestedInstruction.speaker = "alice";
-  const nestedPending = waiting({ ...nestedBase, instructions: nestedBase.instructions.map((instruction) => instruction.kind === "interaction" ? { ...instruction, speaker: null } : instruction) });
+  const nestedInstructions = nestedBase.instructions.map((instruction) =>
+    instruction.kind === "interaction" ? { ...instruction, speaker: null } : instruction,
+  );
+  const nestedPending = waiting({ ...nestedBase, instructions: nestedInstructions });
   const nested = structuredClone(nestedPending.snapshot) as any;
   const rootSpeaker = nested.speakers.find((speaker: any) => speaker.identifier === "root");
   const nestedBob = nested.speakers.find((speaker: any) => speaker.identifier === "bob");
@@ -491,7 +693,12 @@ test("very large regex-bearing interaction strings fast-reject at plan and snaps
   hugeAccessible.instructions[0].ui.accessibleName = { kind: "text", text: huge };
   assert.equal(validateInstructionPlan(hugeAccessible).valid, false);
 
-  const identifier = interactionPlan("choice", { kind: "choice", labelType: "identifier", options: [{ text: "Visible", label: "valid" }], accessibleName: defaults.choice });
+  const identifier = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "identifier",
+    options: [{ text: "Visible", label: "valid" }],
+    accessibleName: defaults.choice,
+  });
   const hugeIdentifier = structuredClone(identifier) as any;
   hugeIdentifier.instructions[0].ui.options[0].label = huge;
   assert.equal(validateInstructionPlan(hugeIdentifier).valid, false);
@@ -503,7 +710,15 @@ test("very large regex-bearing interaction strings fast-reject at plan and snaps
 });
 
 test("interaction validation measures each accepted field once and stops after aggregate exhaustion", () => {
-  const accepted = interactionPlan("choice", { kind: "choice", labelType: "identifier", options: [{ text: "One", label: "one" }, { text: "Two", label: "two" }], accessibleName: defaults.choice });
+  const accepted = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "identifier",
+    options: [
+      { text: "One", label: "one" },
+      { text: "Two", label: "two" },
+    ],
+    accessibleName: defaults.choice,
+  });
   const acceptedStats = withValidationTestStatistics((finish) => {
     assert.equal(validateInstructionPlan(accepted).valid, true);
     return finish();
@@ -571,7 +786,13 @@ test("a foreground action is strictly newer than the retained settlement", () =>
   const plan = { ...base, instructions };
   assert.equal(validateInstructionPlan(plan).valid, true);
   const first = waiting(plan);
-  const completed = completeAction(plan, first.snapshot, { actionId: first.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "button", payload: { kind: "activate" } });
+  const completionRequest = {
+    actionId: first.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  } as const;
+  const completed = completeAction(plan, first.snapshot, completionRequest);
   const second = run(plan, completed.snapshot);
   assert.equal(second.snapshot.status, "waiting");
   assert.notEqual(second.snapshot.lastSettlement, null);
@@ -580,7 +801,10 @@ test("a foreground action is strictly newer than the retained settlement", () =>
   assert.deepEqual(restored.snapshot, second.snapshot);
 
   const mutations: Array<(snapshot: any) => void> = [
-    (snapshot) => { snapshot.lastSettlement.actionId = snapshot.foregroundAction.actionId + 1; snapshot.nextActionId = snapshot.lastSettlement.actionId + 1; },
+    (snapshot) => {
+      snapshot.lastSettlement.actionId = snapshot.foregroundAction.actionId + 1;
+      snapshot.nextActionId = snapshot.lastSettlement.actionId + 1;
+    },
     (snapshot) => { snapshot.lastSettlement.actionId = snapshot.foregroundAction.actionId; },
     (snapshot) => { snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.completionEventSequence - 1; },
     (snapshot) => { snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.completionEventSequence; },
@@ -598,7 +822,13 @@ test("terminal button completion remains inspectable and continuation runs only 
   const plan = { ...withExit, rootEndInstruction: 1, instructions: withExit.instructions.slice(0, 1) };
   assert.equal(validateInstructionPlan(plan).valid, true);
   const pending = waiting(plan);
-  const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "button", payload: { kind: "activate" } });
+  const completionRequest = {
+    actionId: pending.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  } as const;
+  const completed = completeAction(plan, pending.snapshot, completionRequest);
   assert.equal(completed.snapshot.status, "running");
   assert.equal(validateRuntimeSnapshot(completed.snapshot, plan).valid, true);
   assert.deepEqual(completed.events.map((event) => event.kind), ["playerTranscript", "actionCompleted"]);
@@ -613,7 +843,16 @@ test("result-bearing interactions require an in-region continuation while functi
   for (const [kind, ui, payload] of [
     ["text", { kind: "text", hint: null, accessibleName: defaults.text }, { kind: "submittedText", submittedText: "value" }],
     ["number", { kind: "number", hint: null, accessibleName: defaults.number }, { kind: "submittedText", submittedText: "1" }],
-    ["choice", { kind: "choice", labelType: "none", options: [{ text: "One", label: null }], accessibleName: defaults.choice }, { kind: "selectedText", selectedText: "One" }],
+    [
+      "choice",
+      {
+        kind: "choice",
+        labelType: "none",
+        options: [{ text: "One", label: null }],
+        accessibleName: defaults.choice,
+      },
+      { kind: "selectedText", selectedText: "One" },
+    ],
   ] as const) {
     const root = interactionPlan(kind, ui);
     const terminalRoot = { ...root, rootEndInstruction: 1, instructions: root.instructions.slice(0, 1) };
@@ -633,10 +872,23 @@ test("result-bearing interactions require an in-region continuation while functi
       ui,
       span: base.instructions[interactionIndex]!.span,
     };
-    const functionPlan = { ...base, temporaryCount: destinationTemporary, instructions: base.instructions.map((candidate, index) => index === interactionIndex ? instruction : candidate) };
+    const instructions = base.instructions.map((candidate, index) =>
+      index === interactionIndex ? instruction : candidate,
+    );
+    const functionPlan = {
+      ...base,
+      temporaryCount: destinationTemporary,
+      instructions,
+    };
     assert.equal(validateInstructionPlan(functionPlan).valid, true, kind);
     const pending = waiting(functionPlan);
-    const completed = completeAction(functionPlan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: kind, payload });
+    const completionRequest = {
+      actionId: pending.snapshot.foregroundAction!.actionId,
+      actionKind: "interaction",
+      interactionKind: kind,
+      payload,
+    } as const;
+    const completed = completeAction(functionPlan, pending.snapshot, completionRequest);
     assert.equal(completed.outcome.kind, "completed", kind);
     const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(functionPlan, completed.snapshot)));
     const halted = run(restored.plan, restored.snapshot).snapshot;
@@ -649,7 +901,15 @@ test("hostile completion objects reject before getters, mutation, events, or RNG
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const pending = waiting(plan);
   let invoked = false;
-  const request = { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", get payload() { invoked = true; return {}; } };
+  const request = {
+    actionId: pending.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    get payload() {
+      invoked = true;
+      return {};
+    },
+  };
   const rejected = completeAction(plan, pending.snapshot, request);
   assert.equal(rejected.outcome.kind, "invalidPayload");
   assert.equal(invoked, false);
@@ -658,7 +918,15 @@ test("hostile completion objects reject before getters, mutation, events, or RNG
 });
 
 test("interaction plan and checkpoint boundaries reject malformed option domains and hostile shapes", () => {
-  const base = interactionPlan("choice", { kind: "choice", labelType: "identifier", options: [{ text: "One", label: "one" }, { text: "Two", label: "two" }], accessibleName: defaults.choice });
+  const base = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "identifier",
+    options: [
+      { text: "One", label: "one" },
+      { text: "Two", label: "two" },
+    ],
+    accessibleName: defaults.choice,
+  });
   const mutations: Array<(plan: any) => void> = [
     (plan) => { plan.instructions[0].ui.options[1].label = "one"; },
     (plan) => { plan.instructions[0].ui.options[1].label = 2; },
@@ -680,7 +948,13 @@ test("interaction plan and checkpoint boundaries reject malformed option domains
   assert.equal(validateInstructionPlan(sparse).valid, false);
   let invoked = false;
   const accessor = structuredClone(base) as any;
-  Object.defineProperty(accessor.instructions[0].ui, "options", { enumerable: true, get() { invoked = true; return []; } });
+  Object.defineProperty(accessor.instructions[0].ui, "options", {
+    enumerable: true,
+    get() {
+      invoked = true;
+      return [];
+    },
+  });
   assert.equal(validateInstructionPlan(accessor).valid, false);
   assert.equal(invoked, false);
 });
@@ -696,14 +970,25 @@ test("interaction ownership survives active call, scope, and loop frames", () =>
     assert.equal(action.scopeDepth, pending.snapshot.frames.length);
     assert.equal(action.loopDepth, pending.snapshot.loopFrames.length);
     const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, pending.snapshot)));
-    const completed = completeAction(restored.plan, restored.snapshot, { actionId: action.actionId, actionKind: "interaction", interactionKind: "button", payload: { kind: "activate" } });
+    const completionRequest = {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: "button",
+      payload: { kind: "activate" },
+    } as const;
+    const completed = completeAction(restored.plan, restored.snapshot, completionRequest);
     assert.equal(completed.outcome.kind, "completed");
     assert.equal(run(restored.plan, completed.snapshot).snapshot.status, "halted");
   }
 });
 
 test("one multibyte per-string failure stops all later interaction UTF-8 measurement", () => {
-  const base = interactionPlan("choice", { kind: "choice", labelType: "none", options: [{ text: "ok", label: null }], accessibleName: defaults.choice });
+  const base = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "none",
+    options: [{ text: "ok", label: null }],
+    accessibleName: defaults.choice,
+  });
   const overLimit = "\u20ac".repeat(30_000);
   assert.ok(overLimit.length <= MAX_INTERACTION_STRING_UTF8_BYTES);
   assert.ok(interactionUtf8ByteLength(overLimit) > MAX_INTERACTION_STRING_UTF8_BYTES);
@@ -727,8 +1012,25 @@ test("one multibyte per-string failure stops all later interaction UTF-8 measure
 
 test("numeric settlement destinations distinguish canonical zero from negative zero", () => {
   for (const [plan, payload, kind] of [
-    [interactionPlan("number", { kind: "number", hint: null, accessibleName: defaults.number }), { kind: "submittedText", submittedText: "-0" }, "number"],
-    [interactionPlan("choice", { kind: "choice", labelType: "number", options: [{ text: "Zero", label: 0 }], accessibleName: defaults.choice }), { kind: "selectedLabel", selectedLabel: 0 }, "choice"],
+    [
+      interactionPlan("number", {
+        kind: "number",
+        hint: null,
+        accessibleName: defaults.number,
+      }),
+      { kind: "submittedText", submittedText: "-0" },
+      "number",
+    ],
+    [
+      interactionPlan("choice", {
+        kind: "choice",
+        labelType: "number",
+        options: [{ text: "Zero", label: 0 }],
+        accessibleName: defaults.choice,
+      }),
+      { kind: "selectedLabel", selectedLabel: 0 },
+      "choice",
+    ],
   ] as const) {
     const completed = complete(plan, payload, kind);
     assert.equal(Object.is(completed.snapshot.temporaries[0]?.value, -0), false);
@@ -769,7 +1071,12 @@ test("pending actions reserve their complete event sequence capacity", () => {
   assert.equal(pendingInteraction.snapshot.status, "waiting");
   assert.equal(pendingInteraction.snapshot.nextEventSequence, max - 2);
   assert.doesNotThrow(() => createCheckpoint(interaction, pendingInteraction.snapshot));
-  const completedInteraction = completeAction(interaction, pendingInteraction.snapshot, { actionId: pendingInteraction.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "ok" } });
+  const completedInteraction = completeAction(interaction, pendingInteraction.snapshot, {
+    actionId: pendingInteraction.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "ok" },
+  });
   assert.equal(completedInteraction.outcome.kind, "completed");
   assert.equal(completedInteraction.snapshot.nextEventSequence, max);
   const impossibleCompletion = structuredClone(pendingInteraction.snapshot) as any;
@@ -777,7 +1084,13 @@ test("pending actions reserve their complete event sequence capacity", () => {
   const impossibleBefore = structuredClone(impossibleCompletion);
   assert.equal(validateRuntimeSnapshot(impossibleCompletion, interaction).valid, false);
   assert.throws(() => createCheckpoint(interaction, impossibleCompletion));
-  assert.throws(() => completeAction(interaction, impossibleCompletion, { actionId: impossibleCompletion.foregroundAction.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "no write" } }));
+  const impossibleRequest = {
+    actionId: impossibleCompletion.foregroundAction.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "no write" },
+  };
+  assert.throws(() => completeAction(interaction, impossibleCompletion, impossibleRequest));
   assert.deepEqual(impossibleCompletion, impossibleBefore);
   assert.deepEqual(impossibleCompletion.temporaries, []);
 
@@ -814,7 +1127,12 @@ test("pending actions reserve their complete event sequence capacity", () => {
 
 test("unsupported persisted interaction fields are rejected at every boundary", () => {
   const huge = "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 16);
-  const base = interactionPlan("choice", { kind: "choice", labelType: "identifier", options: [{ text: "One", label: "one" }], accessibleName: defaults.choice });
+  const base = interactionPlan("choice", {
+    kind: "choice",
+    labelType: "identifier",
+    options: [{ text: "One", label: "one" }],
+    accessibleName: defaults.choice,
+  });
   for (const mutate of [
     (instruction: any) => { instruction.extra = huge; },
     (instruction: any) => { instruction.ui.extra = huge; },
@@ -838,7 +1156,13 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
     mutate(hostile);
     assert.equal(validateRuntimeSnapshot(hostile, base).valid, false);
     assert.throws(() => restoreCheckpoint({ ...createCheckpoint(base, pending.snapshot), snapshot: hostile }));
-    assert.throws(() => completeAction(base, hostile, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "choice", payload: { kind: "selectedLabel", selectedLabel: "one" } }));
+    const completionRequest = {
+      actionId: pending.snapshot.foregroundAction!.actionId,
+      actionKind: "interaction",
+      interactionKind: "choice",
+      payload: { kind: "selectedLabel", selectedLabel: "one" },
+    } as const;
+    assert.throws(() => completeAction(base, hostile, completionRequest));
   }
 
   const completed = complete(base, { kind: "selectedLabel", selectedLabel: "one" }, "choice");
@@ -846,11 +1170,17 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
   settlementHostile.lastSettlement.extra = huge;
   assert.equal(validateRuntimeSnapshot(settlementHostile, base).valid, false);
   assert.throws(() => restoreCheckpoint({ ...createCheckpoint(base, completed.snapshot), snapshot: settlementHostile }));
-  assert.throws(() => completeAction(base, settlementHostile, { actionId: completed.snapshot.lastSettlement!.actionId, actionKind: "interaction", interactionKind: "choice", payload: { kind: "selectedLabel", selectedLabel: "one" } }));
+  const settlementCompletionRequest = {
+    actionId: completed.snapshot.lastSettlement!.actionId,
+    actionKind: "interaction",
+    interactionKind: "choice",
+    payload: { kind: "selectedLabel", selectedLabel: "one" },
+  } as const;
+  assert.throws(() => completeAction(base, settlementHostile, settlementCompletionRequest));
 
   const requested = pending.events.find((event) => event.kind === "actionRequested")!;
   assert.equal(requested.kind === "actionRequested" && Object.hasOwn(requested.action, "extra"), false);
-  const duplicate = completeAction(base, completed.snapshot, { actionId: completed.snapshot.lastSettlement!.actionId, actionKind: "interaction", interactionKind: "choice", payload: { kind: "selectedLabel", selectedLabel: "one" } });
+  const duplicate = completeAction(base, completed.snapshot, settlementCompletionRequest);
   assert.equal(duplicate.outcome.kind, "alreadySettled");
   assert.equal(duplicate.outcome.kind === "alreadySettled" && Object.hasOwn(duplicate.outcome.settlement, "extra"), false);
 
@@ -873,12 +1203,27 @@ test("pending result destinations are absent in root, function, and loop executi
     const plan = buttonPlanFromSource("function prompt { wait 1\nreturn }\nprompt()\nexit");
     const index = plan.instructions.findIndex((instruction) => instruction.kind === "interaction");
     const destinationTemporary = plan.temporaryCount + 1;
-    return { ...plan, temporaryCount: destinationTemporary, instructions: plan.instructions.map((instruction, instructionIndex) => instructionIndex === index ? { ...root.instructions[0], span: instruction.span, destinationTemporary } : instruction) } as InstructionPlan;
+    const replacement = (instruction: (typeof plan.instructions)[number]) => ({
+      ...root.instructions[0],
+      span: instruction.span,
+      destinationTemporary,
+    });
+    const instructions = plan.instructions.map((instruction, instructionIndex) =>
+      instructionIndex === index ? replacement(instruction) : instruction,
+    );
+    return { ...plan, temporaryCount: destinationTemporary, instructions } as InstructionPlan;
   })();
   const loopPlan = (() => {
     const plan = buttonPlanFromSource("repeat 1 { wait 1 }\nexit");
     const index = plan.instructions.findIndex((instruction) => instruction.kind === "interaction");
-    const result = structuredClone({ ...plan, temporaryCount: 1, instructions: plan.instructions.map((instruction, instructionIndex) => instructionIndex === index ? { ...root.instructions[0], span: instruction.span } : instruction) }) as any;
+    const replacement = (instruction: (typeof plan.instructions)[number]) => ({
+      ...root.instructions[0],
+      span: instruction.span,
+    });
+    const instructions = plan.instructions.map((instruction, instructionIndex) =>
+      instructionIndex === index ? replacement(instruction) : instruction,
+    );
+    const result = structuredClone({ ...plan, temporaryCount: 1, instructions }) as any;
     result.instructions.splice(index + 1, 0, { kind: "clearTemporary", temporaryId: 1, span: result.instructions[index].span });
     result.rootEndInstruction += 1;
     result.instructions[0].target += 1;
@@ -893,7 +1238,13 @@ test("pending result destinations are absent in root, function, and loop executi
     assert.equal(validateRuntimeSnapshot(hostile).valid, false);
     assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false);
     assert.throws(() => restoreCheckpoint({ ...createCheckpoint(plan, pending.snapshot), snapshot: hostile }));
-    const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText: "new" } });
+    const completionRequest = {
+      actionId: pending.snapshot.foregroundAction!.actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: "new" },
+    } as const;
+    const completed = completeAction(plan, pending.snapshot, completionRequest);
     assert.equal(completed.outcome.kind, "completed");
     assert.equal(completed.snapshot.temporaries.find((temporary) => temporary.id === destination)?.value, "new");
   }
@@ -904,7 +1255,13 @@ test("accepted text completions perform one bounded UTF-8 measurement before nor
   for (const submittedText of ["ordinary", "a\r\nb\rc"]) {
     const pending = waiting(plan);
     const stats = withValidationTestStatistics((finish) => {
-      const completed = completeAction(plan, pending.snapshot, { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: "interaction", interactionKind: "text", payload: { kind: "submittedText", submittedText } });
+      const completionRequest = {
+        actionId: pending.snapshot.foregroundAction!.actionId,
+        actionKind: "interaction",
+        interactionKind: "text",
+        payload: { kind: "submittedText", submittedText },
+      } as const;
+      const completed = completeAction(plan, pending.snapshot, completionRequest);
       assert.equal(completed.outcome.kind, "completed");
       return finish();
     });

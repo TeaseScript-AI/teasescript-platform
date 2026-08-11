@@ -7,7 +7,7 @@ import test from "node:test";
 
 const filterPath = resolve(process.cwd(), "tools/test-output-filter.mjs");
 
-function runFixtures(fixtures: Record<string, string>) {
+function runFixtures(fixtures: Record<string, string>, fullOutput = false) {
   const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
   const environment = { ...process.env };
   delete environment.NODE_TEST_CONTEXT;
@@ -19,7 +19,7 @@ function runFixtures(fixtures: Record<string, string>) {
   });
 
   try {
-    return spawnSync(process.execPath, [filterPath, ...fixturePaths], {
+    return spawnSync(process.execPath, [filterPath, ...(fullOutput ? ["--full-output"] : []), ...fixturePaths], {
       encoding: "utf8",
       env: environment,
     });
@@ -47,6 +47,18 @@ test("filter removes passing test lines and preserves Node's full summary", () =
   assert.match(result.stdout, /ℹ skipped 0/);
   assert.match(result.stdout, /ℹ todo 0/);
   assert.match(result.stdout, /ℹ duration_ms \d+(?:\.\d+)?/);
+});
+
+test("full-output mode preserves passing test lines", () => {
+  const result = runFixtures({
+    "passing.test.mjs": `
+      import test from "node:test";
+      test("visible passing test", () => {});
+    `,
+  }, true);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /✔ visible passing test/);
 });
 
 test("filter preserves failures, stacks, the summary, and the exit code", () => {

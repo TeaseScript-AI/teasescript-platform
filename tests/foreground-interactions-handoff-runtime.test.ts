@@ -22,10 +22,17 @@ import type {
 } from "../src/runtime/actions/model.js";
 import { getSerializableProperty, type SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import type { SourceSpan } from "../src/source.js";
 
-function interactionPlan(interactionKind: InteractionInstruction["interactionKind"], ui: InteractionUiPayload, options: { speaker?: string | null } = {}): InstructionPlan {
-  const source = options.speaker === undefined ? "wait 1\nexit" : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;
+function interactionPlan(
+  interactionKind: InteractionInstruction["interactionKind"],
+  ui: InteractionUiPayload,
+  options: { speaker?: string | null } = {},
+): InstructionPlan {
+  const source = options.speaker === undefined
+    ? "wait 1\nexit"
+    : `speaker ${options.speaker} {}\nspeaker ${options.speaker}\nwait 1\nexit`;
   const compiled = compileSource(source);
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
@@ -47,7 +54,14 @@ function interactionPlan(interactionKind: InteractionInstruction["interactionKin
     ui,
     span: base.instructions[waitIndex]!.span,
   };
-  const plan = { ...base, temporaryCount: interactionKind === "button" ? 0 : 1, instructions: base.instructions.map((instruction, index) => index === waitIndex ? interaction : instruction) };
+  const instructions = base.instructions.map((instruction, index) =>
+    index === waitIndex ? interaction : instruction,
+  );
+  const plan = {
+    ...base,
+    temporaryCount: interactionKind === "button" ? 0 : 1,
+    instructions,
+  };
   assert.equal(validateInstructionPlan(plan).valid, true, JSON.stringify(validateInstructionPlan(plan).errors));
   return plan;
 }
@@ -60,7 +74,7 @@ const defaults = {
 } as const;
 
 function waiting(plan: InstructionPlan) {
-  const result = run(plan, createFreshRuntimeSnapshot(plan));
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(result.snapshot.status, "waiting");
   assert.equal(result.snapshot.foregroundAction?.kind, "interaction");
   return result;
@@ -211,7 +225,7 @@ test("compiler-shaped foo, interaction, bar source order remains exact", () => {
   ].join("\n"));
   const beforeInteraction = run(
     injected.plan,
-    createFreshRuntimeSnapshot(injected.plan),
+    createImmediatePacingRuntimeSnapshot(injected.plan),
   );
   assert.equal(beforeInteraction.snapshot.status, "waiting");
   assert.deepEqual(
@@ -752,6 +766,8 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
         kind: "say",
         speaker: null,
         value: { kind: "temporary", temporaryId: injected.destinationTemporary, span: handoffInstructionSpan(injected) },
+        skipPolicy: null,
+        pacing: "smart",
         span: handoffInstructionSpan(injected),
       }),
       needsCleanup: true,
@@ -1453,7 +1469,7 @@ function settledHandoffFixture(): SettlementHandoffFixture {
   const injected = injectTextInteraction(
     'wait 1 ms\nlet answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit',
   );
-  const firstDelay = run(injected.plan, createFreshRuntimeSnapshot(injected.plan));
+  const firstDelay = run(injected.plan, createImmediatePacingRuntimeSnapshot(injected.plan));
   assert.equal(firstDelay.snapshot.foregroundAction?.kind, "delay");
   const firstSettled = observeTime(injected.plan, firstDelay.snapshot, 1);
   assert.equal(validateRuntimeSnapshot(firstSettled.snapshot, injected.plan).valid, true);
@@ -2146,6 +2162,8 @@ test("PR194 matrix: failed canonical continuations retain the handoff atomically
         kind: "say",
         speaker: "missing",
         value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
+        skipPolicy: null,
+        pacing: "smart",
         span: injected.plan.instructions[injected.handoffInstruction]!.span,
       }),
       assertUntouchedTarget: (snapshot) => assert.equal(snapshot.speakers.length, 0),

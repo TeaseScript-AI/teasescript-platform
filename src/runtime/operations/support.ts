@@ -9,7 +9,10 @@ import {
   type RuntimeSnapshot,
   type RuntimeTemporarySnapshot,
 } from "../state.js";
-import type { RuntimeActionSettlementSnapshot } from "../actions/model.js";
+import {
+  requiredActionCompletionEvents,
+  type RuntimeActionSettlementSnapshot,
+} from "../actions/model.js";
 import type { PendingActionOperationResult, RuntimeOperationResult } from "./model.js";
 
 export class RuntimeDataError extends Error {
@@ -56,6 +59,7 @@ export function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): Ru
     deadlineMs: settlement.deadlineMs,
     completedAtMs: settlement.completedAtMs,
   };
+  if (settlement.actionKind === "chatPacingGate") return { ...settlement };
   return {
     actionId: settlement.actionId,
     actionKind: "interaction",
@@ -88,8 +92,30 @@ export function assertEventSequenceCapacity(snapshot: RuntimeSnapshot, count: nu
   throw new RuntimeDataError("TSR101", "Runtime nextEventSequence cannot satisfy the pending action atomically.");
 }
 
-export function takeSequence(snapshot: RuntimeSnapshot): number {
+/**
+ * Count the completion events that active actions must still be able to emit.
+ * The count is derived from canonical action state, not persisted separately.
+ */
+export function requiredFutureActionCompletionEvents(snapshot: RuntimeSnapshot): number {
+  const actions = [snapshot.foregroundAction, ...snapshot.backgroundActions];
+  return actions.reduce((count, action) => count + requiredActionCompletionEvents(action), 0);
+}
+
+/**
+ * Allocate one event while retaining capacity for active actions. A settlement
+ * may declare the completion events it is discharging before it removes its
+ * action from canonical state.
+ */
+export function takeSequence(
+  snapshot: RuntimeSnapshot,
+  dischargedActionCompletionEvents = 0,
+): number {
   assertCounterCanAdvance(snapshot.nextEventSequence, "nextEventSequence");
+  const remainingCompletionEvents = Math.max(
+    0,
+    requiredFutureActionCompletionEvents(snapshot) - dischargedActionCompletionEvents,
+  );
+  assertEventSequenceCapacity(snapshot, 1 + remainingCompletionEvents);
   const sequence = snapshot.nextEventSequence;
   snapshot.nextEventSequence += 1;
   return sequence;

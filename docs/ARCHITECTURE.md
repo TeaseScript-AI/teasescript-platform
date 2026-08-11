@@ -43,7 +43,9 @@ Ordinary TypeScript execution may remain synchronous, but it may not suspend inv
 
 A plan/checkpoint must either contain the lowered library behavior or bind to an exact compatible Standard Library identity/version. Restore against an implicit latest implementation is not permitted.
 
-This layering is accepted. Exact import syntax, version binding, generated declarations, privileged adapter modules, and the first Standard Library implementation slice remain open.
+This layering is accepted. ADR 0018 compact interactions and `say` pacing are implemented through compiler-owned
+full lowering into versioned engine instructions/state. Exact import syntax, linked Standard Library modules, version
+binding, generated declarations, and privileged adapter modules remain open.
 
 ## Syntax and implementation placement
 
@@ -107,8 +109,8 @@ execute instructions without duplicating operation logic. Whole-snapshot
 construction, cloning, validation, and cross-state invariants remain in
 `src/runtime/state.ts`.
 
-No `src/standard-library/` shell was created because no real Standard Library
-implementation is present.
+No `src/standard-library/` shell exists yet because the implemented ADR 0018 POC forms are fully lowered by the
+parser/compiler/runtime; linked reusable Standard Library modules remain future work.
 
 The technical playground workspace controller lives at
 `playground/workspace/controller.ts`. No speculative Player or shared browser

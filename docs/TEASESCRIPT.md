@@ -182,7 +182,11 @@ The current function subset includes:
 
 Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented. Typed signatures may be parsed for diagnostics while unsupported execution/type semantics remain rejected.
 
-The current implemented `say` and `say as` paths remain unchanged until a tested ADR 0018 implementation preserves source spans, diagnostics, visible output, speaker identity, deterministic RNG use, and checkpoint behavior while adding the accepted pacing contract.
+The current source/compiler implements the ADR 0018 `say` pacing and skip forms while preserving existing `say`/
+`say as` spans, diagnostics, visible output, speaker identity, deterministic RNG use, and checkpoint behavior.
+`skippable` and `unskippable` act as modifiers only where the existing value grammar cannot consume them as the complete
+`say` value. Bare `instant` is the zero-duration alias only when it fills the complete pacing slot; larger pacing
+expressions beginning with an identifier named `instant` remain ordinary expressions.
 
 ## Diagnostics
 

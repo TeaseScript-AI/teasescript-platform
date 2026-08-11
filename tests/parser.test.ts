@@ -89,12 +89,14 @@ test("parses say, say as, and exit statements", () => {
     {
       kind: "sayStatement",
       speaker: null,
+      skipPolicy: null,
       value: {
         kind: "stringLiteral",
         raw: '"Kneel."',
         value: "Kneel.",
         span: sourceSpan(source, 4, 12),
       },
+      pacing: null,
       span: sourceSpan(source, 0, 12),
     },
     {
@@ -104,12 +106,14 @@ test("parses say, say as, and exit statements", () => {
         name: "cashier",
         span: sourceSpan(source, 20, 27),
       },
+      skipPolicy: null,
       value: {
         kind: "stringLiteral",
         raw: '"Your total is five euros."',
         value: "Your total is five euros.",
         span: sourceSpan(source, 28, 55),
       },
+      pacing: null,
       span: sourceSpan(source, 13, 55),
     },
     {
@@ -117,6 +121,87 @@ test("parses say, say as, and exit statements", () => {
       span: sourceSpan(source, 56, 60),
     },
   ]);
+});
+
+test("parses say pacing and skip syntax with pacing spans", () => {
+  const source = 'say as vera unskippable "Read this", 1.5\nsay "Now", instant';
+  const result = parse(source);
+  const first = result.program.statements[0];
+  const second = result.program.statements[1];
+
+  assert.deepEqual(result.diagnostics, []);
+  assert.equal(first?.kind, "sayStatement");
+  assert.equal(first?.kind === "sayStatement" ? first.skipPolicy : null, "unskippable");
+  assert.deepEqual(
+    first?.kind === "sayStatement" && first.pacing !== null && first.pacing !== "instant"
+      ? first.pacing.span
+      : null,
+    sourceSpan(source, source.indexOf("1.5"), source.indexOf("1.5") + 3),
+  );
+  assert.deepEqual(first?.span, sourceSpan(source, 0, source.indexOf("\n")));
+  assert.equal(second?.kind === "sayStatement" ? second.pacing : null, "instant");
+  assert.deepEqual(second?.span, sourceSpan(source, source.indexOf("say \"Now\""), source.length));
+});
+
+test("treats say skip words as modifiers only when the existing expression cannot finish", () => {
+  const source = [
+    'say skippable "Read this."',
+    'say as vera unskippable "Read this."',
+    "say skippable",
+    "say unskippable",
+    "say skippable + suffix",
+    "say skippable, instant",
+    "say as vera skippable",
+    "say skippable[0]",
+    "say unskippable(index)",
+    "say skippable.member",
+    "say unskippable.member[0]",
+    "say as vera skippable[0], instant",
+  ].join("\n");
+  const result = parse(source);
+
+  assert.deepEqual(result.diagnostics, []);
+  const statements = result.program.statements.filter(
+    (statement): statement is Extract<typeof statement, { kind: "sayStatement" }> =>
+      statement.kind === "sayStatement",
+  );
+  assert.deepEqual(statements.map((statement) => statement.skipPolicy), [
+    "skippable",
+    "unskippable",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]);
+  assert.deepEqual(statements.slice(2).map((statement) => statement.value.kind), [
+    "identifier",
+    "identifier",
+    "binaryExpression",
+    "identifier",
+    "identifier",
+    "indexExpression",
+    "callExpression",
+    "propertyAccessExpression",
+    "indexExpression",
+    "indexExpression",
+  ]);
+  assert.equal(statements[5]?.pacing, "instant");
+  assert.equal(statements[11]?.pacing, "instant");
+  assert.deepEqual(statements[4]?.value.span, sourceSpan(source, source.indexOf("skippable + suffix"), source.indexOf("skippable + suffix") + "skippable + suffix".length));
+  const indexedStart = source.lastIndexOf("skippable[0]");
+  assert.deepEqual(statements[11]?.value.span, sourceSpan(source, indexedStart, indexedStart + "skippable[0]".length));
+});
+
+test("rejects missing say pacing expressions", () => {
+  const result = parse('say "later",');
+  assert.equal(result.program.statements.length, 0);
+  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.message === "Expected a pacing value after ','."));
 });
 
 test("preserves template text and identifier interpolation", () => {
@@ -127,6 +212,7 @@ test("preserves template text and identifier interpolation", () => {
   assert.deepEqual(result.program.statements[0], {
     kind: "sayStatement",
     speaker: null,
+    skipPolicy: null,
     value: {
       kind: "templateLiteral",
       parts: [
@@ -154,6 +240,7 @@ test("preserves template text and identifier interpolation", () => {
       ],
       span: sourceSpan(source, 4, 22),
     },
+    pacing: null,
     span: sourceSpan(source, 0, 22),
   });
 });

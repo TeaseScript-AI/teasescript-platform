@@ -21,6 +21,7 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
@@ -90,7 +91,7 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
 
   for (const scenario of scenarios) {
     const compiled = plan(scenario.source);
-    const result = run(compiled, createFreshRuntimeSnapshot(compiled));
+    const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
     assert.equal(result.snapshot.status, "halted", scenario.name);
     assert.deepEqual(result.events.map((event) => event.kind), scenario.expectedKinds, scenario.name);
     assert.equal(validateRuntimeSnapshot(result.snapshot, compiled).valid, true, scenario.name);
@@ -176,7 +177,7 @@ test("rejects unsafe counters through direct snapshot and checkpoint boundaries"
 
 test("rejects event-sequence exhaustion before emitting a duplicate sequence", () => {
   const compiled = plan('say "one"\nsay "two"\nexit');
-  const snapshot = createFreshRuntimeSnapshot(compiled);
+  const snapshot = createImmediatePacingRuntimeSnapshot(compiled);
   snapshot.nextEventSequence = MAX_SAFE;
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
 
@@ -271,7 +272,7 @@ test("requires safe integers for nested runtime identities, positions, and progr
 
 test("emits only safe, unique, strictly increasing event sequences", () => {
   const compiled = plan('say "one"\nsay "two"\nexit');
-  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   const sequences = result.events.map((event) => event.sequence);
 
   assert.ok(sequences.every(Number.isSafeInteger));

@@ -312,6 +312,30 @@ function validateInstruction(
         errors.push(planError("TSC002", "Temporary boolean expectation must be boolean.", `${path}.expectBoolean`));
       }
       return;
+    case "prepareSaySpeaker":
+      if (!hasExactKeys(value, ["kind", "speaker", "destinationTemporary", "span"])) {
+        errors.push(planError("TSC002", "Prepared say speaker instruction contains unsupported fields.", path));
+      }
+      if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
+      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      return;
+    case "prepareSayContextualSpeaker":
+      if (!hasExactKeys(value, ["kind", "speakerTemporary", "destinationTemporary", "span"])) {
+        errors.push(planError("TSC002", "Prepared say contextual speaker instruction contains unsupported fields.", path));
+      }
+      validateTemporaryId(value.speakerTemporary, `${path}.speakerTemporary`, temporaryCount, errors);
+      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      if (value.speakerTemporary === value.destinationTemporary) {
+        errors.push(planError("TSC002", "Prepared say contextual speaker must not alias its output speaker.", `${path}.destinationTemporary`));
+      }
+      return;
+    case "prepareSayText":
+      if (!hasExactKeys(value, ["kind", "value", "destinationTemporary", "span"])) {
+        errors.push(planError("TSC002", "Prepared say text instruction contains unsupported fields.", path));
+      }
+      validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      return;
     case "prepareInteractionSpeaker":
       if (!hasExactKeys(value, ["kind", "speaker", "destinationTemporary", "span"])) {
         errors.push(planError("TSC002", "Prepared interaction speaker instruction contains unsupported fields.", path));
@@ -375,6 +399,15 @@ function validateInstruction(
     case "say":
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      if (value.speakerTemporary !== undefined) validateTemporaryId(value.speakerTemporary, `${path}.speakerTemporary`, temporaryCount, errors);
+      if (value.contextualSpeakerTemporary !== undefined) validateTemporaryId(value.contextualSpeakerTemporary, `${path}.contextualSpeakerTemporary`, temporaryCount, errors);
+      if (value.textTemporary !== undefined) validateTemporaryId(value.textTemporary, `${path}.textTemporary`, temporaryCount, errors);
+      if (value.skipPolicy !== null && value.skipPolicy !== "skippable" && value.skipPolicy !== "unskippable") {
+        errors.push(planError("TSC002", "Say skip policy is invalid.", `${path}.skipPolicy`));
+      }
+      if (value.pacing !== "smart" && value.pacing !== "instant") {
+        validateExpression(value.pacing, `${path}.pacing`, errors, false, temporaryCount);
+      }
       return;
     case "wait":
       if (value.unit !== null && !["ms", "s", "min", "h"].includes(String(value.unit))) {
@@ -416,9 +449,21 @@ function validateInteractionInstruction(
     : kind === "number" || (kind === "choice" && labelType === "number")
       ? "number"
       : "string";
-  if (value.expectedResult !== expected) errors.push(planError("TSC002", "Interaction result domain does not match its kind.", `${path}.expectedResult`));
+  if (value.expectedResult !== expected) {
+    errors.push(planError(
+      "TSC002",
+      "Interaction result domain does not match its kind.",
+      `${path}.expectedResult`,
+    ));
+  }
   if (kind === "button") {
-    if (value.destinationTemporary !== null) errors.push(planError("TSC002", "Button interaction must not have a result destination.", `${path}.destinationTemporary`));
+    if (value.destinationTemporary !== null) {
+      errors.push(planError(
+        "TSC002",
+        "Button interaction must not have a result destination.",
+        `${path}.destinationTemporary`,
+      ));
+    }
   } else {
     validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
   }
@@ -426,7 +471,11 @@ function validateInteractionInstruction(
   if (prepared) {
     validateTemporaryId(value.speakerTemporary, `${path}.speakerTemporary`, temporaryCount, errors);
     if (value.destinationTemporary === value.speakerTemporary) {
-      errors.push(planError("TSC002", "Interaction result destination must not alias its prepared speaker temporary.", `${path}.destinationTemporary`));
+      errors.push(planError(
+        "TSC002",
+        "Interaction result destination must not alias its prepared speaker temporary.",
+        `${path}.destinationTemporary`,
+      ));
     }
     validatePreparedInteractionUi(kind, ui, `${path}.preparedUi`, temporaryCount, value.speakerTemporary, value.destinationTemporary, errors);
     return;
@@ -481,14 +530,23 @@ function validateStaticInteractionUi(
     aggregate += bytes;
     return true;
   };
-  validateInteractionAccessibleName(kind, ui.accessibleName, `${path}.accessibleName`, countString, measurementExhausted, errors);
+  validateInteractionAccessibleName(
+    kind,
+    ui.accessibleName,
+    `${path}.accessibleName`,
+    countString,
+    measurementExhausted,
+    errors,
+  );
   if (kind === "button") countString(ui.buttonLabel, `${path}.buttonLabel`);
   if (kind === "text" || kind === "number") {
     if (ui.hint !== null) countString(ui.hint, `${path}.hint`);
   }
   if (kind === "choice") {
     const labelType = ui.labelType;
-    if (!["none", "identifier", "number"].includes(String(labelType))) errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
+    if (!["none", "identifier", "number"].includes(String(labelType))) {
+      errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
+    }
     if (!Array.isArray(ui.options) || ui.options.length === 0 || ui.options.length > MAX_INTERACTION_OPTION_ENTRIES) {
       errors.push(planError("TSC002", "Choice options exceed the shared collection boundary or are empty.", `${path}.options`));
     } else {
@@ -501,21 +559,41 @@ function validateStaticInteractionUi(
           errors.push(planError("TSC002", "Choice option must be an object.", optionPath));
           continue;
         }
-        if (!hasExactKeys(option, ["text", "label"])) errors.push(planError("TSC002", "Choice option contains unsupported fields.", optionPath));
+        if (!hasExactKeys(option, ["text", "label"])) {
+          errors.push(planError(
+            "TSC002",
+            "Choice option contains unsupported fields.",
+            optionPath,
+          ));
+        }
         const textValid = countString(option.text, `${optionPath}.text`);
         const label = option.label;
         const validLabel = labelType === "none"
           ? label === null
           : labelType === "identifier"
-            ? typeof label === "string" && countString(label, `${optionPath}.label`) && (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
-            : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
-        if (!validLabel) errors.push(planError("TSC002", "Choice option label does not match the choice label type.", `${optionPath}.label`));
+            ? typeof label === "string" &&
+              countString(label, `${optionPath}.label`) &&
+              (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
+            : typeof label === "number" &&
+              Number.isFinite(label) &&
+              !Object.is(label, -0);
+        if (!validLabel) {
+          errors.push(planError(
+            "TSC002",
+            "Choice option label does not match the choice label type.",
+            `${optionPath}.label`,
+          ));
+        }
         if (!measurementExhausted && validLabel && (typeof label === "string" || typeof label === "number")) {
-          if (labels.has(label)) errors.push(planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`));
+          if (labels.has(label)) {
+            errors.push(planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`));
+          }
           labels.add(label);
         }
         if (!measurementExhausted && textValid && labelType === "none") {
-          if (visible.has(option.text as string)) errors.push(planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`));
+          if (visible.has(option.text as string)) {
+            errors.push(planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`));
+          }
           visible.add(option.text as string);
         }
       }
@@ -541,7 +619,9 @@ function validatePreparedInteractionUi(
     : kind === "text" || kind === "number"
       ? ["kind", "hintTemporary", "accessibleName"]
       : ["kind", "labelType", "optionsTemporary", "optionCount", "labels", "accessibleName"];
-  if (!hasExactKeys(ui, keys)) errors.push(planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path));
+  if (!hasExactKeys(ui, keys)) {
+    errors.push(planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path));
+  }
   let aggregate = 0;
   let measurementExhausted = false;
   const countString = (candidate: unknown, fieldPath: string): candidate is string => {
@@ -582,7 +662,11 @@ function validatePreparedInteractionUi(
     validateTemporaryId(value, fieldPath, temporaryCount, errors);
     if (typeof value === "number") {
       if (value === speakerTemporary || value === destinationTemporary || used.has(value)) {
-        errors.push(planError("TSC002", "Prepared interaction temporaries must be pairwise distinct.", fieldPath));
+        errors.push(planError(
+          "TSC002",
+          "Prepared interaction temporaries must be pairwise distinct.",
+          fieldPath,
+        ));
       }
       used.add(value);
     }
@@ -596,13 +680,25 @@ function validatePreparedInteractionUi(
     return;
   }
   if (kind !== "choice") return;
-  if (!["none", "identifier", "number"].includes(String(ui.labelType))) errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
+  if (!["none", "identifier", "number"].includes(String(ui.labelType))) {
+    errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
+  }
   addTemporary(ui.optionsTemporary, `${path}.optionsTemporary`);
-  if (!Number.isSafeInteger(ui.optionCount) || (ui.optionCount as number) < 1 || (ui.optionCount as number) > MAX_INTERACTION_OPTION_ENTRIES) {
+  if (
+    !Number.isSafeInteger(ui.optionCount) ||
+    (ui.optionCount as number) < 1 ||
+    (ui.optionCount as number) > MAX_INTERACTION_OPTION_ENTRIES
+  ) {
     errors.push(planError("TSC002", "Prepared choice option count exceeds the shared collection boundary or is empty.", `${path}.optionCount`));
   }
   if (ui.labelType === "none") {
-    if (ui.labels !== null) errors.push(planError("TSC002", "Unlabelled prepared choice must not carry labels.", `${path}.labels`));
+    if (ui.labels !== null) {
+      errors.push(planError(
+        "TSC002",
+        "Unlabelled prepared choice must not carry labels.",
+        `${path}.labels`,
+      ));
+    }
     return;
   }
   if (!Array.isArray(ui.labels) || ui.labels.length !== ui.optionCount) {
@@ -614,10 +710,20 @@ function validatePreparedInteractionUi(
     const label = ui.labels[index];
     const labelPath = `${path}.labels[${index}]`;
     const valid = ui.labelType === "identifier"
-      ? countString(label, labelPath) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
-      : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
-    if (!valid) errors.push(planError("TSC002", "Prepared choice label does not match the label type.", labelPath));
-    if ((typeof label === "string" || typeof label === "number") && labels.has(label)) errors.push(planError("TSC002", "Prepared choice labels must be unique.", labelPath));
+      ? countString(label, labelPath) &&
+        /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
+      : typeof label === "number" &&
+        Number.isFinite(label) &&
+        !Object.is(label, -0);
+    if (!valid) {
+      errors.push(planError("TSC002", "Prepared choice label does not match the label type.", labelPath));
+    }
+    if (
+      (typeof label === "string" || typeof label === "number") &&
+      labels.has(label)
+    ) {
+      errors.push(planError("TSC002", "Prepared choice labels must be unique.", labelPath));
+    }
     if (typeof label === "string" || typeof label === "number") labels.add(label);
   }
 }
@@ -635,15 +741,35 @@ function validateInteractionAccessibleName(
     return;
   }
   if (accessible.kind === "text") {
-    if (!hasExactKeys(accessible, ["kind", "text"])) errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", path));
-    if (countString(accessible.text, `${path}.text`) && !measurementExhausted && !interactionStringHasNonWhitespace(accessible.text)) {
+    if (!hasExactKeys(accessible, ["kind", "text"])) {
+      errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", path));
+    }
+    if (
+      countString(accessible.text, `${path}.text`) &&
+      !measurementExhausted &&
+      !interactionStringHasNonWhitespace(accessible.text)
+    ) {
       errors.push(planError("TSC002", "Explicit interaction accessible name must contain a non-whitespace character.", `${path}.text`));
     }
     return;
   }
-  if (!hasExactKeys(accessible, ["kind", "key"])) errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", path));
-  const expectedKey = kind === "button" ? "continue" : kind === "number" ? "number" : kind === "choice" ? "chooseOption" : "answer";
-  if (accessible.key !== expectedKey) errors.push(planError("TSC002", "Interaction localized accessible-name key does not match its kind.", `${path}.key`));
+  if (!hasExactKeys(accessible, ["kind", "key"])) {
+    errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", path));
+  }
+  const expectedKey = kind === "button"
+    ? "continue"
+    : kind === "number"
+      ? "number"
+      : kind === "choice"
+        ? "chooseOption"
+        : "answer";
+  if (accessible.key !== expectedKey) {
+    errors.push(planError(
+      "TSC002",
+      "Interaction localized accessible-name key does not match its kind.",
+      `${path}.key`,
+    ));
+  }
 }
 
 function validateExpression(
@@ -928,6 +1054,7 @@ function validateInstructionControlFlowRegions(
   if (index === null) return;
 
   validateCanonicalInteractionResultHandoffs(instructions, index, errors);
+  validateCanonicalPreparedSays(instructions, index, errors);
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
     const region = index.owners[instructionIndex];
@@ -973,6 +1100,394 @@ function validateInstructionControlFlowRegions(
         return;
     }
   });
+}
+
+function validateCanonicalPreparedSays(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  errors: PlanValidationError[],
+): void {
+  const producers = new Map<number, number[]>();
+  instructions.forEach((instruction, instructionIndex) => {
+    if (!isRecord(instruction)) return;
+    const temporaryId = producedTemporaryId(instruction);
+    if (temporaryId === null) return;
+    const entries = producers.get(temporaryId) ?? [];
+    entries.push(instructionIndex);
+    producers.set(temporaryId, entries);
+  });
+
+  const consumed = new Set<number>();
+  instructions.forEach((instruction, instructionIndex) => {
+    if (!isRecord(instruction) || instruction.kind !== "say") return;
+    const region = index.owners[instructionIndex];
+    if (region === undefined) return;
+    const path = `$.instructions[${instructionIndex}]`;
+    const speakerTemporary = instruction.speakerTemporary;
+    const contextualSpeakerTemporary = instruction.contextualSpeakerTemporary;
+    const textTemporary = instruction.textTemporary;
+    if (speakerTemporary !== undefined && contextualSpeakerTemporary === undefined) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared say speaker requires its contextual speaker capture.",
+        `${path}.contextualSpeakerTemporary`,
+      ));
+    }
+    if (contextualSpeakerTemporary !== undefined && speakerTemporary === undefined) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared say contextual speaker requires its output speaker capture.",
+        `${path}.speakerTemporary`,
+      ));
+    }
+    if (speakerTemporary !== undefined && textTemporary !== undefined && speakerTemporary === textTemporary) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared say speaker and text temporaries must not alias.",
+        `${path}.textTemporary`,
+      ));
+    }
+    if (
+      contextualSpeakerTemporary !== undefined &&
+      (contextualSpeakerTemporary === speakerTemporary || contextualSpeakerTemporary === textTemporary)
+    ) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared say contextual speaker temporary must not alias another prepared say temporary.",
+        `${path}.contextualSpeakerTemporary`,
+      ));
+    }
+    validatePreparedSayProducer(
+      "prepareSaySpeaker",
+      speakerTemporary,
+      instruction.speaker,
+      instructionIndex,
+      path,
+      region,
+      instructions,
+      index,
+      producers,
+      consumed,
+      errors,
+    );
+    validatePreparedSayProducer(
+      "prepareSayText",
+      textTemporary,
+      instruction.value,
+      instructionIndex,
+      path,
+      region,
+      instructions,
+      index,
+      producers,
+      consumed,
+      errors,
+    );
+    validatePreparedSayContextualSpeaker(
+      contextualSpeakerTemporary,
+      speakerTemporary,
+      instructionIndex,
+      path,
+      region,
+      instructions,
+      index,
+      producers,
+      consumed,
+      errors,
+    );
+  });
+
+  instructions.forEach((instruction, instructionIndex) => {
+    if (
+      isRecord(instruction) &&
+      (instruction.kind === "prepareSaySpeaker" ||
+        instruction.kind === "prepareSayText" ||
+        instruction.kind === "prepareSayContextualSpeaker") &&
+      !consumed.has(instructionIndex)
+    ) {
+      errors.push(planError(
+        "TSC002",
+        "Prepared say instruction must have one matching consuming say instruction.",
+        `$.instructions[${instructionIndex}]`,
+      ));
+    }
+  });
+}
+
+function validatePreparedSayProducer(
+  expectedKind: "prepareSaySpeaker" | "prepareSayText",
+  temporaryId: unknown,
+  expectedValue: unknown,
+  sayIndex: number,
+  sayPath: string,
+  region: InstructionExecutionRegion,
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  producers: ReadonlyMap<number, readonly number[]>,
+  consumed: Set<number>,
+  errors: PlanValidationError[],
+): void {
+  if (!Number.isSafeInteger(temporaryId)) return;
+  const preparedTemporaryId = temporaryId as number;
+  const candidates = producers.get(preparedTemporaryId) ?? [];
+  const producerIndex = candidates.length === 1 ? candidates[0] : undefined;
+  const producer = producerIndex === undefined ? undefined : instructions[producerIndex];
+  const producerPath = `${sayPath}.${expectedKind === "prepareSaySpeaker" ? "speakerTemporary" : "textTemporary"}`;
+  if (
+    producerIndex === undefined ||
+    !isRecord(producer) ||
+    producer.kind !== expectedKind ||
+    producerIndex >= sayIndex ||
+    index.owners[producerIndex] !== region ||
+    !samePreparedSayValue(
+      expectedKind === "prepareSaySpeaker" ? producer.speaker : producer.value,
+      expectedValue,
+    )
+  ) {
+    errors.push(planError(
+      "TSC002",
+      `Prepared say ${expectedKind === "prepareSaySpeaker" ? "speaker" : "text"} temporary lacks its canonical producer.`,
+      producerPath,
+    ));
+    return;
+  }
+  if (consumed.has(producerIndex)) {
+    errors.push(planError(
+      "TSC002",
+      "Prepared say producer must not be reused by another say instruction.",
+      producerPath,
+    ));
+    return;
+  }
+  consumed.add(producerIndex);
+  if (preparedSayTemporaryIsCleared(
+    instructions,
+    producerIndex,
+    sayIndex,
+    preparedTemporaryId,
+  )) {
+    errors.push(planError(
+      "TSC002",
+      `Prepared say ${expectedKind === "prepareSaySpeaker" ? "speaker" : "text"} temporary is cleared before its consuming say instruction.`,
+      producerPath,
+    ));
+  }
+  if (preparedSayCanBeBypassed(instructions, index, region, producerIndex, sayIndex)) {
+    errors.push(planError(
+      "TSC002",
+      "Prepared say instruction can be reached while bypassing its required preparation.",
+      sayPath,
+    ));
+  }
+}
+
+function validatePreparedSayContextualSpeaker(
+  temporaryId: unknown,
+  speakerTemporary: unknown,
+  sayIndex: number,
+  sayPath: string,
+  region: InstructionExecutionRegion,
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  producers: ReadonlyMap<number, readonly number[]>,
+  consumed: Set<number>,
+  errors: PlanValidationError[],
+): void {
+  if (!Number.isSafeInteger(temporaryId)) return;
+  const candidates = producers.get(temporaryId as number) ?? [];
+  const producerIndex = candidates.length === 1 ? candidates[0] : undefined;
+  const producer = producerIndex === undefined ? undefined : instructions[producerIndex];
+  const speakerCandidates = Number.isSafeInteger(speakerTemporary)
+    ? producers.get(speakerTemporary as number) ?? []
+    : [];
+  const speakerProducerIndex = speakerCandidates.length === 1
+    ? speakerCandidates[0]
+    : undefined;
+  const path = `${sayPath}.contextualSpeakerTemporary`;
+  if (
+    producerIndex === undefined ||
+    !isRecord(producer) ||
+    producer.kind !== "prepareSayContextualSpeaker" ||
+    producer.speakerTemporary !== speakerTemporary ||
+    speakerProducerIndex === undefined ||
+    producerIndex !== speakerProducerIndex + 1 ||
+    producerIndex >= sayIndex ||
+    index.owners[producerIndex] !== region
+  ) {
+    errors.push(planError("TSC002", "Prepared say contextual speaker lacks its canonical producer.", path));
+    return;
+  }
+  if (consumed.has(producerIndex)) {
+    errors.push(planError("TSC002", "Prepared say producer must not be reused by another say instruction.", path));
+    return;
+  }
+  consumed.add(producerIndex);
+  if (preparedSayTemporaryIsCleared(instructions, producerIndex, sayIndex, temporaryId as number)) {
+    errors.push(planError("TSC002", "Prepared say contextual speaker is cleared before its consuming say instruction.", path));
+  }
+  if (preparedSayContextualSpeakerIsUsedBeforeCapture(
+    instructions,
+    index,
+    region,
+    producerIndex,
+    temporaryId as number,
+  )) {
+    errors.push(planError(
+      "TSC002",
+      "Prepared say contextual speaker must be captured before its payload is lowered.",
+      path,
+    ));
+  }
+  if (preparedSayCanBeBypassed(instructions, index, region, producerIndex, sayIndex)) {
+    errors.push(planError("TSC002", "Prepared say instruction can be reached while bypassing its required preparation.", sayPath));
+  }
+}
+
+function preparedSayContextualSpeakerIsUsedBeforeCapture(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  region: InstructionExecutionRegion,
+  producerIndex: number,
+  temporaryId: number,
+): boolean {
+  for (let instructionIndex = region.startInstruction; instructionIndex < producerIndex; instructionIndex += 1) {
+    const instruction = instructions[instructionIndex];
+    if (
+      isRecord(instruction) &&
+      index.owners[instructionIndex] === region &&
+      preparedSayPayloadMayReferenceTemporary(instruction, temporaryId)
+    ) return true;
+  }
+  return false;
+}
+
+function preparedSayPayloadMayReferenceTemporary(
+  instruction: Record<string, unknown>,
+  temporaryId: number,
+): boolean {
+  let expression: unknown;
+  switch (instruction.kind) {
+    case "evaluate":
+    case "prepareReference":
+      expression = instruction.expression;
+      break;
+    case "declareBinding":
+    case "assign":
+    case "storeTemporary":
+    case "prepareSayText":
+    case "say":
+    case "setDeclaredSpeakerProperty":
+    case "returnValue":
+      expression = instruction.value;
+      break;
+    default:
+      expression = undefined;
+  }
+  return expressionMayReferenceTemporary(expression, temporaryId);
+}
+
+function expressionMayReferenceTemporary(value: unknown, temporaryId: number): boolean {
+  if (!isRecord(value)) return false;
+  switch (value.kind) {
+    case "temporary":
+      return value.temporaryId === temporaryId;
+    case "list":
+    case "set":
+      return Array.isArray(value.elements) && value.elements.some((item) =>
+        expressionMayReferenceTemporary(item, temporaryId)
+      );
+    case "object":
+      return Array.isArray(value.properties) && value.properties.some((property) =>
+        isRecord(property) && expressionMayReferenceTemporary(property.value, temporaryId)
+      );
+    case "group":
+      return expressionMayReferenceTemporary(value.expression, temporaryId);
+    case "template":
+      return Array.isArray(value.parts) && value.parts.some((part) =>
+        isRecord(part) &&
+        part.kind === "expression" &&
+        expressionMayReferenceTemporary(part.expression, temporaryId)
+      );
+    case "property":
+      return expressionMayReferenceTemporary(value.object, temporaryId);
+    case "index":
+      return expressionMayReferenceTemporary(value.object, temporaryId) ||
+        expressionMayReferenceTemporary(value.index, temporaryId);
+    case "call": {
+      const calleeReferences =
+        isRecord(value.callee) &&
+        value.callee.kind === "property" &&
+        expressionMayReferenceTemporary(value.callee.object, temporaryId);
+      const argumentReferences = Array.isArray(value.arguments) && value.arguments.some((argument) =>
+        isRecord(argument) && expressionMayReferenceTemporary(argument.value, temporaryId)
+      );
+      return calleeReferences || argumentReferences;
+    }
+    case "unary":
+      return expressionMayReferenceTemporary(value.operand, temporaryId);
+    case "binary":
+      return expressionMayReferenceTemporary(value.left, temporaryId) ||
+        expressionMayReferenceTemporary(value.right, temporaryId);
+    case "range":
+      return expressionMayReferenceTemporary(value.start, temporaryId) ||
+        expressionMayReferenceTemporary(value.end, temporaryId);
+    default:
+      return false;
+  }
+}
+
+function preparedSayTemporaryIsCleared(
+  instructions: readonly unknown[],
+  producerIndex: number,
+  sayIndex: number,
+  temporaryId: number,
+): boolean {
+  for (
+    let instructionIndex = producerIndex + 1;
+    instructionIndex < sayIndex;
+    instructionIndex += 1
+  ) {
+    const instruction = instructions[instructionIndex];
+    if (
+      isRecord(instruction) &&
+      instruction.kind === "clearTemporary" &&
+      instruction.temporaryId === temporaryId
+    ) return true;
+  }
+  return false;
+}
+
+function preparedSayCanBeBypassed(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  region: InstructionExecutionRegion,
+  producerIndex: number,
+  sayIndex: number,
+): boolean {
+  for (let sourceIndex = region.startInstruction; sourceIndex < region.endInstruction; sourceIndex += 1) {
+    const instruction = instructions[sourceIndex];
+    if (!isRecord(instruction) || index.owners[sourceIndex] !== region) continue;
+    if (explicitInstructionTargets(instruction).some((target) =>
+      typeof target === "number" && Number.isSafeInteger(target) &&
+      target > producerIndex && target <= sayIndex &&
+      (sourceIndex < producerIndex || sourceIndex >= sayIndex)
+    )) return true;
+  }
+  return false;
+}
+
+function samePreparedSayValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length && left.every((value, index) => samePreparedSayValue(value, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) =>
+    Object.hasOwn(right, key) && samePreparedSayValue(left[key], right[key])
+  );
 }
 
 function validateCanonicalInteractionResultHandoffs(
@@ -1100,6 +1615,12 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
   if (instruction.kind === "storeTemporary") {
     value = instruction.temporaryId;
   } else if (
+    instruction.kind === "prepareSaySpeaker" ||
+    instruction.kind === "prepareSayText" ||
+    instruction.kind === "prepareSayContextualSpeaker"
+  ) {
+    value = instruction.destinationTemporary;
+  } else if (
     instruction.kind === "prepareInteractionSpeaker" ||
     instruction.kind === "prepareReference" ||
     instruction.kind === "callFunction" ||
@@ -1139,6 +1660,7 @@ function canonicalHandoffConsumesTemporary(
     case "declareBinding":
     case "assign":
     case "storeTemporary":
+    case "prepareSayText":
     case "say":
     case "setDeclaredSpeakerProperty":
     case "returnValue":

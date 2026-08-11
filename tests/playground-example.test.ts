@@ -9,7 +9,7 @@ import {
 import { compileSource } from "../src/compiler.js";
 import { CHECKPOINT_VERSION } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 test("executes the repository playground example deterministically", async () => {
   const source = await readFile("examples/playground/main.tease", "utf8");
@@ -18,8 +18,8 @@ test("executes the repository playground example deterministically", async () =>
   assert.deepEqual(compilation.diagnostics, []);
   assert.notEqual(compilation.plan, null);
   const plan = compilation.plan!;
-  const first = run(plan, createFreshRuntimeSnapshot(plan));
-  const second = run(plan, createFreshRuntimeSnapshot(plan));
+  const first = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  const second = run(plan, createImmediatePacingRuntimeSnapshot(plan));
 
   assert.deepEqual(second.events, first.events);
   assert.equal(first.snapshot.status, "halted");
@@ -43,7 +43,7 @@ test("every fixed repository playground example compiles and completes", async (
     assert.notEqual(compilation.plan, null, name);
     const result = run(
       compilation.plan!,
-      createFreshRuntimeSnapshot(compilation.plan!),
+      createImmediatePacingRuntimeSnapshot(compilation.plan!),
     );
     assert.equal(result.snapshot.status, "halted", name);
   }
@@ -65,7 +65,7 @@ test("the functions example is allowlisted and visibly exercises the milestone",
   assert.deepEqual(compilation.diagnostics, []);
   const result = run(
     compilation.plan!,
-    createFreshRuntimeSnapshot(compilation.plan!),
+    createImmediatePacingRuntimeSnapshot(compilation.plan!),
   );
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),

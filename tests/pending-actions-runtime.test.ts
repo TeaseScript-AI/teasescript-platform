@@ -8,6 +8,7 @@ import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { RuntimeDelayActionSnapshot } from "../src/runtime/actions/model.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 function plan(source: string) {
   const result = compileSource(source);
@@ -18,7 +19,7 @@ function plan(source: string) {
 
 test("wait lowers to a foreground delay and settles only after an explicit observation", () => {
   const compiled = plan('wait 1.5 s\nsay "done"\nexit');
-  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const waiting = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   assert.equal(waiting.snapshot.status, "waiting");
   assert.equal(waiting.snapshot.foregroundAction?.kind, "delay");
   assert.equal((waiting.snapshot.foregroundAction as RuntimeDelayActionSnapshot).deadlineMs, 1500);
@@ -63,16 +64,42 @@ test("typed completion is idempotent and classifies invalid, early, stale, and u
   const compiled = plan("wait 10 ms\nwait 10 ms\nexit");
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const actionId = waiting.snapshot.foregroundAction!.actionId;
-  const early = completeAction(compiled, waiting.snapshot, { actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs: 9 } });
+  const early = completeAction(compiled, waiting.snapshot, {
+    actionId,
+    actionKind: "delay",
+    payload: { kind: "time", currentSessionTimeMs: 9 },
+  });
   assert.equal(early.outcome.kind, "notDue");
-  const settled = completeAction(compiled, waiting.snapshot, { actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs: 10 } });
+  const settled = completeAction(compiled, waiting.snapshot, {
+    actionId,
+    actionKind: "delay",
+    payload: { kind: "time", currentSessionTimeMs: 10 },
+  });
   assert.equal(settled.outcome.kind, "completed");
-  const duplicate = completeAction(compiled, settled.snapshot, { actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs: 10 } });
+  const duplicate = completeAction(compiled, settled.snapshot, {
+    actionId,
+    actionKind: "delay",
+    payload: { kind: "time", currentSessionTimeMs: 10 },
+  });
   assert.equal(duplicate.outcome.kind, "alreadySettled");
   assert.deepEqual(duplicate.events, []);
   const secondWaiting = run(compiled, settled.snapshot);
   const secondId = secondWaiting.snapshot.foregroundAction!.actionId;
-  const secondSettled = completeAction(compiled, secondWaiting.snapshot, { actionId: secondId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs: 20 } });
-  assert.equal(completeAction(compiled, secondSettled.snapshot, { actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs: 20 } }).outcome.kind, "staleAction");
-  assert.equal(completeAction(compiled, secondSettled.snapshot, { actionId: secondId + 1, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs: 20 } }).outcome.kind, "unknownAction");
+  const secondSettled = completeAction(compiled, secondWaiting.snapshot, {
+    actionId: secondId,
+    actionKind: "delay",
+    payload: { kind: "time", currentSessionTimeMs: 20 },
+  });
+  const stale = completeAction(compiled, secondSettled.snapshot, {
+    actionId,
+    actionKind: "delay",
+    payload: { kind: "time", currentSessionTimeMs: 20 },
+  });
+  assert.equal(stale.outcome.kind, "staleAction");
+  const unknown = completeAction(compiled, secondSettled.snapshot, {
+    actionId: secondId + 1,
+    actionKind: "delay",
+    payload: { kind: "time", currentSessionTimeMs: 20 },
+  });
+  assert.equal(unknown.outcome.kind, "unknownAction");
 });

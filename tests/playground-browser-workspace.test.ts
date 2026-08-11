@@ -8,7 +8,23 @@ test("browser playground exposes the bounded editable workspace controls", async
     readFile(resolve(process.cwd(), "playground/index.html"), "utf8"),
     readFile(resolve(process.cwd(), "playground/browser.ts"), "utf8"),
   ]);
-  for (const id of ["source-code", "source-lines", "source-panel", "player-panel", "compile", "run", "step", "reset", "reload-example", "import-source", "export-source", "refresh-workspace"]) assert.match(html, new RegExp(`id="${id}"`, "u"));
+  const requiredElementIds = [
+    "source-code",
+    "source-lines",
+    "source-panel",
+    "player-panel",
+    "compile",
+    "run",
+    "step",
+    "reset",
+    "reload-example",
+    "import-source",
+    "export-source",
+    "refresh-workspace",
+  ];
+  for (const id of requiredElementIds) {
+    assert.match(html, new RegExp(`id="${id}"`, "u"));
+  }
   assert.match(html, /<textarea id="source-code"/u);
   assert.match(html, /Reserved for future timer UI/u);
   assert.match(html, /future-timer-circle/u);

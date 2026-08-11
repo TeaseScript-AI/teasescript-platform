@@ -396,6 +396,15 @@ class Parser {
       speaker = this.#identifier(this.#advance());
     }
 
+    let skipPolicy: SayStatement["skipPolicy"] = null;
+    if (this.#check(TokenKind.Identifier) && !this.#canParseCompleteSayValue()) {
+      const policy = this.#peek().lexeme;
+      if (policy === "skippable" || policy === "unskippable") {
+        skipPolicy = policy;
+        this.#advance();
+      }
+    }
+
     const valueStart = this.#peek().kind;
     const value = this.#parseExpression();
     if (value === null) {
@@ -410,12 +419,75 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
+    let pacing: SayStatement["pacing"] = null;
+    let endSpan = value.span;
+    if (this.#match(TokenKind.Comma)) {
+      if (this.#canParseInstantPacingAlias()) {
+        endSpan = this.#advance().span;
+        pacing = "instant";
+      } else {
+        const parsedPacing = this.#parseExpression();
+        if (parsedPacing === null) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedExpression,
+            "Expected a pacing value after ','.",
+          );
+          this.#synchronizeStatement();
+          return null;
+        }
+        pacing = parsedPacing;
+        endSpan = parsedPacing.span;
+      }
+    }
     return Object.freeze({
       kind: "sayStatement",
       speaker,
+      skipPolicy,
       value,
-      span: spanFrom(keyword.span, value.span),
+      pacing,
+      span: spanFrom(keyword.span, endSpan),
     });
+  }
+
+  /**
+   * `skippable` and `unskippable` predate their modifier meaning as ordinary
+   * identifiers. Keep that interpretation whenever the existing say grammar
+   * can consume a complete value (and optional pacing) from this position.
+   */
+  #canParseCompleteSayValue(): boolean {
+    const speculative = new Parser(this.tokens);
+    speculative.#current = this.#current;
+
+    const value = speculative.#parseExpression();
+    if (value === null || speculative.#diagnostics.length > 0) return false;
+
+    if (speculative.#match(TokenKind.Comma)) {
+      if (speculative.#canParseInstantPacingAlias()) {
+        speculative.#advance();
+      } else {
+        const pacing = speculative.#parseExpression();
+        if (pacing === null || speculative.#diagnostics.length > 0) return false;
+      }
+    }
+
+    return speculative.#isSayStatementBoundary();
+  }
+
+  #isSayStatementBoundary(): boolean {
+    return (
+      this.#check(TokenKind.Newline) ||
+      this.#check(TokenKind.RightBrace) ||
+      this.#check(TokenKind.EndOfFile)
+    );
+  }
+
+  /** `instant` remains an identifier unless it fills the entire pacing slot. */
+  #canParseInstantPacingAlias(): boolean {
+    if (!this.#checkIdentifier("instant")) return false;
+    const speculative = new Parser(this.tokens);
+    speculative.#current = this.#current;
+    speculative.#advance();
+    return speculative.#isSayStatementBoundary();
   }
 
   #parseExitStatement(): Statement {
@@ -1420,7 +1492,12 @@ class Parser {
         break;
       }
     }
-    if (options.length === 0 && !this.#diagnostics.some((item) => item.code === parserDiagnosticCode.expectedChoiceOption && item.span.start.offset >= command.span.start.offset)) {
+    const missingChoiceOptionWasReported = this.#diagnostics.some(
+      (item) =>
+        item.code === parserDiagnosticCode.expectedChoiceOption &&
+        item.span.start.offset >= command.span.start.offset,
+    );
+    if (options.length === 0 && !missingChoiceOptionWasReported) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedChoiceOption,
         "Expected at least one choice option.",

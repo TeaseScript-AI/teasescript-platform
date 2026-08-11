@@ -296,6 +296,291 @@ test("keeps snapshots valid after accepted root control flow reaches its boundar
   assert.equal(validateRuntimeSnapshot(first.snapshot, compiled).valid, true);
 });
 
+test("rejects forged prepared say fields and lifetimes before any script event executes", () => {
+  const ordinary = plan('say "first", instant\nsay "second", instant');
+  const secondSay = ordinary.instructions.findIndex((instruction, index) => index > 0 && instruction.kind === "say");
+  assert.ok(secondSay >= 0);
+  const forgedSpeaker = JSON.parse(JSON.stringify(ordinary)) as InstructionPlan & { temporaryCount: number };
+  forgedSpeaker.temporaryCount = 1;
+  (forgedSpeaker.instructions[secondSay] as any).speakerTemporary = 0;
+  assert.equal(validateInstructionPlan(forgedSpeaker).valid, false);
+  assert.throws(
+    () => run(forgedSpeaker, createFreshRuntimeSnapshot(ordinary)),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+  );
+
+  const prepared = plan([
+    "function pace { return 1 }",
+    'say ["first", "second"], pace()',
+  ].join("\n"));
+  const sayIndex = prepared.instructions.findIndex((instruction) => instruction.kind === "say");
+  const say = prepared.instructions[sayIndex];
+  assert.equal(say?.kind, "say");
+  if (
+    say?.kind !== "say" ||
+    typeof say.speakerTemporary !== "number" ||
+    typeof say.textTemporary !== "number" ||
+    typeof say.contextualSpeakerTemporary !== "number"
+  ) {
+    throw new Error("Expected prepared say fields.");
+  }
+
+  const speakerPreparation = prepared.instructions.findIndex(
+    (instruction) => instruction.kind === "prepareSaySpeaker",
+  );
+  const textPreparation = prepared.instructions.findIndex(
+    (instruction) => instruction.kind === "prepareSayText",
+  );
+  const pacingCall = prepared.instructions.findIndex(
+    (instruction) => instruction.kind === "callFunction",
+  );
+  const pacingStore = prepared.instructions.findIndex(
+    (instruction) => instruction.kind === "storeTemporary",
+  );
+  assert.ok(speakerPreparation >= 0);
+  assert.ok(textPreparation >= 0);
+  assert.ok(pacingCall >= 0);
+  assert.ok(pacingStore >= 0);
+
+  const cases: Array<[string, (candidate: any) => void]> = [
+    ["forged text temporary", (candidate) => {
+      candidate.temporaryCount += 1;
+      candidate.instructions[sayIndex].textTemporary = candidate.temporaryCount - 1;
+    }],
+    ["wrong producer kind", (candidate) => {
+      candidate.instructions[sayIndex].speakerTemporary = say.textTemporary;
+    }],
+    ["aliased preparation temporaries", (candidate) => {
+      candidate.instructions[sayIndex].textTemporary = say.speakerTemporary;
+    }],
+    ["aliased contextual speaker temporary", (candidate) => {
+      candidate.instructions[sayIndex].contextualSpeakerTemporary = say.speakerTemporary;
+    }],
+    ["missing contextual speaker producer", (candidate) => {
+      delete candidate.instructions[sayIndex].contextualSpeakerTemporary;
+    }],
+    ["orphaned preparation instructions", (candidate) => {
+      delete candidate.instructions[sayIndex].speakerTemporary;
+      delete candidate.instructions[sayIndex].textTemporary;
+    }],
+    ["duplicate prepared speaker producer", (candidate) => {
+      candidate.instructions[textPreparation].destinationTemporary = say.speakerTemporary;
+    }],
+    ["prepared speaker overwritten by store", (candidate) => {
+      candidate.instructions[pacingStore].temporaryId = say.speakerTemporary;
+      candidate.instructions[sayIndex].pacing.temporaryId = say.speakerTemporary;
+    }],
+    ["prepared text overwritten by store", (candidate) => {
+      candidate.instructions[pacingStore].temporaryId = say.textTemporary;
+      candidate.instructions[sayIndex].pacing.temporaryId = say.textTemporary;
+    }],
+    ["prepared speaker overwritten by a function call", (candidate) => {
+      candidate.instructions[pacingCall].destinationTemporary = say.speakerTemporary;
+      candidate.instructions[pacingStore].value.temporaryId = say.speakerTemporary;
+    }],
+    ["prepared speaker cleared before its say", (candidate) => {
+      candidate.instructions[pacingStore] = {
+        kind: "clearTemporary",
+        temporaryId: say.speakerTemporary,
+        span: candidate.instructions[pacingStore].span,
+      };
+    }],
+    ["prepared text cleared before its say", (candidate) => {
+      candidate.instructions[pacingStore] = {
+        kind: "clearTemporary",
+        temporaryId: say.textTemporary,
+        span: candidate.instructions[pacingStore].span,
+      };
+    }],
+    ["backedge re-enters a prepared say", (candidate) => {
+      candidate.instructions[sayIndex + 1] = {
+        kind: "jump",
+        target: sayIndex,
+        span: candidate.instructions[sayIndex + 1].span,
+      };
+    }],
+  ];
+  for (const [name, mutate] of cases) {
+    const malformed = JSON.parse(JSON.stringify(prepared));
+    mutate(malformed);
+    assert.equal(validateInstructionPlan(malformed).valid, false, name);
+  }
+
+  const contextual = plan([
+    'speaker vera { title: "Captain" }',
+    "function pace { return 1 }",
+    'say as vera `${speaker.title}`, pace()',
+  ].join("\n"));
+  const contextualSpeakerPreparation = contextual.instructions.findIndex(
+    (instruction) => instruction.kind === "prepareSaySpeaker",
+  );
+  const contextualCapture = contextual.instructions.findIndex(
+    (instruction) => instruction.kind === "prepareSayContextualSpeaker",
+  );
+  const contextualTextPreparation = contextual.instructions.findIndex(
+    (instruction) => instruction.kind === "prepareSayText",
+  );
+  assert.ok(contextualSpeakerPreparation >= 0);
+  assert.ok(contextualCapture >= 0);
+  assert.ok(contextualTextPreparation >= 0);
+  for (const [name, left, right] of [
+    ["contextual capture before its output speaker", contextualSpeakerPreparation, contextualCapture],
+    ["contextual capture after a text payload consumer", contextualCapture, contextualTextPreparation],
+  ] as const) {
+    const malformed = structuredClone(contextual) as any;
+    [malformed.instructions[left], malformed.instructions[right]] = [
+      malformed.instructions[right],
+      malformed.instructions[left],
+    ];
+    assert.equal(validateInstructionPlan(malformed).valid, false, name);
+    const initial = createFreshRuntimeSnapshot(contextual);
+    const beforeExecution = structuredClone(initial);
+    assert.throws(
+      () => run(malformed, initial),
+      (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+      name,
+    );
+    assert.deepEqual(initial, beforeExecution, `${name} rejects before script execution`);
+  }
+
+  const contextualPayloadCases = [
+    {
+      name: "contextual capture pair after prepared text",
+      source: [
+        'speaker vera { title: "Captain" }',
+        "function pace { return 1 }",
+        'say as vera `${speaker.title}`, pace()',
+      ].join("\n"),
+      consumerKind: "prepareSayText",
+    },
+    {
+      name: "contextual capture pair after text-side call payload",
+      source: [
+        'speaker vera { title: "Captain" }',
+        "function use(x) { return x.title }",
+        "say as vera use(speaker), instant",
+      ].join("\n"),
+      consumerKind: "storeTemporary",
+    },
+    {
+      name: "contextual capture pair after prepared text short-circuit payload",
+      source: [
+        'speaker vera { title: "Captain" }',
+        "function pace { return 1 }",
+        'say as vera `${true and speaker.title}`, pace()',
+      ].join("\n"),
+      consumerKind: "prepareSayText",
+    },
+    {
+      name: "contextual capture pair after text-side call short-circuit payload",
+      source: [
+        'speaker vera { title: "Captain" }',
+        "function use(x) { return x.title }",
+        "say as vera use(true or speaker), instant",
+      ].join("\n"),
+      consumerKind: "storeTemporary",
+    },
+  ] as const;
+  for (const scenario of contextualPayloadCases) {
+    const canonical = plan(scenario.source);
+    assert.equal(validateInstructionPlan(canonical).valid, true, scenario.name);
+    const speakerPreparation = canonical.instructions.findIndex(
+      (instruction) => instruction.kind === "prepareSaySpeaker",
+    );
+    const contextualPreparation = canonical.instructions.findIndex(
+      (instruction) => instruction.kind === "prepareSayContextualSpeaker",
+    );
+    const payloadConsumer = canonical.instructions.findIndex(
+      (instruction, instructionIndex) =>
+        instructionIndex > contextualPreparation && instruction.kind === scenario.consumerKind,
+    );
+    assert.ok(speakerPreparation >= 0);
+    assert.ok(contextualPreparation >= 0);
+    assert.ok(payloadConsumer >= 0);
+    const malformed = structuredClone(canonical) as any;
+    const pair = malformed.instructions.splice(speakerPreparation, 2);
+    malformed.instructions.splice(payloadConsumer - 1, 0, ...pair);
+    assert.equal(validateInstructionPlan(malformed).valid, false, scenario.name);
+    const initial = createFreshRuntimeSnapshot(canonical);
+    const beforeExecution = structuredClone(initial);
+    assert.throws(
+      () => run(malformed, initial),
+      (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+      scenario.name,
+    );
+    assert.deepEqual(initial, beforeExecution, `${scenario.name} rejects before script execution`);
+  }
+
+  const malformed = JSON.parse(JSON.stringify(prepared));
+  malformed.instructions[pacingStore].temporaryId = say.speakerTemporary;
+  malformed.instructions[sayIndex].pacing.temporaryId = say.speakerTemporary;
+  let randomCalls = 0;
+  const initial = createFreshRuntimeSnapshot(prepared);
+  const beforeExecution = structuredClone(initial);
+  assert.throws(
+    () => run(malformed, initial, {
+      random: {
+        next: () => {
+          randomCalls += 1;
+          return 0.5;
+        },
+      },
+    }),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+  );
+  assert.deepEqual(initial, beforeExecution, "malformed plan does not mutate canonical runtime state");
+  assert.equal(randomCalls, 0, "malformed plan is rejected before source evaluation or events");
+
+  const bypassable = plan([
+    'function textValue { return "hello" }',
+    "function pace { return 1 }",
+    "say false and textValue(), pace()",
+  ].join("\n"));
+  const bypassSay = bypassable.instructions.findIndex((instruction) => instruction.kind === "say");
+  const bypassTextPreparation = bypassable.instructions.findIndex((instruction) => instruction.kind === "prepareSayText");
+  const bypassJump = bypassable.instructions.findIndex(
+    (instruction, index) => index < bypassTextPreparation && instruction.kind === "jumpIfFalse",
+  );
+  assert.ok(bypassJump >= 0);
+  const malformedBypass = JSON.parse(JSON.stringify(bypassable)) as InstructionPlan;
+  (malformedBypass.instructions[bypassJump] as any).target = bypassSay;
+  assert.equal(validateInstructionPlan(malformedBypass).valid, false, "bypassed prepared text");
+});
+
+test("preserves compiler-generated prepared says across control-flow regions", () => {
+  const sources = [
+    [
+      "function textValue { return \"hello\" }",
+      "function pace { return 1 }",
+      'say textValue(), instant',
+      'say "pacing", pace()',
+      "say textValue(), pace()",
+    ].join("\n"),
+    [
+      "function textValue { return \"hello\" }",
+      "function pace { return 1 }",
+      "if true {",
+      "  say textValue(), pace()",
+      "}",
+      "repeat 2 {",
+      "  say textValue(), pace()",
+      "}",
+    ].join("\n"),
+    [
+      "function textValue { return \"hello\" }",
+      "function pace { return 1 }",
+      "function speak {",
+      "  say textValue(), pace()",
+      "}",
+      "speak()",
+    ].join("\n"),
+  ];
+
+  for (const source of sources) {
+    assert.equal(validateInstructionPlan(plan(source)).valid, true, source);
+  }
+});
+
 function rootBranchWithTwoFunctions(): string {
   return [
     'function first { say "first" }',

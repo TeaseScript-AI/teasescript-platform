@@ -18,6 +18,7 @@ import {
   type InstructionPlan,
   type RuntimeSnapshot,
 } from "../../src/index.js";
+import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
 import {
   createNearValidSourceCase,
   createValidSourceCase,
@@ -470,8 +471,8 @@ function assertSameSeedIsDeterministic(seed: number, index: number): void {
     "let value = randomInteger(1..=100)\nsay `\${value}`\nexit",
   );
   const runtimeSeed = caseSeed(seed, index);
-  const first = run(plan, createFreshRuntimeSnapshot(plan, { seed: runtimeSeed }));
-  const second = run(plan, createFreshRuntimeSnapshot(plan, { seed: runtimeSeed }));
+  const first = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: runtimeSeed }));
+  const second = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: runtimeSeed }));
 
   assert.deepEqual(second, first);
   assertValidSnapshot(plan, first.snapshot);
@@ -535,7 +536,7 @@ function assertValidSourcePipeline(
 }
 
 function runSourceToHalt(plan: InstructionPlan, seed: number) {
-  return run(plan, createFreshRuntimeSnapshot(plan, { seed }), {}, {
+  return run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed }), {}, {
     instructionBudget: SOURCE_FUZZ_INSTRUCTION_BUDGET,
   });
 }
