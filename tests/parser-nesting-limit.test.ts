@@ -35,3 +35,29 @@ test("nested source beyond the former parser guard remains valid", () => {
     assert.deepEqual(compiled.diagnostics, [], name);
   }
 });
+
+test("linear prefix depth does not become plan depth", () => {
+  const sources = [
+    ["not", `let value = ${"not ".repeat(10_000)}true\nexit`],
+    ["unary minus", `let value = ${"-".repeat(10_000)}1\nexit`],
+    ["parentheses", `let value = ${"(".repeat(500)}1${")".repeat(500)}\nexit`],
+  ] as const;
+
+  for (const [name, source] of sources) {
+    const compiled = compileSource(source);
+    assert.deepEqual(compiled.diagnostics, [], name);
+    assert.notEqual(compiled.plan, null, name);
+    assert.equal(compiled.plan!.instructions.length, 2, name);
+  }
+});
+
+test("parentheses do not inflate pure expression plans", () => {
+  const expression = `${"(".repeat(500)}1${")".repeat(500)}`;
+  const compiled = compileSource(`speaker vera { value: ${expression} }\nexit`);
+  assert.deepEqual(compiled.diagnostics, []);
+  assert.notEqual(compiled.plan, null);
+  const declaration = compiled.plan!.instructions[0];
+  assert.equal(declaration?.kind, "declareSpeaker");
+  if (declaration?.kind !== "declareSpeaker") return;
+  assert.equal(declaration.properties[0]?.value.kind, "literal");
+});

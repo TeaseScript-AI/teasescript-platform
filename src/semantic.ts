@@ -386,8 +386,22 @@ class SemanticValidator {
     }
 
     const defaultScope = new SemanticScope(this.#root);
-    for (let index = 0; index < declaration.parameters.length; index += 1) {
-      const parameter = declaration.parameters[index]!;
+    const laterNameCounts = new Map<string, number>();
+    const laterNames = new Set<string>();
+    for (const parameter of declaration.parameters) {
+      const name = parameter.name.name;
+      laterNameCounts.set(name, (laterNameCounts.get(name) ?? 0) + 1);
+      laterNames.add(name);
+    }
+    for (const parameter of declaration.parameters) {
+      const name = parameter.name.name;
+      const remaining = (laterNameCounts.get(name) ?? 1) - 1;
+      if (remaining === 0) {
+        laterNameCounts.delete(name);
+        laterNames.delete(name);
+      } else {
+        laterNameCounts.set(name, remaining);
+      }
       if (parameter.defaultValue !== null) {
         const blockingInteraction = findFirstInteraction(parameter.defaultValue);
         if (blockingInteraction !== null) {
@@ -397,13 +411,10 @@ class SemanticValidator {
             blockingInteraction.span,
           );
         }
-        const laterNames = new Set(
-          declaration.parameters.slice(index + 1).map((item) => item.name.name),
-        );
         this.#reportLaterParameterReferences(parameter.defaultValue, laterNames);
         this.#validateExpression(parameter.defaultValue, defaultScope, null);
       }
-      defaultScope.declare(parameter.name.name, { kind: "variable" });
+      defaultScope.declare(name, { kind: "variable" });
     }
 
     this.#functionDepth += 1;
@@ -465,6 +476,14 @@ class SemanticValidator {
     scope: SemanticScope,
     contextualSpeaker: string | null,
   ): void {
+    while (
+      expression.kind === "parenthesizedExpression" ||
+      expression.kind === "unaryExpression"
+    ) {
+      expression = expression.kind === "parenthesizedExpression"
+        ? expression.expression
+        : expression.operand;
+    }
     switch (expression.kind) {
       case "booleanLiteral":
       case "nullLiteral":
@@ -504,9 +523,6 @@ class SemanticValidator {
             expression.span,
           );
         }
-        return;
-      case "parenthesizedExpression":
-        this.#validateExpression(expression.expression, scope, contextualSpeaker);
         return;
       case "listLiteral":
         for (const element of expression.elements) {
@@ -599,9 +615,6 @@ class SemanticValidator {
             );
           }
         }
-        return;
-      case "unaryExpression":
-        this.#validateExpression(expression.operand, scope, contextualSpeaker);
         return;
       case "binaryExpression":
         this.#validateExpression(expression.left, scope, contextualSpeaker);
@@ -817,6 +830,14 @@ function isKnownInteger(expression: Expression): boolean {
 function findFirstInteraction(
   expression: Expression,
 ): Extract<Expression, { kind: "interactionExpression" }> | null {
+  while (
+    expression.kind === "parenthesizedExpression" ||
+    expression.kind === "unaryExpression"
+  ) {
+    expression = expression.kind === "parenthesizedExpression"
+      ? expression.expression
+      : expression.operand;
+  }
   if (expression.kind === "interactionExpression") return expression;
   const nested: readonly Expression[] = (() => {
     switch (expression.kind) {
@@ -826,8 +847,6 @@ function findFirstInteraction(
       case "stringLiteral":
       case "identifier":
         return [];
-      case "parenthesizedExpression":
-        return [expression.expression];
       case "listLiteral":
       case "setLiteral":
         return expression.elements;
@@ -843,8 +862,6 @@ function findFirstInteraction(
         return [expression.object, expression.index];
       case "callExpression":
         return [expression.callee, ...expression.arguments.map((argument) => argument.value)];
-      case "unaryExpression":
-        return [expression.operand];
       case "binaryExpression":
         return [expression.left, expression.right];
       case "rangeExpression":
@@ -859,35 +876,49 @@ function findFirstInteraction(
 }
 
 function knownNumber(expression: Expression): number | undefined {
-  if (expression.kind === "numberLiteral") return expression.value;
-  if (expression.kind === "parenthesizedExpression") {
-    return knownNumber(expression.expression);
+  let negate = false;
+  while (true) {
+    if (expression.kind === "parenthesizedExpression") {
+      expression = expression.expression;
+      continue;
+    }
+    if (
+      expression.kind === "unaryExpression" &&
+      (expression.operator === "+" || expression.operator === "-")
+    ) {
+      if (expression.operator === "-") negate = !negate;
+      expression = expression.operand;
+      continue;
+    }
+    break;
   }
-  if (
-    expression.kind === "unaryExpression" &&
-    (expression.operator === "+" || expression.operator === "-")
-  ) {
-    const operand = knownNumber(expression.operand);
-    if (operand === undefined) return undefined;
-    return expression.operator === "+" ? operand : -operand;
-  }
-  if (expression.kind === "binaryExpression") {
+
+  let value: number | undefined;
+  if (expression.kind === "numberLiteral") {
+    value = expression.value;
+  } else if (expression.kind === "binaryExpression") {
     const left = knownNumber(expression.left);
     const right = knownNumber(expression.right);
     if (left === undefined || right === undefined) return undefined;
     switch (expression.operator) {
-      case "+": return left + right;
-      case "-": return left - right;
-      case "*": return left * right;
-      case "/": return right === 0 ? undefined : left / right;
-      case "%": return right === 0 ? undefined : left % right;
-      default: return undefined;
+      case "+": value = left + right; break;
+      case "-": value = left - right; break;
+      case "*": value = left * right; break;
+      case "/": value = right === 0 ? undefined : left / right; break;
+      case "%": value = right === 0 ? undefined : left % right; break;
+      default: value = undefined; break;
     }
   }
-  return undefined;
+  return value === undefined || !negate ? value : -value;
+}
+
+function unwrapParentheses(expression: Expression): Expression {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  return expression;
 }
 
 function knownString(expression: Expression): string | undefined {
+  expression = unwrapParentheses(expression);
   switch (expression.kind) {
     case "stringLiteral":
       return expression.value;
@@ -899,8 +930,6 @@ function knownString(expression: Expression): string | undefined {
       return expression.value ? "true" : "false";
     case "nullLiteral":
       return "null";
-    case "parenthesizedExpression":
-      return knownString(expression.expression);
     case "unaryExpression":
     case "binaryExpression": {
       const value = knownNumber(expression);
@@ -927,9 +956,7 @@ function knownString(expression: Expression): string | undefined {
 }
 
 function isDefinitelyNonNumeric(expression: Expression): boolean {
-  if (expression.kind === "parenthesizedExpression") {
-    return isDefinitelyNonNumeric(expression.expression);
-  }
+  expression = unwrapParentheses(expression);
   if (expression.kind === "interactionExpression") {
     if (expression.interactionKind === "number") return false;
     if (expression.interactionKind !== "choice") return true;
@@ -948,9 +975,7 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
 }
 
 function isDefinitelyNonIterable(expression: Expression): boolean {
-  if (expression.kind === "parenthesizedExpression") {
-    return isDefinitelyNonIterable(expression.expression);
-  }
+  expression = unwrapParentheses(expression);
   return (
     expression.kind === "stringLiteral" ||
     expression.kind === "booleanLiteral" ||
@@ -966,15 +991,13 @@ function isDefinitelyComposite(
   expression: Expression,
   scope: SemanticScope,
 ): boolean {
+  expression = unwrapParentheses(expression);
   if (
     expression.kind === "listLiteral" ||
     expression.kind === "objectLiteral" ||
     expression.kind === "setLiteral"
   ) {
     return true;
-  }
-  if (expression.kind === "parenthesizedExpression") {
-    return isDefinitelyComposite(expression.expression, scope);
   }
   return (
     expression.kind === "identifier" &&
@@ -986,6 +1009,14 @@ function visitExpression(
   expression: Expression,
   visitor: (identifier: Extract<Expression, { kind: "identifier" }>) => void,
 ): void {
+  while (
+    expression.kind === "parenthesizedExpression" ||
+    expression.kind === "unaryExpression"
+  ) {
+    expression = expression.kind === "parenthesizedExpression"
+      ? expression.expression
+      : expression.operand;
+  }
   switch (expression.kind) {
     case "identifier":
       visitor(expression);
@@ -994,9 +1025,6 @@ function visitExpression(
     case "nullLiteral":
     case "numberLiteral":
     case "stringLiteral":
-      return;
-    case "parenthesizedExpression":
-      visitExpression(expression.expression, visitor);
       return;
     case "listLiteral":
     case "setLiteral":
@@ -1022,9 +1050,6 @@ function visitExpression(
     case "callExpression":
       visitExpression(expression.callee, visitor);
       expression.arguments.forEach((argument) => visitExpression(argument.value, visitor));
-      return;
-    case "unaryExpression":
-      visitExpression(expression.operand, visitor);
       return;
     case "binaryExpression":
       visitExpression(expression.left, visitor);

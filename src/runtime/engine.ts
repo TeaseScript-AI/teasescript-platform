@@ -1051,8 +1051,8 @@ function functionDefinition(
   functionId: number,
   span: SourceSpan,
 ): InstructionPlan["functions"][number] {
-  const definition = plan.functions.find((item) => item.id === functionId);
-  if (definition === undefined) {
+  const definition = plan.functions[functionId - 1];
+  if (definition === undefined || definition.id !== functionId) {
     throw fault("TSR052", `Unknown compiled function ID '${functionId}'.`, span);
   }
   return definition;

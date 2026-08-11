@@ -1004,20 +1004,25 @@ class Parser {
   }
 
   #parseNot(): Expression | null {
-    if (this.#match(TokenKind.KeywordNot)) {
-      const operator = this.#previous();
+    const operators: Token[] = [];
+    while (this.#match(TokenKind.KeywordNot)) {
+      operators.push(this.#previous());
       this.#skipContinuationNewlines();
-      const operand = this.#parseNot();
-      if (operand === null) {
+    }
+    let expression = this.#parseComparison();
+    if (expression === null) {
+      for (let index = 0; index < operators.length; index += 1) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
           "Expected an expression after 'not'.",
         );
-        return null;
       }
-      return this.#unary(operator, operand, "not");
+      return null;
     }
-    return this.#parseComparison();
+    for (let index = operators.length - 1; index >= 0; index -= 1) {
+      expression = this.#unary(operators[index]!, expression, "not");
+    }
+    return expression;
   }
 
   #parseComparison(): Expression | null {
@@ -1156,20 +1161,26 @@ class Parser {
   }
 
   #parseUnaryArithmetic(): Expression | null {
-    if (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus)) {
-      const operator = this.#advance();
+    const operators: Token[] = [];
+    while (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus)) {
+      operators.push(this.#advance());
       this.#skipContinuationNewlines();
-      const operand = this.#parseUnaryArithmetic();
-      if (operand === null) {
+    }
+    let expression = this.#parsePostfix();
+    if (expression === null) {
+      for (let index = 0; index < operators.length; index += 1) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
           "Expected an expression after the unary operator.",
         );
-        return null;
       }
-      return this.#unary(operator, operand, operator.lexeme as "+" | "-");
+      return null;
     }
-    return this.#parsePostfix();
+    for (let index = operators.length - 1; index >= 0; index -= 1) {
+      const operator = operators[index]!;
+      expression = this.#unary(operator, expression, operator.lexeme as "+" | "-");
+    }
+    return expression;
   }
 
   #parsePostfix(): Expression | null {

@@ -1108,14 +1108,26 @@ function validateCanonicalPreparedSays(
   errors: PlanValidationError[],
 ): void {
   const producers = new Map<number, number[]>();
+  let hasPreparedSay = false;
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
+    if (
+      instruction.kind === "say" &&
+      (Number.isSafeInteger(instruction.speakerTemporary) ||
+        Number.isSafeInteger(instruction.contextualSpeakerTemporary) ||
+        Number.isSafeInteger(instruction.textTemporary))
+    ) {
+      hasPreparedSay = true;
+    }
     const temporaryId = producedTemporaryId(instruction);
     if (temporaryId === null) return;
     const entries = producers.get(temporaryId) ?? [];
     entries.push(instructionIndex);
     producers.set(temporaryId, entries);
   });
+  const explicitIncomingSources = hasPreparedSay
+    ? collectExplicitIncomingSources(instructions)
+    : [];
 
   const consumed = new Set<number>();
   instructions.forEach((instruction, instructionIndex) => {
@@ -1166,6 +1178,7 @@ function validateCanonicalPreparedSays(
       region,
       instructions,
       index,
+      explicitIncomingSources,
       producers,
       consumed,
       errors,
@@ -1179,6 +1192,7 @@ function validateCanonicalPreparedSays(
       region,
       instructions,
       index,
+      explicitIncomingSources,
       producers,
       consumed,
       errors,
@@ -1191,6 +1205,7 @@ function validateCanonicalPreparedSays(
       region,
       instructions,
       index,
+      explicitIncomingSources,
       producers,
       consumed,
       errors,
@@ -1223,6 +1238,7 @@ function validatePreparedSayProducer(
   region: InstructionExecutionRegion,
   instructions: readonly unknown[],
   index: PlanValidationIndex,
+  explicitIncomingSources: readonly (readonly number[])[],
   producers: ReadonlyMap<number, readonly number[]>,
   consumed: Set<number>,
   errors: PlanValidationError[],
@@ -1272,7 +1288,13 @@ function validatePreparedSayProducer(
       producerPath,
     ));
   }
-  if (preparedSayCanBeBypassed(instructions, index, region, producerIndex, sayIndex)) {
+  if (preparedSayCanBeBypassed(
+    index,
+    explicitIncomingSources,
+    region,
+    producerIndex,
+    sayIndex,
+  )) {
     errors.push(planError(
       "TSC002",
       "Prepared say instruction can be reached while bypassing its required preparation.",
@@ -1289,6 +1311,7 @@ function validatePreparedSayContextualSpeaker(
   region: InstructionExecutionRegion,
   instructions: readonly unknown[],
   index: PlanValidationIndex,
+  explicitIncomingSources: readonly (readonly number[])[],
   producers: ReadonlyMap<number, readonly number[]>,
   consumed: Set<number>,
   errors: PlanValidationError[],
@@ -1338,7 +1361,13 @@ function validatePreparedSayContextualSpeaker(
       path,
     ));
   }
-  if (preparedSayCanBeBypassed(instructions, index, region, producerIndex, sayIndex)) {
+  if (preparedSayCanBeBypassed(
+    index,
+    explicitIncomingSources,
+    region,
+    producerIndex,
+    sayIndex,
+  )) {
     errors.push(planError("TSC002", "Prepared say instruction can be reached while bypassing its required preparation.", sayPath));
   }
 }
@@ -1457,21 +1486,39 @@ function preparedSayTemporaryIsCleared(
   return false;
 }
 
-function preparedSayCanBeBypassed(
+function collectExplicitIncomingSources(
   instructions: readonly unknown[],
+): readonly (readonly number[])[] {
+  const incoming: number[][] = Array.from({ length: instructions.length }, () => []);
+  for (let sourceIndex = 0; sourceIndex < instructions.length; sourceIndex += 1) {
+    const instruction = instructions[sourceIndex];
+    if (!isRecord(instruction)) continue;
+    for (const target of explicitInstructionTargets(instruction)) {
+      if (
+        typeof target === "number" &&
+        Number.isSafeInteger(target) &&
+        target >= 0 &&
+        target < instructions.length
+      ) {
+        incoming[target]!.push(sourceIndex);
+      }
+    }
+  }
+  return incoming;
+}
+
+function preparedSayCanBeBypassed(
   index: PlanValidationIndex,
+  explicitIncomingSources: readonly (readonly number[])[],
   region: InstructionExecutionRegion,
   producerIndex: number,
   sayIndex: number,
 ): boolean {
-  for (let sourceIndex = region.startInstruction; sourceIndex < region.endInstruction; sourceIndex += 1) {
-    const instruction = instructions[sourceIndex];
-    if (!isRecord(instruction) || index.owners[sourceIndex] !== region) continue;
-    if (explicitInstructionTargets(instruction).some((target) =>
-      typeof target === "number" && Number.isSafeInteger(target) &&
-      target > producerIndex && target <= sayIndex &&
-      (sourceIndex < producerIndex || sourceIndex >= sayIndex)
-    )) return true;
+  for (let target = producerIndex + 1; target <= sayIndex; target += 1) {
+    for (const sourceIndex of explicitIncomingSources[target] ?? []) {
+      if (index.owners[sourceIndex] !== region) continue;
+      if (sourceIndex < producerIndex || sourceIndex >= sayIndex) return true;
+    }
   }
   return false;
 }

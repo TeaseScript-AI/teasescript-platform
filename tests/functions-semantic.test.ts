@@ -153,3 +153,31 @@ test("does not treat deferred protected engine names as implemented built-ins", 
     ["TSV018", "TSV018", "TSV018"],
   );
 });
+
+test("later-parameter detection scales without changing broad default semantics", () => {
+  const count = 1_500;
+  const parameters = Array.from({ length: count }, (_, index) =>
+    index === 0 ? `p0 = p${count - 1}` : `p${index} = ${index}`
+  ).join(", ");
+  const result = compileSource(`function broad(${parameters}) { return p0 }`);
+
+  assert.deepEqual(
+    result.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV025", "TSV002"],
+  );
+});
+
+test("long unary defaults preserve validation without native semantic recursion", () => {
+  const valid = compileSource(
+    `function stable(value = ${"-".repeat(5_000)}1) { return value }`,
+  );
+  assert.deepEqual(valid.diagnostics, []);
+
+  const invalid = compileSource(
+    `function later(value = ${"+".repeat(5_000)}other, other = 1) { return value }`,
+  );
+  assert.deepEqual(
+    invalid.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV025", "TSV002"],
+  );
+});
