@@ -10,6 +10,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test:compiled": "node ./tools/test-output-filter.mjs dist/tests/*.test.js",
+    "test:focused": "npm run build && node ./tools/test-output-filter.mjs",
     "test": "npm run build && npm run test:compiled",
     "check": "npm test",
     "playground": "npm run build && node dist/playground/server.js",

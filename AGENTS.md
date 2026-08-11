@@ -94,7 +94,8 @@ deliverable.
 Correct existing wording before appending an amendment. Use preservation-aware
 edits; full-file creation or replacement is only for a new file or intentional
 total replacement. Inspect the changed hunks from each coherent edit batch, run
-`git diff --check`, and run proportionate focused checks. Before commit, handoff,
+`git diff --check`, and run proportionate focused checks. Use `npm run test:focused -- dist/tests/<file>.test.js`
+for compiled focused checks so successful test lines remain filtered; use full-output variants only for diagnosis. Before commit, handoff,
 or merge, review the complete diff for collateral or generated files, debug code,
 secrets, unrelated changes, and stale documentation. Follow
 `docs/DOCUMENTATION-OWNERSHIP.md` for non-trivial documentation edits and
