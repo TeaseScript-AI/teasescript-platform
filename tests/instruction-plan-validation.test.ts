@@ -406,6 +406,43 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     assert.equal(validateInstructionPlan(malformed).valid, false, name);
   }
 
+  const contextual = plan([
+    'speaker vera { title: "Captain" }',
+    "function pace { return 1 }",
+    'say as vera `${speaker.title}`, pace()',
+  ].join("\n"));
+  const contextualSpeakerPreparation = contextual.instructions.findIndex(
+    (instruction) => instruction.kind === "prepareSaySpeaker",
+  );
+  const contextualCapture = contextual.instructions.findIndex(
+    (instruction) => instruction.kind === "prepareSayContextualSpeaker",
+  );
+  const contextualTextPreparation = contextual.instructions.findIndex(
+    (instruction) => instruction.kind === "prepareSayText",
+  );
+  assert.ok(contextualSpeakerPreparation >= 0);
+  assert.ok(contextualCapture >= 0);
+  assert.ok(contextualTextPreparation >= 0);
+  for (const [name, left, right] of [
+    ["contextual capture before its output speaker", contextualSpeakerPreparation, contextualCapture],
+    ["contextual capture after a text payload consumer", contextualCapture, contextualTextPreparation],
+  ] as const) {
+    const malformed = structuredClone(contextual) as any;
+    [malformed.instructions[left], malformed.instructions[right]] = [
+      malformed.instructions[right],
+      malformed.instructions[left],
+    ];
+    assert.equal(validateInstructionPlan(malformed).valid, false, name);
+    const initial = createFreshRuntimeSnapshot(contextual);
+    const beforeExecution = structuredClone(initial);
+    assert.throws(
+      () => run(malformed, initial),
+      (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+      name,
+    );
+    assert.deepEqual(initial, beforeExecution, `${name} rejects before script execution`);
+  }
+
   const malformed = JSON.parse(JSON.stringify(prepared));
   malformed.instructions[pacingStore].temporaryId = say.speakerTemporary;
   malformed.instructions[sayIndex].pacing.temporaryId = say.speakerTemporary;

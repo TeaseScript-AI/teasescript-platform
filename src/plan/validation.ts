@@ -1297,12 +1297,20 @@ function validatePreparedSayContextualSpeaker(
   const candidates = producers.get(temporaryId as number) ?? [];
   const producerIndex = candidates.length === 1 ? candidates[0] : undefined;
   const producer = producerIndex === undefined ? undefined : instructions[producerIndex];
+  const speakerCandidates = Number.isSafeInteger(speakerTemporary)
+    ? producers.get(speakerTemporary as number) ?? []
+    : [];
+  const speakerProducerIndex = speakerCandidates.length === 1
+    ? speakerCandidates[0]
+    : undefined;
   const path = `${sayPath}.contextualSpeakerTemporary`;
   if (
     producerIndex === undefined ||
     !isRecord(producer) ||
     producer.kind !== "prepareSayContextualSpeaker" ||
     producer.speakerTemporary !== speakerTemporary ||
+    speakerProducerIndex === undefined ||
+    producerIndex !== speakerProducerIndex + 1 ||
     producerIndex >= sayIndex ||
     index.owners[producerIndex] !== region
   ) {
