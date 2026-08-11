@@ -28,9 +28,7 @@ failure information. `npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
-distinct task-relevant evidence. Use `npm run test:focused -- dist/tests/<file>.test.js`
-for focused compiled tests; it builds first and uses the same passing-line filter
-as the complete suite.
+distinct task-relevant evidence.
 
 CI and tests verify executable code, scripts, configuration, generated artifacts,
 and real machine-checkable boundaries. They must not freeze living documentation
