@@ -109,7 +109,7 @@ test("detects duplicate prototype-sensitive named arguments", () => {
   );
 });
 
-test("stabilizes builtin registration within one operation and refreshes it between operations", () => {
+test("refreshes builtin registration between instructions while reusing operation context", () => {
   const compiled = compile(
     [
       "let first = probe()",
@@ -143,7 +143,7 @@ test("stabilizes builtin registration within one operation and refreshes it betw
 
   assert.deepEqual(calls, [
     "original",
-    "original",
+    "replacement",
     "replacement",
     "replacement",
   ]);
@@ -151,7 +151,7 @@ test("stabilizes builtin registration within one operation and refreshes it betw
     first.events
       .filter((event) => event.kind === "say")
       .map((event) => event.text),
-    ["original:original"],
+    ["original:replacement"],
   );
   assert.deepEqual(
     second.events

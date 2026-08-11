@@ -1268,11 +1268,6 @@ function assertIntegerRange(range: SerializableRuntimeRange, span: SourceSpan): 
   }
 }
 
-interface EvaluatorInfrastructure {
-  readonly builtins: Readonly<Record<string, RuntimeBuiltinFunction>>;
-  readonly random: RandomSource | undefined;
-}
-
 class RuntimeExecutionContext {
   public readonly events: InterpreterEvent[] = [];
   #evaluator: Evaluator | null = null;
@@ -1283,34 +1278,36 @@ class RuntimeExecutionContext {
   ) {}
 
   public evaluator(): Evaluator {
-    if (this.#evaluator !== null) return this.#evaluator;
-    const builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
-    Object.assign(builtins, this.capabilities.builtins ?? {});
-    const infrastructure: EvaluatorInfrastructure = Object.freeze({
-      builtins: Object.freeze(builtins),
-      random: this.capabilities.random,
-    });
-    this.#evaluator = new Evaluator(
-      this.snapshot,
-      infrastructure,
-      this.events,
-    );
+    if (this.#evaluator !== null) {
+      this.#evaluator.refreshBuiltinRegistration();
+      return this.#evaluator;
+    }
+    this.#evaluator = new Evaluator(this.snapshot, this.capabilities, this.events);
     return this.#evaluator;
   }
 }
 
 class Evaluator {
+  readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
+
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
-    private readonly infrastructure: EvaluatorInfrastructure,
+    private readonly capabilities: RuntimeCapabilities,
     private readonly events: InterpreterEvent[],
-  ) {}
+  ) {
+    this.refreshBuiltinRegistration();
+  }
+
+  public refreshBuiltinRegistration(): void {
+    for (const name of Object.keys(this.#builtins)) delete this.#builtins[name];
+    Object.assign(this.#builtins, this.capabilities.builtins ?? {});
+  }
 
   public forSnapshot(
     snapshot: RuntimeSnapshot,
     events: InterpreterEvent[],
   ): Evaluator {
-    return new Evaluator(snapshot, this.infrastructure, events);
+    return new Evaluator(snapshot, this.capabilities, events);
   }
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
@@ -1837,8 +1834,8 @@ class Evaluator {
       const name = expression.callee.name;
       const coreBuiltin =
         name === "random" || name === "chance" || name === "randomInteger";
-      const builtin = Object.hasOwn(this.infrastructure.builtins, name)
-        ? this.infrastructure.builtins[name]
+      const builtin = Object.hasOwn(this.#builtins, name)
+        ? this.#builtins[name]
         : undefined;
       if (!coreBuiltin && builtin === undefined) {
         throw fault("TSR011", `Unknown built-in function '${expression.callee.name}'.`, expression.callee.span);
@@ -2041,7 +2038,7 @@ class Evaluator {
   }
 
   #findRandom(span: SourceSpan, rng = this.snapshot.rng): number {
-    const random = this.infrastructure.random?.next() ?? nextXorShift32(rng);
+    const random = this.capabilities.random?.next() ?? nextXorShift32(rng);
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
       throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
     }
