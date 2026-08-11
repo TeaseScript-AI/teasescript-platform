@@ -191,7 +191,7 @@ function validateLoopStructure(
       starts.set(loopId, {
         index,
         target: instruction.target as number,
-        breakTarget: loopBreakTarget(instructions, instruction),
+        breakTarget: loopBreakTarget(instructions, index, instruction),
         continueTarget: instruction.continueTarget as number,
       });
     }
@@ -225,46 +225,26 @@ function validateLoopStructure(
 
 function loopBreakTarget(
   instructions: readonly unknown[],
+  loopStartIndex: number,
   loopStart: Record<string, unknown>,
 ): number {
   let target = loopStart.target as number;
-  const temporaryIds = collectExpressionTemporaryIds(loopStart.expression);
-  while (temporaryIds.size > 0) {
-    const instruction = instructions[target];
+  let trueCleanup = loopStartIndex + 1;
+  while (true) {
+    const trueInstruction = instructions[trueCleanup];
+    const falseInstruction = instructions[target];
     if (
-      !isRecord(instruction) ||
-      instruction.kind !== "clearTemporary" ||
-      !positiveSafeInteger(instruction.temporaryId) ||
-      !temporaryIds.delete(instruction.temporaryId as number)
+      !isRecord(trueInstruction) ||
+      trueInstruction.kind !== "clearTemporary" ||
+      !positiveSafeInteger(trueInstruction.temporaryId) ||
+      !isRecord(falseInstruction) ||
+      falseInstruction.kind !== "clearTemporary" ||
+      falseInstruction.temporaryId !== trueInstruction.temporaryId
     ) break;
+    trueCleanup += 1;
     target += 1;
   }
   return target;
-}
-
-function collectExpressionTemporaryIds(value: unknown): Set<number> {
-  const output = new Set<number>();
-  const work: unknown[] = [value];
-  while (work.length > 0) {
-    const current = work.pop();
-    if (current === null || typeof current !== "object") continue;
-    if (Array.isArray(current)) {
-      for (let index = current.length - 1; index >= 0; index -= 1) {
-        work.push(current[index]);
-      }
-      continue;
-    }
-    if (
-      isRecord(current) &&
-      (current.kind === "temporary" || current.kind === "preparedReference") &&
-      positiveSafeInteger(current.temporaryId)
-    ) {
-      output.add(current.temporaryId as number);
-      continue;
-    }
-    for (const nested of Object.values(current)) work.push(nested);
-  }
-  return output;
 }
 
 function validateInstruction(

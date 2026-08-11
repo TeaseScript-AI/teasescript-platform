@@ -1669,32 +1669,71 @@ function createTemporaryMap(temporaries: readonly unknown[]): ReadonlyMap<number
 
 /** Structural equality for values that have already passed serializable-value validation. */
 function sameValidatedSerializableValue(left: unknown, right: unknown): boolean {
-  recordValidationTestWork("structuralValueComparisons");
-  if (left === right) return true;
-  if (!isPlainRecord(left) || !isPlainRecord(right) || left.kind !== right.kind) return false;
-  switch (left.kind) {
-    case "speakerReference":
-      return left.speakerId === right.speakerId && left.identifier === right.identifier;
-    case "range":
-      return left.start === right.start && left.end === right.end && left.inclusive === right.inclusive;
-    case "list":
-    case "set":
-      { const rightItems = Array.isArray(right.items) ? right.items : null;
-        return Array.isArray(left.items) && rightItems !== null &&
-          left.items.length === rightItems.length &&
-          left.items.every((item, index) => sameValidatedSerializableValue(item, rightItems[index])); }
-    case "object":
-      { const rightProperties = Array.isArray(right.properties) ? right.properties : null;
-        return Array.isArray(left.properties) && rightProperties !== null &&
-        left.properties.length === rightProperties.length &&
-        left.properties.every((property, index) =>
-          isPlainRecord(property) && isPlainRecord(rightProperties[index]) &&
-          property.name === rightProperties[index].name &&
-          sameValidatedSerializableValue(property.value, rightProperties[index].value)
-        ); }
-    default:
-      return false;
+  const work: Array<readonly [unknown, unknown]> = [[left, right]];
+  while (work.length > 0) {
+    recordValidationTestWork("structuralValueComparisons");
+    const [currentLeft, currentRight] = work.pop()!;
+    if (currentLeft === currentRight) continue;
+    if (
+      !isPlainRecord(currentLeft) ||
+      !isPlainRecord(currentRight) ||
+      currentLeft.kind !== currentRight.kind
+    ) return false;
+    switch (currentLeft.kind) {
+      case "speakerReference":
+        if (
+          currentLeft.speakerId !== currentRight.speakerId ||
+          currentLeft.identifier !== currentRight.identifier
+        ) return false;
+        break;
+      case "range":
+        if (
+          currentLeft.start !== currentRight.start ||
+          currentLeft.end !== currentRight.end ||
+          currentLeft.inclusive !== currentRight.inclusive
+        ) return false;
+        break;
+      case "list":
+      case "set": {
+        const leftItems = Array.isArray(currentLeft.items) ? currentLeft.items : null;
+        const rightItems = Array.isArray(currentRight.items) ? currentRight.items : null;
+        if (leftItems === null || rightItems === null || leftItems.length !== rightItems.length) {
+          return false;
+        }
+        for (let index = leftItems.length - 1; index >= 0; index -= 1) {
+          work.push([leftItems[index], rightItems[index]]);
+        }
+        break;
+      }
+      case "object": {
+        const leftProperties = Array.isArray(currentLeft.properties)
+          ? currentLeft.properties
+          : null;
+        const rightProperties = Array.isArray(currentRight.properties)
+          ? currentRight.properties
+          : null;
+        if (
+          leftProperties === null ||
+          rightProperties === null ||
+          leftProperties.length !== rightProperties.length
+        ) return false;
+        for (let index = leftProperties.length - 1; index >= 0; index -= 1) {
+          const leftProperty = leftProperties[index];
+          const rightProperty = rightProperties[index];
+          if (
+            !isPlainRecord(leftProperty) ||
+            !isPlainRecord(rightProperty) ||
+            leftProperty.name !== rightProperty.name
+          ) return false;
+          work.push([leftProperty.value, rightProperty.value]);
+        }
+        break;
+      }
+      default:
+        return false;
+    }
   }
+  return true;
 }
 
 function validateParameterBindings(
@@ -3937,16 +3976,23 @@ function validateSpeakerReferences(
 }
 
 function collectSpeakerReferenceIds(value: unknown, output: Set<number>): void {
-  if (!isPlainRecord(value)) return;
-  if (value.kind === "speakerReference" && nonNegativeSafeInteger(value.speakerId)) {
-    output.add(value.speakerId);
-    return;
-  }
-  if (value.kind === "list" && Array.isArray(value.items)) {
-    for (const item of value.items) collectSpeakerReferenceIds(item, output);
-  } else if (value.kind === "object" && Array.isArray(value.properties)) {
-    for (const property of value.properties) {
-      if (isPlainRecord(property)) collectSpeakerReferenceIds(property.value, output);
+  const work: unknown[] = [value];
+  while (work.length > 0) {
+    const current = work.pop();
+    if (!isPlainRecord(current)) continue;
+    if (current.kind === "speakerReference" && nonNegativeSafeInteger(current.speakerId)) {
+      output.add(current.speakerId);
+      continue;
+    }
+    if (current.kind === "list" && Array.isArray(current.items)) {
+      for (let index = current.items.length - 1; index >= 0; index -= 1) {
+        work.push(current.items[index]);
+      }
+    } else if (current.kind === "object" && Array.isArray(current.properties)) {
+      for (let index = current.properties.length - 1; index >= 0; index -= 1) {
+        const property = current.properties[index];
+        if (isPlainRecord(property)) work.push(property.value);
+      }
     }
   }
 }

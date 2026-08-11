@@ -213,7 +213,7 @@ test("ordinary source compiles beyond the removed generic capture threshold", ()
 test("snapshot validation accepts deeply nested serializable values", () => {
   const plan = compiledPlan();
   const snapshot = mutableSnapshot(plan);
-  addBinding(snapshot, deepList(512));
+  addBinding(snapshot, deepList(5_000));
   (snapshot.speakers as unknown as Array<Record<string, unknown>>).push({
     id: 1,
     identifier: "mistress",
@@ -229,22 +229,29 @@ test("snapshot validation accepts a deeply nested supplied call argument", () =>
   const snapshot = activeCallSnapshot(plan);
   const argument = snapshot.callFrames[0]!.arguments[0];
   assert.ok(argument?.supplied);
-  (argument as { value: SerializableRuntimeValue }).value = deepList(512);
-  snapshot.callFrames[0]!.callerTemporaries[0]!.value = deepList(512);
+  (argument as { value: SerializableRuntimeValue }).value = deepList(5_000);
+  snapshot.callFrames[0]!.callerTemporaries[0]!.value = deepList(5_000);
 
   assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
 });
 
-test("checkpoint restore and JSON deserialize preserve deep valid data", () => {
+test("checkpoint restore and JSON deserialize preserve deeply nested valid state", () => {
   const plan = compiledPlan();
-  const value = checkpoint(plan, createFreshRuntimeSnapshot(plan)) as RuntimeCheckpoint & {
+  const live = checkpoint(plan, createFreshRuntimeSnapshot(plan)) as RuntimeCheckpoint & {
     plan: Record<string, unknown>;
   };
-  value.plan.padding = deepArray(512);
-  addBinding(value.snapshot, deepList(512));
-  const restored = restoreCheckpoint(value);
+  live.plan.padding = deepArray(512);
+  addBinding(live.snapshot, deepList(5_000));
+  const restored = restoreCheckpoint(live);
   assert.equal(validateRuntimeSnapshot(restored.snapshot, restored.plan).valid, true);
-  const deserialized = deserializeCheckpoint(JSON.stringify(restored));
+
+  const serializedSnapshot = mutableSnapshot(plan);
+  addBinding(serializedSnapshot, "__DEEP_VALUE__");
+  const json = JSON.stringify(createCheckpoint(plan, serializedSnapshot)).replace(
+    '"__DEEP_VALUE__"',
+    deepListJson(5_000),
+  );
+  const deserialized = deserializeCheckpoint(json);
   assert.equal(validateRuntimeSnapshot(deserialized.snapshot, deserialized.plan).valid, true);
 });
 

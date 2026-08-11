@@ -91,10 +91,10 @@ test("rejects cross-region loopControl targets", () => {
   assertRegionError(validateInstructionPlan(malformed), `$.instructions[${controlIndex}].target`);
 });
 
-test("validates break targets after user-call condition cleanup", () => {
+test("validates break targets after multi-temporary condition cleanup", () => {
   const compiled = plan([
     "function truth { return true }",
-    "while truth() { break }",
+    "while truth() and truth() { break }",
   ].join("\n"));
   const loopIndex = rootInstructionIndex(compiled, "loopStart");
   const breakIndex = compiled.instructions.findIndex(
