@@ -22,6 +22,7 @@ import {
 } from "../src/index.js";
 import { captureExternalData } from "../src/external-data-limits.js";
 import { captureInstructionPlan } from "../src/plan/capture.js";
+import { serializeCapturedCheckpoint } from "../src/runtime/checkpoint.js";
 import { captureExecutableData } from "../src/runtime/operations/support.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
 import { captureRuntimeSnapshotWithValidatedPlan } from "../src/runtime/state.js";
@@ -189,6 +190,13 @@ test("compiler and runtime paths avoid duplicate whole-plan capture", () => {
     return finish();
   }).counts;
   assert.equal(deserializeStatistics.externalCaptureVisits, undefined);
+
+  const capturedCheckpoint = createCheckpoint(plan, snapshot);
+  const serializationStatistics = withValidationTestStatistics((finish) => {
+    serializeCapturedCheckpoint(capturedCheckpoint);
+    return finish();
+  }).counts;
+  assert.equal(serializationStatistics.externalCaptureVisits, undefined);
 });
 
 test("ordinary source compiles beyond the removed generic capture threshold", () => {

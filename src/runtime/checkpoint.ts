@@ -50,7 +50,12 @@ export function createCheckpoint(
 
 export function serializeCheckpoint(checkpoint: RuntimeCheckpoint): string {
   const restored = restoreCheckpoint(checkpoint);
-  return JSON.stringify(restored);
+  return serializeCapturedCheckpoint(restored);
+}
+
+/** Serializes a checkpoint produced and retained only by the current engine operation. */
+export function serializeCapturedCheckpoint(checkpoint: RuntimeCheckpoint): string {
+  return JSON.stringify(checkpoint);
 }
 
 export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {

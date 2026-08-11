@@ -1,13 +1,18 @@
 import {
   compileSource,
-  run,
-  stepToEvent,
   type Diagnostic,
   type InstructionPlan,
   type InterpreterEvent,
   type RuntimeSnapshot,
 } from "../../src/index.js";
-import { createFreshRuntimeSnapshotWithValidatedPlan } from "../../src/runtime/state.js";
+import {
+  runValidatedState,
+  stepValidatedStateToEvent,
+} from "../../src/runtime/engine.js";
+import {
+  cloneCapturedRuntimeSnapshot,
+  createFreshRuntimeSnapshotWithValidatedPlan,
+} from "../../src/runtime/state.js";
 
 export interface WorkspaceDiagnostic {
   readonly code: string;
@@ -40,15 +45,20 @@ export function executeWorkspaceSource(source: string, mode: "run" | "step" = "r
   const compiled = compileWorkspaceSource(source);
   if (compiled.plan === null || compiled.snapshot === null) return compiled;
   const operation = mode === "run"
-    ? run(compiled.plan, compiled.snapshot)
-    : stepToEvent(compiled.plan, compiled.snapshot);
+    ? runValidatedState(compiled.plan, compiled.snapshot)
+    : stepValidatedStateToEvent(compiled.plan, compiled.snapshot);
   return freezeResult({ diagnostics: compiled.diagnostics, plan: compiled.plan, snapshot: operation.snapshot, events: operation.events, status: operation.snapshot.status, instructionsExecuted: operation.instructionsExecuted });
 }
 
-export function executeWorkspaceSnapshot(plan: InstructionPlan, snapshot: RuntimeSnapshot, mode: "run" | "step"): WorkspaceResult {
+export function executeValidatedWorkspaceSnapshot(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  mode: "run" | "step",
+): WorkspaceResult {
+  const workingSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
   const operation = mode === "run"
-    ? run(plan, snapshot)
-    : stepToEvent(plan, snapshot);
+    ? runValidatedState(plan, workingSnapshot)
+    : stepValidatedStateToEvent(plan, workingSnapshot);
   return freezeResult({ diagnostics: [], plan, snapshot: operation.snapshot, events: operation.events, status: operation.snapshot.status, instructionsExecuted: operation.instructionsExecuted });
 }
 

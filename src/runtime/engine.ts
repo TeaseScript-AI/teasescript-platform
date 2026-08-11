@@ -192,8 +192,23 @@ export function stepToEvent(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
+  return stepValidatedStateToEvent(
+    captured.plan,
+    captured.snapshot,
+    capabilities,
+    options,
+  );
+}
+
+/** Steps engine-owned plan/state that already passed complete validation. */
+export function stepValidatedStateToEvent(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities = {},
+  options: RuntimeRunOptions = {},
+): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  let current = captured.snapshot;
+  let current = snapshot;
   const events: InterpreterEvent[] = [];
   let instructionsExecuted = 0;
   while (
@@ -203,13 +218,13 @@ export function stepToEvent(
     events.length === 0
   ) {
     if (instructionsExecuted >= budget) {
-      const budgetResult = failForBudget(captured.plan, current);
+      const budgetResult = failForBudget(plan, current);
       events.push(...budgetResult.events);
       current = budgetResult.snapshot;
       break;
     }
     const operation = executeCapturedInstruction(
-      captured.plan,
+      plan,
       current,
       capabilities,
     );
@@ -227,19 +242,34 @@ export function run(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
+  return runValidatedState(
+    captured.plan,
+    captured.snapshot,
+    capabilities,
+    options,
+  );
+}
+
+/** Runs engine-owned plan/state that already passed complete validation. */
+export function runValidatedState(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities = {},
+  options: RuntimeRunOptions = {},
+): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  let current = captured.snapshot;
+  let current = snapshot;
   const events: InterpreterEvent[] = [];
   let instructionsExecuted = 0;
   while (current.status !== "waiting" && current.status !== "halted" && current.status !== "failed") {
     if (instructionsExecuted >= budget) {
-      const budgetResult = failForBudget(captured.plan, current);
+      const budgetResult = failForBudget(plan, current);
       current = budgetResult.snapshot;
       events.push(...budgetResult.events);
       break;
     }
     const operation = executeCapturedInstruction(
-      captured.plan,
+      plan,
       current,
       capabilities,
     );
