@@ -135,6 +135,30 @@ test("materializes only arguments that must survive a later user call", () => {
   assert.equal(root.filter((instruction) => instruction.kind === "clearTemporaries").length, 1);
 });
 
+test("materializes a complete composite argument that emits instructions", () => {
+  const compiled = plan([
+    "function inner { return 2 }",
+    "function outer(value) { return value }",
+    "outer(inner() + 1)",
+  ].join("\n"));
+  const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
+  const outer = root.find(
+    (instruction) => instruction.kind === "callFunction" && instruction.functionId === 2,
+  );
+  assert.equal(outer?.kind, "callFunction");
+  if (outer?.kind !== "callFunction") return;
+
+  assert.equal(outer.arguments[0]!.value.kind, "temporary");
+  assert.deepEqual(root.map((instruction) => instruction.kind), [
+    "callFunction",
+    "storeTemporary",
+    "callFunction",
+    "clearTemporaries",
+    "evaluate",
+    "clearTemporary",
+  ]);
+});
+
 test("lowers property receivers and assignment targets in source order", () => {
   const compiled = plan([
     "let items = [0]",

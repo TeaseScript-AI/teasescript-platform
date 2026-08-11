@@ -1038,19 +1038,26 @@ export class InstructionCompiler {
 
   #lowerOrderedExpressions(
     expressions: readonly Expression[],
+    materializeInstructionEmitting = false,
   ): LoweredExpression[] {
+    const emitsInstructions = expressions.map((expression) =>
+      this.#containsUserCall(expression)
+    );
     const laterEmitsInstructions = new Array<boolean>(expressions.length);
     let suffixEmitsInstructions = false;
     for (let index = expressions.length - 1; index >= 0; index -= 1) {
       laterEmitsInstructions[index] = suffixEmitsInstructions;
-      if (this.#containsUserCall(expressions[index]!)) suffixEmitsInstructions = true;
+      if (emitsInstructions[index]) suffixEmitsInstructions = true;
     }
 
     const lowered: LoweredExpression[] = [];
     for (let index = 0; index < expressions.length; index += 1) {
       const expression = expressions[index]!;
       let item = this.#lowerExpression(expression);
-      if (laterEmitsInstructions[index]) {
+      if (
+        laterEmitsInstructions[index] ||
+        (materializeInstructionEmitting && emitsInstructions[index])
+      ) {
         item = item.plan.kind === "temporary"
           ? item
           : this.#materializeExpression(item, expression.span);
@@ -1069,6 +1076,7 @@ export class InstructionCompiler {
     const planned: CallArgumentPlan[] = [];
     const loweredArguments = this.#lowerOrderedExpressions(
       expression.arguments.map((argument) => argument.value),
+      true,
     );
     expression.arguments.forEach((argument, index) => {
       const lowered = loweredArguments[index]!;
