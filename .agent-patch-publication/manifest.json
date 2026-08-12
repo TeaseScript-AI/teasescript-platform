@@ -1,0 +1,21 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "docs/optimization-maintenance-candidates",
+  "expectedBaseSha": "faff7e6789fa24473527ff81486fdfa97d0b26ec",
+  "expectedResultTreeSha": "1bc240bfc33f5cd7b0d3f4dd78a04b15fa13182d",
+  "patchSizeBytes": 21578,
+  "patchSha256": "75728785984492edeb354ef1d4bc622952715234891667ad05b430274c00f842",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0002",
+      "sizeBytes": 12224,
+      "sha256": "83ab089b9d2086a39bdcfcfdccc7216604a673797984973302fe92f57b398d58"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0002",
+      "sizeBytes": 9354,
+      "sha256": "08032c1decada08957aeee45674f94664878a6a5c955c805fd7c47e2110308b2"
+    }
+  ],
+  "commitMessage": "Tighten optimization candidate documentation"
+}

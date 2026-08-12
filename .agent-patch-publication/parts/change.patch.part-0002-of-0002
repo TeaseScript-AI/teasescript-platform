@@ -1,0 +1,126 @@
+-Deep valid canonical runtime state can survive capture, validation, and cloning and still reach a native stack failure
+-in `JSON.stringify(...)` during checkpoint serialization. The failure is real, but current evidence is extreme-depth
+-and a robust repair may require custom iterative serialization or a persistence representation choice, so it remains
+-P3 until realistic workloads justify that complexity; do not restore a generic content-depth limit to hide it.
++Deep valid canonical runtime state can reach native `RangeError` in `JSON.stringify(...)` during checkpoint
++serialization after earlier capture/validation stages succeed. Keep this P3 because the reproduced depth is extreme and
++a robust repair is serializer/design-level; do not hide it behind a generic content-depth limit.
+ 
+ ### Additional source-side recursive traversal
+ 
+-Nested-template lexer state and semantic scope-parent traversal remain possible sibling stack-resilience areas beyond
+-the P1 source paths above. Preserve them as P3 until current source-reachable evidence shows a realistic native
+-failure or a local stack-safe repair is clearly simpler than retaining recursion.
+-
+-### Plan-validator pass and index consolidation
+-
+-Whole-plan correctness validation legitimately performs several passes. Sharing compatible operation-local
+-producer/target/owner analysis could reduce CPU, but the total validator phase bounds the maximum possible win and older
+-evidence did not justify large complexity, so pass fusion or indexing remains P3 unless current profiling makes it
+-material; never fuse checks merely to reduce traversal count or build a validation DSL.
+-
+-### Snapshot plan-analysis reuse or laziness
+-
+-Snapshot validation may derive plan analysis that a particular snapshot cannot use. Historical cost was small, so reuse
+-or lazy construction is P3 and should be considered only when current profiles show a material contribution rather than
+-adding caches or lifecycle complexity pre-emptively.
+-
+-### Temporary-ID aggregation allocation
+-
+-Broad lowering may still allocate intermediate temporary-ID arrays or `flatMap`-style aggregates after the dominant
+-quadratic suffix work was removed. The remaining opportunity is P3 because its current materiality is unproven; prefer a
+-simple streaming/append repair only if allocation profiles show this path still matters.
+-
+-### Function-prologue simplification
+-
+-Separate supplied/default parameter-prologue machinery may permit fewer instructions or simpler state. This is P3
+-because instruction-count reduction alone does not justify changing resumable `parameterState`, checkpoint boundaries,
+-or serialized formats; any format or compatibility impact follows the normal version/compatibility and, when required,
+-Owner route.
+-
+-### Snapshot liveness work
+-
+-Alternative worklists or compatible liveness-result reuse previously reduced structural work more clearly than wall
+-clock time. This remains P3 unless current profiles make liveness propagation material; the removal of historical
+-generic validation-work ceilings is not itself a reason to optimize it.
+-
+-### Runtime lookup and index candidates
+-
+-Prepared-reference scans across active/suspended temporaries, temporary-ID lookup/update/clear, lexical binding
+-slots/indexes, and speaker/property lookup indexes remain separate P3 hypotheses. Expected collection sizes and
+-invalidation, rebasing, shadowing, detachment, and checkpoint semantics can cost more than the scan itself, so add only
+-a local index whose current repeated-work hotspot is materially demonstrated rather than building a general indexing
+-framework.
+-
+-### High-level public runtime-session ownership
+-
+-A future high-level session API could amortize repeated low-level public capture boundaries for a real external host.
+-This is P3 because no current consumer requires that API shape and a generic trusted/prepared pipeline or provenance
+-registry would be premature; introducing such a public ownership/API boundary requires the normal Owner/architecture
+-route when a concrete consumer exists.
+-
+-### Further source-location compression
+-
+-Tables, tuples, relative/delta encoding, or line-index context could reduce plan bytes beyond the compact
+-`PlanSourceLocation` representation. They remain P3 because earlier alternatives traded bytes against complexity,
+-capture cost, or workload dependence; revisit only if current plan/checkpoint representation size again becomes a
+-material bottleneck.
+-
+-### Playground/editor line-number rendering
++Nested-template lexer state and semantic scope-parent recursion remain P3 sibling stack paths. Revisit them only if
++relevant source reaches the failure or a simple local stack-safe repair becomes justified.
+ 
+-Very large editor/playground buffers may allocate substantial temporary line splits or labels for line-number display.
+-This tooling-only candidate is P3 until representative source sizes make the allocation material; keep any repair with
+-the editor/tooling surface rather than the core engine.
++### Other profile-driven performance hypotheses
+ 
+-### Playground development-server body copying
++Known lower-priority hypotheses:
+ 
+-The local development server historically accumulated request chunks and then concatenated them before UTF-8 decode,
+-which can create an extra full-body copy for very large source uploads. This tooling-only candidate is P3 unless large
+-source transport becomes a representative development bottleneck.
++- share only compatible plan-validator analysis rather than fusing checks or building a validation framework;
++- avoid unused snapshot plan analysis or simplify liveness work only if it becomes material;
++- stream temporary-ID aggregation if intermediate allocation remains significant;
++- simplify function-parameter prologue machinery only when the benefit justifies resumability/format impact; and
++- add prepared-reference, temporary, lexical-binding, or speaker/property indexes only for a demonstrated repeated-scan
++  hotspot whose lifecycle is simpler than the scan.
+diff --git a/docs/review-and-audit/AUDIT.md b/docs/review-and-audit/AUDIT.md
+index 19bcee985da240a6759c648fba5d9902d1781766..04ed5abc82509b2e3f1bf82bf43e633158146b84 100644
+--- a/docs/review-and-audit/AUDIT.md
++++ b/docs/review-and-audit/AUDIT.md
+@@ -154,12 +154,11 @@ unbounded work, and credible operating costs.
+ For relevant scalable paths, trace growth across the complete affected pipeline and lifecycle rather
+ than approving each local helper in isolation. Inspect repeated whole-structure scans, copies,
+ validation, or capture across layers; input-sized work nested in other input-sized work;
+-representation and allocation amplification; per-instruction/call/event/checkpoint multipliers; shared helpers
+-that impose expensive caller-specific work on sibling paths that do not require it; and input-controlled recursion,
+-argument spreading, materialization, indexing, allocation, or other native-JavaScript failure modes. For
+-compiler-facing scope, follow representative valid `.tease` width/depth through every affected lexer/parser, semantic,
+-lowering, plan-validation, runtime, and
+-checkpoint/restore stage; surviving one layer does not close a later native-stack or allocation failure.
++representation and allocation amplification; per-instruction/call/event/checkpoint multipliers; caller-specific
++expensive work in shared helpers that sibling paths do not need; and input-controlled recursion, argument spreading,
++materialization, indexing, allocation, or other native-JavaScript failure modes. For compiler-facing scope, follow
++representative valid `.tease` width/depth through every affected lexer/parser, semantic, lowering, plan-validation,
++runtime, and checkpoint/restore stage; surviving one layer does not close a later native-stack or allocation failure.
+ 
+ The audit does not require every algorithm to be linear or every traversal to be iterative. Prefer a
+ simple structural repair when a material amplification or native failure is avoidable. When the
+diff --git a/docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md b/docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md
+index 96d04b38d900202ef37d7f03203cf25bd62398d7..673ff42074468c825cc20ae730594250e9cd51e7 100644
+--- a/docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md
++++ b/docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md
+@@ -43,8 +43,8 @@ Inspect proportionately for:
+   collections, strings, or copies created only to count, inspect, or immediately discard them;
+ - setup or invariant work repeated at a lifecycle frequency when once per enclosing operation would
+   preserve the same behavior;
+-- expensive caller-specific work placed in a shared helper even though sibling callers do not need it; keep copying,
+-  freezing, validation, indexing, or preparation scoped to the ownership/lifecycle path that requires it; and
++- caller-specific copying, freezing, validation, indexing, or preparation in shared helpers when sibling callers do not
++  need it; keep that work on the requiring ownership/lifecycle path; and
+ - input-controlled recursion, dynamic argument spreading, large materialization/stringification,
+   indexing/allocation domains, or other native-JavaScript behavior that can fail otherwise valid content
+   before an accepted product or resource boundary requires rejection.
