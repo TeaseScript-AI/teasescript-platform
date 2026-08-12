@@ -26,6 +26,43 @@ or documentation is beneficial when clarity, behavior, evidence, and maintenance
 strong; prefer clear local repetition over abstraction or indirection that makes the whole result
 harder to understand or change.
 
+### Input-driven scaling and native JavaScript resilience
+
+Treat valid `.tease` input scale as an implementation dimension when CPU work, allocation or memory,
+serialized representation size, or native JavaScript stack/API use can grow with source width or depth
+or with derived AST, plan, snapshot, checkpoint, or runtime data. Identify the material growth dimension
+when it is non-trivial; ordinary changes do not require a formal complexity proof or benchmark worksheet.
+
+Inspect proportionately for:
+
+- input-sized scans, copies, searches, filters, or slices nested inside other input-sized work, including
+  whole-region work repeated per expression, instruction, call, event, or boundary;
+- repeated whole-structure capture, copy, validation, or traversal without a semantic, ownership, or
+  isolation need;
+- source-to-plan/state amplification, unnecessary temporary/frame growth, and large throwaway
+  collections, strings, or copies created only to count, inspect, or immediately discard them;
+- setup or invariant work repeated at a lifecycle frequency when once per enclosing operation would
+  preserve the same behavior; and
+- input-controlled recursion, dynamic argument spreading, large materialization/stringification,
+  indexing/allocation domains, or other native-JavaScript behavior that can fail otherwise valid content
+  before an accepted product or resource boundary requires rejection.
+
+Do not knowingly introduce or retain material accidental amplification or an avoidable native failure
+on the changed scalable path when a local, proportionate structural repair exists; address it as part of
+the implementation rather than relabeling it as later optimization. Code inspection should catch these
+structural red flags. Reuse, caching, indexing, or micro-allocation changes whose benefit is not evident
+remain profiling-driven rather than mandatory pre-optimization.
+
+Do not categorically forbid superlinear algorithms, recursion, copying, or other deliberate trade-offs:
+judge realistic workloads, normal-path CPU/memory cost, implementation complexity, and alternatives.
+When a material limitation is found but a proportionate repair would require broad redesign or would
+impose a material recurring cost, classify it through the normal finding rules and preserve the evidence
+in the active issue/PR. If the limitation remains open when that work closes, create or update a concrete
+follow-up before closure so it stays discoverable. Record the controlling input shape, observed consequence,
+likely or measured benefit, repair scope, and reason for deferral so related findings can support a later
+redesign decision. Do not silently ignore the limitation or turn an incidental JavaScript/V8 failure into
+TeaseScript product policy.
+
 Treat code, tests, relevant documentation and examples, configuration, workflows, generated
 results, and affected integrations or boundaries as one result; it is incomplete while any relevant
 part remains false, stale, weak, ambiguous, or needlessly costly. Keep responsibilities,
@@ -53,8 +90,11 @@ author claims, and earlier approval are evidence, not proof.
 
 Treat review as a proportional, change-scoped examination. Inspect every material part deeply enough
 to support the landing decision without audit-only ceremony or unrelated cleanup. Apply the relevant
-lenses below; not every lens applies equally, and preference alone is not a blocker. Escalate
-uncertainty that cannot be bounded through a separately assigned [`AUDIT.md`](AUDIT.md).
+lenses below; not every lens applies equally, and preference alone is not a blocker. On changed scalable
+paths, independently apply the input-driven scaling and native-JavaScript lens above; small fixtures and
+green CI do not by themselves prove that valid large or complex input avoids accidental amplification or
+native failure. Escalate uncertainty that cannot be bounded through a separately assigned
+[`AUDIT.md`](AUDIT.md).
 
 - **Requirements and paths:** accepted behavior, scope, failures, indirect effects, and real
   supported or trusted paths.
@@ -65,9 +105,9 @@ uncertainty that cannot be bounded through a separately assigned [`AUDIT.md`](AU
   negative paths, and proof of the claim rather than a green total.
 - **Documentation and context:** correctness, canonical-source placement, lifecycle, routing, executable
   details, stale or competing text, consolidation, and safe, token-efficient compactness.
-- **Boundaries and cost:** reachable trust boundaries, realistic workloads, unbounded work, hot
-  paths, and proportionate security, performance, and resource scrutiny without speculative
-  hardening.
+- **Boundaries and cost:** reachable trust boundaries, realistic workloads, input-driven scaling,
+  native-JavaScript failure modes, unbounded work, hot paths, and proportionate security, performance,
+  and resource scrutiny without speculative hardening or premature micro-optimization.
 - **Diff hygiene:** accidental scope, generated residue, debug artifacts, secrets, stale text, and
   undocumented public or compatibility commitments.
 
@@ -107,7 +147,8 @@ Non-authoritative memory aid; mark `N/A` only after considering the item.
 - [ ] Supported behavior and failures proved through real paths.
 - [ ] Tests and oracles are sound; negative probes used when warranted.
 - [ ] Documentation is canonical, current, consolidated, and token-efficient without semantic loss.
-- [ ] Dependencies, trust boundaries, security, performance, and resources checked proportionately.
+- [ ] Dependencies, trust boundaries, input-driven scaling/native-JavaScript failures, security, performance,
+  and resources checked proportionately.
 - [ ] Diff contains no unrelated changes, residue, secrets, debug code, or stale text.
 - [ ] Exact head, comparison base, checks, skips, uncertainty, and PR metadata recorded.
 - [ ] Findings classified; blockers resolved; convergence or escalation recorded.
