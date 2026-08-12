@@ -154,10 +154,11 @@ unbounded work, and credible operating costs.
 For relevant scalable paths, trace growth across the complete affected pipeline and lifecycle rather
 than approving each local helper in isolation. Inspect repeated whole-structure scans, copies,
 validation, or capture across layers; input-sized work nested in other input-sized work;
-representation and allocation amplification; per-instruction/call/event/checkpoint multipliers; and
-input-controlled recursion, argument spreading, materialization, indexing, allocation, or other
-native-JavaScript failure modes. For compiler-facing scope, follow representative valid `.tease`
-width/depth through every affected lexer/parser, semantic, lowering, plan-validation, runtime, and
+representation and allocation amplification; per-instruction/call/event/checkpoint multipliers; shared helpers
+that impose expensive caller-specific work on sibling paths that do not require it; and input-controlled recursion,
+argument spreading, materialization, indexing, allocation, or other native-JavaScript failure modes. For
+compiler-facing scope, follow representative valid `.tease` width/depth through every affected lexer/parser, semantic,
+lowering, plan-validation, runtime, and
 checkpoint/restore stage; surviving one layer does not close a later native-stack or allocation failure.
 
 The audit does not require every algorithm to be linear or every traversal to be iterative. Prefer a
