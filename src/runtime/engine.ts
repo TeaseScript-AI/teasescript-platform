@@ -5,6 +5,7 @@ import type {
   Instruction,
   InstructionPlan,
   InteractionUiPayload,
+  PlanSourceLocation,
   PreparedInteractionUiPayload,
 } from "../plan/model.js";
 import {
@@ -14,7 +15,7 @@ import {
 import {
   createSourcePosition,
   createSourceSpan,
-  type SourceSpan,
+  SourceSpan as RichSourceSpan,
 } from "../source.js";
 import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
 import {
@@ -91,8 +92,10 @@ import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
   readonly named: Readonly<Record<string, SerializableRuntimeValue>>;
-  readonly span: SourceSpan;
+  readonly span: RichSourceSpan;
 }
+
+type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 export type RuntimeBuiltinFunction = (
   call: RuntimeCapabilityCall,
@@ -3066,7 +3069,11 @@ function failForBudget(
   events: InterpreterEvent[],
 ): void {
   const span = plan.instructions[snapshot.nextInstruction]?.span ?? plan.sourceSpan;
-  failSnapshot(snapshot, { code: "TSR037", message: "Runtime instruction budget exceeded.", span }, events);
+  failSnapshot(snapshot, {
+    code: "TSR037",
+    message: "Runtime instruction budget exceeded.",
+    span: copySpan(span),
+  }, events);
 }
 
 function instructionBudget(value: number | undefined): number {
@@ -3086,7 +3093,7 @@ function instructionBudget(value: number | undefined): number {
 
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
-  return new RuntimeFault(code, message, span);
+  return new RuntimeFault(code, message, copySpan(span));
 }
 
 

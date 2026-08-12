@@ -10,6 +10,7 @@ import type {
   InteractionAccessibleName,
   InteractionInstruction,
   InteractionUiPayload,
+  PlanSourceLocation,
 } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { CheckpointError, createCheckpoint, deserializeCheckpoint, restoreCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
@@ -23,7 +24,6 @@ import type {
 import { getSerializableProperty, type SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import type { SourceSpan } from "../src/source.js";
 
 function interactionPlan(
   interactionKind: InteractionInstruction["interactionKind"],
@@ -587,7 +587,7 @@ function replaceHandoffInstruction(
   };
 }
 
-function handoffInstructionSpan(injected: InjectedInteractionPlan): SourceSpan {
+function handoffInstructionSpan(injected: InjectedInteractionPlan): PlanSourceLocation {
   return injected.plan.instructions[injected.handoffInstruction]!.span;
 }
 
@@ -892,11 +892,11 @@ interface RejectedExpressionGuaranteeRow {
   readonly temporaryCount?: number;
 }
 
-function temporaryExpression(temporaryId: number, span: SourceSpan): ExpressionPlan {
+function temporaryExpression(temporaryId: number, span: PlanSourceLocation): ExpressionPlan {
   return { kind: "temporary", temporaryId, span };
 }
 
-function literalExpression(value: string | number | boolean | null, span: SourceSpan): ExpressionPlan {
+function literalExpression(value: string | number | boolean | null, span: PlanSourceLocation): ExpressionPlan {
   return { kind: "literal", value, span };
 }
 
@@ -904,7 +904,7 @@ function binaryExpression(
   operator: BinaryExpressionPlan["operator"],
   left: ExpressionPlan,
   right: ExpressionPlan,
-  span: SourceSpan,
+  span: PlanSourceLocation,
 ): ExpressionPlan {
   return { kind: "binary", operator, left, right, span };
 }

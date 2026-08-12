@@ -1,6 +1,7 @@
-import type { InstructionPlan } from "../../plan/model.js";
+import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
 import { captureInstructionPlan } from "../../plan/capture.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
+import { planLocationToSourceSpan } from "../../plan/source-location.js";
 import { RuntimeFault } from "../errors.js";
 import type { InterpreterEvent } from "../events.js";
 import { cloneSerializableValue, type SerializableRuntimeValue } from "../serializable-values.js";
@@ -86,9 +87,13 @@ export function assertCounterCanAdvance(value: number, field: string): void {
   }
 }
 
-export function assertEventSequenceCapacity(snapshot: RuntimeSnapshot, count: number, span?: SourceSpan): void {
+export function assertEventSequenceCapacity(
+  snapshot: RuntimeSnapshot,
+  count: number,
+  span?: SourceSpan | PlanSourceLocation,
+): void {
   if (snapshot.nextEventSequence <= Number.MAX_SAFE_INTEGER - count) return;
-  if (span !== undefined) throw new RuntimeFault("TSR051", "Runtime event sequence space is exhausted.", span);
+  if (span !== undefined) throw new RuntimeFault("TSR051", "Runtime event sequence space is exhausted.", copySpan(span));
   throw new RuntimeDataError("TSR101", "Runtime nextEventSequence cannot satisfy the pending action atomically.");
 }
 
@@ -174,6 +179,7 @@ export function isPlainRecord(value: unknown): value is Record<string, unknown> 
   return prototype === Object.prototype || prototype === null;
 }
 
-export function copySpan(span: SourceSpan): SourceSpan {
+export function copySpan(span: SourceSpan | PlanSourceLocation): SourceSpan {
+  if ("so" in span) return planLocationToSourceSpan(span);
   return createSourceSpan(span.start, span.end);
 }

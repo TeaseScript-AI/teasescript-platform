@@ -540,9 +540,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 18 | User-function call arguments contain source-ordered expression plans. Lowering materializes an argument result when that argument emits instructions or when its value must survive a later instruction-emitting argument; otherwise the runtime evaluates the expression atomically at the call boundary. This removes the former one-preparation-instruction and one-evidence-temporary cost per supplied argument. |
+| Instruction plan | 19 | Plan-owned source provenance is the compact self-contained `PlanSourceLocation` record `{so,sl,sc,eo,el,ec}`. Compiler/parser diagnostics and public runtime events, faults, warnings, built-in calls, and snapshot-owned spans retain rich `SourceSpan` values; the runtime converts plan locations at those boundaries. |
 | Runtime snapshot | 19 | Call-frame argument values are the canonical exactly-once inputs retained for parameter binding, default prologues, suspension, and resume. Validation checks supplied/missing argument state against the owning call instruction without requiring historical duplicate values in caller temporaries, and rejects a pre-call snapshot whose result destination is already occupied. |
-| Checkpoint | 26 | Updated the self-contained bundle for instruction-plan revision 18 and runtime-snapshot revision 19. |
+| Checkpoint | 27 | Updated the self-contained bundle for instruction-plan revision 19 and runtime-snapshot revision 19. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

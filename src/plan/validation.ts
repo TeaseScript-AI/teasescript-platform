@@ -2354,25 +2354,20 @@ function validateFunctionId(
 }
 
 function validateSpan(value: unknown, path: string, errors: PlanValidationError[]): void {
-  if (!isRecord(value) || !validPosition(value.start) || !validPosition(value.end)) {
-    errors.push(planError("TSC002", "Source span is malformed.", path));
+  if (!isRecord(value) || !hasExactKeys(value, PLAN_LOCATION_KEYS)) {
+    errors.push(planError("TSC002", "Plan source location is malformed.", path));
     return;
   }
-  const start = value.start as { offset: number };
-  const end = value.end as { offset: number };
-  if (end.offset < start.offset) {
-    errors.push(planError("TSC002", "Source span ends before it starts.", path));
+  if (!PLAN_LOCATION_KEYS.every((key) => nonNegativeSafeInteger(value[key]))) {
+    errors.push(planError("TSC002", "Plan source location values must be non-negative safe integers.", path));
+    return;
+  }
+  if ((value.eo as number) < (value.so as number)) {
+    errors.push(planError("TSC002", "Plan source location ends before it starts.", path));
   }
 }
 
-function validPosition(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    nonNegativeSafeInteger(value.offset) &&
-    nonNegativeSafeInteger(value.line) &&
-    nonNegativeSafeInteger(value.column)
-  );
-}
+const PLAN_LOCATION_KEYS = ["so", "sl", "sc", "eo", "el", "ec"] as const;
 
 function validateJumpTarget(
   value: unknown,

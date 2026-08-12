@@ -73,12 +73,12 @@ test("rejects an extreme root boundary without building a metadata-sized region"
 test("rejects unsafe persisted temporary and loop identities", () => {
   const unsafe = Number.MAX_SAFE_INTEGER + 1;
   const sourcePlan = mutablePlan(functionPlan());
-  (sourcePlan.sourceSpan.start as { offset: number }).offset = unsafe;
+  (sourcePlan.sourceSpan as { so: number }).so = unsafe;
 
   const sourceValidation = validateInstructionPlan(sourcePlan as unknown as InstructionPlan);
   assert.equal(sourceValidation.valid, false);
   assert.ok(sourceValidation.errors.some((error) =>
-    error.path === "$.sourceSpan" && error.message === "Source span is malformed."
+    error.path === "$.sourceSpan" && error.message === "Plan source location values must be non-negative safe integers."
   ));
 
   const temporaryPlan = mutablePlan(functionPlan());

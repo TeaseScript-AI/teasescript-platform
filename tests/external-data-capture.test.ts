@@ -207,23 +207,21 @@ test("external plan capture freezes the detached graph without freezing generic 
 
   const capturedPlan = captured.plan! as unknown as {
     instructions: Array<{
-      span: { start: { offset: number } };
+      span: { so: number };
     }>;
   };
   const capturedInstruction = capturedPlan.instructions[0]!;
   const capturedSpan = capturedInstruction.span;
-  const capturedStart = capturedSpan.start;
   assert.equal(Object.isFrozen(captured.plan), true);
   assert.equal(Object.isFrozen(capturedPlan.instructions), true);
   assert.equal(Object.isFrozen(capturedInstruction), true);
   assert.equal(Object.isFrozen(capturedSpan), true);
-  assert.equal(Object.isFrozen(capturedStart), true);
 
   const originalInstruction = (plan.instructions as Array<{
-    span: { start: { offset: number } };
+    span: { so: number };
   }>)[0]!;
-  originalInstruction.span.start.offset = 3;
-  assert.notEqual(capturedStart.offset, 3);
+  originalInstruction.span.so = 3;
+  assert.notEqual(capturedSpan.so, 3);
 
   const generic = captureExternalData({ nested: [1, { value: 2 }] });
   assert.equal(generic.ok, true);

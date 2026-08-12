@@ -8,6 +8,7 @@ import {
 import { compileStableProgram, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
+import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import {
   validateSemantics,
@@ -90,7 +91,7 @@ function compiledPlanValidationDiagnostic(
       DiagnosticSeverity.Error,
       "TSC006",
       `Compiled instruction plan is invalid: ${validation.errors[0]!.message}`,
-      plan.sourceSpan,
+      planLocationToSourceSpan(plan.sourceSpan),
     );
   }
 
@@ -98,7 +99,7 @@ function compiledPlanValidationDiagnostic(
     DiagnosticSeverity.Error,
     "TSC006",
     `Compiled interaction data is rejected by the current instruction-plan validation boundary: ${match.error.message}`,
-    plan.instructions[match.instructionIndex]!.span,
+    planLocationToSourceSpan(plan.instructions[match.instructionIndex]!.span),
   );
 }
 

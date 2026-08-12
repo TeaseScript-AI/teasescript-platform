@@ -7,7 +7,7 @@ import type {
   InteractionExpression,
   ShowButtonStatement,
 } from "../../ast.js";
-import { createSourceSpan, type SourceSpan } from "../../source.js";
+import type { SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
 import type {
   ArgumentPlan,
@@ -25,7 +25,9 @@ import type {
   TemporaryExpressionPlan,
   InteractionUiPayload,
   PreparedInteractionUiPayload,
+  PlanSourceLocation,
 } from "../../plan/model.js";
+import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 
 export class InstructionCompiler {
   public readonly instructions: Instruction[] = [];
@@ -1541,6 +1543,6 @@ function staticNumber(expression: Expression): number | undefined {
   }
 }
 
-function copySpan(span: SourceSpan): SourceSpan {
-  return createSourceSpan(span.start, span.end);
+function copySpan(span: SourceSpan): PlanSourceLocation {
+  return sourceSpanToPlanLocation(span);
 }

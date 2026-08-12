@@ -244,12 +244,11 @@ test("function plans survive JSON round trips with preserved spans", () => {
   assert.deepEqual(restored, original);
   assert.equal(validateInstructionPlan(restored).valid, true);
   assert.deepEqual(original.functions[0]?.declarationSpan, {
-    start: { offset: 0, line: 0, column: 0 },
-    end: { offset: 49, line: 0, column: 49 },
+    so: 0, sl: 0, sc: 0, eo: 49, el: 0, ec: 49,
   });
   const call = original.instructions.find((instruction) => instruction.kind === "callFunction");
   assert.deepEqual(
-    call === undefined ? null : [call.span.start.offset, call.span.end.offset],
+    call === undefined ? null : [call.span.so, call.span.eo],
     [63, 72],
   );
 });

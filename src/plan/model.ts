@@ -1,12 +1,26 @@
-import type { SourceSpan } from "../source.js";
-
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 18;
+export const INSTRUCTION_PLAN_VERSION = 19;
+
+/** Compact serialized instruction-plan representation of a source range. */
+export interface PlanSourceLocation {
+  /** Inclusive start offset in UTF-16 code units. */
+  readonly so: number;
+  /** Zero-based line containing the inclusive start position. */
+  readonly sl: number;
+  /** Zero-based column of the inclusive start position. */
+  readonly sc: number;
+  /** Exclusive end offset in UTF-16 code units. */
+  readonly eo: number;
+  /** Zero-based line containing the exclusive end position. */
+  readonly el: number;
+  /** Zero-based column of the exclusive end position. */
+  readonly ec: number;
+}
 
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
   readonly version: typeof INSTRUCTION_PLAN_VERSION;
-  readonly sourceSpan: SourceSpan;
+  readonly sourceSpan: PlanSourceLocation;
   readonly rootEndInstruction: number;
   readonly temporaryCount: number;
   readonly functions: readonly CompiledFunctionDefinition[];
@@ -17,20 +31,20 @@ export interface CompiledFunctionParameter {
   readonly name: string;
   readonly index: number;
   readonly hasDefault: boolean;
-  readonly declarationSpan: SourceSpan;
-  readonly defaultSpan: SourceSpan | null;
+  readonly declarationSpan: PlanSourceLocation;
+  readonly defaultSpan: PlanSourceLocation | null;
 }
 
 export interface CompiledFunctionDefinition {
   readonly id: number;
   readonly name: string;
-  readonly declarationSpan: SourceSpan;
+  readonly declarationSpan: PlanSourceLocation;
   readonly parameters: readonly CompiledFunctionParameter[];
   readonly entryInstruction: number;
   readonly bodyEntryInstruction: number;
   readonly implicitReturnInstruction: number;
   readonly endInstruction: number;
-  readonly bodySpan: SourceSpan;
+  readonly bodySpan: PlanSourceLocation;
 }
 
 export type Instruction =
@@ -70,7 +84,7 @@ export type Instruction =
   | ExitInstruction;
 
 interface InstructionBase {
-  readonly span: SourceSpan;
+  readonly span: PlanSourceLocation;
 }
 
 export interface DeclareSpeakerInstruction extends InstructionBase {
@@ -225,7 +239,7 @@ export interface ClearTemporariesInstruction extends InstructionBase {
 export interface CallArgumentPlan {
   readonly parameterName: string;
   readonly value: ExpressionPlan;
-  readonly span: SourceSpan;
+  readonly span: PlanSourceLocation;
 }
 
 export interface CallFunctionInstruction extends InstructionBase {
@@ -380,7 +394,7 @@ export interface ExitInstruction extends InstructionBase {
 export interface PlannedProperty {
   readonly name: string;
   readonly value: ExpressionPlan;
-  readonly span: SourceSpan;
+  readonly span: PlanSourceLocation;
 }
 
 export type AssignmentTargetPlan =
@@ -406,7 +420,7 @@ export type ExpressionPlan =
   | PreparedReferenceExpressionPlan;
 
 interface ExpressionPlanBase {
-  readonly span: SourceSpan;
+  readonly span: PlanSourceLocation;
 }
 
 export interface LiteralExpressionPlan extends ExpressionPlanBase {
@@ -453,12 +467,12 @@ export type TemplatePartPlan =
   | {
       readonly kind: "text";
       readonly value: string;
-      readonly span: SourceSpan;
+      readonly span: PlanSourceLocation;
     }
   | {
       readonly kind: "expression";
       readonly expression: ExpressionPlan;
-      readonly span: SourceSpan;
+      readonly span: PlanSourceLocation;
     };
 
 export interface TemplateExpressionPlan extends ExpressionPlanBase {
@@ -482,13 +496,13 @@ export type ArgumentPlan =
   | {
       readonly kind: "positional";
       readonly value: ExpressionPlan;
-      readonly span: SourceSpan;
+      readonly span: PlanSourceLocation;
     }
   | {
       readonly kind: "named";
       readonly name: string;
       readonly value: ExpressionPlan;
-      readonly span: SourceSpan;
+      readonly span: PlanSourceLocation;
     };
 
 export interface CallExpressionPlan extends ExpressionPlanBase {

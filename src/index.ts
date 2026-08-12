@@ -37,6 +37,7 @@ export {
   type PreparedInteractionUiPayload,
   type PreparedInteractionChoiceLabel,
   type InstructionPlan,
+  type PlanSourceLocation,
   type LoopControlInstruction,
   type LoopStartInstruction,
   type RangeExpressionPlan,

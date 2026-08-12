@@ -4,13 +4,14 @@ import {
   captureProgramAst,
   findNonFiniteNumericLiteralDiagnosticsInStableProgram,
 } from "../ast-validation.js";
-import { createSourceSpan, type SourceSpan } from "../source.js";
+import type { SourceSpan } from "../source.js";
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
   type InstructionPlan,
 } from "../plan/model.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
+import { sourceSpanToPlanLocation } from "../plan/source-location.js";
 import { InstructionCompiler } from "./lowering/compiler.js";
 import { InstructionCompilationError } from "./errors.js";
 
@@ -70,6 +71,6 @@ export function compileStableProgram(program: Program): InstructionPlan {
   });
 }
 
-function copySpan(span: SourceSpan): SourceSpan {
-  return createSourceSpan(span.start, span.end);
+function copySpan(span: SourceSpan) {
+  return sourceSpanToPlanLocation(span);
 }
