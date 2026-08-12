@@ -424,6 +424,18 @@ test("dynamic interaction UI uses the established visible-text conversion once b
   assert.equal(unsupported.snapshot.nextActionId, 1);
 });
 
+test("static compact interactions compile long mixed unary numeric labels without native recursion", () => {
+  const source = `showButton ${"-+".repeat(12_000)}-1`;
+  const result = compileSource(source);
+  assert.deepEqual(result.diagnostics, []);
+  assert.ok(result.plan !== null);
+  assert.equal(validateInstructionPlan(result.plan).valid, true);
+  const interaction = result.plan.instructions.find((instruction) => instruction.kind === "interaction");
+  assert.ok(interaction?.kind === "interaction" && "ui" in interaction);
+  assert.equal(interaction.ui.kind, "button");
+  assert.equal(interaction.ui.buttonLabel, "-1");
+});
+
 test("dynamic interaction UI commits prepared text and serialized RNG only after full validation", () => {
   const cases = [
     {

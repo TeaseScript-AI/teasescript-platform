@@ -1484,6 +1484,7 @@ function staticInteractionUi(
 }
 
 function staticVisibleText(expression: Expression): string | undefined {
+  expression = unwrapParentheses(expression);
   switch (expression.kind) {
     case "stringLiteral":
       return expression.value;
@@ -1495,8 +1496,6 @@ function staticVisibleText(expression: Expression): string | undefined {
       return expression.value ? "true" : "false";
     case "nullLiteral":
       return "null";
-    case "parenthesizedExpression":
-      return staticVisibleText(expression.expression);
     case "unaryExpression":
     case "binaryExpression": {
       const value = staticNumber(expression);
@@ -1523,24 +1522,33 @@ function staticVisibleText(expression: Expression): string | undefined {
 }
 
 function staticNumber(expression: Expression): number | undefined {
-  if (expression.kind === "numberLiteral") return expression.value;
-  if (expression.kind === "parenthesizedExpression") return staticNumber(expression.expression);
-  if (expression.kind === "unaryExpression" && (expression.operator === "+" || expression.operator === "-")) {
-    const value = staticNumber(expression.operand);
-    return value === undefined ? undefined : expression.operator === "+" ? value : -value;
+  let negate = false;
+  while (true) {
+    expression = unwrapParentheses(expression);
+    if (
+      expression.kind !== "unaryExpression" ||
+      (expression.operator !== "+" && expression.operator !== "-")
+    ) break;
+    if (expression.operator === "-") negate = !negate;
+    expression = expression.operand;
   }
-  if (expression.kind !== "binaryExpression") return undefined;
-  const left = staticNumber(expression.left);
-  const right = staticNumber(expression.right);
-  if (left === undefined || right === undefined) return undefined;
-  switch (expression.operator) {
-    case "+": return left + right;
-    case "-": return left - right;
-    case "*": return left * right;
-    case "/": return right === 0 ? undefined : left / right;
-    case "%": return right === 0 ? undefined : left % right;
-    default: return undefined;
+  let value: number | undefined;
+  if (expression.kind === "numberLiteral") {
+    value = expression.value;
+  } else if (expression.kind === "binaryExpression") {
+    const left = staticNumber(expression.left);
+    const right = staticNumber(expression.right);
+    if (left === undefined || right === undefined) return undefined;
+    switch (expression.operator) {
+      case "+": value = left + right; break;
+      case "-": value = left - right; break;
+      case "*": value = left * right; break;
+      case "/": value = right === 0 ? undefined : left / right; break;
+      case "%": value = right === 0 ? undefined : left % right; break;
+      default: value = undefined; break;
+    }
   }
+  return value === undefined || !negate ? value : -value;
 }
 
 function copySpan(span: SourceSpan): PlanSourceLocation {
