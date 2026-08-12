@@ -38,6 +38,8 @@ interface PathNode {
 interface AssignmentTarget {
   readonly container: unknown[] | Record<string, unknown>;
   readonly key: string;
+  /** Non-null only for a known numeric element of an engine-created array. */
+  readonly arrayIndex: number | null;
 }
 
 type WorkItem =
@@ -115,8 +117,9 @@ export function captureExternalData(
         return captureFailure("nonJsonSafeValue", item.path, rootPath);
       }
 
+      let arrayIndex: number | null = null;
       if (item.array && typeof key === "string") {
-        const arrayIndex = canonicalArrayIndex(key);
+        arrayIndex = canonicalArrayIndex(key);
         if (arrayIndex === null) {
           return captureFailure("nonJsonSafeValue", item.path, rootPath);
         } else if (arrayIndex >= item.arrayLength!) {
@@ -147,7 +150,7 @@ export function captureExternalData(
         value: descriptor.value,
         depth: item.depth + 1,
         path: nestedPath,
-        target: { container: item.captured, key },
+        target: { container: item.captured, key, arrayIndex },
       });
       continue;
     }
@@ -262,6 +265,10 @@ function assignCaptured(
 ): void {
   if (target === null) {
     setRoot(value);
+    return;
+  }
+  if (target.arrayIndex !== null) {
+    (target.container as unknown[])[target.arrayIndex] = value;
     return;
   }
   Reflect.defineProperty(target.container, target.key, {

@@ -27,9 +27,26 @@ export interface CapturedProgramAstResult {
   readonly diagnostic: Diagnostic | null;
 }
 
-interface AssignmentTarget {
-  readonly container: unknown[] | Record<string, unknown>;
+type AssignmentTarget =
+  | {
+      readonly container: Record<string, unknown>;
+      readonly key: string;
+    }
+  | {
+      readonly container: unknown[];
+      readonly index: number;
+    };
+
+interface ObjectPropertyStage {
   readonly key: string;
+  readonly value: unknown;
+  readonly previous: ObjectPropertyStage | null;
+}
+
+interface CapturedArrayHeader {
+  readonly output: unknown[];
+  readonly values: Record<string, unknown>;
+  readonly length: number;
 }
 
 type WorkItem =
@@ -109,12 +126,12 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
       });
       active.add(current);
       work.push({ kind: "leave", source: current, captured: captured.output });
-      for (let index = captured.values.length - 1; index >= 0; index -= 1) {
+      for (let index = captured.length - 1; index >= 0; index -= 1) {
         work.push({
           kind: "visit",
           value: captured.values[index],
           depth: item.depth + 1,
-          target: { container: captured.output, key: String(index) },
+          target: { container: captured.output, index },
         });
       }
       continue;
@@ -132,7 +149,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
       return captureFailure("Direct AST input must contain only plain objects and arrays.");
     }
     const captured = Object.create(null) as Record<string, unknown>;
-    const values = createCapturedArray(0) as Array<readonly [string, unknown]>;
+    let values: ObjectPropertyStage | null = null;
     for (const key of keys) {
       recordValidationTestWork("directAstCaptureDescriptors");
       if (typeof key === "symbol") {
@@ -151,7 +168,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
       ) {
         return captureFailure("Direct AST input may contain only enumerable data properties.");
       }
-      values.push([key, descriptor.value]);
+      values = { key, value: descriptor.value, previous: values };
     }
 
     assignCaptured(item.target, captured, (root) => {
@@ -159,13 +176,16 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     });
     active.add(current);
     work.push({ kind: "leave", source: current, captured });
-    for (let index = values.length - 1; index >= 0; index -= 1) {
-      const [key, nested] = values[index]!;
+    for (
+      let currentValue = values;
+      currentValue !== null;
+      currentValue = currentValue.previous
+    ) {
       work.push({
         kind: "visit",
-        value: nested,
+        value: currentValue.value,
         depth: item.depth + 1,
-        target: { container: captured, key },
+        target: { container: captured, key: currentValue.key },
       });
     }
   }
@@ -232,9 +252,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
   return Object.freeze(diagnostics);
 }
 
-function captureArrayHeader(
-  value: object,
-): { readonly output: unknown[]; readonly values: readonly unknown[] } | null {
+function captureArrayHeader(value: object): CapturedArrayHeader | null {
   let lengthDescriptor: PropertyDescriptor | undefined;
   let keys: readonly (string | symbol)[];
   try {
@@ -255,7 +273,7 @@ function captureArrayHeader(
   }
 
   const length = lengthDescriptor.value;
-  const values = createCapturedArray(length);
+  const values = Object.create(null) as Record<string, unknown>;
   const seen = new Set<number>();
   for (const key of keys) {
     if (key === "length") continue;
@@ -279,15 +297,10 @@ function captureArrayHeader(
       return null;
     }
     seen.add(index);
-    Reflect.defineProperty(values, key, {
-      value: descriptor.value,
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
+    values[key] = descriptor.value;
   }
   if (seen.size !== length) return null;
-  return { output: createCapturedArray(length), values };
+  return { output: createCapturedArray(length), values, length };
 }
 
 function assignCaptured(
@@ -297,6 +310,10 @@ function assignCaptured(
 ): void {
   if (target === null) {
     setRoot(value);
+    return;
+  }
+  if ("index" in target) {
+    target.container[target.index] = value;
     return;
   }
   Reflect.defineProperty(target.container, target.key, {

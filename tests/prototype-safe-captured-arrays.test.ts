@@ -109,3 +109,36 @@ test("inherited numeric getters are never invoked across captured-data boundarie
   );
   assert.equal(getterCalls, 0);
 });
+
+test("dense captured arrays install ordinary own elements without inherited setters", () => {
+  let setterCalls = 0;
+  withArrayPrototypeIndex(
+    {
+      set(this: unknown[], value: unknown) {
+        if (Object.getPrototypeOf(this) !== Array.prototype) {
+          setterCalls += 1;
+          throw new Error("captured-array numeric setter must not run");
+        }
+        Reflect.defineProperty(this, "0", {
+          value,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+      },
+    },
+    () => {
+      const result = captureExternalData(["captured"]);
+      assert.equal(result.ok, true);
+      const captured = result.value as unknown[];
+      assert.equal(captured[0], "captured");
+      assert.deepEqual(Reflect.getOwnPropertyDescriptor(captured, "0"), {
+        value: "captured",
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    },
+  );
+  assert.equal(setterCalls, 0);
+});
