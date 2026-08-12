@@ -43,8 +43,7 @@ Inspect proportionately for:
   collections, strings, or copies created only to count, inspect, or immediately discard them;
 - setup or invariant work repeated at a lifecycle frequency when once per enclosing operation would
   preserve the same behavior;
-- expensive caller-specific work placed in a shared helper even though sibling callers do not need it; keep copying,
-  freezing, validation, indexing, or preparation scoped to the ownership/lifecycle path that requires it; and
+- caller-specific expensive work in shared helpers that sibling callers do not need; and
 - input-controlled recursion, dynamic argument spreading, large materialization/stringification,
   indexing/allocation domains, or other native-JavaScript behavior that can fail otherwise valid content
   before an accepted product or resource boundary requires rejection.
