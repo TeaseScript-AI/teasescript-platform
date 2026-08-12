@@ -50,11 +50,11 @@ test("preserves relevant statement and nested expression source spans", () => {
   assert.equal(instruction?.kind, "declareBinding");
   if (instruction?.kind !== "declareBinding") return;
   assert.deepEqual(
-    [instruction.span.start.offset, instruction.span.end.offset],
+    [instruction.span.so, instruction.span.eo],
     [0, source.length],
   );
   assert.deepEqual(
-    [instruction.value.span.start.offset, instruction.value.span.end.offset],
+    [instruction.value.span.so, instruction.value.span.eo],
     [source.indexOf("1"), source.length],
   );
 });

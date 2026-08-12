@@ -1,15 +1,19 @@
 import {
   type InstructionPlan,
 } from "../plan/model.js";
-import { captureInstructionPlan } from "../plan/capture.js";
 import {
-  captureRuntimeSnapshot,
-  cloneCapturedRuntimeSnapshot,
+  captureInstructionPlan,
+} from "../plan/capture.js";
+import { freezeInstructionPlan } from "../plan/freeze.js";
+import { validateCapturedInstructionPlan } from "../plan/validation.js";
+import {
+  captureRuntimeSnapshotWithValidatedPlan,
+  validateCapturedRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "./state.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 25;
+export const CHECKPOINT_VERSION = 27;
 
 export interface RuntimeCheckpoint {
   readonly format: typeof CHECKPOINT_FORMAT;
@@ -40,8 +44,8 @@ export function createCheckpoint(
   return Object.freeze({
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
-    plan: clonePlan(capturedPlan),
-    snapshot: cloneCapturedRuntimeSnapshot(capturedSnapshot),
+    plan: capturedPlan,
+    snapshot: capturedSnapshot,
   });
 }
 
@@ -64,8 +68,8 @@ export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {
   return Object.freeze({
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
-    plan: clonePlan(plan),
-    snapshot: cloneCapturedRuntimeSnapshot(snapshot),
+    plan,
+    snapshot,
   });
 }
 
@@ -138,10 +142,6 @@ function captureCheckpointEnvelope(value: unknown): CheckpointEnvelope {
   return captured as unknown as CheckpointEnvelope;
 }
 
-function clonePlan(plan: InstructionPlan): InstructionPlan {
-  return deepFreeze(JSON.parse(JSON.stringify(plan)) as InstructionPlan);
-}
-
 export function deserializeCheckpoint(json: string): RuntimeCheckpoint {
   let parsed: unknown;
   try {
@@ -150,7 +150,47 @@ export function deserializeCheckpoint(json: string): RuntimeCheckpoint {
     const message = error instanceof Error ? error.message : String(error);
     throw checkpointError("TSK003", `Checkpoint JSON is invalid: ${message}`, "$.");
   }
-  return restoreCheckpoint(parsed);
+  return restoreParsedCheckpoint(parsed);
+}
+
+function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
+  const envelope = captureCheckpointEnvelope(value);
+  if (envelope.format !== CHECKPOINT_FORMAT) {
+    throw checkpointError("TSK001", "Unsupported checkpoint format.", "$.format");
+  }
+  if (envelope.version !== CHECKPOINT_VERSION) {
+    throw checkpointError("TSK001", "Unsupported checkpoint version.", "$.version");
+  }
+  const planValidation = validateCapturedInstructionPlan(envelope.plan);
+  if (!planValidation.valid) {
+    const first = planValidation.errors[0];
+    throw checkpointError(
+      first?.code === "TSC001" ? "TSK001" : "TSK002",
+      checkpointComponentCaptureMessage(first?.message ?? "Instruction plan is malformed."),
+      `$.plan${first?.path.slice(1) ?? ""}`,
+    );
+  }
+  const plan = freezeInstructionPlan(envelope.plan as InstructionPlan);
+  const snapshotValidation = validateCapturedRuntimeSnapshot(
+    envelope.snapshot,
+    plan,
+  );
+  if (!snapshotValidation.valid) {
+    const message = checkpointComponentCaptureMessage(
+      snapshotValidation.errors[0] ?? "Runtime snapshot is malformed.",
+    );
+    throw checkpointError(
+      message.includes("Unsupported runtime-snapshot") ? "TSK001" : "TSK002",
+      message,
+      "$.snapshot",
+    );
+  }
+  return Object.freeze({
+    format: CHECKPOINT_FORMAT,
+    version: CHECKPOINT_VERSION,
+    plan,
+    snapshot: envelope.snapshot as RuntimeSnapshot,
+  });
 }
 
 function capturePlan(value: unknown, path: string): InstructionPlan {
@@ -173,7 +213,7 @@ function captureSnapshot(
   plan: InstructionPlan,
   path: string,
 ): RuntimeSnapshot {
-  const captured = captureRuntimeSnapshot(value, plan);
+  const captured = captureRuntimeSnapshotWithValidatedPlan(value, plan);
   if (!captured.validation.valid || captured.snapshot === null) {
     const message = checkpointComponentCaptureMessage(
       captured.validation.errors[0] ?? "Runtime snapshot is malformed.",
@@ -218,10 +258,4 @@ function checkpointError(
   path: string,
 ): CheckpointError {
   return new CheckpointError(Object.freeze({ code, message, path }));
-}
-
-function deepFreeze<T>(value: T): T {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
-  for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
-  return Object.freeze(value);
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import { captureExternalData } from "../src/external-data-limits.js";
+import { captureExternalData } from "../src/external-data-capture.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
@@ -51,7 +51,7 @@ test("restores a self-contained checkpoint from serialized JSON", () => {
   assert.deepEqual(completed.events.map((event) => event.sequence), [1, 2]);
 });
 
-test("checkpoint component capture does not spend one work allowance across plan and snapshot", () => {
+test("checkpoint accepts a large valid plan and snapshot without a shared work rejection", () => {
   const compiled = plan(
     Array.from({ length: 3_000 }, (_value, index) => `say "${index}"`).join("\n"),
   );
@@ -70,7 +70,7 @@ test("checkpoint component capture does not spend one work allowance across plan
     version: CHECKPOINT_VERSION,
     plan: compiled,
     snapshot,
-  }).ok, false, "The former combined envelope capture would exhaust one shared allowance.");
+  }).ok, true);
 
   const created = createCheckpoint(compiled, snapshot);
   const serialized = serializeCheckpoint(created);

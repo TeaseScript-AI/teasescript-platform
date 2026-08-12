@@ -1,10 +1,7 @@
 import {
-  EXTERNAL_DATA_DEPTH_MESSAGE,
-  EXTERNAL_DATA_WORK_MESSAGE,
-  MAX_EXTERNAL_RUNTIME_DATA_WORK,
   captureExternalData,
   type ExternalDataFailureKind,
-} from "../external-data-limits.js";
+} from "../external-data-capture.js";
 import type { PlanValidationError, PlanValidationResult } from "./validation.js";
 
 export interface CapturedPlanData {
@@ -16,8 +13,15 @@ export interface PlanCaptureFailure {
   readonly path: string;
 }
 
-export function capturePlanData(value: unknown): CapturedPlanData | PlanCaptureFailure {
-  const capture = captureExternalData(value);
+export interface PlanCaptureOptions {
+  readonly freezeCapturedContainers?: boolean;
+}
+
+export function capturePlanData(
+  value: unknown,
+  options?: PlanCaptureOptions,
+): CapturedPlanData | PlanCaptureFailure {
+  const capture = captureExternalData(value, "$", options);
   if (!capture.ok) {
     return Object.freeze({
       message: planExternalDataFailureMessage(capture.failure.kind),
@@ -47,10 +51,6 @@ export function captureFailureValidation(
 
 function planExternalDataFailureMessage(kind: ExternalDataFailureKind): string {
   switch (kind) {
-    case "depth":
-      return EXTERNAL_DATA_DEPTH_MESSAGE;
-    case "work":
-      return EXTERNAL_DATA_WORK_MESSAGE;
     case "nonFiniteNumber":
       return "Plan contains a non-finite number.";
     case "nonJsonSafeValue":
@@ -61,5 +61,3 @@ function planExternalDataFailureMessage(kind: ExternalDataFailureKind): string {
       return "Plan contains a non-plain object.";
   }
 }
-
-export { MAX_EXTERNAL_RUNTIME_DATA_WORK };

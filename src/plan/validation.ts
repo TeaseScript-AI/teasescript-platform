@@ -170,7 +170,12 @@ function validateLoopStructure(
   instructions: readonly unknown[],
   errors: PlanValidationError[],
 ): void {
-  const starts = new Map<number, { index: number; target: number; continueTarget: number }>();
+  const starts = new Map<number, {
+    index: number;
+    target: number;
+    breakTarget: number;
+    continueTarget: number;
+  }>();
   for (let index = 0; index < instructions.length; index += 1) {
     const instruction = instructions[index];
     if (!isRecord(instruction) || instruction.kind !== "loopStart") continue;
@@ -186,6 +191,7 @@ function validateLoopStructure(
       starts.set(loopId, {
         index,
         target: instruction.target as number,
+        breakTarget: loopBreakTarget(instructions, index, instruction),
         continueTarget: instruction.continueTarget as number,
       });
     }
@@ -208,11 +214,37 @@ function validateLoopStructure(
       errors.push(planError("TSC002", "Loop control refers to an unknown loop.", `$.instructions[${index}].loopId`));
       continue;
     }
-    const expected = instruction.action === "continue" ? start.continueTarget : start.target;
+    const expected = instruction.action === "continue"
+      ? start.continueTarget
+      : start.breakTarget;
     if (instruction.target !== expected || index <= start.index || index >= start.target) {
       errors.push(planError("TSC002", "Loop-control target does not match its loop.", `$.instructions[${index}].target`));
     }
   }
+}
+
+function loopBreakTarget(
+  instructions: readonly unknown[],
+  loopStartIndex: number,
+  loopStart: Record<string, unknown>,
+): number {
+  let target = loopStart.target as number;
+  let trueCleanup = loopStartIndex + 1;
+  while (true) {
+    const trueInstruction = instructions[trueCleanup];
+    const falseInstruction = instructions[target];
+    if (
+      !isRecord(trueInstruction) ||
+      trueInstruction.kind !== "clearTemporary" ||
+      !positiveSafeInteger(trueInstruction.temporaryId) ||
+      !isRecord(falseInstruction) ||
+      falseInstruction.kind !== "clearTemporary" ||
+      falseInstruction.temporaryId !== trueInstruction.temporaryId
+    ) break;
+    trueCleanup += 1;
+    target += 1;
+  }
+  return target;
 }
 
 function validateInstruction(
@@ -351,7 +383,7 @@ function validateInstruction(
       return;
     case "callFunction":
       validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
-      validatePreparedArguments(value.arguments, `${path}.arguments`, temporaryCount, errors);
+      validateCallArguments(value.arguments, `${path}.arguments`, temporaryCount, errors);
       validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
       if (
         Number.isInteger(value.destinationTemporary) &&
@@ -359,7 +391,10 @@ function validateInstruction(
         value.arguments.some(
           (argument) =>
             isRecord(argument) &&
-            argument.temporaryId === value.destinationTemporary,
+            expressionMayReferenceTemporary(
+              argument.value,
+              value.destinationTemporary as number,
+            ),
         )
       ) {
         errors.push(planError(
@@ -2250,35 +2285,27 @@ function validateFunctionParameters(
   });
 }
 
-function validatePreparedArguments(
+function validateCallArguments(
   value: unknown,
   path: string,
   temporaryCount: number,
   errors: PlanValidationError[],
 ): void {
   if (!Array.isArray(value)) {
-    errors.push(planError("TSC002", "Prepared function arguments must be an array.", path));
+    errors.push(planError("TSC002", "Function arguments must be an array.", path));
     return;
   }
-  const temporaryIds = new Set<number>();
   value.forEach((argument, index) => {
     const argumentPath = `${path}[${index}]`;
     if (!isRecord(argument)) {
-      errors.push(planError("TSC002", "Prepared function argument must be an object.", argumentPath));
+      errors.push(planError("TSC002", "Function argument must be an object.", argumentPath));
       return;
     }
-    requireString(argument.parameterName, `${argumentPath}.parameterName`, errors);
-    validateTemporaryId(argument.temporaryId, `${argumentPath}.temporaryId`, temporaryCount, errors);
-    if (typeof argument.temporaryId === "number") {
-      if (temporaryIds.has(argument.temporaryId)) {
-        errors.push(planError(
-          "TSC002",
-          "Prepared function argument temporary IDs must be unique.",
-          `${argumentPath}.temporaryId`,
-        ));
-      }
-      temporaryIds.add(argument.temporaryId);
+    if (!hasExactKeys(argument, ["parameterName", "value", "span"])) {
+      errors.push(planError("TSC002", "Function argument contains unsupported fields.", argumentPath));
     }
+    requireString(argument.parameterName, `${argumentPath}.parameterName`, errors);
+    validateExpression(argument.value, `${argumentPath}.value`, errors, false, temporaryCount);
     validateSpan(argument.span, `${argumentPath}.span`, errors);
   });
 }
@@ -2327,25 +2354,20 @@ function validateFunctionId(
 }
 
 function validateSpan(value: unknown, path: string, errors: PlanValidationError[]): void {
-  if (!isRecord(value) || !validPosition(value.start) || !validPosition(value.end)) {
-    errors.push(planError("TSC002", "Source span is malformed.", path));
+  if (!isRecord(value) || !hasExactKeys(value, PLAN_LOCATION_KEYS)) {
+    errors.push(planError("TSC002", "Plan source location is malformed.", path));
     return;
   }
-  const start = value.start as { offset: number };
-  const end = value.end as { offset: number };
-  if (end.offset < start.offset) {
-    errors.push(planError("TSC002", "Source span ends before it starts.", path));
+  if (!PLAN_LOCATION_KEYS.every((key) => nonNegativeSafeInteger(value[key]))) {
+    errors.push(planError("TSC002", "Plan source location values must be non-negative safe integers.", path));
+    return;
+  }
+  if ((value.eo as number) < (value.so as number)) {
+    errors.push(planError("TSC002", "Plan source location ends before it starts.", path));
   }
 }
 
-function validPosition(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    nonNegativeSafeInteger(value.offset) &&
-    nonNegativeSafeInteger(value.line) &&
-    nonNegativeSafeInteger(value.column)
-  );
-}
+const PLAN_LOCATION_KEYS = ["so", "sl", "sc", "eo", "el", "ec"] as const;
 
 function validateJumpTarget(
   value: unknown,

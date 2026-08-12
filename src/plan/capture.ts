@@ -12,7 +12,7 @@ export interface CapturedInstructionPlanResult {
 }
 
 export function captureInstructionPlan(value: unknown): CapturedInstructionPlanResult {
-  const capture = capturePlanData(value);
+  const capture = capturePlanData(value, { freezeCapturedContainers: true });
   if (isPlanCaptureFailure(capture)) {
     return Object.freeze({
       validation: captureFailureValidation(capture.message, capture.path),
@@ -22,6 +22,6 @@ export function captureInstructionPlan(value: unknown): CapturedInstructionPlanR
   const validation = validateCapturedInstructionPlan(capture.value);
   return Object.freeze({
     validation,
-    plan: validation.valid ? capture.value as InstructionPlan : null,
+    plan: validation.valid ? (capture.value as InstructionPlan) : null,
   });
 }

@@ -7,7 +7,7 @@ import type {
   InteractionExpression,
   ShowButtonStatement,
 } from "../../ast.js";
-import { createSourceSpan, type SourceSpan } from "../../source.js";
+import type { SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
 import type {
   ArgumentPlan,
@@ -20,12 +20,14 @@ import type {
   LoopControlInstruction,
   LoopStartInstruction,
   PrepareParameterDefaultInstruction,
-  PreparedCallArgument,
+  CallArgumentPlan,
   TemplatePartPlan,
   TemporaryExpressionPlan,
   InteractionUiPayload,
   PreparedInteractionUiPayload,
+  PlanSourceLocation,
 } from "../../plan/model.js";
+import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 
 export class InstructionCompiler {
   public readonly instructions: Instruction[] = [];
@@ -1038,19 +1040,26 @@ export class InstructionCompiler {
 
   #lowerOrderedExpressions(
     expressions: readonly Expression[],
+    materializeInstructionEmitting = false,
   ): LoweredExpression[] {
+    const emitsInstructions = expressions.map((expression) =>
+      this.#containsUserCall(expression)
+    );
     const laterEmitsInstructions = new Array<boolean>(expressions.length);
     let suffixEmitsInstructions = false;
     for (let index = expressions.length - 1; index >= 0; index -= 1) {
       laterEmitsInstructions[index] = suffixEmitsInstructions;
-      if (this.#containsUserCall(expressions[index]!)) suffixEmitsInstructions = true;
+      if (emitsInstructions[index]) suffixEmitsInstructions = true;
     }
 
     const lowered: LoweredExpression[] = [];
     for (let index = 0; index < expressions.length; index += 1) {
       const expression = expressions[index]!;
       let item = this.#lowerExpression(expression);
-      if (laterEmitsInstructions[index]) {
+      if (
+        laterEmitsInstructions[index] ||
+        (materializeInstructionEmitting && emitsInstructions[index])
+      ) {
         item = item.plan.kind === "temporary"
           ? item
           : this.#materializeExpression(item, expression.span);
@@ -1066,19 +1075,14 @@ export class InstructionCompiler {
     const name = (expression.callee as Extract<Expression, { kind: "identifier" }>).name;
     const registered = this.#functionByName.get(name)!;
     const temporaryIds: number[] = [];
-    const prepared: PreparedCallArgument[] = [];
+    const planned: CallArgumentPlan[] = [];
+    const loweredArguments = this.#lowerOrderedExpressions(
+      expression.arguments.map((argument) => argument.value),
+      true,
+    );
     expression.arguments.forEach((argument, index) => {
-      const lowered = this.#lowerExpression(argument.value);
+      const lowered = loweredArguments[index]!;
       for (const temporaryId of lowered.temporaryIds) temporaryIds.push(temporaryId);
-      const temporaryId = this.#allocateTemporary();
-      temporaryIds.push(temporaryId);
-      this.instructions.push({
-        kind: "storeTemporary",
-        temporaryId,
-        value: lowered.plan,
-        expectBoolean: false,
-        span: copySpan(argument.span),
-      });
       let parameterName: string;
       if (argument.kind === "namedArgument") {
         parameterName = argument.name.name;
@@ -1093,9 +1097,9 @@ export class InstructionCompiler {
         }
         parameterName = parameter.name.name;
       }
-      prepared.push({
+      planned.push({
         parameterName,
-        temporaryId,
+        value: lowered.plan,
         span: copySpan(argument.span),
       });
     });
@@ -1104,7 +1108,7 @@ export class InstructionCompiler {
     this.instructions.push({
       kind: "callFunction",
       functionId: registered.id,
-      arguments: prepared,
+      arguments: planned,
       destinationTemporary,
       returnInstruction: callIndex + 1,
       span: copySpan(expression.span),
@@ -1480,6 +1484,7 @@ function staticInteractionUi(
 }
 
 function staticVisibleText(expression: Expression): string | undefined {
+  expression = unwrapParentheses(expression);
   switch (expression.kind) {
     case "stringLiteral":
       return expression.value;
@@ -1491,8 +1496,6 @@ function staticVisibleText(expression: Expression): string | undefined {
       return expression.value ? "true" : "false";
     case "nullLiteral":
       return "null";
-    case "parenthesizedExpression":
-      return staticVisibleText(expression.expression);
     case "unaryExpression":
     case "binaryExpression": {
       const value = staticNumber(expression);
@@ -1519,26 +1522,35 @@ function staticVisibleText(expression: Expression): string | undefined {
 }
 
 function staticNumber(expression: Expression): number | undefined {
-  if (expression.kind === "numberLiteral") return expression.value;
-  if (expression.kind === "parenthesizedExpression") return staticNumber(expression.expression);
-  if (expression.kind === "unaryExpression" && (expression.operator === "+" || expression.operator === "-")) {
-    const value = staticNumber(expression.operand);
-    return value === undefined ? undefined : expression.operator === "+" ? value : -value;
+  let negate = false;
+  while (true) {
+    expression = unwrapParentheses(expression);
+    if (
+      expression.kind !== "unaryExpression" ||
+      (expression.operator !== "+" && expression.operator !== "-")
+    ) break;
+    if (expression.operator === "-") negate = !negate;
+    expression = expression.operand;
   }
-  if (expression.kind !== "binaryExpression") return undefined;
-  const left = staticNumber(expression.left);
-  const right = staticNumber(expression.right);
-  if (left === undefined || right === undefined) return undefined;
-  switch (expression.operator) {
-    case "+": return left + right;
-    case "-": return left - right;
-    case "*": return left * right;
-    case "/": return right === 0 ? undefined : left / right;
-    case "%": return right === 0 ? undefined : left % right;
-    default: return undefined;
+  let value: number | undefined;
+  if (expression.kind === "numberLiteral") {
+    value = expression.value;
+  } else if (expression.kind === "binaryExpression") {
+    const left = staticNumber(expression.left);
+    const right = staticNumber(expression.right);
+    if (left === undefined || right === undefined) return undefined;
+    switch (expression.operator) {
+      case "+": value = left + right; break;
+      case "-": value = left - right; break;
+      case "*": value = left * right; break;
+      case "/": value = right === 0 ? undefined : left / right; break;
+      case "%": value = right === 0 ? undefined : left % right; break;
+      default: value = undefined; break;
+    }
   }
+  return value === undefined || !negate ? value : -value;
 }
 
-function copySpan(span: SourceSpan): SourceSpan {
-  return createSourceSpan(span.start, span.end);
+function copySpan(span: SourceSpan): PlanSourceLocation {
+  return sourceSpanToPlanLocation(span);
 }

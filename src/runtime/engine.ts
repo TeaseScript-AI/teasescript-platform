@@ -5,6 +5,7 @@ import type {
   Instruction,
   InstructionPlan,
   InteractionUiPayload,
+  PlanSourceLocation,
   PreparedInteractionUiPayload,
 } from "../plan/model.js";
 import {
@@ -14,7 +15,7 @@ import {
 import {
   createSourcePosition,
   createSourceSpan,
-  type SourceSpan,
+  SourceSpan as RichSourceSpan,
 } from "../source.js";
 import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
 import {
@@ -24,7 +25,7 @@ import {
   copySpan,
   requiredFutureActionCompletionEvents,
   result,
-  setTemporary,
+  setCapturedTemporary,
   takeSequence,
 } from "./operations/support.js";
 import type { RuntimeOperationResult } from "./operations/model.js";
@@ -48,16 +49,17 @@ import type {
 import { nextXorShift32, type RandomSource, type XorShift32State } from "./random.js";
 import {
   addSerializableSetValue,
+  cloneCapturedSerializableValue,
   cloneSerializableValue,
-  createSerializableList,
-  createSerializableObject,
-  createSerializableSet,
+  createCapturedSerializableList,
+  createCapturedSerializableObject,
+  createCapturedSerializableSet,
   getSerializableProperty,
   removeSerializableSetValue,
   serializableSetContains,
   serializableEquals,
   SerializableValueError,
-  setSerializableProperty,
+  setCapturedSerializableProperty,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
@@ -91,8 +93,10 @@ import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
   readonly named: Readonly<Record<string, SerializableRuntimeValue>>;
-  readonly span: SourceSpan;
+  readonly span: RichSourceSpan;
 }
+
+type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 export type RuntimeBuiltinFunction = (
   call: RuntimeCapabilityCall,
@@ -114,23 +118,24 @@ export function executeInstruction(
   capabilities: RuntimeCapabilities = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, inputSnapshot);
-  return executeCapturedInstruction(
+  const context = new RuntimeExecutionContext(captured.snapshot, capabilities);
+  const instructionsExecuted = executeCapturedInstruction(
     captured.plan,
     captured.snapshot,
-    capabilities,
+    context,
   );
+  return result(captured.snapshot, context.events, instructionsExecuted);
 }
 
 function executeCapturedInstruction(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
-  capabilities: RuntimeCapabilities,
-): RuntimeOperationResult {
+  context: RuntimeExecutionContext,
+): number {
   if (snapshot.status === "halted" || snapshot.status === "failed") {
-    return result(snapshot, [], 0);
+    return 0;
   }
-  if (snapshot.status === "waiting") return result(snapshot, [], 0);
-  const events: InterpreterEvent[] = [];
+  if (snapshot.status === "waiting") return 0;
   if (
     snapshot.nextInstruction === plan.rootEndInstruction &&
     snapshot.callFrames.length === 0
@@ -143,20 +148,31 @@ function executeCapturedInstruction(
     snapshot.terminalContinuationHandoff = null;
     snapshot.status = "halted";
     const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
-    events.push(createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan));
-    return result(snapshot, events, 1);
+    context.events.push(
+      createCompleteEvent(
+        snapshot,
+        terminalInstruction?.span ?? plan.sourceSpan,
+      ),
+    );
+    return 1;
   }
   const instructionIndex = snapshot.nextInstruction;
   const instruction = plan.instructions[instructionIndex];
   if (instruction === undefined) {
     snapshot.status = "halted";
-    return result(snapshot, [], 0);
+    return 0;
   }
 
   snapshot.status = "running";
-  const evaluator = new Evaluator(snapshot, capabilities, events);
+  const evaluator = context.evaluator();
   try {
-    executePlannedInstruction(plan, instruction, snapshot, evaluator, events);
+    executePlannedInstruction(
+      plan,
+      instruction,
+      snapshot,
+      evaluator,
+      context.events,
+    );
     if (
       snapshot.interactionResultHandoff?.continuationInstruction ===
       instructionIndex
@@ -174,15 +190,15 @@ function executeCapturedInstruction(
         snapshot,
         completeEventAndFutureCompletions,
       );
-      events.push(createCompleteEvent(snapshot, instruction.span));
+      context.events.push(createCompleteEvent(snapshot, instruction.span));
     }
   } catch (error) {
     if (!(error instanceof RuntimeFault)) throw error;
-    failSnapshot(snapshot, error.toInfo(), events);
+    failSnapshot(snapshot, error.toInfo(), context.events);
   } finally {
     snapshot.contextualSpeaker = null;
   }
-  return result(snapshot, events, 1);
+  return 1;
 }
 
 export function stepToEvent(
@@ -192,32 +208,41 @@ export function stepToEvent(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
+  return stepValidatedStateToEvent(
+    captured.plan,
+    captured.snapshot,
+    capabilities,
+    options,
+  );
+}
+
+/** Steps engine-owned plan/state that already passed complete validation. */
+export function stepValidatedStateToEvent(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities = {},
+  options: RuntimeRunOptions = {},
+): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  let current = captured.snapshot;
-  const events: InterpreterEvent[] = [];
+  const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
   while (
-    current.status !== "waiting" &&
-    current.status !== "halted" &&
-    current.status !== "failed" &&
-    events.length === 0
+    snapshot.status !== "waiting" &&
+    snapshot.status !== "halted" &&
+    snapshot.status !== "failed" &&
+    context.events.length === 0
   ) {
     if (instructionsExecuted >= budget) {
-      const budgetResult = failForBudget(captured.plan, current);
-      events.push(...budgetResult.events);
-      current = budgetResult.snapshot;
+      failForBudget(plan, snapshot, context.events);
       break;
     }
-    const operation = executeCapturedInstruction(
-      captured.plan,
-      current,
-      capabilities,
+    instructionsExecuted += executeCapturedInstruction(
+      plan,
+      snapshot,
+      context,
     );
-    current = operation.snapshot;
-    instructionsExecuted += operation.instructionsExecuted;
-    events.push(...operation.events);
   }
-  return result(current, events, instructionsExecuted);
+  return result(snapshot, context.events, instructionsExecuted);
 }
 
 export function run(
@@ -227,27 +252,36 @@ export function run(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
+  return runValidatedState(
+    captured.plan,
+    captured.snapshot,
+    capabilities,
+    options,
+  );
+}
+
+/** Runs engine-owned plan/state that already passed complete validation. */
+export function runValidatedState(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities = {},
+  options: RuntimeRunOptions = {},
+): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  let current = captured.snapshot;
-  const events: InterpreterEvent[] = [];
+  const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
-  while (current.status !== "waiting" && current.status !== "halted" && current.status !== "failed") {
+  while (snapshot.status !== "waiting" && snapshot.status !== "halted" && snapshot.status !== "failed") {
     if (instructionsExecuted >= budget) {
-      const budgetResult = failForBudget(captured.plan, current);
-      current = budgetResult.snapshot;
-      events.push(...budgetResult.events);
+      failForBudget(plan, snapshot, context.events);
       break;
     }
-    const operation = executeCapturedInstruction(
-      captured.plan,
-      current,
-      capabilities,
+    instructionsExecuted += executeCapturedInstruction(
+      plan,
+      snapshot,
+      context,
     );
-    current = operation.snapshot;
-    instructionsExecuted += operation.instructionsExecuted;
-    events.push(...operation.events);
   }
-  return result(current, events, instructionsExecuted);
+  return result(snapshot, context.events, instructionsExecuted);
 }
 
 function executePlannedInstruction(
@@ -284,7 +318,7 @@ function executePlannedInstruction(
           if (speaker.properties.some((item) => item.name === property.name)) {
             throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
           }
-          const propertyValue = cloneSerializableValue(stagedEvaluator.evaluate(property.value));
+          const propertyValue = cloneCapturedSerializableValue(stagedEvaluator.evaluate(property.value));
           if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
             throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", property.span);
           }
@@ -304,7 +338,7 @@ function executePlannedInstruction(
           throw fault("TSR007", `Duplicate speaker property '${instruction.name}'.`, instruction.span);
         }
         stagedSnapshot.contextualSpeaker = speaker.id;
-        const propertyValue = cloneSerializableValue(stagedEvaluator.evaluate(instruction.value));
+        const propertyValue = cloneCapturedSerializableValue(stagedEvaluator.evaluate(instruction.value));
         if (instruction.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
           throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", instruction.span);
         }
@@ -341,13 +375,13 @@ function executePlannedInstruction(
       }
       currentFrame(snapshot).bindings.push({
         name: instruction.name,
-        value: cloneSerializableValue(evaluator.evaluate(instruction.value)),
+        value: cloneCapturedSerializableValue(evaluator.evaluate(instruction.value)),
       });
       advance(snapshot);
       return;
     }
     case "prepareReference":
-      setTemporary(
+      setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
         evaluator.prepareReference(instruction.expression),
@@ -398,7 +432,7 @@ function executePlannedInstruction(
       if (instruction.expectBoolean && typeof value !== "boolean") {
         throw fault("TSR026", "Expected a boolean value.", instruction.value.span);
       }
-      setTemporary(snapshot.temporaries, instruction.temporaryId, value);
+      setCapturedTemporary(snapshot.temporaries, instruction.temporaryId, value);
       advance(snapshot);
       return;
     }
@@ -409,12 +443,12 @@ function executePlannedInstruction(
           : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
         : evaluator.speakerByName(instruction.speaker, instruction.span);
       const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
-      setTemporary(
+      setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
         output === null
           ? null
-          : createSerializableObject([
+          : createCapturedSerializableObject([
               { name: "identifier", value: output.identifier },
               { name: "displayName", value: output.displayName },
               { name: "color", value: output.color },
@@ -427,7 +461,7 @@ function executePlannedInstruction(
       return;
     }
     case "prepareSayText": {
-      setTemporary(
+      setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
         evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span),
@@ -441,7 +475,7 @@ function executePlannedInstruction(
         instruction.speakerTemporary,
         instruction.span,
       );
-      setTemporary(
+      setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
         prepared.speakerId === null
@@ -462,7 +496,7 @@ function executePlannedInstruction(
           : snapshot.defaultSpeaker !== null
             ? evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
             : null;
-      setTemporary(
+      setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
         speaker === null
@@ -491,7 +525,7 @@ function executePlannedInstruction(
       return;
     }
     case "callFunction":
-      enterFunction(plan, instruction, snapshot);
+      enterFunction(plan, instruction, snapshot, evaluator);
       return;
     case "bindSuppliedParameter":
       bindSuppliedParameter(plan, instruction, snapshot);
@@ -771,7 +805,7 @@ function materializeInteractionUi(
       options: texts.map((text, index) => ({ text, label: labels?.[index] ?? null })),
       accessibleName: prepared.accessibleName,
     };
-    stagedWrites.push({ temporaryId: source.id, value: createSerializableList(texts) });
+    stagedWrites.push({ temporaryId: source.id, value: createCapturedSerializableList(texts) });
   }
 
   assertInteractionUiLimits(ui, span);
@@ -786,7 +820,7 @@ function materializeInteractionUi(
     ui,
     stagedWrites: Object.freeze(stagedWrites.map((staged) => Object.freeze({
       temporaryId: staged.temporaryId,
-      value: cloneSerializableValue(staged.value),
+      value: cloneCapturedSerializableValue(staged.value),
     }))),
     rngState: stagedRng.state,
   });
@@ -802,7 +836,7 @@ function commitInteractionMaterialization(
     if (temporary === undefined) {
       throw new Error(`Prepared interaction temporary '${staged.temporaryId}' disappeared before commit.`);
     }
-    temporary.value = cloneSerializableValue(staged.value);
+    temporary.value = cloneCapturedSerializableValue(staged.value);
   }
   snapshot.rng.state = rngState;
 }
@@ -834,8 +868,15 @@ function enterFunction(
   plan: InstructionPlan,
   instruction: Extract<Instruction, { kind: "callFunction" }>,
   snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
 ): void {
   const definition = functionDefinition(plan, instruction.functionId, instruction.span);
+  const supplied = new Map(
+    instruction.arguments.map((argument) => [
+      argument.parameterName,
+      cloneCapturedSerializableValue(evaluator.evaluate(argument.value)),
+    ]),
+  );
   if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
     throw fault(
       "TSR047",
@@ -845,14 +886,6 @@ function enterFunction(
   }
   assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");
   assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
-  const supplied = new Map(
-    instruction.arguments.map((argument) => [
-      argument.parameterName,
-      cloneSerializableValue(
-        readTemporary(snapshot.temporaries, argument.temporaryId, argument.span),
-      ),
-    ]),
-  );
   const frame: RuntimeCallFrameSnapshot = {
     id: snapshot.nextCallFrameId,
     functionId: definition.id,
@@ -1015,7 +1048,7 @@ function returnFromFunction(
   span: SourceSpan,
 ): void {
   const { frame } = activeFunction(plan, snapshot, span);
-  const returned = cloneSerializableValue(value);
+  const returned = cloneCapturedSerializableValue(value);
   snapshot.frames.splice(frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
   snapshot.callFrames.pop();
@@ -1079,7 +1112,7 @@ function declareFunctionBinding(
   }
   currentFrame(snapshot).bindings.push({
     name,
-    value: cloneSerializableValue(value),
+    value: cloneCapturedSerializableValue(value),
   });
 }
 
@@ -1128,7 +1161,7 @@ function executeLoopStart(
         loopId: instruction.loopId,
         scopeDepth,
         variable: instruction.variable,
-        source: cloneSerializableValue(source) as Extract<RuntimeLoopFrameSnapshot, { kind: "for" }>["source"],
+        source: cloneCapturedSerializableValue(source) as Extract<RuntimeLoopFrameSnapshot, { kind: "for" }>["source"],
         position: 0,
         callFrameId: currentCallFrameId(snapshot),
       };
@@ -1178,7 +1211,7 @@ function executeLoopStart(
   const value = iterationValue(frame.source, frame.position);
   frame.position += 1;
   pushIterationScope(snapshot, [
-    { name: frame.variable, value: cloneSerializableValue(value) },
+    { name: frame.variable, value: cloneCapturedSerializableValue(value) },
   ]);
   advance(snapshot);
 }
@@ -1239,20 +1272,39 @@ function assertIntegerRange(range: SerializableRuntimeRange, span: SourceSpan): 
   }
 }
 
+class RuntimeExecutionContext {
+  public readonly events: InterpreterEvent[] = [];
+  #evaluator: Evaluator | null = null;
+
+  public constructor(
+    private readonly snapshot: RuntimeSnapshot,
+    private readonly capabilities: RuntimeCapabilities,
+  ) {}
+
+  public evaluator(): Evaluator {
+    if (this.#evaluator !== null) {
+      this.#evaluator.refreshBuiltinRegistration();
+      return this.#evaluator;
+    }
+    this.#evaluator = new Evaluator(this.snapshot, this.capabilities, this.events);
+    return this.#evaluator;
+  }
+}
+
 class Evaluator {
-  readonly #builtins: Readonly<Record<string, RuntimeBuiltinFunction>>;
+  readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
 
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
     private readonly events: InterpreterEvent[],
   ) {
-    const builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
-    Object.assign(builtins, capabilities.builtins ?? {});
-    builtins.random = (call) => this.#randomBuiltin(call);
-    builtins.chance = (call) => this.#chanceBuiltin(call);
-    builtins.randomInteger = (call) => this.#randomIntegerBuiltin(call);
-    this.#builtins = Object.freeze(builtins);
+    this.refreshBuiltinRegistration();
+  }
+
+  public refreshBuiltinRegistration(): void {
+    for (const name of Object.keys(this.#builtins)) delete this.#builtins[name];
+    Object.assign(this.#builtins, this.capabilities.builtins ?? {});
   }
 
   public forSnapshot(
@@ -1300,9 +1352,9 @@ class Evaluator {
           expression.span,
         );
       case "list":
-        return createSerializableList(expression.elements.map((item) => this.evaluate(item)));
+        return createCapturedSerializableList(expression.elements.map((item) => this.evaluate(item)));
       case "set": {
-        const set = createSerializableSet([]);
+        const set = createCapturedSerializableSet([]);
         const membership = new Set<SerializableRuntimeScalar>();
         for (const element of expression.elements) {
           try {
@@ -1325,7 +1377,7 @@ class Evaluator {
           }
           names.add(property.name);
         }
-        return createSerializableObject(
+        return createCapturedSerializableObject(
           expression.properties.map((property) => ({
             name: property.name,
             value: this.evaluate(property.value),
@@ -1378,7 +1430,6 @@ class Evaluator {
   }
 
   public assign(target: AssignmentTargetPlan, value: SerializableRuntimeValue): void {
-    const copied = cloneSerializableValue(value);
     if (target.kind === "identifier") {
       const location = findBindingLocation(this.snapshot, target.name);
       if (location === undefined) {
@@ -1395,7 +1446,7 @@ class Evaluator {
           path: [],
         },
       );
-      location.binding.value = copied;
+      location.binding.value = cloneCapturedSerializableValue(value);
       return;
     }
     const object = this.evaluate(target.object);
@@ -1428,11 +1479,11 @@ class Evaluator {
         });
       }
       if (isObject(object)) {
-        setSerializableProperty(object, target.name, copied);
+        setCapturedSerializableProperty(object, target.name, value);
         return;
       }
       if (isSpeakerReference(object)) {
-        setSpeakerProperty(this.speakerById(object.speakerId, target.span), target.name, copied, target.span);
+        setSpeakerProperty(this.speakerById(object.speakerId, target.span), target.name, value, target.span);
         return;
       }
       throw fault("TSR003", "Only objects and speakers have assignable properties.", target.span);
@@ -1454,7 +1505,7 @@ class Evaluator {
         ),
       });
     }
-    object.items[index] = copied;
+    object.items[index] = cloneCapturedSerializableValue(value);
   }
 
   public prepareReference(expression: ExpressionPlan): SerializableRuntimeObject {
@@ -1516,7 +1567,7 @@ class Evaluator {
         rootFrameId: location.frame.id,
         rootName: expression.name,
         path: [],
-        capturedRoot: cloneSerializableValue(location.binding.value),
+        capturedRoot: cloneCapturedSerializableValue(location.binding.value),
         detached: false,
       };
     }
@@ -1566,7 +1617,7 @@ class Evaluator {
       rootFrameId: null,
       rootName: null,
       path: [],
-      capturedRoot: cloneSerializableValue(value),
+      capturedRoot: cloneCapturedSerializableValue(value),
       detached: true,
     };
   }
@@ -1581,7 +1632,7 @@ class Evaluator {
       return this.#resolveDescriptor(descriptor, span);
     } catch (error) {
       if (!(error instanceof RuntimeFault) || !isObject(serialized)) throw error;
-      setSerializableProperty(serialized, "detached", true);
+      setCapturedSerializableProperty(serialized, "detached", true);
       return this.#resolveDescriptor({ ...descriptor, detached: true }, span);
     }
   }
@@ -1773,7 +1824,7 @@ class Evaluator {
     const positional: SerializableRuntimeValue[] = [];
     const named: Record<string, SerializableRuntimeValue> = Object.create(null);
     for (const argument of expression.arguments) {
-      const value = cloneSerializableValue(this.evaluate(argument.value));
+      const value = cloneCapturedSerializableValue(this.evaluate(argument.value));
       if (argument.kind === "positional") positional.push(value);
       else {
         if (Object.hasOwn(named, argument.name)) {
@@ -1783,19 +1834,35 @@ class Evaluator {
       }
     }
     if (expression.callee.kind === "identifier") {
-      const builtin = Object.hasOwn(this.#builtins, expression.callee.name)
-        ? this.#builtins[expression.callee.name]
+      const name = expression.callee.name;
+      const coreBuiltin =
+        name === "random" || name === "chance" || name === "randomInteger";
+      const builtin = Object.hasOwn(this.#builtins, name)
+        ? this.#builtins[name]
         : undefined;
-      if (builtin === undefined) {
+      if (!coreBuiltin && builtin === undefined) {
         throw fault("TSR011", `Unknown built-in function '${expression.callee.name}'.`, expression.callee.span);
       }
+      const call = Object.freeze({
+        positional: Object.freeze(positional),
+        named: Object.freeze(named),
+        span: copySpan(expression.span),
+      });
       let returned: SerializableRuntimeValue;
       try {
-        returned = builtin(Object.freeze({
-          positional: Object.freeze(positional),
-          named: Object.freeze(named),
-          span: copySpan(expression.span),
-        }));
+        switch (name) {
+          case "random":
+            returned = this.#randomBuiltin(call);
+            break;
+          case "chance":
+            returned = this.#chanceBuiltin(call);
+            break;
+          case "randomInteger":
+            returned = this.#randomIntegerBuiltin(call);
+            break;
+          default:
+            returned = builtin!(call);
+        }
       } catch (error) {
         if (error instanceof SerializableValueError) {
           const code =
@@ -1853,12 +1920,12 @@ class Evaluator {
           case "remove": expect(1); removeSerializableSetValue(receiver, positional[0]!); return null;
           case "clear": expect(0); receiver.items.length = 0; return null;
           case "contains": expect(1); return serializableSetContains(receiver, positional[0]!);
-          case "toList": expect(0); return createSerializableList(receiver.items);
+          case "toList": expect(0); return createCapturedSerializableList(receiver.items);
           default: throw fault("TSR016", `Unsupported method '${name}'.`, span);
         }
       }
       switch (name) {
-        case "add": expect(1); receiver.items.push(cloneSerializableValue(positional[0]!)); return null;
+        case "add": expect(1); receiver.items.push(cloneCapturedSerializableValue(positional[0]!)); return null;
         case "remove": {
           expect(1);
           const index = this.#findValue(receiver.items, positional[0]!, span);
@@ -1912,7 +1979,7 @@ class Evaluator {
           }
           return null;
         case "contains": expect(1); return this.#findValue(receiver.items, positional[0]!, span) >= 0;
-        case "toSet": expect(0); return createSerializableSet(receiver.items);
+        case "toSet": expect(0); return createCapturedSerializableSet(receiver.items);
         default: throw fault("TSR016", `Unsupported method '${name}'.`, span);
       }
     } catch (error) {
@@ -2120,8 +2187,8 @@ function setSpeakerProperty(
     throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
   }
   const property = speaker.properties.find((item) => item.name === name);
-  if (property === undefined) speaker.properties.push({ name, value: cloneSerializableValue(value) });
-  else property.value = cloneSerializableValue(value);
+  if (property === undefined) speaker.properties.push({ name, value: cloneCapturedSerializableValue(value) });
+  else property.value = cloneCapturedSerializableValue(value);
 }
 
 function findBinding(snapshot: RuntimeSnapshot, name: string): RuntimeBindingSnapshot | undefined {
@@ -2183,7 +2250,7 @@ const INTERNAL_REFERENCE_SPAN = createSourceSpan(
 function serializePreparedReference(
   descriptor: PreparedReferenceDescriptor,
 ): SerializableRuntimeObject {
-  return createSerializableObject([
+  return createCapturedSerializableObject([
     { name: "marker", value: "preparedReference" },
     { name: "rootFrameId", value: descriptor.rootFrameId },
     { name: "rootName", value: descriptor.rootName },
@@ -2199,14 +2266,14 @@ function serializePreparedReference(
 function serializePreparedReferencePath(
   path: readonly PreparedReferenceStep[],
 ): SerializableRuntimeList {
-  return createSerializableList(
+  return createCapturedSerializableList(
     path.map((step) =>
       step.kind === "property"
-        ? createSerializableObject([
+        ? createCapturedSerializableObject([
             { name: "kind", value: "property" },
             { name: "name", value: step.name },
           ])
-        : createSerializableObject([
+        : createCapturedSerializableObject([
             { name: "kind", value: "index" },
             { name: "index", value: step.index },
           ]),
@@ -2334,7 +2401,7 @@ function preparePreparedReferencesForListRemoval(
       }
       if (step.index < removedIndex) continue;
       descriptor.path[pathIndex] = { kind: "index", index: step.index - 1 };
-      setSerializableProperty(
+      setCapturedSerializableProperty(
         temporary.value,
         "path",
         serializePreparedReferencePath(descriptor.path),
@@ -2362,7 +2429,7 @@ function refreshPreparedReferenceFallbacks(
       freezePreparedReference(snapshot, serialized, descriptor);
       continue;
     }
-    setSerializableProperty(serialized, "capturedRoot", root.value);
+    setCapturedSerializableProperty(serialized, "capturedRoot", root.value);
   }
 }
 
@@ -2439,14 +2506,14 @@ function freezePreparedReference(
 ): void {
   const resolution = resolvePreparedReferenceDescriptor(snapshot, descriptor);
   if (!resolution.found) {
-    setSerializableProperty(serialized, "detached", true);
+    setCapturedSerializableProperty(serialized, "detached", true);
     return;
   }
-  setSerializableProperty(serialized, "rootFrameId", null);
-  setSerializableProperty(serialized, "rootName", null);
-  setSerializableProperty(serialized, "path", createSerializableList([]));
-  setSerializableProperty(serialized, "capturedRoot", resolution.value);
-  setSerializableProperty(serialized, "detached", true);
+  setCapturedSerializableProperty(serialized, "rootFrameId", null);
+  setCapturedSerializableProperty(serialized, "rootName", null);
+  setCapturedSerializableProperty(serialized, "path", createCapturedSerializableList([]));
+  setCapturedSerializableProperty(serialized, "capturedRoot", resolution.value);
+  setCapturedSerializableProperty(serialized, "detached", true);
 }
 
 function preparedReferenceSpeakerPath(
@@ -2600,7 +2667,7 @@ function cloneTemporary(
 ): RuntimeTemporarySnapshot {
   return {
     id: temporary.id,
-    value: cloneSerializableValue(temporary.value),
+    value: cloneCapturedSerializableValue(temporary.value),
   };
 }
 
@@ -2996,11 +3063,17 @@ function failSnapshot(
   );
 }
 
-function failForBudget(plan: InstructionPlan, snapshot: RuntimeSnapshot): RuntimeOperationResult {
+function failForBudget(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+): void {
   const span = plan.instructions[snapshot.nextInstruction]?.span ?? plan.sourceSpan;
-  const events: InterpreterEvent[] = [];
-  failSnapshot(snapshot, { code: "TSR037", message: "Runtime instruction budget exceeded.", span }, events);
-  return result(snapshot, events, 0);
+  failSnapshot(snapshot, {
+    code: "TSR037",
+    message: "Runtime instruction budget exceeded.",
+    span: copySpan(span),
+  }, events);
 }
 
 function instructionBudget(value: number | undefined): number {
@@ -3020,7 +3093,7 @@ function instructionBudget(value: number | undefined): number {
 
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
-  return new RuntimeFault(code, message, span);
+  return new RuntimeFault(code, message, copySpan(span));
 }
 
 

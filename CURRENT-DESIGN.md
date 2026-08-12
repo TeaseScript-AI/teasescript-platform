@@ -37,6 +37,11 @@ LLM and vision output is untrusted input. It may provide constrained dialogue or
 engine validates the result and remains authoritative for rules, state transitions, available choices, permissions,
 and device or platform capabilities.
 
+Correctness validation of plans, snapshots, checkpoints, and other engine representations is separate from these
+cross-principal security boundaries. A local work, size, or traversal counter does not become a TeaseScript
+security/capacity rejection merely because validation observes it; a security rejection requires a concrete current
+boundary where one principal can affect another user or protected platform asset.
+
 See [`docs/SECURITY.md`](docs/SECURITY.md) and [`docs/DATA-AND-API.md`](docs/DATA-AND-API.md) for the maintained
 security, privacy, transport, and persistence contracts.
 

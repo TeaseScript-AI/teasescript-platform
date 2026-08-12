@@ -2,13 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CHECKPOINT_FORMAT,
-  CHECKPOINT_VERSION,
   CheckpointError,
-  EXTERNAL_DATA_DEPTH_MESSAGE,
-  EXTERNAL_DATA_WORK_MESSAGE,
-  MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
-  MAX_EXTERNAL_RUNTIME_DATA_WORK,
   RuntimeDataError,
   cloneSerializableValue,
   compileSource,
@@ -26,8 +20,13 @@ import {
   type RuntimeSnapshot,
   type SerializableRuntimeValue,
 } from "../src/index.js";
-import { captureExternalData } from "../src/external-data-limits.js";
+import { captureExternalData } from "../src/external-data-capture.js";
+import { captureInstructionPlan } from "../src/plan/capture.js";
+import { capturePlanData } from "../src/plan/capture-support.js";
+import { captureExecutableData } from "../src/runtime/operations/support.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
+import { captureRuntimeSnapshotWithValidatedPlan } from "../src/runtime/state.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
 
 const FAILING_BEFORE_DEPTH = 20_000;
 
@@ -141,264 +140,253 @@ function activeCallSnapshot(plan: InstructionPlan): RuntimeSnapshot {
   return JSON.parse(JSON.stringify(snapshot)) as RuntimeSnapshot;
 }
 
-test("plan validation rejects an above-limit nested array with TSC002 and an exact path", () => {
+test("plan validation measures deep and broad data without rejecting arbitrary work or depth", () => {
   const value = mutablePlan();
-  value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH);
+  value.deepPadding = deepArray(1_000);
+  value.broadPadding = new Array(100_001).fill(0);
 
-  const result = validateInstructionPlan(value);
+  const statistics = withValidationTestStatistics((finish) => {
+    assert.equal(validateInstructionPlan(value).valid, true);
+    return finish();
+  }).counts;
 
-  assert.equal(result.valid, false);
-  assert.deepEqual(result.errors, [{
-    code: "TSC002",
-    message: EXTERNAL_DATA_DEPTH_MESSAGE,
-    path: `$.padding${"[0]".repeat(MAX_EXTERNAL_RUNTIME_DATA_DEPTH)}`,
-  }]);
+  assert.ok((statistics.externalCaptureVisits ?? 0) > 100_000);
+  assert.ok((statistics.externalCaptureMaximumDepth ?? 0) > 1_000);
 });
 
-test("plan validation rejects an above-limit nested object without throwing", () => {
-  const value = mutablePlan();
-  value.padding = deepObject(MAX_EXTERNAL_RUNTIME_DATA_DEPTH);
+test("compiler and runtime paths avoid duplicate whole-plan capture", () => {
+  const source = Array.from({ length: 100 }, (_, index) => `say "Line ${index}"`).join("\n");
+  const compileStatistics = withValidationTestStatistics((finish) => {
+    assert.notEqual(compileSource(source).plan, null);
+    return finish();
+  }).counts;
+  assert.equal(compileStatistics.externalCaptureVisits, undefined);
 
-  assert.doesNotThrow(() => validateInstructionPlan(value));
-  const result = validateInstructionPlan(value);
-  assert.equal(result.valid, false);
-  assert.equal(result.errors[0]?.code, "TSC002");
-  assert.equal(result.errors[0]?.message, EXTERNAL_DATA_DEPTH_MESSAGE);
+  const plan = compiledPlan(source);
+  const snapshot = createFreshRuntimeSnapshot(plan);
+  const planVisits = withValidationTestStatistics((finish) => {
+    assert.notEqual(captureInstructionPlan(plan).plan, null);
+    return finish();
+  }).counts.externalCaptureVisits!;
+  const snapshotVisits = withValidationTestStatistics((finish) => {
+    assert.notEqual(captureRuntimeSnapshotWithValidatedPlan(snapshot, plan).snapshot, null);
+    return finish();
+  }).counts.externalCaptureVisits!;
+  const executableVisits = withValidationTestStatistics((finish) => {
+    captureExecutableData(plan, snapshot);
+    return finish();
+  }).counts.externalCaptureVisits!;
+  assert.equal(executableVisits, planVisits + snapshotVisits);
+
+  const checkpointVisits = withValidationTestStatistics((finish) => {
+    createCheckpoint(plan, snapshot);
+    return finish();
+  }).counts.externalCaptureVisits!;
+  assert.equal(checkpointVisits, planVisits + snapshotVisits);
+
+  const serialized = JSON.stringify(createCheckpoint(plan, snapshot));
+  const deserializeStatistics = withValidationTestStatistics((finish) => {
+    deserializeCheckpoint(serialized);
+    return finish();
+  }).counts;
+  assert.equal(deserializeStatistics.externalCaptureVisits, undefined);
+
+  const capturedCheckpoint = createCheckpoint(plan, snapshot);
+  const serializationStatistics = withValidationTestStatistics((finish) => {
+    JSON.stringify(capturedCheckpoint);
+    return finish();
+  }).counts;
+  assert.equal(serializationStatistics.externalCaptureVisits, undefined);
 });
 
-test("plan validation accepts nesting at the supported boundary", () => {
-  const value = mutablePlan();
-  value.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH - 1);
-  assert.equal(validateInstructionPlan(value).valid, true);
+test("external plan capture freezes the detached graph without freezing generic capture", () => {
+  const plan = mutablePlan("let value = [1, { nested: 2 }]\nexit");
+  const captured = captureInstructionPlan(plan);
+  assert.ok(captured.validation.valid);
+  assert.notEqual(captured.plan, null);
+
+  const capturedPlan = captured.plan! as unknown as {
+    instructions: Array<{
+      span: { so: number };
+    }>;
+  };
+  const capturedInstruction = capturedPlan.instructions[0]!;
+  const capturedSpan = capturedInstruction.span;
+  assert.equal(Object.isFrozen(captured.plan), true);
+  assert.equal(Object.isFrozen(capturedPlan.instructions), true);
+  assert.equal(Object.isFrozen(capturedInstruction), true);
+  assert.equal(Object.isFrozen(capturedSpan), true);
+
+  const originalInstruction = (plan.instructions as Array<{
+    span: { so: number };
+  }>)[0]!;
+  originalInstruction.span.so = 3;
+  assert.notEqual(capturedSpan.so, 3);
+
+  const generic = captureExternalData({ nested: [1, { value: 2 }] });
+  assert.equal(generic.ok, true);
+  const genericValue = generic.value as { nested: Array<{ value?: number }> };
+  assert.equal(Object.isFrozen(genericValue), false);
+  assert.equal(Object.isFrozen(genericValue.nested), false);
+  assert.equal(Object.isFrozen(genericValue.nested[1]!), false);
 });
 
-test("plan validation bounds wide shallow external data", () => {
-  const value = mutablePlan();
-  value.padding = new Array(MAX_EXTERNAL_RUNTIME_DATA_WORK).fill(0);
+test("validation-only plan capture remains mutable while returned plan capture freezes", () => {
+  const plan = mutablePlan("say \"ready\"");
+  const validationCapture = capturePlanData(plan);
+  assert.ok("value" in validationCapture);
+  const validationPlan = validationCapture.value as {
+    instructions: Array<{ span: object }>;
+  };
+  assert.notEqual(validationPlan, plan);
+  assert.equal(Object.isFrozen(validationPlan), false);
+  assert.equal(Object.isFrozen(validationPlan.instructions), false);
+  assert.equal(Object.isFrozen(validationPlan.instructions[0]!), false);
+  assert.equal(Object.isFrozen(validationPlan.instructions[0]!.span), false);
 
-  const result = validateInstructionPlan(value);
-
-  assert.equal(result.valid, false);
-  assert.equal(result.errors[0]?.code, "TSC002");
-  assert.equal(result.errors[0]?.message, EXTERNAL_DATA_WORK_MESSAGE);
+  const returnedCapture = captureInstructionPlan(plan);
+  assert.ok(returnedCapture.validation.valid);
+  assert.notEqual(returnedCapture.plan, null);
+  assert.equal(Object.isFrozen(returnedCapture.plan), true);
+  assert.equal(Object.isFrozen(returnedCapture.plan!.instructions), true);
+  assert.equal(Object.isFrozen(returnedCapture.plan!.instructions[0]!), true);
+  assert.equal(Object.isFrozen(returnedCapture.plan!.instructions[0]!.span), true);
 });
 
-test("snapshot validation bounds nested binding lists and preserves below-limit values", () => {
+test("runtime snapshot capture remains mutable after plan capture freezes on leave", () => {
   const plan = compiledPlan();
-  const accepted = mutableSnapshot(plan);
-  addBinding(accepted, deepList(50));
-  assert.equal(validateRuntimeSnapshot(accepted, plan).valid, true);
-
-  const rejected = mutableSnapshot(plan);
-  addBinding(rejected, deepList(65));
-  const result = validateRuntimeSnapshot(rejected, plan);
-  assert.equal(result.valid, false);
-  assert.deepEqual(result.errors, [EXTERNAL_DATA_DEPTH_MESSAGE]);
+  const snapshot = captureRuntimeSnapshotWithValidatedPlan(
+    mutableSnapshot(plan),
+    plan,
+  );
+  assert.notEqual(snapshot.snapshot, null);
+  assert.equal(Object.isFrozen(snapshot.snapshot), false);
+  assert.equal(Object.isFrozen(snapshot.snapshot!.frames), false);
+  snapshot.snapshot!.nextInstruction = 1;
+  assert.equal(snapshot.snapshot!.nextInstruction, 1);
 });
 
-test("snapshot validation bounds a nested object in a speaker property", () => {
+test("parsed checkpoint plans retain the independent freeze path", () => {
+  const plan = compiledPlan("say \"ready\"");
+  const restored = deserializeCheckpoint(JSON.stringify(
+    createCheckpoint(plan, createFreshRuntimeSnapshot(plan)),
+  ));
+  assert.equal(Object.isFrozen(restored.plan), true);
+  assert.equal(Object.isFrozen(restored.plan.instructions), true);
+  assert.equal(Object.isFrozen(restored.plan.instructions[0]!), true);
+  assert.equal(Object.isFrozen(restored.plan.instructions[0]!.span), true);
+});
+
+test("ordinary source compiles beyond the removed generic capture threshold", () => {
+  const count = 5_000;
+  const source = Array.from({ length: count }, (_, index) => `say "Line ${index}"`).join("\n");
+  const compiled = compileSource(source);
+
+  assert.deepEqual(compiled.diagnostics, []);
+  assert.notEqual(compiled.plan, null);
+  assert.equal(compiled.plan!.instructions.length, count);
+  assert.equal(Object.isFrozen(compiled.plan), true);
+});
+
+test("snapshot validation accepts deeply nested serializable values", () => {
   const plan = compiledPlan();
   const snapshot = mutableSnapshot(plan);
+  addBinding(snapshot, deepList(5_000));
   (snapshot.speakers as unknown as Array<Record<string, unknown>>).push({
     id: 1,
     identifier: "mistress",
-    properties: [{ name: "profile", value: deepSerializableObject(50) }],
+    properties: [{ name: "profile", value: deepSerializableObject(256) }],
   });
   snapshot.nextSpeakerId = 2;
 
-  const result = validateRuntimeSnapshot(snapshot, plan);
-
-  assert.equal(result.valid, false);
-  assert.deepEqual(result.errors, [EXTERNAL_DATA_DEPTH_MESSAGE]);
+  assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
 });
 
-test("snapshot validation bounds a nested supplied call argument", () => {
+test("snapshot validation accepts a deeply nested supplied call argument", () => {
   const plan = compiledPlan("function echo(value) { return value }\necho(1)\nexit");
   const snapshot = activeCallSnapshot(plan);
   const argument = snapshot.callFrames[0]!.arguments[0];
   assert.ok(argument?.supplied);
-  (argument as { value: SerializableRuntimeValue }).value = deepList(65);
+  (argument as { value: SerializableRuntimeValue }).value = deepList(5_000);
 
-  const result = validateRuntimeSnapshot(snapshot, plan);
-
-  assert.equal(result.valid, false);
-  assert.deepEqual(result.errors, [EXTERNAL_DATA_DEPTH_MESSAGE]);
+  assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
 });
 
-test("restoreCheckpoint rejects deeply nested plan data with structured TSK002", () => {
+test("checkpoint restore and JSON deserialize preserve deeply nested valid state", () => {
   const plan = compiledPlan();
-  const value = checkpoint(plan, createFreshRuntimeSnapshot(plan)) as RuntimeCheckpoint & {
+  const live = checkpoint(plan, createFreshRuntimeSnapshot(plan)) as RuntimeCheckpoint & {
     plan: Record<string, unknown>;
   };
-  value.plan.padding = deepArray(FAILING_BEFORE_DEPTH);
-
-  assertCheckpointError(
-    () => restoreCheckpoint(value),
-    EXTERNAL_DATA_DEPTH_MESSAGE,
-  );
-  assert.equal(value.plan.padding !== undefined, true);
-});
-
-test("restoreCheckpoint rejects deeply nested snapshot data with structured TSK002", () => {
-  const plan = compiledPlan();
-  const value = checkpoint(plan, createFreshRuntimeSnapshot(plan));
-  addBinding(value.snapshot, deepList(65));
-
-  assertCheckpointError(
-    () => restoreCheckpoint(value),
-    EXTERNAL_DATA_DEPTH_MESSAGE,
-    "$.snapshot",
-  );
-});
-
-test("deserializeCheckpoint parses deep JSON first and returns structured TSK002", () => {
-  const plan = compiledPlan();
-  const value = {
-    format: CHECKPOINT_FORMAT,
-    version: CHECKPOINT_VERSION,
-    plan,
-    snapshot: mutableSnapshot(plan),
-  } as RuntimeCheckpoint;
-  addBinding(value.snapshot, "__DEEP_VALUE__");
-  const json = JSON.stringify(value).replace(
-    '"__DEEP_VALUE__"',
-    deepListJson(FAILING_BEFORE_DEPTH),
-  );
-
-  assert.doesNotThrow(() => JSON.parse(json) as unknown);
-  assertCheckpointError(
-    () => deserializeCheckpoint(json),
-    EXTERNAL_DATA_DEPTH_MESSAGE,
-    "$.snapshot",
-  );
-});
-
-test("checkpoint restoration preserves valid below-limit nested values", () => {
-  const plan = compiledPlan();
-  const snapshot = mutableSnapshot(plan);
-  addBinding(snapshot, deepList(50));
-
-  const restored = restoreCheckpoint({
-    format: CHECKPOINT_FORMAT,
-    version: CHECKPOINT_VERSION,
-    plan,
-    snapshot,
-  });
-
+  live.plan.padding = deepArray(512);
+  addBinding(live.snapshot, deepList(5_000));
+  const restored = restoreCheckpoint(live);
   assert.equal(validateRuntimeSnapshot(restored.snapshot, restored.plan).valid, true);
+
+  const serializedSnapshot = mutableSnapshot(plan);
+  addBinding(serializedSnapshot, "__DEEP_VALUE__");
+  const json = JSON.stringify(createCheckpoint(plan, serializedSnapshot)).replace(
+    '"__DEEP_VALUE__"',
+    deepListJson(5_000),
+  );
+  const deserialized = deserializeCheckpoint(json);
+  assert.equal(validateRuntimeSnapshot(deserialized.snapshot, deserialized.plan).valid, true);
 });
 
-test("runtime entry points reject an over-limit plan before execution or RNG use", () => {
-  const validPlan = compiledPlan("say random()\nexit");
-  const malformedPlan = JSON.parse(JSON.stringify(validPlan)) as InstructionPlan & {
+test("runtime entry points accept valid deep plan and snapshot data without mutating the caller", () => {
+  const validPlan = compiledPlan("exit");
+  const extendedPlan = JSON.parse(JSON.stringify(validPlan)) as InstructionPlan & {
     padding: unknown;
   };
-  malformedPlan.padding = deepArray(MAX_EXTERNAL_RUNTIME_DATA_DEPTH);
+  extendedPlan.padding = deepObject(512);
 
   for (const operation of [executeInstruction, stepToEvent, run]) {
-    const snapshot = createFreshRuntimeSnapshot(validPlan);
+    const snapshot = mutableSnapshot(validPlan);
+    addBinding(snapshot, deepList(512));
     const before = JSON.parse(JSON.stringify(snapshot)) as RuntimeSnapshot;
-    let randomCalls = 0;
-    assert.throws(
-      () => operation(malformedPlan, snapshot, {
-        random: { next: () => { randomCalls += 1; return 0.5; } },
-      }),
-      (error: unknown) =>
-        error instanceof RuntimeDataError &&
-        error.code === "TSR100" &&
-        error.message === EXTERNAL_DATA_DEPTH_MESSAGE,
-    );
-    assert.equal(randomCalls, 0);
+    assert.doesNotThrow(() => operation(extendedPlan, snapshot));
     assert.deepEqual(snapshot, before);
   }
 });
 
-test("runtime entry points reject an over-limit snapshot before execution or RNG use", () => {
-  const plan = compiledPlan("say random()\nexit");
+test("serializable cloning is stack-independent beyond the removed depth threshold", () => {
+  assert.doesNotThrow(() => cloneSerializableValue(deepList(FAILING_BEFORE_DEPTH)));
+});
 
-  for (const operation of [executeInstruction, stepToEvent, run]) {
-    const snapshot = mutableSnapshot(plan);
-    addBinding(snapshot, deepList(65));
-    const rngState = snapshot.rng.state;
-    const eventSequence = snapshot.nextEventSequence;
-    let randomCalls = 0;
-    assert.throws(
-      () => operation(plan, snapshot, {
-        random: { next: () => { randomCalls += 1; return 0.5; } },
-      }),
-      (error: unknown) =>
-        error instanceof RuntimeDataError &&
-        error.code === "TSR101" &&
-        error.message === EXTERNAL_DATA_DEPTH_MESSAGE,
-    );
-    assert.equal(randomCalls, 0);
-    assert.equal(snapshot.rng.state, rngState);
-    assert.equal(snapshot.nextEventSequence, eventSequence);
+test("external capture rejects sparse arrays as non-canonical regardless of length", () => {
+  for (const length of [1, 100_001, 0xffff_ffff]) {
+    const sparse: unknown[] = [];
+    sparse.length = length;
+    assert.deepEqual(captureExternalData(sparse, "$.items"), {
+      ok: false,
+      failure: { kind: "nonJsonSafeValue", path: "$.items" },
+    });
   }
 });
 
-test("serializable cloning accepts the depth boundary and rejects the next level", () => {
-  const acceptedDepth = MAX_EXTERNAL_RUNTIME_DATA_DEPTH / 2;
-  assert.doesNotThrow(() => cloneSerializableValue(deepList(acceptedDepth)));
-  assert.throws(
-    () => cloneSerializableValue(deepList(acceptedDepth + 1)),
-    (error: unknown) =>
-      error instanceof SerializableValueError &&
-      error.code === "invalid" &&
-      error.message === EXTERNAL_DATA_DEPTH_MESSAGE,
-  );
-});
-
-
-test("external capture bounds sparse array length before detailed validation", () => {
-  const sparseArrayLengthBoundary = 100_000;
-  const accepted: unknown[] = [];
-  accepted.length = sparseArrayLengthBoundary;
-  const acceptedCapture = captureExternalData(accepted, "$.items");
-  assert.equal(acceptedCapture.ok, true);
-  if (acceptedCapture.ok) {
-    assert.ok(Array.isArray(acceptedCapture.value));
-    assert.equal(
-      (acceptedCapture.value as unknown[]).length,
-      sparseArrayLengthBoundary,
-    );
-  }
-
-  const rejected: unknown[] = [];
-  rejected.length = sparseArrayLengthBoundary + 1;
-  assert.deepEqual(captureExternalData(rejected, "$.items"), {
-    ok: false,
-    failure: {
-      kind: "work",
-      path: "$.items",
-    },
-  });
-});
-
-test("external capture accounts for non-enumerable own-key descriptor work", () => {
-  const hostile = Object.create(null) as Record<string, unknown>;
-  for (let index = 0; index < MAX_EXTERNAL_RUNTIME_DATA_WORK; index += 1) {
-    Object.defineProperty(hostile, `hidden${index}`, {
+test("external capture measures broad descriptor work without rejecting it", () => {
+  const broad = Object.create(null) as Record<string, unknown>;
+  for (let index = 0; index < 100_001; index += 1) {
+    Object.defineProperty(broad, `hidden${index}`, {
       value: null,
       enumerable: false,
       configurable: true,
     });
   }
+  const statistics = withValidationTestStatistics((finish) => {
+    const captured = captureExternalData(broad);
+    assert.equal(captured.ok, true);
+    return finish();
+  }).counts;
+  assert.equal(statistics.externalCaptureDescriptors, 100_001);
 
-  assert.deepEqual(captureExternalData(hostile), {
-    ok: false,
-    failure: { kind: "work", path: "$" },
-  });
+  const dense = new Array(100_001).fill(null);
+  assert.deepEqual(captureExternalData(dense).ok, true);
 });
 
-test("external capture reserves enumerable child visits without double charging", () => {
-  const accepted = new Array(MAX_EXTERNAL_RUNTIME_DATA_WORK - 1).fill(null);
-  assert.equal(captureExternalData(accepted).ok, true);
-
-  const rejected = new Array(MAX_EXTERNAL_RUNTIME_DATA_WORK).fill(null);
-  assert.deepEqual(captureExternalData(rejected), {
+test("external capture rejects non-canonical proxy arrays before indexed traversal", () => {
+  assert.deepEqual(captureExternalData(proxyArray(2, ["1", "length"], { "1": "present" })), {
     ok: false,
-    failure: { kind: "work", path: "$" },
+    failure: { kind: "nonJsonSafeValue", path: "$" },
   });
 });
 
@@ -418,14 +406,10 @@ test("external capture rejects proxy indexes that conflict with validated array 
     );
   }
 
-  const accepted = captureExternalData(proxyArray(2, ["1", "length"], { "1": "present" }));
-  assert.equal(accepted.ok, true);
-  if (accepted.ok) {
-    assert.equal((accepted.value as unknown[])[0], undefined);
-    assert.equal(0 in (accepted.value as unknown[]), false);
-    assert.equal((accepted.value as unknown[])[1], "present");
-    assert.equal((accepted.value as unknown[]).length, 2);
-  }
+  assert.equal(
+    captureExternalData(proxyArray(2, ["1", "length"], { "1": "present" })).ok,
+    false,
+  );
 });
 
 test("external capture rejects malformed proxy length descriptors without invoking getters", () => {
@@ -481,7 +465,7 @@ test("proxy array length inflation is structured at plan, snapshot, checkpoint, 
   );
 });
 
-test("serializable cloning maps huge sparse arrays to the work-limit error", () => {
+test("serializable cloning rejects huge sparse arrays as non-canonical", () => {
   const items: SerializableRuntimeValue[] = [];
   items.length = 0xffff_ffff;
 
@@ -490,12 +474,12 @@ test("serializable cloning maps huge sparse arrays to the work-limit error", () 
     (error: unknown) =>
       error instanceof SerializableValueError &&
       error.code === "invalid" &&
-      error.message === EXTERNAL_DATA_WORK_MESSAGE,
+      error.message === "$.items is not a JSON-safe runtime value.",
   );
 });
 
-test("serializable cloning preserves dense and small sparse boundary behavior", () => {
-  const acceptedCount = MAX_EXTERNAL_RUNTIME_DATA_WORK - 3;
+test("serializable cloning accepts broad dense arrays and rejects sparse arrays", () => {
+  const acceptedCount = 100_001;
   const accepted = new Array<SerializableRuntimeValue>(acceptedCount).fill(null);
   const cloned = cloneSerializableValue({ kind: "list", items: accepted });
   assert.equal(typeof cloned === "object" && cloned?.kind === "list", true);
@@ -503,15 +487,12 @@ test("serializable cloning preserves dense and small sparse boundary behavior", 
     assert.equal(cloned.items.length, acceptedCount);
   }
 
-  const aboveCaptureBudget = new Array<SerializableRuntimeValue>(
+  const extended = new Array<SerializableRuntimeValue>(
     acceptedCount + 1,
   ).fill(null);
-  assert.throws(
-    () => cloneSerializableValue({ kind: "list", items: aboveCaptureBudget }),
-    (error: unknown) =>
-      error instanceof SerializableValueError &&
-      error.code === "invalid" &&
-      error.message === EXTERNAL_DATA_WORK_MESSAGE,
+  assert.equal(
+    (cloneSerializableValue({ kind: "list", items: extended }) as { items: unknown[] }).items.length,
+    extended.length,
   );
 
   assert.deepEqual(
@@ -527,7 +508,7 @@ test("serializable cloning preserves dense and small sparse boundary behavior", 
     (error: unknown) =>
       error instanceof SerializableValueError &&
       error.code === "invalid" &&
-      error.message === "$.items[0] is not a JSON-safe runtime value.",
+      error.message === "$.items is not a JSON-safe runtime value.",
   );
 });
 
@@ -540,7 +521,7 @@ test("plan validation rejects sparse instruction length before execution", () =>
     valid: false,
     errors: [{
       code: "TSC002",
-      message: EXTERNAL_DATA_WORK_MESSAGE,
+      message: "Plan contains a non-JSON-safe value.",
       path: "$.instructions",
     }],
   });
@@ -556,21 +537,21 @@ test("plan validation rejects sparse instruction length before execution", () =>
       (error: unknown) =>
         error instanceof RuntimeDataError &&
         error.code === "TSR100" &&
-        error.message === EXTERNAL_DATA_WORK_MESSAGE,
+        error.message === "Plan contains a non-JSON-safe value.",
     );
     assert.equal(randomCalls, 0);
     assert.deepEqual(snapshot, before);
   }
 });
 
-test("snapshot and checkpoint paths preserve sparse-array work errors", () => {
+test("snapshot and checkpoint paths reject sparse arrays as malformed data", () => {
   const plan = compiledPlan("say random()\nexit");
   const malformedSnapshot = mutableSnapshot(plan);
   (malformedSnapshot.frames as unknown[]).length = 0xffff_ffff;
 
   assert.deepEqual(validateRuntimeSnapshot(malformedSnapshot, plan), {
     valid: false,
-    errors: [EXTERNAL_DATA_WORK_MESSAGE],
+    errors: ["Runtime snapshot contains a non-JSON-safe value."],
   });
 
   for (const operation of [executeInstruction, stepToEvent, run]) {
@@ -586,7 +567,7 @@ test("snapshot and checkpoint paths preserve sparse-array work errors", () => {
       (error: unknown) =>
         error instanceof RuntimeDataError &&
         error.code === "TSR101" &&
-        error.message === EXTERNAL_DATA_WORK_MESSAGE,
+        error.message === "Runtime snapshot contains a non-JSON-safe value.",
     );
     assert.equal(randomCalls, 0);
     assert.equal(snapshot.rng.state, rngState);
@@ -600,7 +581,7 @@ test("snapshot and checkpoint paths preserve sparse-array work errors", () => {
   (malformedCheckpoint.snapshot.frames as unknown[]).length = 0xffff_ffff;
   assertCheckpointError(
     () => restoreCheckpoint(malformedCheckpoint),
-    EXTERNAL_DATA_WORK_MESSAGE,
+    "Checkpoint contains a non-JSON-safe value.",
     "$.snapshot",
   );
 });

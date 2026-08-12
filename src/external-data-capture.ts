@@ -1,15 +1,9 @@
-export const MAX_EXTERNAL_RUNTIME_DATA_DEPTH = 128;
-export const MAX_EXTERNAL_RUNTIME_DATA_WORK = 100_000;
-const MAX_EXTERNAL_RUNTIME_SPARSE_ARRAY_LENGTH = 100_000;
-
-export const EXTERNAL_DATA_DEPTH_MESSAGE =
-  "External runtime data exceeds the supported nesting depth.";
-export const EXTERNAL_DATA_WORK_MESSAGE =
-  "External runtime data exceeds the supported validation-work limit.";
+import {
+  recordValidationTestMaximum,
+  recordValidationTestWork,
+} from "./validation-testing.js";
 
 export type ExternalDataFailureKind =
-  | "depth"
-  | "work"
   | "nonFiniteNumber"
   | "nonJsonSafeValue"
   | "cycle"
@@ -30,6 +24,10 @@ export type ExternalDataCaptureResult =
       readonly failure: ExternalDataFailure;
     };
 
+export interface ExternalDataCaptureOptions {
+  readonly freezeCapturedContainers?: boolean;
+}
+
 const CAPTURED_ARRAY_PROTOTYPE = createCapturedArrayPrototype();
 
 interface PathNode {
@@ -40,6 +38,8 @@ interface PathNode {
 interface AssignmentTarget {
   readonly container: unknown[] | Record<string, unknown>;
   readonly key: string;
+  /** Non-null only for a known numeric element of an engine-created array. */
+  readonly arrayIndex: number | null;
 }
 
 type WorkItem =
@@ -49,7 +49,6 @@ type WorkItem =
       readonly depth: number;
       readonly path: PathNode | null;
       readonly target: AssignmentTarget | null;
-      readonly precharged: boolean;
     }
   | {
       readonly kind: "iterate";
@@ -65,34 +64,31 @@ type WorkItem =
   | {
       readonly kind: "leave";
       readonly value: object;
+      readonly captured: unknown[] | Record<string, unknown>;
     };
 
 /**
  * Captures an externally supplied JSON-like graph into stable plain data while
- * enforcing the shared depth/work limits. Enumerable accessors are rejected
- * without invocation. Proxy traps are observed only during this capture; the
- * returned graph retains no caller-controlled proxy, accessor, or prototype behavior.
+ * rejecting accessors, cycles, unsupported values, prototypes, and sparse or
+ * otherwise non-canonical arrays. Proxy traps are observed only during this
+ * capture; the returned graph retains no caller-controlled proxy, accessor,
+ * or prototype behavior.
  */
 export function captureExternalData(
   value: unknown,
   rootPath = "$",
+  options?: ExternalDataCaptureOptions,
 ): ExternalDataCaptureResult {
   const active = new Set<object>();
   const work: WorkItem[] = [
-    { kind: "visit", value, depth: 0, path: null, target: null, precharged: false },
+    { kind: "visit", value, depth: 0, path: null, target: null },
   ];
-  let consumedWork = 0;
   let capturedRoot: unknown;
-
-  const consumeWork = (amount = 1): boolean => {
-    if (amount > MAX_EXTERNAL_RUNTIME_DATA_WORK - consumedWork) return false;
-    consumedWork += amount;
-    return true;
-  };
 
   while (work.length > 0) {
     const item = work.pop()!;
     if (item.kind === "leave") {
+      if (options?.freezeCapturedContainers) Object.freeze(item.captured);
       active.delete(item.value);
       continue;
     }
@@ -109,12 +105,7 @@ export function captureExternalData(
       const key = item.keys[item.index]!;
       if (item.array && key === "length") continue;
 
-      // Each non-length own key requires descriptor processing. Enumerable
-      // data properties reserve their child visit here so dense data is not
-      // charged once for the descriptor and again for that same child.
-      if (!consumeWork()) {
-        return captureFailure("work", item.path, rootPath);
-      }
+      recordValidationTestWork("externalCaptureDescriptors");
 
       let descriptor: PropertyDescriptor | undefined;
       try {
@@ -126,18 +117,22 @@ export function captureExternalData(
         return captureFailure("nonJsonSafeValue", item.path, rootPath);
       }
 
+      let arrayIndex: number | null = null;
       if (item.array && typeof key === "string") {
-        const arrayIndex = canonicalArrayIndex(key);
+        arrayIndex = canonicalArrayIndex(key);
         if (arrayIndex === null) {
-          if (numericLookingArrayKey(key)) {
-            return captureFailure("nonJsonSafeValue", item.path, rootPath);
-          }
+          return captureFailure("nonJsonSafeValue", item.path, rootPath);
         } else if (arrayIndex >= item.arrayLength!) {
           return captureFailure("nonJsonSafeValue", item.path, rootPath);
         }
       }
 
-      if (!descriptor.enumerable) continue;
+      if (!descriptor.enumerable) {
+        if (item.array) {
+          return captureFailure("nonJsonSafeValue", item.path, rootPath);
+        }
+        continue;
+      }
       if (typeof key === "symbol") {
         return captureFailure("nonJsonSafeValue", item.path, rootPath);
       }
@@ -155,18 +150,13 @@ export function captureExternalData(
         value: descriptor.value,
         depth: item.depth + 1,
         path: nestedPath,
-        target: { container: item.captured, key },
-        precharged: true,
+        target: { container: item.captured, key, arrayIndex },
       });
       continue;
     }
 
-    if (!item.precharged && !consumeWork()) {
-      return captureFailure("work", item.path, rootPath);
-    }
-    if (item.depth > MAX_EXTERNAL_RUNTIME_DATA_DEPTH) {
-      return captureFailure("depth", item.path, rootPath);
-    }
+    recordValidationTestWork("externalCaptureVisits");
+    recordValidationTestMaximum("externalCaptureMaximumDepth", item.depth);
 
     const current = item.value;
     if (
@@ -231,9 +221,6 @@ export function captureExternalData(
       ) {
         return captureFailure("nonJsonSafeValue", item.path, rootPath);
       }
-      if (lengthDescriptor.value > MAX_EXTERNAL_RUNTIME_SPARSE_ARRAY_LENGTH) {
-        return captureFailure("work", item.path, rootPath);
-      }
       arrayLength = lengthDescriptor.value;
     }
 
@@ -241,6 +228,9 @@ export function captureExternalData(
     try {
       keys = Reflect.ownKeys(current);
     } catch {
+      return captureFailure("nonJsonSafeValue", item.path, rootPath);
+    }
+    if (array && keys.length !== arrayLength! + 1) {
       return captureFailure("nonJsonSafeValue", item.path, rootPath);
     }
     const captured = array
@@ -251,7 +241,7 @@ export function captureExternalData(
     });
 
     active.add(current);
-    work.push({ kind: "leave", value: current });
+    work.push({ kind: "leave", value: current, captured });
     work.push({
       kind: "iterate",
       value: current,
@@ -268,14 +258,6 @@ export function captureExternalData(
   return Object.freeze({ ok: true, value: capturedRoot });
 }
 
-export function findExternalDataFailure(
-  value: unknown,
-  rootPath = "$",
-): ExternalDataFailure | null {
-  const capture = captureExternalData(value, rootPath);
-  return capture.ok ? null : capture.failure;
-}
-
 function assignCaptured(
   target: AssignmentTarget | null,
   value: unknown,
@@ -283,6 +265,10 @@ function assignCaptured(
 ): void {
   if (target === null) {
     setRoot(value);
+    return;
+  }
+  if (target.arrayIndex !== null) {
+    (target.container as unknown[])[target.arrayIndex] = value;
     return;
   }
   Reflect.defineProperty(target.container, target.key, {
@@ -335,10 +321,6 @@ function canonicalArrayIndex(key: string): number | null {
   if (!/^(0|[1-9]\d*)$/.test(key)) return null;
   const index = Number(key);
   return Number.isSafeInteger(index) && index < 0xffff_ffff ? index : null;
-}
-
-function numericLookingArrayKey(key: string): boolean {
-  return /^[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(key);
 }
 
 function formatPath(path: PathNode | null, rootPath: string): string {

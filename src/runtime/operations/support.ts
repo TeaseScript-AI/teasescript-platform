@@ -1,11 +1,16 @@
-import type { InstructionPlan } from "../../plan/model.js";
+import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
 import { captureInstructionPlan } from "../../plan/capture.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
+import { planLocationToSourceSpan } from "../../plan/source-location.js";
 import { RuntimeFault } from "../errors.js";
 import type { InterpreterEvent } from "../events.js";
-import { cloneSerializableValue, type SerializableRuntimeValue } from "../serializable-values.js";
 import {
-  captureRuntimeSnapshot,
+  cloneCapturedSerializableValue,
+  cloneSerializableValue,
+  type SerializableRuntimeValue,
+} from "../serializable-values.js";
+import {
+  captureRuntimeSnapshotWithValidatedPlan,
   type RuntimeSnapshot,
   type RuntimeTemporarySnapshot,
 } from "../state.js";
@@ -47,6 +52,18 @@ export function setTemporary(
   }
 }
 
+/** Stores a detached copy of an engine-owned, already validated temporary value. */
+export function setCapturedTemporary(
+  temporaries: RuntimeTemporarySnapshot[],
+  temporaryId: number,
+  value: SerializableRuntimeValue,
+): void {
+  const existing = temporaries.find((item) => item.id === temporaryId);
+  const copied = cloneCapturedSerializableValue(value);
+  if (existing === undefined) temporaries.push({ id: temporaryId, value: copied });
+  else existing.value = copied;
+}
+
 export function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeActionSettlementSnapshot {
   if (settlement.actionKind === "delay") return {
     actionId: settlement.actionId,
@@ -86,9 +103,13 @@ export function assertCounterCanAdvance(value: number, field: string): void {
   }
 }
 
-export function assertEventSequenceCapacity(snapshot: RuntimeSnapshot, count: number, span?: SourceSpan): void {
+export function assertEventSequenceCapacity(
+  snapshot: RuntimeSnapshot,
+  count: number,
+  span?: SourceSpan | PlanSourceLocation,
+): void {
   if (snapshot.nextEventSequence <= Number.MAX_SAFE_INTEGER - count) return;
-  if (span !== undefined) throw new RuntimeFault("TSR051", "Runtime event sequence space is exhausted.", span);
+  if (span !== undefined) throw new RuntimeFault("TSR051", "Runtime event sequence space is exhausted.", copySpan(span));
   throw new RuntimeDataError("TSR101", "Runtime nextEventSequence cannot satisfy the pending action atomically.");
 }
 
@@ -132,7 +153,10 @@ export function captureExecutableData(
       capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
     );
   }
-  const capturedSnapshot = captureRuntimeSnapshot(snapshot, capturedPlan.plan);
+  const capturedSnapshot = captureRuntimeSnapshotWithValidatedPlan(
+    snapshot,
+    capturedPlan.plan,
+  );
   if (!capturedSnapshot.validation.valid || capturedSnapshot.snapshot === null) {
     throw new RuntimeDataError(
       "TSR101",
@@ -171,6 +195,7 @@ export function isPlainRecord(value: unknown): value is Record<string, unknown> 
   return prototype === Object.prototype || prototype === null;
 }
 
-export function copySpan(span: SourceSpan): SourceSpan {
+export function copySpan(span: SourceSpan | PlanSourceLocation): SourceSpan {
+  if ("so" in span) return planLocationToSourceSpan(span);
   return createSourceSpan(span.start, span.end);
 }

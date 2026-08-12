@@ -94,7 +94,7 @@ The cross-origin host protocol, general/background timer actions, Standard Libra
 
 The behavior-neutral Option A refactor is implemented for the code present on
 the starting `main`. `src/plan/model.ts` contains only the serializable plan
-contract; `capture.ts` and `validation.ts` own hostile-data capture and plan
+contract; `capture.ts` and `validation.ts` own stable external-data capture and plan
 validation, with the small private capture support seam shared to avoid a
 capture/validation cycle. `src/compiler/compile-program.ts` owns compilation
 orchestration, while `src/compiler/lowering/compiler.ts` owns the cohesive

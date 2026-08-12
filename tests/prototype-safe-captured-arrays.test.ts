@@ -14,7 +14,7 @@ import {
   type RuntimeCheckpoint,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { captureExternalData } from "../src/external-data-limits.js";
+import { captureExternalData } from "../src/external-data-capture.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
 
 function compiledPlan(): InstructionPlan {
@@ -46,19 +46,16 @@ function withArrayPrototypeIndex(
   }
 }
 
-test("captured sparse arrays ignore inherited numeric values", () => {
+test("sparse arrays are rejected without reading inherited numeric values", () => {
   const sparse = new Array<unknown>(1);
   withArrayPrototypeIndex(
     { value: "inherited", writable: true },
     () => {
       const captured = captureExternalData(sparse);
-      assert.equal(captured.ok, true);
-      if (!captured.ok) return;
-      assert.equal(Array.isArray(captured.value), true);
-      assert.notEqual(Object.getPrototypeOf(captured.value), Array.prototype);
-      assert.equal(Object.hasOwn(captured.value as object, 0), false);
-      assert.equal(0 in (captured.value as unknown[]), false);
-      assert.equal(typeof (captured.value as unknown[]).map, "function");
+      assert.deepEqual(captured, {
+        ok: false,
+        failure: { kind: "nonJsonSafeValue", path: "$" },
+      });
     },
   );
 });
@@ -111,4 +108,37 @@ test("inherited numeric getters are never invoked across captured-data boundarie
     },
   );
   assert.equal(getterCalls, 0);
+});
+
+test("dense captured arrays install ordinary own elements without inherited setters", () => {
+  let setterCalls = 0;
+  withArrayPrototypeIndex(
+    {
+      set(this: unknown[], value: unknown) {
+        if (Object.getPrototypeOf(this) !== Array.prototype) {
+          setterCalls += 1;
+          throw new Error("captured-array numeric setter must not run");
+        }
+        Reflect.defineProperty(this, "0", {
+          value,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+      },
+    },
+    () => {
+      const result = captureExternalData(["captured"]);
+      assert.equal(result.ok, true);
+      const captured = result.value as unknown[];
+      assert.equal(captured[0], "captured");
+      assert.deepEqual(Reflect.getOwnPropertyDescriptor(captured, "0"), {
+        value: "captured",
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    },
+  );
+  assert.equal(setterCalls, 0);
 });

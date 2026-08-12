@@ -46,10 +46,20 @@ test("lowers nested calls and arguments in source order", () => {
     "left",
     "right",
   ]);
-  assert.ok(outer.arguments[0]!.temporaryId < outer.arguments[1]!.temporaryId);
+  assert.equal(outer.arguments[0]!.value.kind, "temporary");
+  assert.equal(outer.arguments[1]!.value.kind, "temporary");
+  if (
+    outer.arguments[0]!.value.kind === "temporary" &&
+    outer.arguments[1]!.value.kind === "temporary"
+  ) {
+    assert.ok(
+      outer.arguments[0]!.value.temporaryId <
+        outer.arguments[1]!.value.temporaryId,
+    );
+  }
 });
 
-test("clears one call's prepared argument temporaries in one return-continuation instruction", () => {
+test("embeds synchronous call arguments without preparation instructions", () => {
   const compiled = plan([
     "function combine(first, second, third) { return first + second + third }",
     "combine(1, 2, 3)",
@@ -60,18 +70,93 @@ test("clears one call's prepared argument temporaries in one return-continuation
   assert.equal(call?.kind, "callFunction");
   if (call?.kind !== "callFunction") return;
 
-  const cleanup = root[call.returnInstruction];
-  assert.equal(cleanup?.kind, "clearTemporaries");
-  if (cleanup?.kind !== "clearTemporaries") return;
   assert.deepEqual(
-    cleanup.temporaryIds,
-    call.arguments.map((argument) => argument.temporaryId),
+    call.arguments.map((argument) =>
+      argument.value.kind === "literal" ? argument.value.value : undefined
+    ),
+    [1, 2, 3],
   );
-  assert.equal(cleanup.temporaryIds.includes(call.destinationTemporary), false);
-  assert.equal(
-    root.filter((instruction) => instruction.kind === "clearTemporaries").length,
-    1,
+  assert.equal(root.filter((instruction) => instruction.kind === "storeTemporary").length, 0);
+  assert.equal(root.filter((instruction) => instruction.kind === "clearTemporaries").length, 0);
+  assert.deepEqual(root.map((instruction) => instruction.kind), [
+    "callFunction",
+    "evaluate",
+    "clearTemporary",
+  ]);
+});
+
+test("repeated synchronous multi-argument calls do not emit per-argument preparation", () => {
+  const argumentCount = 12;
+  const callCount = 25;
+  const parameters = Array.from(
+    { length: argumentCount },
+    (_, index) => `p${index}`,
+  ).join(", ");
+  const argumentsList = Array.from(
+    { length: argumentCount },
+    (_, index) => String(index + 1),
+  ).join(", ");
+  const compiled = plan([
+    `function sink(${parameters}) { return p0 }`,
+    ...Array.from({ length: callCount }, () => `sink(${argumentsList})`),
+  ].join("\n"));
+  const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
+  const calls = root.filter((instruction) => instruction.kind === "callFunction");
+
+  assert.equal(calls.length, callCount);
+  assert.equal(compiled.temporaryCount, callCount);
+  assert.equal(root.filter((instruction) => instruction.kind === "storeTemporary").length, 0);
+  assert.equal(root.filter((instruction) => instruction.kind === "clearTemporaries").length, 0);
+  assert.ok(calls.every((call) =>
+    call.arguments.length === argumentCount &&
+    call.arguments.every((argument) => argument.value.kind === "literal")
+  ));
+});
+
+test("materializes only arguments that must survive a later user call", () => {
+  const compiled = plan([
+    "function later { return 2 }",
+    "function combine(first, second, third) { return first + second + third }",
+    "combine(random(), later(), 3)",
+  ].join("\n"));
+  const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
+  const outer = root.find(
+    (instruction) => instruction.kind === "callFunction" && instruction.functionId === 2,
   );
+  assert.equal(outer?.kind, "callFunction");
+  if (outer?.kind !== "callFunction") return;
+
+  assert.deepEqual(outer.arguments.map((argument) => argument.value.kind), [
+    "temporary",
+    "temporary",
+    "literal",
+  ]);
+  assert.equal(root.filter((instruction) => instruction.kind === "storeTemporary").length, 1);
+  assert.equal(root.filter((instruction) => instruction.kind === "clearTemporaries").length, 1);
+});
+
+test("materializes a complete composite argument that emits instructions", () => {
+  const compiled = plan([
+    "function inner { return 2 }",
+    "function outer(value) { return value }",
+    "outer(inner() + 1)",
+  ].join("\n"));
+  const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
+  const outer = root.find(
+    (instruction) => instruction.kind === "callFunction" && instruction.functionId === 2,
+  );
+  assert.equal(outer?.kind, "callFunction");
+  if (outer?.kind !== "callFunction") return;
+
+  assert.equal(outer.arguments[0]!.value.kind, "temporary");
+  assert.deepEqual(root.map((instruction) => instruction.kind), [
+    "callFunction",
+    "storeTemporary",
+    "callFunction",
+    "clearTemporaries",
+    "evaluate",
+    "clearTemporary",
+  ]);
 });
 
 test("lowers property receivers and assignment targets in source order", () => {
@@ -131,7 +216,6 @@ test("compiles defaults as executable prologues and inserts implicit returns", (
   assert.ok(prologue.some((instruction) => instruction.kind === "bindSuppliedParameter"));
   assert.ok(prologue.some((instruction) => instruction.kind === "prepareParameterDefault"));
   assert.ok(prologue.some((instruction) => instruction.kind === "callFunction"));
-  assert.ok(prologue.some((instruction) => instruction.kind === "clearTemporaries"));
   assert.ok(prologue.some((instruction) => instruction.kind === "bindDefaultParameter"));
   assert.equal(compiled.instructions[sample.implicitReturnInstruction]?.kind, "returnVoid");
 });
@@ -160,12 +244,11 @@ test("function plans survive JSON round trips with preserved spans", () => {
   assert.deepEqual(restored, original);
   assert.equal(validateInstructionPlan(restored).valid, true);
   assert.deepEqual(original.functions[0]?.declarationSpan, {
-    start: { offset: 0, line: 0, column: 0 },
-    end: { offset: 49, line: 0, column: 49 },
+    so: 0, sl: 0, sc: 0, eo: 49, el: 0, ec: 49,
   });
   const call = original.instructions.find((instruction) => instruction.kind === "callFunction");
   assert.deepEqual(
-    call === undefined ? null : [call.span.start.offset, call.span.end.offset],
+    call === undefined ? null : [call.span.so, call.span.eo],
     [63, 72],
   );
 });
@@ -268,31 +351,40 @@ test("rejects malformed function regions and aliased call temporaries", () => {
   const aliasedCall = aliasedDestination.instructions.find(
     (instruction) => instruction.kind === "callFunction",
   )!;
-  aliasedCall.destinationTemporary = aliasedCall.arguments[0]!.temporaryId;
+  aliasedCall.arguments[0]!.value = {
+    kind: "temporary",
+    temporaryId: aliasedCall.destinationTemporary,
+    span: aliasedCall.arguments[0]!.value.span,
+  };
   assertInvalid(aliasedDestination, /must not alias/u);
 
   const duplicateArgument = mutable(calls);
   const duplicateCall = duplicateArgument.instructions.find(
     (instruction) => instruction.kind === "callFunction",
   )!;
-  duplicateCall.arguments[1]!.temporaryId = duplicateCall.arguments[0]!.temporaryId;
-  assertInvalid(duplicateArgument, /temporary IDs must be unique/u);
+  duplicateCall.arguments[1]!.parameterName = duplicateCall.arguments[0]!.parameterName;
+  assertInvalid(duplicateArgument, /more than once/u);
 
-  const emptyCleanup = mutable(calls);
+  const callsWithCleanup = plan([
+    "function value { return 1 }",
+    "function pair(left, right) { return left + right }",
+    "say pair(value(), value())",
+  ].join("\n"));
+  const emptyCleanup = mutable(callsWithCleanup);
   const emptyBatch = emptyCleanup.instructions.find(
     (instruction) => instruction.kind === "clearTemporaries",
   )!;
   emptyBatch.temporaryIds = [];
   assertInvalid(emptyCleanup, /non-empty array/u);
 
-  const duplicateCleanup = mutable(calls);
+  const duplicateCleanup = mutable(callsWithCleanup);
   const duplicateBatch = duplicateCleanup.instructions.find(
     (instruction) => instruction.kind === "clearTemporaries",
   )!;
   duplicateBatch.temporaryIds.push(duplicateBatch.temporaryIds[0]);
   assertInvalid(duplicateCleanup, /must not contain duplicates/u);
 
-  const unknownCleanup = mutable(calls);
+  const unknownCleanup = mutable(callsWithCleanup);
   const unknownBatch = unknownCleanup.instructions.find(
     (instruction) => instruction.kind === "clearTemporaries",
   )!;

@@ -4,12 +4,14 @@ import {
   captureProgramAst,
   findNonFiniteNumericLiteralDiagnosticsInStableProgram,
 } from "../ast-validation.js";
-import { createSourceSpan, type SourceSpan } from "../source.js";
+import type { SourceSpan } from "../source.js";
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
   type InstructionPlan,
 } from "../plan/model.js";
+import { freezeInstructionPlan } from "../plan/freeze.js";
+import { sourceSpanToPlanLocation } from "../plan/source-location.js";
 import { InstructionCompiler } from "./lowering/compiler.js";
 import { InstructionCompilationError } from "./errors.js";
 
@@ -32,8 +34,8 @@ export function compileProgram(program: Program): InstructionPlan {
  * Lowers parser-owned or already-captured stable AST data.
  *
  * The canonical source route calls this after parsing and semantic validation so
- * parser-owned AST size is not conflated with the hostile direct-AST capture
- * budget. `compileProgram(...)` remains the guarded internal entry point for
+ * parser-owned AST data is not copied through the direct caller-data capture
+ * path. `compileProgram(...)` remains the guarded internal entry point for
  * caller-constructed AST data.
  */
 export function compileStableProgram(program: Program): InstructionPlan {
@@ -58,7 +60,7 @@ export function compileStableProgram(program: Program): InstructionPlan {
   );
   const rootEndInstruction = compiler.instructions.length;
   compiler.compileFunctions();
-  return deepFreeze({
+  return freezeInstructionPlan({
     format: INSTRUCTION_PLAN_FORMAT,
     version: INSTRUCTION_PLAN_VERSION,
     sourceSpan: copySpan(program.span),
@@ -69,35 +71,6 @@ export function compileStableProgram(program: Program): InstructionPlan {
   });
 }
 
-function copySpan(span: SourceSpan): SourceSpan {
-  return createSourceSpan(span.start, span.end);
-}
-
-function deepFreeze<T>(value: T): T {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
-  const work: Array<readonly [object, boolean]> = [[value, false]];
-  while (work.length > 0) {
-    const [current, readyToFreeze] = work.pop()!;
-    if (Object.isFrozen(current)) continue;
-    if (readyToFreeze) {
-      Object.freeze(current);
-      continue;
-    }
-    work.push([current, true]);
-    if (Array.isArray(current)) {
-      for (let index = current.length - 1; index >= 0; index -= 1) {
-        const nested = current[index];
-        if (typeof nested === "object" && nested !== null && !Object.isFrozen(nested)) {
-          work.push([nested, false]);
-        }
-      }
-      continue;
-    }
-    for (const nested of Object.values(current as Record<string, unknown>)) {
-      if (typeof nested === "object" && nested !== null && !Object.isFrozen(nested)) {
-        work.push([nested, false]);
-      }
-    }
-  }
-  return value;
+function copySpan(span: SourceSpan) {
+  return sourceSpanToPlanLocation(span);
 }

@@ -1289,7 +1289,7 @@ test("say instruction plans and public pacing failures stay at their validation 
     ["invalid speaker", (candidate) => { candidate.instructions[sayIndex].speaker = 123; }],
     ["malformed value", (candidate) => { candidate.instructions[sayIndex].value = { kind: "literal", value: () => "bad" }; }],
     ["old plan version", (candidate) => { candidate.version -= 1; }],
-    ["malformed span", (candidate) => { candidate.instructions[sayIndex].span.start.offset = -1; }],
+    ["malformed location", (candidate) => { candidate.instructions[sayIndex].span.so = -1; }],
   ];
   for (const [label, mutate] of invalidPlans) {
     const hostile = structuredClone(base) as any;

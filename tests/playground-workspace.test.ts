@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSource } from "../playground/workspace/controller.js";
+import {
+  compileWorkspaceSource,
+  decodeWorkspaceSourceBytes,
+  executeValidatedWorkspaceSnapshot,
+  executeWorkspaceSource,
+} from "../playground/workspace/controller.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
 
 test("workspace helper exposes production say pacing and returns JSON-safe data", () => {
   const compiled = compileWorkspaceSource('say "Hello"');
@@ -17,10 +23,44 @@ test("workspace helper reports parser and semantic diagnostics", () => {
   assert.equal(compileWorkspaceSource("missing = 1").plan, null);
 });
 
+test("workspace compilation reuses the compiler-validated plan", () => {
+  const statistics = withValidationTestStatistics((finish) => {
+    assert.ok(compileWorkspaceSource(Array.from({ length: 100 }, () => 'say "Hello"').join("\n")).plan);
+    return finish();
+  }).counts;
+
+  assert.equal(statistics.externalCaptureVisits, 1, "only the empty fresh-runtime options object is captured");
+
+  const executionStatistics = withValidationTestStatistics((finish) => {
+    assert.equal(executeWorkspaceSource('say "Hello"').status, "halted");
+    return finish();
+  }).counts;
+  assert.equal(executionStatistics.externalCaptureVisits, 1);
+});
+
 test("workspace helper stops blocking waits in waiting with action events", () => {
   const result = executeWorkspaceSource("wait 1");
   assert.equal(result.status, "waiting");
   assert.deepEqual(result.events.map((event) => event.kind), ["actionRequested"]);
+});
+
+test("validated workspace execution clones state without hostile-data recapture", () => {
+  const compiled = compileWorkspaceSource('say "Hello"');
+  assert.ok(compiled.plan);
+  assert.ok(compiled.snapshot);
+  const before = JSON.stringify(compiled.snapshot);
+  const statistics = withValidationTestStatistics((finish) => {
+    const result = executeValidatedWorkspaceSnapshot(
+      compiled.plan!,
+      compiled.snapshot!,
+      "run",
+    );
+    assert.equal(result.status, "halted");
+    return finish();
+  }).counts;
+
+  assert.equal(JSON.stringify(compiled.snapshot), before);
+  assert.equal(statistics.externalCaptureVisits, undefined);
 });
 
 test("workspace helper accepts source beyond the former local byte limit", () => {

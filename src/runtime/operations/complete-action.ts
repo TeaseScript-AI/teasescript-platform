@@ -1,7 +1,6 @@
 import type { InstructionPlan } from "../../plan/model.js";
-import { captureExternalData } from "../../external-data-limits.js";
+import { captureExternalData } from "../../external-data-capture.js";
 import {
-  cloneCapturedRuntimeSnapshot,
   type RuntimeInteractionResultHandoffSnapshot,
   type RuntimeSnapshot,
 } from "../state.js";
@@ -32,7 +31,7 @@ export function completeAction(
   request: unknown,
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   const captured = captureExecutableData(plan, snapshot);
-  const current = cloneCapturedRuntimeSnapshot(captured.snapshot);
+  const current = captured.snapshot;
   const external = captureExternalData(request);
   if (!external.ok || !isPlainRecord(external.value)) {
     return pendingResult(current, [], {

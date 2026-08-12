@@ -4,12 +4,6 @@ export {
   type Diagnostic,
 } from "./diagnostics.js";
 export {
-  EXTERNAL_DATA_DEPTH_MESSAGE,
-  EXTERNAL_DATA_WORK_MESSAGE,
-  MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
-  MAX_EXTERNAL_RUNTIME_DATA_WORK,
-} from "./external-data-limits.js";
-export {
   INTERACTION_LIMITS_VERSION,
   INTERACTION_WHITESPACE_CLASSIFICATION,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
@@ -43,13 +37,14 @@ export {
   type PreparedInteractionUiPayload,
   type PreparedInteractionChoiceLabel,
   type InstructionPlan,
+  type PlanSourceLocation,
   type LoopControlInstruction,
   type LoopStartInstruction,
   type RangeExpressionPlan,
   type CompiledFunctionDefinition,
   type CompiledFunctionParameter,
   type CallFunctionInstruction,
-  type PreparedCallArgument,
+  type CallArgumentPlan,
   type TemporaryExpressionPlan,
 } from "./plan/model.js";
 export {

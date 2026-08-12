@@ -1,6 +1,18 @@
-import { CheckpointError, createCheckpoint, deserializeCheckpoint, serializeCheckpoint, type InstructionPlan, type InterpreterEvent, type RuntimeSnapshot } from "../src/index.js";
+import {
+  CheckpointError,
+  deserializeCheckpoint,
+  type InstructionPlan,
+  type InterpreterEvent,
+  type RuntimeSnapshot,
+} from "../src/index.js";
+import { createCheckpoint } from "../src/runtime/checkpoint.js";
 import { checkpointStorageKey, exampleUrl, isPlaygroundExampleName, PLAYGROUND_EXAMPLES, type PlaygroundExampleName } from "./examples.js";
-import { compileWorkspaceSource, decodeWorkspaceSourceBytes, executeWorkspaceSnapshot, type WorkspaceResult } from "./workspace/controller.js";
+import {
+  compileWorkspaceSource,
+  decodeWorkspaceSourceBytes,
+  executeValidatedWorkspaceSnapshot,
+  type WorkspaceResult,
+} from "./workspace/controller.js";
 
 const DRAFT_KEY = "teasescript-playground-draft-v1";
 const elements = {
@@ -72,7 +84,14 @@ function compileAndReset(): void {
 
 function execute(mode: "run" | "step"): void {
   if (!runtimeIsCurrent()) { setActionStatus("Compile the current source before execution; the previous runtime is stale."); return; }
-  try { applyResult(executeWorkspaceSnapshot(plan as InstructionPlan, snapshot as RuntimeSnapshot, mode), false); setActionStatus(`${mode === "run" ? "Run" : "Step"} executed.`); } catch (error) { setActionStatus(errorMessage(error)); }
+  try {
+    applyResult(executeValidatedWorkspaceSnapshot(
+      plan as InstructionPlan,
+      snapshot as RuntimeSnapshot,
+      mode,
+    ), false);
+    setActionStatus(`${mode === "run" ? "Run" : "Step"} executed.`);
+  } catch (error) { setActionStatus(errorMessage(error)); }
 }
 
 function applyResult(result: WorkspaceResult, resetEvents: boolean): void {
@@ -87,7 +106,17 @@ function runtimeIsCurrent(): boolean { return plan !== null && snapshot !== null
 
 function saveCheckpoint(): void {
   if (!runtimeIsCurrent()) { setActionStatus("Checkpoints require a current compiled runtime."); return; }
-  try { localStorage.setItem(checkpointStorageKey(currentExample), serializeCheckpoint(createCheckpoint(plan as InstructionPlan, snapshot as RuntimeSnapshot))); setActionStatus("Checkpoint saved locally."); } catch (error) { setActionStatus(errorMessage(error)); }
+  try {
+    const checkpoint = createCheckpoint(
+      plan as InstructionPlan,
+      snapshot as RuntimeSnapshot,
+    );
+    localStorage.setItem(
+      checkpointStorageKey(currentExample),
+      JSON.stringify(checkpoint),
+    );
+    setActionStatus("Checkpoint saved locally.");
+  } catch (error) { setActionStatus(errorMessage(error)); }
 }
 
 function restoreSavedCheckpoint(): void {

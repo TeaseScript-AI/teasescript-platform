@@ -424,6 +424,18 @@ test("dynamic interaction UI uses the established visible-text conversion once b
   assert.equal(unsupported.snapshot.nextActionId, 1);
 });
 
+test("static compact interactions compile long mixed unary numeric labels without native recursion", () => {
+  const source = `showButton ${"-+".repeat(12_000)}-1`;
+  const result = compileSource(source);
+  assert.deepEqual(result.diagnostics, []);
+  assert.ok(result.plan !== null);
+  assert.equal(validateInstructionPlan(result.plan).valid, true);
+  const interaction = result.plan.instructions.find((instruction) => instruction.kind === "interaction");
+  assert.ok(interaction?.kind === "interaction" && "ui" in interaction);
+  assert.equal(interaction.ui.kind, "button");
+  assert.equal(interaction.ui.buttonLabel, "-1");
+});
+
 test("dynamic interaction UI commits prepared text and serialized RNG only after full validation", () => {
   const cases = [
     {
@@ -680,7 +692,7 @@ test("interaction expressions preserve function-argument source order across sus
   const plan = compiled(
     [
       "function middle(first, second, third) { return second }",
-      'let answer = middle(mark("before"), askText, mark("after"))',
+      'let answer = middle(mark("before"), `received ${askText}`, mark("after"))',
       "say answer",
     ].join("\n"),
     { builtins: ["mark"] },
@@ -696,6 +708,20 @@ test("interaction expressions preserve function-argument source order across sus
       },
     },
   };
+  const call = plan.instructions.find(
+    (instruction) => instruction.kind === "callFunction",
+  );
+  assert.equal(call?.kind, "callFunction");
+  if (call?.kind !== "callFunction") return;
+  assert.deepEqual(call.arguments.map((argument) => argument.value.kind), [
+    "temporary",
+    "temporary",
+    "call",
+  ]);
+  assert.equal(
+    plan.instructions.filter((instruction) => instruction.kind === "storeTemporary").length,
+    3,
+  );
   const pending = run(plan, createFreshRuntimeSnapshot(plan), capabilities);
   assert.deepEqual(marks, ["before"]);
   assert.equal(pending.snapshot.status, "waiting");
@@ -709,7 +735,7 @@ test("interaction expressions preserve function-argument source order across sus
   const done = run(plan, completed.snapshot, capabilities);
   assert.deepEqual(marks, ["before", "after"]);
   assert.equal(done.snapshot.status, "halted");
-  assert.equal(done.events.find((event) => event.kind === "say")?.text, "answer");
+  assert.equal(done.events.find((event) => event.kind === "say")?.text, "received answer");
 });
 
 test("real source completes, retries invalid input, records provenance, and resumes at top level", () => {

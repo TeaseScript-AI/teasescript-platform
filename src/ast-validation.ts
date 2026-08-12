@@ -6,16 +6,16 @@ import {
 } from "./diagnostics.js";
 import {
   createCapturedArray,
-  EXTERNAL_DATA_DEPTH_MESSAGE,
-  EXTERNAL_DATA_WORK_MESSAGE,
-  MAX_EXTERNAL_RUNTIME_DATA_DEPTH,
-  MAX_EXTERNAL_RUNTIME_DATA_WORK,
-} from "./external-data-limits.js";
+} from "./external-data-capture.js";
 import {
   createSourcePosition,
   createSourceSpan,
   type SourceSpan,
 } from "./source.js";
+import {
+  recordValidationTestMaximum,
+  recordValidationTestWork,
+} from "./validation-testing.js";
 
 export const AST_VALIDATION_CODES = {
   nonFiniteNumericLiteral: "TSC001",
@@ -27,9 +27,26 @@ export interface CapturedProgramAstResult {
   readonly diagnostic: Diagnostic | null;
 }
 
-interface AssignmentTarget {
-  readonly container: unknown[] | Record<string, unknown>;
+type AssignmentTarget =
+  | {
+      readonly container: Record<string, unknown>;
+      readonly key: string;
+    }
+  | {
+      readonly container: unknown[];
+      readonly index: number;
+    };
+
+interface ObjectPropertyStage {
   readonly key: string;
+  readonly value: unknown;
+  readonly previous: ObjectPropertyStage | null;
+}
+
+interface CapturedArrayHeader {
+  readonly output: unknown[];
+  readonly values: Record<string, unknown>;
+  readonly length: number;
 }
 
 type WorkItem =
@@ -38,7 +55,6 @@ type WorkItem =
       readonly value: unknown;
       readonly depth: number;
       readonly target: AssignmentTarget | null;
-      readonly precharged: boolean;
     }
   | {
       readonly kind: "leave";
@@ -60,15 +76,8 @@ const FALLBACK_SPAN = createSourceSpan(
 export function captureProgramAst(value: unknown): CapturedProgramAstResult {
   const active = new Set<object>();
   const work = createCapturedArray(0) as WorkItem[];
-  work.push({ kind: "visit", value, depth: 0, target: null, precharged: false });
-  let consumedWork = 0;
+  work.push({ kind: "visit", value, depth: 0, target: null });
   let capturedRoot: unknown;
-
-  const reserveWork = (amount = 1): boolean => {
-    if (amount > MAX_EXTERNAL_RUNTIME_DATA_WORK - consumedWork) return false;
-    consumedWork += amount;
-    return true;
-  };
 
   while (work.length > 0) {
     const item = work.pop()!;
@@ -78,12 +87,8 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
       continue;
     }
 
-    if (!item.precharged && !reserveWork()) {
-      return captureFailure(EXTERNAL_DATA_WORK_MESSAGE);
-    }
-    if (item.depth > MAX_EXTERNAL_RUNTIME_DATA_DEPTH) {
-      return captureFailure(EXTERNAL_DATA_DEPTH_MESSAGE);
-    }
+    recordValidationTestWork("directAstCaptureVisits");
+    recordValidationTestMaximum("directAstCaptureMaximumDepth", item.depth);
 
     const current = item.value;
     if (
@@ -112,10 +117,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     }
 
     if (array) {
-      const captured = captureArrayHeader(current, reserveWork);
-      if (captured === "work") {
-        return captureFailure(EXTERNAL_DATA_WORK_MESSAGE);
-      }
+      const captured = captureArrayHeader(current);
       if (captured === null) {
         return captureFailure("Direct AST arrays must be dense stable data arrays.");
       }
@@ -124,13 +126,12 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
       });
       active.add(current);
       work.push({ kind: "leave", source: current, captured: captured.output });
-      for (let index = captured.values.length - 1; index >= 0; index -= 1) {
+      for (let index = captured.length - 1; index >= 0; index -= 1) {
         work.push({
           kind: "visit",
           value: captured.values[index],
           depth: item.depth + 1,
-          target: { container: captured.output, key: String(index) },
-          precharged: true,
+          target: { container: captured.output, index },
         });
       }
       continue;
@@ -147,13 +148,10 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     if (prototype !== Object.prototype && prototype !== null) {
       return captureFailure("Direct AST input must contain only plain objects and arrays.");
     }
-    if (!reserveWork(keys.length)) {
-      return captureFailure(EXTERNAL_DATA_WORK_MESSAGE);
-    }
-
     const captured = Object.create(null) as Record<string, unknown>;
-    const values = createCapturedArray(0) as Array<readonly [string, unknown]>;
+    let values: ObjectPropertyStage | null = null;
     for (const key of keys) {
+      recordValidationTestWork("directAstCaptureDescriptors");
       if (typeof key === "symbol") {
         return captureFailure("Direct AST input may not contain symbol properties.");
       }
@@ -170,7 +168,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
       ) {
         return captureFailure("Direct AST input may contain only enumerable data properties.");
       }
-      values.push([key, descriptor.value]);
+      values = { key, value: descriptor.value, previous: values };
     }
 
     assignCaptured(item.target, captured, (root) => {
@@ -178,14 +176,16 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     });
     active.add(current);
     work.push({ kind: "leave", source: current, captured });
-    for (let index = values.length - 1; index >= 0; index -= 1) {
-      const [key, nested] = values[index]!;
+    for (
+      let currentValue = values;
+      currentValue !== null;
+      currentValue = currentValue.previous
+    ) {
       work.push({
         kind: "visit",
-        value: nested,
+        value: currentValue.value,
         depth: item.depth + 1,
-        target: { container: captured, key },
-        precharged: true,
+        target: { container: captured, key: currentValue.key },
       });
     }
   }
@@ -252,10 +252,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
   return Object.freeze(diagnostics);
 }
 
-function captureArrayHeader(
-  value: object,
-  reserveWork: (amount: number) => boolean,
-): { readonly output: unknown[]; readonly values: readonly unknown[] } | "work" | null {
+function captureArrayHeader(value: object): CapturedArrayHeader | null {
   let lengthDescriptor: PropertyDescriptor | undefined;
   let keys: readonly (string | symbol)[];
   try {
@@ -276,11 +273,11 @@ function captureArrayHeader(
   }
 
   const length = lengthDescriptor.value;
-  if (!reserveWork(length)) return "work";
-  const values = createCapturedArray(length);
+  const values = Object.create(null) as Record<string, unknown>;
   const seen = new Set<number>();
   for (const key of keys) {
     if (key === "length") continue;
+    recordValidationTestWork("directAstCaptureDescriptors");
     if (typeof key !== "string" || !/^(0|[1-9]\d*)$/.test(key)) return null;
     const index = Number(key);
     if (!Number.isSafeInteger(index) || index < 0 || index >= length || seen.has(index)) {
@@ -300,15 +297,10 @@ function captureArrayHeader(
       return null;
     }
     seen.add(index);
-    Reflect.defineProperty(values, key, {
-      value: descriptor.value,
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
+    values[key] = descriptor.value;
   }
   if (seen.size !== length) return null;
-  return { output: createCapturedArray(length), values };
+  return { output: createCapturedArray(length), values, length };
 }
 
 function assignCaptured(
@@ -318,6 +310,10 @@ function assignCaptured(
 ): void {
   if (target === null) {
     setRoot(value);
+    return;
+  }
+  if ("index" in target) {
+    target.container[target.index] = value;
     return;
   }
   Reflect.defineProperty(target.container, target.key, {

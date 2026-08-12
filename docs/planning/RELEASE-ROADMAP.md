@@ -165,16 +165,16 @@ subsystems may still have different maturity levels.
     [`RESOURCE-LIMITS.md`](../RESOURCE-LIMITS.md).
 
 - [ ] **Reassess retained #288 numeric resource policies and defaults**
-  - **Outcome:** Before any numeric policy or default deliberately retained by Issue #288 becomes supported non-POC
-    compatibility behavior, reassess it using then-current workload, safety, performance, compatibility, and maintenance
-    evidence. Include retained capture, validation, interaction, call-depth, and instruction-budget policies, defaults,
-    and ceilings. For `capture.depth`, explicitly decide whether coordinated stack-independent traversal is warranted
-    across serializable-value processing, plan/snapshot validation, direct-AST lowering/freezing, runtime expression
-    evaluation, and checkpoint clone/freeze paths. Do not preselect replacement values or that refactor, and do not treat
-    the retained POC values as permanent capacity promises.
+  - **Outcome:** Before any remaining numeric policy or default deliberately retained by Issue #288 becomes supported
+    non-POC compatibility behavior, reassess it using then-current workload, safety, performance, compatibility, and
+    maintenance evidence. This applies to the separately retained interaction, call-depth, and instruction-budget
+    policies, defaults, and ceilings. Generic capture/traversal and validation-work counters are not retained rejection
+    policies; stack-independent traversal remains an engineering resilience/performance option when evidence warrants it,
+    not a reason to recreate a generic `capture.depth` rejection policy. Do not preselect replacement values or treat
+    retained POC values as permanent capacity promises.
   - **Trigger:** Reassess no later than the Beta runtime-performance baseline, and earlier if representative valid
     workloads hit a retained boundary or new performance/security evidence shows that a current policy is materially wrong.
-  - **Reference:** Issue #288, PR #293, [ADR 0019](../decisions/0019-resource-limit-governance.md),
+  - **Reference:** Issues #288 and #304, PR #293, [ADR 0019](../decisions/0019-resource-limit-governance.md),
     `docs/RESOURCE-LIMITS.md`, and **Establish a runtime performance baseline and optimization plan**.
 
 ## Release Candidate
