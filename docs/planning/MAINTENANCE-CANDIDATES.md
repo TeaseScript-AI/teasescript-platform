@@ -12,7 +12,8 @@ accepted architecture, product requirements, or scheduled implementation scope. 
 work only after the owner or coordinator selects it, current repository evidence is re-established, and a focused issue
 is created. Accepted behavior remains defined by specifications, ADRs, and current topic documents. Broad release-stage
 performance reassessment remains in [`RELEASE-ROADMAP.md`](RELEASE-ROADMAP.md); this file preserves concrete candidates
-between such passes.
+between such passes. Historical measurements and audit evidence for migrated optimization families remain in Issue #294
+and the combined #306–#315 PR/audit history; this inventory keeps only current candidate rationale.
 
 Revalidate every candidate against current `main` before implementation. Historical measurements preserve evidence
 about a mechanism, but later changes may materially alter its reachability, cost, or expected benefit. Before a broad
@@ -78,9 +79,9 @@ must not become TeaseScript limits.
 ### Semantic-expression and ordinary-lowering traversal
 
 The combined optimization audit reproduced source-side recursive semantic-expression and ordinary-lowering stack cliffs
-outside the already repaired unary-wrapper cases. They are P1 because sufficiently complex valid authored expressions
-can fail compilation entirely; treat related traversal stages together far enough that a repair does not merely move the
-native stack cliff downstream.
+outside the already repaired unary-wrapper cases. Treat these as P1 only when current `main` reproduces a realistic
+authored or generated source path; otherwise keep them P3 until reachability evidence strengthens. When repaired, treat
+related traversal stages together far enough that the native stack cliff is not merely moved downstream.
 
 ## P2 — material performance or memory opportunities
 
