@@ -25,7 +25,7 @@ import {
   copySpan,
   requiredFutureActionCompletionEvents,
   result,
-  setTemporary,
+  setCapturedTemporary,
   takeSequence,
 } from "./operations/support.js";
 import type { RuntimeOperationResult } from "./operations/model.js";
@@ -49,16 +49,17 @@ import type {
 import { nextXorShift32, type RandomSource, type XorShift32State } from "./random.js";
 import {
   addSerializableSetValue,
+  cloneCapturedSerializableValue,
   cloneSerializableValue,
-  createSerializableList,
-  createSerializableObject,
-  createSerializableSet,
+  createCapturedSerializableList,
+  createCapturedSerializableObject,
+  createCapturedSerializableSet,
   getSerializableProperty,
   removeSerializableSetValue,
   serializableSetContains,
   serializableEquals,
   SerializableValueError,
-  setSerializableProperty,
+  setCapturedSerializableProperty,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
@@ -317,7 +318,7 @@ function executePlannedInstruction(
           if (speaker.properties.some((item) => item.name === property.name)) {
             throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
           }
-          const propertyValue = cloneSerializableValue(stagedEvaluator.evaluate(property.value));
+          const propertyValue = cloneCapturedSerializableValue(stagedEvaluator.evaluate(property.value));
           if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
             throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", property.span);
           }
@@ -337,7 +338,7 @@ function executePlannedInstruction(
           throw fault("TSR007", `Duplicate speaker property '${instruction.name}'.`, instruction.span);
         }
         stagedSnapshot.contextualSpeaker = speaker.id;
-        const propertyValue = cloneSerializableValue(stagedEvaluator.evaluate(instruction.value));
+        const propertyValue = cloneCapturedSerializableValue(stagedEvaluator.evaluate(instruction.value));
         if (instruction.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
           throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", instruction.span);
         }
@@ -374,13 +375,13 @@ function executePlannedInstruction(
       }
       currentFrame(snapshot).bindings.push({
         name: instruction.name,
-        value: cloneSerializableValue(evaluator.evaluate(instruction.value)),
+        value: cloneCapturedSerializableValue(evaluator.evaluate(instruction.value)),
       });
       advance(snapshot);
       return;
     }
     case "prepareReference":
-      setTemporary(
+      setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
         evaluator.prepareReference(instruction.expression),
@@ -431,7 +432,7 @@ function executePlannedInstruction(
       if (instruction.expectBoolean && typeof value !== "boolean") {
         throw fault("TSR026", "Expected a boolean value.", instruction.value.span);
       }
-      setTemporary(snapshot.temporaries, instruction.temporaryId, value);
+      setCapturedTemporary(snapshot.temporaries, instruction.temporaryId, value);
       advance(snapshot);
       return;
     }
@@ -442,12 +443,12 @@ function executePlannedInstruction(
           : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
         : evaluator.speakerByName(instruction.speaker, instruction.span);
       const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
-      setTemporary(
+      setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
         output === null
           ? null
-          : createSerializableObject([
+          : createCapturedSerializableObject([
               { name: "identifier", value: output.identifier },
               { name: "displayName", value: output.displayName },
               { name: "color", value: output.color },
@@ -460,7 +461,7 @@ function executePlannedInstruction(
       return;
     }
     case "prepareSayText": {
-      setTemporary(
+      setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
         evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span),
@@ -474,7 +475,7 @@ function executePlannedInstruction(
         instruction.speakerTemporary,
         instruction.span,
       );
-      setTemporary(
+      setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
         prepared.speakerId === null
@@ -495,7 +496,7 @@ function executePlannedInstruction(
           : snapshot.defaultSpeaker !== null
             ? evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
             : null;
-      setTemporary(
+      setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
         speaker === null
@@ -804,7 +805,7 @@ function materializeInteractionUi(
       options: texts.map((text, index) => ({ text, label: labels?.[index] ?? null })),
       accessibleName: prepared.accessibleName,
     };
-    stagedWrites.push({ temporaryId: source.id, value: createSerializableList(texts) });
+    stagedWrites.push({ temporaryId: source.id, value: createCapturedSerializableList(texts) });
   }
 
   assertInteractionUiLimits(ui, span);
@@ -819,7 +820,7 @@ function materializeInteractionUi(
     ui,
     stagedWrites: Object.freeze(stagedWrites.map((staged) => Object.freeze({
       temporaryId: staged.temporaryId,
-      value: cloneSerializableValue(staged.value),
+      value: cloneCapturedSerializableValue(staged.value),
     }))),
     rngState: stagedRng.state,
   });
@@ -835,7 +836,7 @@ function commitInteractionMaterialization(
     if (temporary === undefined) {
       throw new Error(`Prepared interaction temporary '${staged.temporaryId}' disappeared before commit.`);
     }
-    temporary.value = cloneSerializableValue(staged.value);
+    temporary.value = cloneCapturedSerializableValue(staged.value);
   }
   snapshot.rng.state = rngState;
 }
@@ -873,7 +874,7 @@ function enterFunction(
   const supplied = new Map(
     instruction.arguments.map((argument) => [
       argument.parameterName,
-      cloneSerializableValue(evaluator.evaluate(argument.value)),
+      cloneCapturedSerializableValue(evaluator.evaluate(argument.value)),
     ]),
   );
   if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
@@ -1047,7 +1048,7 @@ function returnFromFunction(
   span: SourceSpan,
 ): void {
   const { frame } = activeFunction(plan, snapshot, span);
-  const returned = cloneSerializableValue(value);
+  const returned = cloneCapturedSerializableValue(value);
   snapshot.frames.splice(frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
   snapshot.callFrames.pop();
@@ -1111,7 +1112,7 @@ function declareFunctionBinding(
   }
   currentFrame(snapshot).bindings.push({
     name,
-    value: cloneSerializableValue(value),
+    value: cloneCapturedSerializableValue(value),
   });
 }
 
@@ -1160,7 +1161,7 @@ function executeLoopStart(
         loopId: instruction.loopId,
         scopeDepth,
         variable: instruction.variable,
-        source: cloneSerializableValue(source) as Extract<RuntimeLoopFrameSnapshot, { kind: "for" }>["source"],
+        source: cloneCapturedSerializableValue(source) as Extract<RuntimeLoopFrameSnapshot, { kind: "for" }>["source"],
         position: 0,
         callFrameId: currentCallFrameId(snapshot),
       };
@@ -1210,7 +1211,7 @@ function executeLoopStart(
   const value = iterationValue(frame.source, frame.position);
   frame.position += 1;
   pushIterationScope(snapshot, [
-    { name: frame.variable, value: cloneSerializableValue(value) },
+    { name: frame.variable, value: cloneCapturedSerializableValue(value) },
   ]);
   advance(snapshot);
 }
@@ -1351,9 +1352,9 @@ class Evaluator {
           expression.span,
         );
       case "list":
-        return createSerializableList(expression.elements.map((item) => this.evaluate(item)));
+        return createCapturedSerializableList(expression.elements.map((item) => this.evaluate(item)));
       case "set": {
-        const set = createSerializableSet([]);
+        const set = createCapturedSerializableSet([]);
         const membership = new Set<SerializableRuntimeScalar>();
         for (const element of expression.elements) {
           try {
@@ -1376,7 +1377,7 @@ class Evaluator {
           }
           names.add(property.name);
         }
-        return createSerializableObject(
+        return createCapturedSerializableObject(
           expression.properties.map((property) => ({
             name: property.name,
             value: this.evaluate(property.value),
@@ -1429,7 +1430,6 @@ class Evaluator {
   }
 
   public assign(target: AssignmentTargetPlan, value: SerializableRuntimeValue): void {
-    const copied = cloneSerializableValue(value);
     if (target.kind === "identifier") {
       const location = findBindingLocation(this.snapshot, target.name);
       if (location === undefined) {
@@ -1446,7 +1446,7 @@ class Evaluator {
           path: [],
         },
       );
-      location.binding.value = copied;
+      location.binding.value = cloneCapturedSerializableValue(value);
       return;
     }
     const object = this.evaluate(target.object);
@@ -1479,11 +1479,11 @@ class Evaluator {
         });
       }
       if (isObject(object)) {
-        setSerializableProperty(object, target.name, copied);
+        setCapturedSerializableProperty(object, target.name, value);
         return;
       }
       if (isSpeakerReference(object)) {
-        setSpeakerProperty(this.speakerById(object.speakerId, target.span), target.name, copied, target.span);
+        setSpeakerProperty(this.speakerById(object.speakerId, target.span), target.name, value, target.span);
         return;
       }
       throw fault("TSR003", "Only objects and speakers have assignable properties.", target.span);
@@ -1505,7 +1505,7 @@ class Evaluator {
         ),
       });
     }
-    object.items[index] = copied;
+    object.items[index] = cloneCapturedSerializableValue(value);
   }
 
   public prepareReference(expression: ExpressionPlan): SerializableRuntimeObject {
@@ -1567,7 +1567,7 @@ class Evaluator {
         rootFrameId: location.frame.id,
         rootName: expression.name,
         path: [],
-        capturedRoot: cloneSerializableValue(location.binding.value),
+        capturedRoot: cloneCapturedSerializableValue(location.binding.value),
         detached: false,
       };
     }
@@ -1617,7 +1617,7 @@ class Evaluator {
       rootFrameId: null,
       rootName: null,
       path: [],
-      capturedRoot: cloneSerializableValue(value),
+      capturedRoot: cloneCapturedSerializableValue(value),
       detached: true,
     };
   }
@@ -1632,7 +1632,7 @@ class Evaluator {
       return this.#resolveDescriptor(descriptor, span);
     } catch (error) {
       if (!(error instanceof RuntimeFault) || !isObject(serialized)) throw error;
-      setSerializableProperty(serialized, "detached", true);
+      setCapturedSerializableProperty(serialized, "detached", true);
       return this.#resolveDescriptor({ ...descriptor, detached: true }, span);
     }
   }
@@ -1824,7 +1824,7 @@ class Evaluator {
     const positional: SerializableRuntimeValue[] = [];
     const named: Record<string, SerializableRuntimeValue> = Object.create(null);
     for (const argument of expression.arguments) {
-      const value = cloneSerializableValue(this.evaluate(argument.value));
+      const value = cloneCapturedSerializableValue(this.evaluate(argument.value));
       if (argument.kind === "positional") positional.push(value);
       else {
         if (Object.hasOwn(named, argument.name)) {
@@ -1920,12 +1920,12 @@ class Evaluator {
           case "remove": expect(1); removeSerializableSetValue(receiver, positional[0]!); return null;
           case "clear": expect(0); receiver.items.length = 0; return null;
           case "contains": expect(1); return serializableSetContains(receiver, positional[0]!);
-          case "toList": expect(0); return createSerializableList(receiver.items);
+          case "toList": expect(0); return createCapturedSerializableList(receiver.items);
           default: throw fault("TSR016", `Unsupported method '${name}'.`, span);
         }
       }
       switch (name) {
-        case "add": expect(1); receiver.items.push(cloneSerializableValue(positional[0]!)); return null;
+        case "add": expect(1); receiver.items.push(cloneCapturedSerializableValue(positional[0]!)); return null;
         case "remove": {
           expect(1);
           const index = this.#findValue(receiver.items, positional[0]!, span);
@@ -1979,7 +1979,7 @@ class Evaluator {
           }
           return null;
         case "contains": expect(1); return this.#findValue(receiver.items, positional[0]!, span) >= 0;
-        case "toSet": expect(0); return createSerializableSet(receiver.items);
+        case "toSet": expect(0); return createCapturedSerializableSet(receiver.items);
         default: throw fault("TSR016", `Unsupported method '${name}'.`, span);
       }
     } catch (error) {
@@ -2187,8 +2187,8 @@ function setSpeakerProperty(
     throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
   }
   const property = speaker.properties.find((item) => item.name === name);
-  if (property === undefined) speaker.properties.push({ name, value: cloneSerializableValue(value) });
-  else property.value = cloneSerializableValue(value);
+  if (property === undefined) speaker.properties.push({ name, value: cloneCapturedSerializableValue(value) });
+  else property.value = cloneCapturedSerializableValue(value);
 }
 
 function findBinding(snapshot: RuntimeSnapshot, name: string): RuntimeBindingSnapshot | undefined {
@@ -2250,7 +2250,7 @@ const INTERNAL_REFERENCE_SPAN = createSourceSpan(
 function serializePreparedReference(
   descriptor: PreparedReferenceDescriptor,
 ): SerializableRuntimeObject {
-  return createSerializableObject([
+  return createCapturedSerializableObject([
     { name: "marker", value: "preparedReference" },
     { name: "rootFrameId", value: descriptor.rootFrameId },
     { name: "rootName", value: descriptor.rootName },
@@ -2266,14 +2266,14 @@ function serializePreparedReference(
 function serializePreparedReferencePath(
   path: readonly PreparedReferenceStep[],
 ): SerializableRuntimeList {
-  return createSerializableList(
+  return createCapturedSerializableList(
     path.map((step) =>
       step.kind === "property"
-        ? createSerializableObject([
+        ? createCapturedSerializableObject([
             { name: "kind", value: "property" },
             { name: "name", value: step.name },
           ])
-        : createSerializableObject([
+        : createCapturedSerializableObject([
             { name: "kind", value: "index" },
             { name: "index", value: step.index },
           ]),
@@ -2401,7 +2401,7 @@ function preparePreparedReferencesForListRemoval(
       }
       if (step.index < removedIndex) continue;
       descriptor.path[pathIndex] = { kind: "index", index: step.index - 1 };
-      setSerializableProperty(
+      setCapturedSerializableProperty(
         temporary.value,
         "path",
         serializePreparedReferencePath(descriptor.path),
@@ -2429,7 +2429,7 @@ function refreshPreparedReferenceFallbacks(
       freezePreparedReference(snapshot, serialized, descriptor);
       continue;
     }
-    setSerializableProperty(serialized, "capturedRoot", root.value);
+    setCapturedSerializableProperty(serialized, "capturedRoot", root.value);
   }
 }
 
@@ -2506,14 +2506,14 @@ function freezePreparedReference(
 ): void {
   const resolution = resolvePreparedReferenceDescriptor(snapshot, descriptor);
   if (!resolution.found) {
-    setSerializableProperty(serialized, "detached", true);
+    setCapturedSerializableProperty(serialized, "detached", true);
     return;
   }
-  setSerializableProperty(serialized, "rootFrameId", null);
-  setSerializableProperty(serialized, "rootName", null);
-  setSerializableProperty(serialized, "path", createSerializableList([]));
-  setSerializableProperty(serialized, "capturedRoot", resolution.value);
-  setSerializableProperty(serialized, "detached", true);
+  setCapturedSerializableProperty(serialized, "rootFrameId", null);
+  setCapturedSerializableProperty(serialized, "rootName", null);
+  setCapturedSerializableProperty(serialized, "path", createCapturedSerializableList([]));
+  setCapturedSerializableProperty(serialized, "capturedRoot", resolution.value);
+  setCapturedSerializableProperty(serialized, "detached", true);
 }
 
 function preparedReferenceSpeakerPath(
@@ -2667,7 +2667,7 @@ function cloneTemporary(
 ): RuntimeTemporarySnapshot {
   return {
     id: temporary.id,
-    value: cloneSerializableValue(temporary.value),
+    value: cloneCapturedSerializableValue(temporary.value),
   };
 }
 

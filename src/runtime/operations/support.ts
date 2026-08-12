@@ -4,7 +4,11 @@ import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { planLocationToSourceSpan } from "../../plan/source-location.js";
 import { RuntimeFault } from "../errors.js";
 import type { InterpreterEvent } from "../events.js";
-import { cloneSerializableValue, type SerializableRuntimeValue } from "../serializable-values.js";
+import {
+  cloneCapturedSerializableValue,
+  cloneSerializableValue,
+  type SerializableRuntimeValue,
+} from "../serializable-values.js";
 import {
   captureRuntimeSnapshotWithValidatedPlan,
   type RuntimeSnapshot,
@@ -46,6 +50,18 @@ export function setTemporary(
   } else {
     existing.value = cloneSerializableValue(value);
   }
+}
+
+/** Stores a detached copy of an engine-owned, already validated temporary value. */
+export function setCapturedTemporary(
+  temporaries: RuntimeTemporarySnapshot[],
+  temporaryId: number,
+  value: SerializableRuntimeValue,
+): void {
+  const existing = temporaries.find((item) => item.id === temporaryId);
+  const copied = cloneCapturedSerializableValue(value);
+  if (existing === undefined) temporaries.push({ id: temporaryId, value: copied });
+  else existing.value = copied;
 }
 
 export function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeActionSettlementSnapshot {

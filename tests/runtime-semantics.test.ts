@@ -53,6 +53,33 @@ test("recursively deep-copies nested lists", () => {
   ]);
 });
 
+test("passes builtins deep copies of canonical runtime values", () => {
+  const captured: unknown[] = [];
+  const mutate: RuntimeBuiltinFunction = (call) => {
+    const value = call.positional[0];
+    if (value === null || typeof value !== "object" || value.kind !== "list") {
+      throw new TypeError("Expected a list argument.");
+    }
+    const nested = value.items[0];
+    if (nested === null || typeof nested !== "object" || nested.kind !== "list") {
+      throw new TypeError("Expected a nested list argument.");
+    }
+    nested.items[0] = 9;
+    return null;
+  };
+  const result = executeSource(
+    [
+      "let original = [[1]]",
+      "mutate(original)",
+      "capture(original)",
+    ],
+    { capture: captureInto(captured), mutate },
+  );
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(captured, [[[1]]]);
+});
+
 test("recursively deep-copies ordinary objects", () => {
   const captured: unknown[] = [];
   const result = executeSource(

@@ -65,6 +65,16 @@ export function createSerializableList(
   }) as SerializableRuntimeList;
 }
 
+/** Creates an independent list from engine-owned, already validated values. */
+export function createCapturedSerializableList(
+  items: readonly SerializableRuntimeValue[],
+): SerializableRuntimeList {
+  return {
+    kind: "list",
+    items: items.map((item) => cloneCapturedSerializableValue(item)),
+  };
+}
+
 export function createSerializableObject(
   properties: readonly SerializableRuntimeProperty[],
 ): SerializableRuntimeObject {
@@ -72,6 +82,19 @@ export function createSerializableObject(
     kind: "object",
     properties: properties as SerializableRuntimeProperty[],
   }) as SerializableRuntimeObject;
+}
+
+/** Creates an independent object from engine-owned, already validated values. */
+export function createCapturedSerializableObject(
+  properties: readonly SerializableRuntimeProperty[],
+): SerializableRuntimeObject {
+  return {
+    kind: "object",
+    properties: properties.map((property) => ({
+      name: property.name,
+      value: cloneCapturedSerializableValue(property.value),
+    })),
+  };
 }
 
 export function createSerializableSet(
@@ -87,6 +110,26 @@ export function createSerializableSet(
   const capturedItems: SerializableRuntimeScalar[] = [];
   for (let index = 0; index < capture.value.length; index += 1) {
     const item = capture.value[index];
+    if (!isScalar(item)) {
+      throw new SerializableValueError(
+        "setElement",
+        "Sets may contain only string, boolean, integer, number, or null values.",
+      );
+    }
+    if (seen.has(item)) continue;
+    seen.add(item);
+    capturedItems.push(item);
+  }
+  return { kind: "set", items: capturedItems };
+}
+
+/** Creates a set from engine-owned, already validated values. */
+export function createCapturedSerializableSet(
+  items: readonly SerializableRuntimeValue[],
+): SerializableRuntimeSet {
+  const seen = new Set<SerializableRuntimeScalar>();
+  const capturedItems: SerializableRuntimeScalar[] = [];
+  for (const item of items) {
     if (!isScalar(item)) {
       throw new SerializableValueError(
         "setElement",
@@ -188,6 +231,18 @@ export function setSerializableProperty(
 ): void {
   const existing = object.properties.find((property) => property.name === name);
   const copied = cloneSerializableValue(value);
+  if (existing === undefined) object.properties.push({ name, value: copied });
+  else existing.value = copied;
+}
+
+/** Stores an independent value that is already captured and validated by the engine. */
+export function setCapturedSerializableProperty(
+  object: SerializableRuntimeObject,
+  name: string,
+  value: SerializableRuntimeValue,
+): void {
+  const existing = object.properties.find((property) => property.name === name);
+  const copied = cloneCapturedSerializableValue(value);
   if (existing === undefined) object.properties.push({ name, value: copied });
   else existing.value = copied;
 }
