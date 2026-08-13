@@ -1,8 +1,8 @@
 # Active planning
 
 `docs/planning/` contains active planning plus the compact release-roadmap progress record. It may record owner-selected
-release-stage outcomes, unscheduled maintenance candidates, or proposed direction. Planning does not
-define accepted architecture, syntax, or current implementation status.
+release-stage outcomes, optimization/maintenance candidates, or proposed direction. Planning does not define
+accepted architecture, syntax, or current implementation status.
 
 [`RELEASE-ROADMAP.md`](RELEASE-ROADMAP.md) is the canonical release-stage roadmap. Unlike ordinary planning files, it may
 retain checked completed items as compact progress history. Those checked entries do not replace current implementation

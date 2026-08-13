@@ -1,75 +1,75 @@
-# Maintenance candidates
+# Optimization / maintenance candidates
 
-- **Status:** Active unscheduled maintenance candidates
+- **Status:** Active candidate inventory
 - **Authority:** Non-authoritative and evidence-dependent
-- **Use when:** Considering a focused maintainability issue from current repository evidence
-- **Do not use for:** Architecture, product requirements, or scheduled implementation
+- **Use when:** Considering focused optimization or maintainability work
+- **Do not use for:** Architecture, product requirements, accepted capacity claims, or scheduled implementation
 
 ## Purpose
 
-This file records concrete maintenance opportunities that may improve development and review work but are not accepted architecture decisions, product requirements, or scheduled implementation scope.
+This file preserves concrete optimization and maintenance candidates worth remembering. They are neither scheduled nor
+authoritative; implementation starts only after the owner or coordinator selects a candidate and creates a focused
+issue.
+Accepted behavior remains in specifications, ADRs, and current topic documents. Historical optimization evidence remains
+in Issue #294 and the combined #306–#315 PR/audit history.
 
-A candidate becomes implementation work only after the owner or coordinator selects it, confirms the current repository evidence, and creates a focused issue. Accepted behavior remains defined by specifications, ADRs, and current topic documents.
+Revalidate a candidate when it is selected for implementation, not after unrelated merges; later changes may alter its
+reachability, cost, or expected benefit. Before a broad optimization or redesign, also bound how much of the relevant
+workload the affected phase can actually improve.
 
-## Split large production modules along existing responsibilities
+Priorities are triage aids, not schedules or capacity policy:
 
-### Candidate scope
+- **P1 — realistic native-JavaScript failure removal:** valid, realistically large or complex `.tease` content can fail
+  rather than merely run slowly.
+- **P2 — material performance or memory opportunity:** evidence indicates potentially substantial CPU, memory,
+  allocation, representation-size, latency, or throughput improvement.
+- **P3 — lower-value or speculative opportunity:** expected gains are smaller or uncertain, or a native-JavaScript
+  failure is known only from extreme or synthetic input.
 
-Consider mechanically splitting these large implementation modules while preserving their supported exports and behavior:
+## Structural maintenance
 
-```text
-src/runtime/state.ts
-src/runtime/engine.ts
-```
+### Split large production modules along existing responsibilities
 
-`src/parser.ts` is also large, but its cursor, recovery, diagnostics, and AST construction are tightly coupled. Do not split it merely because of line count; require a concrete maintenance problem and a coherent boundary first.
+Current candidates are `src/runtime/state.ts` and `src/runtime/engine.ts`. `src/parser.ts` is also large, but its parser
+state is tightly coupled; do not split it by line count alone.
 
-### Motivation
+The useful outcome is lower source-context and merge-conflict cost with clearer invariant ownership. Keep a split
+mechanical: preserve supported exports and runtime/diagnostic/event/checkpoint/serialization behavior, use ordinary
+internal TypeScript modules, avoid new framework abstractions, and do not combine file movement with semantic or
+performance changes. Derive exact boundaries when scheduled and keep each pull request to one coherent module group.
 
-A responsibility-based split may provide:
+## P1 — realistic native-JavaScript failures
 
-- less source context for focused agent and reviewer work;
-- fewer merge conflicts when compiler, validator, state, and execution work proceed in parallel;
-- clearer ownership of invariants and their tests;
-- easier navigation and more focused reviews;
-- less risk that a small change requires loading or touching an entire multi-thousand-line module.
+- **Source parser nesting.** Valid deeply nested source has reached native JavaScript stack failures in parser paths for
+  parentheses, collections, templates, and nested blocks. This is P1 because the failure is source-reachable and
+  terminates compilation; observed host depths are diagnostics, not TeaseScript limits.
+- **Semantic-expression and ordinary-lowering traversal.** The recent optimization audit reproduced source-side native
+  stack cliffs outside the unary-wrapper path fixed by #314. This is P1 because valid source can terminate compilation;
+  inspect related stages together so a repair does not merely move the native failure downstream.
 
-The goal is maintainability and parallel-development safety, not reducing the total line count.
+## P2 — material performance or memory opportunities
 
-### Risks and constraints
+- **Captured-array downstream execution.** Historical measurements showed materially slower common built-ins on the
+  captured-array prototype while indexed access and JSON serialization were near native. #315 changed surrounding costs,
+  so reprofile when selected; prefer narrow hot-consumer repairs. Replacing the prototype requires an Owner decision
+  about its current inherited-numeric-setter protection.
+- **Caller-temporary collection copying.** Historical call-heavy measurements showed material CPU/allocation cost from
+  copying complete `callerTemporaries` around function transitions. #307 and #315 changed surrounding costs, so
+  reprofile
+  when selected; prefer simple ownership transfer or narrower copying while preserving call, fault, liveness, and
+  checkpoint/resume behavior.
 
-A split also creates costs:
+## P3 — lower-value or speculative opportunities
 
-- a large mechanical diff with little immediate user-visible value;
-- merge conflicts with concurrent work in the same modules;
-- additional files and imports that can become indirection when boundaries are too fine;
-- premature module boundaries that may need to move again;
-
-Any implementation must therefore:
-
-- preserve current supported public exports;
-- preserve runtime, diagnostic, event, checkpoint, and serialization behavior;
-- avoid combining file movement with semantic changes or performance optimization;
-- avoid generic plugin, visitor, service-container, or dependency-injection frameworks;
-- use ordinary internal TypeScript modules and functions;
-- keep each pull request focused on one coherent module group;
-- run the full relevant verification after every split.
-
-### Possible starting direction
-
-The following is a candidate sequence, not an accepted module architecture:
-
-1. `src/runtime/state.ts`: separate snapshot types, creation, cloning, and focused validation areas behind the existing `state.ts` module.
-2. `src/runtime/engine.ts`: separate public execution boundaries, instruction dispatch, expression evaluation, calls, prepared references, and event construction behind the existing `engine.ts` module.
-3. Reassess `src/parser.ts` only after concrete evidence shows that a split would improve rather than obscure its shared parser state.
-
-Exact filenames and boundaries must be derived from the repository state at implementation time. This list does not authorize a broad rewrite.
-
-### When to schedule
-
-Consider creating a focused implementation issue only when current evidence identifies a concrete maintenance problem,
-an import/export and test-ownership inventory shows a stable boundary, and the split can be reviewed without bundled
-semantic work.
-
-Prefer one module group and one owning agent per pull request. Sequence the pull requests rather than moving all large
-modules at once.
+- **Public plan-expression traversal.** `validateExpression(...)`, `Evaluator.evaluate(...)`, and
+  `collectPreparedReferenceIds(...)` have produced native stack failures on very deep hand-built plans. Keep them as one
+  repair family, but current evidence is synthetic rather than a realistic authored-source blocker.
+- **Deep checkpoint JSON serialization.** Very deep valid runtime state can reach native `RangeError` in
+  `JSON.stringify(...)` during checkpoint serialization. The failure is real, but current evidence is extreme and a
+  robust repair is serializer/design-level; do not hide it behind a generic content-depth limit.
+- **Other recursive source paths.** Nested-template lexer state and semantic scope-parent recursion remain P3 sibling
+  stack paths until stronger source-reachability evidence or a simple local repair justifies work.
+- **Profiling-driven engine work.** Validator-analysis sharing, snapshot-analysis/liveness work, temporary aggregation,
+  function-prologue simplification, and prepared-reference/temporary/binding/speaker indexes remain lower-priority
+  hypotheses. Revisit only when profiling shows a material repeated-work or allocation cost, and prefer local repairs
+  over general frameworks.
