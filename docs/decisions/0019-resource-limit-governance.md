@@ -42,9 +42,9 @@ production bound must justify both its need and its selected boundary.
    evidence status. The measurement definition is a quantitative unit or a
    qualitative domain or predicate, with a reason when no quantitative unit
    applies.
-2. Limits with different threat models or semantic purposes must not share one
-   value merely for convenience. Coupled limits must record the coupling and
-   downstream expansion explicitly.
+2. Limits that protect different boundaries or serve different semantic
+   purposes must not share one value merely for convenience. Coupled limits must
+   record the coupling and downstream expansion explicitly.
 3. An officially supported maximum is an end-to-end contract across every
    applicable public layer, not merely agreement between a production constant
    and a boundary test.
@@ -163,15 +163,15 @@ for accessibility or interaction design.
 It is non-blocking unless a separate accepted technical or product-policy limit
 also applies. A UI warning does not automatically become an engine rejection.
 
-### Hostile-input capture budget
+### External-input capture budget
 
-A hostile-input capture budget bounds the work needed to detach, inspect, and
+An external-input capture budget bounds the work needed to detach, inspect, and
 stabilize caller-controlled data before detailed validation. It protects
 against cycles, accessors, proxies, unsupported prototypes, excessive depth,
-excessive graph size, and similar hostile or malformed inputs.
+excessive graph size, and similar malformed or effectful inputs.
 
-This budget belongs to the capture threat model. It does not automatically
-define the capacity of compiler-generated plans, runtime snapshots, or
+This budget belongs to the external-input capture boundary. It does not
+automatically define the capacity of compiler-generated plans, runtime snapshots, or
 checkpoints, even when those structures currently pass through the same helper.
 
 ### Engine representational capacity
@@ -237,7 +237,7 @@ and does not claim permanent support. Tests verify the justified guard; they do 
 
 The following distinctions are mandatory:
 
-- A hostile-input capture budget does not automatically determine the capacity
+- An external-input capture budget does not automatically determine the capacity
   of compiler-generated plans, runtime snapshots, or checkpoints.
 - A UI warning or usability threshold does not automatically reject input in
   the engine.
@@ -248,12 +248,12 @@ The following distinctions are mandatory:
   proves implementation agreement at that boundary. It does not prove that the
   number is correct, justified, covered by the required worst-form evidence
   set, or supported end to end.
-- Raising a general security or hostile-input budget is not the default repair
+- Raising a general defensive capture budget is not the default repair
   for an inefficient compiler-generated, plan, snapshot, checkpoint, or other
   internal representation. The representation, expansion, and applicable
   governing budget must be analysed first.
 - Sharing a number across boundaries does not establish that the boundaries
-  have the same threat model, measurement definition, expansion factor,
+  have the same boundary purpose, measurement definition, expansion factor,
   evidence, or compatibility contract.
 - A product default, warning threshold, and technical rejection limit may have
   different values, canonical sources, and change processes.
@@ -491,7 +491,7 @@ explicit decision triggers apply.
 A new or amended ADR is required when a change alters:
 
 - the taxonomy or meaning of a category;
-- boundary responsibility or the separation of threat models;
+- boundary responsibility or the separation of limit purposes;
 - the architecture for capture, validation, plan, snapshot, checkpoint,
   transport, storage, or execution budgets;
 - the relationship between execution quanta and permanent failure policy;
@@ -591,7 +591,7 @@ statuses.
 
 - Technical limits gain explicit governing authorities, canonical sources,
   change processes, meanings, measurement definitions, risks, and evidence.
-- Defensive hostile-input budgets no longer silently define internal engine
+- Defensive external-input budgets no longer silently define internal engine
   capacity.
 - UI guidance, execution scheduling, permanent policy, and representational
   capacity remain distinguishable.

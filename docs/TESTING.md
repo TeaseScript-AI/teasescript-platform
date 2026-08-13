@@ -457,7 +457,7 @@ The implemented ADR 0018 `say` pacing slice adds source-to-runtime coverage for 
 smart-autoplay settings, Unicode code-point and word counting, exact/zero/`instant` pacing, speaker skip defaults,
 background gate creation, same-identity foreground promotion, prepared-output exact-once behavior, typed/time
 settlement, `wait` coexistence, interaction consumption, deterministic event ordering, checkpoint/JSON restore
-equivalence, and adversarial snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
+equivalence, and negative snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
 exhaustion and terminal transition atomicity. Standard Player click/touch/Space behavior remains assigned to its later
 browser slice.
 
