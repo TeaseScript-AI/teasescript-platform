@@ -63,17 +63,27 @@
           clamp(8px, 0.7vmin, 13px);
 
         --conversation-max-width: 900px;
+        --conversation-min-width: 380px;
         --conversation-gap: 18px;
+        --conversation-overlay-reserve: 0px;
 
         --scene-ambient: #7d365d;
         --timer-progress: 46%;
       }
 
       .player {
+        --primary-column-min:
+          max(
+            var(--media-height),
+            calc(
+              var(--conversation-min-width)
+              + var(--conversation-overlay-reserve)
+            )
+          );
         --left-panel-max:
           max(
             var(--left-open),
-            calc(100vw - var(--right-track) - var(--media-height))
+            calc(100vw - var(--right-track) - var(--primary-column-min))
           );
 
         position: relative;
@@ -153,9 +163,7 @@
         min-height: 0;
 
         display: grid;
-        grid-template-rows:
-          auto
-          minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
 
         padding-top: var(--title-overlay-clearance);
 

@@ -73,6 +73,29 @@ test("Player entrypoint uses modular local assets without external runtime depen
   assert.match(html, /href="\/player\/styles\/components-tools\.css"/u);
   assert.match(html, /id="addToolColumn"/u);
   assert.match(html, /id="toolStrip"/u);
+  assert.doesNotMatch(html, /tool-panel-header/u);
   assert.doesNotMatch(html, /<style>/u);
   assert.doesNotMatch(html, /https?:\/\//u);
+});
+
+test("Player tool chrome keeps one fixed column header and one vertical scroll owner", async () => {
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
+  const visualLab = await readFile(resolve(process.cwd(), "player/styles/components-visual-lab.css"), "utf8");
+
+  assert.match(render, /className = "tool-column-header"/u);
+  assert.doesNotMatch(render, /lab-scroll/u);
+  assert.doesNotMatch(render, /className = "lab-title"/u);
+  assert.match(tools, /\.tool-column-body[\s\S]*overflow-y: auto/u);
+  assert.doesNotMatch(visualLab, /overflow-y: auto/u);
+});
+
+test("Player left-panel growth protects media and conversation minimums independently", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+
+  assert.match(layout, /--conversation-min-width:/u);
+  assert.match(layout, /--conversation-overlay-reserve:/u);
+  assert.match(layout, /--primary-column-min:/u);
+  assert.match(layout, /var\(--media-height\)/u);
+  assert.match(layout, /var\(--conversation-min-width\)/u);
 });

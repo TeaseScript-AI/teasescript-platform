@@ -16,6 +16,10 @@
       }
 
       @media (max-width: 760px) {
+        .player[data-left="auto"] .tool-column-add {
+          display: none;
+        }
+
         .player[data-left="auto"] {
           --left-grid-track: 0px;
           --left-reserve: 0px;
@@ -105,6 +109,8 @@
         .player[data-right="overlay"] {
           --right-reserve:
             var(--right-controls-width);
+          --conversation-overlay-reserve:
+            var(--right-controls-width);
         }
 
         .player[data-right="overlay"] .transcript,
@@ -129,6 +135,7 @@
       @media (orientation: landscape) {
         .player[data-right="overlay"] {
           --right-reserve: var(--right-controls-width);
+          --conversation-overlay-reserve: var(--right-controls-width);
         }
 
         .player[data-right="overlay"] .right-zone {
@@ -150,6 +157,7 @@
       @media (max-width: 760px) and (orientation: landscape) {
         .player[data-right="auto"] {
           --right-reserve: 0px;
+          --conversation-overlay-reserve: var(--right-controls-width);
         }
 
         .player[data-right="auto"] .right-zone {

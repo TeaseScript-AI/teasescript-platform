@@ -199,18 +199,9 @@ function createToolBody(
   }
 }
 
-function createVisualTool(): DocumentFragment {
-  const fragment = document.createDocumentFragment();
-
-  const header = document.createElement("div");
-  header.className = "lab-header";
-
-  const titleRow = document.createElement("div");
-  titleRow.className = "lab-title-row";
-
-  const title = document.createElement("h3");
-  title.className = "lab-title";
-  title.textContent = "Visual Lab";
+function createVisualTool(): HTMLElement {
+  const content = document.createElement("div");
+  content.className = "lab-content";
 
   const picker = document.createElement("label");
   picker.className = "theme-picker";
@@ -221,27 +212,6 @@ function createVisualTool(): DocumentFragment {
   colour.dataset.themeColor = "";
   colour.setAttribute("aria-label", "Player accent colour");
   picker.append(colour);
-
-  titleRow.append(title, picker);
-
-  const note = document.createElement("p");
-  note.className = "lab-note";
-  note.textContent = "Cosmetic experiments only. Text wraps; tool sizing stays bounded.";
-
-  const fixed = document.createElement("div");
-  fixed.className = "lab-fixed-note";
-  fixed.textContent = "Always on: accent · timer ring · refined controls · surface depth · speaker identity · speaker typography · micro-motion · transcript fade";
-
-  const reset = document.createElement("button");
-  reset.type = "button";
-  reset.className = "lab-reset";
-  reset.dataset.resetVisuals = "";
-  reset.textContent = "Reset visual tests";
-
-  header.append(titleRow, note, fixed, reset);
-
-  const scroll = document.createElement("div");
-  scroll.className = "lab-scroll";
 
   const options = document.createElement("div");
   options.className = "lab-options";
@@ -257,10 +227,23 @@ function createVisualTool(): DocumentFragment {
       "fx-vignette",
     ),
   );
-  scroll.append(options);
 
-  fragment.append(header, scroll);
-  return fragment;
+  const note = document.createElement("p");
+  note.className = "lab-note";
+  note.textContent = "Cosmetic experiments only. Text wraps; tool sizing stays bounded.";
+
+  const fixed = document.createElement("div");
+  fixed.className = "lab-fixed-note";
+  fixed.textContent = "Always on: accent · timer ring · refined controls · surface depth · speaker identity · speaker typography · micro-motion · transcript fade";
+
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "lab-reset";
+  reset.dataset.resetVisuals = "";
+  reset.textContent = "Reset visual tests";
+
+  content.append(picker, options, note, fixed, reset);
+  return content;
 }
 
 function createVisualOption(
@@ -302,10 +285,6 @@ function createSceneTool(presentation: PlayerPresentation): HTMLElement {
   const section = document.createElement("section");
   section.className = "tool-section";
 
-  const title = document.createElement("h3");
-  title.className = "tool-section-title";
-  title.textContent = "Scene";
-
   const list = document.createElement("dl");
   list.className = "tool-kv";
   appendKeyValue(list, "Media", presentation.media.id);
@@ -313,7 +292,7 @@ function createSceneTool(presentation: PlayerPresentation): HTMLElement {
   appendKeyValue(list, "Caption", presentation.media.caption);
   appendKeyValue(list, "Timer", formatTimer(presentation.timer.remainingSeconds));
 
-  section.append(title, list);
+  section.append(list);
   return section;
 }
 
@@ -329,10 +308,6 @@ function createActionsTool(actions: readonly PlayerActionPresentation[]): HTMLEl
   const section = document.createElement("section");
   section.className = "tool-section";
 
-  const title = document.createElement("h3");
-  title.className = "tool-section-title";
-  title.textContent = "Available actions";
-
   const list = document.createElement("ul");
   list.className = "tool-action-list";
   for (const action of actions) {
@@ -342,6 +317,6 @@ function createActionsTool(actions: readonly PlayerActionPresentation[]): HTMLEl
     list.append(item);
   }
 
-  section.append(title, list);
+  section.append(list);
   return section;
 }
