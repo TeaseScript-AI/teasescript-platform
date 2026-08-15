@@ -22,6 +22,7 @@
 - `SECURITY.md`
 - `CONTINUOUS-PERSONALITIES.md`
 - `CODE-EDITOR.md`
+- `PLAYER-UI.md`: Player presentation maintenance guardrails and regression strategy.
 - `LLM-INTEGRATION.md`
 - `MATH-EXPRESSIONS.md`
 - `TESTING.md`: current testing strategy, runtime invariants, and future quality gates.
