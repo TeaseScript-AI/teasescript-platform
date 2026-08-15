@@ -194,8 +194,6 @@ function createToolBody(
       return createVisualTool();
     case "scene":
       return createSceneTool(presentation);
-    case "actions":
-      return createActionsTool(presentation.actions);
   }
 }
 
@@ -302,21 +300,4 @@ function appendKeyValue(list: HTMLDListElement, key: string, value: string): voi
   const description = document.createElement("dd");
   description.textContent = value;
   list.append(term, description);
-}
-
-function createActionsTool(actions: readonly PlayerActionPresentation[]): HTMLElement {
-  const section = document.createElement("section");
-  section.className = "tool-section";
-
-  const list = document.createElement("ul");
-  list.className = "tool-action-list";
-  for (const action of actions) {
-    const item = document.createElement("li");
-    item.className = "tool-action-item";
-    item.textContent = action.label;
-    list.append(item);
-  }
-
-  section.append(list);
-  return section;
 }

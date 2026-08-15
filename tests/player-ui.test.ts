@@ -90,6 +90,17 @@ test("Player tool chrome keeps one fixed column header and one vertical scroll o
   assert.doesNotMatch(visualLab, /overflow-y: auto/u);
 });
 
+test("Player Actions stay in the dedicated right rail and are not tool-column content", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const demo = await readFile(resolve(process.cwd(), "player/demo-session.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+
+  assert.match(html, /id="actions"/u);
+  assert.match(render, /targets\.actions\.replaceChildren/u);
+  assert.doesNotMatch(demo, /\{ id: "actions", label: "Actions" \}/u);
+  assert.doesNotMatch(render, /case "actions"/u);
+});
+
 test("Player left-panel growth protects media and conversation minimums independently", async () => {
   const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
 

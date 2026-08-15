@@ -14,7 +14,7 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
     id: "scene-bedroom-014",
     fit: "contain",
     caption: "Demo scene media · script-selected fit: contain",
-    ambientColor: "#7d365d",
+    ambientColor: "#5a2737",
   },
 
   timer: {
@@ -25,19 +25,19 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
   speakers: {
     eva: {
       name: "Mistress Eva",
-      accent: "#d86683",
+      accent: "#c96b7f",
       avatar: "E",
       fontFamily: "Georgia, 'Times New Roman', serif",
     },
     nora: {
       name: "Nora",
-      accent: "#8d7be8",
+      accent: "#b6aa97",
       avatar: "N",
       fontFamily: "ui-monospace, 'DejaVu Sans Mono', Consolas, monospace",
     },
     user: {
       name: "You",
-      accent: "#6fa8cf",
+      accent: "#8fa3ab",
       avatar: "Y",
       fontFamily: "Verdana, 'DejaVu Sans', system-ui, sans-serif",
     },
@@ -85,7 +85,6 @@ export const DEFAULT_VISUAL_PREFERENCES: PlayerVisualPreferences = {
 export const DEMO_TOOL_DEFINITIONS: readonly PlayerToolDefinition[] = [
   { id: "visuals", label: "Visual Lab" },
   { id: "scene", label: "Scene" },
-  { id: "actions", label: "Actions" },
 ];
 
 export const INITIAL_TOOL_COLUMNS: readonly PlayerToolColumnState[] = [

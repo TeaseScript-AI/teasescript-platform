@@ -4,17 +4,19 @@
 
         --theme-color: #8f3048;
 
-        --title-bg:
-          color-mix(in srgb, #1a1b1f 96%, var(--theme-color));
-        --side-bg:
-          color-mix(in srgb, #17181c 97%, var(--theme-color));
-        --center-bg:
-          color-mix(in srgb, #0f1013 99%, var(--theme-color));
+        --canvas-bg: #0b0b0d;
+        --title-bg: #171619;
+        --side-bg: #121216;
+        --center-bg: #0c0c0f;
+        --control-bg: #17161a;
 
-        --text: #ece8e7;
-        --muted: #979497;
+        --text: #eeeae7;
+        --muted: #9e9799;
+        --muted-quiet: #777174;
+        --border-subtle: rgb(255 255 255 / 8%);
+        --border-strong: rgb(255 255 255 / 15%);
         --ui-accent:
-          color-mix(in srgb, var(--theme-color) 82%, #e8d8dc);
+          color-mix(in srgb, var(--theme-color) 86%, #f0e3e6);
 
         /*
           Player chrome respects device safe areas while media remains full-bleed.
@@ -67,7 +69,7 @@
         --conversation-gap: 18px;
         --conversation-overlay-reserve: 0px;
 
-        --scene-ambient: #7d365d;
+        --scene-ambient: #5a2737;
         --timer-progress: 46%;
       }
 
@@ -122,13 +124,7 @@
 
         background: var(--title-bg);
 
-        border-bottom:
-          1px solid
-          color-mix(
-            in srgb,
-            var(--ui-accent) 20%,
-            rgb(255 255 255 / 6%)
-          );
+        border-bottom: 1px solid var(--border-subtle);
       }
 
       .title-controls {
@@ -170,13 +166,7 @@
         overflow: hidden;
         background: var(--side-bg);
 
-        border-right:
-          1px solid
-          color-mix(
-            in srgb,
-            var(--ui-accent) 10%,
-            rgb(255 255 255 / 5%)
-          );
+        border-right: 1px solid var(--border-subtle);
       }
 
       .left-scrim {
@@ -311,13 +301,7 @@
 
         background: var(--side-bg);
 
-        border-left:
-          1px solid
-          color-mix(
-            in srgb,
-            var(--ui-accent) 12%,
-            rgb(255 255 255 / 5%)
-          );
+        border-left: 1px solid var(--border-subtle);
       }
 
       .player[data-right="overlay"] .right-zone {

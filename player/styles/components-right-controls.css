@@ -160,14 +160,11 @@
           clamp(8px, 0.8vmin, 12px)
           0.9em;
 
-        border:
-          1px solid
-          rgb(255 255 255 / 16%);
+        border: 1px solid var(--border-strong);
 
         border-radius: 4px;
 
-        background:
-          rgb(9 10 13 / 34%);
+        background: color-mix(in srgb, var(--control-bg) 72%, transparent);
         color: var(--text);
 
         box-shadow:

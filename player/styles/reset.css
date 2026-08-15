@@ -17,8 +17,8 @@
         min-height: 100dvh;
         overflow: hidden;
         overscroll-behavior: none;
-        background: #090a0c;
-        color: #eef1f5;
+        background: var(--canvas-bg, #0b0b0d);
+        color: var(--text, #eeeae7);
         font-family:
           Inter,
           ui-sans-serif,

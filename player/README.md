@@ -33,8 +33,9 @@ baseline rather than shrinking the media further, while the future constraint-dr
 open.
 
 The browser bootstrap measures only the strip's intrinsic preferred width. CSS owns the actual Grid allocation and layout
-caps; there is no JavaScript width optimizer. The current `Visual Lab`, `Scene`, and `Actions` tool registry is demo
-presentation data, not a runtime or package API.
+caps; there is no JavaScript width optimizer. The current `Visual Lab` and `Scene` tool registry is demo presentation
+data, not a runtime or package API. Player Actions remain the dedicated right-hand controls beneath the timer rather than
+becoming tool-column content.
 
 No UI or CSS framework is required by this POC. Presentation data, rendering, panel transitions, and browser bootstrap are separate seams so a later runtime integration or UI-framework decision does not become part of the presentation contract by accident.
 
