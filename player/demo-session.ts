@@ -11,9 +11,10 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
   },
 
   media: {
-    id: "scene-bedroom-014",
-    fit: "contain",
-    caption: "Demo scene media · script-selected fit: contain",
+    id: "demo-media-unavailable",
+    src: "",
+    fit: "cover",
+    title: "Demo media unavailable",
     ambientColor: "#5a2737",
   },
 

@@ -101,6 +101,18 @@ test("Player Actions stay in the dedicated right rail and are not tool-column co
   assert.doesNotMatch(render, /case "actions"/u);
 });
 
+test("Player media uses image content without duplicate fit or caption overlays", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const demo = await readFile(resolve(process.cwd(), "player/demo-session.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+
+  assert.match(html, /id="sceneMedia"/u);
+  assert.doesNotMatch(html, /id="mediaFit"/u);
+  assert.doesNotMatch(html, /id="mediaCaption"/u);
+  assert.match(demo, /fit: "cover"/u);
+  assert.match(render, /targets\.sceneMedia\.src/u);
+});
+
 test("Player left-panel growth protects media and conversation minimums independently", async () => {
   const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
 

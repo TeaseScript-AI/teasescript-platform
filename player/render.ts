@@ -13,8 +13,7 @@ export interface PlayerRenderTargets {
   readonly transcript: HTMLElement;
   readonly actions: HTMLElement;
   readonly timerText: HTMLElement;
-  readonly mediaFit: HTMLElement;
-  readonly mediaCaption: HTMLElement;
+  readonly sceneMedia: HTMLImageElement;
 }
 
 export function renderPresentation(
@@ -29,8 +28,14 @@ export function renderPresentation(
   targets.player.style.setProperty("--timer-progress", `${progress}%`);
   targets.timerText.textContent = formatTimer(presentation.timer.remainingSeconds);
 
-  targets.mediaFit.textContent = presentation.media.fit;
-  targets.mediaCaption.textContent = presentation.media.caption;
+  targets.sceneMedia.alt = presentation.media.title;
+  if (presentation.media.src.length === 0) {
+    targets.sceneMedia.hidden = true;
+    targets.sceneMedia.removeAttribute("src");
+  } else {
+    targets.sceneMedia.hidden = false;
+    targets.sceneMedia.src = presentation.media.src;
+  }
 
   targets.transcript.replaceChildren(
     ...presentation.messages.map((message) => createMessage(message, presentation.speakers)),
@@ -285,9 +290,9 @@ function createSceneTool(presentation: PlayerPresentation): HTMLElement {
 
   const list = document.createElement("dl");
   list.className = "tool-kv";
-  appendKeyValue(list, "Media", presentation.media.id);
+  appendKeyValue(list, "Scene", presentation.media.title);
+  appendKeyValue(list, "Media file", presentation.media.id);
   appendKeyValue(list, "Fit", presentation.media.fit);
-  appendKeyValue(list, "Caption", presentation.media.caption);
   appendKeyValue(list, "Timer", formatTimer(presentation.timer.remainingSeconds));
 
   section.append(list);

@@ -1,5 +1,5 @@
-import { createReadStream } from "node:fs";
-import { realpath, stat } from "node:fs/promises";
+import { createReadStream, type Dirent } from "node:fs";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -80,6 +80,10 @@ async function serveRequest(
   const method = request.method ?? "GET";
   const requestUrl = request.url ?? "/";
   const rawPath = requestUrl.split("?", 1)[0] ?? "/";
+  if (rawPath === "/player/demo-media/random") {
+    await serveRandomPlayerDemoMedia(request, roots.playerRoot, response);
+    return;
+  }
   if (rawPath.startsWith("/api/workspace")) {
     await serveWorkspaceApi(request, rawPath, workspace, response);
     return;
@@ -144,6 +148,72 @@ async function serveRequest(
       method === "HEAD",
     );
   }
+}
+
+async function serveRandomPlayerDemoMedia(
+  request: IncomingMessage,
+  playerRoot: string,
+  response: ServerResponse,
+): Promise<void> {
+  const method = request.method ?? "GET";
+  if (method !== "GET" && method !== "HEAD") {
+    sendText(response, 405, "Method not allowed.\n", method === "HEAD");
+    return;
+  }
+
+  const mediaRoot = resolve(playerRoot, "demo-media");
+  let entries: Dirent[];
+  try {
+    entries = await readdir(mediaRoot, { withFileTypes: true });
+  } catch (error) {
+    const code = isNodeError(error) ? error.code : "";
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      sendText(response, 404, "No demo media available.\n", method === "HEAD");
+      return;
+    }
+    throw error;
+  }
+
+  const files = entries
+    .filter((entry) => entry.isFile() && playerDemoMediaExtension(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  if (files.length === 0) {
+    sendText(response, 404, "No demo media available.\n", method === "HEAD");
+    return;
+  }
+
+  const fileName = files[Math.floor(Math.random() * files.length)];
+  if (fileName === undefined) throw new Error("Demo media selection failed.");
+  const id = fileName.slice(0, -extname(fileName).length);
+  const body = {
+    id,
+    src: `/player/demo-media/${encodeURIComponent(fileName)}`,
+    title: demoMediaTitle(id),
+  };
+
+  if (method === "HEAD") {
+    const text = JSON.stringify(body);
+    response.statusCode = 200;
+    response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("Content-Length", Buffer.byteLength(text));
+    response.setHeader("Cache-Control", "no-store");
+    response.end();
+    return;
+  }
+  sendJson(response, 200, body);
+}
+
+function playerDemoMediaExtension(fileName: string): boolean {
+  return [".jpg", ".jpeg", ".png", ".webp"].includes(extname(fileName).toLowerCase());
+}
+
+function demoMediaTitle(id: string): string {
+  return id
+    .split(/[-_]+/u)
+    .filter((part) => part.length !== 0)
+    .map((part) => /^\d+$/u.test(part) ? part : `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+    .join(" ");
 }
 
 async function serveWorkspaceApi(request: IncomingMessage, pathname: string, workspace: AutomationWorkspace, response: ServerResponse): Promise<void> {
@@ -283,6 +353,10 @@ function contentType(path: string): string {
     case ".html": return "text/html; charset=utf-8";
     case ".css": return "text/css; charset=utf-8";
     case ".js": return "text/javascript; charset=utf-8";
+    case ".jpg":
+    case ".jpeg": return "image/jpeg";
+    case ".png": return "image/png";
+    case ".webp": return "image/webp";
     case ".json":
     case ".map": return "application/json; charset=utf-8";
     case ".tease":

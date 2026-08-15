@@ -17,8 +17,9 @@ export interface PlayerPackagePresentation {
 
 export interface PlayerMediaPresentation {
   readonly id: string;
+  readonly src: string;
   readonly fit: MediaFit;
-  readonly caption: string;
+  readonly title: string;
   readonly ambientColor: string;
 }
 

@@ -58,6 +58,34 @@ test("serves the modular Player demo and its local assets", async () => {
   assert.match(css.body, /--right-controls-width/u);
 });
 
+test("Player demo media endpoint discovers supported image files from the demo-media folder", async (context) => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "teasescript-player-media-"));
+  context.after(async () => rm(projectRoot, { recursive: true, force: true }));
+  await mkdir(join(projectRoot, "playground"), { recursive: true });
+  await mkdir(join(projectRoot, "player", "demo-media"), { recursive: true });
+  await mkdir(join(projectRoot, "dist"), { recursive: true });
+  await mkdir(join(projectRoot, "examples", "playground"), { recursive: true });
+  await writeFile(join(projectRoot, "player", "demo-media", "school-days-38.jpg"), "image");
+  await writeFile(join(projectRoot, "player", "demo-media", "ignore.txt"), "not image");
+
+  const isolatedServer = createPlaygroundServer({ projectRoot });
+  const isolatedPort = await listen(isolatedServer);
+  context.after(async () => close(isolatedServer));
+
+  const selected = await get("/player/demo-media/random", isolatedPort);
+  assert.equal(selected.status, 200);
+  assert.match(selected.contentType, /^application\/json/u);
+  assert.deepEqual(JSON.parse(selected.body), {
+    id: "school-days-38",
+    src: "/player/demo-media/school-days-38.jpg",
+    title: "School Days 38",
+  });
+
+  const image = await get("/player/demo-media/school-days-38.jpg", isolatedPort);
+  assert.equal(image.status, 200);
+  assert.equal(image.contentType, "image/jpeg");
+});
+
 test("serves required JavaScript and CSS assets", async () => {
   const [javascript, css] = await Promise.all([
     get("/dist/playground/browser.js"),

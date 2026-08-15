@@ -25,8 +25,7 @@ const rightToggle = requiredElement<HTMLButtonElement>("rightToggle", HTMLButton
 const transcript = requiredElement<HTMLElement>("transcript", HTMLElement);
 const actions = requiredElement<HTMLElement>("actions", HTMLElement);
 const timerText = requiredElement<HTMLElement>("timerText", HTMLElement);
-const mediaFit = requiredElement<HTMLElement>("mediaFit", HTMLElement);
-const mediaCaption = requiredElement<HTMLElement>("mediaCaption", HTMLElement);
+const sceneMedia = requiredElement<HTMLImageElement>("sceneMedia", HTMLImageElement);
 const composerForm = requiredElement<HTMLFormElement>("composerForm", HTMLFormElement);
 
 const narrowScreen = window.matchMedia("(max-width: 760px)");
@@ -36,16 +35,22 @@ let nextToolColumnNumber = 2;
 let accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
 let ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
 let vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
+let presentation = DEMO_PRESENTATION;
 
 renderPresentation(
-  { player, transcript, actions, timerText, mediaFit, mediaCaption },
-  DEMO_PRESENTATION,
+  { player, transcript, actions, timerText, sceneMedia },
+  presentation,
 );
 renderTools();
 resetVisualLab();
 syncPanelAccessibility();
 syncLeftPreferredWidth();
 syncLeftReserve();
+void loadDemoMedia();
+
+sceneMedia.addEventListener("error", () => {
+  sceneMedia.hidden = true;
+});
 
 const leftPanelObserver = new ResizeObserver(syncLeftReserve);
 leftPanelObserver.observe(leftPanel);
@@ -143,7 +148,7 @@ composerForm.addEventListener("submit", (event) => event.preventDefault());
 
 function renderTools(scrollMode: "preserve" | "end" = "preserve"): void {
   const previousScrollLeft = toolStripScroll.scrollLeft;
-  renderToolColumns(toolStrip, toolColumns, DEMO_TOOL_DEFINITIONS, DEMO_PRESENTATION);
+  renderToolColumns(toolStrip, toolColumns, DEMO_TOOL_DEFINITIONS, presentation);
   syncVisualControls();
 
   requestAnimationFrame(() => {
@@ -156,6 +161,48 @@ function renderTools(scrollMode: "preserve" | "end" = "preserve"): void {
     }
     syncLeftReserve();
   });
+}
+
+async function loadDemoMedia(): Promise<void> {
+  presentation = await loadDemoPresentation();
+  renderPresentation(
+    { player, transcript, actions, timerText, sceneMedia },
+    presentation,
+  );
+  renderTools();
+}
+
+interface DemoMediaResponse {
+  readonly id: string;
+  readonly src: string;
+  readonly title: string;
+}
+
+async function loadDemoPresentation(): Promise<typeof DEMO_PRESENTATION> {
+  try {
+    const response = await fetch("/player/demo-media/random", { cache: "no-store" });
+    if (!response.ok) return DEMO_PRESENTATION;
+    const media = await response.json() as DemoMediaResponse;
+    if (
+      typeof media.id !== "string"
+      || typeof media.src !== "string"
+      || typeof media.title !== "string"
+    ) {
+      return DEMO_PRESENTATION;
+    }
+
+    return {
+      ...DEMO_PRESENTATION,
+      media: {
+        ...DEMO_PRESENTATION.media,
+        id: media.id,
+        src: media.src,
+        title: media.title,
+      },
+    };
+  } catch {
+    return DEMO_PRESENTATION;
+  }
 }
 
 function usesWideDefaultLayout(): boolean {
