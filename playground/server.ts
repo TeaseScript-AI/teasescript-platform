@@ -20,12 +20,13 @@ export function createPlaygroundServer(
 ): Server {
   const projectRoot = resolve(options.projectRoot ?? defaultProjectRoot());
   const playgroundRoot = resolve(projectRoot, "playground");
+  const playerRoot = resolve(projectRoot, "player");
   const distRoot = resolve(projectRoot, "dist");
   const examplesRoot = resolve(projectRoot, "examples");
   const workspace: AutomationWorkspace = { source: "", sourceRevision: 0, lastCompileResult: null, lastRunResult: null, resultRevision: null };
 
   return createServer((request, response) => {
-    void serveRequest(request, { projectRoot, playgroundRoot, distRoot, examplesRoot }, workspace, response).catch(() => {
+    void serveRequest(request, { projectRoot, playgroundRoot, playerRoot, distRoot, examplesRoot }, workspace, response).catch(() => {
       if (!response.headersSent) sendJson(response, 500, { error: { code: "internalError", message: "Server error." } });
       else response.destroy();
     });
@@ -57,6 +58,7 @@ export async function startPlaygroundServer(
 interface StaticRoots {
   readonly projectRoot: string;
   readonly playgroundRoot: string;
+  readonly playerRoot: string;
   readonly distRoot: string;
   readonly examplesRoot: string;
 }
@@ -238,6 +240,12 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
   }
   if (pathname === "/playground.css") {
     return { root: roots.playgroundRoot, path: resolve(roots.playgroundRoot, "playground.css") };
+  }
+  if (pathname === "/player" || pathname === "/player/") {
+    return { root: roots.playerRoot, path: resolve(roots.playerRoot, "index.html") };
+  }
+  if (pathname.startsWith("/player/")) {
+    return resolveInside(roots.playerRoot, pathname.slice("/player/".length));
   }
   if (pathname.startsWith("/dist/")) {
     return resolveInside(roots.distRoot, pathname.slice("/dist/".length));

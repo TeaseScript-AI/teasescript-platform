@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  />
+  <meta name="color-scheme" content="dark" />
+  <title>TeaseScript Player</title>
+
+  <link rel="stylesheet" href="/player/styles/cascade.css" />
+  <link rel="stylesheet" href="/player/styles/reset.css" />
+  <link rel="stylesheet" href="/player/styles/layout.css" />
+  <link rel="stylesheet" href="/player/styles/components-base.css" />
+  <link rel="stylesheet" href="/player/styles/components-visual-lab.css" />
+  <link rel="stylesheet" href="/player/styles/components-media.css" />
+  <link rel="stylesheet" href="/player/styles/components-transcript.css" />
+  <link rel="stylesheet" href="/player/styles/components-composer.css" />
+  <link rel="stylesheet" href="/player/styles/components-right-controls.css" />
+  <link rel="stylesheet" href="/player/styles/effects.css" />
+  <link rel="stylesheet" href="/player/styles/responsive.css" />
+</head>
+
+<body>
+  <main
+    class="player"
+    id="player"
+    data-left="auto"
+    data-right="auto"
+  >
+    <div class="title-bg" aria-hidden="true"></div>
+
+    <header class="title-controls">
+      <button
+        class="icon-button"
+        id="leftToggle"
+        type="button"
+        aria-label="Toggle Visual Lab"
+        aria-controls="leftPanel"
+        aria-expanded="false"
+      >
+        <span class="menu-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+
+      <div class="title-text">
+        TeaseScript Player
+      </div>
+
+      <div class="toolbar-spacer"></div>
+    </header>
+
+    <aside
+      class="left-panel"
+      id="leftPanel"
+      aria-label="Visual Lab"
+    >
+      <div class="lab-header">
+        <div class="lab-title-row">
+          <h2 class="lab-title">
+            Visual Lab
+          </h2>
+
+          <label class="theme-picker">
+            Accent
+            <input
+              id="themeColor"
+              type="color"
+              value="#8f3048"
+              aria-label="Player accent colour"
+            />
+          </label>
+        </div>
+
+        <p class="lab-note">
+          Cosmetic experiments only. Text wraps;
+          the panel does not resize itself from labels.
+        </p>
+
+        <div class="lab-fixed-note">
+          Always on:
+          accent · timer ring · refined controls · surface depth ·
+          speaker identity · speaker typography · micro-motion · transcript fade
+        </div>
+
+        <button
+          class="lab-reset"
+          id="resetLab"
+          type="button"
+        >
+          Reset visual tests
+        </button>
+      </div>
+
+      <div class="lab-scroll">
+        <div class="lab-options">
+          <label class="lab-option">
+            <span class="lab-option-copy">
+              <span class="lab-option-title">
+                Ambient media colour
+              </span>
+              <span class="lab-option-note">
+                Weak scene colour bleed around media.
+              </span>
+            </span>
+
+            <span class="switch">
+              <input
+                type="checkbox"
+                data-effect="fx-ambient"
+              />
+              <span class="switch-ui"></span>
+            </span>
+          </label>
+
+          <label class="lab-option">
+            <span class="lab-option-copy">
+              <span class="lab-option-title">
+                Vignette
+              </span>
+              <span class="lab-option-note">
+                Universal edge darkening for any media content.
+              </span>
+            </span>
+
+            <span class="switch">
+              <input
+                type="checkbox"
+                data-effect="fx-vignette"
+              />
+              <span class="switch-ui"></span>
+            </span>
+          </label>
+        </div>
+      </div>
+    </aside>
+
+    <div
+      class="left-scrim"
+      id="leftScrim"
+      aria-hidden="true"
+    ></div>
+
+    <section class="media-area">
+      <div
+        class="media-surface"
+        aria-label="Demo media"
+      >
+        <div
+          class="demo-media"
+          aria-hidden="true"
+        >
+          <span
+            class="media-fit"
+            id="mediaFit"
+          ></span>
+
+          <span
+            class="media-caption"
+            id="mediaCaption"
+          ></span>
+        </div>
+      </div>
+    </section>
+
+    <section
+      class="transcript"
+      id="transcript"
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions text"
+      aria-label="Conversation transcript"
+    ></section>
+
+    <footer class="composer">
+      <form id="composerForm">
+        <textarea
+          rows="1"
+          aria-label="User input"
+          placeholder="Type your response…"
+        ></textarea>
+
+        <button
+          class="send-button"
+          type="submit"
+        >
+          Send
+        </button>
+      </form>
+    </footer>
+
+    <aside
+      class="right-zone"
+      aria-label="Timer and background actions"
+    >
+      <div class="timer-wrap">
+        <div class="timer-cluster">
+          <div
+            class="timer"
+            aria-label="Timer"
+          >
+            <span id="timerText">02:41</span>
+          </div>
+
+          <button
+            class="icon-button right-toggle"
+            id="rightToggle"
+            type="button"
+            aria-label="Toggle right panel background"
+            aria-pressed="false"
+          >
+            <span
+              class="panel-icon"
+              aria-hidden="true"
+            ></span>
+          </button>
+        </div>
+      </div>
+
+      <div
+        class="action-scroll"
+        id="actions"
+        role="group"
+        aria-label="Available actions"
+      ></div>
+    </aside>
+  </main>
+
+  <script type="module" src="/dist/player/browser.js"></script>
+</body>
+</html>

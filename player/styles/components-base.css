@@ -1,0 +1,73 @@
+@layer components {
+      .icon-button {
+        width: 34px;
+        height: 34px;
+
+        display: grid;
+        place-items: center;
+
+        padding: 0;
+
+        border: 0;
+        border-radius: 4px;
+
+        background:
+          rgb(10 11 14 / 22%);
+        color: var(--text);
+
+        box-shadow:
+          0 1px 0 rgb(255 255 255 / 4%) inset;
+
+        cursor: pointer;
+      }
+
+      .menu-icon {
+        width: 18px;
+        display: grid;
+        gap: 4px;
+      }
+
+      .menu-icon span {
+        height: 2px;
+        border-radius: 999px;
+        background: currentColor;
+      }
+
+      .panel-icon {
+        position: relative;
+
+        width: 18px;
+        height: 16px;
+
+        border: 1.5px solid currentColor;
+        border-radius: 3px;
+      }
+
+      .panel-icon::after {
+        content: "";
+
+        position: absolute;
+        top: 0;
+        right: 4px;
+        bottom: 0;
+
+        border-left: 1.5px solid currentColor;
+      }
+
+      .title-text {
+        padding: 5px 8px;
+
+        border-radius: 3px;
+
+        color: var(--text);
+        font-size: 0.95rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+
+        box-shadow: none;
+      }
+
+      .toolbar-spacer {
+        flex: 1;
+      }
+}

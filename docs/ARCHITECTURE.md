@@ -113,8 +113,10 @@ No `src/standard-library/` shell exists yet because the implemented ADR 0018 POC
 parser/compiler/runtime; linked reusable Standard Library modules remain future work.
 
 The technical playground workspace controller lives at
-`playground/workspace/controller.ts`. No speculative Player or shared browser
-folders were added.
+`playground/workspace/controller.ts`. The production-oriented Player presentation
+POC lives under `player/` and is served by the existing local playground server at
+`/player/`. Its current presentation model and demo data are internal POC seams,
+not an accepted engine/Player protocol or cross-origin host contract.
 
 `src/index.ts` is the intentional public package/root API. Canonical internal
 paths may change before a published compatibility policy exists; old repository

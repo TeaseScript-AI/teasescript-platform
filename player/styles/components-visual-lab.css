@@ -1,0 +1,224 @@
+@layer components {
+      /* ---------- Visual Lab ---------- */
+
+      .lab-header {
+        padding:
+          14px
+          14px
+          10px
+          calc(14px + var(--safe-left));
+
+        background: var(--side-bg);
+        border-bottom:
+          1px solid rgb(255 255 255 / 6%);
+      }
+
+      .lab-title-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+
+        margin-bottom: 4px;
+      }
+
+      .lab-title {
+        margin: 0;
+
+        font-size: 0.9rem;
+        font-weight: 750;
+      }
+
+      .theme-picker {
+        margin-left: auto;
+
+        display: flex;
+        align-items: center;
+        gap: 6px;
+
+        color: var(--muted);
+        font-size: 0.68rem;
+      }
+
+      .theme-picker input[type="color"] {
+        width: 30px;
+        height: 24px;
+
+        padding: 2px;
+
+        border:
+          1px solid rgb(255 255 255 / 12%);
+        border-radius: 3px;
+
+        background: transparent;
+        cursor: pointer;
+      }
+
+      .lab-note {
+        margin: 0;
+
+        color: var(--muted);
+        font-size: 0.72rem;
+        line-height: 1.35;
+      }
+
+      .lab-fixed-note {
+        margin-top: 7px;
+
+        color: #778292;
+        font-size: 0.64rem;
+        line-height: 1.35;
+      }
+
+      .lab-reset {
+        width: 100%;
+        min-height: 30px;
+
+        margin-top: 9px;
+
+        border:
+          1px solid rgb(255 255 255 / 10%);
+        border-radius: 4px;
+
+        background:
+          rgb(255 255 255 / 3%);
+        color: var(--text);
+
+        box-shadow:
+          0 1px 0 rgb(255 255 255 / 4%) inset;
+
+        cursor: pointer;
+      }
+
+      .lab-scroll {
+        min-width: 0;
+        min-height: 0;
+
+        overflow-y: auto;
+        overflow-x: hidden;
+        overscroll-behavior: contain;
+
+        padding:
+          8px
+          10px
+          calc(14px + var(--safe-bottom))
+          calc(10px + var(--safe-left));
+
+        scrollbar-width: thin;
+        scrollbar-color:
+          rgb(255 255 255 / 24%)
+          transparent;
+      }
+
+      .lab-options {
+        display: grid;
+        gap: 5px;
+      }
+
+      .lab-option {
+        display: grid;
+        grid-template-columns:
+          minmax(0, 1fr)
+          auto;
+
+        align-items: center;
+        gap: 10px;
+
+        min-width: 0;
+
+        padding: 8px 7px;
+
+        border-radius: 3px;
+      }
+
+      .lab-option-copy {
+        min-width: 0;
+      }
+
+      .lab-option-title {
+        display: block;
+
+        color: #dce1e8;
+        font-size: 0.76rem;
+        font-weight: 700;
+        line-height: 1.2;
+
+        overflow-wrap: anywhere;
+      }
+
+      .lab-option-note {
+        display: block;
+
+        margin-top: 2px;
+
+        color: #7f8997;
+        font-size: 0.66rem;
+        line-height: 1.25;
+
+        overflow-wrap: anywhere;
+      }
+
+      .switch {
+        position: relative;
+
+        width: 32px;
+        height: 19px;
+      }
+
+      .switch input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .switch-ui {
+        position: absolute;
+        inset: 0;
+
+        border:
+          1px solid rgb(255 255 255 / 14%);
+        border-radius: 999px;
+
+        background: #111419;
+        cursor: pointer;
+      }
+
+      .switch-ui::after {
+        content: "";
+
+        position: absolute;
+        top: 2px;
+        left: 2px;
+
+        width: 13px;
+        aspect-ratio: 1;
+
+        border-radius: 50%;
+
+        background: #7e8896;
+
+        transition:
+          translate 120ms ease,
+          background 120ms ease;
+      }
+
+      .switch input:checked + .switch-ui {
+        border-color:
+          color-mix(
+            in srgb,
+            var(--ui-accent) 62%,
+            transparent
+          );
+
+        background:
+          color-mix(
+            in srgb,
+            var(--ui-accent) 24%,
+            #111419
+          );
+      }
+
+      .switch input:checked + .switch-ui::after {
+        translate: 13px 0;
+        background: var(--ui-accent);
+      }
+}

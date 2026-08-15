@@ -1,0 +1,203 @@
+@layer components {
+      /* ---------- Right controls ---------- */
+
+      .timer-wrap {
+        display: grid;
+        place-items: start center;
+
+        padding:
+          6px
+          calc(var(--control-padding) + var(--safe-right))
+          calc(var(--control-padding) * 0.7)
+          var(--control-padding);
+      }
+
+      .timer-cluster {
+        position: relative;
+
+        inline-size:
+          min(
+            100%,
+            calc(var(--timer-size) + 50px)
+          );
+
+        block-size:
+          calc(var(--timer-size) + 10px);
+      }
+
+      .timer-cluster .timer {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+      }
+
+      .timer-cluster .right-toggle {
+        position: absolute;
+        z-index: 4;
+        top: 0;
+        right: 0;
+
+        width: 34px;
+        height: 34px;
+
+        border-radius: 3px;
+
+        background:
+          rgb(8 10 13 / 30%);
+      }
+
+      .timer {
+        position: relative;
+        isolation: isolate;
+
+        inline-size: var(--timer-size);
+        aspect-ratio: 1;
+
+        display: grid;
+        place-items: center;
+
+        border:
+          1px solid rgb(255 255 255 / 18%);
+        border-radius: 50%;
+
+        background:
+          rgb(7 9 12 / 8%);
+
+        box-shadow:
+          0 0 0 1px rgb(0 0 0 / 18%);
+
+        font-size: var(--timer-font-size);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .timer::before {
+        content: "";
+
+        position: absolute;
+        z-index: -1;
+        inset: -5px;
+
+        border-radius: 50%;
+
+        background:
+          conic-gradient(
+            var(--ui-accent)
+            0
+            var(--timer-progress),
+
+            rgb(255 255 255 / 10%)
+            var(--timer-progress)
+            100%
+          );
+
+        -webkit-mask:
+          radial-gradient(
+            farthest-side,
+            transparent calc(100% - 5px),
+            #000 calc(100% - 4px)
+          );
+
+        mask:
+          radial-gradient(
+            farthest-side,
+            transparent calc(100% - 5px),
+            #000 calc(100% - 4px)
+          );
+      }
+
+      .timer::after {
+        content: none;
+      }
+
+      .action-scroll {
+        min-width: 0;
+        min-height: 0;
+
+        display: grid;
+        grid-auto-rows: max-content;
+        align-content: start;
+        gap: var(--control-gap);
+
+        overflow-y: auto;
+        overscroll-behavior: contain;
+
+        padding:
+          18px
+          calc(var(--control-padding) + var(--safe-right))
+          calc(var(--control-padding) + var(--safe-bottom))
+          var(--control-padding);
+
+        scrollbar-width: thin;
+        scrollbar-color:
+          rgb(255 255 255 / 24%)
+          transparent;
+
+        -webkit-mask-image:
+          linear-gradient(
+            to bottom,
+            transparent 0,
+            #000 18px,
+            #000 100%
+          );
+
+        mask-image:
+          linear-gradient(
+            to bottom,
+            transparent 0,
+            #000 18px,
+            #000 100%
+          );
+      }
+
+      .action-button {
+        width: 100%;
+
+        min-block-size:
+          var(--action-min-height);
+
+        padding:
+          clamp(8px, 0.8vmin, 12px)
+          0.9em;
+
+        border:
+          1px solid
+          rgb(255 255 255 / 16%);
+
+        border-radius: 4px;
+
+        background:
+          rgb(9 10 13 / 34%);
+        color: var(--text);
+
+        box-shadow:
+          2px 0 0
+            color-mix(
+              in srgb,
+              var(--ui-accent) 38%,
+              transparent
+            )
+            inset,
+          0 1px 0 rgb(255 255 255 / 4%) inset;
+
+        font-size:
+          var(--action-font-size);
+
+        line-height: 1.18;
+        text-align: left;
+        text-shadow: none;
+
+        white-space: normal;
+        text-wrap: balance;
+        overflow-wrap: anywhere;
+
+        cursor: pointer;
+      }
+
+      .switch-ui {
+        box-shadow:
+          0 1px 0 rgb(255 255 255 / 4%) inset,
+          0 3px 9px rgb(0 0 0 / 12%);
+      }
+    
+}

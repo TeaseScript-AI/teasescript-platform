@@ -1,0 +1,189 @@
+@layer responsive {
+      @media (max-width: 760px) {
+        .player[data-left="auto"] {
+          --left-track: 0px;
+        }
+
+        .player[data-right="auto"] {
+          --right-track: 0px;
+          --right-reserve: 0px;
+        }
+
+        .player[data-right="auto"] .right-zone {
+          grid-column: 2 / 4;
+          grid-row: 2 / 3;
+
+          justify-self: end;
+
+          inline-size: var(--right-controls-width);
+          max-inline-size: var(--right-controls-width);
+
+          background: transparent;
+        }
+
+        .player[data-left="open"] {
+          --left-track: 0px;
+        }
+
+        .player[data-left="open"] .left-scrim {
+          display: block;
+
+          position: absolute;
+          z-index: 35;
+          inset: 0;
+
+          padding: 0;
+          border: 0;
+          background: transparent;
+
+          cursor: default;
+        }
+
+        .player[data-left="open"] .left-panel {
+          /*
+            True overlay drawer:
+            - its Grid containing area is the complete Player;
+            - starts at the physical top, so no title-sized gap remains;
+            - sits above media/right controls, but below title controls;
+            - right controls stay alive underneath.
+          */
+          position: absolute;
+          z-index: 40;
+
+          grid-column: 1 / -1;
+          grid-row: 1 / -1;
+
+          top: 0;
+          bottom: 0;
+          left: 0;
+
+          width: min(82vw, 300px);
+
+          padding-top: var(--title-height);
+
+          background:
+            color-mix(
+              in srgb,
+              var(--side-bg) 91%,
+              transparent
+            );
+
+          box-shadow:
+            18px 0 34px
+            rgb(0 0 0 / 24%);
+        }
+
+      }
+
+      /*
+        Wide portrait manual overlay:
+        collapsing only the right background must not move the conversation.
+        This deliberately starts above the narrow/mobile breakpoint so the
+        existing mobile auto/overlay behaviour remains untouched.
+      */
+      @media
+        (min-width: 761px)
+        and (orientation: portrait) {
+        .player[data-right="overlay"] {
+          --right-reserve:
+            var(--right-controls-width);
+        }
+
+        .player[data-right="overlay"] .transcript,
+        .player[data-right="overlay"] .composer {
+          margin-inline-end:
+            var(--right-controls-width);
+        }
+      }
+
+      /*
+        LANDSCAPE STRATEGY
+        ------------------
+        Horizontal room is cheaper than vertical room:
+        - overlay Actions may use the full Player height;
+        - transcript/composer reserve one right-hand control strip;
+        - toggling the right background does not move their geometry.
+
+        This deliberately depends on orientation, not an arbitrary height
+        threshold, so resizing a landscape window vertically does not switch
+        strategies unexpectedly.
+      */
+      @media (orientation: landscape) {
+        .player[data-right="overlay"] {
+          --right-reserve: var(--right-controls-width);
+        }
+
+        .player[data-right="overlay"] .right-zone {
+          grid-column: 2 / 4;
+          grid-row: 2 / 5;
+        }
+
+        .player[data-right="overlay"] .transcript,
+        .player[data-right="overlay"] .composer {
+          margin-inline-end: var(--right-controls-width);
+        }
+      }
+
+      /*
+        Narrow auto mode is an overlay. In landscape it follows the same
+        full-height/reserved-strip strategy. In portrait, the controls stay
+        over the media only and transcript/composer keep the full width.
+      */
+      @media (max-width: 760px) and (orientation: landscape) {
+        .player[data-right="auto"] {
+          --right-reserve: 0px;
+        }
+
+        .player[data-right="auto"] .right-zone {
+          grid-column: 2 / 4;
+          grid-row: 2 / 5;
+        }
+
+        .player[data-right="auto"] .transcript,
+        .player[data-right="auto"] .composer {
+          margin-inline-end: var(--right-controls-width);
+        }
+      }
+
+      @media (max-height: 600px) {
+        .player {
+          --title-track: 0px;
+          --title-overlay-clearance:
+            var(--title-height);
+
+          --media-height: 64dvh;
+        }
+
+        .title-bg {
+          background: transparent;
+        }
+
+        .title-text,
+        .icon-button {
+          border-radius: 3px;
+
+          background:
+            rgb(29 33 41 / 58%);
+        }
+      }
+
+      @media
+        (max-height: 600px)
+        and (hover: hover)
+        and (pointer: fine) {
+        .icon-button:hover {
+          background:
+            rgb(29 33 41 / 76%);
+        }
+      }
+
+      @media (max-width: 480px) {
+        .composer {
+          padding-block: 8px;
+        }
+
+        .send-button {
+          min-width: 64px;
+        }
+      }
+    }

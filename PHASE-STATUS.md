@@ -22,8 +22,9 @@ accept syntax, architecture, or implementation details.
   compact `showButton`, `askText`, `askNumber`, and `choose` forms lowered into one typed foreground-interaction
   family; and ADR 0018 `say` smart/exact pacing with one resumable `chatPacingGate`, deterministic checkpoint/restore,
   prepared output, typed skip settlement, and interaction/`wait` composition.
-- **Development and verification:** a standalone browser playground, source-to-runtime conformance coverage,
-  focused runtime/checkpoint/state-validation tests, and a bounded deterministic property campaign.
+- **Development and verification:** a standalone browser playground, a modular production-oriented Player presentation
+  POC using demo presentation data, source-to-runtime conformance coverage, focused runtime/checkpoint/state-validation
+  tests, and a bounded deterministic property campaign.
 
 These summaries are orientation only. The current topic documents below are canonical for the detailed implementation
 contracts and boundaries.
@@ -31,8 +32,8 @@ contracts and boundaries.
 ## Current major exclusions and blockers
 
 - complete V30 coverage, complete static typing, and units/date/time/duration values;
-- Standard Player interaction/pacing controls, richer editor support, and final browser interaction acceptance
-  coverage;
+- runtime wiring for Standard Player interaction/pacing controls, richer editor support, and final browser interaction
+  acceptance coverage;
 - background-action kinds beyond `chatPacingGate`, general timers, media actions, camera lifecycle, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and

@@ -1,0 +1,123 @@
+@layer components {
+      /* ---------- Transcript ---------- */
+
+      .message {
+        max-width: 84%;
+
+        --speaker-accent: #9ba4b2;
+        --speaker-font: inherit;
+      }
+
+      .message.user {
+        align-self: flex-end;
+        margin-inline-start: auto;
+
+        text-align: right;
+      }
+
+      .message-row {
+        display: grid;
+        grid-template-columns:
+          auto
+          minmax(0, 1fr);
+
+        align-items: start;
+        gap: 9px;
+      }
+
+      .message.user .message-row {
+        grid-template-columns:
+          minmax(0, 1fr)
+          auto;
+
+        justify-items: end;
+      }
+
+      .speaker-avatar {
+        width: 30px;
+        aspect-ratio: 1;
+
+        display: grid;
+        place-items: center;
+
+        border:
+          1px solid
+          color-mix(
+            in srgb,
+            var(--speaker-accent) 52%,
+            transparent
+          );
+
+        border-radius: 50%;
+
+        background:
+          color-mix(
+            in srgb,
+            var(--speaker-accent) 18%,
+            #171b21
+          );
+
+        color:
+          color-mix(
+            in srgb,
+            var(--speaker-accent) 72%,
+            white
+          );
+
+        font-size: 0.68rem;
+        font-weight: 750;
+      }
+
+      .message.user .speaker-avatar {
+        order: 2;
+      }
+
+      .message-copy {
+        min-width: 0;
+      }
+
+      .message.user .message-copy {
+        text-align: right;
+      }
+
+      .speaker-name {
+        margin-bottom: 2px;
+
+        color: var(--speaker-accent);
+
+        font-size: 0.67rem;
+        font-weight: 750;
+        letter-spacing: 0.025em;
+      }
+
+      .message-body {
+        padding-left: 9px;
+
+        border-left:
+          2px solid
+          color-mix(
+            in srgb,
+            var(--speaker-accent) 58%,
+            transparent
+          );
+
+        font-family:
+          var(--speaker-font);
+
+        line-height: 1.5;
+      }
+
+      .message.user .message-body {
+        padding-left: 0;
+        padding-right: 9px;
+
+        border-left: 0;
+        border-right:
+          2px solid
+          color-mix(
+            in srgb,
+            var(--speaker-accent) 58%,
+            transparent
+          );
+      }
+}

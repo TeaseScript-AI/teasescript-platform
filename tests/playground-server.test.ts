@@ -40,6 +40,24 @@ test("serves the root playground page", async () => {
   assert.match(response.body, /TeaseScript Playground/u);
 });
 
+test("serves the modular Player demo and its local assets", async () => {
+  const [html, javascript, css] = await Promise.all([
+    get("/player/"),
+    get("/dist/player/browser.js"),
+    get("/player/styles/layout.css"),
+  ]);
+
+  assert.equal(html.status, 200);
+  assert.match(html.contentType, /^text\/html/u);
+  assert.match(html.body, /TeaseScript Player/u);
+  assert.equal(javascript.status, 200);
+  assert.match(javascript.contentType, /^text\/javascript/u);
+  assert.match(javascript.body, /toggleLeftPanelMode/u);
+  assert.equal(css.status, 200);
+  assert.match(css.contentType, /^text\/css/u);
+  assert.match(css.body, /--right-controls-width/u);
+});
+
 test("serves required JavaScript and CSS assets", async () => {
   const [javascript, css] = await Promise.all([
     get("/dist/playground/browser.js"),
@@ -91,6 +109,7 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
   const projectRoot = await mkdtemp(join(tmpdir(), "teasescript-playground-"));
   context.after(async () => rm(projectRoot, { recursive: true, force: true }));
   await mkdir(join(projectRoot, "playground"), { recursive: true });
+  await mkdir(join(projectRoot, "player"), { recursive: true });
   await mkdir(join(projectRoot, "dist"), { recursive: true });
   await mkdir(join(projectRoot, "examples", "playground"), { recursive: true });
   await writeFile(join(projectRoot, "secret.txt"), "not public", "utf8");
