@@ -687,6 +687,7 @@ A player-facing pause command is not deferred; it is excluded by this accepted c
 - click-anywhere and Space-to-advance require careful event precedence, input-method, and accessibility testing;
 - bounded-data guards add maintenance and test cost; under ADR 0019 each retained guard needs a justified local boundary, and semantically distinct boundaries are not coupled merely for consistency;
 - account pacing values become deterministic session inputs that must be persisted correctly;
-- populated background actions and background-to-foreground gate promotion require explicit schema versioning and adversarial validation tests;
+- populated background actions and background-to-foreground gate promotion require explicit schema versioning and
+  negative schema-validation tests;
 - prepared delayed output must preserve source evaluation and RNG results across checkpoint/restore;
 - the first POC deliberately does not solve final library packaging, advanced input options, or multi-conversation provenance.

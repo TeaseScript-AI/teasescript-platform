@@ -7,7 +7,7 @@ supported capacity. Issue #288 removed, structurally repaired, or deliberately r
 entry. The #304 implementation removes generic capture depth/work, sparse-array preflight, and detailed-validation work
 rejection; current POC policy does not treat those dimensions as rejection requirements without a concrete current
 protected boundary. Remaining numeric policies below are separate decisions and are not justified by that removed
-capture threat model.
+external-input capture model.
 
 ## Conventions
 
@@ -80,7 +80,7 @@ chose on 2026-08-09 to retain their current numeric values through the POC while
 workloads are still changing. That compatibility-preservation rationale does **not** establish that a historical number
 was technically derived, measured as safe capacity, or suitable as a permanent compatibility promise. The #304
 reassessment does not make these remaining policies security requirements and does not re-decide them merely because
-the generic capture threat model changed.
+the generic external-input capture policy changed.
 
 Every row in this table therefore remains `provisional` and must follow its own ADR 0019 change route. It must be
 reassessed before its numeric value is carried forward as supported non-POC compatibility behavior, no later than the

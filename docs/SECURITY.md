@@ -20,12 +20,13 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
   detailed use. Captured arrays use an engine-owned prototype isolated from ambient numeric `Array.prototype`
   properties, and density checks require own indexes. Compiler-owned plans use complete inspect-only validation without
   this defensive copy. Defensive capture is correctness/robustness behavior, not by itself a TeaseScript content-capacity
-  or security policy, and already validated internal representations are not reclassified as hostile merely because they
-  share a capture or validation helper.
-- A resource-based security rejection requires a concrete current attacker, a distinct victim or protected platform
-  asset, a reachable boundary, and the consequence being prevented. Self-only local misuse is not sufficient. Generic
-  work, node, size, or traversal-depth counters may be useful diagnostics, but they do not reject otherwise valid
-  TeaseScript or structurally valid engine data without a separately justified current boundary. Future shared/server
+  or security policy, and already validated internal representations do not need external-data capture merely because
+  they share a capture or validation helper.
+- A resource-based security rejection requires a concrete current cross-principal or protected-resource boundary,
+  reachable influence across that boundary, and the consequence being prevented. Self-only local misuse is not
+  sufficient. Generic work, node, size, or traversal-depth counters may be useful diagnostics, but they do not reject
+  otherwise valid TeaseScript or structurally valid engine data without a separately justified current boundary. Future
+  shared/server
   resource controls belong at the actual shared-resource or submission boundary rather than in speculative TeaseScript
   plan/snapshot/checkpoint size limits.
 - Keep serializable-set validation and reconstruction linear while preserving insertion order, scalar equality, and the canonical array representation.
