@@ -3,6 +3,9 @@ import type {
   PlayerMessagePresentation,
   PlayerPresentation,
   PlayerSpeakerPresentation,
+  PlayerToolColumnState,
+  PlayerToolDefinition,
+  PlayerToolId,
 } from "./model.js";
 
 export interface PlayerRenderTargets {
@@ -103,4 +106,242 @@ function createActionButton(action: PlayerActionPresentation): HTMLButtonElement
   button.dataset.actionId = action.id;
   button.textContent = action.label;
   return button;
+}
+
+
+export function renderToolColumns(
+  strip: HTMLElement,
+  columns: readonly PlayerToolColumnState[],
+  tools: readonly PlayerToolDefinition[],
+  presentation: PlayerPresentation,
+): void {
+  if (columns.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "tool-empty-state";
+    empty.textContent = "No tool columns are open. Add one with + when you want another tool visible.";
+    strip.replaceChildren(empty);
+    return;
+  }
+
+  strip.replaceChildren(
+    ...columns.map((column) => createToolColumn(column, tools, presentation)),
+  );
+}
+
+function createToolColumn(
+  column: PlayerToolColumnState,
+  tools: readonly PlayerToolDefinition[],
+  presentation: PlayerPresentation,
+): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "tool-column";
+  section.dataset.toolColumnId = column.id;
+  section.dataset.toolId = column.toolId ?? "";
+
+  const header = document.createElement("header");
+  header.className = "tool-column-header";
+
+  const selector = document.createElement("select");
+  selector.className = "tool-selector";
+  selector.dataset.toolColumnSelect = "";
+  selector.setAttribute("aria-label", "Tool shown in this column");
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Choose tool…";
+  placeholder.disabled = true;
+  placeholder.selected = column.toolId === null;
+  selector.append(placeholder);
+
+  for (const tool of tools) {
+    const option = document.createElement("option");
+    option.value = tool.id;
+    option.textContent = tool.label;
+    option.selected = tool.id === column.toolId;
+    selector.append(option);
+  }
+
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "tool-column-close";
+  close.dataset.toolColumnClose = "";
+  close.setAttribute("aria-label", "Close tool column");
+  close.title = "Close tool column";
+  close.textContent = "×";
+
+  const body = document.createElement("div");
+  body.className = "tool-column-body";
+  body.dataset.toolBody = column.toolId ?? "";
+  body.append(createToolBody(column.toolId, presentation));
+
+  header.append(selector, close);
+  section.append(header, body);
+  return section;
+}
+
+function createToolBody(
+  toolId: PlayerToolId | null,
+  presentation: PlayerPresentation,
+): Node {
+  switch (toolId) {
+    case null: {
+      const placeholder = document.createElement("p");
+      placeholder.className = "tool-placeholder";
+      placeholder.textContent = "Choose a tool for this column.";
+      return placeholder;
+    }
+    case "visuals":
+      return createVisualTool();
+    case "scene":
+      return createSceneTool(presentation);
+    case "actions":
+      return createActionsTool(presentation.actions);
+  }
+}
+
+function createVisualTool(): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+
+  const header = document.createElement("div");
+  header.className = "lab-header";
+
+  const titleRow = document.createElement("div");
+  titleRow.className = "lab-title-row";
+
+  const title = document.createElement("h3");
+  title.className = "lab-title";
+  title.textContent = "Visual Lab";
+
+  const picker = document.createElement("label");
+  picker.className = "theme-picker";
+  picker.append("Accent");
+
+  const colour = document.createElement("input");
+  colour.type = "color";
+  colour.dataset.themeColor = "";
+  colour.setAttribute("aria-label", "Player accent colour");
+  picker.append(colour);
+
+  titleRow.append(title, picker);
+
+  const note = document.createElement("p");
+  note.className = "lab-note";
+  note.textContent = "Cosmetic experiments only. Text wraps; tool sizing stays bounded.";
+
+  const fixed = document.createElement("div");
+  fixed.className = "lab-fixed-note";
+  fixed.textContent = "Always on: accent · timer ring · refined controls · surface depth · speaker identity · speaker typography · micro-motion · transcript fade";
+
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "lab-reset";
+  reset.dataset.resetVisuals = "";
+  reset.textContent = "Reset visual tests";
+
+  header.append(titleRow, note, fixed, reset);
+
+  const scroll = document.createElement("div");
+  scroll.className = "lab-scroll";
+
+  const options = document.createElement("div");
+  options.className = "lab-options";
+  options.append(
+    createVisualOption(
+      "Ambient media colour",
+      "Weak scene colour bleed around media.",
+      "fx-ambient",
+    ),
+    createVisualOption(
+      "Vignette",
+      "Universal edge darkening for any media content.",
+      "fx-vignette",
+    ),
+  );
+  scroll.append(options);
+
+  fragment.append(header, scroll);
+  return fragment;
+}
+
+function createVisualOption(
+  title: string,
+  note: string,
+  effect: string,
+): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "lab-option";
+
+  const copy = document.createElement("span");
+  copy.className = "lab-option-copy";
+
+  const titleElement = document.createElement("span");
+  titleElement.className = "lab-option-title";
+  titleElement.textContent = title;
+
+  const noteElement = document.createElement("span");
+  noteElement.className = "lab-option-note";
+  noteElement.textContent = note;
+  copy.append(titleElement, noteElement);
+
+  const switchElement = document.createElement("span");
+  switchElement.className = "switch";
+
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.dataset.effect = effect;
+
+  const switchUi = document.createElement("span");
+  switchUi.className = "switch-ui";
+  switchElement.append(input, switchUi);
+
+  label.append(copy, switchElement);
+  return label;
+}
+
+function createSceneTool(presentation: PlayerPresentation): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "tool-section";
+
+  const title = document.createElement("h3");
+  title.className = "tool-section-title";
+  title.textContent = "Scene";
+
+  const list = document.createElement("dl");
+  list.className = "tool-kv";
+  appendKeyValue(list, "Media", presentation.media.id);
+  appendKeyValue(list, "Fit", presentation.media.fit);
+  appendKeyValue(list, "Caption", presentation.media.caption);
+  appendKeyValue(list, "Timer", formatTimer(presentation.timer.remainingSeconds));
+
+  section.append(title, list);
+  return section;
+}
+
+function appendKeyValue(list: HTMLDListElement, key: string, value: string): void {
+  const term = document.createElement("dt");
+  term.textContent = key;
+  const description = document.createElement("dd");
+  description.textContent = value;
+  list.append(term, description);
+}
+
+function createActionsTool(actions: readonly PlayerActionPresentation[]): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "tool-section";
+
+  const title = document.createElement("h3");
+  title.className = "tool-section-title";
+  title.textContent = "Available actions";
+
+  const list = document.createElement("ul");
+  list.className = "tool-action-list";
+  for (const action of actions) {
+    const item = document.createElement("li");
+    item.className = "tool-action-item";
+    item.textContent = action.label;
+    list.append(item);
+  }
+
+  section.append(title, list);
+  return section;
 }

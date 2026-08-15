@@ -1,4 +1,15 @@
 export type MediaFit = "contain" | "cover";
+export type PlayerToolId = "visuals" | "scene" | "actions";
+
+export interface PlayerToolDefinition {
+  readonly id: PlayerToolId;
+  readonly label: string;
+}
+
+export interface PlayerToolColumnState {
+  readonly id: string;
+  readonly toolId: PlayerToolId | null;
+}
 
 export interface PlayerPackagePresentation {
   readonly accentColor: string;

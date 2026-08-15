@@ -1,7 +1,24 @@
 @layer responsive {
+      @media (min-width: 761px) {
+        .player[data-left="auto"],
+        .player[data-left="open"] {
+          --left-grid-track:
+            min(
+              max(var(--left-preferred), var(--left-open)),
+              var(--left-panel-max)
+            );
+        }
+
+        .player[data-left="auto"] .left-panel,
+        .player[data-left="open"] .left-panel {
+          min-inline-size: var(--left-open);
+        }
+      }
+
       @media (max-width: 760px) {
         .player[data-left="auto"] {
-          --left-track: 0px;
+          --left-grid-track: 0px;
+          --left-reserve: 0px;
         }
 
         .player[data-right="auto"] {
@@ -22,7 +39,8 @@
         }
 
         .player[data-left="open"] {
-          --left-track: 0px;
+          --left-grid-track: 0px;
+          --left-reserve: 0px;
         }
 
         .player[data-left="open"] .left-scrim {

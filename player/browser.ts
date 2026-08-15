@@ -1,40 +1,69 @@
-import { DEFAULT_VISUAL_PREFERENCES, DEMO_PRESENTATION } from "./demo-session.js";
-import type { LeftPanelMode, RightPanelMode } from "./model.js";
+import {
+  DEFAULT_VISUAL_PREFERENCES,
+  DEMO_PRESENTATION,
+  DEMO_TOOL_DEFINITIONS,
+  INITIAL_TOOL_COLUMNS,
+} from "./demo-session.js";
+import type {
+  LeftPanelMode,
+  PlayerToolColumnState,
+  PlayerToolId,
+  RightPanelMode,
+} from "./model.js";
 import { toggleLeftPanelMode, toggleRightPanelMode } from "./panel-state.js";
-import { renderPresentation } from "./render.js";
+import { renderPresentation, renderToolColumns } from "./render.js";
+import { addToolColumn, closeToolColumn, selectToolColumn } from "./tool-columns.js";
 
 const player = requiredElement<HTMLElement>("player", HTMLElement);
 const leftToggle = requiredElement<HTMLButtonElement>("leftToggle", HTMLButtonElement);
+const leftPanel = requiredElement<HTMLElement>("leftPanel", HTMLElement);
 const leftScrim = requiredElement<HTMLElement>("leftScrim", HTMLElement);
+const addToolColumnButton = requiredElement<HTMLButtonElement>("addToolColumn", HTMLButtonElement);
+const toolStrip = requiredElement<HTMLElement>("toolStrip", HTMLElement);
+const toolStripScroll = requiredElement<HTMLElement>("toolStripScroll", HTMLElement);
 const rightToggle = requiredElement<HTMLButtonElement>("rightToggle", HTMLButtonElement);
 const transcript = requiredElement<HTMLElement>("transcript", HTMLElement);
 const actions = requiredElement<HTMLElement>("actions", HTMLElement);
 const timerText = requiredElement<HTMLElement>("timerText", HTMLElement);
 const mediaFit = requiredElement<HTMLElement>("mediaFit", HTMLElement);
 const mediaCaption = requiredElement<HTMLElement>("mediaCaption", HTMLElement);
-const themeColor = requiredColourInput("themeColor");
-const resetLab = requiredElement<HTMLButtonElement>("resetLab", HTMLButtonElement);
 const composerForm = requiredElement<HTMLFormElement>("composerForm", HTMLFormElement);
-const visualInputs = [...document.querySelectorAll<HTMLInputElement>("[data-effect]")];
 
 const narrowScreen = window.matchMedia("(max-width: 760px)");
+
+let toolColumns: readonly PlayerToolColumnState[] = INITIAL_TOOL_COLUMNS;
+let nextToolColumnNumber = 2;
+let accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
+let ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
+let vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
 
 renderPresentation(
   { player, transcript, actions, timerText, mediaFit, mediaCaption },
   DEMO_PRESENTATION,
 );
+renderTools();
 resetVisualLab();
 syncPanelAccessibility();
+syncLeftPreferredWidth();
+syncLeftReserve();
+
+const leftPanelObserver = new ResizeObserver(syncLeftReserve);
+leftPanelObserver.observe(leftPanel);
+
+const toolStripObserver = new ResizeObserver(syncLeftPreferredWidth);
+toolStripObserver.observe(toolStrip);
 
 leftToggle.addEventListener("click", () => {
   player.dataset.left = toggleLeftPanelMode(currentLeftMode(), usesWideDefaultLayout());
   syncPanelAccessibility();
+  queueLeftReserveSync();
 });
 
 leftScrim.addEventListener("click", () => {
   if (narrowScreen.matches && player.dataset.left === "open") {
     player.dataset.left = "closed";
     syncPanelAccessibility();
+    queueLeftReserveSync();
   }
 });
 
@@ -43,7 +72,10 @@ rightToggle.addEventListener("click", () => {
   syncPanelAccessibility();
 });
 
-narrowScreen.addEventListener("change", syncPanelAccessibility);
+narrowScreen.addEventListener("change", () => {
+  syncPanelAccessibility();
+  queueLeftReserveSync();
+});
 
 document.addEventListener("keydown", (event) => {
   if (
@@ -53,22 +85,78 @@ document.addEventListener("keydown", (event) => {
   ) {
     player.dataset.left = "closed";
     syncPanelAccessibility();
+    queueLeftReserveSync();
     leftToggle.focus();
   }
 });
 
-themeColor.addEventListener("input", () => {
-  applyAccentColour(themeColor.value);
+addToolColumnButton.addEventListener("click", () => {
+  const id = `tool-column-${nextToolColumnNumber}`;
+  nextToolColumnNumber += 1;
+  toolColumns = addToolColumn(toolColumns, id);
+  renderTools("end");
 });
 
-for (const input of visualInputs) {
-  input.addEventListener("change", () => {
-    setVisualOption(input, input.checked);
+toolStrip.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLSelectElement && target.matches("[data-tool-column-select]")) {
+    const column = target.closest<HTMLElement>("[data-tool-column-id]");
+    if (column === null) throw new Error("Tool selector is not inside a tool column.");
+    if (!isPlayerToolId(target.value)) throw new Error(`Unknown Player tool: ${target.value}`);
+    toolColumns = selectToolColumn(toolColumns, requiredDatasetValue(column, "toolColumnId"), target.value);
+    renderTools();
+    return;
+  }
+
+  if (target instanceof HTMLInputElement && target.matches("[data-effect]")) {
+    const effect = requiredDatasetValue(target, "effect");
+    setVisualOption(effect, target.checked);
+  }
+});
+
+toolStrip.addEventListener("input", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLInputElement && target.matches("[data-theme-color]")) {
+    applyAccentColour(target.value);
+  }
+});
+
+toolStrip.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  const close = target.closest<HTMLButtonElement>("[data-tool-column-close]");
+  if (close !== null) {
+    const column = close.closest<HTMLElement>("[data-tool-column-id]");
+    if (column === null) throw new Error("Tool close button is not inside a tool column.");
+    toolColumns = closeToolColumn(toolColumns, requiredDatasetValue(column, "toolColumnId"));
+    renderTools();
+    return;
+  }
+
+  if (target.closest("[data-reset-visuals]") !== null) {
+    resetVisualLab();
+  }
+});
+
+composerForm.addEventListener("submit", (event) => event.preventDefault());
+
+function renderTools(scrollMode: "preserve" | "end" = "preserve"): void {
+  const previousScrollLeft = toolStripScroll.scrollLeft;
+  renderToolColumns(toolStrip, toolColumns, DEMO_TOOL_DEFINITIONS, DEMO_PRESENTATION);
+  syncVisualControls();
+
+  requestAnimationFrame(() => {
+    syncLeftPreferredWidth();
+    if (scrollMode === "end") {
+      toolStripScroll.scrollLeft = toolStripScroll.scrollWidth;
+    } else {
+      const maxScrollLeft = Math.max(0, toolStripScroll.scrollWidth - toolStripScroll.clientWidth);
+      toolStripScroll.scrollLeft = Math.min(previousScrollLeft, maxScrollLeft);
+    }
+    syncLeftReserve();
   });
 }
-
-resetLab.addEventListener("click", resetVisualLab);
-composerForm.addEventListener("submit", (event) => event.preventDefault());
 
 function usesWideDefaultLayout(): boolean {
   return !narrowScreen.matches;
@@ -98,34 +186,90 @@ function syncPanelAccessibility(): void {
   rightToggle.setAttribute("aria-pressed", String(rightDocked));
 }
 
-function applyAccentColour(value: string): void {
-  document.documentElement.style.setProperty("--theme-color", value);
-  themeColor.value = value;
+function queueLeftReserveSync(): void {
+  requestAnimationFrame(() => {
+    syncLeftPreferredWidth();
+    syncLeftReserve();
+  });
 }
 
-function setVisualOption(input: HTMLInputElement, enabled: boolean): void {
-  input.checked = enabled;
-  const effect = input.dataset.effect;
-  if (effect === undefined || effect.length === 0) {
-    throw new Error("Visual option is missing data-effect.");
+function syncLeftPreferredWidth(): void {
+  // Measure only the intrinsic preferred width; CSS still owns allocation and the 1:1 cap.
+  const stripWidth = Math.ceil(toolStrip.getBoundingClientRect().width);
+  const panelChromeWidth = Math.max(
+    0,
+    Math.ceil(leftPanel.getBoundingClientRect().width - toolStripScroll.clientWidth),
+  );
+  player.style.setProperty("--left-preferred", `${stripWidth + panelChromeWidth}px`);
+}
+
+function syncLeftReserve(): void {
+  const reservesGridSpace = usesWideDefaultLayout() && currentLeftMode() !== "closed";
+  const reserve = reservesGridSpace ? leftPanel.getBoundingClientRect().width : 0;
+  player.style.setProperty("--left-reserve", `${reserve}px`);
+}
+
+function applyAccentColour(value: string): void {
+  accentColor = value;
+  document.documentElement.style.setProperty("--theme-color", value);
+  syncVisualControls();
+}
+
+function setVisualOption(effect: string, enabled: boolean): void {
+  switch (effect) {
+    case "fx-ambient":
+      ambientEnabled = enabled;
+      break;
+    case "fx-vignette":
+      vignetteEnabled = enabled;
+      break;
+    default:
+      throw new Error(`Unknown visual option: ${effect}`);
   }
+
   player.classList.toggle(effect, enabled);
+  syncVisualControls();
 }
 
 function resetVisualLab(): void {
-  applyAccentColour(DEFAULT_VISUAL_PREFERENCES.accentColor);
-  for (const input of visualInputs) {
+  accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
+  ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
+  vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
+  document.documentElement.style.setProperty("--theme-color", accentColor);
+  player.classList.toggle("fx-ambient", ambientEnabled);
+  player.classList.toggle("fx-vignette", vignetteEnabled);
+  syncVisualControls();
+}
+
+function syncVisualControls(): void {
+  for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-theme-color]")) {
+    input.value = accentColor;
+  }
+
+  for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-effect]")) {
     switch (input.dataset.effect) {
       case "fx-ambient":
-        setVisualOption(input, DEFAULT_VISUAL_PREFERENCES.ambient);
+        input.checked = ambientEnabled;
         break;
       case "fx-vignette":
-        setVisualOption(input, DEFAULT_VISUAL_PREFERENCES.vignette);
+        input.checked = vignetteEnabled;
         break;
       default:
         throw new Error(`Unknown visual option: ${String(input.dataset.effect)}`);
     }
   }
+}
+
+function isPlayerToolId(value: string): value is PlayerToolId {
+  return DEMO_TOOL_DEFINITIONS.some((tool) => tool.id === value);
+}
+
+function requiredDatasetValue(element: HTMLElement, key: string): string {
+  const value = element.dataset[key];
+  if (value === undefined || value.length === 0) {
+    throw new Error(`Player element is missing data-${key}.`);
+  }
+  return value;
 }
 
 function requiredElement<T extends Element>(
@@ -137,12 +281,4 @@ function requiredElement<T extends Element>(
     throw new Error(`Missing or invalid Player element #${id}.`);
   }
   return element;
-}
-
-function requiredColourInput(id: string): HTMLInputElement {
-  const input = requiredElement<HTMLInputElement>(id, HTMLInputElement);
-  if (input.type !== "color") {
-    throw new Error(`Player element #${id} must be a colour input.`);
-  }
-  return input;
 }

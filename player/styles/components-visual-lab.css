@@ -6,7 +6,7 @@
           14px
           14px
           10px
-          calc(14px + var(--safe-left));
+          14px;
 
         background: var(--side-bg);
         border-bottom:
@@ -100,8 +100,8 @@
         padding:
           8px
           10px
-          calc(14px + var(--safe-bottom))
-          calc(10px + var(--safe-left));
+          14px
+          10px;
 
         scrollbar-width: thin;
         scrollbar-color:

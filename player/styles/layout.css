@@ -32,7 +32,9 @@
         --title-overlay-clearance: 0px;
 
         --left-open: clamp(190px, 15vw, 250px);
-        --left-track: var(--left-open);
+        --left-grid-track: var(--left-open);
+        --left-preferred: var(--left-open);
+        --left-reserve: var(--left-open);
 
         --media-height: 62dvh;
 
@@ -68,6 +70,12 @@
       }
 
       .player {
+        --left-panel-max:
+          max(
+            var(--left-open),
+            calc(100vw - var(--right-track) - var(--media-height))
+          );
+
         position: relative;
 
         width: 100vw;
@@ -75,7 +83,7 @@
 
         display: grid;
         grid-template-columns:
-          var(--left-track)
+          var(--left-grid-track)
           minmax(0, 1fr)
           var(--right-track);
 
@@ -90,7 +98,8 @@
       }
 
       .player[data-left="closed"] {
-        --left-track: 0px;
+        --left-grid-track: 0px;
+        --left-reserve: 0px;
       }
 
       .player[data-right="overlay"] {
@@ -199,7 +208,7 @@
             calc(var(--conversation-gap) + var(--safe-left)),
             calc(
               (100vw - var(--conversation-max-width)) / 2
-              - var(--left-track)
+              - var(--left-reserve)
             )
           );
 
@@ -255,7 +264,7 @@
             calc(12px + var(--safe-left)),
             calc(
               (100vw - var(--conversation-max-width)) / 2
-              - var(--left-track)
+              - var(--left-reserve)
             )
           );
 

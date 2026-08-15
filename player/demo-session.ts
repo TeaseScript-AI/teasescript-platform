@@ -1,4 +1,9 @@
-import type { PlayerPresentation, PlayerVisualPreferences } from "./model.js";
+import type {
+  PlayerPresentation,
+  PlayerToolColumnState,
+  PlayerToolDefinition,
+  PlayerVisualPreferences,
+} from "./model.js";
 
 export const DEMO_PRESENTATION: PlayerPresentation = {
   package: {
@@ -76,3 +81,13 @@ export const DEFAULT_VISUAL_PREFERENCES: PlayerVisualPreferences = {
   ambient: true,
   vignette: false,
 };
+
+export const DEMO_TOOL_DEFINITIONS: readonly PlayerToolDefinition[] = [
+  { id: "visuals", label: "Visual Lab" },
+  { id: "scene", label: "Scene" },
+  { id: "actions", label: "Actions" },
+];
+
+export const INITIAL_TOOL_COLUMNS: readonly PlayerToolColumnState[] = [
+  { id: "tool-column-1", toolId: "visuals" },
+];

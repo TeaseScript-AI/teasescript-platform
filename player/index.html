@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/player/styles/reset.css" />
   <link rel="stylesheet" href="/player/styles/layout.css" />
   <link rel="stylesheet" href="/player/styles/components-base.css" />
+  <link rel="stylesheet" href="/player/styles/components-tools.css" />
   <link rel="stylesheet" href="/player/styles/components-visual-lab.css" />
   <link rel="stylesheet" href="/player/styles/components-media.css" />
   <link rel="stylesheet" href="/player/styles/components-transcript.css" />
@@ -36,7 +37,7 @@
         class="icon-button"
         id="leftToggle"
         type="button"
-        aria-label="Toggle Visual Lab"
+        aria-label="Toggle tools"
         aria-controls="leftPanel"
         aria-expanded="false"
       >
@@ -57,85 +58,26 @@
     <aside
       class="left-panel"
       id="leftPanel"
-      aria-label="Visual Lab"
+      aria-label="Player tools"
     >
-      <div class="lab-header">
-        <div class="lab-title-row">
-          <h2 class="lab-title">
-            Visual Lab
-          </h2>
-
-          <label class="theme-picker">
-            Accent
-            <input
-              id="themeColor"
-              type="color"
-              value="#8f3048"
-              aria-label="Player accent colour"
-            />
-          </label>
-        </div>
-
-        <p class="lab-note">
-          Cosmetic experiments only. Text wraps;
-          the panel does not resize itself from labels.
-        </p>
-
-        <div class="lab-fixed-note">
-          Always on:
-          accent · timer ring · refined controls · surface depth ·
-          speaker identity · speaker typography · micro-motion · transcript fade
+      <div class="tool-panel-header">
+        <div class="tool-panel-heading">
+          <h2 class="tool-panel-title">Tools</h2>
         </div>
 
         <button
-          class="lab-reset"
-          id="resetLab"
+          class="tool-column-add"
+          id="addToolColumn"
           type="button"
+          aria-label="Add tool column"
+          title="Add tool column"
         >
-          Reset visual tests
+          +
         </button>
       </div>
 
-      <div class="lab-scroll">
-        <div class="lab-options">
-          <label class="lab-option">
-            <span class="lab-option-copy">
-              <span class="lab-option-title">
-                Ambient media colour
-              </span>
-              <span class="lab-option-note">
-                Weak scene colour bleed around media.
-              </span>
-            </span>
-
-            <span class="switch">
-              <input
-                type="checkbox"
-                data-effect="fx-ambient"
-              />
-              <span class="switch-ui"></span>
-            </span>
-          </label>
-
-          <label class="lab-option">
-            <span class="lab-option-copy">
-              <span class="lab-option-title">
-                Vignette
-              </span>
-              <span class="lab-option-note">
-                Universal edge darkening for any media content.
-              </span>
-            </span>
-
-            <span class="switch">
-              <input
-                type="checkbox"
-                data-effect="fx-vignette"
-              />
-              <span class="switch-ui"></span>
-            </span>
-          </label>
-        </div>
+      <div class="tool-strip-scroll" id="toolStripScroll">
+        <div class="tool-strip" id="toolStrip"></div>
       </div>
     </aside>
 
