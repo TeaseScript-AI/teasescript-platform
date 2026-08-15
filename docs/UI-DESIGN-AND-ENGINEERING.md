@@ -34,9 +34,9 @@ geometry need an identifiable owner. A cascade layer can make responsibility vis
 conflicting declarations. If two selectors assign the same geometric property for the same state, first ask whether one
 owner is wrong rather than adding another override.
 
-Responsive CSS should describe actual responsive state changes, not restate base geometry merely because a breakpoint
-exists. Visual effects should normally remain paint-only: colour, opacity, shadow, outline, mask, filter, and similar
-properties that do not alter neighbouring layout.
+Responsive CSS should describe actual layout or interaction changes, not restate base geometry merely because a
+breakpoint exists. Visual effects should normally remain paint-only: colour, opacity, shadow, outline, mask, filter,
+and similar properties that do not alter neighbouring layout.
 
 ### Separate presence, reservation, content, and interaction
 
@@ -87,6 +87,27 @@ real consumers.
 Viewport height, orientation, safe areas, scrollbars, soft keyboards, and low-height windows can change usable space
 without changing the conceptual UI. Account for them in the owning layout/responsive layer. Avoid JavaScript layout
 measurement when modern CSS can express the same invariant more directly and reliably.
+
+### Size responsive layouts from constraints
+
+Base layout decisions on usable viewport/container geometry and content needs rather than hard device categories. Phone,
+tablet, laptop, desktop, TV, and ultrawide shapes are useful test cases, but they should not become separate modes when
+the same constraints produce the same layout. CSS `orientation` describes whether the viewport is wider than it is tall;
+it does not require or imply a physical orientation sensor.
+
+Use each browser layout mechanism for the problem it solves:
+
+- use `clamp()` when the layout stays the same and a size should vary smoothly within useful bounds;
+- use media queries when viewport geometry or input capability requires a real layout/interaction change;
+- use container queries when a component should change presentation according to the space that component itself gets;
+- use intrinsic/content sizing when content should influence preferred size, while still applying explicit minimum and
+  maximum constraints.
+
+Protect a useful minimum for primary content before secondary panels consume additional space. Extra room may expose
+more useful information simultaneously, but should not be consumed merely because it exists. Content-aware sizing must
+also account for wrapping: one long wrappable line should not force an otherwise unnecessary wide panel, while genuinely
+wide or dense content should not be squeezed into avoidable vertical overflow. Prefer CSS layout, wrapping, and
+intrinsic sizing before adding JavaScript measurement or width-allocation logic.
 
 ## Design quality and avoiding generic "AI slop"
 

@@ -63,6 +63,7 @@ progress record plus active, non-implemented planning; entries do not schedule t
 
 - `planning/RELEASE-ROADMAP.md` records owner-selected release-stage placement, open release-stage outcomes, and
   compact roadmap progress history.
+- `planning/PLAYER-UI-FOLLOW-UPS.md` keeps active, non-implemented Standard Player presentation follow-ups.
 - `planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md` retains open timer-handle and advanced recovery-point direction.
 - `planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md` retains open camera ownership, capture, media-lifetime, and
   browser/server time-integrity direction.

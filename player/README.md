@@ -17,3 +17,7 @@ The Player currently consumes `demo-session.ts` presentation data. It is not yet
 The CSS keeps the browser-native direction established by the Player research: Grid, dynamic viewport units, `clamp()`, `color-mix()`, `aspect-ratio`, `field-sizing`, stable scrollbar gutters, masks, safe-area environment insets for Player controls, input-capability media queries, and `prefers-reduced-motion`. The demo has no external runtime asset or network dependency.
 
 No UI or CSS framework is required by this POC. Presentation data, rendering, panel transitions, and browser bootstrap are separate seams so a later runtime integration or UI-framework decision does not become part of the presentation contract by accident.
+
+Open, non-implemented Standard Player presentation work is tracked in
+[`docs/planning/PLAYER-UI-FOLLOW-UPS.md`](../docs/planning/PLAYER-UI-FOLLOW-UPS.md). General UI engineering and design
+guardrails remain in [`docs/UI-DESIGN-AND-ENGINEERING.md`](../docs/UI-DESIGN-AND-ENGINEERING.md).
