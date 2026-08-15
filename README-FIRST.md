@@ -56,6 +56,7 @@ milestone, gate, integration-status, or current-capability work.
 - `docs/chatgpt-project/SYSTEM-PROMPT.txt`: repository-maintained ChatGPT Project Settings prompt candidate; read only
   for prompt maintenance or deliberate owner-approved synchronization. It does not prove the live Project Settings state.
 - `docs/README.md`: documentation map.
+- `docs/PLAYER-UI.md`: Player presentation maintenance guardrails and regression strategy; read for Player UI work.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
 - `docs/specifications/`: accepted consolidated specifications.
 - `docs/decisions/`: accepted and proposed ADRs.
