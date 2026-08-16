@@ -126,6 +126,13 @@ test("Player media uses image content without duplicate fit or caption overlays"
   assert.match(render, /targets\.sceneMedia\.src/u);
 });
 
+test("Player media content can shrink to its grid row before contain fitting", async () => {
+  const media = await readFile(resolve(process.cwd(), "player/styles/components-media.css"), "utf8");
+
+  assert.match(media, /\.media-content\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*0;/su);
+  assert.match(media, /object-fit:\s*var\(--media-fit, contain\)/u);
+});
+
 test("Player conversation spacing is based on its own grid column", async () => {
   const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
   const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
