@@ -61,6 +61,39 @@ Theme defaults, component defaults, semantic state colours, and content/person/p
 ownership. Avoid defining the same moving default in CSS and JavaScript/data unless one intentionally overrides the
 other and that precedence is explicit. Local identity styling should not silently repaint unrelated application chrome.
 
+### Build colour systems from semantic roles
+
+A coherent palette is not a list of nearby hex values assigned component by component. Start from a small tonal system
+and map it to semantic roles. A useful general model separates:
+
+- application/canvas and subtle structural backgrounds;
+- component backgrounds for default, hover, and pressed/selected states;
+- passive, interactive, and strong/focus borders;
+- solid accent fills and their interaction states; and
+- lower- and higher-emphasis text.
+
+Do not copy an external scale mechanically; the useful lesson is the separation of roles, not a mandatory step count.
+Use semantic aliases in components rather than coupling them to scale positions or raw colour values. A neutral control
+should normally progress through neutral default/hover/pressed colours; an accent control should progress through its
+accent family. Do not turn every neutral hover or press into the brand/accent colour merely to make interaction visible.
+Focus is a separate state and must remain explicit without changing geometry.
+
+Keep the structural surface vocabulary as small as the hierarchy permits. Near-identical tints with no distinct role add
+visual noise and make nesting harder to read; consolidate them and use borders, shadow, or restrained elevation when
+depth is the real need. Do not flatten genuinely different roles merely to minimize the colour count. The Player POC,
+for example, exposed this failure when transcript, chrome, raised components, top bar, and input accumulated several
+very similar warm near-whites despite representing fewer meaningful levels.
+
+Judge tonal spacing perceptually rather than from hexadecimal or RGB distance alone. OKLCH/Oklab comparisons can help
+spot duplicate or uneven steps, and use accessibility contrast checks for readable text and controls. Perceptual
+colour-distance numbers are diagnostics, not project thresholds unless a controlling requirement accepts one.
+
+Keep application chrome separate from content-driven identity. Speaker/avatar/package accents, media-derived ambience,
+and similar content colours may be supplied dynamically and must not silently become fixed application accent tokens.
+Responsive layouts may change composition, but the same semantic role should normally retain the same colour across
+breakpoints. Inverse foreground text is a text role, not another surface level; disabled controls likewise need a
+recognizable neutral state rather than a new decorative palette branch.
+
 ### Match interaction feedback to input capability
 
 Do not assume hover exists because desktop emulation exposes a pointer. Use capability-aware CSS for hover, touch press,
@@ -121,8 +154,8 @@ coherent system.
 
 ### Prefer a chosen visual system over generic defaults
 
-- **Palette:** choose a product-specific palette and use accent colour with restraint. Keep semantic colours semantic;
-  avoid tinting every surface merely because an accent exists.
+- **Palette:** use a small role-based tonal system for backgrounds, component states, borders, solid accents, and text.
+  Keep semantic and content-driven colours separate; use the product accent with restraint.
 - **Typography:** use type roles deliberately. A system font is acceptable when it serves the product; an untouched
   fashionable default everywhere is not a substitute for typographic hierarchy or identity.
 - **Surfaces:** define a small surface vocabulary. Avoid "glass everywhere", universal glow, and identical soft-shadow
