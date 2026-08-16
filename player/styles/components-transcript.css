@@ -2,7 +2,7 @@
       /* ---------- Transcript ---------- */
 
       .message {
-        max-width: 84%;
+        max-width: min(84%, var(--conversation-max-width));
 
         --speaker-accent: #9ba4b2;
         --speaker-font: inherit;

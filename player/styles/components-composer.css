@@ -2,7 +2,9 @@
       /* ---------- Composer ---------- */
 
       .composer form {
+        width: min(100%, var(--conversation-max-width));
         min-width: 0;
+        margin-inline: auto;
 
         display: grid;
         grid-template-columns:

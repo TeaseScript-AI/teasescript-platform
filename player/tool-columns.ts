@@ -11,6 +11,13 @@ export function addToolColumn(
   return [...columns, { id, toolId: null }];
 }
 
+export function ensureToolColumn(
+  columns: readonly PlayerToolColumnState[],
+  id: string,
+): readonly PlayerToolColumnState[] {
+  return columns.length === 0 ? addToolColumn(columns, id) : columns;
+}
+
 export function selectToolColumn(
   columns: readonly PlayerToolColumnState[],
   id: string,

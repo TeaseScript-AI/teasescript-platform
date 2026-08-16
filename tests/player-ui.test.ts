@@ -5,7 +5,12 @@ import test from "node:test";
 
 import { toggleLeftPanelMode, toggleRightPanelMode } from "../player/panel-state.js";
 import { formatTimer, timerProgressPercent } from "../player/render.js";
-import { addToolColumn, closeToolColumn, selectToolColumn } from "../player/tool-columns.js";
+import {
+  addToolColumn,
+  closeToolColumn,
+  ensureToolColumn,
+  selectToolColumn,
+} from "../player/tool-columns.js";
 
 test("Player panel toggles preserve the current auto/manual semantics", () => {
   assert.equal(toggleLeftPanelMode("auto", true), "closed");
@@ -51,6 +56,14 @@ test("Player tool columns can be added, switched, duplicated, and closed indepen
   assert.deepEqual(closeToolColumn(switched, "tool-column-1"), [
     { id: "tool-column-2", toolId: "visuals" },
   ]);
+});
+
+test("Opening an empty tool panel can create its first column in one step", () => {
+  const existing = [{ id: "tool-column-1", toolId: "visuals" as const }];
+  assert.deepEqual(ensureToolColumn([], "tool-column-2"), [
+    { id: "tool-column-2", toolId: null },
+  ]);
+  assert.equal(ensureToolColumn(existing, "tool-column-2"), existing);
 });
 
 test("Player tool column helpers reject unknown or duplicate column ids", () => {
@@ -109,8 +122,17 @@ test("Player media uses image content without duplicate fit or caption overlays"
   assert.match(html, /id="sceneMedia"/u);
   assert.doesNotMatch(html, /id="mediaFit"/u);
   assert.doesNotMatch(html, /id="mediaCaption"/u);
-  assert.match(demo, /fit: "cover"/u);
+  assert.match(demo, /fit: "contain"/u);
   assert.match(render, /targets\.sceneMedia\.src/u);
+});
+
+test("Player conversation spacing is based on its own grid column", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
+
+  assert.doesNotMatch(layout, /100vw - var\(--conversation-max-width\)/u);
+  assert.match(layout, /padding-left:\s*calc\(var\(--conversation-gap\) \+ var\(--safe-left\)\)/u);
+  assert.match(composer, /width: min\(100%, var\(--conversation-max-width\)\)/u);
 });
 
 test("Player left-panel growth protects media and conversation minimums independently", async () => {

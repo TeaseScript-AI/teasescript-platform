@@ -39,7 +39,8 @@ becoming tool-column content.
 
 For local demo media, the playground server discovers supported image files (`.jpg`, `.jpeg`, `.png`, `.webp`) placed in
 `player/demo-media/` and returns one random file each time the Player opens. The Player renders that image with the demo
-`cover` fit while keeping filename-derived scene information in the Scene tool instead of duplicating it over the media.
+`contain` fit so the complete image stays visible, while filename-derived scene information stays in the Scene tool instead of
+duplicating it over the media.
 The demo-media folder is presentation fixture data only; it is not a runtime media-loading contract.
 
 No UI or CSS framework is required by this POC. Presentation data, rendering, panel transitions, and browser bootstrap are separate seams so a later runtime integration or UI-framework decision does not become part of the presentation contract by accident.

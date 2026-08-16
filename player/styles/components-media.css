@@ -23,7 +23,9 @@
 
       img.media-content,
       video.media-content {
+        display: block;
         object-fit: var(--media-fit, contain);
+        object-position: center;
       }
 
 

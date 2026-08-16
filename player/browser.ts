@@ -12,7 +12,12 @@ import type {
 } from "./model.js";
 import { toggleLeftPanelMode, toggleRightPanelMode } from "./panel-state.js";
 import { renderPresentation, renderToolColumns } from "./render.js";
-import { addToolColumn, closeToolColumn, selectToolColumn } from "./tool-columns.js";
+import {
+  addToolColumn,
+  closeToolColumn,
+  ensureToolColumn,
+  selectToolColumn,
+} from "./tool-columns.js";
 
 const player = requiredElement<HTMLElement>("player", HTMLElement);
 const leftToggle = requiredElement<HTMLButtonElement>("leftToggle", HTMLButtonElement);
@@ -59,7 +64,14 @@ const toolStripObserver = new ResizeObserver(syncLeftPreferredWidth);
 toolStripObserver.observe(toolStrip);
 
 leftToggle.addEventListener("click", () => {
-  player.dataset.left = toggleLeftPanelMode(currentLeftMode(), usesWideDefaultLayout());
+  const nextMode = toggleLeftPanelMode(currentLeftMode(), usesWideDefaultLayout());
+  if (nextMode === "open" && toolColumns.length === 0) {
+    const id = `tool-column-${nextToolColumnNumber}`;
+    nextToolColumnNumber += 1;
+    toolColumns = ensureToolColumn(toolColumns, id);
+    renderTools();
+  }
+  player.dataset.left = nextMode;
   syncPanelAccessibility();
   queueLeftReserveSync();
 });

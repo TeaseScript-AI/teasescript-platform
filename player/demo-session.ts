@@ -13,7 +13,7 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
   media: {
     id: "demo-media-unavailable",
     src: "",
-    fit: "cover",
+    fit: "contain",
     title: "Demo media unavailable",
     ambientColor: "#5a2737",
   },

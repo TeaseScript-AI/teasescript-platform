@@ -202,22 +202,9 @@
         padding-block: 16px;
 
         padding-left:
-          max(
-            calc(var(--conversation-gap) + var(--safe-left)),
-            calc(
-              (100vw - var(--conversation-max-width)) / 2
-              - var(--left-reserve)
-            )
-          );
-
+          calc(var(--conversation-gap) + var(--safe-left));
         padding-right:
-          max(
-            calc(var(--conversation-gap) + var(--safe-right)),
-            calc(
-              (100vw - var(--conversation-max-width)) / 2
-              - var(--right-reserve)
-            )
-          );
+          calc(var(--conversation-gap) + var(--safe-right));
 
         display: flex;
         flex-direction: column;
@@ -258,22 +245,9 @@
         padding-bottom: calc(10px + var(--safe-bottom));
 
         padding-left:
-          max(
-            calc(12px + var(--safe-left)),
-            calc(
-              (100vw - var(--conversation-max-width)) / 2
-              - var(--left-reserve)
-            )
-          );
-
+          calc(12px + var(--safe-left));
         padding-right:
-          max(
-            calc(12px + var(--safe-right)),
-            calc(
-              (100vw - var(--conversation-max-width)) / 2
-              - var(--right-reserve)
-            )
-          );
+          calc(12px + var(--safe-right));
 
         background: var(--center-bg);
       }
