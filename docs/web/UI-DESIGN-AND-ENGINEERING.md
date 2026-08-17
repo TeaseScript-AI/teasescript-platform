@@ -126,7 +126,8 @@ button styles per page. Treat this as the default baseline, not a requirement to
   rather than creating a second local default by accident.
 
 Individual product surfaces may compose the shared roles differently where their content and hierarchy require it. Exact
-component dimensions and the exact palette values remain owned by the maintained specification for that surface.
+product-surface widths, heights, spacing, layout geometry, and palette values remain owned by the maintained
+specification for that surface unless this shared baseline deliberately adopts them.
 
 ### Match interaction feedback to input capability
 

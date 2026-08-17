@@ -96,7 +96,7 @@ Responsive behavior is constraint-driven, with three current threshold condition
 | Condition | Purpose | Maintained behavior |
 | --- | --- | --- |
 | width `>= 761px` | Wide composition | Side regions may reserve space; automatic tools are open and automatic right rail is docked. |
-| width `<= 760px` | Narrow composition | Left tools become an overlay drawer; the right region reserves no main Grid track and floats/overlays according to orientation. |
+| width `<= 760px` | Narrow composition | Left tools become an overlay drawer; the right region reserves no normal-flow main-content width and floats/overlays according to orientation. |
 | width `<= 480px` | Compact control geometry | Reduces selected insets/control sizes only; it does **not** introduce another docking model. |
 | height `<= 600px` | Low-height composition | Title becomes an overlay and the circular timer compacts into the title-height strip. This condition is independent of width. |
 
@@ -434,7 +434,8 @@ text.
 - touch/coarse-pointer activation uses pressed/active feedback rather than depending on hover;
 - compact buttons suppress the browser tap highlight and use manipulation-oriented touch behavior;
 - keyboard focus remains visible through `:focus-visible`-equivalent behavior;
-- reduced-motion preference effectively removes current control-transition and message-entry animation duration.
+- reduced-motion preference effectively removes decorative transition/animation duration where current Player motion
+  is used.
 
 An actual interactive control takes precedence over the ADR 0018 click/tap/Space pacing-skip gesture. Activating a
 button, field, selector, or other control must not also complete a viewport-wide pacing gate.

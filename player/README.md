@@ -26,14 +26,12 @@ server. That development route is not a public Player/host protocol.
 The implementation intentionally uses browser-native layout/features and has no UI-framework runtime dependency. Current
 CSS uses Grid, dynamic viewport units, `clamp()`, `color-mix()`, `aspect-ratio`, `field-sizing`, safe-area environment
 insets, stable scrollbar gutters, masks, input-capability media queries, and `prefers-reduced-motion` where they
-simplify
-the required presentation.
+simplify the required presentation.
 
 `styles/layout.css` currently owns the concrete light-theme palette values and semantic token mapping used by the
 source. Those values are also maintained as observable Player contract in `docs/web/PLAYER-UI.md`; component CSS should
 consume semantic roles rather than raw application-palette primitives. Speaker, package-accent, media, and technical
-mask colours
-remain separate presentation data.
+mask colours remain separate presentation data.
 
 ## Demo-only behavior
 

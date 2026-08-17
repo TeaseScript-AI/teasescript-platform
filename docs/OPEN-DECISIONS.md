@@ -103,8 +103,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
 - Standard/runtime mechanism for long-lived non-interactive right-rail status items (for example progress `3 / 10`),
   including lifecycle/update/removal semantics and how they relate to accepted background/permanent controls.
-- Which exact current Player control dimensions, radii, and focus geometry should become shared defaults for future
-  TeaseScript web surfaces versus remain owned by each surface specification.
+- Whether any additional Player-specific control widths, heights, or spacing should later join the already shared
+  border/radius/focus/state baseline for TeaseScript web surfaces.
 - Standard Player shell versus package custom-view ownership: which platform regions may be replaced, styled, hidden, or
   composed with package presentation while preserving the accepted isolation/lifecycle boundary.
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
