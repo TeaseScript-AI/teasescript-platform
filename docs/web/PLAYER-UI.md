@@ -70,7 +70,7 @@ may collapse, overlay, or appear only while an interaction requires them:
 |                      +--------------------------------+ / status      |
 |                      | transcript                     |               |
 |                      +--------------------------------+               |
-|                      | foreground controls when any  |               |
+|                      | foreground controls when any   |               |
 |                      | composer                       |               |
 +----------------------+--------------------------------+---------------+
 ```
