@@ -1,0 +1,377 @@
+-        --muted-quiet: #8a7770;
+-        --border-subtle: #d9c8b8;
+-        --border-strong: #d9c8b8;
+-
+-        --control-hover-bg: #f8eee5;
+-        --control-hover-border: #cbb2a1;
+-        --control-pressed-bg: #f2e3d8;
+-        --control-pressed-border: #b49380;
+-        --control-disabled-bg: #efe6df;
+-        --control-disabled-border: #decfc4;
+-
+-        --accent-solid: #d63b61;
+-        --accent-hover: #c93659;
+-        --accent-pressed: #b82f4f;
+-        --focus-ring: #e84c71;
+-        --ui-accent: var(--theme-color);
+-
+         /*
+           Player chrome respects device safe areas while media remains full-bleed.
+           The variables can also be overridden by the embedding host in tests.
+@@ -79,7 +51,6 @@
+         --conversation-gap: 18px;
+         --conversation-overlay-reserve: 0px;
+ 
+-        --scene-ambient: #f7cdaf;
+         --timer-progress: 46%;
+       }
+ 
+@@ -116,7 +87,7 @@
+           auto;
+ 
+         overflow: hidden;
+-        background: var(--center-bg);
++        background: var(--surface-base);
+       }
+ 
+       .player[data-left="closed"] {
+@@ -134,8 +105,8 @@
+         grid-column: 1 / -1;
+         grid-row: 1;
+ 
+-        background: var(--title-bg);
+-        box-shadow: 0 2px 6px rgb(56 45 42 / 8%);
++        background: var(--surface-chrome);
++        box-shadow: 0 2px 6px var(--shell-shadow);
+       }
+ 
+       .title-controls {
+@@ -177,8 +148,8 @@
+         padding-top: var(--title-overlay-clearance);
+ 
+         overflow: hidden;
+-        background: var(--side-bg);
+-        box-shadow: 3px 0 8px rgb(56 45 42 / 8%);
++        background: var(--surface-chrome);
++        box-shadow: 3px 0 8px var(--shell-shadow);
+       }
+ 
+       .left-scrim {
+@@ -198,7 +169,7 @@
+         place-items: center;
+ 
+         overflow: hidden;
+-        background: var(--media-bg);
++        background: var(--surface-media);
+       }
+ 
+       .transcript {
+@@ -239,28 +210,28 @@
+         flex-direction: column;
+         gap: 12px;
+ 
+-        background: var(--center-bg);
++        background: var(--surface-base);
+ 
+         scrollbar-width: thin;
+         scrollbar-gutter: stable;
+         scrollbar-color:
+-          color-mix(in srgb, var(--muted) 45%, transparent)
++          color-mix(in srgb, var(--text-muted) 45%, transparent)
+           transparent;
+ 
+         -webkit-mask-image:
+           linear-gradient(
+             to bottom,
+             transparent 0,
+-            #000 28px,
+-            #000 100%
++            var(--mask-opaque) 28px,
++            var(--mask-opaque) 100%
+           );
+ 
+         mask-image:
+           linear-gradient(
+             to bottom,
+             transparent 0,
+-            #000 28px,
+-            #000 100%
++            var(--mask-opaque) 28px,
++            var(--mask-opaque) 100%
+           );
+       }
+ 
+@@ -278,7 +249,7 @@
+         padding-right:
+           calc(12px + var(--safe-right));
+ 
+-        background: var(--center-bg);
++        background: var(--surface-base);
+       }
+ 
+       .right-zone {
+@@ -302,10 +273,10 @@
+ 
+         overflow: hidden;
+ 
+-        background: var(--side-bg);
++        background: var(--surface-chrome);
+ 
+         border-left: 0;
+-        box-shadow: -3px 0 8px rgb(56 45 42 / 8%);
++        box-shadow: -3px 0 8px var(--shell-shadow);
+       }
+ 
+       .player[data-right="overlay"] .right-zone {
+diff --git a/player/styles/reset.css b/player/styles/reset.css
+index a9cf99ee51194f0eacae01da8eb75be15c449290..a6ac06bcb1d073ff7b65350af3df45c38f5aff73 100644
+--- a/player/styles/reset.css
++++ b/player/styles/reset.css
+@@ -17,8 +17,8 @@
+         min-height: 100dvh;
+         overflow: hidden;
+         overscroll-behavior: none;
+-        background: var(--canvas-bg, #f7f0e8);
+-        color: var(--text, #382d2a);
++        background: var(--surface-base);
++        color: var(--text-primary);
+         font-family:
+           "Inter Tight",
+           Inter,
+diff --git a/player/styles/responsive.css b/player/styles/responsive.css
+index d25891a627577eabd131b2f11cb15d295533b867..704ae3acc611d46d54d65f55faeec42d0a42a014 100644
+--- a/player/styles/responsive.css
++++ b/player/styles/responsive.css
+@@ -70,8 +70,8 @@
+         }
+ 
+         .player[data-right="docked"] .right-zone {
+-          background: var(--side-bg);
+-          box-shadow: -3px 0 8px rgb(56 45 42 / 8%);
++          background: var(--surface-chrome);
++          box-shadow: -3px 0 8px var(--shell-shadow);
+         }
+ 
+         .player[data-right="auto"] .timer,
+@@ -81,7 +81,7 @@
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-bg) 60%,
++              var(--surface-component) 60%,
+               transparent
+             );
+         }
+@@ -113,32 +113,32 @@
+           padding: 10px 11px;
+           border: 1px solid var(--border-subtle);
+           border-radius: 7px;
+-          background: var(--control-bg);
++          background: var(--surface-component);
+           font-size: 10px;
+         }
+ 
+         .composer textarea:focus-visible {
+           border-color: var(--border-subtle);
+-          outline: 2px solid var(--focus-ring);
++          outline: 2px solid var(--accent-focus);
+           outline-offset: 1px;
+         }
+ 
+         @media (hover: hover) and (pointer: fine) {
+           .composer textarea:not(:disabled):hover {
+-            border-color: var(--control-hover-border);
+-            background: var(--control-bg);
++            border-color: var(--border-interactive);
++            background: var(--surface-component);
+           }
+         }
+ 
+         .composer textarea:not(:disabled):active {
+-          border-color: var(--control-pressed-border);
+-          background: var(--control-bg);
++          border-color: var(--border-strong);
++          background: var(--surface-component);
+         }
+ 
+         .composer textarea:disabled {
+-          border-color: var(--control-disabled-border);
+-          background: var(--control-disabled-bg);
+-          color: var(--muted-quiet);
++          border-color: var(--disabled-border);
++          background: var(--disabled-bg);
++          color: var(--disabled-text);
+           cursor: not-allowed;
+         }
+ 
+@@ -154,11 +154,11 @@
+         @media (hover: hover) and (pointer: fine) {
+           .player[data-right="auto"] .action-button:not(:disabled):hover,
+           .player[data-right="overlay"] .action-button:not(:disabled):hover {
+-            border-color: var(--control-hover-border);
++            border-color: var(--border-interactive);
+             background:
+               color-mix(
+                 in srgb,
+-                var(--control-hover-bg) 60%,
++                var(--component-hover) 60%,
+                 transparent
+               );
+           }
+@@ -166,22 +166,22 @@
+ 
+         .player[data-right="auto"] .action-button:not(:disabled):active,
+         .player[data-right="overlay"] .action-button:not(:disabled):active {
+-          border-color: var(--control-pressed-border);
++          border-color: var(--border-strong);
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-pressed-bg) 60%,
++              var(--component-pressed) 60%,
+               transparent
+             );
+         }
+ 
+         .player[data-right="auto"] .action-button:disabled,
+         .player[data-right="overlay"] .action-button:disabled {
+-          border-color: var(--control-disabled-border);
++          border-color: var(--disabled-border);
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-disabled-bg) 60%,
++              var(--disabled-bg) 60%,
+               transparent
+             );
+         }
+@@ -216,7 +216,7 @@
+ 
+           padding: 0;
+           border: 0;
+-          background: rgb(56 45 42 / 18%);
++          background: var(--overlay-scrim);
+ 
+           cursor: default;
+         }
+@@ -240,9 +240,9 @@
+           width: var(--mobile-drawer-width);
+           padding-top: 0;
+ 
+-          background: var(--side-bg);
++          background: var(--surface-chrome);
+           border-right: 1px solid var(--border-subtle);
+-          box-shadow: 3px 0 8px rgb(56 45 42 / 8%);
++          box-shadow: 3px 0 8px var(--shell-shadow);
+         }
+ 
+         .player[data-left="open"] .tool-strip {
+@@ -327,39 +327,39 @@
+         background:
+           color-mix(
+             in srgb,
+-            var(--control-bg) 60%,
++            var(--surface-component) 60%,
+             transparent
+           );
+       }
+ 
+       @media (hover: hover) and (pointer: fine) {
+         .player[data-right="overlay"] .action-button:not(:disabled):hover {
+-          border-color: var(--control-hover-border);
++          border-color: var(--border-interactive);
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-hover-bg) 60%,
++              var(--component-hover) 60%,
+               transparent
+             );
+         }
+       }
+ 
+       .player[data-right="overlay"] .action-button:not(:disabled):active {
+-        border-color: var(--control-pressed-border);
++        border-color: var(--border-strong);
+         background:
+           color-mix(
+             in srgb,
+-            var(--control-pressed-bg) 60%,
++            var(--component-pressed) 60%,
+             transparent
+           );
+       }
+ 
+       .player[data-right="overlay"] .action-button:disabled {
+-        border-color: var(--control-disabled-border);
++        border-color: var(--disabled-border);
+         background:
+           color-mix(
+             in srgb,
+-            var(--control-disabled-bg) 60%,
++            var(--disabled-bg) 60%,
+             transparent
+           );
+       }
+@@ -437,7 +437,7 @@
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-bg) 90%,
++              var(--surface-component) 90%,
+               transparent
+             );
+         }
+@@ -446,7 +446,7 @@
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-bg) 90%,
++              var(--surface-component) 90%,
+               transparent
+             );
+         }
+diff --git a/player/styles/tokens.css b/player/styles/tokens.css
+new file mode 100644
+index 0000000000000000000000000000000000000000..e35689c7496b5e7b1801823c2acbda9573389fd0
+--- /dev/null
++++ b/player/styles/tokens.css
+@@ -0,0 +1,89 @@
++@layer tokens {
++      :root,
++      [data-theme="light"] {
++        /*
++          Radix-inspired functional primitives. The numbered neutral scale
++          preserves the approved light-theme anchors rather than forcing a
++          mathematically uniform ramp that would change the Player appearance.
++        */
++        --neutral-1: oklch(0.958388167 0.013064634 71.329675);
++        --neutral-2: oklch(0.975859732 0.011304887 71.900713);
++        --neutral-3: oklch(0.991986399 0.007338834 80.721397);
++        --neutral-4: oklch(0.954491898 0.016177987 64.670581);
++        --neutral-5: oklch(0.924813698 0.022133945 58.770256);
++        --neutral-6: oklch(0.930086518 0.013607742 60.562705);
++        --neutral-7: oklch(0.863698296 0.022520549 58.740358);
++        --neutral-8: oklch(0.842463561 0.029049486 65.706579);
++        --neutral-9: oklch(0.780500634 0.037401997 56.320047);
++        --neutral-10: oklch(0.688505808 0.048261569 51.545561);
++        --neutral-11: oklch(0.526489898 0.026786943 41.270655);
++        --neutral-12: oklch(0.308376787 0.017117909 35.721243);
++
++        /* Disabled text is an approved neutral anchor outside the 12-step interaction ramp. */
++        --neutral-disabled-text: oklch(0.584857304 0.026025073 41.299400);
++        --neutral-white: oklch(1 0 0);
++
++        /*
++          Accent steps 8-11 preserve the approved focus/solid interaction
++          anchors exactly. The unused surrounding steps provide the complete
++          theme palette without coupling components to scale positions.
++        */
++        --accent-1: oklch(0.985 0.010 10);
++        --accent-2: oklch(0.970 0.020 10);
++        --accent-3: oklch(0.945 0.045 10);
++        --accent-4: oklch(0.915 0.070 10);
++        --accent-5: oklch(0.875 0.095 10);
++        --accent-6: oklch(0.825 0.120 10);
++        --accent-7: oklch(0.755 0.155 10);
++        --accent-8: oklch(0.641824322 0.192363248 10.285530);

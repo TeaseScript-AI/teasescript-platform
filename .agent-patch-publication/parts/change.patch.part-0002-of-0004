@@ -1,0 +1,400 @@
++        background: var(--surface-component);
++        color: var(--text-primary);
+ 
+         cursor: pointer;
+       }
+@@ -32,7 +32,7 @@
+         overscroll-behavior-inline: contain;
+ 
+         scrollbar-width: thin;
+-        scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
++        scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
+       }
+ 
+       .tool-strip {
+@@ -56,7 +56,7 @@
+         align-self: start;
+ 
+         padding: 12px;
+-        color: var(--muted);
++        color: var(--text-muted);
+         font-size: 11px;
+         line-height: 1.35;
+       }
+@@ -79,7 +79,7 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 8px;
+ 
+-        background: var(--control-bg);
++        background: var(--surface-component);
+       }
+ 
+       .tool-column:only-child {
+@@ -99,6 +99,7 @@
+         min-block-size: 44px;
+         padding: 6px;
+         border-bottom: 1px solid var(--border-subtle);
++        /* The component container owns this surface; keep the header transparent to avoid double-painting rounded edges. */
+         background: transparent;
+       }
+ 
+@@ -112,8 +113,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 6px;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+         font: inherit;
+         font-size: 11px;
+         font-weight: 600;
+@@ -135,17 +136,17 @@
+         overflow-x: hidden;
+         overscroll-behavior: contain;
+ 
+-        background: var(--control-bg);
++        background: var(--surface-component);
+ 
+         scrollbar-width: thin;
+         scrollbar-gutter: stable;
+-        scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
++        scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
+       }
+ 
+       .tool-placeholder {
+         max-inline-size: 24ch;
+         padding: 12px;
+-        color: var(--muted);
++        color: var(--text-muted);
+         font-size: 11px;
+         line-height: 1.35;
+       }
+@@ -167,7 +168,7 @@
+ 
+       .tool-kv dt {
+         margin: 0;
+-        color: var(--muted);
++        color: var(--text-muted);
+         font-size: 10px;
+       }
+ 
+@@ -176,7 +177,7 @@
+         margin: 4px 0 12px;
+         padding-bottom: 12px;
+         border-bottom: 1px solid var(--border-subtle);
+-        color: var(--text);
++        color: var(--text-primary);
+         overflow-wrap: anywhere;
+       }
+ }
+diff --git a/player/styles/components-transcript.css b/player/styles/components-transcript.css
+index d2650885587d62d663bb91d0096762e25eef1a05..5cd53212611ad0da0043e3c1f762db47c817c678 100644
+--- a/player/styles/components-transcript.css
++++ b/player/styles/components-transcript.css
+@@ -4,7 +4,7 @@
+       .message {
+         max-width: min(100%, var(--conversation-max-width));
+ 
+-        --speaker-accent: #9ba4b2;
++        --speaker-accent: var(--content-accent-fallback);
+         --speaker-font: inherit;
+       }
+ 
+@@ -45,7 +45,7 @@
+         border: 1px solid var(--speaker-accent);
+         border-radius: 50%;
+ 
+-        background: var(--control-bg);
++        background: var(--surface-component);
+         color: var(--speaker-accent);
+ 
+         font-size: 10px;
+@@ -80,7 +80,7 @@
+ 
+         border-left: 2px solid color-mix(in srgb, var(--speaker-accent) 85%, transparent);
+ 
+-        color: var(--text);
++        color: var(--text-primary);
+         font-family: var(--speaker-font);
+         font-size: 12px;
+         line-height: 1.25;
+diff --git a/player/styles/components-visual-lab.css b/player/styles/components-visual-lab.css
+index 043ffdef8b17b9eb1dfb07e1f58f74701830feef..3d6505f95222a868382cd63d4e8d4f9193f8a72e 100644
+--- a/player/styles/components-visual-lab.css
++++ b/player/styles/components-visual-lab.css
+@@ -19,7 +19,7 @@
+         padding-bottom: 10px;
+         border-bottom: 1px solid var(--border-subtle);
+ 
+-        color: var(--muted);
++        color: var(--text-muted);
+         font-size: 11px;
+         font-weight: 600;
+       }
+@@ -55,7 +55,7 @@
+         margin: 0;
+ 
+         padding-block: 10px 14px;
+-        color: var(--muted);
++        color: var(--text-muted);
+         font-size: 9px;
+         line-height: 1.35;
+       }
+@@ -68,8 +68,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 7px;
+ 
+-        background: var(--side-bg);
+-        color: var(--muted);
++        background: var(--surface-chrome);
++        color: var(--text-muted);
+         font-size: 8px;
+         line-height: 1.35;
+       }
+@@ -78,7 +78,7 @@
+         display: block;
+ 
+         margin-bottom: 8px;
+-        color: var(--ui-accent);
++        color: var(--identity-accent);
+         font-size: 9px;
+         font-weight: 700;
+         line-height: 1.2;
+@@ -97,8 +97,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 6px;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+ 
+         box-shadow: none;
+ 
+@@ -139,7 +139,7 @@
+       .lab-option-title {
+         display: block;
+ 
+-        color: var(--text);
++        color: var(--text-primary);
+         font-size: 11px;
+         font-weight: 700;
+         line-height: 1.2;
+@@ -152,7 +152,7 @@
+ 
+         margin-top: 2px;
+ 
+-        color: var(--muted-quiet);
++        color: var(--disabled-text);
+         font-size: 9px;
+         line-height: 1.25;
+ 
+@@ -179,7 +179,7 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 999px;
+ 
+-        background: var(--control-bg);
++        background: var(--surface-component);
+         cursor: pointer;
+       }
+ 
+@@ -195,7 +195,7 @@
+ 
+         border-radius: 50%;
+ 
+-        background: var(--muted-quiet);
++        background: var(--disabled-text);
+ 
+         transition:
+           translate 120ms ease,
+@@ -203,12 +203,12 @@
+       }
+ 
+       .switch input:checked + .switch-ui {
+-        border-color: var(--ui-accent);
+-        background: var(--control-bg);
++        border-color: var(--identity-accent);
++        background: var(--surface-component);
+       }
+ 
+       .switch input:checked + .switch-ui::after {
+         translate: 14px 0;
+-        background: var(--ui-accent);
++        background: var(--identity-accent);
+       }
+ }
+diff --git a/player/styles/effects.css b/player/styles/effects.css
+index 1ccf038049df3e9368de8dc4fabf71115a80add2..bfcdac797274c2270496b30eb0ddb51197914a82 100644
+--- a/player/styles/effects.css
++++ b/player/styles/effects.css
+@@ -48,8 +48,8 @@
+           radial-gradient(
+             ellipse at center,
+             transparent 46%,
+-            rgb(0 0 0 / 9%) 74%,
+-            rgb(0 0 0 / 26%) 100%
++            var(--vignette-soft) 74%,
++            var(--vignette-strong) 100%
+           );
+       }
+ 
+@@ -74,8 +74,8 @@
+ 
+       @media (hover: hover) and (pointer: fine) {
+         .composer form:has(textarea:not(:disabled):hover) {
+-          border-color: var(--control-hover-border);
+-          background: var(--control-bg);
++          border-color: var(--border-interactive);
++          background: var(--surface-component);
+         }
+ 
+         .icon-button:not(:disabled):hover,
+@@ -85,14 +85,14 @@
+         .tool-selector:not(:disabled):hover,
+         .action-button:not(:disabled):hover,
+         .lab-reset:not(:disabled):hover {
+-          border-color: var(--control-hover-border);
+-          background: var(--control-hover-bg);
++          border-color: var(--border-interactive);
++          background: var(--component-hover);
+           box-shadow: none;
+         }
+ 
+         .send-button:not(:disabled):hover {
+-          border-color: var(--accent-hover);
+-          background: var(--accent-hover);
++          border-color: var(--accent-solid-hover);
++          background: var(--accent-solid-hover);
+           box-shadow: none;
+         }
+       }
+@@ -103,25 +103,25 @@
+       .tool-selector:not(:disabled):active,
+       .action-button:not(:disabled):active,
+       .lab-reset:not(:disabled):active {
+-        border-color: var(--control-pressed-border);
+-        background: var(--control-pressed-bg);
++        border-color: var(--border-strong);
++        background: var(--component-pressed);
+         box-shadow: none;
+       }
+ 
+       .send-button:not(:disabled):active {
+-        border-color: var(--accent-pressed);
+-        background: var(--accent-pressed);
++        border-color: var(--accent-solid-pressed);
++        background: var(--accent-solid-pressed);
+         box-shadow: none;
+       }
+ 
+       .composer form:has(textarea:not(:disabled):active) {
+-        border-color: var(--control-pressed-border);
+-        background: var(--control-bg);
++        border-color: var(--border-strong);
++        background: var(--surface-component);
+       }
+ 
+       .composer form:has(textarea:disabled) {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
+       }
+ 
+       @media (hover: none), (pointer: coarse) {
+@@ -137,7 +137,7 @@
+       }
+ 
+       .composer form:has(textarea:focus-visible) {
+-        outline: 2px solid var(--focus-ring);
++        outline: 2px solid var(--accent-focus);
+         outline-offset: 1px;
+       }
+ 
+@@ -149,32 +149,32 @@
+       .send-button:focus-visible,
+       .lab-reset:focus-visible,
+       .theme-picker input[type="color"]:focus-visible {
+-        outline: 2px solid var(--focus-ring);
++        outline: 2px solid var(--accent-focus);
+         outline-offset: 1px;
+       }
+ 
+       .switch input:focus-visible + .switch-ui {
+-        outline: 2px solid var(--focus-ring);
++        outline: 2px solid var(--accent-focus);
+         outline-offset: 1px;
+       }
+ 
+       @media (hover: hover) and (pointer: fine) {
+         .theme-picker input[type="color"]:not(:disabled):hover {
+-          border-color: var(--control-hover-border);
++          border-color: var(--border-interactive);
+         }
+ 
+         .switch input:not(:disabled) + .switch-ui:hover {
+-          background: var(--control-hover-bg);
++          background: var(--component-hover);
+         }
+       }
+ 
+       .theme-picker input[type="color"]:not(:disabled):active {
+-        border-color: var(--control-pressed-border);
++        border-color: var(--border-strong);
+       }
+ 
+       .switch input:not(:disabled) + .switch-ui:active {
+-        border-color: var(--control-pressed-border);
+-        background: var(--control-pressed-bg);
++        border-color: var(--border-strong);
++        background: var(--component-pressed);
+       }
+ 
+       .switch input:checked:not(:disabled) + .switch-ui:active {
+@@ -186,20 +186,20 @@
+       .tool-selector:disabled,
+       .lab-reset:disabled,
+       .theme-picker input[type="color"]:disabled {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
+-        color: var(--muted-quiet);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
++        color: var(--disabled-text);
+         cursor: not-allowed;
+       }
+ 
+       .switch input:disabled + .switch-ui {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
+         cursor: not-allowed;
+       }
+ 
+       .switch input:disabled + .switch-ui::after {
+-        background: var(--muted-quiet);
++        background: var(--disabled-text);
+       }
+ 
+       @keyframes message-in {
+diff --git a/player/styles/layout.css b/player/styles/layout.css
+index dcf16c3c673551fc27f9f0fb9c4e60414e072c15..2d0aabbd287b6c49e44751d330a8ff6aee2d509f 100644
+--- a/player/styles/layout.css
++++ b/player/styles/layout.css
+@@ -2,34 +2,6 @@
+       :root {
+         color-scheme: light;
+ 
+-        --theme-color: #e84c71;
+-
+-        --canvas-bg: #f7f0e8;
+-        --title-bg: #fcf6ef;
+-        --side-bg: #fcf6ef;
+-        --center-bg: #f7f0e8;
+-        --media-bg: #f0dcc8;
+-        --control-bg: #fffcf7;
+-
+-        --text: #382d2a;
+-        --muted: #79665f;

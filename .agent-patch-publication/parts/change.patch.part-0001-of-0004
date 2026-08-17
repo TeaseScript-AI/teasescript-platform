@@ -1,0 +1,285 @@
+diff --git a/docs/UI-DESIGN-AND-ENGINEERING.md b/docs/UI-DESIGN-AND-ENGINEERING.md
+index f8dcfc936c2f3117551a41980bd74402f896308b..6d84584c3d3b9782105c5fe2b157cf6137896a73 100644
+--- a/docs/UI-DESIGN-AND-ENGINEERING.md
++++ b/docs/UI-DESIGN-AND-ENGINEERING.md
+@@ -72,11 +72,22 @@ and map it to semantic roles. A useful general model separates:
+ - solid accent fills and their interaction states; and
+ - lower- and higher-emphasis text.
+ 
+-Do not copy an external scale mechanically; the useful lesson is the separation of roles, not a mandatory step count.
+-Use semantic aliases in components rather than coupling them to scale positions or raw colour values. A neutral control
+-should normally progress through neutral default/hover/pressed colours; an accent control should progress through its
+-accent family. Do not turn every neutral hover or press into the brand/accent colour merely to make interaction visible.
+-Focus is a separate state and must remain explicit without changing geometry.
++OKLCH is the canonical representation for maintained design-system colours. Primitive palettes use a Radix-inspired
++12-step functional structure: early steps cover application and component surfaces, middle steps cover borders and
++interaction boundaries, and later steps cover solid emphasis and high-contrast content. Radix provides the scale
++philosophy only; TeaseScript does not depend on Radix Colors, Radix Primitives, React, or generated Radix CSS. Preserve
++approved visual anchors rather than distorting them merely to make a primitive ramp mathematically uniform.
++
++Semantic design tokens are the component-facing colour API. Components use roles such as surfaces, component states,
++borders, text, accent, and disabled state instead of primitive step numbers or raw colour literals. Theme definitions
++own the primitive values and semantic mappings, so a light or future dark theme can replace the palette without changing
++component CSS. A dark palette must be deliberately designed rather than produced by automatic lightness inversion.
++HEX/sRGB values may be recorded as compatibility or review references, but they are not the canonical design source.
++
++A neutral control should normally progress through neutral default/hover/pressed colours; an accent control should
++progress through its accent family. Do not turn every neutral hover or press into the application accent merely to make
++interaction visible. Focus is a separate state and must remain explicit without changing geometry. Content-, speaker-,
++media-, and package-driven identity colours remain separate from application UI accent roles.
+ 
+ Keep the structural surface vocabulary as small as the hierarchy permits. Near-identical tints with no distinct role add
+ visual noise and make nesting harder to read; consolidate them and use borders, shadow, or restrained elevation when
+diff --git a/player/README.md b/player/README.md
+index 7703c1f6ce8d75dc554a295bf169b220ac8c5bc9..f867d70dc036d1e8c7b6f695b8464e03433cec52 100644
+--- a/player/README.md
++++ b/player/README.md
+@@ -7,6 +7,7 @@ The Player currently consumes `demo-session.ts` presentation data. It is not yet
+ ## Source layout
+ 
+ - `index.html`: semantic Player shell and local asset entrypoints.
++- `styles/tokens.css`: OKLCH primitive palettes and semantic light-theme colour mappings.
+ - `model.ts`: internal presentation-only types; not a public engine contract.
+ - `demo-session.ts`: temporary POC presentation data.
+ - `panel-state.ts`: pure left/right panel transition helpers.
+@@ -43,6 +44,43 @@ For local demo media, the playground server discovers supported image files (`.j
+ duplicating it over the media.
+ The demo-media folder is presentation fixture data only; it is not a runtime media-loading contract.
+ 
++## Colour-token architecture
++
++`styles/tokens.css` is the Player colour-system owner. Canonical palette values use `oklch()`. Numbered neutral and
++accent primitives follow a Radix-inspired 12-step functional progression, while Player components consume semantic
++roles such as `--surface-component`, `--border-interactive`, and `--accent-solid`. Radix is design guidance only; the
++Player has no Radix, React, palette-runtime, or generated-Radix-CSS dependency.
++
++The approved light-theme anchors below are compatibility references for the current appearance. Their canonical values
++are the OKLCH primitives in `styles/tokens.css`; the HEX values are not the design source.
++
++| Semantic role | sRGB reference |
++| --- | --- |
++| `surface-base` | `#F7F0E8` |
++| `surface-chrome` | `#FCF6EF` |
++| `surface-component` | `#FFFCF7` |
++| `component-hover` | `#F8EEE5` |
++| `component-pressed` | `#F2E3D8` |
++| `border-subtle` | `#D9C8B8` |
++| `border-interactive` | `#CBB2A1` |
++| `border-strong` | `#B49380` |
++| `text-primary` | `#382D2A` |
++| `text-muted` | `#79665F` |
++| `accent-focus` / application UI accent | `#E84C71` |
++| `accent-solid` | `#D63B61` |
++| `accent-solid-hover` | `#C93659` |
++| `accent-solid-pressed` | `#B82F4F` |
++| `disabled-bg` | `#EFE6DF` |
++| `disabled-border` | `#DECFC4` |
++| `disabled-text` | `#8A7770` |
++
++The tool-column body and header both render on `surface-component`; the container owns that surface and the header
++remains transparent so the same colour is not double-painted at its rounded outer edge. The selector, add, and close
++controls are component surfaces as well. Neutral controls use `border-subtle` by default, `border-interactive` on hover, and `border-strong`
++for pressed or deliberately stronger neutral emphasis. Package/speaker/media identity remains separate from application
++accent semantics. No dark palette is approved yet; a future dark theme should replace the theme mappings rather than
++rewrite component styles or invert the light palette automatically.
++
+ No UI or CSS framework is required by this POC. Presentation data, rendering, panel transitions, and browser bootstrap are separate seams so a later runtime integration or UI-framework decision does not become part of the presentation contract by accident.
+ 
+ Open, non-implemented Standard Player presentation work is tracked in
+diff --git a/player/index.html b/player/index.html
+index b767115ead528d7c12732be764b01b294431179a..5caac8018bdfe63e47c3d49aff06010b5de7931b 100644
+--- a/player/index.html
++++ b/player/index.html
+@@ -10,6 +10,7 @@
+   <title>TeaseScript Player</title>
+ 
+   <link rel="stylesheet" href="/player/styles/cascade.css" />
++  <link rel="stylesheet" href="/player/styles/tokens.css" />
+   <link rel="stylesheet" href="/player/styles/reset.css" />
+   <link rel="stylesheet" href="/player/styles/layout.css" />
+   <link rel="stylesheet" href="/player/styles/components-base.css" />
+diff --git a/player/styles/cascade.css b/player/styles/cascade.css
+index bea0fe7c67e7517f9a81c04c7250362698e37e02..9b33362447ac2d6013e57a5a5e39dc95ba073984 100644
+--- a/player/styles/cascade.css
++++ b/player/styles/cascade.css
+@@ -1 +1 @@
+-@layer reset, layout, components, effects, responsive;
++@layer tokens, reset, layout, components, effects, responsive;
+diff --git a/player/styles/components-base.css b/player/styles/components-base.css
+index 552ba254a03df5bfefd68405fe5a4ee04326675e..484c47566056d9c26ab019c3d18346bfb6ab4af0 100644
+--- a/player/styles/components-base.css
++++ b/player/styles/components-base.css
+@@ -11,8 +11,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 6px;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+ 
+         box-shadow: none;
+         cursor: pointer;
+@@ -52,7 +52,7 @@
+       }
+ 
+       .title-text {
+-        color: var(--text);
++        color: var(--text-primary);
+         font-size: 14px;
+         font-weight: 700;
+         letter-spacing: 0;
+@@ -63,9 +63,9 @@
+       }
+ 
+       .icon-button:disabled {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
+-        color: var(--muted-quiet);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
++        color: var(--disabled-text);
+         cursor: not-allowed;
+       }
+ }
+diff --git a/player/styles/components-composer.css b/player/styles/components-composer.css
+index 72097b5b30d9794f4e955299b1859f1186762708..e1c31c826daede946c938c4fd4fe2e22d6e223dc 100644
+--- a/player/styles/components-composer.css
++++ b/player/styles/components-composer.css
+@@ -18,7 +18,7 @@
+         padding: 5px;
+         border: 1px solid var(--border-subtle);
+         border-radius: 8px;
+-        background: var(--control-bg);
++        background: var(--surface-component);
+       }
+ 
+       textarea {
+@@ -40,7 +40,7 @@
+         outline: 0;
+ 
+         background: transparent;
+-        color: var(--text);
++        color: var(--text-primary);
+ 
+         box-shadow: none;
+         font-size: 11px;
+@@ -48,7 +48,7 @@
+       }
+ 
+       textarea::placeholder {
+-        color: var(--muted);
++        color: var(--text-muted);
+         opacity: 1;
+       }
+ 
+@@ -62,7 +62,7 @@
+         border-radius: 7px;
+ 
+         background: var(--accent-solid);
+-        color: #ffffff;
++        color: var(--text-on-accent);
+ 
+         box-shadow: none;
+ 
+@@ -74,9 +74,9 @@
+       }
+ 
+       .send-button:disabled {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
+-        color: var(--muted-quiet);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
++        color: var(--disabled-text);
+         cursor: not-allowed;
+       }
+ }
+diff --git a/player/styles/components-right-controls.css b/player/styles/components-right-controls.css
+index 4f4023a1ae980abd8ad82afe2b6ca61181d73761..3363610403a4aba7afcbf758146ddd917511609d 100644
+--- a/player/styles/components-right-controls.css
++++ b/player/styles/components-right-controls.css
+@@ -52,8 +52,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 50%;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+ 
+         box-shadow: none;
+ 
+@@ -73,7 +73,7 @@
+ 
+         background:
+           conic-gradient(
+-            var(--ui-accent)
++            var(--identity-accent)
+             0
+             var(--timer-progress),
+ 
+@@ -86,14 +86,14 @@
+           radial-gradient(
+             farthest-side,
+             transparent calc(100% - 5px),
+-            #000 calc(100% - 4px)
++            var(--mask-opaque) calc(100% - 4px)
+           );
+ 
+         mask:
+           radial-gradient(
+             farthest-side,
+             transparent calc(100% - 5px),
+-            #000 calc(100% - 4px)
++            var(--mask-opaque) calc(100% - 4px)
+           );
+       }
+ 
+@@ -120,7 +120,7 @@
+           0;
+ 
+         scrollbar-width: thin;
+-        scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
++        scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
+       }
+ 
+       .action-button {
+@@ -133,11 +133,11 @@
+           clamp(8px, 0.8vmin, 12px)
+           12px;
+ 
+-        border: 1px solid var(--border-strong);
++        border: 1px solid var(--border-subtle);
+         border-radius: 6px;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+ 
+         box-shadow: none;
+ 
+@@ -155,9 +155,9 @@
+       }
+ 
+       .action-button:disabled {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
+-        color: var(--muted-quiet);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
++        color: var(--disabled-text);
+         cursor: not-allowed;
+       }
+ 
+diff --git a/player/styles/components-tools.css b/player/styles/components-tools.css
+index 5937f74a6137d2ed82a2f0a51e6e8ebb387ac6ae..0d065df0c4a3e7bd7fc95a8332a916073ed4156c 100644
+--- a/player/styles/components-tools.css
++++ b/player/styles/components-tools.css
+@@ -8,8 +8,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 6px;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);

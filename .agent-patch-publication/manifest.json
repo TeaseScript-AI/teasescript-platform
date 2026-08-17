@@ -1,0 +1,31 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "feature/player-production-demo",
+  "expectedBaseSha": "d7af062775d7fc7bbf692a9af26138147b07c1bb",
+  "expectedResultTreeSha": "df61d49f6de49ba2655276ab74d7682543557a0e",
+  "patchSizeBytes": 49019,
+  "patchSha256": "4d47c5cc8ffe581942231c2038f99841337fb2f2fbb728dc369de5facc262042",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0004",
+      "sizeBytes": 12285,
+      "sha256": "3d99e5d5e733cb4fa61b167bb3ff0f369b781633c408d1e80425c79a55605a16"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0004",
+      "sizeBytes": 12258,
+      "sha256": "ab93d7e8d7cd6752041199cf4b337bf8ec27bc8fb7c9c84fcaf2a7fd9a42da29"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0004",
+      "sizeBytes": 12282,
+      "sha256": "7680240b3ecfc9a29161cbec8a02b7de954b8e4f8d650e827d28530fb8711334"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0004",
+      "sizeBytes": 12194,
+      "sha256": "243846cba601b712c1fbc2776ade4ae489adbf1abba1eb88f2eb78996906f721"
+    }
+  ],
+  "commitMessage": "Refactor Player colours into OKLCH tokens"
+}
