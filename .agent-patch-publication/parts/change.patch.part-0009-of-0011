@@ -1,0 +1,85 @@
+@@ -0,0 +1,78 @@
++@layer tokens {
++  :root,
++  [data-theme="light"] {
++    color-scheme: light;
++
++    /* Radix-inspired neutral scale. OKLCH is the canonical representation. */
++    --neutral-1: oklch(95.838817% 0.013065 71.329675);
++    --neutral-2: oklch(97.585973% 0.011305 71.900713);
++    --neutral-3: oklch(99.198640% 0.007339 80.721397);
++    --neutral-4: oklch(95.449190% 0.016178 64.670581);
++    --neutral-5: oklch(92.481370% 0.022134 58.770256);
++    --neutral-6: oklch(93.008652% 0.013608 60.562705);
++    --neutral-7: oklch(86.369830% 0.022521 58.740358);
++    --neutral-8: oklch(84.246356% 0.029049 65.706579);
++    --neutral-9: oklch(78.050063% 0.037402 56.320047);
++    --neutral-10: oklch(68.850581% 0.048262 51.545561);
++    --neutral-11: oklch(52.648990% 0.026787 41.270655);
++    --neutral-12: oklch(30.837679% 0.017118 35.721243);
++
++    /*
++      The approved disabled text anchor is intentionally separate from the
++      12-step scale rather than distorting one of the scale's functional steps.
++    */
++    --neutral-disabled-text: oklch(58.485730% 0.026025 41.299400);
++
++    /* Radix-inspired accent scale. Steps 8-11 preserve the approved pink anchors. */
++    --accent-1: oklch(98.500000% 0.008000 10.5);
++    --accent-2: oklch(96.500000% 0.018000 10.5);
++    --accent-3: oklch(93.500000% 0.035000 10.5);
++    --accent-4: oklch(90.000000% 0.055000 10.5);
++    --accent-5: oklch(85.500000% 0.080000 10.5);
++    --accent-6: oklch(79.500000% 0.110000 10.5);
++    --accent-7: oklch(71.500000% 0.150000 10.5);
++    --accent-8: oklch(64.182432% 0.192363 10.285530);
++    --accent-9: oklch(59.208036% 0.191378 11.081039);
++    --accent-10: oklch(56.375014% 0.183261 11.656601);
++    --accent-11: oklch(52.587596% 0.173015 12.200162);
++    --accent-12: oklch(38.000000% 0.120000 12.5);
++
++    /* Semantic theme API consumed by Player component CSS. */
++    --surface-base: var(--neutral-1);
++    --surface-chrome: var(--neutral-2);
++    --surface-component: var(--neutral-3);
++    --component-hover: var(--neutral-4);
++    --component-pressed: var(--neutral-5);
++
++    --border-subtle: var(--neutral-8);
++    --border-interactive: var(--neutral-9);
++    --border-strong: var(--neutral-10);
++
++    --text-primary: var(--neutral-12);
++    --text-muted: var(--neutral-11);
++    --text-subtle: var(--neutral-disabled-text);
++
++    --accent-focus: var(--accent-8);
++    --accent-solid: var(--accent-9);
++    --accent-solid-hover: var(--accent-10);
++    --accent-solid-pressed: var(--accent-11);
++
++    --disabled-bg: var(--neutral-6);
++    --disabled-border: var(--neutral-7);
++    --disabled-text: var(--neutral-disabled-text);
++
++    /* Content/effect roles are separate from the application theme scales. */
++    --surface-media: oklch(90.544767% 0.034721 67.365716);
++    --text-on-accent: oklch(100% 0 0);
++    --shadow-color: oklch(30.837679% 0.017118 35.721243 / 8%);
++    --scrim-color: oklch(30.837679% 0.017118 35.721243 / 18%);
++    --vignette-soft: oklch(0% 0 0 / 9%);
++    --vignette-strong: oklch(0% 0 0 / 26%);
++    --mask-opaque: oklch(0% 0 0);
++    --speaker-fallback-accent: oklch(71.600665% 0.022791 259.192677);
++
++    /* Package/media identity stays independent from the application accent scale. */
++    --identity-accent: var(--accent-focus);
++    --scene-ambient: oklch(87.697783% 0.062244 57.337958);
++  }
++}
+diff --git a/tests/player-ui.test.ts b/tests/player-ui.test.ts
+index da55bb8fcde42bf1c2f4defba6a207ef2da0bc6f..51dc113ac700e83e0f2834f6197cdd7818360a55 100644
+--- a/tests/player-ui.test.ts
++++ b/tests/player-ui.test.ts
+@@ -1,5 +1,5 @@
+ import assert from "node:assert/strict";

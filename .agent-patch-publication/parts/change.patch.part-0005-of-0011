@@ -1,0 +1,150 @@
+diff --git a/player/styles/components-visual-lab.css b/player/styles/components-visual-lab.css
+index 043ffdef8b17b9eb1dfb07e1f58f74701830feef..101c198ee7035841217de261947ec06cc64912ec 100644
+--- a/player/styles/components-visual-lab.css
++++ b/player/styles/components-visual-lab.css
+@@ -19,7 +19,7 @@
+         padding-bottom: 10px;
+         border-bottom: 1px solid var(--border-subtle);
+ 
+-        color: var(--muted);
++        color: var(--text-muted);
+         font-size: 11px;
+         font-weight: 600;
+       }
+@@ -55,7 +55,7 @@
+         margin: 0;
+ 
+         padding-block: 10px 14px;
+-        color: var(--muted);
++        color: var(--text-muted);
+         font-size: 9px;
+         line-height: 1.35;
+       }
+@@ -68,8 +68,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 7px;
+ 
+-        background: var(--side-bg);
+-        color: var(--muted);
++        background: var(--surface-chrome);
++        color: var(--text-muted);
+         font-size: 8px;
+         line-height: 1.35;
+       }
+@@ -78,7 +78,7 @@
+         display: block;
+ 
+         margin-bottom: 8px;
+-        color: var(--ui-accent);
++        color: var(--identity-accent);
+         font-size: 9px;
+         font-weight: 700;
+         line-height: 1.2;
+@@ -97,8 +97,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 6px;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+ 
+         box-shadow: none;
+ 
+@@ -139,7 +139,7 @@
+       .lab-option-title {
+         display: block;
+ 
+-        color: var(--text);
++        color: var(--text-primary);
+         font-size: 11px;
+         font-weight: 700;
+         line-height: 1.2;
+@@ -152,7 +152,7 @@
+ 
+         margin-top: 2px;
+ 
+-        color: var(--muted-quiet);
++        color: var(--text-subtle);
+         font-size: 9px;
+         line-height: 1.25;
+ 
+@@ -179,7 +179,7 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 999px;
+ 
+-        background: var(--control-bg);
++        background: var(--surface-component);
+         cursor: pointer;
+       }
+ 
+@@ -195,7 +195,7 @@
+ 
+         border-radius: 50%;
+ 
+-        background: var(--muted-quiet);
++        background: var(--text-subtle);
+ 
+         transition:
+           translate 120ms ease,
+@@ -203,12 +203,12 @@
+       }
+ 
+       .switch input:checked + .switch-ui {
+-        border-color: var(--ui-accent);
+-        background: var(--control-bg);
++        border-color: var(--identity-accent);
++        background: var(--surface-component);
+       }
+ 
+       .switch input:checked + .switch-ui::after {
+         translate: 14px 0;
+-        background: var(--ui-accent);
++        background: var(--identity-accent);
+       }
+ }
+diff --git a/player/styles/effects.css b/player/styles/effects.css
+index 1ccf038049df3e9368de8dc4fabf71115a80add2..bfcdac797274c2270496b30eb0ddb51197914a82 100644
+--- a/player/styles/effects.css
++++ b/player/styles/effects.css
+@@ -48,8 +48,8 @@
+           radial-gradient(
+             ellipse at center,
+             transparent 46%,
+-            rgb(0 0 0 / 9%) 74%,
+-            rgb(0 0 0 / 26%) 100%
++            var(--vignette-soft) 74%,
++            var(--vignette-strong) 100%
+           );
+       }
+ 
+@@ -74,8 +74,8 @@
+ 
+       @media (hover: hover) and (pointer: fine) {
+         .composer form:has(textarea:not(:disabled):hover) {
+-          border-color: var(--control-hover-border);
+-          background: var(--control-bg);
++          border-color: var(--border-interactive);
++          background: var(--surface-component);
+         }
+ 
+         .icon-button:not(:disabled):hover,
+@@ -85,14 +85,14 @@
+         .tool-selector:not(:disabled):hover,
+         .action-button:not(:disabled):hover,
+         .lab-reset:not(:disabled):hover {
+-          border-color: var(--control-hover-border);
+-          background: var(--control-hover-bg);
++          border-color: var(--border-interactive);
++          background: var(--component-hover);
+           box-shadow: none;
+         }
+ 
+         .send-button:not(:disabled):hover {
+-          border-color: var(--accent-hover);
+-          background: var(--accent-hover);
++          border-color: var(--accent-solid-hover);
++          background: var(--accent-solid-hover);
+           box-shadow: none;
+         }
+       }

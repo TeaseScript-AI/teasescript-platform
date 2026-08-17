@@ -1,0 +1,132 @@
+diff --git a/player/styles/components-tools.css b/player/styles/components-tools.css
+index 5937f74a6137d2ed82a2f0a51e6e8ebb387ac6ae..57ba45afef2a68725d83c6f9f48853621607cd73 100644
+--- a/player/styles/components-tools.css
++++ b/player/styles/components-tools.css
+@@ -8,8 +8,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 6px;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+ 
+         cursor: pointer;
+       }
+@@ -32,7 +32,7 @@
+         overscroll-behavior-inline: contain;
+ 
+         scrollbar-width: thin;
+-        scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
++        scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
+       }
+ 
+       .tool-strip {
+@@ -56,7 +56,7 @@
+         align-self: start;
+ 
+         padding: 12px;
+-        color: var(--muted);
++        color: var(--text-muted);
+         font-size: 11px;
+         line-height: 1.35;
+       }
+@@ -79,7 +79,7 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 8px;
+ 
+-        background: var(--control-bg);
++        background: var(--surface-component);
+       }
+ 
+       .tool-column:only-child {
+@@ -99,7 +99,7 @@
+         min-block-size: 44px;
+         padding: 6px;
+         border-bottom: 1px solid var(--border-subtle);
+-        background: transparent;
++        background: var(--surface-component);
+       }
+ 
+       .tool-selector {
+@@ -112,8 +112,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 6px;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+         font: inherit;
+         font-size: 11px;
+         font-weight: 600;
+@@ -135,17 +135,17 @@
+         overflow-x: hidden;
+         overscroll-behavior: contain;
+ 
+-        background: var(--control-bg);
++        background: var(--surface-component);
+ 
+         scrollbar-width: thin;
+         scrollbar-gutter: stable;
+-        scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
++        scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
+       }
+ 
+       .tool-placeholder {
+         max-inline-size: 24ch;
+         padding: 12px;
+-        color: var(--muted);
++        color: var(--text-muted);
+         font-size: 11px;
+         line-height: 1.35;
+       }
+@@ -167,7 +167,7 @@
+ 
+       .tool-kv dt {
+         margin: 0;
+-        color: var(--muted);
++        color: var(--text-muted);
+         font-size: 10px;
+       }
+ 
+@@ -176,7 +176,7 @@
+         margin: 4px 0 12px;
+         padding-bottom: 12px;
+         border-bottom: 1px solid var(--border-subtle);
+-        color: var(--text);
++        color: var(--text-primary);
+         overflow-wrap: anywhere;
+       }
+ }
+diff --git a/player/styles/components-transcript.css b/player/styles/components-transcript.css
+index d2650885587d62d663bb91d0096762e25eef1a05..88a22500254e58f787eacde8b51b5205f42d96be 100644
+--- a/player/styles/components-transcript.css
++++ b/player/styles/components-transcript.css
+@@ -4,7 +4,7 @@
+       .message {
+         max-width: min(100%, var(--conversation-max-width));
+ 
+-        --speaker-accent: #9ba4b2;
++        --speaker-accent: var(--speaker-fallback-accent);
+         --speaker-font: inherit;
+       }
+ 
+@@ -45,7 +45,7 @@
+         border: 1px solid var(--speaker-accent);
+         border-radius: 50%;
+ 
+-        background: var(--control-bg);
++        background: var(--surface-component);
+         color: var(--speaker-accent);
+ 
+         font-size: 10px;
+@@ -80,7 +80,7 @@
+ 
+         border-left: 2px solid color-mix(in srgb, var(--speaker-accent) 85%, transparent);
+ 
+-        color: var(--text);
++        color: var(--text-primary);
+         font-family: var(--speaker-font);
+         font-size: 12px;
+         line-height: 1.25;

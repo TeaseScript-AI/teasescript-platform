@@ -1,0 +1,131 @@
+diff --git a/player/styles/components-composer.css b/player/styles/components-composer.css
+index 72097b5b30d9794f4e955299b1859f1186762708..e1c31c826daede946c938c4fd4fe2e22d6e223dc 100644
+--- a/player/styles/components-composer.css
++++ b/player/styles/components-composer.css
+@@ -18,7 +18,7 @@
+         padding: 5px;
+         border: 1px solid var(--border-subtle);
+         border-radius: 8px;
+-        background: var(--control-bg);
++        background: var(--surface-component);
+       }
+ 
+       textarea {
+@@ -40,7 +40,7 @@
+         outline: 0;
+ 
+         background: transparent;
+-        color: var(--text);
++        color: var(--text-primary);
+ 
+         box-shadow: none;
+         font-size: 11px;
+@@ -48,7 +48,7 @@
+       }
+ 
+       textarea::placeholder {
+-        color: var(--muted);
++        color: var(--text-muted);
+         opacity: 1;
+       }
+ 
+@@ -62,7 +62,7 @@
+         border-radius: 7px;
+ 
+         background: var(--accent-solid);
+-        color: #ffffff;
++        color: var(--text-on-accent);
+ 
+         box-shadow: none;
+ 
+@@ -74,9 +74,9 @@
+       }
+ 
+       .send-button:disabled {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
+-        color: var(--muted-quiet);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
++        color: var(--disabled-text);
+         cursor: not-allowed;
+       }
+ }
+diff --git a/player/styles/components-right-controls.css b/player/styles/components-right-controls.css
+index 4f4023a1ae980abd8ad82afe2b6ca61181d73761..3363610403a4aba7afcbf758146ddd917511609d 100644
+--- a/player/styles/components-right-controls.css
++++ b/player/styles/components-right-controls.css
+@@ -52,8 +52,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 50%;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+ 
+         box-shadow: none;
+ 
+@@ -73,7 +73,7 @@
+ 
+         background:
+           conic-gradient(
+-            var(--ui-accent)
++            var(--identity-accent)
+             0
+             var(--timer-progress),
+ 
+@@ -86,14 +86,14 @@
+           radial-gradient(
+             farthest-side,
+             transparent calc(100% - 5px),
+-            #000 calc(100% - 4px)
++            var(--mask-opaque) calc(100% - 4px)
+           );
+ 
+         mask:
+           radial-gradient(
+             farthest-side,
+             transparent calc(100% - 5px),
+-            #000 calc(100% - 4px)
++            var(--mask-opaque) calc(100% - 4px)
+           );
+       }
+ 
+@@ -120,7 +120,7 @@
+           0;
+ 
+         scrollbar-width: thin;
+-        scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
++        scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
+       }
+ 
+       .action-button {
+@@ -133,11 +133,11 @@
+           clamp(8px, 0.8vmin, 12px)
+           12px;
+ 
+-        border: 1px solid var(--border-strong);
++        border: 1px solid var(--border-subtle);
+         border-radius: 6px;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+ 
+         box-shadow: none;
+ 
+@@ -155,9 +155,9 @@
+       }
+ 
+       .action-button:disabled {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
+-        color: var(--muted-quiet);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
++        color: var(--disabled-text);
+         cursor: not-allowed;
+       }
+ 

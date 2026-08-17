@@ -1,0 +1,153 @@
++            background: var(--surface-component);
+           }
+         }
+ 
+         .composer textarea:not(:disabled):active {
+-          border-color: var(--control-pressed-border);
+-          background: var(--control-bg);
++          border-color: var(--border-strong);
++          background: var(--surface-component);
+         }
+ 
+         .composer textarea:disabled {
+-          border-color: var(--control-disabled-border);
+-          background: var(--control-disabled-bg);
+-          color: var(--muted-quiet);
++          border-color: var(--disabled-border);
++          background: var(--disabled-bg);
++          color: var(--disabled-text);
+           cursor: not-allowed;
+         }
+ 
+@@ -154,11 +154,11 @@
+         @media (hover: hover) and (pointer: fine) {
+           .player[data-right="auto"] .action-button:not(:disabled):hover,
+           .player[data-right="overlay"] .action-button:not(:disabled):hover {
+-            border-color: var(--control-hover-border);
++            border-color: var(--border-interactive);
+             background:
+               color-mix(
+                 in srgb,
+-                var(--control-hover-bg) 60%,
++                var(--component-hover) 60%,
+                 transparent
+               );
+           }
+@@ -166,22 +166,22 @@
+ 
+         .player[data-right="auto"] .action-button:not(:disabled):active,
+         .player[data-right="overlay"] .action-button:not(:disabled):active {
+-          border-color: var(--control-pressed-border);
++          border-color: var(--border-strong);
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-pressed-bg) 60%,
++              var(--component-pressed) 60%,
+               transparent
+             );
+         }
+ 
+         .player[data-right="auto"] .action-button:disabled,
+         .player[data-right="overlay"] .action-button:disabled {
+-          border-color: var(--control-disabled-border);
++          border-color: var(--disabled-border);
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-disabled-bg) 60%,
++              var(--disabled-bg) 60%,
+               transparent
+             );
+         }
+@@ -216,7 +216,7 @@
+ 
+           padding: 0;
+           border: 0;
+-          background: rgb(56 45 42 / 18%);
++          background: var(--scrim-color);
+ 
+           cursor: default;
+         }
+@@ -240,9 +240,9 @@
+           width: var(--mobile-drawer-width);
+           padding-top: 0;
+ 
+-          background: var(--side-bg);
++          background: var(--surface-chrome);
+           border-right: 1px solid var(--border-subtle);
+-          box-shadow: 3px 0 8px rgb(56 45 42 / 8%);
++          box-shadow: 3px 0 8px var(--shadow-color);
+         }
+ 
+         .player[data-left="open"] .tool-strip {
+@@ -327,39 +327,39 @@
+         background:
+           color-mix(
+             in srgb,
+-            var(--control-bg) 60%,
++            var(--surface-component) 60%,
+             transparent
+           );
+       }
+ 
+       @media (hover: hover) and (pointer: fine) {
+         .player[data-right="overlay"] .action-button:not(:disabled):hover {
+-          border-color: var(--control-hover-border);
++          border-color: var(--border-interactive);
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-hover-bg) 60%,
++              var(--component-hover) 60%,
+               transparent
+             );
+         }
+       }
+ 
+       .player[data-right="overlay"] .action-button:not(:disabled):active {
+-        border-color: var(--control-pressed-border);
++        border-color: var(--border-strong);
+         background:
+           color-mix(
+             in srgb,
+-            var(--control-pressed-bg) 60%,
++            var(--component-pressed) 60%,
+             transparent
+           );
+       }
+ 
+       .player[data-right="overlay"] .action-button:disabled {
+-        border-color: var(--control-disabled-border);
++        border-color: var(--disabled-border);
+         background:
+           color-mix(
+             in srgb,
+-            var(--control-disabled-bg) 60%,
++            var(--disabled-bg) 60%,
+             transparent
+           );
+       }
+@@ -437,7 +437,7 @@
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-bg) 90%,
++              var(--surface-component) 90%,
+               transparent
+             );
+         }
+@@ -446,7 +446,7 @@
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-bg) 90%,
++              var(--surface-component) 90%,
+               transparent
+             );
+         }
+diff --git a/player/styles/tokens.css b/player/styles/tokens.css
+new file mode 100644
+index 0000000000000000000000000000000000000000..aeae66b47c846985196d05c4d177dd70d10bc730
+--- /dev/null
++++ b/player/styles/tokens.css

@@ -1,0 +1,165 @@
+@@ -79,7 +49,6 @@
+         --conversation-gap: 18px;
+         --conversation-overlay-reserve: 0px;
+ 
+-        --scene-ambient: #f7cdaf;
+         --timer-progress: 46%;
+       }
+ 
+@@ -116,7 +85,7 @@
+           auto;
+ 
+         overflow: hidden;
+-        background: var(--center-bg);
++        background: var(--surface-base);
+       }
+ 
+       .player[data-left="closed"] {
+@@ -134,8 +103,8 @@
+         grid-column: 1 / -1;
+         grid-row: 1;
+ 
+-        background: var(--title-bg);
+-        box-shadow: 0 2px 6px rgb(56 45 42 / 8%);
++        background: var(--surface-chrome);
++        box-shadow: 0 2px 6px var(--shadow-color);
+       }
+ 
+       .title-controls {
+@@ -177,8 +146,8 @@
+         padding-top: var(--title-overlay-clearance);
+ 
+         overflow: hidden;
+-        background: var(--side-bg);
+-        box-shadow: 3px 0 8px rgb(56 45 42 / 8%);
++        background: var(--surface-chrome);
++        box-shadow: 3px 0 8px var(--shadow-color);
+       }
+ 
+       .left-scrim {
+@@ -198,7 +167,7 @@
+         place-items: center;
+ 
+         overflow: hidden;
+-        background: var(--media-bg);
++        background: var(--surface-media);
+       }
+ 
+       .transcript {
+@@ -239,28 +208,28 @@
+         flex-direction: column;
+         gap: 12px;
+ 
+-        background: var(--center-bg);
++        background: var(--surface-base);
+ 
+         scrollbar-width: thin;
+         scrollbar-gutter: stable;
+         scrollbar-color:
+-          color-mix(in srgb, var(--muted) 45%, transparent)
++          color-mix(in srgb, var(--text-muted) 45%, transparent)
+           transparent;
+ 
+         -webkit-mask-image:
+           linear-gradient(
+             to bottom,
+             transparent 0,
+-            #000 28px,
+-            #000 100%
++            var(--mask-opaque) 28px,
++            var(--mask-opaque) 100%
+           );
+ 
+         mask-image:
+           linear-gradient(
+             to bottom,
+             transparent 0,
+-            #000 28px,
+-            #000 100%
++            var(--mask-opaque) 28px,
++            var(--mask-opaque) 100%
+           );
+       }
+ 
+@@ -278,7 +247,7 @@
+         padding-right:
+           calc(12px + var(--safe-right));
+ 
+-        background: var(--center-bg);
++        background: var(--surface-base);
+       }
+ 
+       .right-zone {
+@@ -302,10 +271,10 @@
+ 
+         overflow: hidden;
+ 
+-        background: var(--side-bg);
++        background: var(--surface-chrome);
+ 
+         border-left: 0;
+-        box-shadow: -3px 0 8px rgb(56 45 42 / 8%);
++        box-shadow: -3px 0 8px var(--shadow-color);
+       }
+ 
+       .player[data-right="overlay"] .right-zone {
+diff --git a/player/styles/reset.css b/player/styles/reset.css
+index a9cf99ee51194f0eacae01da8eb75be15c449290..a6ac06bcb1d073ff7b65350af3df45c38f5aff73 100644
+--- a/player/styles/reset.css
++++ b/player/styles/reset.css
+@@ -17,8 +17,8 @@
+         min-height: 100dvh;
+         overflow: hidden;
+         overscroll-behavior: none;
+-        background: var(--canvas-bg, #f7f0e8);
+-        color: var(--text, #382d2a);
++        background: var(--surface-base);
++        color: var(--text-primary);
+         font-family:
+           "Inter Tight",
+           Inter,
+diff --git a/player/styles/responsive.css b/player/styles/responsive.css
+index d25891a627577eabd131b2f11cb15d295533b867..7e7099e33b6a3f88729e8185d7bba0e9f9ca2ebd 100644
+--- a/player/styles/responsive.css
++++ b/player/styles/responsive.css
+@@ -70,8 +70,8 @@
+         }
+ 
+         .player[data-right="docked"] .right-zone {
+-          background: var(--side-bg);
+-          box-shadow: -3px 0 8px rgb(56 45 42 / 8%);
++          background: var(--surface-chrome);
++          box-shadow: -3px 0 8px var(--shadow-color);
+         }
+ 
+         .player[data-right="auto"] .timer,
+@@ -81,7 +81,7 @@
+           background:
+             color-mix(
+               in srgb,
+-              var(--control-bg) 60%,
++              var(--surface-component) 60%,
+               transparent
+             );
+         }
+@@ -113,32 +113,32 @@
+           padding: 10px 11px;
+           border: 1px solid var(--border-subtle);
+           border-radius: 7px;
+-          background: var(--control-bg);
++          background: var(--surface-component);
+           font-size: 10px;
+         }
+ 
+         .composer textarea:focus-visible {
+           border-color: var(--border-subtle);
+-          outline: 2px solid var(--focus-ring);
++          outline: 2px solid var(--accent-focus);
+           outline-offset: 1px;
+         }
+ 
+         @media (hover: hover) and (pointer: fine) {
+           .composer textarea:not(:disabled):hover {
+-            border-color: var(--control-hover-border);
+-            background: var(--control-bg);
++            border-color: var(--border-interactive);

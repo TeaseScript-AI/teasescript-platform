@@ -1,0 +1,150 @@
+@@ -103,25 +103,25 @@
+       .tool-selector:not(:disabled):active,
+       .action-button:not(:disabled):active,
+       .lab-reset:not(:disabled):active {
+-        border-color: var(--control-pressed-border);
+-        background: var(--control-pressed-bg);
++        border-color: var(--border-strong);
++        background: var(--component-pressed);
+         box-shadow: none;
+       }
+ 
+       .send-button:not(:disabled):active {
+-        border-color: var(--accent-pressed);
+-        background: var(--accent-pressed);
++        border-color: var(--accent-solid-pressed);
++        background: var(--accent-solid-pressed);
+         box-shadow: none;
+       }
+ 
+       .composer form:has(textarea:not(:disabled):active) {
+-        border-color: var(--control-pressed-border);
+-        background: var(--control-bg);
++        border-color: var(--border-strong);
++        background: var(--surface-component);
+       }
+ 
+       .composer form:has(textarea:disabled) {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
+       }
+ 
+       @media (hover: none), (pointer: coarse) {
+@@ -137,7 +137,7 @@
+       }
+ 
+       .composer form:has(textarea:focus-visible) {
+-        outline: 2px solid var(--focus-ring);
++        outline: 2px solid var(--accent-focus);
+         outline-offset: 1px;
+       }
+ 
+@@ -149,32 +149,32 @@
+       .send-button:focus-visible,
+       .lab-reset:focus-visible,
+       .theme-picker input[type="color"]:focus-visible {
+-        outline: 2px solid var(--focus-ring);
++        outline: 2px solid var(--accent-focus);
+         outline-offset: 1px;
+       }
+ 
+       .switch input:focus-visible + .switch-ui {
+-        outline: 2px solid var(--focus-ring);
++        outline: 2px solid var(--accent-focus);
+         outline-offset: 1px;
+       }
+ 
+       @media (hover: hover) and (pointer: fine) {
+         .theme-picker input[type="color"]:not(:disabled):hover {
+-          border-color: var(--control-hover-border);
++          border-color: var(--border-interactive);
+         }
+ 
+         .switch input:not(:disabled) + .switch-ui:hover {
+-          background: var(--control-hover-bg);
++          background: var(--component-hover);
+         }
+       }
+ 
+       .theme-picker input[type="color"]:not(:disabled):active {
+-        border-color: var(--control-pressed-border);
++        border-color: var(--border-strong);
+       }
+ 
+       .switch input:not(:disabled) + .switch-ui:active {
+-        border-color: var(--control-pressed-border);
+-        background: var(--control-pressed-bg);
++        border-color: var(--border-strong);
++        background: var(--component-pressed);
+       }
+ 
+       .switch input:checked:not(:disabled) + .switch-ui:active {
+@@ -186,20 +186,20 @@
+       .tool-selector:disabled,
+       .lab-reset:disabled,
+       .theme-picker input[type="color"]:disabled {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
+-        color: var(--muted-quiet);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
++        color: var(--disabled-text);
+         cursor: not-allowed;
+       }
+ 
+       .switch input:disabled + .switch-ui {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
+         cursor: not-allowed;
+       }
+ 
+       .switch input:disabled + .switch-ui::after {
+-        background: var(--muted-quiet);
++        background: var(--disabled-text);
+       }
+ 
+       @keyframes message-in {
+diff --git a/player/styles/layout.css b/player/styles/layout.css
+index dcf16c3c673551fc27f9f0fb9c4e60414e072c15..bd110ef7c0f1f30dc17367526962bc7aed77ca4a 100644
+--- a/player/styles/layout.css
++++ b/player/styles/layout.css
+@@ -1,35 +1,5 @@
+ @layer layout {
+       :root {
+-        color-scheme: light;
+-
+-        --theme-color: #e84c71;
+-
+-        --canvas-bg: #f7f0e8;
+-        --title-bg: #fcf6ef;
+-        --side-bg: #fcf6ef;
+-        --center-bg: #f7f0e8;
+-        --media-bg: #f0dcc8;
+-        --control-bg: #fffcf7;
+-
+-        --text: #382d2a;
+-        --muted: #79665f;
+-        --muted-quiet: #8a7770;
+-        --border-subtle: #d9c8b8;
+-        --border-strong: #d9c8b8;
+-
+-        --control-hover-bg: #f8eee5;
+-        --control-hover-border: #cbb2a1;
+-        --control-pressed-bg: #f2e3d8;
+-        --control-pressed-border: #b49380;
+-        --control-disabled-bg: #efe6df;
+-        --control-disabled-border: #decfc4;
+-
+-        --accent-solid: #d63b61;
+-        --accent-hover: #c93659;
+-        --accent-pressed: #b82f4f;
+-        --focus-ring: #e84c71;
+-        --ui-accent: var(--theme-color);
+-
+         /*
+           Player chrome respects device safe areas while media remains full-bleed.
+           The variables can also be overridden by the embedding host in tests.

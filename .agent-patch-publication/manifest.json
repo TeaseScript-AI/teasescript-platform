@@ -1,0 +1,66 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "feature/player-production-demo",
+  "expectedBaseSha": "d7af062775d7fc7bbf692a9af26138147b07c1bb",
+  "expectedResultTreeSha": "ea1bdbb0555cc521862d627ffbefde84b226f4d8",
+  "patchSizeBytes": 48800,
+  "patchSha256": "d0e7fda9937263372a1b829656f3d58f4c56820816659501f43243f6a801ddba",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0011",
+      "sizeBytes": 4248,
+      "sha256": "7a6f761c00265b3022765560e8306c91886b3bd3415d1faa7baa89b747274964"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0011",
+      "sizeBytes": 5287,
+      "sha256": "b0e7c8a3a8f6fcbaf9121b57add497382023dc91f62ee8697f564b457ae26f65"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0011",
+      "sizeBytes": 3675,
+      "sha256": "670315ff8c05d07fcd8adbcdc8f7a5341a6d4a22f2eb6e5aa1714d82fc3d4678"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0011",
+      "sizeBytes": 3982,
+      "sha256": "a799ef9cf5c89e97bbce1c962142850f664693d364b937402fc6682b0113cc27"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0011",
+      "sizeBytes": 4365,
+      "sha256": "a66143462a2b44377cff4b0e7729e65ac04d6666acedbe835d57c48c8195cbed"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0006-of-0011",
+      "sizeBytes": 5010,
+      "sha256": "b743b671b82585daa61e5e6c8c9215ce7d3ad83d6018488f14834d2d7b060d91"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0007-of-0011",
+      "sizeBytes": 4732,
+      "sha256": "54714626e4bbd21941396570b2bc65c53cf9bb076ad60ca6e1a570d99bdedc83"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0008-of-0011",
+      "sizeBytes": 4892,
+      "sha256": "70423d505ddce520757c0e36278d2a0fc4b774eb6a4a9eb9f8c8c1b54cfbd5a5"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0009-of-0011",
+      "sizeBytes": 3628,
+      "sha256": "59a39d22dca051c389dbab2633455a2fe93b77c2bfff9e511371a05632d350f9"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0010-of-0011",
+      "sizeBytes": 4645,
+      "sha256": "97103e652fb1d673c41d413556063b9edea47d0d8006f66d162114f02b74f00a"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0011-of-0011",
+      "sizeBytes": 4336,
+      "sha256": "47f4092f71e341f5e1cce8a07e4aa769457a57fa56adc28fc3e0358bdd27901d"
+    }
+  ],
+  "commitMessage": "Refactor Player colour tokens to OKLCH"
+}

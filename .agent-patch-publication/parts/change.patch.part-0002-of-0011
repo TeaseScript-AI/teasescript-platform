@@ -1,0 +1,105 @@
+diff --git a/player/README.md b/player/README.md
+index 7703c1f6ce8d75dc554a295bf169b220ac8c5bc9..0bca0b7da0cc25af7997677a0898c45383b50aab 100644
+--- a/player/README.md
++++ b/player/README.md
+@@ -13,13 +13,21 @@ The Player currently consumes `demo-session.ts` presentation data. It is not yet
+ - `tool-columns.ts`: pure add/select/close transitions for user-created tool columns.
+ - `render.ts`: data-driven message, action, timer, media, and tool-column presentation.
+ - `browser.ts`: DOM bootstrap and local UI interactions.
+-- `styles/`: cascade-layered layout, component, effect, and responsive CSS.
++- `styles/`: cascade-layered token, layout, component, effect, and responsive CSS. `styles/tokens.css` owns the Player
++  primitive scales and semantic colour mappings.
+ 
+ The CSS keeps the browser-native direction established by the Player research: Grid, dynamic viewport units,
+ `clamp()`, `color-mix()`, `aspect-ratio`, `field-sizing`, stable scrollbar gutters, masks, safe-area environment insets for
+ Player controls, input-capability media queries, and `prefers-reduced-motion`. The demo has no external runtime asset or
+ network dependency.
+ 
++Player theme colours follow the architecture documented in
++[`docs/UI-DESIGN-AND-ENGINEERING.md`](../docs/UI-DESIGN-AND-ENGINEERING.md): canonical OKLCH primitives feed semantic
++surface, state, border, text, accent, and disabled tokens, and component CSS consumes only that semantic API. The current
++light mapping is the approved visual baseline. A future dark mapping replaces theme primitives/semantic mappings rather
++than component styles. Package, speaker, and media identity colours remain separate from the application theme; the
++Visual Lab's demo identity accent therefore does not replace the semantic application accent scale.
++
+ The left tool area supports user-created columns. Each column has one fixed selector/`+`/close row and one vertically
+ scrollable body; the `+` in any column adds another independent blank column. Tool content no longer adds nested vertical
+ scrolling or repeats the selected tool name as another heading. Columns may duplicate a tool, switch tools, and be closed
+diff --git a/player/browser.ts b/player/browser.ts
+index bc5103a23b4e14e6c16886fff06f7612ff7dc452..3e7712b7d02d46a4c8aa7717c9e492deffc7cc1a 100644
+--- a/player/browser.ts
++++ b/player/browser.ts
+@@ -274,7 +274,7 @@ function syncLeftReserve(): void {
+ 
+ function applyAccentColour(value: string): void {
+   accentColor = value;
+-  document.documentElement.style.setProperty("--theme-color", value);
++  document.documentElement.style.setProperty("--identity-accent", value);
+   syncVisualControls();
+ }
+ 
+@@ -298,7 +298,7 @@ function resetVisualLab(): void {
+   accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
+   ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
+   vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
+-  document.documentElement.style.setProperty("--theme-color", accentColor);
++  document.documentElement.style.setProperty("--identity-accent", accentColor);
+   player.classList.toggle("fx-ambient", ambientEnabled);
+   player.classList.toggle("fx-vignette", vignetteEnabled);
+   syncVisualControls();
+diff --git a/player/index.html b/player/index.html
+index b767115ead528d7c12732be764b01b294431179a..660e81788360d83d6970f0422789eaf20900f3f1 100644
+--- a/player/index.html
++++ b/player/index.html
+@@ -11,6 +11,7 @@
+ 
+   <link rel="stylesheet" href="/player/styles/cascade.css" />
+   <link rel="stylesheet" href="/player/styles/reset.css" />
++  <link rel="stylesheet" href="/player/styles/tokens.css" />
+   <link rel="stylesheet" href="/player/styles/layout.css" />
+   <link rel="stylesheet" href="/player/styles/components-base.css" />
+   <link rel="stylesheet" href="/player/styles/components-tools.css" />
+diff --git a/player/styles/cascade.css b/player/styles/cascade.css
+index bea0fe7c67e7517f9a81c04c7250362698e37e02..8cea3b2440d4a0ca82d7e2c34bf55aee663041bf 100644
+--- a/player/styles/cascade.css
++++ b/player/styles/cascade.css
+@@ -1 +1 @@
+-@layer reset, layout, components, effects, responsive;
++@layer reset, tokens, layout, components, effects, responsive;
+diff --git a/player/styles/components-base.css b/player/styles/components-base.css
+index 552ba254a03df5bfefd68405fe5a4ee04326675e..484c47566056d9c26ab019c3d18346bfb6ab4af0 100644
+--- a/player/styles/components-base.css
++++ b/player/styles/components-base.css
+@@ -11,8 +11,8 @@
+         border: 1px solid var(--border-subtle);
+         border-radius: 6px;
+ 
+-        background: var(--control-bg);
+-        color: var(--text);
++        background: var(--surface-component);
++        color: var(--text-primary);
+ 
+         box-shadow: none;
+         cursor: pointer;
+@@ -52,7 +52,7 @@
+       }
+ 
+       .title-text {
+-        color: var(--text);
++        color: var(--text-primary);
+         font-size: 14px;
+         font-weight: 700;
+         letter-spacing: 0;
+@@ -63,9 +63,9 @@
+       }
+ 
+       .icon-button:disabled {
+-        border-color: var(--control-disabled-border);
+-        background: var(--control-disabled-bg);
+-        color: var(--muted-quiet);
++        border-color: var(--disabled-border);
++        background: var(--disabled-bg);
++        color: var(--disabled-text);
+         cursor: not-allowed;
+       }
+ }

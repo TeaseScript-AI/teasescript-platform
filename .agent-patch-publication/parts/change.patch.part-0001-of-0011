@@ -1,0 +1,56 @@
+diff --git a/docs/UI-DESIGN-AND-ENGINEERING.md b/docs/UI-DESIGN-AND-ENGINEERING.md
+index f8dcfc936c2f3117551a41980bd74402f896308b..0c20ae4e620c1c536f1fdbeabcf060d7bcb7ab43 100644
+--- a/docs/UI-DESIGN-AND-ENGINEERING.md
++++ b/docs/UI-DESIGN-AND-ENGINEERING.md
+@@ -94,6 +94,51 @@ Responsive layouts may change composition, but the same semantic role should nor
+ breakpoints. Inverse foreground text is a text role, not another surface level; disabled controls likewise need a
+ recognizable neutral state rather than a new decorative palette branch.
+ 
++#### Current Player colour-token architecture
++
++The Player light theme uses OKLCH as the canonical colour representation. Its primitive palettes follow a
++Radix-inspired 12-step functional progression: low steps support application and component surfaces, middle steps
++support interaction and boundaries, and high steps support solid emphasis and readable content. Radix supplies the
++scale philosophy only; TeaseScript does not depend on Radix Colors, Radix Primitives, React, or generated Radix CSS.
++
++Player component CSS consumes semantic tokens, not primitive step numbers. The dependency direction is therefore
++`OKLCH primitive -> semantic token -> component`. The neutral scale keeps one additional
++`--neutral-disabled-text` primitive because the approved light palette has a distinct disabled/subtle-text anchor that
++would otherwise force one of the 12 functional scale positions to change meaning. This preserves the approved colour
++instead of inventing another near-duplicate scale step.
++
++The current approved light-theme anchors are:
++
++| Semantic role | Primitive | Canonical OKLCH | sRGB/HEX reference |
++| --- | --- | --- | --- |
++| `surface-base` | `neutral-1` | `oklch(95.838817% 0.013065 71.329675)` | `#F7F0E8` |
++| `surface-chrome` | `neutral-2` | `oklch(97.585973% 0.011305 71.900713)` | `#FCF6EF` |
++| `surface-component` | `neutral-3` | `oklch(99.198640% 0.007339 80.721397)` | `#FFFCF7` |
++| `component-hover` | `neutral-4` | `oklch(95.449190% 0.016178 64.670581)` | `#F8EEE5` |
++| `component-pressed` | `neutral-5` | `oklch(92.481370% 0.022134 58.770256)` | `#F2E3D8` |
++| `disabled-bg` | `neutral-6` | `oklch(93.008652% 0.013608 60.562705)` | `#EFE6DF` |
++| `disabled-border` | `neutral-7` | `oklch(86.369830% 0.022521 58.740358)` | `#DECFC4` |
++| `border-subtle` | `neutral-8` | `oklch(84.246356% 0.029049 65.706579)` | `#D9C8B8` |
++| `border-interactive` | `neutral-9` | `oklch(78.050063% 0.037402 56.320047)` | `#CBB2A1` |
++| `border-strong` | `neutral-10` | `oklch(68.850581% 0.048262 51.545561)` | `#B49380` |
++| `text-muted` | `neutral-11` | `oklch(52.648990% 0.026787 41.270655)` | `#79665F` |
++| `text-primary` | `neutral-12` | `oklch(30.837679% 0.017118 35.721243)` | `#382D2A` |
++| `disabled-text` / `text-subtle` | `neutral-disabled-text` | `oklch(58.485730% 0.026025 41.299400)` | `#8A7770` |
++| `accent-focus` | `accent-8` | `oklch(64.182432% 0.192363 10.285530)` | `#E84C71` |
++| `accent-solid` | `accent-9` | `oklch(59.208036% 0.191378 11.081039)` | `#D63B61` |
++| `accent-solid-hover` | `accent-10` | `oklch(56.375014% 0.183261 11.656601)` | `#C93659` |
++| `accent-solid-pressed` | `accent-11` | `oklch(52.587596% 0.173015 12.200162)` | `#B82F4F` |
++
++The HEX values are compatibility/reference values only; they are not the canonical design source. The remaining
++primitive accent steps complete the functional 12-step scale and need not be used merely because they exist. Default
++neutral controls use `border-subtle`, hover can use `border-interactive`, and pressed or deliberately strong neutral
++emphasis can use `border-strong`. Application accent tokens remain separate from speaker, package, and media identity
++colours.
++
++A future universal dark theme should define a deliberately designed dark primitive palette and semantic mappings under
++`[data-theme="dark"]`; component CSS should remain unchanged. Do not generate dark mode by automatically inverting the
++light scale. The current task has no approved dark palette, so only the light mapping is defined.
++
+ ### Match interaction feedback to input capability
+ 
+ Do not assume hover exists because desktop emulation exposes a pointer. Use capability-aware CSS for hover, touch press,

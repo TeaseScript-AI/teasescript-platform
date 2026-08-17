@@ -1,0 +1,57 @@
+\s\S]*background: var\(--disabled-bg\)/u);
+   assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*\.composer form \{[\s\S]*border: 0;[\s\S]*background: transparent;/u);
+-  assert.match(responsive, /\.composer textarea \{[\s\S]*border: 1px solid var\(--border-subtle\);[\s\S]*background: var\(--control-bg\)/u);
+-  assert.match(responsive, /\.composer textarea:not\(:disabled\):active[\s\S]*border-color: var\(--control-pressed-border\)/u);
+-  assert.match(responsive, /\.composer textarea:disabled[\s\S]*background: var\(--control-disabled-bg\)/u);
++  assert.match(responsive, /\.composer textarea \{[\s\S]*border: 1px solid var\(--border-subtle\);[\s\S]*background: var\(--surface-component\)/u);
++  assert.match(responsive, /\.composer textarea:not\(:disabled\):active[\s\S]*border-color: var\(--border-strong\)/u);
++  assert.match(responsive, /\.composer textarea:disabled[\s\S]*background: var\(--disabled-bg\)/u);
+ });
+ 
+ test("Player overlay Actions keep translucent default, hover, and pressed fills", async () => {
+   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+ 
+-  assert.match(responsive, /\.player\[data-right="overlay"\] \.action-button \{[\s\S]*var\(--control-bg\) 60%/u);
+-  assert.match(responsive, /var\(--control-hover-bg\) 60%/u);
+-  assert.match(responsive, /var\(--control-pressed-bg\) 60%/u);
++  assert.match(responsive, /\.player\[data-right="overlay"\] \.action-button \{[\s\S]*var\(--surface-component\) 60%/u);
++  assert.match(responsive, /var\(--component-hover\) 60%/u);
++  assert.match(responsive, /var\(--component-pressed\) 60%/u);
+ });
+ 
+ test("Player right background toggle keeps conversation geometry stable", async () => {
+@@ -199,8 +222,8 @@ test("Player narrow drawer remains opaque and timer compaction is height-driven"
+   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+ 
+   assert.match(responsive, /--mobile-drawer-width:/u);
+-  assert.match(responsive, /background: var\(--side-bg\);/u);
+-  assert.match(responsive, /background: rgb\(56 45 42 \/ 18%\);/u);
++  assert.match(responsive, /background: var\(--surface-chrome\);/u);
++  assert.match(responsive, /background: var\(--scrim-color\);/u);
+   assert.doesNotMatch(responsive, /--control-padding:/u);
+   assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer-cluster \.timer \{[\s\S]*inline-size: 34px;[\s\S]*border-radius: 50%;/u);
+   assert.doesNotMatch(responsive, /\.timer::before \{[\s\S]*content: none;/u);
+@@ -219,16 +242,16 @@ test("Player chrome roles and restrained Penpot elevation stay on structural she
+   const visualLab = await readFile(resolve(process.cwd(), "player/styles/components-visual-lab.css"), "utf8");
+   const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+ 
+-  assert.match(layout, /\.title-bg[\s\S]*box-shadow: 0 2px 6px rgb\(56 45 42 \/ 8%\)/u);
+-  assert.match(layout, /\.left-panel[\s\S]*box-shadow: 3px 0 8px rgb\(56 45 42 \/ 8%\)/u);
+-  assert.match(layout, /\.right-zone[\s\S]*box-shadow: -3px 0 8px rgb\(56 45 42 \/ 8%\)/u);
++  assert.match(layout, /\.title-bg[\s\S]*box-shadow: 0 2px 6px var\(--shadow-color\)/u);
++  assert.match(layout, /\.left-panel[\s\S]*box-shadow: 3px 0 8px var\(--shadow-color\)/u);
++  assert.match(layout, /\.right-zone[\s\S]*box-shadow: -3px 0 8px var\(--shadow-color\)/u);
+   assert.doesNotMatch(layout, /1px 0 0 var\(--border-subtle\) inset/u);
+   assert.match(layout, /\.player\[data-right="overlay"\] \.right-zone[\s\S]*box-shadow: none/u);
+ 
+-  assert.match(tools, /\.tool-column-header[\s\S]*background: transparent/u);
+-  assert.match(tools, /\.tool-selector[\s\S]*background: var\(--control-bg\)/u);
+-  assert.match(visualLab, /\.lab-fixed-note[\s\S]*background: var\(--side-bg\)/u);
+-  assert.match(visualLab, /\.lab-fixed-note-title[\s\S]*color: var\(--ui-accent\)/u);
++  assert.match(tools, /\.tool-column-header[\s\S]*background: var\(--surface-component\)/u);
++  assert.match(tools, /\.tool-selector[\s\S]*background: var\(--surface-component\)/u);
++  assert.match(visualLab, /\.lab-fixed-note[\s\S]*background: var\(--surface-chrome\)/u);
++  assert.match(visualLab, /\.lab-fixed-note-title[\s\S]*color: var\(--identity-accent\)/u);
+   assert.match(render, /fixedTitle\.textContent = "Always on"/u);
+ });
+ 
