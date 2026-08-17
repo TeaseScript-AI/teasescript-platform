@@ -84,7 +84,7 @@ test("Player entrypoint uses modular local assets without external runtime depen
   assert.match(html, /src="\/dist\/player\/browser\.js"/u);
   assert.match(html, /href="\/player\/styles\/layout\.css"/u);
   assert.match(html, /href="\/player\/styles\/components-tools\.css"/u);
-  assert.match(html, /id="addToolColumn"/u);
+  assert.doesNotMatch(html, /id="addToolColumn"/u);
   assert.match(html, /id="toolStrip"/u);
   assert.doesNotMatch(html, /tool-panel-header/u);
   assert.doesNotMatch(html, /<style>/u);
@@ -92,20 +92,32 @@ test("Player entrypoint uses modular local assets without external runtime depen
 });
 
 test("Player tool chrome keeps one fixed column header and one vertical scroll owner", async () => {
-  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
   const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
   const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
   const visualLab = await readFile(resolve(process.cwd(), "player/styles/components-visual-lab.css"), "utf8");
 
   assert.match(render, /className = "tool-column-header"/u);
   assert.match(render, /add\.dataset\.toolColumnAdd = ""/u);
-  assert.match(browser, /target\.closest<HTMLButtonElement>\("\[data-tool-column-add\]"\)[\s\S]*appendToolColumn\(\)/u);
-  assert.match(browser, /addToolColumnButton\.addEventListener\("click", appendToolColumn\)/u);
-  assert.match(tools, /\.player:has\(\.tool-column\) \.tool-column-add-global[\s\S]*display: none/u);
+  assert.match(render, /header\.append\(selector, add, close\)/u);
+  assert.match(tools, /grid-template-columns: minmax\(0, 1fr\) auto auto/u);
   assert.doesNotMatch(render, /lab-scroll/u);
   assert.doesNotMatch(render, /className = "lab-title"/u);
-  assert.match(tools, /\.tool-column-body[\s\S]*overflow-y: auto/u);
+  const stripScroll = tools.match(/\.tool-strip-scroll\s*\{[^}]*\}/u)?.[0] ?? "";
+  const columnBody = tools.match(/\.tool-column-body\s*\{[^}]*\}/u)?.[0] ?? "";
+  assert.doesNotMatch(stripScroll, /scrollbar-gutter:\s*stable/u);
+  assert.match(columnBody, /overflow-y:\s*auto/u);
+  assert.match(columnBody, /scrollbar-gutter:\s*stable/u);
   assert.doesNotMatch(visualLab, /overflow-y: auto/u);
+});
+
+test("Player tool-column add controls are local to each column", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.doesNotMatch(html, /id="addToolColumn"/u);
+  assert.doesNotMatch(html, /title-tool-column-add/u);
+  assert.doesNotMatch(browser, /addToolColumnButton/u);
+  assert.match(browser, /target\.closest\("\[data-tool-column-add\]"\)[\s\S]*appendToolColumn\(\)/u);
 });
 
 test("Player Actions stay in the dedicated right rail and are not tool-column content", async () => {
@@ -146,6 +158,41 @@ test("Player conversation spacing is based on its own grid column", async () => 
   assert.doesNotMatch(layout, /100vw - var\(--conversation-max-width\)/u);
   assert.match(layout, /calc\(\(100% - var\(--conversation-max-width\)\) \/ 2 \+ var\(--conversation-gap\)\)/u);
   assert.match(composer, /width: min\(100%, var\(--conversation-max-width\)\)/u);
+  assert.match(layout, /\.composer \{[\s\S]*background: var\(--center-bg\)/u);
+  assert.doesNotMatch(layout, /\.composer \{[\s\S]*border-top:/u);
+});
+
+test("Player composer preserves desktop shell focus and separate mobile controls", async () => {
+  const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(composer, /\.composer form[\s\S]*border: 1px solid var\(--border-subtle\)[\s\S]*background: var\(--control-bg\)/u);
+  assert.match(composer, /textarea[\s\S]*border: 0;[\s\S]*background: transparent/u);
+  assert.doesNotMatch(composer, /textarea:focus-visible/u);
+  assert.match(effects, /\.composer form:has\(textarea:focus-visible\)[\s\S]*outline: 2px solid var\(--focus-ring\)/u);
+  assert.match(effects, /\.composer form:has\(textarea:not\(:disabled\):hover\)[\s\S]*border-color: var\(--control-hover-border\)/u);
+  assert.match(effects, /\.composer form:has\(textarea:not\(:disabled\):active\)[\s\S]*border-color: var\(--control-pressed-border\)/u);
+  assert.match(effects, /\.composer form:has\(textarea:disabled\)[\s\S]*background: var\(--control-disabled-bg\)/u);
+  assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*\.composer form \{[\s\S]*border: 0;[\s\S]*background: transparent;/u);
+  assert.match(responsive, /\.composer textarea \{[\s\S]*border: 1px solid var\(--border-subtle\);[\s\S]*background: var\(--control-bg\)/u);
+  assert.match(responsive, /\.composer textarea:not\(:disabled\):active[\s\S]*border-color: var\(--control-pressed-border\)/u);
+  assert.match(responsive, /\.composer textarea:disabled[\s\S]*background: var\(--control-disabled-bg\)/u);
+});
+
+test("Player overlay Actions keep translucent default, hover, and pressed fills", async () => {
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(responsive, /\.player\[data-right="overlay"\] \.action-button \{[\s\S]*var\(--control-bg\) 60%/u);
+  assert.match(responsive, /var\(--control-hover-bg\) 60%/u);
+  assert.match(responsive, /var\(--control-pressed-bg\) 60%/u);
+});
+
+test("Player right background toggle keeps conversation geometry stable", async () => {
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(responsive, /@media \(min-width: 761px\)[\s\S]*\.player\[data-right="overlay"\] \{[\s\S]*--right-track: var\(--right-controls-width\)/u);
+  assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*\.player\[data-right="auto"\],[\s\S]*\.player\[data-right="docked"\],[\s\S]*\.player\[data-right="overlay"\][\s\S]*--right-track: 0px/u);
 });
 
 test("Player narrow drawer remains opaque and timer compaction is height-driven", async () => {
@@ -154,7 +201,35 @@ test("Player narrow drawer remains opaque and timer compaction is height-driven"
   assert.match(responsive, /--mobile-drawer-width:/u);
   assert.match(responsive, /background: var\(--side-bg\);/u);
   assert.match(responsive, /background: rgb\(56 45 42 \/ 18%\);/u);
-  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer::before \{[\s\S]*content: none;/u);
+  assert.doesNotMatch(responsive, /--control-padding:/u);
+  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer-cluster \.timer \{[\s\S]*inline-size: 34px;[\s\S]*border-radius: 50%;/u);
+  assert.doesNotMatch(responsive, /\.timer::before \{[\s\S]*content: none;/u);
+
+  const overlayBreakpoint = responsive.indexOf("@media (max-width: 760px) {");
+  const compactBreakpoint = responsive.indexOf("@media (max-width: 480px) {");
+  assert.ok(overlayBreakpoint >= 0 && compactBreakpoint > overlayBreakpoint);
+  const overlayOnlyRules = responsive.slice(overlayBreakpoint, compactBreakpoint);
+  assert.doesNotMatch(overlayOnlyRules, /\.timer-wrap\s*\{/u);
+  assert.doesNotMatch(overlayOnlyRules, /\.timer-cluster \.timer\s*\{[^}]*inline-size/u);
+});
+
+test("Player chrome roles and restrained Penpot elevation stay on structural shells", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
+  const visualLab = await readFile(resolve(process.cwd(), "player/styles/components-visual-lab.css"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+
+  assert.match(layout, /\.title-bg[\s\S]*box-shadow: 0 2px 6px rgb\(56 45 42 \/ 8%\)/u);
+  assert.match(layout, /\.left-panel[\s\S]*box-shadow: 3px 0 8px rgb\(56 45 42 \/ 8%\)/u);
+  assert.match(layout, /\.right-zone[\s\S]*box-shadow: -3px 0 8px rgb\(56 45 42 \/ 8%\)/u);
+  assert.doesNotMatch(layout, /1px 0 0 var\(--border-subtle\) inset/u);
+  assert.match(layout, /\.player\[data-right="overlay"\] \.right-zone[\s\S]*box-shadow: none/u);
+
+  assert.match(tools, /\.tool-column-header[\s\S]*background: transparent/u);
+  assert.match(tools, /\.tool-selector[\s\S]*background: var\(--control-bg\)/u);
+  assert.match(visualLab, /\.lab-fixed-note[\s\S]*background: var\(--side-bg\)/u);
+  assert.match(visualLab, /\.lab-fixed-note-title[\s\S]*color: var\(--ui-accent\)/u);
+  assert.match(render, /fixedTitle\.textContent = "Always on"/u);
 });
 
 test("Player left-panel growth protects media and conversation minimums independently", async () => {

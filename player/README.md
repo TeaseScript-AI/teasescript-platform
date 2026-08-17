@@ -20,10 +20,10 @@ The CSS keeps the browser-native direction established by the Player research: G
 Player controls, input-capability media queries, and `prefers-reduced-motion`. The demo has no external runtime asset or
 network dependency.
 
-The left tool area supports user-created columns. `+` reuses the existing Player title row instead of consuming another
-vertical header; each column has one fixed selector/close row and one vertically scrollable body. Tool content no longer
-adds nested vertical scrolling or repeats the selected tool name as another heading. Columns may duplicate a tool, switch
-tools, and be closed independently, while the whole strip owns horizontal overflow.
+The left tool area supports user-created columns. Each column has one fixed selector/`+`/close row and one vertically
+scrollable body; the `+` in any column adds another independent blank column. Tool content no longer adds nested vertical
+scrolling or repeats the selected tool name as another heading. Columns may duplicate a tool, switch tools, and be closed
+independently, while the whole strip owns horizontal overflow.
 
 On wide docked layouts the tool area grows only in response to user-created columns. Its growth is capped by the stricter
 of the square-media (1:1) boundary and the current minimum usable conversation/composer width. This protects text input

@@ -58,6 +58,7 @@
       }
 
 
+      .composer form,
       .icon-button,
       .tool-column-add,
       .tool-column-close,
@@ -72,6 +73,11 @@
       }
 
       @media (hover: hover) and (pointer: fine) {
+        .composer form:has(textarea:not(:disabled):hover) {
+          border-color: var(--control-hover-border);
+          background: var(--control-bg);
+        }
+
         .icon-button:not(:disabled):hover,
         .timer-cluster .right-toggle:not(:disabled):hover,
         .tool-column-add:not(:disabled):hover,
@@ -108,6 +114,16 @@
         box-shadow: none;
       }
 
+      .composer form:has(textarea:not(:disabled):active) {
+        border-color: var(--control-pressed-border);
+        background: var(--control-bg);
+      }
+
+      .composer form:has(textarea:disabled) {
+        border-color: var(--control-disabled-border);
+        background: var(--control-disabled-bg);
+      }
+
       @media (hover: none), (pointer: coarse) {
         .icon-button,
         .tool-column-add,
@@ -118,6 +134,11 @@
           -webkit-tap-highlight-color: transparent;
           touch-action: manipulation;
         }
+      }
+
+      .composer form:has(textarea:focus-visible) {
+        outline: 2px solid var(--focus-ring);
+        outline-offset: 1px;
       }
 
       .icon-button:focus-visible,
@@ -202,6 +223,7 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
+        .composer form,
         .icon-button,
         .tool-column-add,
         .tool-column-close,

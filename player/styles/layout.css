@@ -65,11 +65,14 @@
           clamp(72px, calc(32px + 6vmin), 86px);
         --timer-font-size: 18px;
 
-        --action-min-height: 44px;
+        --action-min-height:
+          clamp(42px, 3.2vmin, 60px);
         --action-font-size: 12px;
 
-        --control-padding: 16px;
-        --control-gap: 9px;
+        --control-padding:
+          clamp(10px, 1vmin, 17px);
+        --control-gap:
+          clamp(8px, 0.7vmin, 13px);
 
         --conversation-max-width: 900px;
         --conversation-min-width: 380px;
@@ -126,12 +129,13 @@
       }
 
       .title-bg {
+        z-index: 30;
+
         grid-column: 1 / -1;
         grid-row: 1;
 
         background: var(--title-bg);
-
-        border-bottom: 1px solid var(--border-subtle);
+        box-shadow: 0 2px 6px rgb(56 45 42 / 8%);
       }
 
       .title-controls {
@@ -159,6 +163,8 @@
       }
 
       .left-panel {
+        z-index: 10;
+
         grid-column: 1;
         grid-row: 2 / 5;
 
@@ -172,8 +178,7 @@
 
         overflow: hidden;
         background: var(--side-bg);
-
-        border-right: 1px solid var(--border-subtle);
+        box-shadow: 3px 0 8px rgb(56 45 42 / 8%);
       }
 
       .left-scrim {
@@ -267,7 +272,6 @@
 
         padding-top: 5px;
         padding-bottom: calc(6px + var(--safe-bottom));
-        border-top: 1px solid var(--border-subtle);
 
         padding-left:
           calc(12px + var(--safe-left));
@@ -300,7 +304,8 @@
 
         background: var(--side-bg);
 
-        border-left: 1px solid var(--border-subtle);
+        border-left: 0;
+        box-shadow: -3px 0 8px rgb(56 45 42 / 8%);
       }
 
       .player[data-right="overlay"] .right-zone {
@@ -313,6 +318,8 @@
         max-inline-size: var(--right-controls-width);
 
         background: transparent;
+        border-left: 0;
+        box-shadow: none;
       }
 
 

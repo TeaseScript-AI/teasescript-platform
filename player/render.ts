@@ -168,7 +168,7 @@ function createToolColumn(
 
   const add = document.createElement("button");
   add.type = "button";
-  add.className = "tool-column-add tool-column-add-local";
+  add.className = "tool-column-add";
   add.dataset.toolColumnAdd = "";
   add.setAttribute("aria-label", "Add tool column");
   add.title = "Add tool column";
@@ -245,7 +245,16 @@ function createVisualTool(): HTMLElement {
 
   const fixed = document.createElement("div");
   fixed.className = "lab-fixed-note";
-  fixed.textContent = "Always on: accent · timer ring · refined controls · surface depth · speaker identity · speaker typography · micro-motion · transcript fade";
+
+  const fixedTitle = document.createElement("span");
+  fixedTitle.className = "lab-fixed-note-title";
+  fixedTitle.textContent = "Always on";
+
+  const fixedCopy = document.createElement("span");
+  fixedCopy.className = "lab-fixed-note-copy";
+  fixedCopy.textContent = "accent · timer ring · refined controls · surface depth · speaker identity · speaker typography · micro-motion · transcript fade";
+
+  fixed.append(fixedTitle, fixedCopy);
 
   const reset = document.createElement("button");
   reset.type = "button";

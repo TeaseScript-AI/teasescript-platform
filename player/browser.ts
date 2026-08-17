@@ -23,7 +23,6 @@ const player = requiredElement<HTMLElement>("player", HTMLElement);
 const leftToggle = requiredElement<HTMLButtonElement>("leftToggle", HTMLButtonElement);
 const leftPanel = requiredElement<HTMLElement>("leftPanel", HTMLElement);
 const leftScrim = requiredElement<HTMLElement>("leftScrim", HTMLElement);
-const addToolColumnButton = requiredElement<HTMLButtonElement>("addToolColumn", HTMLButtonElement);
 const toolStrip = requiredElement<HTMLElement>("toolStrip", HTMLElement);
 const toolStripScroll = requiredElement<HTMLElement>("toolStripScroll", HTMLElement);
 const rightToggle = requiredElement<HTMLButtonElement>("rightToggle", HTMLButtonElement);
@@ -107,8 +106,6 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-addToolColumnButton.addEventListener("click", appendToolColumn);
-
 toolStrip.addEventListener("change", (event) => {
   const target = event.target;
   if (target instanceof HTMLSelectElement && target.matches("[data-tool-column-select]")) {
@@ -137,8 +134,7 @@ toolStrip.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
 
-  const add = target.closest<HTMLButtonElement>("[data-tool-column-add]");
-  if (add !== null) {
+  if (target.closest("[data-tool-column-add]") !== null) {
     appendToolColumn();
     return;
   }

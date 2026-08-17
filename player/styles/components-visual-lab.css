@@ -68,9 +68,24 @@
         border: 1px solid var(--border-subtle);
         border-radius: 7px;
 
+        background: var(--side-bg);
         color: var(--muted);
         font-size: 8px;
         line-height: 1.35;
+      }
+
+      .lab-fixed-note-title {
+        display: block;
+
+        margin-bottom: 8px;
+        color: var(--ui-accent);
+        font-size: 9px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+
+      .lab-fixed-note-copy {
+        display: block;
       }
 
       .lab-reset {
