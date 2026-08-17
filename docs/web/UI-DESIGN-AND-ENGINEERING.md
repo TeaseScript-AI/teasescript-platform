@@ -1,10 +1,10 @@
 # UI design and engineering guide
 
 - **Status:** Current cross-surface UI engineering and design guidance.
-- **Use when:** modifying the Player, host-site UI, editor/simulator UI, responsive layouts, controls, media presentation,
-  or visual styling.
-- **Does not define:** product features, runtime/host protocols, trust boundaries, exact visual design, framework choice,
-  or TeaseScript semantics.
+- **Use when:** modifying the Player, host-site UI, editor/simulator UI, responsive layouts, controls, media
+  presentation, or visual styling.
+- **Does not define:** product features, runtime/host protocols, trust boundaries, exact visual design, framework
+  choice, or TeaseScript semantics.
 
 This guide distils recurring Player POC failures and visual-design research into reusable maintenance guidance. Specific
 Player incidents remain useful evidence, but the durable rules are intentionally phrased for any current or future UI
@@ -72,8 +72,9 @@ and map it to semantic roles. A useful general model separates:
 - solid accent fills and their interaction states; and
 - lower- and higher-emphasis text.
 
-Do not copy an external scale mechanically; the useful lesson is the separation of roles, not a mandatory step count.
-Use semantic aliases in components rather than coupling them to scale positions or raw colour values. A neutral control
+Do not copy external palette values mechanically. TeaseScript uses the shared twelve-step role-band structure below,
+but the actual palette values remain project-owned. Use semantic aliases in components rather than coupling them to raw
+colour values or assuming every step must have a distinct token. A neutral control
 should normally progress through neutral default/hover/pressed colours; an accent control should progress through its
 accent family. Do not turn every neutral hover or press into the brand/accent colour merely to make interaction visible.
 Focus is a separate state and must remain explicit without changing geometry.
@@ -102,35 +103,30 @@ A future light or dark theme changes the semantic mappings rather than rewriting
 not apply to technical mask colours or content-driven media, speaker, and package colours, which retain their separate
 ownership.
 
-The Radix twelve-step role bands are useful structural inspiration without a Radix dependency: steps 1–2 are backgrounds,
-3–5 component states, 6–8 borders, 9–10 solid accent, and 11–12 text. Do not invent intermediate values solely to fill
-those steps. Record and use the values needed by the approved surface; a later design task may extend a scale.
+Use the Radix twelve-step role-band model as the default palette structure for TeaseScript web surfaces without taking a
+Radix dependency: steps 1–2 are backgrounds, 3–5 component states, 6–8 borders, 9–10 solid accent, and 11–12 text.
+The values are project-owned; do not copy Radix palette values mechanically and do not invent intermediate values solely
+to fill all twelve positions. A maintained surface specification owns its exact approved palette. For the current
+Player palette, see [`PLAYER-UI.md`](PLAYER-UI.md).
 
-The current Player light palette is:
+### Shared control baseline
 
-| Semantic role | Canonical OKLCH | sRGB reference |
-| --- | --- | --- |
-| surface-base | `oklch(95.839% 0.01306 71.33)` | `#F7F0E8` |
-| surface-chrome | `oklch(97.586% 0.01130 71.90)` | `#FCF6EF` |
-| surface-component | `oklch(99.199% 0.00734 80.72)` | `#FFFCF7` |
-| component-hover | `oklch(95.449% 0.01618 64.67)` | `#F8EEE5` |
-| component-pressed | `oklch(92.481% 0.02213 58.77)` | `#F2E3D8` |
-| border-subtle | `oklch(84.246% 0.02905 65.71)` | `#D9C8B8` |
-| border-interactive | `oklch(78.050% 0.03740 56.32)` | `#CBB2A1` |
-| border-strong | `oklch(68.851% 0.04826 51.55)` | `#B49380` |
-| text-primary | `oklch(30.838% 0.01712 35.72)` | `#382D2A` |
-| text-muted | `oklch(52.649% 0.02679 41.27)` | `#79665F` |
-| accent-focus | `oklch(64.182% 0.19236 10.29)` | `#E84C71` |
-| accent-solid | `oklch(59.208% 0.19138 11.08)` | `#D63B61` |
-| accent-solid-hover | `oklch(56.375% 0.18326 11.66)` | `#C93659` |
-| accent-solid-pressed | `oklch(52.588% 0.17301 12.20)` | `#B82F4F` |
-| disabled-bg | `oklch(93.009% 0.01361 60.56)` | `#EFE6DF` |
-| disabled-border | `oklch(86.370% 0.02252 58.74)` | `#DECFC4` |
-| disabled-text | `oklch(58.486% 0.02603 41.30)` | `#8A7770` |
+New TeaseScript web surfaces should start from the same restrained control vocabulary instead of inventing unrelated
+button styles per page. Treat this as the default baseline, not a requirement to force unlike controls into one shape:
 
-For neutral controls, the interaction sequence is default `border-subtle`, hover `border-interactive`, pressed
-`border-strong`, then focus `accent-focus`. `border-strong` is not the ordinary resting control border. Individual
-product surfaces may compose the approved roles differently where their content and hierarchy require it.
+- use a `1px` neutral border and moderate, consistent non-pill rounding for ordinary controls; compact icon/tool
+  controls use a `6px` radius as the shared baseline, while input/container and primary-button corners normally stay in
+  the `7–8px` range;
+- ordinary controls are flat by default rather than relying on shadows for affordance;
+- use the neutral state progression `border-subtle` -> `border-interactive` on hover -> `border-strong` while pressed;
+- use the solid accent family for primary actions, with separate solid hover and pressed roles;
+- use a `2px` accent focus outline with `1px` visible separation from the control as the shared keyboard-focus baseline;
+- keep hover and pressed feedback paint-only unless movement or geometry change communicates real interaction semantics;
+- deviate when the component, workflow, accessibility requirement, or surrounding composition gives a concrete reason,
+  rather than creating a second local default by accident.
+
+Individual product surfaces may compose the shared roles differently where their content and hierarchy require it. Exact
+component dimensions and the exact palette values remain owned by the maintained specification for that surface.
 
 ### Match interaction feedback to input capability
 
@@ -251,9 +247,10 @@ removed or folded into its real owner once the direction is accepted.
 ## Boundary against accidental policy
 
 Current breakpoints, colours, fonts, demo media, control labels, component shapes, framework choices, and POC-only types
-remain implementation details unless another controlling source accepts them as product requirements. The anti-slop
-section is design-review guidance, not a prohibition on gradients, glass, cards, rounded corners, common fonts, dark
-mode, or any other individual technique.
+remain implementation details unless another controlling source accepts them as product requirements. For example,
+`PLAYER-UI.md` intentionally promotes selected current Player values into that surface's maintained contract. The
+anti-slop section is design-review guidance, not a prohibition on gradients, glass, cards, rounded corners, common
+fonts, dark mode, or any other individual technique.
 
 This guide records reusable UI maintenance experience. It must not override architecture, security, runtime, package,
 accessibility, product, or host/player protocol decisions owned elsewhere.

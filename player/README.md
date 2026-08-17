@@ -1,55 +1,46 @@
-# Player presentation POC
+# Player POC implementation
 
-This directory contains the production-oriented Player UI presentation POC. It is intentionally separate from the technical editor/playground UI and is served by the existing local playground server at `/player/` after `npm run playground`.
+This directory contains the current browser presentation implementation for the Standard Player POC. The canonical
+observable UI contract is [`docs/web/PLAYER-UI.md`](../docs/web/PLAYER-UI.md). Do not infer new product requirements
+from HTML structure, CSS selectors, TypeScript helpers, demo data, or other implementation details here.
 
-The Player currently consumes `demo-session.ts` presentation data. It is not yet the accepted runtime/Player protocol, does not mutate canonical engine state, and does not implement the future cross-origin host contract. Runtime integration can replace the demo data/bootstrap seam without changing the layout CSS or the data-driven message/action renderers.
+General cross-surface web UI engineering/design guidance lives in
+[`docs/web/UI-DESIGN-AND-ENGINEERING.md`](../docs/web/UI-DESIGN-AND-ENGINEERING.md). Accepted runtime, interaction,
+security, and custom-view semantics remain in their controlling specifications and ADRs.
 
-## Source layout
+For local inspection, `npm run playground` serves this implementation at `/player/` through the existing development
+server. That development route is not a public Player/host protocol.
 
-- `index.html`: semantic Player shell and local asset entrypoints.
-- `model.ts`: internal presentation-only types; not a public engine contract.
-- `demo-session.ts`: temporary POC presentation data.
-- `panel-state.ts`: pure left/right panel transition helpers.
-- `tool-columns.ts`: pure add/select/close transitions for user-created tool columns.
-- `render.ts`: data-driven message, action, timer, media, and tool-column presentation.
-- `browser.ts`: DOM bootstrap and local UI interactions.
-- `styles/`: cascade-layered layout, component, effect, and responsive CSS.
+## Implementation seams
 
-The CSS keeps the browser-native direction established by the Player research: Grid, dynamic viewport units,
-`clamp()`, `color-mix()`, `aspect-ratio`, `field-sizing`, stable scrollbar gutters, masks, safe-area environment insets for
-Player controls, input-capability media queries, and `prefers-reduced-motion`. The demo has no external runtime asset or
-network dependency.
+- `index.html` is the local Player entry point and static shell.
+- `model.ts` contains presentation-only POC data shapes.
+- `render.ts` renders presentation data and demo tool-column content.
+- `panel-state.ts` and `tool-columns.ts` keep the current local UI state transitions separate from rendering.
+- `browser.ts` wires local browser interactions, demo presentation state, responsive state synchronization, and demo
+  media loading.
+- `styles/` separates reset, layout/theme ownership, components, effects, and responsive composition through cascade
+  layers.
+- `demo-session.ts` and `demo-media/` are presentation fixtures, not runtime/package APIs.
 
-`styles/layout.css` owns the current light-theme CSS `oklch()` palette primitives and maps them to semantic component
-tokens. Component styles use those semantic tokens, so a future theme can replace mappings without rewriting component
-CSS. Speaker, package-accent, media, and technical mask colours remain outside that application palette; the existing
-Visual Lab picker continues to affect only the package-accent presentation seam.
+The implementation intentionally uses browser-native layout/features and has no UI-framework runtime dependency. Current
+CSS uses Grid, dynamic viewport units, `clamp()`, `color-mix()`, `aspect-ratio`, `field-sizing`, safe-area environment
+insets, stable scrollbar gutters, masks, input-capability media queries, and `prefers-reduced-motion` where they
+simplify
+the required presentation.
 
-The left tool area supports user-created columns. Each column has one fixed selector/`+`/close row and one vertically
-scrollable body; the `+` in any column adds another independent blank column. Tool content no longer adds nested vertical
-scrolling or repeats the selected tool name as another heading. Columns may duplicate a tool, switch tools, and be closed
-independently, while the whole strip owns horizontal overflow.
+`styles/layout.css` currently owns the concrete light-theme palette values and semantic token mapping used by the
+source. Those values are also maintained as observable Player contract in `docs/web/PLAYER-UI.md`; component CSS should
+consume semantic roles rather than raw application-palette primitives. Speaker, package-accent, media, and technical
+mask colours
+remain separate presentation data.
 
-On wide docked layouts the tool area grows only in response to user-created columns. Its growth is capped by the stricter
-of the square-media (1:1) boundary and the current minimum usable conversation/composer width. This protects text input
-independently from media geometry without reserving a fixed percentage of an ultrawide viewport. Narrow layouts keep the
-existing overlay drawer. Tall portrait docked layouts can already start below 1:1; multi-column sizing preserves that
-baseline rather than shrinking the media further, while the future constraint-driven dock/overlay transition remains
-open.
+## Demo-only behavior
 
-The browser bootstrap measures only the strip's intrinsic preferred width. CSS owns the actual Grid allocation and layout
-caps; there is no JavaScript width optimizer. The current `Visual Lab` and `Scene` tool registry is demo presentation
-data, not a runtime or package API. Player Actions remain the dedicated right-hand controls beneath the timer rather than
-becoming tool-column content.
+The local playground server may select a supported image from `player/demo-media/` when the Player opens. The `Visual
+Lab` and `Scene` tools, their fixture content, local accent/effect controls, filename-derived scene information, and the
+demo-media endpoint exist to exercise the presentation and are not Standard Library, runtime, package, or host APIs.
 
-For local demo media, the playground server discovers supported image files (`.jpg`, `.jpeg`, `.png`, `.webp`) placed in
-`player/demo-media/` and returns one random file each time the Player opens. The Player renders that image with the demo
-`contain` fit so the complete image stays visible, while filename-derived scene information stays in the Scene tool instead of
-duplicating it over the media.
-The demo-media folder is presentation fixture data only; it is not a runtime media-loading contract.
-
-No UI or CSS framework is required by this POC. Presentation data, rendering, panel transitions, and browser bootstrap are separate seams so a later runtime integration or UI-framework decision does not become part of the presentation contract by accident.
-
-Open, non-implemented Standard Player presentation work is tracked in
-[`docs/planning/PLAYER-UI-FOLLOW-UPS.md`](../docs/planning/PLAYER-UI-FOLLOW-UPS.md). General UI engineering and design
-guardrails remain in [`docs/UI-DESIGN-AND-ENGINEERING.md`](../docs/UI-DESIGN-AND-ENGINEERING.md).
+The current composer and rendered right-rail Action buttons are presentation-only and are not wired to the deterministic
+runtime. Accepted Standard interaction behavior remains controlled by ADR 0018 and the runtime contracts; the maintained
+placement/presentation boundary is described in `docs/web/PLAYER-UI.md`.

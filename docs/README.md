@@ -22,7 +22,8 @@
 - `SECURITY.md`
 - `CONTINUOUS-PERSONALITIES.md`
 - `CODE-EDITOR.md`
-- `UI-DESIGN-AND-ENGINEERING.md`: cross-surface UI engineering, responsive, interaction, and design-quality
+- `web/PLAYER-UI.md`: provisional maintained observable Standard Player UI contract.
+- `web/UI-DESIGN-AND-ENGINEERING.md`: cross-surface UI engineering, responsive, interaction, and design-quality
   guardrails.
 - `LLM-INTEGRATION.md`
 - `MATH-EXPRESSIONS.md`
@@ -63,7 +64,6 @@ progress record plus active, non-implemented planning; entries do not schedule t
 
 - `planning/RELEASE-ROADMAP.md` records owner-selected release-stage placement, open release-stage outcomes, and
   compact roadmap progress history.
-- `planning/PLAYER-UI-FOLLOW-UPS.md` keeps active, non-implemented Standard Player presentation follow-ups.
 - `planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md` retains open timer-handle and advanced recovery-point direction.
 - `planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md` retains open camera ownership, capture, media-lifetime, and
   browser/server time-integrity direction.

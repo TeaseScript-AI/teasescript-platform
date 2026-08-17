@@ -62,8 +62,8 @@ architecture may change substantially while correctness and the basic model are 
   - **Outcome:** Replace the technical playground presentation with a practical Player interface for transcript output,
     Standard interactions, timers, status/errors, and the media capabilities selected for the POC. Keep development and
     debug controls secondary to the actual Player experience.
-  - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and
-    [`PLAYER-UI-FOLLOW-UPS.md`](PLAYER-UI-FOLLOW-UPS.md).
+  - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md),
+    [`PLAYER-UI.md`](../web/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
 - [ ] **Iframe development host and virtual viewport**
   - **Outcome:** Run the Player through a small local host shell using the product's iframe boundary without requiring a

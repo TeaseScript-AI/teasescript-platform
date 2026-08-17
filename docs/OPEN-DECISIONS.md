@@ -72,7 +72,8 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 ## Player and interactions
 
 Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
-[`CODE-EDITOR.md`](CODE-EDITOR.md), [ADR 0010](decisions/0010-package-network-policy.md),
+[`CODE-EDITOR.md`](CODE-EDITOR.md), [`web/PLAYER-UI.md`](web/PLAYER-UI.md),
+[ADR 0010](decisions/0010-package-network-policy.md),
 [ADR 0012](decisions/0012-custom-view-capability.md),
 [ADR 0016](decisions/0016-resumable-pending-action-runtime-contract.md), and
 [ADR 0018](decisions/0018-first-standard-library-poc-contract.md). Owner-selected release-stage design outcomes
@@ -84,6 +85,28 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Background-handler interruption, ordering, cleanup, and foreground-slot interaction after the public timer API is
   decided.
 - Stable text-output target handles beyond the first Standard chat target.
+- Player theme precedence among platform default, developer/package selection, and future user-selected preferences,
+  including whether a package may require, suggest, or merely provide a theme and how future dark-theme semantic
+  mappings participate.
+- Exact package customization of Standard Player foreground/background controls: allowed colour inputs, automatic
+  hover/pressed/disabled state derivation, text-colour selection, and accessibility/readability protection.
+- Speaker/text colour customization and the readability policy when content-provided colours interact with the Player
+  theme or future user theme choices.
+- Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
+  readable scaling/zoom behavior, minimum control sizing, contrast thresholds, and browser/platform responsibility.
+- Player UI preference persistence: which panel/tool/theme/media-fit/text-display preferences survive reload or session
+  changes and whether restoration is automatic, explicit, or both.
+- Smart transcript following: exact at-latest detection, return-to-latest control, resize/restore behavior, and how new
+  content behaves while the player is reading older transcript entries.
+- Whether tall portrait or other constraint-driven shapes should move docked side regions to overlays beyond the
+  current Standard Player width rule.
+- Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
+- Standard/runtime mechanism for long-lived non-interactive right-rail status items (for example progress `3 / 10`),
+  including lifecycle/update/removal semantics and how they relate to accepted background/permanent controls.
+- Which exact current Player control dimensions, radii, and focus geometry should become shared defaults for future
+  TeaseScript web surfaces versus remain owned by each surface specification.
+- Standard Player shell versus package custom-view ownership: which platform regions may be replaced, styled, hidden, or
+  composed with package presentation while preserving the accepted isolation/lifecycle boundary.
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
 - Camera capability declarations, stream ownership, device switching, quality negotiation, restore, privacy
   indicators, and simultaneous-camera policy.
