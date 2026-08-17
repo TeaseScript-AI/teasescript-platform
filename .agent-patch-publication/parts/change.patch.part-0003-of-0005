@@ -1,0 +1,222 @@
++text/control surfaces remain legible as raised component surfaces.
++
++## Left tools area
++
++### Panel state
++
++The left tools area has three presentation states:
++
++- `auto`: open/reserved on wide layouts and closed on narrow layouts;
++- `open`: explicit user-open state;
++- `closed`: explicit user-closed state.
++
++The tools toggle changes `auto` to the opposite of the current responsive default and thereafter toggles explicit
++`open`/`closed`. An explicit state survives width/orientation changes.
++
++On wide layouts, an open tools area reserves horizontal space. On narrow layouts, opening tools creates an opaque
++chrome-surface drawer below the title instead of shrinking the main Player content.
++
++### Narrow drawer behavior
++
++The narrow drawer:
++
++- uses the current drawer-width constraint in the geometry table;
++- remains opaque; underlying media/transcript content must not visually bleed through it;
++- leaves a visible outside area covered by a scrim;
++- intercepts outside pointer input so clicks do not pass through to underlying Player controls;
++- closes when the scrim is activated;
++- closes on `Escape` and returns keyboard focus to the tools toggle;
++- remains below the title controls in z-order so the title controls stay usable.
++
++### Tool columns
++
++The tools area supports user-created independent columns. Each column contains exactly one fixed header row with:
++
++1. a tool selector;
++2. a local `+` control that appends another blank column;
++3. a close control.
++
++The selected tool's body occupies the remaining column height and owns vertical overflow. The tool name is not repeated
++as another body heading merely because it already appears in the selector.
++
++Columns may:
++
++- select different tools independently;
++- show the same tool in more than one column;
++- be added from the `+` control in any existing column;
++- be closed independently, including closing the last column.
++
++When no columns remain, the tools region may show an empty state. Opening an empty tools region creates one blank column
++so the user has an immediate selector instead of an unusable empty drawer.
++
++The complete strip owns horizontal overflow. Adding a column scrolls the strip toward the new end; rerendering existing
++columns preserves the previous horizontal position as far as the new scroll range permits. Columns use the maintained
++geometry above; in the narrow drawer they expand to the available drawer content width subject to the documented floor.
++These dimensions are part of the current multi-column presentation, not a package API.
++
++### Wide sizing constraint
++
++Wide tool-panel growth responds to user-created columns rather than claiming a fixed percentage of extra viewport
++space. Growth is capped so the primary middle region preserves the stricter of:
++
++- enough width to avoid shrinking the current media row below a 1:1 width/height boundary when the baseline can satisfy
++  that boundary; and
++- the `380px` minimum conversation/composer width, plus any right-overlay reservation applicable to that composition.
++
++Tall portrait layouts that already begin below the 1:1 boundary currently preserve that baseline instead of shrinking
++media further. Whether such shapes should move side regions to overlays or use another constraint remains open and is
++not decided by this document.
++
++The current `Visual Lab` and `Scene` registry is demo content, not the Standard Player tool API.
++
++## Media presentation
++
++The media region is a dedicated structural surface above the transcript in the main content column.
++
++Current Player presentation invariants:
++
++- media content may shrink to the allocated media region before object fitting is applied;
++- image/video-like content is centered within the region;
++- the current demo image uses `contain`, keeping the complete image visible;
++- no duplicate fit label, filename caption, or scene-information overlay is placed over the media merely because that
++  information exists elsewhere;
++- decorative ambience/vignette layers, when used, are clipped to the media region and do not receive pointer input;
++- accepted future image/video/canvas/custom package rendering should be able to replace demo media without changing the
++  surrounding Player geometry.
++
++The demo `contain` choice is the current Player presentation, not a final media API or user-preference contract. Media
++fit persistence and broader media ownership remain open elsewhere.
++
++## Transcript
++
++The Standard Player has one visible conversation transcript in the current design. It remains visible during foreground
++interactions.
++
++The transcript:
++
++- uses the canvas surface;
++- is centered within the actual middle content region rather than the full viewport;
++- has a readable width capped at `900px`;
++- owns vertical scrolling and contains overscroll;
++- uses a subtle `28px` top fade so content enters beneath the media boundary without a hard visual cut;
++- hides the visible scrollbar on narrow layouts while retaining scroll behavior.
++
++Current message presentation distinguishes package/speaker output from player-authored messages:
++
++- speaker messages align to the normal reading side with a `30px` circular avatar/presentation marker, speaker name,
++  `2px` speaker-coloured rule with `12px` text inset, and speaker-selected font;
++- player-authored messages align to the opposite side and are constrained to `72%` of the conversation width with a
++  `560px` maximum;
++- speaker/package accent and font values are content presentation, not application palette roles.
++
++The POC currently renders letter glyphs as avatar fixtures. Accepted V30 permits speaker avatar image references; the
++fixture glyphs are not the final avatar contract.
++
++ADR 0018 owns canonical transcript effects of foreground completion: valid text/number answers and choice/button
++activations become player-authored transcript messages according to its normalization and visible-text rules. Invalid
++attempts do not create canonical transcript output.
++
++Smart transcript following is not yet accepted here. In particular, do not infer a contract that every new message
++must forcibly scroll the user to the bottom; the follow/return-to-latest behavior remains open.
++
++## Composer and foreground interactions
++
++The Standard chat composer is fixed at the bottom of the conversation area and uses the same `900px` readable maximum as
++the transcript.
++
++### Normal-height wide presentation
++
++The composer is one integrated component surface containing:
++
++- the expanding answer/input field; and
++- the primary `Send` control.
++
++The surrounding composer shell owns the ordinary border, hover/pressed border feedback, focus-visible outline, disabled
++surface, and moderate rounding. The input itself is visually integrated into that shell rather than appearing as a
++second bordered box.
++
++The input expands with content and then becomes internally scrollable. Its current maximum is the smaller of six line
++heights and `20dvh`. The maintained current placeholder is `Type your response…`; the primary action is labelled `Send`.
++
++### Narrow presentation
++
++At `<= 760px`, the composer remains in the integrated bottom footer position, but the text input and `Send` control are
++separate visible component surfaces on the canvas instead of one shared desktop shell. This is an intentional mobile
++presentation difference, not an accidental border override.
++
++### Foreground control slot
++
++ADR 0018 fixes the Standard foreground-interaction relationship even though the current demo is not runtime-wired:
++
++- the transcript remains visible;
++- the existing composer becomes the answer field;
++- ordinary free-chat submission is blocked while the mandatory foreground interaction is active;
++- `choose` and `showButton` controls appear immediately above the composer;
++- the answer field receives focus by default;
++- choice presentation may use one or two rows of buttons or a dropdown when available space, text length, font metrics,
++  zoom, accessibility settings, or similar constraints make buttons impractical;
++- button-versus-dropdown presentation is Player UI state, not canonical runtime/checkpoint state.
++
++Exact choice-row/dropdown measurement rules remain unresolved and are not invented here.
++
++## Right timer and background rail
++
++The right region is a dedicated Standard Player rail for the visible timer and long-lived background controls/status.
++It is not another tool column.
++
++### Timer
++
++In normal-height layouts the timer is circular, uses tabular numeric text, and has an external circular progress ring.
++The current timer diameter is `clamp(72px, calc(32px + 6vmin), 86px)`. The progress ring uses the package accent for the
++completed/progress portion and the normal border family for the remainder.
++
++At `<= 600px` viewport height, the timer compacts to a `34px` circle inside the title-height strip. The progress ring
++remains present; low-height mode does not replace the timer with plain text.
++
++Visible timer text presents non-negative whole seconds as `m:ss`, with a two-digit seconds field. The progress ring
++shows elapsed fraction (`1 - remaining / total`), clamped to the valid range; the current presentation rounds that ring
++percentage to a whole percent. Actual POC timer values are demo data. Which runtime timer/resource owns this visible
++timer and final visible-timer API semantics remain outside this presentation specification.
++
++### Background rail content
++
++Two kinds of content are expected in this rail:
++
++1. **background controls** — long-lived interactions that remain available while normal script execution continues,
++   such as an accepted V30 permanent button (`Mercy`, `Edge`, etc.); and
++2. **status items** — non-interactive information using the same rail vocabulary, such as progress `3 / 10`.
++
++Accepted V30 permanent buttons provide the current semantic basis for background controls. When such a control is
++activated, the accepted behavior temporarily removes it while its handler runs; after a normal function handler it
++returns unless the script removed it, while other accepted handler outcomes follow the V30 runtime semantics. Status
++items are an owner-selected Player presentation direction; their runtime/Standard-Library API is not yet defined. An
++informational item must not be exposed as an interactive button merely because it shares visual geometry with one.
++
++Background controls/status items are vertically stacked and the rail owns their vertical overflow. Long labels wrap
++inside the rail rather than widening it. Background controls use the maintained visible geometry in the component table
++above.
++
++### Right background mode
++
++The right region has `auto`, `docked`, and `overlay` presentation modes. A compact toggle at the upper-right of the
++timer cluster changes the **rail background mode**, not whether the timer/background content exists. Its pressed state
++represents the effective docked-background state for assistive technology.
++
++- `auto` is docked on wide layouts and overlay on narrow layouts.
++- activating the toggle from `auto` selects the opposite of the current responsive default; after that it toggles the
++  explicit `docked`/`overlay` modes;
++- `docked` shows the chrome-surface rail background;
++- `overlay` removes that structural rail background and lets timer/control surfaces float over the underlying visual
++  region;
++- explicit `docked`/`overlay` state survives resize/orientation changes.
++
++On wide layouts, switching the right background to overlay deliberately keeps the same right-side layout reservation so
++transcript/composer geometry does not recenter. Media may extend behind the floating right controls.
++
++On narrow portrait layouts, the right controls occupy the media region and reserve no transcript/composer width. On
++narrow landscape layouts, the controls may span the full Player height and the transcript/composer reserve the right
++controls width so readable content is not hidden beneath them.
++
++When the rail background is absent, timer and ordinary background-control surfaces use a `60%` component-surface mix
++with transparency. Hover and pressed control fills use the corresponding hover/pressed semantic colour at the same
++`60%` treatment.

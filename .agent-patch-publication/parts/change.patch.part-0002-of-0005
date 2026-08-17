@@ -1,0 +1,189 @@
+@@ -0,0 +1,574 @@
++# Standard Player UI specification
++
++- **Status:** Provisional maintained specification for the current Standard Player presentation.
++- **Purpose:** Define the Player's observable layout, responsive behavior, interaction presentation, visual states, and
++  current light theme independently of the HTML/CSS/JavaScript implementation.
++- **Not an ADR:** Accepted ADRs and accepted specifications remain higher authority for architecture, runtime semantics,
++  interaction semantics, isolation, and persistence.
++- **Implementation state:** The production-oriented Player presentation POC exists under `player/`, but runtime/host
++  integration is incomplete. This specification deliberately records accepted upstream behavior that the Standard Player
++  must present even when the current POC does not yet wire that behavior end to end.
++
++A competent implementation should be able to reproduce the maintained Standard Player from this document plus the
++accepted platform/runtime contracts without copying the existing source. A review agent should likewise be able to use
++this document as the observable UI contract instead of treating current selectors, DOM structure, or CSS techniques as
++requirements.
++
++## Authority and scope
++
++The most relevant higher-authority sources are:
++
++- [ADR 0001](../decisions/0001-browser-first.md): browser-first UI and responsive PWA direction;
++- [ADR 0012](../decisions/0012-custom-view-capability.md): accepted blocking/background custom-view capability;
++- [ADR 0016](../decisions/0016-resumable-pending-action-runtime-contract.md): foreground versus background pending
++  actions and reconstruction from canonical state;
++- [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md): Standard chat composer, foreground controls,
++  transcript completion behavior, pacing skip input, and accessibility requirements;
++- [accepted V30 syntax](../specifications/accepted-syntaxes-v30.md): accepted permanent-button, media, speaker colour,
++  font, avatar, and other capability semantics;
++- [ARCHITECTURE.md](../ARCHITECTURE.md), [RUNTIME.md](../RUNTIME.md), [SECURITY.md](../SECURITY.md), and
++  [DATA-AND-API.md](../DATA-AND-API.md): Player/runtime/host ownership and isolation boundaries.
++
++This document owns the maintained **Standard Player presentation**: what surfaces exist, where they appear, how they
++respond to viewport constraints and user panel choices, and how Standard controls look and behave. It does not define
++TeaseScript syntax, action settlement, host message schemas, package permissions, persistence formats, or custom-view
++lifecycle.
++
++General reusable web engineering and visual-design guidance lives in
++[UI-DESIGN-AND-ENGINEERING.md](UI-DESIGN-AND-ENGINEERING.md). That guide informs implementation quality but does not
++replace the Player-specific contract here.
++
++## Current maturity boundary
++
++The current Player POC is a presentation implementation, not a completed production Player. In particular:
++
++- its transcript, timer, background controls, tools, and media currently consume demo presentation data;
++- its composer renders the maintained shell but does not yet submit runtime interactions;
++- ADR 0018 foreground controls are accepted behavior but are not yet rendered by the current demo presentation path;
++- host/iframe messaging, checkpoint persistence acknowledgement, restore/reconnect, and package capability negotiation
++  are not defined here;
++- smart transcript following, final preference persistence, tall-portrait panel policy, transient status/notification
++  presentation, theme precedence, and final package-customization limits remain open decisions;
++- the current Visual Lab and Scene tools, placeholder avatar letters, demo action labels, and random local demo media
++  are fixtures rather than Standard Player product content.
++
++A missing POC integration is not permission to contradict a higher-authority accepted interaction or runtime contract.
++Conversely, a current demo detail is not a product requirement unless this specification adopts it.
++
++## Surface hierarchy
++
++The Standard Player fills the available Player viewport and uses the following structural presentation regions. Some
++may collapse, overlay, or appear only while an interaction requires them:
++
++```text
+++-----------------------------------------------------------------------+
++| title / Player chrome                                                 |
+++----------------------+--------------------------------+---------------+
++|                      |                                | timer +       |
++| tools                | media                          | background    |
++|                      |                                | controls      |
++|                      +--------------------------------+ / status      |
++|                      | transcript                     |               |
++|                      +--------------------------------+               |
++|                      | foreground controls when any  |               |
++|                      | composer                       |               |
+++----------------------+--------------------------------+---------------+
++```
++
++The diagram describes relationships, not DOM nesting or a required CSS layout mechanism.
++
++### Visual hierarchy
++
++- **Canvas surface:** transcript and composer-area background.
++- **Chrome surface:** title bar and opaque docked side regions.
++- **Component surface:** tool columns, input/control surfaces, timer, and ordinary buttons.
++- **Media surface:** visually separate content region; media may be full-bleed to device edges while Player chrome
++  respects safe areas.
++- **Content identity:** speaker, package, and media-derived colours are separate from application chrome tokens.
++
++The title, tools, right rail, transcript, composer, and media are structural peers. Hiding a panel background, changing
++reservation, or switching a region to overlay mode must not implicitly delete unrelated controls.
++
++## Responsive modes
++
++Responsive behavior is constraint-driven, with three current threshold conditions that have distinct purposes.
++
++| Condition | Purpose | Maintained behavior |
++| --- | --- | --- |
++| width `>= 761px` | Wide composition | Side regions may reserve space; automatic tools are open and automatic right rail is docked. |
++| width `<= 760px` | Narrow composition | Left tools become an overlay drawer; the right region reserves no normal-flow main-content width and floats/overlays according to orientation. |
++| width `<= 480px` | Compact control geometry | Reduces selected insets/control sizes only; it does **not** introduce another docking model. |
++| height `<= 600px` | Low-height composition | Title becomes an overlay and the circular timer compacts into the title-height strip. This condition is independent of width. |
++
++The 760/761 transition intentionally changes composition without causing the timer, background-control buttons, or
++right-panel toggle to jump merely because that width boundary was crossed. The 480px threshold owns genuinely compact
++phone control geometry instead.
++
++Manual panel state and responsive defaults are separate. Resizing/orientation changes do not erase an explicit user
++choice; only `auto` adapts to the current width class.
++
++## Global geometry and overflow
++
++The current maintained Player uses these major geometry values because they define the composition rather than an
++incidental implementation technique:
++
++| Item | Current contract |
++| --- | --- |
++| Player viewport | full viewport width and `100dvh`; the document itself does not become the normal scroll owner |
++| normal title bar | `52px` plus top safe-area inset |
++| normal media row | `62dvh` |
++| low-height media row | `64dvh` |
++| baseline left tools width | `clamp(190px, 15vw, 250px)` before content-driven growth |
++| right controls width | `clamp(150px, 18vw, 190px)` |
++| readable conversation maximum | `900px` |
++| conversation minimum protected from tool growth | `380px` |
++| normal conversation side gap | `18px` before safe-area contribution |
++| narrow tools drawer | `min(300px, 100vw - 120px)`, deliberately leaving outside space for dismissal |
++
++Safe-area insets affect Player chrome and controls. Media remains allowed to occupy the full visual media region rather
++than gaining the same safe-area inset by default.
++
++Scrolling is owned locally:
++
++- the transcript owns vertical conversation scrolling;
++- the tool strip owns horizontal scrolling across tool columns;
++- each tool-column body owns its own vertical scrolling;
++- the right background-control/status list owns vertical scrolling;
++- a growing composer input may own its own vertical scrolling once it reaches its height limit;
++- the Player shell itself does not normally scroll.
++
++Nested content should not create a second scrollbar for the same axis/responsibility.
++
++### Typography and visible control geometry
++
++PR #318 intentionally preserves the current Player typography and control geometry. The following visible values are
++therefore part of the provisional reconstruction baseline; local padding and one-off decorative offsets remain
++implementation details unless specified elsewhere.
++
++| Element | Current Player baseline |
++| --- | --- |
++| UI font stack | `"Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` |
++| title | `14px`, weight `700` |
++| speaker name | `9px`, weight `700`, line-height `1.2` |
++| speaker message | `12px`, line-height `1.25`; package speaker font may replace the UI font |
++| player-authored message | `13px`; otherwise follows transcript message rhythm |
++| normal composer text / Send | `11px`; Send weight `700` |
++| narrow composer text | `10px`; Send remains `11px` |
++| normal timer | `18px`, weight `700`, tabular numerals |
++| compact-width timer (`<= 480px`) | `15px` unless low-height mode also applies |
++| low-height timer (`<= 600px` high) | `12px` |
++| background control label | `12px`, weight `600`, line-height `1.2` |
++| global icon control | `34px` square, `6px` corner radius |
++| tool strip / column | `8px` strip gap; wide minimum `204px`, or `212px` when alone; maximum `min(22rem, 72vw)`; narrow floor `180px`; column radius `8px` |
++| tool-column header | minimum `44px` high; selector/add/close controls are `30px` high; add/close are `30px` square; controls use `6px` radius |
++| wide integrated composer shell | minimum `50px` high, `8px` corner radius; input minimum `38px`; Send `38px` high with `7px` radius |
++| narrow composer controls | input and Send `42px` minimum/high respectively, each `7px` radius |
++| right background control | maximum `156px` wide, `6px` radius; normal minimum height is `max(44px, clamp(42px, 3.2vmin, 60px))`, compact-width minimum is `42px` |
++
++Tool-column header and body use one continuous `surface-component` background. The header separator does not introduce
++a second chrome-colour band; selector/add/close controls provide the header's raised hierarchy.
++
++These values define the current Player appearance. The cross-surface web guide deliberately adopts the current
++`1px`-border, moderate-radius, focus-outline, and interaction-state vocabulary as the shared starting baseline for other
++TeaseScript web surfaces. Player-specific widths, heights, spacing, and layout measurements remain owned here rather
++than becoming universal component dimensions.
++
++## Title and global panel controls
++
++The normal title bar uses the chrome surface and visually spans the Player width. It contains:
++
++- the left tools toggle;
++- the Player title area;
++- reserved room for global title controls as the product grows.
++
++The current POC title text is `TeaseScript Player`; the future source of title text is not yet a host/package contract.
++
++The title controls remain above ordinary Player content. The tools toggle exposes the effective open/closed state to
++assistive technology as an expanded/collapsed control. In low-height mode the title's structural row collapses to zero
++and the title controls overlay the media region instead. The title background becomes transparent and the visible title

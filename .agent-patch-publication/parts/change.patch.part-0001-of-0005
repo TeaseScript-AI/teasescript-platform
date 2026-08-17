@@ -1,0 +1,139 @@
+diff --git a/README-FIRST.md b/README-FIRST.md
+index 6dd96a27317e971c225e953a7ebedd7e52450d42..d2b52ea886a195d73ba4748ffdae5a16214206d1 100644
+--- a/README-FIRST.md
++++ b/README-FIRST.md
+@@ -56,8 +56,10 @@ milestone, gate, integration-status, or current-capability work.
+ - `docs/chatgpt-project/SYSTEM-PROMPT.txt`: repository-maintained ChatGPT Project Settings prompt candidate; read only
+   for prompt maintenance or deliberate owner-approved synchronization. It does not prove the live Project Settings state.
+ - `docs/README.md`: documentation map.
+-- `docs/UI-DESIGN-AND-ENGINEERING.md`: cross-surface UI engineering, responsive, interaction, and design-quality
+-  guardrails; read for Player, host-site, or other frontend UI work.
++- `docs/web/PLAYER-UI.md`: provisional maintained observable Standard Player UI contract; read for Player presentation,
++  responsive composition, theming, or control-placement work.
++- `docs/web/UI-DESIGN-AND-ENGINEERING.md`: cross-surface UI engineering, responsive, interaction, and design-quality
++  guardrails; read for Player, host-site, editor, or other frontend UI work.
+ - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
+ - `docs/specifications/`: accepted consolidated specifications.
+ - `docs/decisions/`: accepted and proposed ADRs.
+diff --git a/docs/OPEN-DECISIONS.md b/docs/OPEN-DECISIONS.md
+index 2d374d7ce245d06a3014bfa965871a60af422fd8..2e2b97131fd93afd67eb81f2f93d072bf4a149b7 100644
+--- a/docs/OPEN-DECISIONS.md
++++ b/docs/OPEN-DECISIONS.md
+@@ -72,7 +72,8 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
+ ## Player and interactions
+ 
+ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
+-[`CODE-EDITOR.md`](CODE-EDITOR.md), [ADR 0010](decisions/0010-package-network-policy.md),
++[`CODE-EDITOR.md`](CODE-EDITOR.md), [`web/PLAYER-UI.md`](web/PLAYER-UI.md),
++[ADR 0010](decisions/0010-package-network-policy.md),
+ [ADR 0012](decisions/0012-custom-view-capability.md),
+ [ADR 0016](decisions/0016-resumable-pending-action-runtime-contract.md), and
+ [ADR 0018](decisions/0018-first-standard-library-poc-contract.md). Owner-selected release-stage design outcomes
+@@ -84,6 +85,28 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
+ - Background-handler interruption, ordering, cleanup, and foreground-slot interaction after the public timer API is
+   decided.
+ - Stable text-output target handles beyond the first Standard chat target.
++- Player theme precedence among platform default, developer/package selection, and future user-selected preferences,
++  including whether a package may require, suggest, or merely provide a theme and how future dark-theme semantic
++  mappings participate.
++- Exact package customization of Standard Player foreground/background controls: allowed colour inputs, automatic
++  hover/pressed/disabled state derivation, text-colour selection, and accessibility/readability protection.
++- Speaker/text colour customization and the readability policy when content-provided colours interact with the Player
++  theme or future user theme choices.
++- Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
++  readable scaling/zoom behavior, minimum control sizing, contrast thresholds, and browser/platform responsibility.
++- Player UI preference persistence: which panel/tool/theme/media-fit/text-display preferences survive reload or session
++  changes and whether restoration is automatic, explicit, or both.
++- Smart transcript following: exact at-latest detection, return-to-latest control, resize/restore behavior, and how new
++  content behaves while the player is reading older transcript entries.
++- Whether tall portrait or other constraint-driven shapes should move docked side regions to overlays beyond the
++  current Standard Player width rule.
++- Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
++- Standard/runtime mechanism for long-lived non-interactive right-rail status items (for example progress `3 / 10`),
++  including lifecycle/update/removal semantics and how they relate to accepted background/permanent controls.
++- Whether any additional Player-specific control widths, heights, or spacing should later join the already shared
++  border/radius/focus/state baseline for TeaseScript web surfaces.
++- Standard Player shell versus package custom-view ownership: which platform regions may be replaced, styled, hidden, or
++  composed with package presentation while preserving the accepted isolation/lifecycle boundary.
+ - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
+ - Camera capability declarations, stream ownership, device switching, quality negotiation, restore, privacy
+   indicators, and simultaneous-camera policy.
+diff --git a/docs/README.md b/docs/README.md
+index 854a1ea1dd68c19be09297fe6e1db88e3f3d7e19..151696515792b57e1f1a97cf784eed9567b0e0a2 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -22,7 +22,8 @@
+ - `SECURITY.md`
+ - `CONTINUOUS-PERSONALITIES.md`
+ - `CODE-EDITOR.md`
+-- `UI-DESIGN-AND-ENGINEERING.md`: cross-surface UI engineering, responsive, interaction, and design-quality
++- `web/PLAYER-UI.md`: provisional maintained observable Standard Player UI contract.
++- `web/UI-DESIGN-AND-ENGINEERING.md`: cross-surface UI engineering, responsive, interaction, and design-quality
+   guardrails.
+ - `LLM-INTEGRATION.md`
+ - `MATH-EXPRESSIONS.md`
+@@ -63,7 +64,6 @@ progress record plus active, non-implemented planning; entries do not schedule t
+ 
+ - `planning/RELEASE-ROADMAP.md` records owner-selected release-stage placement, open release-stage outcomes, and
+   compact roadmap progress history.
+-- `planning/PLAYER-UI-FOLLOW-UPS.md` keeps active, non-implemented Standard Player presentation follow-ups.
+ - `planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md` retains open timer-handle and advanced recovery-point direction.
+ - `planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md` retains open camera ownership, capture, media-lifetime, and
+   browser/server time-integrity direction.
+diff --git a/docs/planning/PLAYER-UI-FOLLOW-UPS.md b/docs/planning/PLAYER-UI-FOLLOW-UPS.md
+deleted file mode 100644
+index d4bb674359016d691a1c48b9875c4b0afdb73a44..0000000000000000000000000000000000000000
+--- a/docs/planning/PLAYER-UI-FOLLOW-UPS.md
++++ /dev/null
+@@ -1,31 +0,0 @@
+-# Player UI follow-ups
+-
+-- **Status:** Active, non-implemented planning for the Standard Player presentation.
+-- **Current state:** See [`PHASE-STATUS.md`](../../PHASE-STATUS.md) and [`player/README.md`](../../player/README.md).
+-- **Boundaries:** This file does not define runtime/host protocols, package custom-view APIs, or accepted TeaseScript
+-  semantics. General cross-surface UI rules remain in [`UI-DESIGN-AND-ENGINEERING.md`](../UI-DESIGN-AND-ENGINEERING.md).
+-
+-## Open Player follow-ups
+-
+-- [ ] **Choose persistence behavior.** Decide which Player UI preferences survive reload/session changes and whether the
+-  tool layout is restored automatically, explicitly saved, or both. Candidate preferences include tool columns, panel
+-  state, media fit, and user-facing text/display preferences; inclusion is not yet decided.
+-- [ ] **Validate tool sizing against real content and tall portrait layouts.** The POC now uses bounded intrinsic column
+-  sizing, one shared horizontal strip, and a 1:1 media growth cap where the current docked baseline can satisfy it. Decide
+-  whether tall portrait shapes that already start below 1:1 should switch the left/right regions to overlays or use
+-  another constraint-driven presentation before this becomes production behavior.
+-- [ ] **Implement smart transcript following.** Follow new messages while the user is at the latest content; stop
+-  pulling the view down when the user scrolls back, and provide an explicit way to return to the latest message.
+-- [ ] **Add a layout debug mode.** Make development-only inspection of important Grid/container geometry, active layout
+-  conditions, overlays, safe areas, and measured available space easy enough to diagnose viewport-specific failures.
+-- [ ] **Complete reduced-motion/accessibility handling.** Preserve the existing `prefers-reduced-motion` direction and
+-  evaluate the remaining Player-specific needs for readable scaling, contrast, control sizing, and browser accessibility
+-  behavior as real interactions replace demo presentation.
+-- [ ] **Define status/notification presentation.** Provide temporary Player status such as saved/paused/error/assignment
+-  updates without forcing every status into the transcript or allowing transient chrome to disturb primary layout.
+-- [ ] **Resolve the Standard UI/custom UI boundary.** Decide which Player shell responsibilities stay platform-owned and
+-  which presentation a package custom view may replace or style. Keep lifecycle, state, isolation, and API contracts in
+-  the roadmap's custom-view work rather than duplicating that design here.
+-
+-Older exploratory Player ideas are not automatically part of this list. Add them only after the Owner selects them for
+-active planning or implementation.
+diff --git a/docs/planning/RELEASE-ROADMAP.md b/docs/planning/RELEASE-ROADMAP.md
+index 60dea22d7d7e8b3766bffa344862f3295479462c..c99eab892dba025857b2f3ae19813b3ca3aa417f 100644
+--- a/docs/planning/RELEASE-ROADMAP.md
++++ b/docs/planning/RELEASE-ROADMAP.md
+@@ -62,8 +62,8 @@ architecture may change substantially while correctness and the basic model are
+   - **Outcome:** Replace the technical playground presentation with a practical Player interface for transcript output,
+     Standard interactions, timers, status/errors, and the media capabilities selected for the POC. Keep development and
+     debug controls secondary to the actual Player experience.
+-  - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and
+-    [`PLAYER-UI-FOLLOW-UPS.md`](PLAYER-UI-FOLLOW-UPS.md).
++  - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md),
++    [`PLAYER-UI.md`](../web/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
+ 
+ - [ ] **Iframe development host and virtual viewport**
+   - **Outcome:** Run the Player through a small local host shell using the product's iframe boundary without requiring a
+diff --git a/docs/web/PLAYER-UI.md b/docs/web/PLAYER-UI.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4558197ccd896e247a7d13bb87e1c0bcdcb20e5f
+--- /dev/null
++++ b/docs/web/PLAYER-UI.md

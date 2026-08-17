@@ -1,0 +1,36 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "feature/player-production-demo",
+  "expectedBaseSha": "0e7d14465b33320849430dc0bb790cf1531cff28",
+  "expectedResultTreeSha": "4b5ffb2024e6fc8ab2c5350ca6f3282a619044d6",
+  "patchSizeBytes": 59795,
+  "patchSha256": "436ea3bb278e2e00ea3ee1a4759264eb2966c42698130066a3970c1ac31e09f6",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0005",
+      "sizeBytes": 10716,
+      "sha256": "64196e5d63365fd3b039445046ef78cf4c811e1b6da87348d49496d396b5c3d8"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0005",
+      "sizeBytes": 12237,
+      "sha256": "169911e0e6bbc9bea7cdfa54bfe46808e242ccebdce7ea32486a2d349404f6a0"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0005",
+      "sizeBytes": 12288,
+      "sha256": "f98a11373862aa261aa860bf43125a3e8e4e2197a4e9f425867fe19d15447fa9"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0005",
+      "sizeBytes": 12288,
+      "sha256": "791f3253921cf9c773841fa56d1e2e8898297e6fa21e1e429d34efafa31084a4"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0005-of-0005",
+      "sizeBytes": 12266,
+      "sha256": "ba1bd98ddedb87cedbd636245bf3cb2e56381e523d2fd1b24c3e649416219ae0"
+    }
+  ],
+  "commitMessage": "Refine Player UI contract boundaries"
+}

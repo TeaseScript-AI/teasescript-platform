@@ -1,0 +1,209 @@
++
++## Interaction states and input methods
++
++### Neutral controls
++
++Ordinary neutral controls use the shared web control progression:
++
++1. default: component surface with `border-subtle`;
++2. hover: `border-interactive` plus component-hover fill;
++3. pressed/active: `border-strong` plus component-pressed fill;
++4. keyboard focus: `2px` accent focus outline with `1px` separation, without geometry shift;
++5. disabled: dedicated disabled surface/border/text roles and non-interactive cursor behavior.
++
++`border-strong` is a pressed/strong state, not the ordinary resting border.
++
++### Primary controls
++
++The current primary `Send` control uses the solid accent family for default, hover, and pressed states with inverse
++text.
++
++### Input capability
++
++- hover styling applies only when the input device reports hover capability with a fine pointer;
++- touch/coarse-pointer activation uses pressed/active feedback rather than depending on hover;
++- compact buttons suppress the browser tap highlight and use manipulation-oriented touch behavior;
++- keyboard focus remains visible through `:focus-visible`-equivalent behavior;
++- reduced-motion preference effectively removes decorative transition/animation duration where current Player motion
++  is used.
++
++An actual interactive control takes precedence over the ADR 0018 click/tap/Space pacing-skip gesture. Activating a
++button, field, selector, or other control must not also complete a viewport-wide pacing gate.
++
++## Z-order, overlays, and click-through
++
++The maintained relative stacking order is:
++
++1. title/global controls;
++2. open narrow tools drawer;
++3. drawer scrim;
++4. title structural background;
++5. right timer/background-control region;
++6. ordinary content surfaces.
++
++Exact numeric z-index values are implementation detail; the relative behavior above is contractual.
++
++The drawer scrim intentionally intercepts outside pointer activation. Decorative media effects are pointer-neutral.
++Floating right controls remain interactive even when their structural background is absent. Overlay presentation must
++not create click-through into a covered control where the overlay visibly owns that input area.
++
++## Current light theme
++
++The Standard Player currently has one approved light theme. Application palette primitives are represented canonically
++in OKLCH and mapped to semantic roles before components consume them. The sRGB values below are references for tools and
++review, not a second colour authority.
++
++| Semantic role | Canonical OKLCH | sRGB reference |
++| --- | --- | --- |
++| surface-base | `oklch(95.839% 0.01306 71.33)` | `#F7F0E8` |
++| surface-chrome | `oklch(97.586% 0.01130 71.90)` | `#FCF6EF` |
++| surface-component | `oklch(99.199% 0.00734 80.72)` | `#FFFCF7` |
++| component-hover | `oklch(95.449% 0.01618 64.67)` | `#F8EEE5` |
++| component-pressed | `oklch(92.481% 0.02213 58.77)` | `#F2E3D8` |
++| border-subtle | `oklch(84.246% 0.02905 65.71)` | `#D9C8B8` |
++| border-interactive | `oklch(78.050% 0.03740 56.32)` | `#CBB2A1` |
++| border-strong | `oklch(68.851% 0.04826 51.55)` | `#B49380` |
++| text-primary | `oklch(30.838% 0.01712 35.72)` | `#382D2A` |
++| text-muted | `oklch(52.649% 0.02679 41.27)` | `#79665F` |
++| accent-focus | `oklch(64.182% 0.19236 10.29)` | `#E84C71` |
++| accent-solid | `oklch(59.208% 0.19138 11.08)` | `#D63B61` |
++| accent-solid-hover | `oklch(56.375% 0.18326 11.66)` | `#C93659` |
++| accent-solid-pressed | `oklch(52.588% 0.17301 12.20)` | `#B82F4F` |
++| disabled-bg | `oklch(93.009% 0.01361 60.56)` | `#EFE6DF` |
++| disabled-border | `oklch(86.370% 0.02252 58.74)` | `#DECFC4` |
++| disabled-text | `oklch(58.486% 0.02603 41.30)` | `#8A7770` |
++
++Structural shadow uses the primary-text hue at `8%` alpha; the drawer scrim uses it at `18%` alpha. Inverse text is
++white. These are semantic support roles rather than extra surface levels.
++
++The palette follows the project-owned Radix-inspired twelve-step role-band convention described in the web UI guide;
++there is no Radix runtime or CSS dependency.
++
++### Colour ownership boundary
++
++The application palette does **not** own:
++
++- speaker/person colours;
++- speaker fonts and avatars;
++- package-selected accent/identity colours;
++- media-derived ambience;
++- technical mask colours.
++
++Those values may vary with content without repainting unrelated Standard Player chrome. The current package accent is
++used by the timer progress ring and selected package-accent presentation seams.
++
++## Package customization and theming boundary
++
++The provisional product direction is that packages/developers may select the base colour of both foreground controls
++and long-lived background controls. The current POC has not implemented that author-facing capability yet. Its exact
++TeaseScript/Standard-Library API, accepted colour forms, generated interaction-state colours, text-colour choice, and
++accessibility fallback behavior remain open.
++
++The following related direction is also intentionally **not finalized** and must not be implemented as if this document
++had chosen an API or precedence rule:
++
++- package/developer-selected Player theme versus user-selected theme versus platform default;
++- future dark-theme semantic mappings;
++- developer-selected speaker/text colours interacting with user-selected backgrounds;
++- automatic derivation of hover/pressed/disabled states from a custom control colour;
++- accessibility/contrast correction when a package colour would make text or controls unreadable;
++- which Standard Player visual properties packages may customize without replacing Standard UI;
++- persistence and scope of user Player preferences.
++
++The intended design constraint is that package customization must not make Standard Player controls or text unreadable,
++but the exact precedence, transformation, fallback, warning, and author-override policies remain open. See
++[OPEN-DECISIONS.md](../OPEN-DECISIONS.md).
++
++Custom package views remain governed by ADR 0012 and the later custom-view contract. This specification describes the
++platform Standard Player; it does not grant custom code access to parent DOM, host cookies, or unrestricted network
++capabilities.
++
++## Accessibility invariants
++
++Higher-authority ADR 0018 requires a programmatic accessible name for every Standard UI text field, number field, choice
++group, and button. The Player must preserve that requirement regardless of visible hint text or package styling.
++
++Additional maintained presentation invariants:
++
++- keyboard focus is visibly distinguishable and does not rely on hover;
++- touch interaction does not depend on hover state;
++- drawer dismissal is available through outside activation and `Escape`;
++- actual controls take precedence over viewport pacing-skip gestures;
++- disabled controls remain visually distinguishable from enabled quiet states;
++- reduced-motion preference suppresses current decorative motion without changing layout or interaction semantics;
++- status-only right-rail items use non-interactive semantics rather than masquerading as buttons;
++- package/theme colours must ultimately preserve readable Standard Player content, although the exact enforcement policy
++  remains open.
++
++Broader contrast thresholds, text scaling policy, package-colour correction, and final custom-view accessibility
++responsibility remain controlled by accepted accessibility requirements plus the unresolved decisions; do not invent
++numeric thresholds here without an accepted source.
++
++## Open decisions
++
++Unresolved Player product/design choices are owned by [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). This specification
++marks affected behavior as open at the point where it matters, rather than maintaining a second checklist here. An open
++question is not permission for an implementation to choose a durable project policy silently; a POC may use a local
++reversible presentation choice only while it remains identified as provisional.
++
++## Non-contract implementation details
++
++An equivalent implementation may freely change:
++
++- DOM nesting, element IDs/classes, CSS selectors, Grid/Flex choice, cascade layers, JavaScript helper structure, or
++  module/file names;
++- whether a geometry invariant is expressed with Grid, Flexbox, intrinsic sizing, container queries, or another
++  browser-native mechanism;
++- internal presentation data types and demo bootstrap seams;
++- exact local measurement code used to obtain intrinsic tool-strip preference, provided the observable sizing contract
++  is preserved;
++- fixture tool names/content, placeholder messages, demo timer values, local media-discovery endpoint, and demo action
++  labels.
++
++Do not preserve an implementation technique merely because the current POC uses it. Preserve the observable behavior,
++authoritative upstream semantics, and explicitly recorded geometry/state/theme contracts instead.
+diff --git a/docs/UI-DESIGN-AND-ENGINEERING.md b/docs/web/UI-DESIGN-AND-ENGINEERING.md
+similarity index 85%
+rename from docs/UI-DESIGN-AND-ENGINEERING.md
+rename to docs/web/UI-DESIGN-AND-ENGINEERING.md
+index 31cca7c0a30e734c4d85627f17dcd57388df060e..a93f82671960354bfe65082da152371357c2b704 100644
+--- a/docs/UI-DESIGN-AND-ENGINEERING.md
++++ b/docs/web/UI-DESIGN-AND-ENGINEERING.md
+@@ -1,10 +1,10 @@
+ # UI design and engineering guide
+ 
+ - **Status:** Current cross-surface UI engineering and design guidance.
+-- **Use when:** modifying the Player, host-site UI, editor/simulator UI, responsive layouts, controls, media presentation,
+-  or visual styling.
+-- **Does not define:** product features, runtime/host protocols, trust boundaries, exact visual design, framework choice,
+-  or TeaseScript semantics.
++- **Use when:** modifying the Player, host-site UI, editor/simulator UI, responsive layouts, controls, media
++  presentation, or visual styling.
++- **Does not define:** product features, runtime/host protocols, trust boundaries, exact visual design, framework
++  choice, or TeaseScript semantics.
+ 
+ This guide distils recurring Player POC failures and visual-design research into reusable maintenance guidance. Specific
+ Player incidents remain useful evidence, but the durable rules are intentionally phrased for any current or future UI
+@@ -72,8 +72,9 @@ and map it to semantic roles. A useful general model separates:
+ - solid accent fills and their interaction states; and
+ - lower- and higher-emphasis text.
+ 
+-Do not copy an external scale mechanically; the useful lesson is the separation of roles, not a mandatory step count.
+-Use semantic aliases in components rather than coupling them to scale positions or raw colour values. A neutral control
++Do not copy external palette values mechanically. TeaseScript uses the shared twelve-step role-band structure below,
++but the actual palette values remain project-owned. Use semantic aliases in components rather than coupling them to raw
++colour values or assuming every step must have a distinct token. A neutral control
+ should normally progress through neutral default/hover/pressed colours; an accent control should progress through its
+ accent family. Do not turn every neutral hover or press into the brand/accent colour merely to make interaction visible.
+ Focus is a separate state and must remain explicit without changing geometry.
+@@ -102,35 +103,31 @@ A future light or dark theme changes the semantic mappings rather than rewriting
+ not apply to technical mask colours or content-driven media, speaker, and package colours, which retain their separate
+ ownership.
+ 
+-The Radix twelve-step role bands are useful structural inspiration without a Radix dependency: steps 1–2 are backgrounds,
+-3–5 component states, 6–8 borders, 9–10 solid accent, and 11–12 text. Do not invent intermediate values solely to fill
+-those steps. Record and use the values needed by the approved surface; a later design task may extend a scale.
++Use the Radix twelve-step role-band model as the default palette structure for TeaseScript web surfaces without taking a
++Radix dependency: steps 1–2 are backgrounds, 3–5 component states, 6–8 borders, 9–10 solid accent, and 11–12 text.
++The values are project-owned; do not copy Radix palette values mechanically and do not invent intermediate values solely
++to fill all twelve posit
