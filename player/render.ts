@@ -166,6 +166,14 @@ function createToolColumn(
     selector.append(option);
   }
 
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "tool-column-add tool-column-add-local";
+  add.dataset.toolColumnAdd = "";
+  add.setAttribute("aria-label", "Add tool column");
+  add.title = "Add tool column";
+  add.textContent = "+";
+
   const close = document.createElement("button");
   close.type = "button";
   close.className = "tool-column-close";
@@ -179,7 +187,7 @@ function createToolColumn(
   body.dataset.toolBody = column.toolId ?? "";
   body.append(createToolBody(column.toolId, presentation));
 
-  header.append(selector, close);
+  header.append(selector, add, close);
   section.append(header, body);
   return section;
 }

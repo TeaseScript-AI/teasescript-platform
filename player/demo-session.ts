@@ -7,7 +7,7 @@ import type {
 
 export const DEMO_PRESENTATION: PlayerPresentation = {
   package: {
-    accentColor: "#8f3048",
+    accentColor: "#e84c71",
   },
 
   media: {
@@ -15,7 +15,7 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
     src: "",
     fit: "contain",
     title: "Demo media unavailable",
-    ambientColor: "#5a2737",
+    ambientColor: "#f7cdaf",
   },
 
   timer: {
@@ -26,13 +26,13 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
   speakers: {
     eva: {
       name: "Mistress Eva",
-      accent: "#c96b7f",
+      accent: "#c65b75",
       avatar: "E",
       fontFamily: "Georgia, 'Times New Roman', serif",
     },
     nora: {
       name: "Nora",
-      accent: "#b6aa97",
+      accent: "#9a867d",
       avatar: "N",
       fontFamily: "ui-monospace, 'DejaVu Sans Mono', Consolas, monospace",
     },

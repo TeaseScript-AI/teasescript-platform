@@ -92,11 +92,16 @@ test("Player entrypoint uses modular local assets without external runtime depen
 });
 
 test("Player tool chrome keeps one fixed column header and one vertical scroll owner", async () => {
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
   const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
   const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
   const visualLab = await readFile(resolve(process.cwd(), "player/styles/components-visual-lab.css"), "utf8");
 
   assert.match(render, /className = "tool-column-header"/u);
+  assert.match(render, /add\.dataset\.toolColumnAdd = ""/u);
+  assert.match(browser, /target\.closest<HTMLButtonElement>\("\[data-tool-column-add\]"\)[\s\S]*appendToolColumn\(\)/u);
+  assert.match(browser, /addToolColumnButton\.addEventListener\("click", appendToolColumn\)/u);
+  assert.match(tools, /\.player:has\(\.tool-column\) \.tool-column-add-global[\s\S]*display: none/u);
   assert.doesNotMatch(render, /lab-scroll/u);
   assert.doesNotMatch(render, /className = "lab-title"/u);
   assert.match(tools, /\.tool-column-body[\s\S]*overflow-y: auto/u);
@@ -131,6 +136,7 @@ test("Player media content can shrink to its grid row before contain fitting", a
 
   assert.match(media, /\.media-content\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*0;/su);
   assert.match(media, /object-fit:\s*var\(--media-fit, contain\)/u);
+  assert.match(media, /\.media-content\[hidden\]\s*\{[^}]*display:\s*none;/su);
 });
 
 test("Player conversation spacing is based on its own grid column", async () => {
@@ -138,8 +144,17 @@ test("Player conversation spacing is based on its own grid column", async () => 
   const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
 
   assert.doesNotMatch(layout, /100vw - var\(--conversation-max-width\)/u);
-  assert.match(layout, /padding-left:\s*calc\(var\(--conversation-gap\) \+ var\(--safe-left\)\)/u);
+  assert.match(layout, /calc\(\(100% - var\(--conversation-max-width\)\) \/ 2 \+ var\(--conversation-gap\)\)/u);
   assert.match(composer, /width: min\(100%, var\(--conversation-max-width\)\)/u);
+});
+
+test("Player narrow drawer remains opaque and timer compaction is height-driven", async () => {
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(responsive, /--mobile-drawer-width:/u);
+  assert.match(responsive, /background: var\(--side-bg\);/u);
+  assert.match(responsive, /background: rgb\(56 45 42 \/ 18%\);/u);
+  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer::before \{[\s\S]*content: none;/u);
 });
 
 test("Player left-panel growth protects media and conversation minimums independently", async () => {

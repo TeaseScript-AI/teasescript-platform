@@ -8,15 +8,13 @@
 
         padding: 0;
 
-        border: 0;
-        border-radius: 4px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 6px;
 
-        background:
-          rgb(10 11 14 / 22%);
+        background: var(--control-bg);
         color: var(--text);
 
-        box-shadow:
-          0 1px 0 rgb(255 255 255 / 4%) inset;
+        box-shadow: none;
 
         cursor: pointer;
       }
@@ -24,12 +22,12 @@
       .menu-icon {
         width: 18px;
         display: grid;
-        gap: 4px;
+        gap: 3px;
       }
 
       .menu-icon span {
         height: 2px;
-        border-radius: 999px;
+        border-radius: 1px;
         background: currentColor;
       }
 
@@ -39,8 +37,8 @@
         width: 18px;
         height: 16px;
 
-        border: 1.5px solid currentColor;
-        border-radius: 3px;
+        border: 1px solid currentColor;
+        border-radius: 2px;
       }
 
       .panel-icon::after {
@@ -51,23 +49,24 @@
         right: 4px;
         bottom: 0;
 
-        border-left: 1.5px solid currentColor;
+        border-left: 1px solid currentColor;
       }
 
       .title-text {
-        padding: 5px 8px;
-
-        border-radius: 3px;
-
         color: var(--text);
-        font-size: 0.95rem;
+        font-size: 14px;
         font-weight: 700;
-        letter-spacing: 0.01em;
-
-        box-shadow: none;
+        letter-spacing: 0;
       }
 
       .toolbar-spacer {
         flex: 1;
+      }
+
+      .icon-button:disabled {
+        border-color: var(--control-disabled-border);
+        background: var(--control-disabled-bg);
+        color: var(--muted-quiet);
+        cursor: not-allowed;
       }
 }

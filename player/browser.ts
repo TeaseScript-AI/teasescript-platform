@@ -107,12 +107,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-addToolColumnButton.addEventListener("click", () => {
-  const id = `tool-column-${nextToolColumnNumber}`;
-  nextToolColumnNumber += 1;
-  toolColumns = addToolColumn(toolColumns, id);
-  renderTools("end");
-});
+addToolColumnButton.addEventListener("click", appendToolColumn);
 
 toolStrip.addEventListener("change", (event) => {
   const target = event.target;
@@ -142,6 +137,12 @@ toolStrip.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
 
+  const add = target.closest<HTMLButtonElement>("[data-tool-column-add]");
+  if (add !== null) {
+    appendToolColumn();
+    return;
+  }
+
   const close = target.closest<HTMLButtonElement>("[data-tool-column-close]");
   if (close !== null) {
     const column = close.closest<HTMLElement>("[data-tool-column-id]");
@@ -157,6 +158,13 @@ toolStrip.addEventListener("click", (event) => {
 });
 
 composerForm.addEventListener("submit", (event) => event.preventDefault());
+
+function appendToolColumn(): void {
+  const id = `tool-column-${nextToolColumnNumber}`;
+  nextToolColumnNumber += 1;
+  toolColumns = addToolColumn(toolColumns, id);
+  renderTools("end");
+}
 
 function renderTools(scrollMode: "preserve" | "end" = "preserve"): void {
   const previousScrollLeft = toolStripScroll.scrollLeft;

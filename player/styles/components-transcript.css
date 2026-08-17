@@ -2,13 +2,14 @@
       /* ---------- Transcript ---------- */
 
       .message {
-        max-width: min(84%, var(--conversation-max-width));
+        max-width: min(100%, var(--conversation-max-width));
 
         --speaker-accent: #9ba4b2;
         --speaker-font: inherit;
       }
 
       .message.user {
+        max-width: min(72%, 560px);
         align-self: flex-end;
         margin-inline-start: auto;
 
@@ -22,7 +23,7 @@
           minmax(0, 1fr);
 
         align-items: start;
-        gap: 9px;
+        gap: 12px;
       }
 
       .message.user .message-row {
@@ -40,32 +41,15 @@
         display: grid;
         place-items: center;
 
-        border:
-          1px solid
-          color-mix(
-            in srgb,
-            var(--speaker-accent) 52%,
-            transparent
-          );
-
+        margin-top: 4px;
+        border: 1px solid var(--speaker-accent);
         border-radius: 50%;
 
-        background:
-          color-mix(
-            in srgb,
-            var(--speaker-accent) 18%,
-            #171b21
-          );
+        background: var(--control-bg);
+        color: var(--speaker-accent);
 
-        color:
-          color-mix(
-            in srgb,
-            var(--speaker-accent) 72%,
-            white
-          );
-
-        font-size: 0.68rem;
-        font-weight: 750;
+        font-size: 10px;
+        font-weight: 700;
       }
 
       .message.user .speaker-avatar {
@@ -81,43 +65,34 @@
       }
 
       .speaker-name {
-        margin-bottom: 2px;
+        margin-bottom: 5px;
 
         color: var(--speaker-accent);
 
-        font-size: 0.67rem;
-        font-weight: 750;
-        letter-spacing: 0.025em;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0;
+        line-height: 1.2;
       }
 
       .message-body {
-        padding-left: 9px;
+        padding-left: 12px;
 
-        border-left:
-          2px solid
-          color-mix(
-            in srgb,
-            var(--speaker-accent) 58%,
-            transparent
-          );
+        border-left: 2px solid color-mix(in srgb, var(--speaker-accent) 85%, transparent);
 
-        font-family:
-          var(--speaker-font);
-
-        line-height: 1.5;
+        color: var(--text);
+        font-family: var(--speaker-font);
+        font-size: 12px;
+        line-height: 1.25;
       }
 
       .message.user .message-body {
         padding-left: 0;
-        padding-right: 9px;
+        padding-right: 12px;
 
         border-left: 0;
-        border-right:
-          2px solid
-          color-mix(
-            in srgb,
-            var(--speaker-accent) 58%,
-            transparent
-          );
+        border-right: 2px solid var(--speaker-accent);
+
+        font-size: 13px;
       }
 }

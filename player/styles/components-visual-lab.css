@@ -5,9 +5,9 @@
         min-width: 0;
 
         display: grid;
-        gap: 8px;
+        gap: 0;
 
-        padding: 10px;
+        padding: 8px 10px 10px;
       }
 
       .theme-picker {
@@ -16,62 +16,87 @@
         align-items: center;
         gap: 8px;
 
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border-subtle);
+
         color: var(--muted);
-        font-size: 0.72rem;
+        font-size: 11px;
+        font-weight: 600;
       }
 
       .theme-picker input[type="color"] {
-        width: 30px;
-        height: 24px;
+        width: 34px;
+        height: 26px;
 
-        padding: 2px;
+        padding: 0;
 
-        border:
-          1px solid rgb(255 255 255 / 12%);
-        border-radius: 3px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 5px;
 
         background: transparent;
         cursor: pointer;
       }
 
+      .theme-picker input[type="color"]::-webkit-color-swatch-wrapper {
+        padding: 0;
+      }
+
+      .theme-picker input[type="color"]::-webkit-color-swatch {
+        border: 0;
+        border-radius: 4px;
+      }
+
+      .theme-picker input[type="color"]::-moz-color-swatch {
+        border: 0;
+        border-radius: 4px;
+      }
+
       .lab-note {
         margin: 0;
 
+        padding-block: 10px 14px;
         color: var(--muted);
-        font-size: 0.7rem;
+        font-size: 9px;
         line-height: 1.35;
       }
 
       .lab-fixed-note {
-        margin: 0;
+        margin: 18px 0 0;
 
-        color: var(--muted-quiet);
-        font-size: 0.64rem;
+        min-block-size: 104px;
+        padding: 10px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 7px;
+
+        color: var(--muted);
+        font-size: 8px;
         line-height: 1.35;
       }
 
       .lab-reset {
         width: 100%;
-        min-height: 30px;
+        min-height: 34px;
 
-        margin: 0;
+        margin: 14px 0 0;
 
         border: 1px solid var(--border-subtle);
-        border-radius: 4px;
+        border-radius: 6px;
 
-        background:
-          rgb(255 255 255 / 3%);
+        background: var(--control-bg);
         color: var(--text);
 
-        box-shadow:
-          0 1px 0 rgb(255 255 255 / 4%) inset;
+        box-shadow: none;
+
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1.2;
 
         cursor: pointer;
       }
 
       .lab-options {
         display: grid;
-        gap: 5px;
+        gap: 0;
       }
 
       .lab-option {
@@ -84,10 +109,12 @@
         gap: 10px;
 
         min-width: 0;
+        min-block-size: 67px;
 
-        padding: 8px 7px;
+        padding: 10px 0;
 
-        border-radius: 3px;
+        border-bottom: 1px solid var(--border-subtle);
+        border-radius: 0;
       }
 
       .lab-option-copy {
@@ -98,7 +125,7 @@
         display: block;
 
         color: var(--text);
-        font-size: 0.76rem;
+        font-size: 11px;
         font-weight: 700;
         line-height: 1.2;
 
@@ -111,7 +138,7 @@
         margin-top: 2px;
 
         color: var(--muted-quiet);
-        font-size: 0.66rem;
+        font-size: 9px;
         line-height: 1.25;
 
         overflow-wrap: anywhere;
@@ -120,8 +147,8 @@
       .switch {
         position: relative;
 
-        width: 32px;
-        height: 19px;
+        width: 34px;
+        height: 20px;
       }
 
       .switch input {
@@ -134,8 +161,7 @@
         position: absolute;
         inset: 0;
 
-        border:
-          1px solid rgb(255 255 255 / 14%);
+        border: 1px solid var(--border-subtle);
         border-radius: 999px;
 
         background: var(--control-bg);
@@ -149,12 +175,12 @@
         top: 2px;
         left: 2px;
 
-        width: 13px;
+        width: 14px;
         aspect-ratio: 1;
 
         border-radius: 50%;
 
-        background: var(--muted);
+        background: var(--muted-quiet);
 
         transition:
           translate 120ms ease,
@@ -162,23 +188,12 @@
       }
 
       .switch input:checked + .switch-ui {
-        border-color:
-          color-mix(
-            in srgb,
-            var(--ui-accent) 62%,
-            transparent
-          );
-
-        background:
-          color-mix(
-            in srgb,
-            var(--ui-accent) 24%,
-            var(--control-bg)
-          );
+        border-color: var(--ui-accent);
+        background: var(--control-bg);
       }
 
       .switch input:checked + .switch-ui::after {
-        translate: 13px 0;
+        translate: 14px 0;
         background: var(--ui-accent);
       }
 }

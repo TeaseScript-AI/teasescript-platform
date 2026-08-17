@@ -16,11 +16,20 @@
       }
 
       @media (max-width: 760px) {
-        .player[data-left="auto"] .tool-column-add {
+        .player {
+          --mobile-drawer-width:
+            min(300px, calc(100vw - 120px));
+          --control-padding: 6px;
+          --action-min-height: 42px;
+          --timer-font-size: 15px;
+        }
+
+        .player[data-left="auto"] .tool-column-add-global {
           display: none;
         }
 
-        .player[data-left="auto"] {
+        .player[data-left="auto"],
+        .player[data-left="open"] {
           --left-grid-track: 0px;
           --left-reserve: 0px;
         }
@@ -40,11 +49,42 @@
           max-inline-size: var(--right-controls-width);
 
           background: transparent;
+          border-left: 0;
         }
 
-        .player[data-left="open"] {
-          --left-grid-track: 0px;
-          --left-reserve: 0px;
+        .player[data-right="overlay"] .right-zone {
+          border-left: 0;
+        }
+
+        .timer-wrap {
+          padding-top: 8px;
+          padding-bottom: 7px;
+        }
+
+        .timer-cluster {
+          inline-size:
+            min(100%, calc(var(--timer-size) + 54px));
+          block-size: calc(var(--timer-size) + 15px);
+        }
+
+        .timer-cluster .right-toggle {
+          right: -4px;
+        }
+
+        .player[data-right="auto"] .timer,
+        .player[data-right="overlay"] .timer,
+        .player[data-right="auto"] .action-button,
+        .player[data-right="overlay"] .action-button {
+          background:
+            color-mix(
+              in srgb,
+              var(--control-bg) 60%,
+              transparent
+            );
+        }
+
+        .action-scroll {
+          padding-top: 12px;
         }
 
         .player[data-left="open"] .left-scrim {
@@ -52,22 +92,23 @@
 
           position: absolute;
           z-index: 35;
-          inset: 0;
+          top: var(--title-height);
+          right: 0;
+          bottom: 0;
+          left: var(--mobile-drawer-width);
 
           padding: 0;
           border: 0;
-          background: transparent;
+          background: rgb(56 45 42 / 18%);
 
           cursor: default;
         }
 
         .player[data-left="open"] .left-panel {
           /*
-            True overlay drawer:
-            - its Grid containing area is the complete Player;
-            - starts at the physical top, so no title-sized gap remains;
-            - sits above media/right controls, but below title controls;
-            - right controls stay alive underneath.
+            True opaque overlay drawer. Its width is constrained by the space
+            that must remain visible for dismissal rather than by a fixed
+            Penpot frame percentage.
           */
           position: absolute;
           z-index: 40;
@@ -75,26 +116,47 @@
           grid-column: 1 / -1;
           grid-row: 1 / -1;
 
-          top: 0;
+          top: var(--title-height);
           bottom: 0;
           left: 0;
 
-          width: min(82vw, 300px);
+          width: var(--mobile-drawer-width);
+          padding-top: 0;
 
-          padding-top: var(--title-height);
-
-          background:
-            color-mix(
-              in srgb,
-              var(--side-bg) 91%,
-              transparent
-            );
-
-          box-shadow:
-            18px 0 34px
-            rgb(0 0 0 / 24%);
+          background: var(--side-bg);
+          border-right: 1px solid var(--border-subtle);
+          box-shadow: none;
         }
 
+        .player[data-left="open"] .tool-strip {
+          padding-left: calc(5px + var(--safe-left));
+          padding-right: 4px;
+        }
+
+        .player[data-left="open"] .tool-column {
+          --tool-column-min:
+            max(
+              180px,
+              calc(
+                var(--mobile-drawer-width)
+                - 10px
+                - var(--safe-left)
+              )
+            );
+          --tool-column-max: var(--tool-column-min);
+        }
+
+        .player[data-left="open"] .tool-column:only-child {
+          --tool-column-min:
+            max(
+              180px,
+              calc(
+                var(--mobile-drawer-width)
+                - 10px
+                - var(--safe-left)
+              )
+            );
+        }
       }
 
       /*
@@ -171,12 +233,17 @@
         }
       }
 
+      /*
+        A short viewport is the one state where the circular timer gives up
+        vertical space. The existing title-overlay mode is the geometry owner;
+        CSS folds the timer and its toggle into that 52px strip without JS
+        viewport bookkeeping.
+      */
       @media (max-height: 600px) {
         .player {
           --title-track: 0px;
           --title-overlay-clearance:
             var(--title-height);
-
           --media-height: 64dvh;
         }
 
@@ -184,28 +251,74 @@
           background: transparent;
         }
 
-        .title-text,
-        .icon-button {
-          border-radius: 3px;
-
+        .title-text {
+          padding: 7px 9px;
+          border: 1px solid var(--border-subtle);
+          border-radius: 6px;
           background:
-            rgb(29 33 41 / 58%);
+            color-mix(
+              in srgb,
+              var(--control-bg) 90%,
+              transparent
+            );
         }
-      }
 
-      @media
-        (max-height: 600px)
-        and (hover: hover)
-        and (pointer: fine) {
-        .icon-button:hover {
+        .icon-button {
           background:
-            rgb(29 33 41 / 76%);
+            color-mix(
+              in srgb,
+              var(--control-bg) 90%,
+              transparent
+            );
+        }
+
+        .timer-wrap {
+          min-block-size: var(--title-height);
+          padding:
+            calc(9px + var(--safe-top))
+            calc(8px + var(--safe-right))
+            9px
+            8px;
+        }
+
+        .timer-cluster {
+          inline-size: 94px;
+          block-size: 34px;
+          margin-inline-start: auto;
+        }
+
+        .timer-cluster .timer {
+          top: 0;
+          bottom: auto;
+
+          inline-size: 54px;
+          block-size: 34px;
+          aspect-ratio: auto;
+
+          border-radius: 6px;
+          font-size: 14px;
+        }
+
+        .timer::before {
+          content: none;
+        }
+
+        .timer-cluster .right-toggle {
+          top: 0;
+          right: 0;
+        }
+
+        .action-scroll {
+          padding-top: 8px;
         }
       }
 
       @media (max-width: 480px) {
         .composer {
-          padding-block: 8px;
+          padding-left:
+            calc(10px + var(--safe-left));
+          padding-right:
+            calc(10px + var(--safe-right));
         }
 
         .send-button {

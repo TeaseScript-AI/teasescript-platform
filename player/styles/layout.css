@@ -1,22 +1,34 @@
 @layer layout {
       :root {
-        color-scheme: dark;
+        color-scheme: light;
 
-        --theme-color: #8f3048;
+        --theme-color: #e84c71;
 
-        --canvas-bg: #0b0b0d;
-        --title-bg: #171619;
-        --side-bg: #121216;
-        --center-bg: #0c0c0f;
-        --control-bg: #17161a;
+        --canvas-bg: #f7f0e8;
+        --title-bg: #fcf6ef;
+        --side-bg: #fcf6ef;
+        --center-bg: #f7f0e8;
+        --media-bg: #f0dcc8;
+        --control-bg: #fffcf7;
 
-        --text: #eeeae7;
-        --muted: #9e9799;
-        --muted-quiet: #777174;
-        --border-subtle: rgb(255 255 255 / 8%);
-        --border-strong: rgb(255 255 255 / 15%);
-        --ui-accent:
-          color-mix(in srgb, var(--theme-color) 86%, #f0e3e6);
+        --text: #382d2a;
+        --muted: #79665f;
+        --muted-quiet: #8a7770;
+        --border-subtle: #d9c8b8;
+        --border-strong: #d9c8b8;
+
+        --control-hover-bg: #f8eee5;
+        --control-hover-border: #cbb2a1;
+        --control-pressed-bg: #f2e3d8;
+        --control-pressed-border: #b49380;
+        --control-disabled-bg: #efe6df;
+        --control-disabled-border: #decfc4;
+
+        --accent-solid: #d63b61;
+        --accent-hover: #c93659;
+        --accent-pressed: #b82f4f;
+        --focus-ring: #e84c71;
+        --ui-accent: var(--theme-color);
 
         /*
           Player chrome respects device safe areas while media remains full-bleed.
@@ -50,26 +62,21 @@
         --right-reserve: var(--right-controls-width);
 
         --timer-size:
-          clamp(76px, calc(30px + 6vmin), 152px);
-        --timer-font-size:
-          clamp(1rem, 1.45vmin, 1.85rem);
+          clamp(72px, calc(32px + 6vmin), 86px);
+        --timer-font-size: 18px;
 
-        --action-min-height:
-          clamp(42px, 3.2vmin, 60px);
-        --action-font-size:
-          clamp(0.88rem, 1vmin, 1.05rem);
+        --action-min-height: 44px;
+        --action-font-size: 12px;
 
-        --control-padding:
-          clamp(10px, 1vmin, 17px);
-        --control-gap:
-          clamp(8px, 0.7vmin, 13px);
+        --control-padding: 16px;
+        --control-gap: 9px;
 
         --conversation-max-width: 900px;
         --conversation-min-width: 380px;
         --conversation-gap: 18px;
         --conversation-overlay-reserve: 0px;
 
-        --scene-ambient: #5a2737;
+        --scene-ambient: #f7cdaf;
         --timer-progress: 46%;
       }
 
@@ -186,7 +193,7 @@
         place-items: center;
 
         overflow: hidden;
-        background: var(--center-bg);
+        background: var(--media-bg);
       }
 
       .transcript {
@@ -199,12 +206,29 @@
         overflow-y: auto;
         overscroll-behavior: contain;
 
-        padding-block: 16px;
+        padding-block: 10px 12px;
 
+        /*
+          Center the readable conversation shell inside the actual middle Grid
+          track. The calculation deliberately uses 100%, not 100vw, so tool
+          columns and the right rail remain the geometry owners.
+        */
         padding-left:
-          calc(var(--conversation-gap) + var(--safe-left));
+          calc(
+            max(
+              var(--conversation-gap),
+              calc((100% - var(--conversation-max-width)) / 2 + var(--conversation-gap))
+            )
+            + var(--safe-left)
+          );
         padding-right:
-          calc(var(--conversation-gap) + var(--safe-right));
+          calc(
+            max(
+              var(--conversation-gap),
+              calc((100% - var(--conversation-max-width)) / 2 + var(--conversation-gap))
+            )
+            + var(--safe-right)
+          );
 
         display: flex;
         flex-direction: column;
@@ -215,7 +239,7 @@
         scrollbar-width: thin;
         scrollbar-gutter: stable;
         scrollbar-color:
-          rgb(255 255 255 / 24%)
+          color-mix(in srgb, var(--muted) 45%, transparent)
           transparent;
 
         -webkit-mask-image:
@@ -241,8 +265,9 @@
 
         min-width: 0;
 
-        padding-top: 10px;
-        padding-bottom: calc(10px + var(--safe-bottom));
+        padding-top: 5px;
+        padding-bottom: calc(6px + var(--safe-bottom));
+        border-top: 1px solid var(--border-subtle);
 
         padding-left:
           calc(12px + var(--safe-left));

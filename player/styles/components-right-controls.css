@@ -6,23 +6,17 @@
         place-items: start center;
 
         padding:
-          6px
+          8px
           calc(var(--control-padding) + var(--safe-right))
-          calc(var(--control-padding) * 0.7)
+          11px
           var(--control-padding);
       }
 
       .timer-cluster {
         position: relative;
 
-        inline-size:
-          min(
-            100%,
-            calc(var(--timer-size) + 50px)
-          );
-
-        block-size:
-          calc(var(--timer-size) + 10px);
+        inline-size: min(100%, calc(var(--timer-size) + 50px));
+        block-size: calc(var(--timer-size) + 17px);
       }
 
       .timer-cluster .timer {
@@ -35,15 +29,10 @@
         position: absolute;
         z-index: 4;
         top: 0;
-        right: 0;
+        right: -16px;
 
         width: 34px;
         height: 34px;
-
-        border-radius: 3px;
-
-        background:
-          rgb(8 10 13 / 30%);
       }
 
       .timer {
@@ -56,15 +45,13 @@
         display: grid;
         place-items: center;
 
-        border:
-          1px solid rgb(255 255 255 / 18%);
+        border: 1px solid var(--border-subtle);
         border-radius: 50%;
 
-        background:
-          rgb(7 9 12 / 8%);
+        background: var(--control-bg);
+        color: var(--text);
 
-        box-shadow:
-          0 0 0 1px rgb(0 0 0 / 18%);
+        box-shadow: none;
 
         font-size: var(--timer-font-size);
         font-weight: 700;
@@ -86,7 +73,7 @@
             0
             var(--timer-progress),
 
-            rgb(255 255 255 / 10%)
+            color-mix(in srgb, var(--border-subtle) 90%, transparent)
             var(--timer-progress)
             100%
           );
@@ -129,57 +116,25 @@
           var(--control-padding);
 
         scrollbar-width: thin;
-        scrollbar-color:
-          rgb(255 255 255 / 24%)
-          transparent;
-
-        -webkit-mask-image:
-          linear-gradient(
-            to bottom,
-            transparent 0,
-            #000 18px,
-            #000 100%
-          );
-
-        mask-image:
-          linear-gradient(
-            to bottom,
-            transparent 0,
-            #000 18px,
-            #000 100%
-          );
+        scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
       }
 
       .action-button {
         width: 100%;
+        min-block-size: var(--action-min-height);
 
-        min-block-size:
-          var(--action-min-height);
-
-        padding:
-          clamp(8px, 0.8vmin, 12px)
-          0.9em;
+        padding: 8px 11px;
 
         border: 1px solid var(--border-strong);
+        border-radius: 6px;
 
-        border-radius: 4px;
-
-        background: color-mix(in srgb, var(--control-bg) 72%, transparent);
+        background: var(--control-bg);
         color: var(--text);
 
-        box-shadow:
-          2px 0 0
-            color-mix(
-              in srgb,
-              var(--ui-accent) 38%,
-              transparent
-            )
-            inset,
-          0 1px 0 rgb(255 255 255 / 4%) inset;
+        box-shadow: none;
 
-        font-size:
-          var(--action-font-size);
-
+        font-size: var(--action-font-size);
+        font-weight: 600;
         line-height: 1.18;
         text-align: left;
         text-shadow: none;
@@ -191,10 +146,14 @@
         cursor: pointer;
       }
 
-      .switch-ui {
-        box-shadow:
-          0 1px 0 rgb(255 255 255 / 4%) inset,
-          0 3px 9px rgb(0 0 0 / 12%);
+      .action-button:disabled {
+        border-color: var(--control-disabled-border);
+        background: var(--control-disabled-bg);
+        color: var(--muted-quiet);
+        cursor: not-allowed;
       }
-    
+
+      .switch-ui {
+        box-shadow: none;
+      }
 }

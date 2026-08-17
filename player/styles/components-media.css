@@ -23,6 +23,10 @@
         min-height: 0;
       }
 
+      .media-content[hidden] {
+        display: none;
+      }
+
       img.media-content,
       video.media-content {
         display: block;
