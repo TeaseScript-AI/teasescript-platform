@@ -20,6 +20,11 @@ The CSS keeps the browser-native direction established by the Player research: G
 Player controls, input-capability media queries, and `prefers-reduced-motion`. The demo has no external runtime asset or
 network dependency.
 
+`styles/layout.css` owns the current light-theme CSS `oklch()` palette primitives and maps them to semantic component
+tokens. Component styles use those semantic tokens, so a future theme can replace mappings without rewriting component
+CSS. Speaker, package-accent, media, and technical mask colours remain outside that application palette; the existing
+Visual Lab picker continues to affect only the package-accent presentation seam.
+
 The left tool area supports user-created columns. Each column has one fixed selector/`+`/close row and one vertically
 scrollable body; the `+` in any column adds another independent blank column. Tool content no longer adds nested vertical
 scrolling or repeats the selected tool name as another heading. Columns may duplicate a tool, switch tools, and be closed

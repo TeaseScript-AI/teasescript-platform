@@ -70,8 +70,8 @@
         }
 
         .player[data-right="docked"] .right-zone {
-          background: var(--side-bg);
-          box-shadow: -3px 0 8px rgb(56 45 42 / 8%);
+          background: var(--color-surface-chrome);
+          box-shadow: -3px 0 8px var(--color-structural-shadow);
         }
 
         .player[data-right="auto"] .timer,
@@ -81,7 +81,7 @@
           background:
             color-mix(
               in srgb,
-              var(--control-bg) 60%,
+              var(--color-surface-component) 60%,
               transparent
             );
         }
@@ -111,34 +111,34 @@
         .composer textarea {
           min-block-size: 42px;
           padding: 10px 11px;
-          border: 1px solid var(--border-subtle);
+          border: 1px solid var(--color-border-default);
           border-radius: 7px;
-          background: var(--control-bg);
+          background: var(--color-surface-component);
           font-size: 10px;
         }
 
         .composer textarea:focus-visible {
-          border-color: var(--border-subtle);
-          outline: 2px solid var(--focus-ring);
+          border-color: var(--color-border-default);
+          outline: 2px solid var(--color-accent-focus);
           outline-offset: 1px;
         }
 
         @media (hover: hover) and (pointer: fine) {
           .composer textarea:not(:disabled):hover {
-            border-color: var(--control-hover-border);
-            background: var(--control-bg);
+            border-color: var(--color-border-hover);
+            background: var(--color-surface-component);
           }
         }
 
         .composer textarea:not(:disabled):active {
-          border-color: var(--control-pressed-border);
-          background: var(--control-bg);
+          border-color: var(--color-border-pressed);
+          background: var(--color-surface-component);
         }
 
         .composer textarea:disabled {
-          border-color: var(--control-disabled-border);
-          background: var(--control-disabled-bg);
-          color: var(--muted-quiet);
+          border-color: var(--color-border-disabled);
+          background: var(--color-surface-disabled);
+          color: var(--color-text-disabled);
           cursor: not-allowed;
         }
 
@@ -154,11 +154,11 @@
         @media (hover: hover) and (pointer: fine) {
           .player[data-right="auto"] .action-button:not(:disabled):hover,
           .player[data-right="overlay"] .action-button:not(:disabled):hover {
-            border-color: var(--control-hover-border);
+            border-color: var(--color-border-hover);
             background:
               color-mix(
                 in srgb,
-                var(--control-hover-bg) 60%,
+                var(--color-component-hover) 60%,
                 transparent
               );
           }
@@ -166,22 +166,22 @@
 
         .player[data-right="auto"] .action-button:not(:disabled):active,
         .player[data-right="overlay"] .action-button:not(:disabled):active {
-          border-color: var(--control-pressed-border);
+          border-color: var(--color-border-pressed);
           background:
             color-mix(
               in srgb,
-              var(--control-pressed-bg) 60%,
+              var(--color-component-pressed) 60%,
               transparent
             );
         }
 
         .player[data-right="auto"] .action-button:disabled,
         .player[data-right="overlay"] .action-button:disabled {
-          border-color: var(--control-disabled-border);
+          border-color: var(--color-border-disabled);
           background:
             color-mix(
               in srgb,
-              var(--control-disabled-bg) 60%,
+              var(--color-surface-disabled) 60%,
               transparent
             );
         }
@@ -216,7 +216,7 @@
 
           padding: 0;
           border: 0;
-          background: rgb(56 45 42 / 18%);
+          background: var(--color-structural-scrim);
 
           cursor: default;
         }
@@ -240,9 +240,9 @@
           width: var(--mobile-drawer-width);
           padding-top: 0;
 
-          background: var(--side-bg);
-          border-right: 1px solid var(--border-subtle);
-          box-shadow: 3px 0 8px rgb(56 45 42 / 8%);
+          background: var(--color-surface-chrome);
+          border-right: 1px solid var(--color-border-default);
+          box-shadow: 3px 0 8px var(--color-structural-shadow);
         }
 
         .player[data-left="open"] .tool-strip {
@@ -327,39 +327,39 @@
         background:
           color-mix(
             in srgb,
-            var(--control-bg) 60%,
+            var(--color-surface-component) 60%,
             transparent
           );
       }
 
       @media (hover: hover) and (pointer: fine) {
         .player[data-right="overlay"] .action-button:not(:disabled):hover {
-          border-color: var(--control-hover-border);
+          border-color: var(--color-border-hover);
           background:
             color-mix(
               in srgb,
-              var(--control-hover-bg) 60%,
+              var(--color-component-hover) 60%,
               transparent
             );
         }
       }
 
       .player[data-right="overlay"] .action-button:not(:disabled):active {
-        border-color: var(--control-pressed-border);
+        border-color: var(--color-border-pressed);
         background:
           color-mix(
             in srgb,
-            var(--control-pressed-bg) 60%,
+            var(--color-component-pressed) 60%,
             transparent
           );
       }
 
       .player[data-right="overlay"] .action-button:disabled {
-        border-color: var(--control-disabled-border);
+        border-color: var(--color-border-disabled);
         background:
           color-mix(
             in srgb,
-            var(--control-disabled-bg) 60%,
+            var(--color-surface-disabled) 60%,
             transparent
           );
       }
@@ -432,12 +432,12 @@
 
         .title-text {
           padding: 7px 9px;
-          border: 1px solid var(--border-subtle);
+          border: 1px solid var(--color-border-default);
           border-radius: 6px;
           background:
             color-mix(
               in srgb,
-              var(--control-bg) 90%,
+              var(--color-surface-component) 90%,
               transparent
             );
         }
@@ -446,7 +446,7 @@
           background:
             color-mix(
               in srgb,
-              var(--control-bg) 90%,
+              var(--color-surface-component) 90%,
               transparent
             );
         }

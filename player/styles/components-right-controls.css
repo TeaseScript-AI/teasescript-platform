@@ -49,11 +49,11 @@
         display: grid;
         place-items: center;
 
-        border: 1px solid var(--border-subtle);
+        border: 1px solid var(--color-border-default);
         border-radius: 50%;
 
-        background: var(--control-bg);
-        color: var(--text);
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
 
         box-shadow: none;
 
@@ -73,11 +73,11 @@
 
         background:
           conic-gradient(
-            var(--ui-accent)
+            var(--package-accent)
             0
             var(--timer-progress),
 
-            color-mix(in srgb, var(--border-subtle) 90%, transparent)
+            color-mix(in srgb, var(--color-border-default) 90%, transparent)
             var(--timer-progress)
             100%
           );
@@ -120,7 +120,7 @@
           0;
 
         scrollbar-width: thin;
-        scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
       }
 
       .action-button {
@@ -133,11 +133,11 @@
           clamp(8px, 0.8vmin, 12px)
           12px;
 
-        border: 1px solid var(--border-strong);
+        border: 1px solid var(--color-border-default);
         border-radius: 6px;
 
-        background: var(--control-bg);
-        color: var(--text);
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
 
         box-shadow: none;
 
@@ -155,9 +155,9 @@
       }
 
       .action-button:disabled {
-        border-color: var(--control-disabled-border);
-        background: var(--control-disabled-bg);
-        color: var(--muted-quiet);
+        border-color: var(--color-border-disabled);
+        background: var(--color-surface-disabled);
+        color: var(--color-text-disabled);
         cursor: not-allowed;
       }
 

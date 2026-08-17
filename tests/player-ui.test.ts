@@ -91,6 +91,21 @@ test("Player entrypoint uses modular local assets without external runtime depen
   assert.doesNotMatch(html, /https?:\/\//u);
 });
 
+test("Player application colours use centralized OKLCH primitives and semantic component tokens", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
+
+  assert.match(layout, /--palette-surface-base:\s*oklch\(95\.839% 0\.01306 71\.33\)/u);
+  assert.match(layout, /--palette-border-strong:\s*oklch\(68\.851% 0\.04826 51\.55\)/u);
+  assert.match(layout, /--color-border-default:\s*var\(--palette-border-subtle\)/u);
+  assert.match(layout, /--color-border-pressed:\s*var\(--palette-border-strong\)/u);
+  assert.match(actions, /\.action-button[\s\S]*border: 1px solid var\(--color-border-default\)/u);
+  assert.match(tools, /\.tool-selector[\s\S]*background: var\(--color-surface-component\)/u);
+  assert.doesNotMatch(actions, /var\(--palette-/u);
+  assert.doesNotMatch(tools, /var\(--palette-/u);
+});
+
 test("Player tool chrome keeps one fixed column header and one vertical scroll owner", async () => {
   const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
   const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
@@ -158,7 +173,7 @@ test("Player conversation spacing is based on its own grid column", async () => 
   assert.doesNotMatch(layout, /100vw - var\(--conversation-max-width\)/u);
   assert.match(layout, /calc\(\(100% - var\(--conversation-max-width\)\) \/ 2 \+ var\(--conversation-gap\)\)/u);
   assert.match(composer, /width: min\(100%, var\(--conversation-max-width\)\)/u);
-  assert.match(layout, /\.composer \{[\s\S]*background: var\(--center-bg\)/u);
+  assert.match(layout, /\.composer \{[\s\S]*background: var\(--color-surface-canvas\)/u);
   assert.doesNotMatch(layout, /\.composer \{[\s\S]*border-top:/u);
 });
 
@@ -167,25 +182,25 @@ test("Player composer preserves desktop shell focus and separate mobile controls
   const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
 
-  assert.match(composer, /\.composer form[\s\S]*border: 1px solid var\(--border-subtle\)[\s\S]*background: var\(--control-bg\)/u);
+  assert.match(composer, /\.composer form[\s\S]*border: 1px solid var\(--color-border-default\)[\s\S]*background: var\(--color-surface-component\)/u);
   assert.match(composer, /textarea[\s\S]*border: 0;[\s\S]*background: transparent/u);
   assert.doesNotMatch(composer, /textarea:focus-visible/u);
-  assert.match(effects, /\.composer form:has\(textarea:focus-visible\)[\s\S]*outline: 2px solid var\(--focus-ring\)/u);
-  assert.match(effects, /\.composer form:has\(textarea:not\(:disabled\):hover\)[\s\S]*border-color: var\(--control-hover-border\)/u);
-  assert.match(effects, /\.composer form:has\(textarea:not\(:disabled\):active\)[\s\S]*border-color: var\(--control-pressed-border\)/u);
-  assert.match(effects, /\.composer form:has\(textarea:disabled\)[\s\S]*background: var\(--control-disabled-bg\)/u);
+  assert.match(effects, /\.composer form:has\(textarea:focus-visible\)[\s\S]*outline: 2px solid var\(--color-accent-focus\)/u);
+  assert.match(effects, /\.composer form:has\(textarea:not\(:disabled\):hover\)[\s\S]*border-color: var\(--color-border-hover\)/u);
+  assert.match(effects, /\.composer form:has\(textarea:not\(:disabled\):active\)[\s\S]*border-color: var\(--color-border-pressed\)/u);
+  assert.match(effects, /\.composer form:has\(textarea:disabled\)[\s\S]*background: var\(--color-surface-disabled\)/u);
   assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*\.composer form \{[\s\S]*border: 0;[\s\S]*background: transparent;/u);
-  assert.match(responsive, /\.composer textarea \{[\s\S]*border: 1px solid var\(--border-subtle\);[\s\S]*background: var\(--control-bg\)/u);
-  assert.match(responsive, /\.composer textarea:not\(:disabled\):active[\s\S]*border-color: var\(--control-pressed-border\)/u);
-  assert.match(responsive, /\.composer textarea:disabled[\s\S]*background: var\(--control-disabled-bg\)/u);
+  assert.match(responsive, /\.composer textarea \{[\s\S]*border: 1px solid var\(--color-border-default\);[\s\S]*background: var\(--color-surface-component\)/u);
+  assert.match(responsive, /\.composer textarea:not\(:disabled\):active[\s\S]*border-color: var\(--color-border-pressed\)/u);
+  assert.match(responsive, /\.composer textarea:disabled[\s\S]*background: var\(--color-surface-disabled\)/u);
 });
 
 test("Player overlay Actions keep translucent default, hover, and pressed fills", async () => {
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
 
-  assert.match(responsive, /\.player\[data-right="overlay"\] \.action-button \{[\s\S]*var\(--control-bg\) 60%/u);
-  assert.match(responsive, /var\(--control-hover-bg\) 60%/u);
-  assert.match(responsive, /var\(--control-pressed-bg\) 60%/u);
+  assert.match(responsive, /\.player\[data-right="overlay"\] \.action-button \{[\s\S]*var\(--color-surface-component\) 60%/u);
+  assert.match(responsive, /var\(--color-component-hover\) 60%/u);
+  assert.match(responsive, /var\(--color-component-pressed\) 60%/u);
 });
 
 test("Player right background toggle keeps conversation geometry stable", async () => {
@@ -199,8 +214,8 @@ test("Player narrow drawer remains opaque and timer compaction is height-driven"
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
 
   assert.match(responsive, /--mobile-drawer-width:/u);
-  assert.match(responsive, /background: var\(--side-bg\);/u);
-  assert.match(responsive, /background: rgb\(56 45 42 \/ 18%\);/u);
+  assert.match(responsive, /background: var\(--color-surface-chrome\);/u);
+  assert.match(responsive, /background: var\(--color-structural-scrim\);/u);
   assert.doesNotMatch(responsive, /--control-padding:/u);
   assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer-cluster \.timer \{[\s\S]*inline-size: 34px;[\s\S]*border-radius: 50%;/u);
   assert.doesNotMatch(responsive, /\.timer::before \{[\s\S]*content: none;/u);
@@ -219,16 +234,16 @@ test("Player chrome roles and restrained Penpot elevation stay on structural she
   const visualLab = await readFile(resolve(process.cwd(), "player/styles/components-visual-lab.css"), "utf8");
   const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
 
-  assert.match(layout, /\.title-bg[\s\S]*box-shadow: 0 2px 6px rgb\(56 45 42 \/ 8%\)/u);
-  assert.match(layout, /\.left-panel[\s\S]*box-shadow: 3px 0 8px rgb\(56 45 42 \/ 8%\)/u);
-  assert.match(layout, /\.right-zone[\s\S]*box-shadow: -3px 0 8px rgb\(56 45 42 \/ 8%\)/u);
-  assert.doesNotMatch(layout, /1px 0 0 var\(--border-subtle\) inset/u);
+  assert.match(layout, /\.title-bg[\s\S]*box-shadow: 0 2px 6px var\(--color-structural-shadow\)/u);
+  assert.match(layout, /\.left-panel[\s\S]*box-shadow: 3px 0 8px var\(--color-structural-shadow\)/u);
+  assert.match(layout, /\.right-zone[\s\S]*box-shadow: -3px 0 8px var\(--color-structural-shadow\)/u);
+  assert.doesNotMatch(layout, /1px 0 0 var\(--color-border-default\) inset/u);
   assert.match(layout, /\.player\[data-right="overlay"\] \.right-zone[\s\S]*box-shadow: none/u);
 
   assert.match(tools, /\.tool-column-header[\s\S]*background: transparent/u);
-  assert.match(tools, /\.tool-selector[\s\S]*background: var\(--control-bg\)/u);
-  assert.match(visualLab, /\.lab-fixed-note[\s\S]*background: var\(--side-bg\)/u);
-  assert.match(visualLab, /\.lab-fixed-note-title[\s\S]*color: var\(--ui-accent\)/u);
+  assert.match(tools, /\.tool-selector[\s\S]*background: var\(--color-surface-component\)/u);
+  assert.match(visualLab, /\.lab-fixed-note[\s\S]*background: var\(--color-surface-chrome\)/u);
+  assert.match(visualLab, /\.lab-fixed-note-title[\s\S]*color: var\(--package-accent\)/u);
   assert.match(render, /fixedTitle\.textContent = "Always on"/u);
 });
 

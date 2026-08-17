@@ -2,33 +2,50 @@
       :root {
         color-scheme: light;
 
-        --theme-color: #e84c71;
+        /* Palette primitives: current light theme only. */
+        --palette-surface-base: oklch(95.839% 0.01306 71.33);
+        --palette-surface-chrome: oklch(97.586% 0.01130 71.90);
+        --palette-surface-component: oklch(99.199% 0.00734 80.72);
+        --palette-component-hover: oklch(95.449% 0.01618 64.67);
+        --palette-component-pressed: oklch(92.481% 0.02213 58.77);
+        --palette-border-subtle: oklch(84.246% 0.02905 65.71);
+        --palette-border-interactive: oklch(78.050% 0.03740 56.32);
+        --palette-border-strong: oklch(68.851% 0.04826 51.55);
+        --palette-text-primary: oklch(30.838% 0.01712 35.72);
+        --palette-text-muted: oklch(52.649% 0.02679 41.27);
+        --palette-accent-focus: oklch(64.182% 0.19236 10.29);
+        --palette-accent-solid: oklch(59.208% 0.19138 11.08);
+        --palette-accent-solid-hover: oklch(56.375% 0.18326 11.66);
+        --palette-accent-solid-pressed: oklch(52.588% 0.17301 12.20);
+        --palette-disabled-bg: oklch(93.009% 0.01361 60.56);
+        --palette-disabled-border: oklch(86.370% 0.02252 58.74);
+        --palette-disabled-text: oklch(58.486% 0.02603 41.30);
 
-        --canvas-bg: #f7f0e8;
-        --title-bg: #fcf6ef;
-        --side-bg: #fcf6ef;
-        --center-bg: #f7f0e8;
-        --media-bg: #f0dcc8;
-        --control-bg: #fffcf7;
+        /* Semantic component tokens. A future theme replaces these mappings. */
+        --color-surface-canvas: var(--palette-surface-base);
+        --color-surface-chrome: var(--palette-surface-chrome);
+        --color-surface-component: var(--palette-surface-component);
+        --color-component-hover: var(--palette-component-hover);
+        --color-component-pressed: var(--palette-component-pressed);
+        --color-border-default: var(--palette-border-subtle);
+        --color-border-hover: var(--palette-border-interactive);
+        --color-border-pressed: var(--palette-border-strong);
+        --color-text-primary: var(--palette-text-primary);
+        --color-text-muted: var(--palette-text-muted);
+        --color-text-disabled: var(--palette-disabled-text);
+        --color-accent-focus: var(--palette-accent-focus);
+        --color-accent-solid: var(--palette-accent-solid);
+        --color-accent-solid-hover: var(--palette-accent-solid-hover);
+        --color-accent-solid-pressed: var(--palette-accent-solid-pressed);
+        --color-surface-disabled: var(--palette-disabled-bg);
+        --color-border-disabled: var(--palette-disabled-border);
+        --color-text-inverse: oklch(100% 0 0);
+        --color-structural-shadow: oklch(30.838% 0.01712 35.72 / 8%);
+        --color-structural-scrim: oklch(30.838% 0.01712 35.72 / 18%);
 
-        --text: #382d2a;
-        --muted: #79665f;
-        --muted-quiet: #8a7770;
-        --border-subtle: #d9c8b8;
-        --border-strong: #d9c8b8;
-
-        --control-hover-bg: #f8eee5;
-        --control-hover-border: #cbb2a1;
-        --control-pressed-bg: #f2e3d8;
-        --control-pressed-border: #b49380;
-        --control-disabled-bg: #efe6df;
-        --control-disabled-border: #decfc4;
-
-        --accent-solid: #d63b61;
-        --accent-hover: #c93659;
-        --accent-pressed: #b82f4f;
-        --focus-ring: #e84c71;
-        --ui-accent: var(--theme-color);
+        /* Package/media values are presentation data, not application palette tokens. */
+        --package-accent: var(--color-accent-focus);
+        --media-fallback-color: #f0dcc8;
 
         /*
           Player chrome respects device safe areas while media remains full-bleed.
@@ -116,7 +133,7 @@
           auto;
 
         overflow: hidden;
-        background: var(--center-bg);
+        background: var(--color-surface-canvas);
       }
 
       .player[data-left="closed"] {
@@ -134,8 +151,8 @@
         grid-column: 1 / -1;
         grid-row: 1;
 
-        background: var(--title-bg);
-        box-shadow: 0 2px 6px rgb(56 45 42 / 8%);
+        background: var(--color-surface-chrome);
+        box-shadow: 0 2px 6px var(--color-structural-shadow);
       }
 
       .title-controls {
@@ -177,8 +194,8 @@
         padding-top: var(--title-overlay-clearance);
 
         overflow: hidden;
-        background: var(--side-bg);
-        box-shadow: 3px 0 8px rgb(56 45 42 / 8%);
+        background: var(--color-surface-chrome);
+        box-shadow: 3px 0 8px var(--color-structural-shadow);
       }
 
       .left-scrim {
@@ -198,7 +215,7 @@
         place-items: center;
 
         overflow: hidden;
-        background: var(--media-bg);
+        background: var(--media-fallback-color);
       }
 
       .transcript {
@@ -239,12 +256,12 @@
         flex-direction: column;
         gap: 12px;
 
-        background: var(--center-bg);
+        background: var(--color-surface-canvas);
 
         scrollbar-width: thin;
         scrollbar-gutter: stable;
         scrollbar-color:
-          color-mix(in srgb, var(--muted) 45%, transparent)
+          color-mix(in srgb, var(--color-text-muted) 45%, transparent)
           transparent;
 
         -webkit-mask-image:
@@ -278,7 +295,7 @@
         padding-right:
           calc(12px + var(--safe-right));
 
-        background: var(--center-bg);
+        background: var(--color-surface-canvas);
       }
 
       .right-zone {
@@ -302,10 +319,10 @@
 
         overflow: hidden;
 
-        background: var(--side-bg);
+        background: var(--color-surface-chrome);
 
         border-left: 0;
-        box-shadow: -3px 0 8px rgb(56 45 42 / 8%);
+        box-shadow: -3px 0 8px var(--color-structural-shadow);
       }
 
       .player[data-right="overlay"] .right-zone {

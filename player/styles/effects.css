@@ -74,8 +74,8 @@
 
       @media (hover: hover) and (pointer: fine) {
         .composer form:has(textarea:not(:disabled):hover) {
-          border-color: var(--control-hover-border);
-          background: var(--control-bg);
+          border-color: var(--color-border-hover);
+          background: var(--color-surface-component);
         }
 
         .icon-button:not(:disabled):hover,
@@ -85,14 +85,14 @@
         .tool-selector:not(:disabled):hover,
         .action-button:not(:disabled):hover,
         .lab-reset:not(:disabled):hover {
-          border-color: var(--control-hover-border);
-          background: var(--control-hover-bg);
+          border-color: var(--color-border-hover);
+          background: var(--color-component-hover);
           box-shadow: none;
         }
 
         .send-button:not(:disabled):hover {
-          border-color: var(--accent-hover);
-          background: var(--accent-hover);
+          border-color: var(--color-accent-solid-hover);
+          background: var(--color-accent-solid-hover);
           box-shadow: none;
         }
       }
@@ -103,25 +103,25 @@
       .tool-selector:not(:disabled):active,
       .action-button:not(:disabled):active,
       .lab-reset:not(:disabled):active {
-        border-color: var(--control-pressed-border);
-        background: var(--control-pressed-bg);
+        border-color: var(--color-border-pressed);
+        background: var(--color-component-pressed);
         box-shadow: none;
       }
 
       .send-button:not(:disabled):active {
-        border-color: var(--accent-pressed);
-        background: var(--accent-pressed);
+        border-color: var(--color-accent-solid-pressed);
+        background: var(--color-accent-solid-pressed);
         box-shadow: none;
       }
 
       .composer form:has(textarea:not(:disabled):active) {
-        border-color: var(--control-pressed-border);
-        background: var(--control-bg);
+        border-color: var(--color-border-pressed);
+        background: var(--color-surface-component);
       }
 
       .composer form:has(textarea:disabled) {
-        border-color: var(--control-disabled-border);
-        background: var(--control-disabled-bg);
+        border-color: var(--color-border-disabled);
+        background: var(--color-surface-disabled);
       }
 
       @media (hover: none), (pointer: coarse) {
@@ -137,7 +137,7 @@
       }
 
       .composer form:has(textarea:focus-visible) {
-        outline: 2px solid var(--focus-ring);
+        outline: 2px solid var(--color-accent-focus);
         outline-offset: 1px;
       }
 
@@ -149,36 +149,36 @@
       .send-button:focus-visible,
       .lab-reset:focus-visible,
       .theme-picker input[type="color"]:focus-visible {
-        outline: 2px solid var(--focus-ring);
+        outline: 2px solid var(--color-accent-focus);
         outline-offset: 1px;
       }
 
       .switch input:focus-visible + .switch-ui {
-        outline: 2px solid var(--focus-ring);
+        outline: 2px solid var(--color-accent-focus);
         outline-offset: 1px;
       }
 
       @media (hover: hover) and (pointer: fine) {
         .theme-picker input[type="color"]:not(:disabled):hover {
-          border-color: var(--control-hover-border);
+          border-color: var(--color-border-hover);
         }
 
         .switch input:not(:disabled) + .switch-ui:hover {
-          background: var(--control-hover-bg);
+          background: var(--color-component-hover);
         }
       }
 
       .theme-picker input[type="color"]:not(:disabled):active {
-        border-color: var(--control-pressed-border);
+        border-color: var(--color-border-pressed);
       }
 
       .switch input:not(:disabled) + .switch-ui:active {
-        border-color: var(--control-pressed-border);
-        background: var(--control-pressed-bg);
+        border-color: var(--color-border-pressed);
+        background: var(--color-component-pressed);
       }
 
       .switch input:checked:not(:disabled) + .switch-ui:active {
-        border-color: var(--accent-solid);
+        border-color: var(--color-accent-solid);
       }
 
       .tool-column-add:disabled,
@@ -186,20 +186,20 @@
       .tool-selector:disabled,
       .lab-reset:disabled,
       .theme-picker input[type="color"]:disabled {
-        border-color: var(--control-disabled-border);
-        background: var(--control-disabled-bg);
-        color: var(--muted-quiet);
+        border-color: var(--color-border-disabled);
+        background: var(--color-surface-disabled);
+        color: var(--color-text-disabled);
         cursor: not-allowed;
       }
 
       .switch input:disabled + .switch-ui {
-        border-color: var(--control-disabled-border);
-        background: var(--control-disabled-bg);
+        border-color: var(--color-border-disabled);
+        background: var(--color-surface-disabled);
         cursor: not-allowed;
       }
 
       .switch input:disabled + .switch-ui::after {
-        background: var(--muted-quiet);
+        background: var(--color-text-disabled);
       }
 
       @keyframes message-in {

@@ -5,11 +5,11 @@
         place-items: center;
 
         padding: 0;
-        border: 1px solid var(--border-subtle);
+        border: 1px solid var(--color-border-default);
         border-radius: 6px;
 
-        background: var(--control-bg);
-        color: var(--text);
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
 
         cursor: pointer;
       }
@@ -32,7 +32,7 @@
         overscroll-behavior-inline: contain;
 
         scrollbar-width: thin;
-        scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
       }
 
       .tool-strip {
@@ -56,7 +56,7 @@
         align-self: start;
 
         padding: 12px;
-        color: var(--muted);
+        color: var(--color-text-muted);
         font-size: 11px;
         line-height: 1.35;
       }
@@ -76,10 +76,10 @@
         grid-template-rows: auto minmax(0, 1fr);
 
         overflow: hidden;
-        border: 1px solid var(--border-subtle);
+        border: 1px solid var(--color-border-default);
         border-radius: 8px;
 
-        background: var(--control-bg);
+        background: var(--color-surface-component);
       }
 
       .tool-column:only-child {
@@ -98,7 +98,7 @@
 
         min-block-size: 44px;
         padding: 6px;
-        border-bottom: 1px solid var(--border-subtle);
+        border-bottom: 1px solid var(--color-border-default);
         background: transparent;
       }
 
@@ -109,11 +109,11 @@
         padding-inline: 8px 26px;
         padding-block: 0;
 
-        border: 1px solid var(--border-subtle);
+        border: 1px solid var(--color-border-default);
         border-radius: 6px;
 
-        background: var(--control-bg);
-        color: var(--text);
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
         font: inherit;
         font-size: 11px;
         font-weight: 600;
@@ -135,17 +135,17 @@
         overflow-x: hidden;
         overscroll-behavior: contain;
 
-        background: var(--control-bg);
+        background: var(--color-surface-component);
 
         scrollbar-width: thin;
         scrollbar-gutter: stable;
-        scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
       }
 
       .tool-placeholder {
         max-inline-size: 24ch;
         padding: 12px;
-        color: var(--muted);
+        color: var(--color-text-muted);
         font-size: 11px;
         line-height: 1.35;
       }
@@ -167,7 +167,7 @@
 
       .tool-kv dt {
         margin: 0;
-        color: var(--muted);
+        color: var(--color-text-muted);
         font-size: 10px;
       }
 
@@ -175,8 +175,8 @@
         min-width: 0;
         margin: 4px 0 12px;
         padding-bottom: 12px;
-        border-bottom: 1px solid var(--border-subtle);
-        color: var(--text);
+        border-bottom: 1px solid var(--color-border-default);
+        color: var(--color-text-primary);
         overflow-wrap: anywhere;
       }
 }

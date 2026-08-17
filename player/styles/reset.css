@@ -17,8 +17,8 @@
         min-height: 100dvh;
         overflow: hidden;
         overscroll-behavior: none;
-        background: var(--canvas-bg, #f7f0e8);
-        color: var(--text, #382d2a);
+        background: var(--color-surface-canvas);
+        color: var(--color-text-primary);
         font-family:
           "Inter Tight",
           Inter,

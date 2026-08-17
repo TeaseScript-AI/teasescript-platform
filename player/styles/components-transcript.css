@@ -45,7 +45,7 @@
         border: 1px solid var(--speaker-accent);
         border-radius: 50%;
 
-        background: var(--control-bg);
+        background: var(--color-surface-component);
         color: var(--speaker-accent);
 
         font-size: 10px;
@@ -80,7 +80,7 @@
 
         border-left: 2px solid color-mix(in srgb, var(--speaker-accent) 85%, transparent);
 
-        color: var(--text);
+        color: var(--color-text-primary);
         font-family: var(--speaker-font);
         font-size: 12px;
         line-height: 1.25;

@@ -274,7 +274,7 @@ function syncLeftReserve(): void {
 
 function applyAccentColour(value: string): void {
   accentColor = value;
-  document.documentElement.style.setProperty("--theme-color", value);
+  document.documentElement.style.setProperty("--package-accent", value);
   syncVisualControls();
 }
 
@@ -298,7 +298,7 @@ function resetVisualLab(): void {
   accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
   ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
   vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
-  document.documentElement.style.setProperty("--theme-color", accentColor);
+  document.documentElement.style.setProperty("--package-accent", accentColor);
   player.classList.toggle("fx-ambient", ambientEnabled);
   player.classList.toggle("fx-vignette", vignetteEnabled);
   syncVisualControls();
