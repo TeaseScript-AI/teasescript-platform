@@ -51,6 +51,20 @@
         border-left: 1px solid currentColor;
       }
 
+      .right-toggle[aria-pressed="false"] .panel-icon::after {
+        top: 4px;
+        right: 4px;
+        bottom: auto;
+
+        width: 6px;
+        height: 6px;
+
+        border: 0;
+        border-top: 1px solid currentColor;
+        border-right: 1px solid currentColor;
+        transform: rotate(45deg);
+      }
+
       .title-text {
         color: var(--color-text-primary);
         font-size: 14px;

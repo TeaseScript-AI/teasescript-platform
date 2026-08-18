@@ -74,18 +74,6 @@
           box-shadow: -3px 0 8px var(--color-structural-shadow);
         }
 
-        .player[data-right="auto"] .timer,
-        .player[data-right="overlay"] .timer,
-        .player[data-right="auto"] .action-button,
-        .player[data-right="overlay"] .action-button {
-          background:
-            color-mix(
-              in srgb,
-              var(--color-surface-component) 60%,
-              transparent
-            );
-        }
-
         .composer {
           padding-top: 9px;
           padding-bottom: calc(10px + var(--safe-bottom));
@@ -123,7 +111,7 @@
           outline-offset: 1px;
         }
 
-        @media (hover: hover) and (pointer: fine) {
+        @media (any-hover: hover) {
           .composer textarea:not(:disabled):hover {
             border-color: var(--color-border-hover);
             background: var(--color-surface-component);
@@ -144,46 +132,6 @@
 
         .composer .send-button {
           block-size: 42px;
-        }
-
-        /*
-          Keep the Penpot mobile translucency while preserving the same
-          hover/pressed state family. This layer comes after effects, so each
-          mobile state needs its translucent fill here as well.
-        */
-        @media (hover: hover) and (pointer: fine) {
-          .player[data-right="auto"] .action-button:not(:disabled):hover,
-          .player[data-right="overlay"] .action-button:not(:disabled):hover {
-            border-color: var(--color-border-hover);
-            background:
-              color-mix(
-                in srgb,
-                var(--color-component-hover) 60%,
-                transparent
-              );
-          }
-        }
-
-        .player[data-right="auto"] .action-button:not(:disabled):active,
-        .player[data-right="overlay"] .action-button:not(:disabled):active {
-          border-color: var(--color-border-pressed);
-          background:
-            color-mix(
-              in srgb,
-              var(--color-component-pressed) 60%,
-              transparent
-            );
-        }
-
-        .player[data-right="auto"] .action-button:disabled,
-        .player[data-right="overlay"] .action-button:disabled {
-          border-color: var(--color-border-disabled);
-          background:
-            color-mix(
-              in srgb,
-              var(--color-surface-disabled) 60%,
-              transparent
-            );
         }
 
         /*
@@ -251,20 +199,7 @@
         }
 
         .player[data-left="open"] .tool-column {
-          --tool-column-min:
-            max(
-              180px,
-              calc(
-                var(--mobile-drawer-width)
-                - 10px
-                - var(--safe-left)
-              )
-            );
-          --tool-column-max: var(--tool-column-min);
-        }
-
-        .player[data-left="open"] .tool-column:only-child {
-          --tool-column-min:
+          --tool-column-effective-width:
             max(
               180px,
               calc(
@@ -316,52 +251,6 @@
         .player[data-right="overlay"] .composer {
           margin-inline-end: var(--right-controls-width);
         }
-      }
-
-      /*
-        Whenever the right rail background is absent, its floating surfaces use
-        the Penpot 60% treatment regardless of viewport width.
-      */
-      .player[data-right="overlay"] .timer,
-      .player[data-right="overlay"] .action-button {
-        background:
-          color-mix(
-            in srgb,
-            var(--color-surface-component) 60%,
-            transparent
-          );
-      }
-
-      @media (hover: hover) and (pointer: fine) {
-        .player[data-right="overlay"] .action-button:not(:disabled):hover {
-          border-color: var(--color-border-hover);
-          background:
-            color-mix(
-              in srgb,
-              var(--color-component-hover) 60%,
-              transparent
-            );
-        }
-      }
-
-      .player[data-right="overlay"] .action-button:not(:disabled):active {
-        border-color: var(--color-border-pressed);
-        background:
-          color-mix(
-            in srgb,
-            var(--color-component-pressed) 60%,
-            transparent
-          );
-      }
-
-      .player[data-right="overlay"] .action-button:disabled {
-        border-color: var(--color-border-disabled);
-        background:
-          color-mix(
-            in srgb,
-            var(--color-surface-disabled) 60%,
-            transparent
-          );
       }
 
       @media (max-width: 480px) {

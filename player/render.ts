@@ -59,9 +59,14 @@ export function timerProgressPercent(
 
 export function formatTimer(totalSeconds: number): string {
   const safeSeconds = Number.isFinite(totalSeconds) ? Math.max(0, Math.floor(totalSeconds)) : 0;
-  const minutes = Math.floor(safeSeconds / 60);
   const seconds = safeSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  if (safeSeconds < 3600) {
+    return `${Math.floor(safeSeconds / 60)}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function createMessage(
@@ -244,7 +249,7 @@ function createVisualTool(): HTMLElement {
   tuning.append(
     createTuningInput("Stage height", "Normal composition", "--media-height-normal", "dvh", 1),
     createTuningInput("Overlay stage", "Low-height/fullscreen composition", "--media-height-overlay", "dvh", 1),
-    createTuningInput("Tool width", "Fixed POC column width", "--tool-column-width", "px", 1),
+    createTuningInput("Wide tool width", "Drawer remains viewport-bounded", "--tool-column-width", "px", 1),
     createTuningInput("Conversation max", "Readable width cap", "--conversation-max-width", "px", 1),
     createTuningInput("Conversation min", "Protected width floor", "--conversation-min-width", "px", 1),
     createTuningInput("Composer lines", "Line-height cap", "--composer-max-lines", "lh", 1),

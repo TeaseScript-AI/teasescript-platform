@@ -1,7 +1,7 @@
 # UI design and engineering guide
 
 - **Status:** Current cross-surface UI engineering and design guidance.
-- **Use when:** modifying the Player, host-site UI, editor/simulator UI, responsive layouts, controls, media
+- **Use when:** modifying the Player, host-site UI, editor/debugger UI, responsive layouts, controls, media
   presentation, or visual styling.
 - **Does not define:** product features, runtime/host protocols, trust boundaries, exact visual design, framework
   choice, or TeaseScript semantics.
@@ -131,9 +131,9 @@ specification for that surface unless this shared baseline deliberately adopts t
 
 ### Match interaction feedback to input capability
 
-Do not assume hover exists because desktop emulation exposes a pointer. Use capability-aware CSS for hover, touch press,
-and keyboard focus. Avoid removing focus merely to make pointer visuals look cleaner. Temporary overlays or scrims must
-prevent click-through when they intentionally intercept outside input.
+Do not infer hover from device class or only the primary pointer: hybrid touch devices may also have a mouse or
+hover-capable pen. Use capability-aware CSS for hover, touch press, and keyboard focus. Temporary overlays or scrims
+must prevent click-through when they intentionally intercept outside input.
 
 When a bug appears only on a real phone or another input class, treat that environment as evidence rather than forcing
 desktop emulation to reproduce it. Prefer the simplest input-specific rule that preserves the other input modes.

@@ -8,7 +8,6 @@ import { formatTimer, timerProgressPercent } from "../player/render.js";
 import {
   addToolColumn,
   closeToolColumn,
-  ensureToolColumn,
   selectToolColumn,
 } from "../player/tool-columns.js";
 
@@ -30,47 +29,45 @@ test("Player timer presentation is bounded and deterministic", () => {
   assert.equal(timerProgressPercent(999, 300), 0);
   assert.equal(timerProgressPercent(1, 0), 0);
   assert.equal(formatTimer(161), "2:41");
+  assert.equal(formatTimer(3599), "59:59");
+  assert.equal(formatTimer(3600), "1:00:00");
+  assert.equal(formatTimer(3661), "1:01:01");
   assert.equal(formatTimer(-1), "0:00");
 });
 
-test("Player tool columns can be added, switched, duplicated, and closed independently", () => {
+test("Player tool columns prefer unused tools before deliberate blank or duplicate states", () => {
+  const order = ["visuals", "scene"] as const;
   const initial = [{ id: "tool-column-1", toolId: "visuals" as const }];
-  const withSecond = addToolColumn(initial, "tool-column-2");
+  const withSecond = addToolColumn(initial, "tool-column-2", order);
   assert.deepEqual(withSecond, [
     { id: "tool-column-1", toolId: "visuals" },
-    { id: "tool-column-2", toolId: null },
+    { id: "tool-column-2", toolId: "scene" },
   ]);
 
-  const selected = selectToolColumn(withSecond, "tool-column-2", "visuals");
-  assert.deepEqual(selected, [
+  const withBlankThird = addToolColumn(withSecond, "tool-column-3", order);
+  assert.deepEqual(withBlankThird, [
     { id: "tool-column-1", toolId: "visuals" },
-    { id: "tool-column-2", toolId: "visuals" },
+    { id: "tool-column-2", toolId: "scene" },
+    { id: "tool-column-3", toolId: null },
   ]);
 
-  const switched = selectToolColumn(selected, "tool-column-1", "scene");
-  assert.deepEqual(switched, [
-    { id: "tool-column-1", toolId: "scene" },
-    { id: "tool-column-2", toolId: "visuals" },
-  ]);
-
-  assert.deepEqual(closeToolColumn(switched, "tool-column-1"), [
-    { id: "tool-column-2", toolId: "visuals" },
+  const duplicated = selectToolColumn(withBlankThird, "tool-column-3", "visuals");
+  assert.equal(duplicated[2]?.toolId, "visuals");
+  assert.deepEqual(closeToolColumn(duplicated, "tool-column-2"), [
+    { id: "tool-column-1", toolId: "visuals" },
+    { id: "tool-column-3", toolId: "visuals" },
   ]);
 });
 
-test("Opening an empty tool panel can create its first column in one step", () => {
-  const existing = [{ id: "tool-column-1", toolId: "visuals" as const }];
-  assert.deepEqual(ensureToolColumn([], "tool-column-2"), [
-    { id: "tool-column-2", toolId: null },
-  ]);
-  assert.equal(ensureToolColumn(existing, "tool-column-2"), existing);
-});
-
-test("Player tool column helpers reject unknown or duplicate column ids", () => {
+test("Player tool column helpers preserve the retained final column invariant", () => {
   const columns = [{ id: "tool-column-1", toolId: "visuals" as const }];
-  assert.throws(() => addToolColumn(columns, "tool-column-1"), /Duplicate Player tool column/u);
+  assert.throws(
+    () => addToolColumn(columns, "tool-column-1", ["visuals", "scene"]),
+    /Duplicate Player tool column/u,
+  );
   assert.throws(() => selectToolColumn(columns, "missing", "scene"), /Unknown Player tool column/u);
   assert.throws(() => closeToolColumn(columns, "missing"), /Unknown Player tool column/u);
+  assert.throws(() => closeToolColumn(columns, "tool-column-1"), /final Player tool column/u);
 });
 
 test("Player entrypoint uses modular local assets without external runtime dependencies", async () => {
@@ -115,6 +112,9 @@ test("Player tool chrome keeps one fixed column header and one vertical scroll o
   assert.match(render, /add\.dataset\.toolColumnAdd = ""/u);
   assert.match(render, /header\.append\(selector, add, close\)/u);
   assert.match(tools, /grid-template-columns: minmax\(0, 1fr\) auto auto/u);
+  assert.match(tools, /scroll-snap-type: x proximity/u);
+  assert.match(tools, /inline-size: var\(--tool-column-effective-width\)/u);
+  assert.match(tools, /scroll-snap-align: start/u);
   assert.doesNotMatch(render, /lab-scroll/u);
   assert.doesNotMatch(render, /className = "lab-title"/u);
   const stripScroll = tools.match(/\.tool-strip-scroll\s*\{[^}]*\}/u)?.[0] ?? "";
@@ -198,12 +198,25 @@ test("Player composer preserves desktop shell focus and separate mobile controls
   assert.match(responsive, /\.composer textarea:disabled[\s\S]*background: var\(--color-surface-disabled\)/u);
 });
 
-test("Player overlay Actions keep translucent default, hover, and pressed fills", async () => {
+test("Player right controls keep the same translucent surfaces across backing modes", async () => {
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
 
-  assert.match(responsive, /\.player\[data-right="overlay"\] \.action-button \{[\s\S]*var\(--color-surface-component\) 60%/u);
-  assert.match(responsive, /var\(--color-component-hover\) 60%/u);
-  assert.match(responsive, /var\(--color-component-pressed\) 60%/u);
+  assert.match(actions, /\.timer[\s\S]*var\(--color-surface-component\) 60%/u);
+  assert.match(actions, /\.action-button[\s\S]*var\(--color-surface-component\) 60%/u);
+  assert.match(effects, /\.action-button:not\(:disabled\):hover[\s\S]*var\(--color-component-hover\) 60%/u);
+  assert.match(effects, /\.action-button:not\(:disabled\):active[\s\S]*var\(--color-component-pressed\) 60%/u);
+  assert.doesNotMatch(responsive, /data-right="overlay"[^}]*\.action-button[^}]*60%/u);
+});
+
+test("Player right background toggle exposes distinct docked and overlay states", async () => {
+  const base = await readFile(resolve(process.cwd(), "player/styles/components-base.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.match(base, /\.right-toggle\[aria-pressed="false"\] \.panel-icon::after/u);
+  assert.match(browser, /rightToggle\.setAttribute\("aria-pressed", String\(rightDocked\)\)/u);
+  assert.match(browser, /rightDocked \? "Use overlay right panel background" : "Dock right panel background"/u);
 });
 
 test("Player right background toggle keeps conversation geometry stable", async () => {
@@ -253,11 +266,13 @@ test("Player chrome roles and restrained Penpot elevation stay on structural she
 test("Player Visual Lab exposes reversible Phase 4 geometry tuning", async () => {
   const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
   const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
+  const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
   const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
   const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
 
   assert.match(layout, /--tool-column-width: 250px/u);
+  assert.match(tools, /--tool-column-effective-width: var\(--tool-column-width\)/u);
   assert.match(layout, /--media-height-normal: 62dvh/u);
   assert.match(layout, /--media-height-overlay: 64dvh/u);
   assert.match(layout, /--composer-max-lines: 6lh/u);
@@ -273,6 +288,45 @@ test("Player Visual Lab exposes reversible Phase 4 geometry tuning", async () =>
   assert.match(render, /"--focus-outline-width"/u);
   assert.match(browser, /player\.style\.setProperty\(property, `\$\{input\.valueAsNumber\}\$\{unit\}`\)/u);
   assert.match(browser, /player\.style\.removeProperty\(requiredDatasetValue\(input, "tuningProperty"\)\)/u);
+});
+
+
+test("Player composition changes clear temporary panel overrides", async () => {
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  assert.match(
+    browser,
+    /narrowScreen\.addEventListener\("change", \(\) => \{[\s\S]*player\.dataset\.left = "auto";[\s\S]*player\.dataset\.right = "auto";/u,
+  );
+  assert.match(
+    browser,
+    /if \(toolColumns\.length === 1\) \{[\s\S]*player\.dataset\.left = "closed";/u,
+  );
+});
+
+test("Player right rail centers fitting controls and fades overflow at both edges", async () => {
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  assert.match(actions, /align-content: safe center/u);
+  assert.match(
+    actions,
+    /linear-gradient\([\s\S]*transparent 0,[\s\S]*#000 18px,[\s\S]*#000 calc\(100% - 18px\),[\s\S]*transparent 100%/u,
+  );
+});
+
+test("Player hover styling supports hybrid devices without primary-pointer assumptions", async () => {
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+  assert.match(effects, /@media \(any-hover: hover\)/u);
+  assert.match(responsive, /@media \(any-hover: hover\)/u);
+  assert.doesNotMatch(effects, /\(hover: hover\) and \(pointer: fine\)/u);
+  assert.doesNotMatch(responsive, /\(hover: hover\) and \(pointer: fine\)/u);
+});
+
+test("Enabled quiet Visual Lab states do not reuse disabled semantics", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const visualLab = await readFile(resolve(process.cwd(), "player/styles/components-visual-lab.css"), "utf8");
+  assert.match(layout, /--color-text-quiet: var\(--palette-disabled-text\)/u);
+  assert.match(visualLab, /\.lab-option-note[\s\S]*color: var\(--color-text-quiet\)/u);
+  assert.match(visualLab, /\.switch-ui::after[\s\S]*background: var\(--color-text-quiet\)/u);
 });
 
 test("Player left-panel growth protects media and conversation minimums independently", async () => {

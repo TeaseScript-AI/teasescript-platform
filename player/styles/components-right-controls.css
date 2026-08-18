@@ -52,7 +52,7 @@
         border: 1px solid var(--color-border-default);
         border-radius: 50%;
 
-        background: var(--color-surface-component);
+        background: color-mix(in srgb, var(--color-surface-component) 60%, transparent);
         color: var(--color-text-primary);
 
         box-shadow: none;
@@ -107,7 +107,7 @@
 
         display: grid;
         grid-auto-rows: max-content;
-        align-content: start;
+        align-content: safe center;
         gap: 9px;
 
         overflow-y: auto;
@@ -121,6 +121,23 @@
 
         scrollbar-width: thin;
         scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
+
+        -webkit-mask-image:
+          linear-gradient(
+            to bottom,
+            transparent 0,
+            #000 18px,
+            #000 calc(100% - 18px),
+            transparent 100%
+          );
+        mask-image:
+          linear-gradient(
+            to bottom,
+            transparent 0,
+            #000 18px,
+            #000 calc(100% - 18px),
+            transparent 100%
+          );
       }
 
       .action-button {
@@ -136,7 +153,7 @@
         border: 1px solid var(--color-border-default);
         border-radius: 6px;
 
-        background: var(--color-surface-component);
+        background: color-mix(in srgb, var(--color-surface-component) 60%, transparent);
         color: var(--color-text-primary);
 
         box-shadow: none;
@@ -156,7 +173,7 @@
 
       .action-button:disabled {
         border-color: var(--color-border-disabled);
-        background: var(--color-surface-disabled);
+        background: color-mix(in srgb, var(--color-surface-disabled) 60%, transparent);
         color: var(--color-text-disabled);
         cursor: not-allowed;
       }

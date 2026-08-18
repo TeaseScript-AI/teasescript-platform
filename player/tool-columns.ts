@@ -3,19 +3,15 @@ import type { PlayerToolColumnState, PlayerToolId } from "./model.js";
 export function addToolColumn(
   columns: readonly PlayerToolColumnState[],
   id: string,
+  toolOrder: readonly PlayerToolId[],
 ): readonly PlayerToolColumnState[] {
   if (columns.some((column) => column.id === id)) {
     throw new Error(`Duplicate Player tool column id: ${id}`);
   }
 
-  return [...columns, { id, toolId: null }];
-}
-
-export function ensureToolColumn(
-  columns: readonly PlayerToolColumnState[],
-  id: string,
-): readonly PlayerToolColumnState[] {
-  return columns.length === 0 ? addToolColumn(columns, id) : columns;
+  const openTools = new Set(columns.flatMap((column) => column.toolId === null ? [] : [column.toolId]));
+  const toolId = toolOrder.find((candidate) => !openTools.has(candidate)) ?? null;
+  return [...columns, { id, toolId }];
 }
 
 export function selectToolColumn(
@@ -41,9 +37,11 @@ export function closeToolColumn(
   columns: readonly PlayerToolColumnState[],
   id: string,
 ): readonly PlayerToolColumnState[] {
-  const next = columns.filter((column) => column.id !== id);
-  if (next.length === columns.length) {
+  if (!columns.some((column) => column.id === id)) {
     throw new Error(`Unknown Player tool column: ${id}`);
   }
-  return next;
+  if (columns.length === 1) {
+    throw new Error("Cannot remove the final Player tool column.");
+  }
+  return columns.filter((column) => column.id !== id);
 }

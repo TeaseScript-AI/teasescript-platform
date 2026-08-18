@@ -72,7 +72,7 @@
           box-shadow 120ms ease;
       }
 
-      @media (hover: hover) and (pointer: fine) {
+      @media (any-hover: hover) {
         .composer form:has(textarea:not(:disabled):hover) {
           border-color: var(--color-border-hover);
           background: var(--color-surface-component);
@@ -83,7 +83,6 @@
         .tool-column-add:not(:disabled):hover,
         .tool-column-close:not(:disabled):hover,
         .tool-selector:not(:disabled):hover,
-        .action-button:not(:disabled):hover,
         .lab-reset:not(:disabled):hover {
           border-color: var(--color-border-hover);
           background: var(--color-component-hover);
@@ -101,10 +100,24 @@
       .tool-column-add:not(:disabled):active,
       .tool-column-close:not(:disabled):active,
       .tool-selector:not(:disabled):active,
-      .action-button:not(:disabled):active,
       .lab-reset:not(:disabled):active {
         border-color: var(--color-border-pressed);
         background: var(--color-component-pressed);
+        box-shadow: none;
+      }
+
+
+      @media (any-hover: hover) {
+        .action-button:not(:disabled):hover {
+          border-color: var(--color-border-hover);
+          background: color-mix(in srgb, var(--color-component-hover) 60%, transparent);
+          box-shadow: none;
+        }
+      }
+
+      .action-button:not(:disabled):active {
+        border-color: var(--color-border-pressed);
+        background: color-mix(in srgb, var(--color-component-pressed) 60%, transparent);
         box-shadow: none;
       }
 
@@ -159,7 +172,7 @@
         outline-offset: 1px;
       }
 
-      @media (hover: hover) and (pointer: fine) {
+      @media (any-hover: hover) {
         .theme-picker input[type="color"]:not(:disabled):hover,
         .lab-tuning-input:not(:disabled):hover {
           border-color: var(--color-border-hover);

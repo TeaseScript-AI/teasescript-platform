@@ -32,6 +32,7 @@
         --color-border-pressed: var(--palette-border-strong);
         --color-text-primary: var(--palette-text-primary);
         --color-text-muted: var(--palette-text-muted);
+        --color-text-quiet: var(--palette-disabled-text);
         --color-text-disabled: var(--palette-disabled-text);
         --color-accent-focus: var(--palette-accent-focus);
         --color-accent-solid: var(--palette-accent-solid);

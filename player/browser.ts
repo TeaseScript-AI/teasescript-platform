@@ -15,7 +15,6 @@ import { renderPresentation, renderToolColumns } from "./render.js";
 import {
   addToolColumn,
   closeToolColumn,
-  ensureToolColumn,
   selectToolColumn,
 } from "./tool-columns.js";
 
@@ -64,12 +63,6 @@ toolStripObserver.observe(toolStrip);
 
 leftToggle.addEventListener("click", () => {
   const nextMode = toggleLeftPanelMode(currentLeftMode(), usesWideDefaultLayout());
-  if (nextMode === "open" && toolColumns.length === 0) {
-    const id = `tool-column-${nextToolColumnNumber}`;
-    nextToolColumnNumber += 1;
-    toolColumns = ensureToolColumn(toolColumns, id);
-    renderTools();
-  }
   player.dataset.left = nextMode;
   syncPanelAccessibility();
   queueLeftReserveSync();
@@ -89,6 +82,8 @@ rightToggle.addEventListener("click", () => {
 });
 
 narrowScreen.addEventListener("change", () => {
+  player.dataset.left = "auto";
+  player.dataset.right = "auto";
   syncPanelAccessibility();
   queueLeftReserveSync();
 });
@@ -148,6 +143,12 @@ toolStrip.addEventListener("click", (event) => {
   if (close !== null) {
     const column = close.closest<HTMLElement>("[data-tool-column-id]");
     if (column === null) throw new Error("Tool close button is not inside a tool column.");
+    if (toolColumns.length === 1) {
+      player.dataset.left = "closed";
+      syncPanelAccessibility();
+      queueLeftReserveSync();
+      return;
+    }
     toolColumns = closeToolColumn(toolColumns, requiredDatasetValue(column, "toolColumnId"));
     renderTools();
     return;
@@ -163,7 +164,11 @@ composerForm.addEventListener("submit", (event) => event.preventDefault());
 function appendToolColumn(): void {
   const id = `tool-column-${nextToolColumnNumber}`;
   nextToolColumnNumber += 1;
-  toolColumns = addToolColumn(toolColumns, id);
+  toolColumns = addToolColumn(
+    toolColumns,
+    id,
+    DEMO_TOOL_DEFINITIONS.map((tool) => tool.id),
+  );
   renderTools("end");
 }
 
@@ -252,6 +257,10 @@ function syncPanelAccessibility(): void {
   const rightMode = currentRightMode();
   const rightDocked = rightMode === "docked" || (rightMode === "auto" && wideDefault);
   rightToggle.setAttribute("aria-pressed", String(rightDocked));
+  rightToggle.setAttribute(
+    "aria-label",
+    rightDocked ? "Use overlay right panel background" : "Dock right panel background",
+  );
 }
 
 function queueLeftReserveSync(): void {
@@ -262,7 +271,7 @@ function queueLeftReserveSync(): void {
 }
 
 function syncLeftPreferredWidth(): void {
-  // Measure only the intrinsic preferred width; CSS still owns allocation and the 1:1 cap.
+  // Measure only intrinsic preferred width; CSS owns final allocation and content protection.
   const stripWidth = Math.ceil(toolStrip.getBoundingClientRect().width);
   const panelChromeWidth = Math.max(
     0,

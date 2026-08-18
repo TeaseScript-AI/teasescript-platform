@@ -30,6 +30,7 @@
         overflow-x: auto;
         overflow-y: hidden;
         overscroll-behavior-inline: contain;
+        scroll-snap-type: x proximity;
 
         scrollbar-width: thin;
         scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
@@ -62,14 +63,14 @@
       }
 
       .tool-column {
-        --tool-column-min: 204px;
-        --tool-column-max: min(22rem, 72vw);
+        --tool-column-effective-width: var(--tool-column-width);
 
         flex: 0 0 auto;
 
-        inline-size: min-content;
-        min-inline-size: var(--tool-column-min);
-        max-inline-size: var(--tool-column-max);
+        inline-size: var(--tool-column-effective-width);
+        min-inline-size: var(--tool-column-effective-width);
+        max-inline-size: var(--tool-column-effective-width);
+        scroll-snap-align: start;
         min-block-size: 0;
 
         display: grid;
@@ -80,14 +81,6 @@
         border-radius: 8px;
 
         background: var(--color-surface-component);
-      }
-
-      .tool-column:only-child {
-        --tool-column-min: 212px;
-      }
-
-      .tool-column[data-tool-id=""] {
-        inline-size: var(--tool-column-min);
       }
 
       .tool-column-header {

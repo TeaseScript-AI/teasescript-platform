@@ -190,7 +190,7 @@
 
         margin-top: 2px;
 
-        color: var(--color-text-disabled);
+        color: var(--color-text-quiet);
         font-size: 9px;
         line-height: 1.25;
 
@@ -233,7 +233,7 @@
 
         border-radius: 50%;
 
-        background: var(--color-text-disabled);
+        background: var(--color-text-quiet);
 
         transition:
           translate 120ms ease,
