@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "feature/player-production-demo",
+  "expectedBaseSha": "73226bc67693ad5856d341c29514fdf5a5007f98",
+  "expectedResultTreeSha": "4ed657e042759c517d888a585512930dcf092b7e",
+  "patchSizeBytes": 7673,
+  "patchSha256": "f1db4af41d02eeaf2a5da57d5136314db18a1bff84c8184573abe7e061943482",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0001",
+      "sizeBytes": 7673,
+      "sha256": "f1db4af41d02eeaf2a5da57d5136314db18a1bff84c8184573abe7e061943482"
+    }
+  ],
+  "commitMessage": "Finalize Player theme and interaction semantics"
+}
