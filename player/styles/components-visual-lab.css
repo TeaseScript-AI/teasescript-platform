@@ -51,6 +51,44 @@
         border-radius: 4px;
       }
 
+      .lab-tuning {
+        display: grid;
+        border-top: 1px solid var(--color-border-default);
+      }
+
+      .lab-tuning-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        min-block-size: 58px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--color-border-default);
+      }
+
+      .lab-tuning-field {
+        display: inline-grid;
+        grid-template-columns: 58px auto;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .lab-tuning-input {
+        width: 58px;
+        min-height: 30px;
+        padding: 4px 5px;
+        border: 1px solid var(--color-border-default);
+        border-radius: 5px;
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
+        font: inherit;
+      }
+
+      .lab-tuning-unit {
+        color: var(--color-text-muted);
+        font-size: 9px;
+      }
+
       .lab-note {
         margin: 0;
 

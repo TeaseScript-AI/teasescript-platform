@@ -137,7 +137,7 @@
       }
 
       .composer form:has(textarea:focus-visible) {
-        outline: 2px solid var(--color-accent-focus);
+        outline: var(--focus-outline-width) solid var(--color-accent-focus);
         outline-offset: 1px;
       }
 
@@ -148,18 +148,20 @@
       .action-button:focus-visible,
       .send-button:focus-visible,
       .lab-reset:focus-visible,
-      .theme-picker input[type="color"]:focus-visible {
-        outline: 2px solid var(--color-accent-focus);
+      .theme-picker input[type="color"]:focus-visible,
+      .lab-tuning-input:focus-visible {
+        outline: var(--focus-outline-width) solid var(--color-accent-focus);
         outline-offset: 1px;
       }
 
       .switch input:focus-visible + .switch-ui {
-        outline: 2px solid var(--color-accent-focus);
+        outline: var(--focus-outline-width) solid var(--color-accent-focus);
         outline-offset: 1px;
       }
 
       @media (hover: hover) and (pointer: fine) {
-        .theme-picker input[type="color"]:not(:disabled):hover {
+        .theme-picker input[type="color"]:not(:disabled):hover,
+        .lab-tuning-input:not(:disabled):hover {
           border-color: var(--color-border-hover);
         }
 

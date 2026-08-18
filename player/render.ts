@@ -239,9 +239,22 @@ function createVisualTool(): HTMLElement {
     ),
   );
 
+  const tuning = document.createElement("div");
+  tuning.className = "lab-tuning";
+  tuning.append(
+    createTuningInput("Stage height", "Normal composition", "--media-height-normal", "dvh", 1),
+    createTuningInput("Overlay stage", "Low-height/fullscreen composition", "--media-height-overlay", "dvh", 1),
+    createTuningInput("Tool width", "Fixed POC column width", "--tool-column-width", "px", 1),
+    createTuningInput("Conversation max", "Readable width cap", "--conversation-max-width", "px", 1),
+    createTuningInput("Conversation min", "Protected width floor", "--conversation-min-width", "px", 1),
+    createTuningInput("Composer lines", "Line-height cap", "--composer-max-lines", "lh", 1),
+    createTuningInput("Composer viewport", "Viewport-height cap", "--composer-max-viewport-height", "dvh", 1),
+    createTuningInput("Focus ring", "Keyboard outline thickness", "--focus-outline-width", "px", 0.5),
+  );
+
   const note = document.createElement("p");
   note.className = "lab-note";
-  note.textContent = "Cosmetic experiments only. Text wraps; tool sizing stays bounded.";
+  note.textContent = "POC tuning only. Reset restores the maintained baseline values.";
 
   const fixed = document.createElement("div");
   fixed.className = "lab-fixed-note";
@@ -262,8 +275,50 @@ function createVisualTool(): HTMLElement {
   reset.dataset.resetVisuals = "";
   reset.textContent = "Reset visual tests";
 
-  content.append(picker, options, note, fixed, reset);
+  content.append(picker, options, tuning, note, fixed, reset);
   return content;
+}
+
+function createTuningInput(
+  title: string,
+  note: string,
+  property: string,
+  unit: string,
+  step: number,
+): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "lab-tuning-row";
+
+  const copy = document.createElement("span");
+  copy.className = "lab-option-copy";
+
+  const titleElement = document.createElement("span");
+  titleElement.className = "lab-option-title";
+  titleElement.textContent = title;
+
+  const noteElement = document.createElement("span");
+  noteElement.className = "lab-option-note";
+  noteElement.textContent = note;
+  copy.append(titleElement, noteElement);
+
+  const field = document.createElement("span");
+  field.className = "lab-tuning-field";
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.className = "lab-tuning-input";
+  input.dataset.tuningProperty = property;
+  input.dataset.tuningUnit = unit;
+  input.step = String(step);
+  input.setAttribute("aria-label", `${title} (${unit})`);
+
+  const unitElement = document.createElement("span");
+  unitElement.className = "lab-tuning-unit";
+  unitElement.textContent = unit;
+  field.append(input, unitElement);
+
+  label.append(copy, field);
+  return label;
 }
 
 function createVisualOption(

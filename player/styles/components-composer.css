@@ -28,7 +28,7 @@
         field-sizing: content;
 
         min-block-size: 38px;
-        max-block-size: min(6lh, 20dvh);
+        max-block-size: min(var(--composer-max-lines), var(--composer-max-viewport-height));
 
         resize: none;
         overflow-y: auto;

@@ -36,8 +36,9 @@ mask colours remain separate presentation data.
 ## Demo-only behavior
 
 The local playground server may select a supported image from `player/demo-media/` when the Player opens. The `Visual
-Lab` and `Scene` tools, their fixture content, local accent/effect controls, filename-derived scene information, and the
-demo-media endpoint exist to exercise the presentation and are not Standard Library, runtime, package, or host APIs.
+Lab` and `Scene` tools, their fixture content, local accent/effect/geometry tuning controls, filename-derived scene
+information, and the demo-media endpoint exist to exercise the presentation and are not Standard Library, runtime,
+package, or host APIs.
 
 The current composer and rendered right-rail Action buttons are presentation-only and are not wired to the deterministic
 runtime. Accepted Standard interaction behavior remains controlled by ADR 0018 and the runtime contracts; the maintained

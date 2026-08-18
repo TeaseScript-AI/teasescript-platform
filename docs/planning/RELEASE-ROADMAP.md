@@ -118,20 +118,14 @@ for broader testing and eventual release.
 behavior, persistence, operational behavior, and integration. Major redesign becomes less desirable, but different
 subsystems may still have different maturity levels.
 
-- [ ] **Define the custom-view contract**
-  - **Outcome:** Define the smallest coherent package custom-view contract inside the Player runtime: registration and
-    ownership of package TypeScript views; blocking views with serializable results; background views with runtime
-    handles; typed input/events/results plus update, close, cancellation, failure, cleanup, and deterministic save/resume
-    reconstruction; the split between canonical runtime state and reconstructible UI state; and the Standard UI/package
-    UI boundary. Resolve DOM/CSS isolation and optional Shadow DOM, including interaction with package styling and
-    Standard UI; focus/keyboard/overlay/navigation/back behavior; accessibility; preview/editor/simulator/debugger needs;
-    and compare the viable TypeScript-only, small TeaseScript invocation, and fuller declarative TeaseScript API shapes.
-    These are logical views inside the Player, not browser pop-ups or an iframe per view; any genuine host capability is a
-    separate host-boundary decision. When custom views become supported, extend the real-browser Player/host test
-    coverage to package custom UI. The design is complete only after the Owner approves a coherent
-    lifecycle/state/security contract and the relevant ADRs/current documents are updated; roadmap placement does not
-    accept final syntax or implementation
-    APIs.
+- [ ] **Complete the custom-view contract**
+  - **Outcome:** ADR 0012 fixes blocking/background ownership, supported Player presentation forms, sandbox confinement,
+    and recovery-frontier behavior. Complete registration, typed input/events/results, update/close/cancellation/failure,
+    reconstructible-state declaration, surface isolation/optional Shadow DOM, focus/keyboard/navigation/back behavior,
+    accessibility, preview/debug tooling, and the author-facing TypeScript/TeaseScript API. These are logical views inside
+    the Player, not browser pop-ups or
+    per-view iframes; genuine host capabilities remain a separate boundary. Add real-browser Player/host coverage when
+    package custom UI is implemented.
   - **Reference:** [ADR 0012](../decisions/0012-custom-view-capability.md),
     [ADR 0015](../decisions/0015-serializable-runtime-architecture.md), [`RUNTIME.md`](../RUNTIME.md),
     [`LIBRARIES.md`](../LIBRARIES.md), [`SECURITY.md`](../SECURITY.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md),

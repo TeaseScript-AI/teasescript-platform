@@ -62,12 +62,15 @@
         --title-track: var(--title-height);
         --title-overlay-clearance: 0px;
 
-        --left-open: clamp(190px, 15vw, 250px);
+        --tool-column-width: 250px;
+        --left-open: var(--tool-column-width);
         --left-grid-track: var(--left-open);
         --left-preferred: var(--left-open);
         --left-reserve: var(--left-open);
 
-        --media-height: 62dvh;
+        --media-height-normal: 62dvh;
+        --media-height-overlay: 64dvh;
+        --media-height: var(--media-height-normal);
 
         /*
           One authoritative right-control width.
@@ -95,6 +98,9 @@
         --conversation-min-width: 380px;
         --conversation-gap: 18px;
         --conversation-overlay-reserve: 0px;
+        --composer-max-lines: 6lh;
+        --composer-max-viewport-height: 20dvh;
+        --focus-outline-width: 2px;
 
         --scene-ambient: #f7cdaf;
         --timer-progress: 46%;

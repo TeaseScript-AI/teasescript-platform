@@ -185,7 +185,10 @@ test("Player composer preserves desktop shell focus and separate mobile controls
   assert.match(composer, /\.composer form[\s\S]*border: 1px solid var\(--color-border-default\)[\s\S]*background: var\(--color-surface-component\)/u);
   assert.match(composer, /textarea[\s\S]*border: 0;[\s\S]*background: transparent/u);
   assert.doesNotMatch(composer, /textarea:focus-visible/u);
-  assert.match(effects, /\.composer form:has\(textarea:focus-visible\)[\s\S]*outline: 2px solid var\(--color-accent-focus\)/u);
+  assert.match(
+    effects,
+    /\.composer form:has\(textarea:focus-visible\)[\s\S]*outline: var\(--focus-outline-width\) solid var\(--color-accent-focus\)/u,
+  );
   assert.match(effects, /\.composer form:has\(textarea:not\(:disabled\):hover\)[\s\S]*border-color: var\(--color-border-hover\)/u);
   assert.match(effects, /\.composer form:has\(textarea:not\(:disabled\):active\)[\s\S]*border-color: var\(--color-border-pressed\)/u);
   assert.match(effects, /\.composer form:has\(textarea:disabled\)[\s\S]*background: var\(--color-surface-disabled\)/u);
@@ -245,6 +248,31 @@ test("Player chrome roles and restrained Penpot elevation stay on structural she
   assert.match(visualLab, /\.lab-fixed-note[\s\S]*background: var\(--color-surface-chrome\)/u);
   assert.match(visualLab, /\.lab-fixed-note-title[\s\S]*color: var\(--package-accent\)/u);
   assert.match(render, /fixedTitle\.textContent = "Always on"/u);
+});
+
+test("Player Visual Lab exposes reversible Phase 4 geometry tuning", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.match(layout, /--tool-column-width: 250px/u);
+  assert.match(layout, /--media-height-normal: 62dvh/u);
+  assert.match(layout, /--media-height-overlay: 64dvh/u);
+  assert.match(layout, /--composer-max-lines: 6lh/u);
+  assert.match(layout, /--composer-max-viewport-height: 20dvh/u);
+  assert.match(layout, /--focus-outline-width: 2px/u);
+  assert.match(
+    composer,
+    /max-block-size: min\(var\(--composer-max-lines\), var\(--composer-max-viewport-height\)\)/u,
+  );
+  assert.match(responsive, /--media-height: var\(--media-height-overlay\)/u);
+  assert.match(render, /input\.dataset\.tuningProperty = property/u);
+  assert.match(render, /"--conversation-max-width"/u);
+  assert.match(render, /"--focus-outline-width"/u);
+  assert.match(browser, /player\.style\.setProperty\(property, `\$\{input\.valueAsNumber\}\$\{unit\}`\)/u);
+  assert.match(browser, /player\.style\.removeProperty\(requiredDatasetValue\(input, "tuningProperty"\)\)/u);
 });
 
 test("Player left-panel growth protects media and conversation minimums independently", async () => {

@@ -72,24 +72,10 @@ when no items remain.
 
 Current items:
 
-- **Custom presentation freedom:** later package UI may use a Player-owned custom tool body, replace the central stage,
-  add a floating overlay, add a blocking modal, or temporarily take over the complete Player presentation and later
-  return to the same Standard Player state. Full-player takeover and browser fullscreen are separate capabilities and may
-  coexist. All such UI remains inside the accepted sandboxed Player iframe and does not gain parent DOM, host cookies,
-  or unrestricted external-network access.
-- **Custom-view recoverability:** arbitrary custom HTML/CSS/TypeScript is not required to be checkpoint-restorable.
-  Future runtime/persistence design needs a recovery/resume frontier: the latest point from which the complete experience
-  is guaranteed reconstructible. A crash during a non-restorable custom view may roll back to that frontier rather than
-  pretending the custom DOM/JavaScript state can be proven or serialized automatically.
 - **Time continuity across unavailability:** Standard session time is continuous rather than implicit active-playtime.
   When the Player was unavailable, logical script execution may not skip past the first script event that should have
   executed during that absence; later runtime work must implement the owner-selected missed-event barrier without
   replaying events already materialized in a valid checkpoint. Exact checkpoint/deadline mechanics remain upstream work.
-- **Durable effects beyond a recovery frontier:** server-side effects must not depend on a package claim that arbitrary
-  custom UI is reconstructible. Future contracts need durable effect IDs and ownership/release authority; where practical,
-  checkpoint/recovery state and an external effect should commit durably together. Effects that must be live during a
-  non-restorable view need a reservation/lease then commit/rollback model rather than relying on browser liveness or TTL
-  alone. Exact server/runtime APIs remain upstream work.
 - **Background-control family:** the right-rail presentation below covers momentary actions, toggles/switches,
   single-choice selects, and non-interactive status/progress items. Accepted V30 permanent-button behavior remains the
   current button semantic baseline; exact Standard-Library binding, persistence, update, and handler APIs remain
@@ -205,7 +191,9 @@ but a rigid 1:1 rule must not cause surprising responsive transitions. Final doc
 set of layout constraints.
 
 Safe-area insets affect Player chrome and controls. Stage/media remains allowed to occupy its complete visual region
-rather than receiving identical safe-area padding by default.
+rather than receiving identical safe-area padding by default. During the POC, `Visual Lab` may temporarily override stage
+heights, fixed tool width, conversation bounds, composer line/viewport caps, and focus-outline thickness; Reset removes
+those development-only overrides.
 
 Scrolling ownership:
 
@@ -688,11 +676,13 @@ Exact author-facing schema/names remain upstream API work.
 
 Standard theming covers defined semantic colour roles, not arbitrary CSS. Geometry, fonts, spacing, DOM/chrome
 ownership, and other Standard Player properties remain Player-owned unless a later explicit capability says otherwise.
-Authored speaker/rich-text identity colours remain content styling. An explicit user accessibility/readability override
-takes precedence. Platform dark-theme values, theme API shape, preference persistence, rich-text allowlist, and numeric
-accessibility thresholds remain open; see [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). Ordinary transcript text does not
-accept unrestricted raw HTML. Fully custom HTML/CSS/TypeScript uses the separate custom view/tool/stage capability
-inside the accepted sandbox.
+Authored speaker/rich-text/control colours that carry script meaning are content semantics, not theme defaults. User
+theme or accessibility preferences must preserve that meaning: for example, a story-defined red control cannot simply
+be recoloured blue. Accessibility treatment may add or alter non-semantic presentation while retaining the authored
+distinction. Platform dark-theme values, theme API shape, preference persistence, rich-text allowlist, exact fallback
+mechanics, and numeric accessibility thresholds remain open; see [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). Ordinary
+transcript text does not accept unrestricted raw HTML. Fully custom HTML/CSS/TypeScript uses the separate custom
+view/tool/stage capability inside the accepted sandbox.
 
 ## Accessibility invariants
 

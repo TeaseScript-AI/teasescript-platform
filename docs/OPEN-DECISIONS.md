@@ -95,8 +95,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Exact author-facing data/API form for supported Standard Player per-control base/fill colours. The Player already owns
   derived interaction styling and automatic readable black/white control-label text; syntax, serialization, and which
   Standard control kinds expose the colour input remain unresolved.
-- Constrained transcript rich-text/BBCode capability: allowed formatting elements/attributes, sanitization,
-  accessibility/readability interaction, and how per-span styling composes with speaker and Player presentation.
+- Constrained transcript rich-text/BBCode capability: allowed formatting elements/attributes, sanitization, and how
+  accessibility treatment preserves authored colour/formatting semantics while meeting readability needs.
 - Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
   readable scaling/zoom behavior, minimum control sizing, contrast thresholds, and browser/platform responsibility.
 - Player UI preference persistence: which panel/tool/theme/media-fit/text-display preferences survive reload or session
@@ -110,9 +110,10 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   unresolved.
 - Whether any additional Player-specific control widths, heights, or spacing should later join the already shared
   border/radius/focus/state baseline for TeaseScript UI surfaces.
-- Exact capability/lifecycle APIs for package custom tools, custom stage content, floating/modal overlays, and temporary
-  full-player takeover, including recovery-frontier declaration/reconstruction and restore behavior while preserving the
-  accepted iframe isolation boundary.
+- Exact custom-view registration/lifecycle APIs, typed inputs/events/results, presentation-form to blocking/background
+  action mapping, surface-isolation mechanism (including optional Shadow DOM), focus/navigation/back behavior, and how
+  reconstructible custom state is declared/validated. ADR 0012 fixes the presentation forms, sandbox boundary, and
+  recovery-frontier semantics.
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
 - Camera capability declarations, stream ownership, device switching, quality negotiation, restore, privacy
   indicators, and simultaneous-camera policy.

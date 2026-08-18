@@ -127,6 +127,11 @@ toolStrip.addEventListener("input", (event) => {
   const target = event.target;
   if (target instanceof HTMLInputElement && target.matches("[data-theme-color]")) {
     applyAccentColour(target.value);
+    return;
+  }
+
+  if (target instanceof HTMLInputElement && target.matches("[data-tuning-property]")) {
+    applyTuningValue(target);
   }
 });
 
@@ -301,6 +306,20 @@ function resetVisualLab(): void {
   document.documentElement.style.setProperty("--package-accent", accentColor);
   player.classList.toggle("fx-ambient", ambientEnabled);
   player.classList.toggle("fx-vignette", vignetteEnabled);
+
+  for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-tuning-property]")) {
+    player.style.removeProperty(requiredDatasetValue(input, "tuningProperty"));
+  }
+
+  syncVisualControls();
+}
+
+function applyTuningValue(input: HTMLInputElement): void {
+  if (!Number.isFinite(input.valueAsNumber)) return;
+
+  const property = requiredDatasetValue(input, "tuningProperty");
+  const unit = requiredDatasetValue(input, "tuningUnit");
+  player.style.setProperty(property, `${input.valueAsNumber}${unit}`);
   syncVisualControls();
 }
 
@@ -320,6 +339,13 @@ function syncVisualControls(): void {
       default:
         throw new Error(`Unknown visual option: ${String(input.dataset.effect)}`);
     }
+  }
+
+  const computed = getComputedStyle(player);
+  for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-tuning-property]")) {
+    const property = requiredDatasetValue(input, "tuningProperty");
+    const value = Number.parseFloat(computed.getPropertyValue(property));
+    if (Number.isFinite(value)) input.value = String(value);
   }
 }
 

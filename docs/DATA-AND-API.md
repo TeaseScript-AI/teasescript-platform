@@ -111,6 +111,13 @@ creates and restores supported checkpoints according to the session lifecycle. D
 manual checkpoint and restore operations because those runs are explicitly diagnostic rather than ordinary canonical
 play.
 
+For custom UI, [ADR 0012](decisions/0012-custom-view-capability.md) defines the recovery frontier: the latest point from
+which the complete experience is reconstructible. Persisted server effects beyond that frontier use durable effect IDs
+and server authority; repeating the same effect ID is idempotent. Where practical, effect receipt and advancing recovery
+state commit atomically. An effect that must exist only temporarily while non-restorable UI is active uses a
+reservation/lease followed by commit or rollback; TTL/keepalive cleanup is not the correctness mechanism. Exact records
+and APIs remain open.
+
 ## Stability and future contracts
 
 The current TypeScript exports and internal instruction-plan, runtime-snapshot, and checkpoint formats are POC implementation surfaces. The current numeric revisions are documented in [`RUNTIME.md`](RUNTIME.md). Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
