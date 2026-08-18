@@ -21,12 +21,11 @@
 - `LIBRARIES.md`
 - `SECURITY.md`
 - `CONTINUOUS-PERSONALITIES.md`
-- `CODE-EDITOR.md`
-- `web/PLAYER-UI.md`: provisional maintained normative Standard Player UI contract. While its temporary `Upstream
-  contract integration` section is non-empty, Player work also reads that section for Owner-decided behavior still
-  awaiting synchronization into its controlling upstream source.
-- `web/UI-DESIGN-AND-ENGINEERING.md`: cross-surface UI engineering, responsive, interaction, and design-quality
-  guardrails.
+- `CODE-EDITOR.md`: browser code editor and tooling integration.
+- `DEBUGGER.md`: runtime inspection, simulation, and debug execution.
+- `ui/PLAYER-UI.md`: normative Standard Player UI; while `Upstream contract integration` is non-empty, Player work also
+  reads that section.
+- `ui/UI-DESIGN-AND-ENGINEERING.md`: shared UI engineering and design guidance.
 - `LLM-INTEGRATION.md`
 - `MATH-EXPRESSIONS.md`
 - `TESTING.md`: current testing strategy, runtime invariants, and future quality gates.

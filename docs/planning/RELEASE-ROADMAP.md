@@ -48,7 +48,7 @@ architecture may change substantially while correctness and the basic model are 
     `say` pacing/skip behavior, together with the matching Standard Player controls and editor/simulator support. Keep the
     detailed runtime state-machine and checkpoint rules in their accepted runtime sources rather than repeating them here.
   - **Reference:** [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md), [`RUNTIME.md`](../RUNTIME.md),
-    [`LIBRARIES.md`](../LIBRARIES.md), and [`CODE-EDITOR.md`](../CODE-EDITOR.md).
+    [`LIBRARIES.md`](../LIBRARIES.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and [`DEBUGGER.md`](../DEBUGGER.md).
 
 - [ ] **Foreground and background timers**
   - **Outcome:** Let scripts use foreground timers that block script progress and background timers that continue while
@@ -62,8 +62,8 @@ architecture may change substantially while correctness and the basic model are 
   - **Outcome:** Replace the technical playground presentation with a practical Player interface for transcript output,
     Standard interactions, timers, status/errors, and the media capabilities selected for the POC. Keep development and
     debug controls secondary to the actual Player experience.
-  - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md),
-    [`PLAYER-UI.md`](../web/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
+  - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`DEBUGGER.md`](../DEBUGGER.md),
+    [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
 - [ ] **Iframe development host and virtual viewport**
   - **Outcome:** Run the Player through a small local host shell using the product's iframe boundary without requiring a
@@ -77,7 +77,8 @@ architecture may change substantially while correctness and the basic model are 
   - **Outcome:** Provide the browser authoring environment with editing, diagnostics, simulation/debugging, and a Player
     preview that can use the same iframe host and virtual viewport. Keep the editor and Player as separate components even
     when they are shown side by side.
-  - **Reference:** [`CODE-EDITOR.md`](../CODE-EDITOR.md) and [`WISHES.xml` W-031](../../WISHES.xml).
+  - **Reference:** [`CODE-EDITOR.md`](../CODE-EDITOR.md), [`DEBUGGER.md`](../DEBUGGER.md), and
+    [`WISHES.xml` W-031](../../WISHES.xml).
 
 - [ ] **Audio and video playback**
   - **Outcome:** Support real Player audio and video playback for the POC, including blocking/foreground and background
@@ -134,7 +135,8 @@ subsystems may still have different maturity levels.
   - **Reference:** [ADR 0012](../decisions/0012-custom-view-capability.md),
     [ADR 0015](../decisions/0015-serializable-runtime-architecture.md), [`RUNTIME.md`](../RUNTIME.md),
     [`LIBRARIES.md`](../LIBRARIES.md), [`SECURITY.md`](../SECURITY.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md),
-    [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), and [`WISHES.xml` W-042/W-055](../../WISHES.xml).
+    [`DEBUGGER.md`](../DEBUGGER.md), [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), and
+    [`WISHES.xml` W-042/W-055](../../WISHES.xml).
 
 - [ ] **Establish a runtime performance baseline and optimization plan**
   - **Outcome:** Measure representative small, normal, stress, and long-running deterministic-runtime workloads before

@@ -68,6 +68,7 @@ state from GitHub.
   [`docs/TEASESCRIPT.md`](docs/TEASESCRIPT.md)
 - Runtime, actions, checkpoints, and current internal formats: [`docs/RUNTIME.md`](docs/RUNTIME.md)
 - Engine primitives and libraries: [`docs/LIBRARIES.md`](docs/LIBRARIES.md)
-- Playground, editor, simulator, and debugger: [`docs/CODE-EDITOR.md`](docs/CODE-EDITOR.md)
+- Browser editor and current playground authoring surface: [`docs/CODE-EDITOR.md`](docs/CODE-EDITOR.md)
+- Debugger, simulator, and diagnostic execution: [`docs/DEBUGGER.md`](docs/DEBUGGER.md)
 - Testing strategy and configured verification: [`docs/TESTING.md`](docs/TESTING.md)
 - Security and trust boundaries: [`docs/SECURITY.md`](docs/SECURITY.md)

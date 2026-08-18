@@ -119,6 +119,7 @@ Use these current sources for detail:
 - [`docs/SECURITY.md`](docs/SECURITY.md): isolation, capture, validation, privacy, and capability restrictions;
 - [`docs/DATA-AND-API.md`](docs/DATA-AND-API.md): Laravel ownership, current APIs, persistence, and host/player data
   boundaries;
-- [`docs/CODE-EDITOR.md`](docs/CODE-EDITOR.md): editor, simulator, and debugger direction;
+- [`docs/CODE-EDITOR.md`](docs/CODE-EDITOR.md): browser code-editor direction and tooling integration;
+- [`docs/DEBUGGER.md`](docs/DEBUGGER.md): runtime inspection, simulation, and debug-execution direction;
 - [`docs/LLM-INTEGRATION.md`](docs/LLM-INTEGRATION.md): constrained LLM/vision integration;
 - [`PHASE-STATUS.md`](PHASE-STATUS.md): current phase, gates, capability state, and major exclusions.

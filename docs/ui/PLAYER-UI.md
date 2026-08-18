@@ -40,7 +40,7 @@ respond to viewport constraints and user panel choices, and how Standard control
 TeaseScript syntax, action settlement, host message schemas, package permissions, persistence formats, or custom-view
 lifecycle.
 
-General reusable web engineering and visual-design guidance lives in
+General reusable UI engineering and visual-design guidance lives in
 [UI-DESIGN-AND-ENGINEERING.md](UI-DESIGN-AND-ENGINEERING.md). That guide informs implementation quality but does not
 replace the Player-specific contract here.
 
@@ -247,7 +247,7 @@ for tuning may change through `Visual Lab` before production without implying a 
 Tool-column header and body use one continuous `surface-component` background. The header separator does not introduce
 a second chrome-colour band; selector/add/close controls provide the header's raised hierarchy.
 
-The cross-surface web guide adopts the current `1px` border, moderate-radius, visible-focus, and interaction-state
+The shared UI guide adopts the current `1px` border, moderate-radius, visible-focus, and interaction-state
 vocabulary as a shared starting baseline. Player-specific widths, heights, spacing, and tuned focus thickness remain
 owned here rather than becoming universal dimensions.
 
@@ -357,7 +357,7 @@ POC tool width. The current `900px`, `380px`, and stage-shape values remain visu
 additional responsive modes.
 
 `Visual Lab` and `Scene` remain development fixtures, not Standard Player tools. A real Debugger is a future platform
-tool described in [CODE-EDITOR.md](../CODE-EDITOR.md).
+tool described in [DEBUGGER.md](../DEBUGGER.md).
 
 ## Stage and media presentation
 
@@ -607,15 +607,11 @@ A non-interactive status item is a separate semantic/visual class, not a disable
 The primary `Send` action uses the Player/theme solid accent family. Per-control authored colour does not redefine the
 Player accent; changing the global accent belongs to an explicit theme API.
 
-For supported authored Standard controls, the developer may provide only the control's base/fill colour. The Player
-retains ownership of shape, border/shadow/effects, focus, disabled treatment, and derived hover/pressed states. The Player
-also chooses either black or white label text according to which is readable against the effective fill; Standard
-control text colour is not separately author-overridable. The exact internal colour calculation is an implementation
-choice as long as it deterministically produces the readable black/white result. These per-control colours remain local
-to the authored control and must not repaint unrelated Player chrome, speaker identity, or theme accent.
-
-Speaker name colour, authored transcript text/spans, media ambience, and application theme colours are separate layers.
-Their richer formatting contract is not a reason to expose arbitrary raw HTML in transcript content.
+For supported authored Standard controls, the developer provides only a base/fill colour. The Player derives enabled
+hover/pressed states from that fill, keeps Player-owned focus/disabled treatment, and chooses readable black or white
+label text; Standard control text colour is not separately author-overridable. Derived colours are presentation state,
+not compiler/source semantics. The calculation is an implementation detail provided it gives the same readable result
+and does not repaint unrelated Player chrome, speaker identity, or theme accent.
 
 ### Input capability and motion
 
@@ -675,43 +671,19 @@ review, not a second colour authority.
 Structural shadow uses the primary-text hue at `8%` alpha; the drawer scrim uses it at `18%` alpha. Inverse text is
 white. These are semantic support roles rather than extra surface levels.
 
-The palette follows the project-owned Radix-inspired twelve-step role-band convention described in the web UI guide;
+The palette follows the project-owned Radix-inspired twelve-step role-band convention described in the shared UI guide;
 there is no Radix runtime or CSS dependency.
 
-### Colour ownership boundary
+## Theme and customization boundary
 
-The application palette does **not** own speaker/person colours, authored transcript span colours, authored per-control
-fill colours, media-derived ambience, or technical mask colours. Those values may vary with content without repainting
-unrelated Standard Player chrome.
+The application palette does not own speaker/person colours, authored transcript spans, authored per-control fills,
+media ambience, or technical masks. The Player/theme accent remains theme-owned; local control colour never changes it.
+A package may alter the Player theme only through the eventual explicit theme contract.
 
-The application/theme accent remains theme-owned. A package may later select or alter a Player theme only through the
-explicit theme contract; colouring one authored control does not silently replace that global accent. Timer progress and
-other accent-driven Standard presentation use the effective Player theme accent unless a controlling capability says
-otherwise.
-
-## Package customization and theming boundary
-
-The Standard Player remains a default presentation rather than an irrevocable shell. Within Standard UI, supported
-authored controls may receive a base/fill colour while the Player derives their interaction states and selects readable
-black/white control-label text as defined above. Authors do not separately override Standard control-label text colour.
-The exact accepted colour syntax/data form is upstream Standard-Library work; presentation derivation belongs to the
-Player rather than being baked into source semantics.
-
-The following remain unresolved and are tracked in [OPEN-DECISIONS.md](../OPEN-DECISIONS.md):
-
-- platform default versus package-selected versus future user-selected theme precedence, including whether a package may
-  require, suggest, or merely provide a theme;
-- future dark-theme semantic mappings;
-- which additional Standard Player visual properties a package may customize without replacing Standard UI;
-- exact persistence/scope of user Player presentation preferences;
-- constrained rich-text/BBCode capabilities for authored transcript content and their readability/accessibility rules.
-
-Do not expose unrestricted raw HTML as ordinary transcript text. Rich text should use a constrained/allowlisted contract
-so authored formatting cannot inject arbitrary interactive controls, scripts, or layout-breaking markup. Fully custom
-HTML/CSS/TypeScript remains a separate custom-view/tool/stage capability inside the accepted sandbox boundary.
-
-Custom package presentation remains governed by ADR 0012 plus the temporary upstream-integration direction above. No
-custom UI mode grants access to parent DOM, host cookies, or unrestricted network capabilities.
+Still unresolved in [OPEN-DECISIONS.md](../OPEN-DECISIONS.md): theme precedence, dark-theme mappings, additional Standard
+Player theme properties, presentation-preference persistence, and constrained transcript rich text/BBCode. Ordinary
+transcript text does not accept unrestricted raw HTML; fully custom HTML/CSS/TypeScript uses the separate custom
+view/tool/stage capability inside the accepted sandbox.
 
 ## Accessibility invariants
 

@@ -1,49 +1,34 @@
-# Editor, simulator, and debugger
+# Code editor
 
-The future browser editor should use parser diagnostics and source spans for syntax highlighting, errors, navigation, autocomplete, simulation, stepping, deterministic replay, state inspection, and breakpoint-like debugging.
+The future browser editor owns source authoring: syntax highlighting, diagnostics, navigation, autocomplete, formatting,
+and integration with compiler/runtime tooling. Runtime inspection and diagnostic execution belong to
+[`DEBUGGER.md`](DEBUGGER.md); the editor may embed those controls without owning debugger semantics.
 
-The standalone playground is a local technical workspace, not the production editor. It uses an accessible native textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and validated checkpoint save/restore. It deliberately has no Monaco integration, package authoring, library-aware completion, or cross-origin production-player UI.
+The standalone playground is a local technical workspace, not the production editor. It currently combines an accessible
+native `.tease` textarea with diagnostics and runtime/debug controls such as Run, Step, reset, checkpoint/restore, and
+plan/runtime/event inspection. It has no Monaco integration, package authoring, library-aware completion, or cross-origin
+production-Player UI.
 
-A separate production-oriented Player presentation POC now lives under `player/` and is served by the same local development server at `/player/`. It remains distinct from the editor/playground workspace, currently uses demo presentation data, and does not yet define or implement the runtime/Player or cross-origin host protocol.
+A separate production-oriented Player presentation POC lives under `player/` and is served by the same local development
+server at `/player/`. It remains distinct from the editor/playground workspace and does not define the runtime/Player or
+cross-origin host protocol.
 
-The current technical workspace/controller implementation is canonically at
-`playground/workspace/controller.ts`; browser and server entrypoints use the
-canonical controller directly. The technical workspace remains separate from the
-Player presentation POC and does not claim editor functionality that is not implemented.
+The technical workspace/controller implementation lives at `playground/workspace/controller.ts`; browser and server
+entrypoints use that controller directly.
 
-The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are separate from runtime checkpoints using the current internal POC format. Storage failures are bounded technical messages; explicit example reload discards the draft and never overwrites repository examples. A local `.tease` file may be imported or exported without repository or server writes.
+The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are
+separate from runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the
+draft and never overwrites repository examples. A local `.tease` file may be imported or exported without repository or
+server writes.
 
-Every edit increments a source revision and invalidates the plan, snapshot, transcript, events, counters, and checkpoint controls. Run, step, checkpoint save, and checkpoint restore require a successfully compiled runtime at the current revision. Reset recompiles the textarea contents; no plan migration occurs. Restore accepts only a validated self-contained checkpoint whose plan exactly matches the current runtime, so source text is never checkpoint identity.
+Every edit increments a source revision and invalidates the plan, snapshot, transcript, events, counters, and checkpoint
+controls. Run, Step, checkpoint save/restore, and reset require a successfully compiled runtime at the current revision.
+Reset recompiles the current source; restore accepts only a validated self-contained checkpoint whose plan matches the
+current runtime. Source text is not checkpoint identity.
 
-A production editor should build on the versioned parser/runtime interfaces after the host/player boundary is specified. Debugger history may snapshot selected boundaries; it should not imply that production execution persists every internal instruction.
-
-The temporary TypeScript-export metadata POC has been removed. Editor
-transport, `.tease` linkage, metadata format and validation, automatic export
-discovery, and library-aware completion remain future consumer-driven work.
-
-## Debugger direction
-
-A real Debugger is a future platform tool that may be surfaced through the Standard Player tools framework when an
-explicit debug/developer mode is active. It is not a normal-player default because it exposes implementation detail and
-can deliberately change execution outcomes. It should be available as platform diagnostics rather than being silently
-prevented by a package solely to preserve surprises.
-
-The debugger should support at least inspection of the current source file and execution/source position, variables and
-values, foreground and background actions, visible and hidden timers, current media/audio/video state, and provenance
-that explains why a media item or branch was selected. Exact UI and source-mapping details remain future work.
-
-Two execution modes are distinct:
-
-- **read-only inspection** observes the real session without changing canonical execution;
-- **active debug** runs a disposable fork of the selected session/checkpoint. The fork may step, pause, change variables,
-  control deterministic RNG outcomes, exercise branches, and use manual checkpoint/restore without merging those
-  mutations back into the canonical session when debug mode ends.
-
-Server/account side effects from an active debug fork should use a test/simulation context by default so diagnostic
-progress cannot become ordinary account progress or restrictions. A later explicit integration-test context may exercise
-real persistence semantics when that is the behavior being tested. Exact authorization, history marking, test namespaces,
-and server contracts remain open; the important boundary is that an active debug fork is not silently merged into the
-ordinary session.
+A production editor should build on the versioned parser/runtime interfaces after the host/player boundary is specified.
+The temporary TypeScript-export metadata POC has been removed; editor transport, `.tease` linkage, metadata format and
+validation, automatic export discovery, and library-aware completion remain future consumer-driven work.
 
 ## Accepted library-aware tooling boundary
 
@@ -80,7 +65,7 @@ The first implementation should provide:
 - documentation of exact text/number normalization, simple return types, and permanent non-cancellation;
 - formatting that preserves the accepted compact order and keeps compact `choose` options in one statement;
 - source-span preservation from compact syntax through fully lowered plan instructions;
-- simulator inspection of pending interaction kind, requesting speaker, normalized completion, prepared output, pacing deadline, action location, and skip policy;
+- debugger/simulator inspection of pending interaction kind, requesting speaker, normalized completion, prepared output, pacing deadline, action location, and skip policy;
 - diagnostics for concrete versioned technical limits selected by the implementation;
 - earlier non-blocking usability warnings for unusually long control text or unusually large choice sets without presenting those warnings as language limits.
 

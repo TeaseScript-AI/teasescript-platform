@@ -77,7 +77,7 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 ## Player and interactions
 
 Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
-[`CODE-EDITOR.md`](CODE-EDITOR.md), [`web/PLAYER-UI.md`](web/PLAYER-UI.md),
+[`ui/PLAYER-UI.md`](ui/PLAYER-UI.md),
 [ADR 0010](decisions/0010-package-network-policy.md),
 [ADR 0012](decisions/0012-custom-view-capability.md),
 [ADR 0016](decisions/0016-resumable-pending-action-runtime-contract.md), and
@@ -96,8 +96,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Exact author-facing data/API form for supported Standard Player per-control base/fill colours. The Player already owns
   derived interaction styling and automatic readable black/white control-label text; syntax, serialization, and which
   Standard control kinds expose the colour input remain unresolved.
-- Speaker/text colour customization and the readability policy when content-provided colours interact with the Player
-  theme or future user theme choices.
+- Readability/override policy when authored speaker or rich-text colours conflict with a Player theme or future user
+  accessibility/theme preferences.
 - Constrained transcript rich-text/BBCode capability: allowed formatting elements/attributes, sanitization,
   accessibility/readability interaction, and how per-span styling composes with speaker and Player presentation.
 - Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
@@ -109,10 +109,10 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
 - Exact Standard/runtime API for the right-rail control family: momentary controls, toggles, selects, status/progress
   items, determinate fill, authored priority/order, update/removal, and optional disabled/busy-in-place handler behavior.
-  The intended presentation and ordering rules are maintained in `web/PLAYER-UI.md`; syntax/data/lifecycle binding remain
+  The intended presentation and ordering rules are maintained in `ui/PLAYER-UI.md`; syntax/data/lifecycle binding remain
   unresolved.
 - Whether any additional Player-specific control widths, heights, or spacing should later join the already shared
-  border/radius/focus/state baseline for TeaseScript web surfaces.
+  border/radius/focus/state baseline for TeaseScript UI surfaces.
 - Exact capability/lifecycle APIs for package custom tools, custom stage content, floating/modal overlays, and temporary
   full-player takeover, including recovery-frontier declaration/reconstruction and restore behavior while preserving the
   accepted iframe isolation boundary.
@@ -127,6 +127,15 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Custom-view author syntax within the accepted custom-view capability.
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
 - Time-integrity logging thresholds and whether a future typed anomaly hook is script-visible.
+
+
+## Debugger and simulation
+
+Current constraints: [`DEBUGGER.md`](DEBUGGER.md), [`RUNTIME.md`](RUNTIME.md), and
+[`DATA-AND-API.md`](DATA-AND-API.md).
+
+- Player/developer debugger enablement, authorization, and history marking.
+- Server test/simulation namespaces and external-effect behavior for disposable active-debug forks.
 
 ## Platform and continuous personalities
 

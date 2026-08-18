@@ -103,7 +103,7 @@ A future light or dark theme changes the semantic mappings rather than rewriting
 not apply to technical mask colours or content-driven media, speaker, and package colours, which retain their separate
 ownership.
 
-Use the Radix twelve-step role-band model as the default palette structure for TeaseScript web surfaces without taking a
+Use the Radix twelve-step role-band model as the default palette structure for TeaseScript UI surfaces without taking a
 Radix dependency: steps 1–2 are backgrounds, 3–5 component states, 6–8 borders, 9–10 solid accent, and 11–12 text.
 The values are project-owned; do not copy Radix palette values mechanically and do not invent intermediate values solely
 to fill all twelve positions. A maintained surface specification owns its exact approved palette. For the current
@@ -111,7 +111,7 @@ Player palette, see [`PLAYER-UI.md`](PLAYER-UI.md).
 
 ### Shared control baseline
 
-New TeaseScript web surfaces should start from the same restrained control vocabulary instead of inventing unrelated
+New TeaseScript UI surfaces should start from the same restrained control vocabulary instead of inventing unrelated
 button styles per page. Treat this as the default baseline, not a requirement to force unlike controls into one shape:
 
 - use a `1px` neutral border and moderate, consistent non-pill rounding for ordinary controls; compact icon/tool
