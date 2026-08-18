@@ -1,0 +1,26 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "feature/player-production-demo",
+  "expectedBaseSha": "84f92dcd9c045d7421f6fe91ab080ee4f666d230",
+  "expectedResultTreeSha": "f265768d0b7c9df60ff418a356403f55a821e7b3",
+  "patchSizeBytes": 34871,
+  "patchSha256": "ee958e9820065711f9b6d00777dd1af1832fdb9c0aedda703ccc9181b6dc8d58",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0003",
+      "sizeBytes": 11683,
+      "sha256": "3199e84540432543546e81032c1d93a76b325686e5b779dd334df45d56e35c30"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0003",
+      "sizeBytes": 11397,
+      "sha256": "5a3d3431f63acc860f03224590367d28e3509571081066ca02ab39f496360c6d"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0003",
+      "sizeBytes": 11791,
+      "sha256": "bb7ec2544dd51c6ca0fbb57ba4615f2751c85029549291502c2209557ef20bcf"
+    }
+  ],
+  "commitMessage": "Refine UI documentation ownership"
+}

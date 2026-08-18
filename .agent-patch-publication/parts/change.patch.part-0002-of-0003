@@ -1,0 +1,168 @@
+diff --git a/docs/DEBUGGER.md b/docs/DEBUGGER.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..cfa243c9eee90aa05e2cfbfcf1b6d9dc9ced77ec
+--- /dev/null
++++ b/docs/DEBUGGER.md
+@@ -0,0 +1,28 @@
++# Debugger
++
++The Debugger owns runtime inspection and diagnostic execution independently of editor or Player presentation. The code
++editor may embed it, and the Standard Player may expose it as a platform tool. It is hidden by default in ordinary play
++but may be deliberately enabled by players or developers; package content cannot disable platform debugging solely to
++preserve surprises.
++
++## Inspection
++
++The Debugger should expose the current source file and execution position, variables and values, foreground/background
++actions, visible and hidden timers, current media/audio/video state, and provenance that explains selected media or
++branches. Exact UI and source mapping remain presentation/tooling work.
++
++## Execution modes
++
++- **Read-only inspection** observes the canonical session without changing execution.
++- **Active debug** runs a disposable fork of a selected session/checkpoint. It may Run, Step, Pause, change variables,
++  control deterministic RNG outcomes, exercise branches, and use manual checkpoint/restore. Debug mutations never merge
++  back into the canonical session.
++
++Debugger history may snapshot selected boundaries; this does not imply that production execution persists every internal
++instruction. Simulation is debugger tooling when execution uses disposable or test state, not an editor semantic.
++
++## External effects
++
++Active-debug server/account effects use a simulation/test context by default so diagnostic progress cannot become normal
++account progress or restrictions. A later explicit integration-test context may exercise real persistence semantics.
++Exact enablement and server test-context mechanics remain in [`OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
+diff --git a/docs/OPEN-DECISIONS.md b/docs/OPEN-DECISIONS.md
+index 0d5e5dc6e850f34d2a4c1c46e019f2bc791fd2da..1b7f09ce5aef21263a917f2f115c4b1f62ebbc10 100644
+--- a/docs/OPEN-DECISIONS.md
++++ b/docs/OPEN-DECISIONS.md
+@@ -77,7 +77,7 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
+ ## Player and interactions
+ 
+ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
+-[`CODE-EDITOR.md`](CODE-EDITOR.md), [`web/PLAYER-UI.md`](web/PLAYER-UI.md),
++[`ui/PLAYER-UI.md`](ui/PLAYER-UI.md),
+ [ADR 0010](decisions/0010-package-network-policy.md),
+ [ADR 0012](decisions/0012-custom-view-capability.md),
+ [ADR 0016](decisions/0016-resumable-pending-action-runtime-contract.md), and
+@@ -96,8 +96,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
+ - Exact author-facing data/API form for supported Standard Player per-control base/fill colours. The Player already owns
+   derived interaction styling and automatic readable black/white control-label text; syntax, serialization, and which
+   Standard control kinds expose the colour input remain unresolved.
+-- Speaker/text colour customization and the readability policy when content-provided colours interact with the Player
+-  theme or future user theme choices.
++- Readability/override policy when authored speaker or rich-text colours conflict with a Player theme or future user
++  accessibility/theme preferences.
+ - Constrained transcript rich-text/BBCode capability: allowed formatting elements/attributes, sanitization,
+   accessibility/readability interaction, and how per-span styling composes with speaker and Player presentation.
+ - Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
+@@ -109,10 +109,10 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
+ - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
+ - Exact Standard/runtime API for the right-rail control family: momentary controls, toggles, selects, status/progress
+   items, determinate fill, authored priority/order, update/removal, and optional disabled/busy-in-place handler behavior.
+-  The intended presentation and ordering rules are maintained in `web/PLAYER-UI.md`; syntax/data/lifecycle binding remain
++  The intended presentation and ordering rules are maintained in `ui/PLAYER-UI.md`; syntax/data/lifecycle binding remain
+   unresolved.
+ - Whether any additional Player-specific control widths, heights, or spacing should later join the already shared
+-  border/radius/focus/state baseline for TeaseScript web surfaces.
++  border/radius/focus/state baseline for TeaseScript UI surfaces.
+ - Exact capability/lifecycle APIs for package custom tools, custom stage content, floating/modal overlays, and temporary
+   full-player takeover, including recovery-frontier declaration/reconstruction and restore behavior while preserving the
+   accepted iframe isolation boundary.
+@@ -128,6 +128,15 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
+ - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
+ - Time-integrity logging thresholds and whether a future typed anomaly hook is script-visible.
+ 
++
++## Debugger and simulation
++
++Current constraints: [`DEBUGGER.md`](DEBUGGER.md), [`RUNTIME.md`](RUNTIME.md), and
++[`DATA-AND-API.md`](DATA-AND-API.md).
++
++- Player/developer debugger enablement, authorization, and history marking.
++- Server test/simulation namespaces and external-effect behavior for disposable active-debug forks.
++
+ ## Platform and continuous personalities
+ 
+ Current constraints: [`DATA-AND-API.md`](DATA-AND-API.md),
+diff --git a/docs/README.md b/docs/README.md
+index 67daf06c7ae1a24b0405e1ac7c6fa7c6b8c27544..a2ebe7e0d2a2524bcaf359527d76b97f3a0732b2 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -21,12 +21,11 @@
+ - `LIBRARIES.md`
+ - `SECURITY.md`
+ - `CONTINUOUS-PERSONALITIES.md`
+-- `CODE-EDITOR.md`
+-- `web/PLAYER-UI.md`: provisional maintained normative Standard Player UI contract. While its temporary `Upstream
+-  contract integration` section is non-empty, Player work also reads that section for Owner-decided behavior still
+-  awaiting synchronization into its controlling upstream source.
+-- `web/UI-DESIGN-AND-ENGINEERING.md`: cross-surface UI engineering, responsive, interaction, and design-quality
+-  guardrails.
++- `CODE-EDITOR.md`: browser code editor and tooling integration.
++- `DEBUGGER.md`: runtime inspection, simulation, and debug execution.
++- `ui/PLAYER-UI.md`: normative Standard Player UI; while `Upstream contract integration` is non-empty, Player work also
++  reads that section.
++- `ui/UI-DESIGN-AND-ENGINEERING.md`: shared UI engineering and design guidance.
+ - `LLM-INTEGRATION.md`
+ - `MATH-EXPRESSIONS.md`
+ - `TESTING.md`: current testing strategy, runtime invariants, and future quality gates.
+diff --git a/docs/chatgpt-project/SYSTEM-PROMPT.txt b/docs/chatgpt-project/SYSTEM-PROMPT.txt
+index 914c3481555d8d32bc094fbac71362b68cb9cdd0..c575021d2f318ce8842b2e762a3976542f46ce93 100644
+--- a/docs/chatgpt-project/SYSTEM-PROMPT.txt
++++ b/docs/chatgpt-project/SYSTEM-PROMPT.txt
+@@ -42,7 +42,9 @@ DOCUMENT MAP
+ - TypeScript and Standard Library: `docs/LIBRARIES.md`
+ - Isolation, network, validation, privacy: `docs/SECURITY.md`
+ - Persistent personalities: `docs/CONTINUOUS-PERSONALITIES.md`
+-- Editor, simulator, debugger: `docs/CODE-EDITOR.md`
++- Code editor: `docs/CODE-EDITOR.md`
++- Debugger and simulator: `docs/DEBUGGER.md`
++- Player UI and shared UI guidance: `docs/ui/PLAYER-UI.md`, `docs/ui/UI-DESIGN-AND-ENGINEERING.md`
+ - LLM/vision: `docs/LLM-INTEGRATION.md`
+ - Expressions and math.js proposal: `docs/MATH-EXPRESSIONS.md`
+ - Capability research: `docs/CAPABILITY-MATRIX.md`, `docs/reference/`
+diff --git a/docs/planning/RELEASE-ROADMAP.md b/docs/planning/RELEASE-ROADMAP.md
+index c99eab892dba025857b2f3ae19813b3ca3aa417f..32d166b7d2bc56c3cb473f08d23ced16a652753f 100644
+--- a/docs/planning/RELEASE-ROADMAP.md
++++ b/docs/planning/RELEASE-ROADMAP.md
+@@ -48,7 +48,7 @@ architecture may change substantially while correctness and the basic model are
+     `say` pacing/skip behavior, together with the matching Standard Player controls and editor/simulator support. Keep the
+     detailed runtime state-machine and checkpoint rules in their accepted runtime sources rather than repeating them here.
+   - **Reference:** [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md), [`RUNTIME.md`](../RUNTIME.md),
+-    [`LIBRARIES.md`](../LIBRARIES.md), and [`CODE-EDITOR.md`](../CODE-EDITOR.md).
++    [`LIBRARIES.md`](../LIBRARIES.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and [`DEBUGGER.md`](../DEBUGGER.md).
+ 
+ - [ ] **Foreground and background timers**
+   - **Outcome:** Let scripts use foreground timers that block script progress and background timers that continue while
+@@ -62,8 +62,8 @@ architecture may change substantially while correctness and the basic model are
+   - **Outcome:** Replace the technical playground presentation with a practical Player interface for transcript output,
+     Standard interactions, timers, status/errors, and the media capabilities selected for the POC. Keep development and
+     debug controls secondary to the actual Player experience.
+-  - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md),
+-    [`PLAYER-UI.md`](../web/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
++  - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`DEBUGGER.md`](../DEBUGGER.md),
++    [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
+ 
+ - [ ] **Iframe development host and virtual viewport**
+   - **Outcome:** Run the Player through a small local host shell using the product's iframe boundary without requiring a
+@@ -77,7 +77,8 @@ architecture may change substantially while correctness and the basic model are
+   - **Outcome:** Provide the browser authoring environment with editing, diagnostics, simulation/debugging, and a Player
+     preview that can use the same iframe host and virtual viewport. Keep the editor and Player as separate components even
+     when they are shown side by side.
+-  - **Reference:** [`CODE-EDITOR.md`](../CODE-EDITOR.md) and [`WISHES.xml` W-031](../../WISHES.xml).
++  - **Reference:** [`CODE-EDITOR.md`](../CODE-EDITOR.md), [`DEBUGGER.md`](../DEBUGGER.md), and
++    [`WISHES.xml` W-031](../../WISHES.xml).
+ 
+ - [ ] **Audio and video playback**
+   - **Outcome:** Support real Player audio and video playback for the POC, including blocking/foreground and background
+@@ -134,7 +135,8 @@ subsystems may still have different maturity levels.
+   - **Reference:** [ADR 0012](../decisions/0012-custom-view-capability.md),
+     [ADR 0015](../decisions/0015-serializable-runtime-architecture.md), [`RUNTIME.md`](../RUNTIME.md),
+     [`LIBRARIES.md`](../LIBRARIES.md), [`SECURITY.md`](../SECURITY.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md),
+-    [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), and [`WISHES.xml` W-042/W-055](../../WISHES.xml).
++    [`DEBUGGER.md`](../DEBUGGER.md), [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), and
++    [`WISHES.xml` W-042/W-055](../../WISHES.xml).
+ 
+ - [ ] **Establish a runtime performance baseline and optimization plan**
+   - **Outcome:** Measure representative small, normal, stress, and long-running deterministic-runtime workloads before
