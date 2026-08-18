@@ -111,9 +111,9 @@ through a later normal runtime entry.
 
 ### Standard composer and dynamic choice presentation
 
-The Standard Player application uses one fixed composer. During a foreground interaction it becomes the answer field, receives focus by default, and blocks ordinary free-chat submission. Choice and button controls appear immediately above it.
+The Standard Player application uses one fixed composer. During a foreground interaction it remains enabled, becomes the answer field, and receives focus by default. Choice and button controls appear immediately above it. Only a completion valid for the active deterministic interaction advances that interaction; non-matching composer text leaves the same mandatory action active. Future LLM clarification or interpretation is outside this first POC.
 
-Choice buttons may occupy one or two rows. The Player application may render the same choice group as a dropdown when viewport, text, font, zoom, accessibility, or other layout constraints make buttons impractical. Button-versus-dropdown presentation is not canonical runtime/checkpoint state and does not change labels, visible text, completion validation, transcript output, or return values.
+Choice buttons may occupy one or two rows. The Player application may render the same choice group as a dropdown when viewport, text, font, zoom, accessibility, or other layout constraints make buttons impractical. Button-versus-dropdown presentation is not canonical runtime/checkpoint state and does not change labels, visible text, completion validation, transcript output, or return values. Exact unambiguous visible option text may activate `choose`. The one-option `showButton` may be activated by its rendered control, its exact visible text, or Space with the empty focused composer; unrelated blank-space clicks do not activate it. These Player input routes map to the same canonical action completion rather than adding another runtime state machine.
 
 Field hints, control labels, requesting-speaker metadata, localized validation feedback, and accessibility labels are not duplicate speaker transcript messages.
 

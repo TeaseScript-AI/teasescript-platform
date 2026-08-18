@@ -1,17 +1,23 @@
 # Standard Player UI specification
 
-- **Status:** Provisional maintained specification for the current Standard Player presentation.
-- **Purpose:** Define the Player's observable layout, responsive behavior, interaction presentation, visual states, and
-  current light theme independently of the HTML/CSS/JavaScript implementation.
-- **Not an ADR:** Accepted ADRs and accepted specifications remain higher authority for architecture, runtime semantics,
-  interaction semantics, isolation, and persistence.
+- **Status:** Provisional maintained normative specification for the intended Standard Player presentation.
+- **Purpose:** Define what the Standard Player should present when completed: observable layout, responsive behavior,
+  interaction presentation, visual states, and the approved light-theme baseline, independently of the current
+  HTML/CSS/JavaScript implementation.
+- **Authority:** Accepted ADRs and accepted specifications remain higher authority for the exact architecture, runtime,
+  language, isolation, and persistence scope they decide. The temporary [Upstream contract integration](#upstream-contract-integration)
+  section below records Owner-decided Player behavior that still needs synchronization into those upstream contracts.
 - **Implementation state:** The production-oriented Player presentation POC exists under `player/`, but runtime/host
-  integration is incomplete. This specification deliberately records accepted upstream behavior that the Standard Player
-  must present even when the current POC does not yet wire that behavior end to end.
+  integration is incomplete and several visual measurements remain deliberate tuning baselines.
+
+This document may lead the implementation. A missing POC feature or an implementation bug does not redefine the desired
+Player contract. Conversely, behavior found only in current HTML/CSS/JavaScript is evidence rather than contract until it
+is adopted here or by a higher-authority source. When implementation is deliberately changed first, this specification
+must be synchronized once the desired result is accepted.
 
 A competent implementation should be able to reproduce the maintained Standard Player from this document plus the
-accepted platform/runtime contracts without copying the existing source. A review agent should likewise be able to use
-this document as the observable UI contract instead of treating current selectors, DOM structure, or CSS techniques as
+accepted platform/runtime contracts without copying the existing source. A review agent should likewise use this
+observable contract instead of treating current selectors, DOM structure, CSS techniques, or demo fixtures as
 requirements.
 
 ## Authority and scope
@@ -42,32 +48,84 @@ replace the Player-specific contract here.
 
 The current Player POC is a presentation implementation, not a completed production Player. In particular:
 
-- its transcript, timer, background controls, tools, and media currently consume demo presentation data;
-- its composer renders the maintained shell but does not yet submit runtime interactions;
-- ADR 0018 foreground controls are accepted behavior but are not yet rendered by the current demo presentation path;
-- host/iframe messaging, checkpoint persistence acknowledgement, restore/reconnect, and package capability negotiation
-  are not defined here;
-- smart transcript following, final preference persistence, tall-portrait panel policy, transient status/notification
-  presentation, theme precedence, and final package-customization limits remain open decisions;
-- the current Visual Lab and Scene tools, placeholder avatar letters, demo action labels, and random local demo media
-  are fixtures rather than Standard Player product content.
+- transcript, timer, background controls, tools, and stage/media currently still consume demo presentation data;
+- the composer shell exists but runtime interaction wiring is incomplete;
+- Standard foreground controls are not yet wired end to end in the demo Player;
+- host/iframe messaging, production checkpoint transport, restore/reconnect, and package capability negotiation remain
+  outside this presentation specification;
+- exact final values marked below for visual retesting remain POC tuning baselines rather than frozen production values;
+- `Visual Lab` and `Scene`, placeholder avatar letters, demo action labels, and random local demo media are development
+  fixtures rather than Standard Player product content. `Visual Lab` may remain during the POC for live tuning, but must
+  be removed or separated from production Player content before production maturity.
 
-A missing POC integration is not permission to contradict a higher-authority accepted interaction or runtime contract.
-Conversely, a current demo detail is not a product requirement unless this specification adopts it.
+A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior in this
+specification is the target even when implementation lags, subject to a higher-authority conflict being surfaced rather
+than silently resolved.
+
+## Upstream contract integration
+
+This is a temporary integration checklist for Owner-decided Player behavior whose corresponding runtime, Standard
+Library, persistence, or custom-view contract has not yet been fully synchronized. It is intentionally not a second
+permanent authority layer. `README-FIRST.md` and `docs/README.md` route Player work here while this section is non-empty.
+Remove each item when its controlling upstream source adopts it; remove this entire section and those router references
+when no items remain.
+
+Current items:
+
+- **Custom presentation freedom:** later package UI may use a Player-owned custom tool body, replace the central stage,
+  add a floating overlay, add a blocking modal, or temporarily take over the complete Player presentation and later
+  return to the same Standard Player state. Full-player takeover and browser fullscreen are separate capabilities and may
+  coexist. All such UI remains inside the accepted sandboxed Player iframe and does not gain parent DOM, host cookies,
+  or unrestricted external-network access.
+- **Custom-view recoverability:** arbitrary custom HTML/CSS/TypeScript is not required to be checkpoint-restorable.
+  Future runtime/persistence design needs a recovery/resume frontier: the latest point from which the complete experience
+  is guaranteed reconstructible. A crash during a non-restorable custom view may roll back to that frontier rather than
+  pretending the custom DOM/JavaScript state can be proven or serialized automatically.
+- **Time continuity across unavailability:** Standard session time is continuous rather than implicit active-playtime.
+  When the Player was unavailable, logical script execution may not skip past the first script event that should have
+  executed during that absence; later runtime work must implement the owner-selected missed-event barrier without
+  replaying events already materialized in a valid checkpoint. Exact checkpoint/deadline mechanics remain upstream work.
+- **Durable effects beyond a recovery frontier:** server-side effects must not depend on a package claim that arbitrary
+  custom UI is reconstructible. Future contracts need durable effect IDs and ownership/release authority; where practical,
+  checkpoint/recovery state and an external effect should commit durably together. Effects that must be live during a
+  non-restorable view need a reservation/lease then commit/rollback model rather than relying on browser liveness or TTL
+  alone. Exact server/runtime APIs remain upstream work.
+- **Background-control family:** the long-lived right rail is intended to support momentary actions, toggles/switches,
+  single-choice selects, and non-interactive status/progress items. The accepted V30 permanent-button behavior remains
+  the current button semantic baseline; exact Standard-Library syntax, binding, persistence, update, and handler APIs
+  for the broader family remain upstream work.
+- **Busy background controls:** accepted V30 disappear-while-handler-runs behavior remains available. A later control
+  contract must also allow a control to remain in place as disabled/busy while its handler runs; explicit removal is a
+  separate lifecycle action. Exact syntax/default remains upstream work.
+- **Background ordering and progress:** authored controls may provide an explicit order/priority; controls with explicit
+  priority sort before controls without one, equal priorities preserve creation order, and unprioritized controls follow
+  in creation order. If a statically authored API later allows equal explicit priorities, authoring/compiler tooling
+  should warn rather than fail because creation order already provides a deterministic tie-breaker. Status and
+  interactive controls may present explicit determinate progress/fill. Exact data shapes and lifecycle semantics remain
+  upstream work.
+- **Transcript/history provenance:** foreground and background control activations need machine-readable provenance so
+  history/LLM consumers can distinguish typed prose from button/choice/control activation without relying on visual
+  punctuation. A future visible-transcript reset starts a new visible segment without implicitly destroying retained
+  canonical history; exact history retention and LLM-context policy remain upstream work.
+- **Timer presentation metadata:** visible, mystery, and hidden timer presentation must work for blocking and non-blocking
+  timer semantics without revealing whether a visible timer blocks script execution. The accepted V30 `timer`,
+  `mysteryTimer`, `wait`, and background-timer semantics remain the language baseline; final public background-timer
+  presentation metadata is still upstream work.
 
 ## Surface hierarchy
 
-The Standard Player fills the available Player viewport and uses the following structural presentation regions. Some
-may collapse, overlay, or appear only while an interaction requires them:
+The Standard Player fills the available Player viewport and uses the following normal presentation regions. A region
+may reserve space, overlay another region, or temporarily hide according to the responsive and custom-presentation
+rules, but changing a backing surface must not implicitly delete unrelated controls.
 
 ```text
 +-----------------------------------------------------------------------+
 | title / Player chrome                                                 |
 +----------------------+--------------------------------+---------------+
 |                      |                                | timer +       |
-| tools                | media                          | background    |
-|                      |                                | controls      |
-|                      +--------------------------------+ / status      |
+| tools                | stage                          | background    |
+|                      |                                | controls /    |
+|                      +--------------------------------+ status        |
 |                      | transcript                     |               |
 |                      +--------------------------------+               |
 |                      | foreground controls when any   |               |
@@ -75,387 +133,518 @@ may collapse, overlay, or appear only while an interaction requires them:
 +----------------------+--------------------------------+---------------+
 ```
 
-The diagram describes relationships, not DOM nesting or a required CSS layout mechanism.
+`stage` is the structural name. Standard image/video/media presentation is one kind of stage content; later canvas,
+custom HTML, games, and other accepted custom presentation may use the same structural region without forcing the
+surrounding Player geometry to change.
 
 ### Visual hierarchy
 
 - **Canvas surface:** transcript and composer-area background.
 - **Chrome surface:** title bar and opaque docked side regions.
-- **Component surface:** tool columns, input/control surfaces, timer, and ordinary buttons.
-- **Media surface:** visually separate content region; media may be full-bleed to device edges while Player chrome
+- **Component surface:** tool columns, input/control surfaces, timer, and ordinary Standard controls.
+- **Stage surface:** visually separate content region; media may be full-bleed to device edges while Player chrome
   respects safe areas.
-- **Content identity:** speaker, package, and media-derived colours are separate from application chrome tokens.
+- **Content identity:** speaker, authored control, theme, and media-derived colours remain distinct from unrelated
+  application chrome roles.
 
-The title, tools, right rail, transcript, composer, and media are structural peers. Hiding a panel background, changing
-reservation, or switching a region to overlay mode must not implicitly delete unrelated controls.
+The title, tools, right rail, stage, transcript, foreground controls, and composer are structural peers. The normal
+vertical middle-column order is stage, transcript, foreground controls when active, then composer. The stage and
+transcript remain present in the Standard Player even when empty.
 
 ## Responsive modes
 
-Responsive behavior is constraint-driven, with three current threshold conditions that have distinct purposes.
+Responsive behavior is constraint-driven. Current width/height thresholds remain implementation baselines where noted;
+they are not a substitute for checking usable stage width, readable conversation width, side-region reservation, and
+currently available visual-viewport height.
 
-| Condition | Purpose | Maintained behavior |
+| Condition | Current POC role | Intended behavior |
 | --- | --- | --- |
-| width `>= 761px` | Wide composition | Side regions may reserve space; automatic tools are open and automatic right rail is docked. |
-| width `<= 760px` | Narrow composition | Left tools become an overlay drawer; the right region reserves no normal-flow main-content width and floats/overlays according to orientation. |
-| width `<= 480px` | Compact control geometry | Reduces selected insets/control sizes only; it does **not** introduce another docking model. |
-| height `<= 600px` | Low-height composition | Title becomes an overlay and the circular timer compacts into the title-height strip. This condition is independent of width. |
+| width `>= 761px` | wide-composition baseline | Side regions may reserve space. Automatic tools are open and the automatic right backing rail is docked when constraints permit. |
+| width `<= 760px` | narrow-composition baseline | Left tools become an overlay drawer. Right-side presentation uses overlay/reservation rules that protect readable content rather than a device label. |
+| width `<= 480px` | compact review target | Re-audit selected control geometry. If compact values remain, use deliberate discrete values rather than continuous viewport-driven shrinking. Do not shrink arbitrary tool content. |
+| low usable height or fullscreen | **overlay chrome mode** | Ordinary title chrome auto-hides/overlays so stage height is not consumed unnecessarily; required tools/fullscreen-exit/global controls remain reachable. |
 
-The 760/761 transition intentionally changes composition without causing the timer, background-control buttons, or
-right-panel toggle to jump merely because that width boundary was crossed. The 480px threshold owns genuinely compact
-phone control geometry instead.
+The old term `low-height mode` is therefore replaced by **overlay chrome mode**. Low available height and actual
+fullscreen may activate the same chrome presentation rather than maintaining two unrelated implementations. Fullscreen
+is an actual Player/browser fullscreen state; it is separate from a future package full-player takeover.
 
-Manual panel state and responsive defaults are separate. Resizing/orientation changes do not erase an explicit user
-choice; only `auto` adapts to the current width class.
+Use available dimensions rather than device classes. Portrait/landscape or aspect ratio may be used as an optimization
+signal when both axes are constrained: a tall shape can spend relatively more vertical space to preserve horizontal
+content, while a wide/short shape can preserve vertical control extent because horizontal reading room is more abundant.
+A narrow tall desktop window and a similarly shaped phone should therefore converge on the same layout reasoning.
+Foldables likewise use their currently available dimensions rather than a special device category.
+
+Manual panel choices are temporary overrides **within the current wide/narrow composition class**. Resizing inside the
+same class preserves that explicit choice. Crossing between wide and narrow re-evaluates the responsive default instead
+of carrying a stale override into a materially different composition. A future persistent user preference may refine
+this policy separately.
+
+The Player must size against the currently usable visual viewport when a software keyboard or similar browser UI reduces
+available space.
 
 ## Global geometry and overflow
 
-The current maintained Player uses these major geometry values because they define the composition rather than an
-incidental implementation technique:
+The Player shell itself does not normally scroll. Scrolling belongs to the specific region that owns the overflowing
+content. Major numerical values below are POC reconstruction/tuning baselines unless explicitly marked otherwise.
 
-| Item | Current contract |
+| Item | POC baseline / intended rule |
 | --- | --- |
-| Player viewport | full viewport width and `100dvh`; the document itself does not become the normal scroll owner |
-| normal title bar | `52px` plus top safe-area inset |
-| normal media row | `62dvh` |
-| low-height media row | `64dvh` |
-| baseline left tools width | `clamp(190px, 15vw, 250px)` before content-driven growth |
-| right controls width | `clamp(150px, 18vw, 190px)` |
-| readable conversation maximum | `900px` |
-| conversation minimum protected from tool growth | `380px` |
-| normal conversation side gap | `18px` before safe-area contribution |
-| narrow tools drawer | `min(300px, 100vw - 120px)`, deliberately leaving outside space for dismissal |
+| Player viewport | full viewport width and `100dvh`; outer document is not the normal scroll owner |
+| normal title bar | `52px` plus top safe-area inset; visually retestable |
+| normal stage row | current `62dvh` baseline; expose as a development tuning value and visually re-evaluate |
+| overlay-chrome stage row | current `64dvh` baseline; visually re-evaluate with low-height and fullscreen cases |
+| tool column | move to one fixed default POC width rather than viewport-proportional `clamp()` sizing; use the current `250px` clamp maximum as the initial Visual Lab test value, not a frozen final width |
+| readable conversation maximum | current `900px` baseline; keep a cap for ultrawide readability and visually retest, including browser zoom |
+| protected conversation minimum | current `380px` baseline; remeasure after tool-width/right-rail simplification |
+| normal conversation side gap | current `18px` baseline before safe-area contribution |
+| narrow tools drawer | current `min(300px, 100vw - 120px)` baseline, preserving an outside dismissal area |
 
-Safe-area insets affect Player chrome and controls. Media remains allowed to occupy the full visual media region rather
-than gaining the same safe-area inset by default.
+Keeping the stage roughly square when practical is a design goal, not a hard 1:1 layout invariant. The goal exists so
+both portrait and landscape media remain useful. Side panels should not casually crush the stage into a narrow strip,
+but a rigid 1:1 rule must not cause surprising responsive transitions. Final dock/overlay decisions should use the full
+set of layout constraints.
 
-Scrolling is owned locally:
+Safe-area insets affect Player chrome and controls. Stage/media remains allowed to occupy its complete visual region
+rather than receiving identical safe-area padding by default.
 
-- the transcript owns vertical conversation scrolling;
-- the tool strip owns horizontal scrolling across tool columns;
-- each tool-column body owns its own vertical scrolling;
-- the right background-control/status list owns vertical scrolling;
-- a growing composer input may own its own vertical scrolling once it reaches its height limit;
-- the Player shell itself does not normally scroll.
+Scrolling ownership:
 
-Nested content should not create a second scrollbar for the same axis/responsibility.
+- transcript: vertical conversation scrolling;
+- tool-column strip: horizontal carousel/scrolling;
+- each tool body: its own vertical scrolling;
+- right background-control/status stack: vertical scrolling when needed;
+- composer input: internal vertical scrolling after its constraint-based growth limit;
+- Player shell: no normal scrolling.
+
+Input axes remain predictable. Vertical wheel input stays vertical and horizontal wheel input stays horizontal; reaching
+an edge on one axis must not silently repurpose that input to the other axis. Nested content should not create a second
+scrollbar for the same axis/responsibility.
 
 ### Typography and visible control geometry
 
-PR #318 intentionally preserves the current Player typography and control geometry. The following visible values are
-therefore part of the provisional reconstruction baseline; local padding and one-off decorative offsets remain
-implementation details unless specified elsewhere.
+PR #318 preserves the current typography and most component geometry as the provisional visual baseline. Values marked
+for tuning may change through `Visual Lab` before production without implying a compatibility promise.
 
 | Element | Current Player baseline |
 | --- | --- |
 | UI font stack | `"Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` |
 | title | `14px`, weight `700` |
 | speaker name | `9px`, weight `700`, line-height `1.2` |
-| speaker message | `12px`, line-height `1.25`; package speaker font may replace the UI font |
+| speaker message | `12px`, line-height `1.25`; authored speaker font may replace the UI font |
 | player-authored message | `13px`; otherwise follows transcript message rhythm |
 | normal composer text / Send | `11px`; Send weight `700` |
 | narrow composer text | `10px`; Send remains `11px` |
 | normal timer | `18px`, weight `700`, tabular numerals |
-| compact-width timer (`<= 480px`) | `15px` unless low-height mode also applies |
-| low-height timer (`<= 600px` high) | `12px` |
+| compact timer | current smaller timer values remain a visual-tuning baseline rather than a final `<= 480px` contract |
 | background control label | `12px`, weight `600`, line-height `1.2` |
 | global icon control | `34px` square, `6px` corner radius |
-| tool strip / column | `8px` strip gap; wide minimum `204px`, or `212px` when alone; maximum `min(22rem, 72vw)`; narrow floor `180px`; column radius `8px` |
+| tool column | one fixed POC width; `250px` is the initial tuning value; column radius `8px` |
 | tool-column header | minimum `44px` high; selector/add/close controls are `30px` high; add/close are `30px` square; controls use `6px` radius |
 | wide integrated composer shell | minimum `50px` high, `8px` corner radius; input minimum `38px`; Send `38px` high with `7px` radius |
 | narrow composer controls | input and Send `42px` minimum/high respectively, each `7px` radius |
-| right background control | maximum `156px` wide, `6px` radius; normal minimum height is `max(44px, clamp(42px, 3.2vmin, 60px))`, compact-width minimum is `42px` |
+| right background control | current maximum `156px` wide and `6px` radius remain the POC baseline; final sizing is visually reviewable |
 
 Tool-column header and body use one continuous `surface-component` background. The header separator does not introduce
 a second chrome-colour band; selector/add/close controls provide the header's raised hierarchy.
 
-These values define the current Player appearance. The cross-surface web guide deliberately adopts the current
-`1px`-border, moderate-radius, focus-outline, and interaction-state vocabulary as the shared starting baseline for other
-TeaseScript web surfaces. Player-specific widths, heights, spacing, and layout measurements remain owned here rather
-than becoming universal component dimensions.
+The cross-surface web guide adopts the current `1px` border, moderate-radius, visible-focus, and interaction-state
+vocabulary as a shared starting baseline. Player-specific widths, heights, spacing, and tuned focus thickness remain
+owned here rather than becoming universal dimensions.
 
 ## Title and global panel controls
 
-The normal title bar uses the chrome surface and visually spans the Player width. It contains:
+The normal title bar uses the chrome surface and spans the Player width. It contains:
 
 - the left tools toggle;
 - the Player title area;
-- reserved room for global title controls as the product grows.
+- a fullscreen control in the completed Standard Player;
+- room for other genuinely global Player controls as the product grows.
 
-The current POC title text is `TeaseScript Player`; the future source of title text is not yet a host/package contract.
+The current POC title text is `TeaseScript Player`; the future title source remains a host/package contract question.
 
-The title controls remain above ordinary Player content. The tools toggle exposes the effective open/closed state to
-assistive technology as an expanded/collapsed control. In low-height mode the title's structural row collapses to zero
-and the title controls overlay the media region instead. The title background becomes transparent and the visible title
-text/control surfaces remain legible as raised component surfaces.
+In normal composition the title bar is a fixed Standard Player part. In overlay chrome mode, including fullscreen, the
+same chrome may auto-hide and return on relevant pointer/touch/focus activity rather than creating a second title
+implementation. Required tools access, fullscreen exit, and other critical global controls must remain discoverable and
+reachable. Auto-hide timing and exact reveal zones are implementation/tuning details unless later promoted.
 
 ## Left tools area
 
+The Standard Player owns the tools framework: panel open/close state, column chrome, selector, `+`, close control,
+horizontal carousel behavior, responsive drawer behavior, and surrounding layout. A tool owns only its body content.
+
 ### Panel state
 
-The left tools area has three presentation states:
+The left tools area has `auto`, explicit `open`, and explicit `closed` presentation states. `auto` opens/reserves on wide
+layouts and closes on narrow layouts under the current baseline. The tools toggle changes `auto` to the opposite of the
+current responsive default and thereafter toggles explicit state. Explicit state is preserved while the Player remains
+in the same wide/narrow composition class; crossing that composition boundary re-evaluates the automatic policy.
 
-- `auto`: open/reserved on wide layouts and closed on narrow layouts;
-- `open`: explicit user-open state;
-- `closed`: explicit user-closed state.
-
-The tools toggle changes `auto` to the opposite of the current responsive default and thereafter toggles explicit
-`open`/`closed`. An explicit state survives width/orientation changes.
-
-On wide layouts, an open tools area reserves horizontal space. On narrow layouts, opening tools creates an opaque
-chrome-surface drawer below the title instead of shrinking the main Player content.
+On wide layouts an open tools area reserves horizontal space. On narrow layouts it becomes an opaque chrome-surface
+drawer rather than shrinking the main Player content.
 
 ### Narrow drawer behavior
 
 The narrow drawer:
 
-- uses the current drawer-width constraint in the geometry table;
-- remains opaque; underlying media/transcript content must not visually bleed through it;
+- uses the current drawer-width baseline from the geometry table;
+- remains opaque so stage/transcript content does not bleed through;
 - leaves a visible outside area covered by a scrim;
-- intercepts outside pointer input so clicks do not pass through to underlying Player controls;
+- intercepts outside pointer input so activation does not pass through to underlying Player controls;
 - closes when the scrim is activated;
 - closes on `Escape` and returns keyboard focus to the tools toggle;
-- remains below the title controls in z-order so the title controls stay usable.
+- remains below critical/global chrome in z-order.
 
-### Tool columns
+### Tool columns and lifecycle
 
-The tools area supports user-created independent columns. Each column contains exactly one fixed header row with:
+The tools framework always retains at least one presentation column internally. Each column has one Player-owned header
+row containing:
 
 1. a tool selector;
-2. a local `+` control that appends another blank column;
+2. a local `+` control that appends another column to the right;
 3. a close control.
 
-The selected tool's body occupies the remaining column height and owns vertical overflow. The tool name is not repeated
-as another body heading merely because it already appears in the selector.
+If no tool has ever been selected, the single initial column automatically selects the first available tool. Pressing
+`+` appends a column and selects the first tool in the fixed selector order that is not already open in another column.
+If every available tool is already open at least once, `+` still appends a deliberately blank/unselected column; that
+blank state is the natural signal that no unused tool remains. The user may explicitly select a duplicate tool through
+the selector when duplicates are useful.
 
-Columns may:
+With multiple columns, close removes only that presentation column. Closing the only remaining column collapses the
+entire tools area instead of deleting the internal final column; reopening restores that column and its selected tool.
+Closing a column or switching its selected tool does not erase underlying settings or canonical tool data. Temporary
+presentation-instance state such as scroll position, an unsubmitted field draft, or arbitrary DOM state need not survive
+a tool switch in the POC unless the tool explicitly stores it in its own supported state.
 
-- select different tools independently;
-- show the same tool in more than one column;
-- be added from the `+` control in any existing column;
-- be closed independently, including closing the last column.
+Tool selectors may list platform tools and developer-provided/custom tools. Tool display name is required by the
+selector; an icon may be supplied where supported. A tool cannot replace or restyle the shared header/selector/`+`/close
+chrome directly. A separate permitted theme API may affect global Player styling, but that is not tool ownership.
 
-When no columns remain, the tools region may show an empty state. Opening an empty tools region creates one blank column
-so the user has an immediate selector instead of an unusable empty drawer.
+### Standard tool controls
 
-The complete strip owns horizontal overflow. Adding a column scrolls the strip toward the new end; rerendering existing
-columns preserves the previous horizontal position as far as the new scroll range permits. Columns use the maintained
-geometry above; in the narrow drawer they expand to the available drawer content width subject to the documented floor.
-These dimensions are part of the current multi-column presentation, not a package API.
+The Standard Player's built-in structured tool vocabulary deliberately avoids drag-based sliders/range controls. Use the
+simplest fitting control from:
 
-### Wide sizing constraint
+- momentary button;
+- on/off switch/toggle;
+- dropdown/select for one mutually exclusive choice;
+- text input;
+- numeric input;
+- static text/content.
 
-Wide tool-panel growth responds to user-created columns rather than claiming a fixed percentage of extra viewport
-space. Growth is capped so the primary middle region preserves the stricter of:
+A future stepper may be added for small fixed-step ranges when it is clearer than a select or numeric field. Multiple
+independent booleans can use multiple switches. Fully custom tool HTML/CSS/TypeScript may use any otherwise permitted
+control, including sliders; the restriction applies only to the Standard structured control set.
 
-- enough width to avoid shrinking the current media row below a 1:1 width/height boundary when the baseline can satisfy
-  that boundary; and
-- the `380px` minimum conversation/composer width, plus any right-overlay reservation applicable to that composition.
+### Tool body isolation and scrolling
 
-Tall portrait layouts that already begin below the 1:1 boundary currently preserve that baseline instead of shrinking
-media further. Whether such shapes should move side regions to overlays or use another constraint remains open and is
-not decided by this document.
+The selected tool body occupies the remaining column height and owns vertical overflow. The tool name is not repeated as
+another body heading merely because it already appears in the selector. A fully custom tool body is confined to its
+assigned surface; Shadow DOM is the preferred isolation candidate when custom CSS/DOM is allowed so package styles do
+not escape into Player chrome.
 
-The current `Visual Lab` and `Scene` registry is demo content, not the Standard Player tool API.
+The complete strip is a horizontal browser-native carousel/scroll surface. Prefer native horizontal scrolling and CSS
+Scroll Snap rather than bespoke swipe physics. In effectively single-tool narrow layouts, proximity snapping near a tool
+boundary should settle a nearly completed swipe cleanly onto the adjacent tool. When the viewport can usefully display
+more than one tool or partial views of multiple tools, do not force page-like snapping; positions such as two tools each
+roughly 75% visible remain valid. Previous/next arrow controls may advance by logical tool columns without creating a
+second carousel state model. A gesture that became a pan/scroll must not accidentally fire a child button click.
 
-## Media presentation
+### Wide sizing direction
 
-The media region is a dedicated structural surface above the transcript in the main content column.
+Tool growth must protect useful primary content, but a hard 1:1 stage boundary is not the layout algorithm. Use the full
+constraint set: stage usefulness, readable conversation width, right-side reservation, available height, and the fixed
+POC tool width. The current `900px`, `380px`, and stage-shape values remain visual/tuning inputs rather than hidden
+additional responsive modes.
 
-Current Player presentation invariants:
+`Visual Lab` and `Scene` remain development fixtures, not Standard Player tools. A real Debugger is a future platform
+tool described in [CODE-EDITOR.md](../CODE-EDITOR.md).
 
-- media content may shrink to the allocated media region before object fitting is applied;
-- image/video-like content is centered within the region;
-- the current demo image uses `contain`, keeping the complete image visible;
-- no duplicate fit label, filename caption, or scene-information overlay is placed over the media merely because that
-  information exists elsewhere;
-- decorative ambience/vignette layers, when used, are clipped to the media region and do not receive pointer input;
-- accepted future image/video/canvas/custom package rendering should be able to replace demo media without changing the
-  surrounding Player geometry.
+## Stage and media presentation
 
-The demo `contain` choice is the current Player presentation, not a final media API or user-preference contract. Media
-fit persistence and broader media ownership remain open elsewhere.
+The stage is a dedicated structural surface above the transcript in the main content column and remains present even
+when no media is active. An empty stage shows its normal background/ambience rather than collapsing and expanding the
+transcript into that space.
+
+Standard image/video-like presentation:
+
+- defaults to `contain`, keeping the complete media visible within the allocated stage;
+- centers media within the stage unless an accepted media capability explicitly positions it otherwise;
+- uses a restrained media-derived ambience/vignette in otherwise unused stage area by default where that effect is
+  available, while allowing an accepted author/media capability to provide an explicit stage/background presentation;
+- clips ambience/vignette layers to the stage and keeps decorative effects pointer-neutral;
+- uses a direct replacement as the Standard default transition; accepted explicit media transitions such as V30
+  `fade`/`crossfade` remain author-requested behavior;
+- does not add duplicate filename, fit, or scene-information captions merely because those values exist elsewhere.
+
+Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content
+without changing the surrounding Standard Player geometry. Per-asset fit/background/transition metadata may be needed
+for randomly selected assets, but exact author-facing media metadata/API remains owned by the media contract rather than
+filename conventions in this UI specification.
 
 ## Transcript
 
-The Standard Player has one visible conversation transcript in the current design. It remains visible during foreground
-interactions.
+The Standard Player has one visible conversation transcript surface even when it is empty, and it remains visible during
+foreground interactions. The visible transcript is a presentation over conversation/history data; a future author action
+may start a new visible segment without implying that retained canonical history needed for runtime/history/LLM policy
+has been destroyed. Exact retention and LLM context policy remain upstream work.
 
 The transcript:
 
 - uses the canvas surface;
 - is centered within the actual middle content region rather than the full viewport;
-- has a readable width capped at `900px`;
+- keeps an ultrawide readability cap, with the current `900px` value pending visual retuning;
 - owns vertical scrolling and contains overscroll;
-- uses a subtle `28px` top fade so content enters beneath the media boundary without a hard visual cut;
-- hides the visible scrollbar on narrow layouts while retaining scroll behavior.
+- uses the maintained soft top fade beneath the stage instead of a hard cut;
+- may hide the visible scrollbar on narrow layouts while retaining scroll behavior;
+- must remain performant for histories that can reach extremely large sizes. Do not retain millions of words as active
+  DOM nodes. Use virtualization/windowing or an equivalent technique while preserving stable scroll position and the
+  illusion that the complete retained history is continuously present; loading/rendering older content must not make a
+  user who appeared near the top suddenly jump to a different relative location.
 
-Current message presentation distinguishes package/speaker output from player-authored messages:
+### Smart follow and return to latest
 
-- speaker messages align to the normal reading side with a `30px` circular avatar/presentation marker, speaker name,
-  `2px` speaker-coloured rule with `12px` text inset, and speaker-selected font;
-- player-authored messages align to the opposite side and are constrained to `72%` of the conversation width with a
-  `560px` maximum;
-- speaker/package accent and font values are content presentation, not application palette roles.
+Smart follow is active while the user is following the newest content. New transcript entries and composer growth keep
+the newest content readable in that state. When the user intentionally scrolls upward, smart follow suspends and new
+content/composer growth must not drag the reading position back to the bottom.
 
-The POC currently renders letter glyphs as avatar fixtures. Accepted V30 permits speaker avatar image references; the
-fixture glyphs are not the final avatar contract.
+Smart follow reactivates when either:
+
+- the user manually scrolls back to the latest/bottom region; or
+- the user activates a contextual return-to-latest control.
+
+The return-to-latest control appears only when the user is sufficiently away from current content and is not in the
+middle of an active touch/scroll gesture. On touch, wait until the finger is released and scrolling has settled rather
+than placing a button under the user's moving finger. Hide the control once latest content is reached/follow resumes.
+Its exact threshold and placement remain visual tuning details; it must not permanently occupy reading space.
+
+### Message presentation and provenance
+
+Speaker/package output aligns to the normal reading side; player-authored output aligns to the opposite side. The
+current avatar, speaker-name, speaker-coloured rule, and message-width geometry remain the POC visual baseline. Speaker
+identity colour/font and per-message rich-text styling are content presentation, not application palette roles.
 
 ADR 0018 owns canonical transcript effects of foreground completion: valid text/number answers and choice/button
-activations become player-authored transcript messages according to its normalization and visible-text rules. Invalid
-attempts do not create canonical transcript output.
+activations become player-authored transcript messages according to its normalization and visible-text rules. Background
+control activation is intended to receive equivalent history treatment once its upstream contract is defined. Preserve
+machine-readable activation provenance so the Player can later mark an action visually without forcing punctuation such
+as brackets to become canonical data. Exact visual action markers remain to be tuned.
 
-Smart transcript following is not yet accepted here. In particular, do not infer a contract that every new message
-must forcibly scroll the user to the bottom; the follow/return-to-latest behavior remains open.
+The POC's letter-glyph avatars remain fixtures; accepted V30 speaker avatar references are the product capability.
 
 ## Composer and foreground interactions
 
-The Standard chat composer is fixed at the bottom of the conversation area and uses the same `900px` readable maximum as
-the transcript.
+The Standard Player uses one persistent composer at the bottom of the conversation area. It is the normal chat input and
+the answer field for `askText` and `askNumber`; `choose` and `showButton` controls appear immediately above it within the
+same central conversation width.
 
-### Normal-height wide presentation
+### Wide presentation
 
-The composer is one integrated component surface containing:
-
-- the expanding answer/input field; and
-- the primary `Send` control.
-
-The surrounding composer shell owns the ordinary border, hover/pressed border feedback, focus-visible outline, disabled
-surface, and moderate rounding. The input itself is visually integrated into that shell rather than appearing as a
-second bordered box.
-
-The input expands with content and then becomes internally scrollable. Its current maximum is the smaller of six line
-heights and `20dvh`. The maintained current placeholder is `Type your response…`; the primary action is labelled `Send`.
+At normal wide presentation the composer is one integrated component shell containing the expanding input and primary
+`Send` control. The shell owns its border, hover/pressed feedback, focus outline, disabled treatment, and moderate
+rounding; the input does not draw a second bordered box inside it.
 
 ### Narrow presentation
 
-At `<= 760px`, the composer remains in the integrated bottom footer position, but the text input and `Send` control are
-separate visible component surfaces on the canvas instead of one shared desktop shell. This is an intentional mobile
-presentation difference, not an accidental border override.
+At `<= 760px` under the current baseline, the composer remains in the bottom footer position but the input and `Send`
+control are separate visible component surfaces on the canvas. This is an intentional mobile presentation difference.
 
-### Foreground control slot
+### Input growth, focus, and keyboard behavior
 
-ADR 0018 fixes the Standard foreground-interaction relationship even though the current demo is not runtime-wired:
+The input grows upward only within the conversation area. Its maximum height is constraint-based: a large desktop may
+show more lines than a phone with its software keyboard open. After the limit, only the input scrolls internally. Composer
+growth may reduce the visible transcript viewport but must never push or resize the stage out of its allocated position,
+and the composer may never grow larger than the conversation area available beneath the stage.
 
-- the transcript remains visible;
-- the existing composer becomes the answer field;
-- ordinary free-chat submission is blocked while the mandatory foreground interaction is active;
-- `choose` and `showButton` controls appear immediately above the composer;
-- the answer field receives focus by default;
-- choice presentation may use one or two rows of buttons or a dropdown when available space, text length, font metrics,
-  zoom, accessibility settings, or similar constraints make buttons impractical;
-- button-versus-dropdown presentation is Player UI state, not canonical runtime/checkpoint state.
+The composer receives focus by default. Non-interactive Player clicks should not arbitrarily steal typing focus; an
+explicitly focused tool/input/control naturally owns keyboard input while it is active. Standard keyboard behavior is:
 
-Exact choice-row/dropdown measurement rules remain unresolved and are not invented here.
+- `Enter` submits;
+- `Shift+Enter` inserts a newline;
+- a future user preference may invert or otherwise refine that choice;
+- whitespace-only ordinary submissions are rejected;
+- the maintained default hint is `Type your response…` when an interaction does not provide its own hint. An explicit
+  interaction hint replaces that visible text; an explicit empty hint remains possible where the upstream contract
+  permits it.
+
+### Foreground interaction presentation
+
+`askText` and `askNumber` use the composer as their active answer field. `choose` and `showButton` keep the composer
+enabled rather than visually disabling it:
+
+- `choose`: selecting a rendered control or typing one exact unambiguous visible option completes the same choice;
+- `showButton`: clicking the rendered button, typing its exact visible label, or pressing Space while the empty composer
+  owns focus activates the one available button;
+- a primary click on unrelated/blank Player space does **not** activate `showButton`;
+- while any mandatory foreground interaction is active, other composer text does not advance ordinary canonical script
+  execution. In the deterministic first POC it is an invalid attempt and the same interaction remains active with the
+  accepted validation/retry behavior. A future LLM clarification/interpretation layer may consume non-matching text
+  without silently changing the deterministic choice, but that is outside the current POC contract.
+
+This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
+click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
+Actual interactive controls always take precedence and must not also fire the viewport-wide pacing shortcut.
+
+A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Its width is bounded by
+the available conversation control area, has a practical touch/click minimum, and otherwise grows with its label rather
+than becoming arbitrarily full-width. Long labels may wrap. `choose` uses one or two rows of buttons when practical and
+dynamically switches to a dropdown/select when option count, label length, font metrics, zoom, accessibility settings, or
+available space make buttons impractical. Button-versus-dropdown presentation is Player UI state, not canonical runtime
+or checkpoint state.
+
+Validation content and retry semantics come from the controlling interaction/runtime contract. The Player must not
+invent a competing inline-error semantic merely because the current POC lacks the richer accepted V30 `invalidMessage`
+/`invalidLlmInstruction` compatibility path.
 
 ## Right timer and background rail
 
-The right region is a dedicated Standard Player rail for the visible timer and long-lived background controls/status.
-It is not another tool column.
+The right region is a Standard Player presentation area for visible timers and long-lived background controls/status. It
+is not another tool column. Timer/control presence, rail backing surface, and layout reservation are separate concerns.
+Changing the backing mode must not swap component instances or change their normal appearance.
 
-### Timer
+### Timer presentation
 
-In normal-height layouts the timer is circular, uses tabular numeric text, and has an external circular progress ring.
-The current timer diameter is `clamp(72px, calc(32px + 6vmin), 86px)`. The progress ring uses the package accent for the
-completed/progress portion and the normal border family for the remainder.
+The Standard Player supports three timer-presentation classes:
 
-At `<= 600px` viewport height, the timer compacts to a `34px` circle inside the title-height strip. The progress ring
-remains present; low-height mode does not replace the timer with plain text.
+1. **visible timer** — circular timer with actual remaining time and determinate elapsed-progress ring;
+2. **mystery timer** — the same visible timer vocabulary, but the center displays `?` and the accent ring uses a stable
+   indeterminate/loading-style rotation rather than exposing duration or progress;
+3. **hidden timer** — no timer UI at all. Accepted blocking `wait` is the simple hidden blocking case; future
+   non-blocking timers may likewise request hidden presentation.
 
-Visible timer text presents non-negative whole seconds as `m:ss`, with a two-digit seconds field. The progress ring
-shows elapsed fraction (`1 - remaining / total`), clamped to the valid range; the current presentation rounds that ring
-percentage to a whole percent. Actual POC timer values are demo data. Which runtime timer/resource owns this visible
-timer and final visible-timer API semantics remain outside this presentation specification.
+A visible blocking timer and a visible non-blocking timer use the same visual vocabulary. Presentation must not reveal
+whether script execution is blocked. Multiple visible timers may coexist: only one blocking timer can own the foreground
+path at once, but background timers may add further visible timers.
 
-### Background rail content
+Normal timer text is:
 
-Two kinds of content are expected in this rail:
+- below one hour: `m:ss`;
+- one hour or more: `h:mm:ss`.
 
-1. **background controls** — long-lived interactions that remain available while normal script execution continues,
-   such as an accepted V30 permanent button (`Mercy`, `Edge`, etc.); and
-2. **status items** — non-interactive information using the same rail vocabulary, such as progress `3 / 10`.
+The determinate ring represents elapsed fraction. The current circular size and package/theme accent treatment remain the
+POC visual baseline. In overlay chrome mode the timer may use the current compact title-height presentation; exact compact
+size remains visually tuneable. A timer disappears when its underlying visible timer action/lifecycle has completed and
+no longer requires presentation.
 
-Accepted V30 permanent buttons provide the current semantic basis for background controls. When such a control is
-activated, the accepted behavior temporarily removes it while its handler runs; after a normal function handler it
-returns unless the script removed it, while other accepted handler outcomes follow the V30 runtime semantics. Status
-items are an owner-selected Player presentation direction; their runtime/Standard-Library API is not yet defined. An
-informational item must not be exposed as an interactive button merely because it shares visual geometry with one.
+When exactly one visible timer exists, it stays fixed while the background-control/status list scrolls beneath it. When
+multiple visible timers exist, they form part of the right-side stack and may scroll together with that stack when the
+available height is insufficient. Overflow content fades/softens at both top and bottom boundaries rather than being
+hard-clipped; with one fixed timer the upper fade carries scrolling controls visually behind/beneath the timer region.
 
-Background controls/status items are vertically stacked and the rail owns their vertical overflow. Long labels wrap
-inside the rail rather than widening it. Background controls use the maintained visible geometry in the component table
-above.
+### Background controls and status
+
+The intended Standard rail family contains:
+
+- momentary/background action button;
+- toggle/switch with persistent on/off value;
+- dropdown/select for one persistent mutually exclusive choice;
+- non-interactive status/progress item.
+
+They share a coherent outer visual family while preserving correct semantics and accessibility roles. A status item is
+not styled or exposed as a disabled button. A switch exposes toggle semantics; a select exposes the appropriate
+single-choice semantics. Determinate progress/fill may be shown on a status item and may also be used on an interactive
+control when the explicit progress data is meaningful and does not obscure the control state.
+
+For accepted V30 permanent buttons, disappearing while the handler executes remains the current semantic baseline. A
+future upstream option also permits the control to remain visible but disabled/busy while its handler executes. In both
+cases explicit removal is a separate lifecycle operation.
+
+Ordering is stable and deterministic at the presentation level:
+
+- controls with explicit authored priority/order appear before controls with no explicit priority;
+- explicit priorities sort from lower number to higher number;
+- equal explicit priorities preserve creation order;
+- unprioritized controls follow in creation order.
+
+Equal explicit priorities are valid because creation order is deterministic; when the eventual authored syntax makes
+such a static conflict detectable, compiler/authoring tooling should warn rather than reject it. Exact author syntax and
+runtime data representation remain upstream work. Long labels wrap rather than widening the rail.
+Valid background-control activations should eventually produce player-history/transcript provenance consistent with
+foreground action provenance; exact visible punctuation remains a presentation choice rather than canonical data.
+
+### Vertical placement and overflow
+
+With one timer, the control/status group is vertically centered in the **currently usable space that remains around the
+fixed timer** while all items fit. A software keyboard therefore reduces the space used for this calculation. Once the
+list no longer fits, only that list scrolls and the timer remains fixed. With multiple timers, the timers join the
+scrollable stack when required as described above.
 
 ### Right background mode
 
-The right region has `auto`, `docked`, and `overlay` presentation modes. A compact toggle at the upper-right of the
-timer cluster changes the **rail background mode**, not whether the timer/background content exists. Its pressed state
-represents the effective docked-background state for assistive technology.
+The right backing region has automatic docked/overlay behavior plus an explicit user override. The compact toggle changes
+only the **rail background/reservation mode**, not whether timers or controls exist. Its icon should change to represent
+the effective expanded/docked versus collapsed/overlay state rather than using one unchanged glyph.
 
-- `auto` is docked on wide layouts and overlay on narrow layouts.
-- activating the toggle from `auto` selects the opposite of the current responsive default; after that it toggles the
-  explicit `docked`/`overlay` modes;
-- `docked` shows the chrome-surface rail background;
-- `overlay` removes that structural rail background and lets timer/control surfaces float over the underlying visual
-  region;
-- explicit `docked`/`overlay` state survives resize/orientation changes.
+- automatic mode uses the current wide/narrow responsive policy subject to actual layout constraints;
+- explicit mode is stable inside the current wide/narrow composition class;
+- crossing that composition boundary re-evaluates the responsive policy;
+- a docked/open backing reservation remains stable even when no timer/control/status item is currently visible so later
+  content does not recenter the transcript or stage;
+- removing the rail background does not alter timer/control geometry or state styling;
+- timer and ordinary background-control surfaces keep the already tuned approximately `60%` component-surface opacity in
+  both docked and overlay backing modes. Sliding the backing surface underneath them must not change their opacity.
 
-On wide layouts, switching the right background to overlay deliberately keeps the same right-side layout reservation so
-transcript/composer geometry does not recenter. Media may extend behind the floating right controls.
-
-On narrow portrait layouts, the right controls occupy the media region and reserve no transcript/composer width. On
-narrow landscape layouts, the controls may span the full Player height and the transcript/composer reserve the right
-controls width so readable content is not hidden beneath them.
-
-When the rail background is absent, timer and ordinary background-control surfaces use a `60%` component-surface mix
-with transparency. Hover and pressed control fills use the corresponding hover/pressed semantic colour at the same
-`60%` treatment.
+On wide layouts an overlay backing may retain the same right-side reservation so transcript/composer geometry does not
+recenter while stage media extends behind floating controls. On narrow layouts the final overlay/reservation split is
+constraint-driven; protect readable transcript/composer content rather than assuming a physical device category.
 
 ## Interaction states and input methods
 
 ### Neutral controls
 
-Ordinary neutral controls use the shared web control progression:
+Ordinary neutral controls use the shared progression without geometric movement:
 
-1. default: component surface with `border-subtle`;
+1. default: quiet component surface with `border-subtle`;
 2. hover: `border-interactive` plus component-hover fill;
 3. pressed/active: `border-strong` plus component-pressed fill;
-4. keyboard focus: `2px` accent focus outline with `1px` separation, without geometry shift;
-5. disabled: dedicated disabled surface/border/text roles and non-interactive cursor behavior.
+4. keyboard focus: visible accent outline with separation and no layout shift; the current `2px` thickness is a Visual
+   Lab tuning value and may be reduced after owner testing;
+5. disabled: dedicated readable disabled surface/border/text roles and non-interactive semantics/cursor behavior.
 
-`border-strong` is a pressed/strong state, not the ordinary resting border.
+A non-interactive status item is a separate semantic/visual class, not a disabled control.
 
-### Primary controls
+### Primary and authored control colours
 
-The current primary `Send` control uses the solid accent family for default, hover, and pressed states with inverse
-text.
+The primary `Send` action uses the Player/theme solid accent family. Per-control authored colour does not redefine the
+Player accent; changing the global accent belongs to an explicit theme API.
 
-### Input capability
+For supported authored Standard controls, the developer may provide only the control's base/fill colour. The Player
+retains ownership of shape, border/shadow/effects, focus, disabled treatment, and derived hover/pressed states. The Player
+also chooses either black or white label text according to which is readable against the effective fill; Standard
+control text colour is not separately author-overridable. The exact internal colour calculation is an implementation
+choice as long as it deterministically produces the readable black/white result. These per-control colours remain local
+to the authored control and must not repaint unrelated Player chrome, speaker identity, or theme accent.
 
-- hover styling applies only when the input device reports hover capability with a fine pointer;
-- touch/coarse-pointer activation uses pressed/active feedback rather than depending on hover;
-- compact buttons suppress the browser tap highlight and use manipulation-oriented touch behavior;
+Speaker name colour, authored transcript text/spans, media ambience, and application theme colours are separate layers.
+Their richer formatting contract is not a reason to expose arbitrary raw HTML in transcript content.
+
+### Input capability and motion
+
+- hover styling applies whenever the actual browser/input capability supports hover; do not infer it from desktop versus
+  phone. A phone/tablet with a mouse or hover-capable pen may legitimately receive hover feedback;
+- touch/coarse activation uses pressed/active feedback without requiring hover;
 - keyboard focus remains visible through `:focus-visible`-equivalent behavior;
-- reduced-motion preference effectively removes decorative transition/animation duration where current Player motion
-  is used.
-
-An actual interactive control takes precedence over the ADR 0018 click/tap/Space pacing-skip gesture. Activating a
-button, field, selector, or other control must not also complete a viewport-wide pacing gate.
+- actual interactive controls take precedence over viewport-wide pacing-skip gestures;
+- functional motion is allowed for carousel/snap movement, drawer/rail transitions, mystery-timer indeterminate motion,
+  edge fades, fullscreen auto-hide chrome, and similarly meaningful state transitions;
+- `prefers-reduced-motion` reduces/removes non-essential animation while preserving understandable state changes.
 
 ## Z-order, overlays, and click-through
 
-The maintained relative stacking order is:
+The maintained relative layering direction is:
 
-1. title/global controls;
-2. open narrow tools drawer;
-3. drawer scrim;
-4. title structural background;
-5. right timer/background-control region;
-6. ordinary content surfaces.
+1. ordinary Standard Player content;
+2. floating timer/background-control surfaces;
+3. tools drawer and its scrim, with the drawer above its own scrim;
+4. blocking modal or custom overlay;
+5. critical fullscreen/global auto-hide controls needed to leave or operate the Player.
 
-Exact numeric z-index values are implementation detail; the relative behavior above is contractual.
+Exact numeric `z-index` values are implementation detail. The drawer scrim intentionally intercepts outside activation.
+Decorative stage/media effects are pointer-neutral. Floating right controls remain interactive even when their backing
+surface is absent. A visible overlay must not create accidental click-through into covered controls.
 
-The drawer scrim intentionally intercepts outside pointer activation. Decorative media effects are pointer-neutral.
-Floating right controls remain interactive even when their structural background is absent. Overlay presentation must
-not create click-through into a covered control where the overlay visibly owns that input area.
+Custom tool/stage HTML/CSS is confined to its assigned surface and cannot escape through accidental selectors or
+`z-index`. A deliberate full-player takeover uses its future explicit capability rather than CSS leakage from a smaller
+custom surface.
 
 ## Current light theme
 
@@ -491,47 +680,43 @@ there is no Radix runtime or CSS dependency.
 
 ### Colour ownership boundary
 
-The application palette does **not** own:
+The application palette does **not** own speaker/person colours, authored transcript span colours, authored per-control
+fill colours, media-derived ambience, or technical mask colours. Those values may vary with content without repainting
+unrelated Standard Player chrome.
 
-- speaker/person colours;
-- speaker fonts and avatars;
-- package-selected accent/identity colours;
-- media-derived ambience;
-- technical mask colours.
-
-Those values may vary with content without repainting unrelated Standard Player chrome. The current package accent is
-used by the timer progress ring and selected package-accent presentation seams.
+The application/theme accent remains theme-owned. A package may later select or alter a Player theme only through the
+explicit theme contract; colouring one authored control does not silently replace that global accent. Timer progress and
+other accent-driven Standard presentation use the effective Player theme accent unless a controlling capability says
+otherwise.
 
 ## Package customization and theming boundary
 
-The provisional product direction is that packages/developers may select the base colour of both foreground controls
-and long-lived background controls. The current POC has not implemented that author-facing capability yet. Its exact
-TeaseScript/Standard-Library API, accepted colour forms, generated interaction-state colours, text-colour choice, and
-accessibility fallback behavior remain open.
+The Standard Player remains a default presentation rather than an irrevocable shell. Within Standard UI, supported
+authored controls may receive a base/fill colour while the Player derives their interaction states and selects readable
+black/white control-label text as defined above. Authors do not separately override Standard control-label text colour.
+The exact accepted colour syntax/data form is upstream Standard-Library work; presentation derivation belongs to the
+Player rather than being baked into source semantics.
 
-The following related direction is also intentionally **not finalized** and must not be implemented as if this document
-had chosen an API or precedence rule:
+The following remain unresolved and are tracked in [OPEN-DECISIONS.md](../OPEN-DECISIONS.md):
 
-- package/developer-selected Player theme versus user-selected theme versus platform default;
+- platform default versus package-selected versus future user-selected theme precedence, including whether a package may
+  require, suggest, or merely provide a theme;
 - future dark-theme semantic mappings;
-- developer-selected speaker/text colours interacting with user-selected backgrounds;
-- automatic derivation of hover/pressed/disabled states from a custom control colour;
-- accessibility/contrast correction when a package colour would make text or controls unreadable;
-- which Standard Player visual properties packages may customize without replacing Standard UI;
-- persistence and scope of user Player preferences.
+- which additional Standard Player visual properties a package may customize without replacing Standard UI;
+- exact persistence/scope of user Player presentation preferences;
+- constrained rich-text/BBCode capabilities for authored transcript content and their readability/accessibility rules.
 
-The intended design constraint is that package customization must not make Standard Player controls or text unreadable,
-but the exact precedence, transformation, fallback, warning, and author-override policies remain open. See
-[OPEN-DECISIONS.md](../OPEN-DECISIONS.md).
+Do not expose unrestricted raw HTML as ordinary transcript text. Rich text should use a constrained/allowlisted contract
+so authored formatting cannot inject arbitrary interactive controls, scripts, or layout-breaking markup. Fully custom
+HTML/CSS/TypeScript remains a separate custom-view/tool/stage capability inside the accepted sandbox boundary.
 
-Custom package views remain governed by ADR 0012 and the later custom-view contract. This specification describes the
-platform Standard Player; it does not grant custom code access to parent DOM, host cookies, or unrestricted network
-capabilities.
+Custom package presentation remains governed by ADR 0012 plus the temporary upstream-integration direction above. No
+custom UI mode grants access to parent DOM, host cookies, or unrestricted network capabilities.
 
 ## Accessibility invariants
 
 Higher-authority ADR 0018 requires a programmatic accessible name for every Standard UI text field, number field, choice
-group, and button. The Player must preserve that requirement regardless of visible hint text or package styling.
+group, and button. The Player preserves that requirement regardless of visible hint text or authored styling.
 
 Additional maintained presentation invariants:
 
@@ -539,15 +724,17 @@ Additional maintained presentation invariants:
 - touch interaction does not depend on hover state;
 - drawer dismissal is available through outside activation and `Escape`;
 - actual controls take precedence over viewport pacing-skip gestures;
-- disabled controls remain visually distinguishable from enabled quiet states;
-- reduced-motion preference suppresses current decorative motion without changing layout or interaction semantics;
-- status-only right-rail items use non-interactive semantics rather than masquerading as buttons;
-- package/theme colours must ultimately preserve readable Standard Player content, although the exact enforcement policy
-  remains open.
+- disabled controls remain readable and distinguishable from enabled quiet states;
+- status items expose non-interactive semantics rather than disabled-button semantics;
+- switches/toggles and selects expose their correct control semantics;
+- tool-carousel next/previous controls and horizontal scrolling remain keyboard/pointer accessible when those controls are
+  present;
+- authored Standard control fills receive Player-owned readable black/white label text;
+- reduced-motion preference suppresses non-essential motion without changing layout or interaction semantics.
 
-Broader contrast thresholds, text scaling policy, package-colour correction, and final custom-view accessibility
-responsibility remain controlled by accepted accessibility requirements plus the unresolved decisions; do not invent
-numeric thresholds here without an accepted source.
+Broader text scaling, final minimum-control sizing, custom-view accessibility responsibility, and exact numeric contrast
+requirements remain controlled by accepted accessibility requirements plus unresolved decisions; do not invent a
+project-wide threshold here without an accepted source.
 
 ## Open decisions
 

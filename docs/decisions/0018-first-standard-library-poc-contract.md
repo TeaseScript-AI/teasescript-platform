@@ -25,8 +25,8 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
 8. The first POC uses one Standard chat target with stable optional speaker provenance. Broader involved-speaker and conversation identity remain deferred.
 9. `askText`, `askNumber`, `choose`, and `showButton` are mandatory foreground interactions. They cannot be cancelled and do not return `null`.
 10. Interaction definitions and completions are bounded, typed, JSON-safe data. Over-limit data is rejected deterministically without truncation or partial state mutation.
-11. The Standard Player application uses one focused chat composer for typed answers. Choice controls may render as buttons or a dropdown without changing semantics.
-12. Valid answers and choice/button activations become player-authored transcript messages.
+11. The Standard Player application uses one focused chat composer for typed answers. Choice controls may render as buttons or a dropdown without changing semantics; the one-option `showButton` uses the same Standard activation vocabulary.
+12. Valid answers and choice/button activations become player-authored transcript messages. Exact unambiguous visible choice text may activate `choose`; exact button text or Space with the empty focused composer may activate `showButton`.
 13. `say` uses account-configured smart autoplay by default, supports exact seconds, `0`, and `instant`, and supports speaker defaults plus per-message `skippable` or `unskippable` overrides.
 14. Every positive pacing gate is one ADR 0016 pending action. It begins as background work and may become the foreground action when it blocks a prepared later `say`.
 15. A skippable pacing gate may be completed by a primary click or tap inside the player iframe viewport, or by Space while the focused composer is empty. Skip completes only the pacing gate.
@@ -201,9 +201,9 @@ showButton "Continue"
 showButton as mistress "Ready"
 ```
 
-The first POC form displays one blocking button and has no useful script return value, timeout, or cancellation path. It completes only when the player activates the button.
+The first POC form displays one blocking button and has no useful script return value, timeout, or cancellation path. It is the one-option form of the same Standard foreground-control vocabulary as `choose`. The Player may activate it by clicking/tapping the rendered button, by submitting the exact stored visible button text through the focused composer, or by pressing Space while that composer is empty and focused. A click/tap on unrelated blank Player space does not activate `showButton`.
 
-The completion identifies the active button action. The engine derives the canonical player-authored transcript text from the stored button label; the Player application does not provide replacement transcript text.
+All of those activation routes complete the same active button action. The engine derives the canonical player-authored transcript text from the stored button label; the Player application does not provide replacement transcript text.
 
 Accepted V30 timeout and elapsed-time behavior is not rejected. It is deferred to a later advanced `showButton` extension and is not part of the first implementation slice.
 
@@ -333,10 +333,10 @@ The Standard Player application uses one fixed composer area at the bottom of th
 During a foreground interaction:
 
 - the transcript remains visible;
-- the existing composer becomes the answer field;
-- ordinary free-chat submission is blocked;
+- the existing composer remains enabled and becomes the answer field;
 - choice and button controls appear immediately above the composer;
-- the answer field receives focus by default so the player can type without first clicking it.
+- the answer field receives focus by default so the player can type without first clicking it;
+- only a valid completion advances the deterministic foreground interaction. Non-matching composer text does not become ordinary script progress; in this first POC it is a rejected attempt and the same mandatory interaction remains active. Future LLM clarification or interpretation may handle such text only through a separately accepted constrained contract.
 
 The Player application dynamically chooses how a `choose` interaction is presented. Buttons may occupy one or two rows. When the available viewport, text lengths, font metrics, zoom, accessibility settings, or other layout constraints make that presentation impractical, the same choices may render as a dropdown. Exact breakpoints and measurement rules remain a Player UI decision.
 
@@ -353,7 +353,7 @@ For `choose`, selecting a button or dropdown entry:
 
 Typing an exact unambiguous visible choice has the same completion effect.
 
-For `showButton`, activating the button appends its stored visible text as the player's transcript message and completes the pending action. For example:
+For `showButton`, clicking/tapping the rendered control, submitting its exact visible text, or pressing Space with the empty focused composer has the same completion effect: the stored visible text becomes the player's transcript message and the pending action completes. Clicking unrelated blank Player space does not activate the button. For example:
 
 ```tease
 say as mistress "Tell me when you are ready."
@@ -474,7 +474,7 @@ Each settlement emits its own sequenced `actionCompleted`. Continuations do not 
 
 ### Player skip completion
 
-A primary click, tap, or eligible Space key submits a typed completion for the active `chatPacingGate` action ID.
+A primary click/tap on otherwise unused Player space, or an eligible Space key while the focused composer is empty, submits a typed completion for the active `chatPacingGate` action ID. Interactive controls and focused inputs take precedence: activating them must not also trigger the viewport-wide pacing shortcut.
 
 - a skippable active gate settles normally with a skip settlement;
 - an unskippable gate rejects the attempt without state mutation;

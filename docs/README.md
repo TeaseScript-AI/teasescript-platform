@@ -22,7 +22,9 @@
 - `SECURITY.md`
 - `CONTINUOUS-PERSONALITIES.md`
 - `CODE-EDITOR.md`
-- `web/PLAYER-UI.md`: provisional maintained observable Standard Player UI contract.
+- `web/PLAYER-UI.md`: provisional maintained normative Standard Player UI contract. While its temporary `Upstream
+  contract integration` section is non-empty, Player work also reads that section for Owner-decided behavior still
+  awaiting synchronization into its controlling upstream source.
 - `web/UI-DESIGN-AND-ENGINEERING.md`: cross-surface UI engineering, responsive, interaction, and design-quality
   guardrails.
 - `LLM-INTEGRATION.md`

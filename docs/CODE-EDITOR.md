@@ -21,6 +21,30 @@ The temporary TypeScript-export metadata POC has been removed. Editor
 transport, `.tease` linkage, metadata format and validation, automatic export
 discovery, and library-aware completion remain future consumer-driven work.
 
+## Debugger direction
+
+A real Debugger is a future platform tool that may be surfaced through the Standard Player tools framework when an
+explicit debug/developer mode is active. It is not a normal-player default because it exposes implementation detail and
+can deliberately change execution outcomes. It should be available as platform diagnostics rather than being silently
+prevented by a package solely to preserve surprises.
+
+The debugger should support at least inspection of the current source file and execution/source position, variables and
+values, foreground and background actions, visible and hidden timers, current media/audio/video state, and provenance
+that explains why a media item or branch was selected. Exact UI and source-mapping details remain future work.
+
+Two execution modes are distinct:
+
+- **read-only inspection** observes the real session without changing canonical execution;
+- **active debug** runs a disposable fork of the selected session/checkpoint. The fork may step, pause, change variables,
+  control deterministic RNG outcomes, exercise branches, and use manual checkpoint/restore without merging those
+  mutations back into the canonical session when debug mode ends.
+
+Server/account side effects from an active debug fork should use a test/simulation context by default so diagnostic
+progress cannot become ordinary account progress or restrictions. A later explicit integration-test context may exercise
+real persistence semantics when that is the behavior being tested. Exact authorization, history marking, test namespaces,
+and server contracts remain open; the important boundary is that an active debug fork is not silently merged into the
+ordinary session.
+
 ## Accepted library-aware tooling boundary
 
 Under accepted ADR 0017, Standard Library and package-library functions use

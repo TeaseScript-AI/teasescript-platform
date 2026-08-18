@@ -31,9 +31,14 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTUR
 - Minimal engine primitive families for background timed work and future media capabilities under ADR 0017.
 - Serializable lowering or engine-managed continuation representation for resumable library workflows not covered by
   ADR 0018's full-lowering choice.
-- Browser unavailability, reload, reconnect, device-sleep, and visibility-change time-integrity policy for local timed
-  work.
-- Optional author-defined recovery points, including rollback scope and treatment of irreversible external effects.
+- Exact checkpoint selection, deadline recalculation, repeating-timer, and server-authoritative-time mechanics needed
+  to implement the owner-selected missed-event barrier for browser unavailability/reload/reconnect/device sleep.
+- Exact recovery-frontier mechanics for non-restorable custom presentation, including checkpoint selection and optional
+  advanced reconstruction/snapshot support.
+- Exact durable external-effect protocol across recovery boundaries: effect identity, ownership/release authority,
+  transactional checkpoint/effect commit, reservation/lease lifecycle, idempotency, and cleanup behavior.
+- Optional author-defined recovery points beyond automatic recovery frontiers, including rollback scope and treatment of
+  irreversible external effects.
 
 ## Language, Standard Library, and modules
 
@@ -88,25 +93,29 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Player theme precedence among platform default, developer/package selection, and future user-selected preferences,
   including whether a package may require, suggest, or merely provide a theme and how future dark-theme semantic
   mappings participate.
-- Exact package customization of Standard Player foreground/background controls: allowed colour inputs, automatic
-  hover/pressed/disabled state derivation, text-colour selection, and accessibility/readability protection.
+- Exact author-facing data/API form for supported Standard Player per-control base/fill colours. The Player already owns
+  derived interaction styling and automatic readable black/white control-label text; syntax, serialization, and which
+  Standard control kinds expose the colour input remain unresolved.
 - Speaker/text colour customization and the readability policy when content-provided colours interact with the Player
   theme or future user theme choices.
+- Constrained transcript rich-text/BBCode capability: allowed formatting elements/attributes, sanitization,
+  accessibility/readability interaction, and how per-span styling composes with speaker and Player presentation.
 - Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
   readable scaling/zoom behavior, minimum control sizing, contrast thresholds, and browser/platform responsibility.
 - Player UI preference persistence: which panel/tool/theme/media-fit/text-display preferences survive reload or session
   changes and whether restoration is automatic, explicit, or both.
-- Smart transcript following: exact at-latest detection, return-to-latest control, resize/restore behavior, and how new
-  content behaves while the player is reading older transcript entries.
-- Whether tall portrait or other constraint-driven shapes should move docked side regions to overlays beyond the
-  current Standard Player width rule.
+- Exact tuned thresholds/measurements for constraint-driven side-region dock/overlay decisions, compact geometry,
+  fixed tool width, stage height, readable conversation bounds, composer growth, and focus-outline thickness.
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
-- Standard/runtime mechanism for long-lived non-interactive right-rail status items (for example progress `3 / 10`),
-  including lifecycle/update/removal semantics and how they relate to accepted background/permanent controls.
+- Exact Standard/runtime API for the right-rail control family: momentary controls, toggles, selects, status/progress
+  items, determinate fill, authored priority/order, update/removal, and optional disabled/busy-in-place handler behavior.
+  The intended presentation and ordering rules are maintained in `web/PLAYER-UI.md`; syntax/data/lifecycle binding remain
+  unresolved.
 - Whether any additional Player-specific control widths, heights, or spacing should later join the already shared
   border/radius/focus/state baseline for TeaseScript web surfaces.
-- Standard Player shell versus package custom-view ownership: which platform regions may be replaced, styled, hidden, or
-  composed with package presentation while preserving the accepted isolation/lifecycle boundary.
+- Exact capability/lifecycle APIs for package custom tools, custom stage content, floating/modal overlays, and temporary
+  full-player takeover, including recovery-frontier declaration/reconstruction and restore behavior while preserving the
+  accepted iframe isolation boundary.
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
 - Camera capability declarations, stream ownership, device switching, quality negotiation, restore, privacy
   indicators, and simultaneous-camera policy.

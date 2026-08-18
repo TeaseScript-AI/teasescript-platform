@@ -56,8 +56,10 @@ milestone, gate, integration-status, or current-capability work.
 - `docs/chatgpt-project/SYSTEM-PROMPT.txt`: repository-maintained ChatGPT Project Settings prompt candidate; read only
   for prompt maintenance or deliberate owner-approved synchronization. It does not prove the live Project Settings state.
 - `docs/README.md`: documentation map.
-- `docs/web/PLAYER-UI.md`: provisional maintained observable Standard Player UI contract; read for Player presentation,
-  responsive composition, theming, or control-placement work.
+- `docs/web/PLAYER-UI.md`: provisional maintained normative Standard Player UI contract; read for Player presentation,
+  responsive composition, theming, or control-placement work. While its temporary `Upstream contract integration`
+  section is non-empty, Player work must also review that section for Owner-decided behavior awaiting synchronization
+  into its controlling runtime/Standard-Library/persistence/custom-view source.
 - `docs/web/UI-DESIGN-AND-ENGINEERING.md`: cross-surface UI engineering, responsive, interaction, and design-quality
   guardrails; read for Player, host-site, editor, or other frontend UI work.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.

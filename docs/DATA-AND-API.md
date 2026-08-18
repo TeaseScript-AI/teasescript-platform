@@ -95,6 +95,22 @@ roles, player device aliases, long-lived stream ownership, and persistent media 
 designs recorded in
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
+## Player session persistence modes
+
+Browser-local persistence is a permanent product capability, not a disposable POC convenience. An accountless player
+may keep supported session/runtime state locally. A signed-in player may also choose local-only storage for privacy;
+signing in does not by itself require sensitive Player/session state to be uploaded. Server-backed persistence remains
+the complementary mode for capabilities such as cross-device continuation.
+
+Both modes use the same canonical engine/checkpoint model. Storage location does not create a second runtime or save
+format. Production preferences will select local-only versus server-backed behavior through typed platform contracts;
+the exact records, encryption, retention, synchronization, conflict, and migration policy remain open.
+
+Ordinary Player use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Player
+creates and restores supported checkpoints according to the session lifecycle. Developer/debug tooling may expose
+manual checkpoint and restore operations because those runs are explicitly diagnostic rather than ordinary canonical
+play.
+
 ## Stability and future contracts
 
 The current TypeScript exports and internal instruction-plan, runtime-snapshot, and checkpoint formats are POC implementation surfaces. The current numeric revisions are documented in [`RUNTIME.md`](RUNTIME.md). Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
