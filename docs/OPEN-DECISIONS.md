@@ -90,14 +90,11 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Background-handler interruption, ordering, cleanup, and foreground-slot interaction after the public timer API is
   decided.
 - Stable text-output target handles beyond the first Standard chat target.
-- Player theme precedence among platform default, developer/package selection, and future user-selected preferences,
-  including whether a package may require, suggest, or merely provide a theme and how future dark-theme semantic
-  mappings participate.
+- Exact author-facing theme schema/registration API and platform dark-theme token values. `ui/PLAYER-UI.md` fixes
+  precedence, standalone/light/dark theme semantics, missing-variant fallback, and the no-arbitrary-CSS boundary.
 - Exact author-facing data/API form for supported Standard Player per-control base/fill colours. The Player already owns
   derived interaction styling and automatic readable black/white control-label text; syntax, serialization, and which
   Standard control kinds expose the colour input remain unresolved.
-- Readability/override policy when authored speaker or rich-text colours conflict with a Player theme or future user
-  accessibility/theme preferences.
 - Constrained transcript rich-text/BBCode capability: allowed formatting elements/attributes, sanitization,
   accessibility/readability interaction, and how per-span styling composes with speaker and Player presentation.
 - Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including

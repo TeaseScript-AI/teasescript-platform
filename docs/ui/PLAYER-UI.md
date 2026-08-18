@@ -90,10 +90,10 @@ Current items:
   checkpoint/recovery state and an external effect should commit durably together. Effects that must be live during a
   non-restorable view need a reservation/lease then commit/rollback model rather than relying on browser liveness or TTL
   alone. Exact server/runtime APIs remain upstream work.
-- **Background-control family:** the long-lived right rail is intended to support momentary actions, toggles/switches,
-  single-choice selects, and non-interactive status/progress items. The accepted V30 permanent-button behavior remains
-  the current button semantic baseline; exact Standard-Library syntax, binding, persistence, update, and handler APIs
-  for the broader family remain upstream work.
+- **Background-control family:** the right-rail presentation below covers momentary actions, toggles/switches,
+  single-choice selects, and non-interactive status/progress items. Accepted V30 permanent-button behavior remains the
+  current button semantic baseline; exact Standard-Library binding, persistence, update, and handler APIs remain
+  upstream work.
 - **Busy background controls:** accepted V30 disappear-while-handler-runs behavior remains available. A later control
   contract must also allow a control to remain in place as disabled/busy while its handler runs; explicit removal is a
   separate lifecycle action. Exact syntax/default remains upstream work.
@@ -425,9 +425,9 @@ identity colour/font and per-message rich-text styling are content presentation,
 
 ADR 0018 owns canonical transcript effects of foreground completion: valid text/number answers and choice/button
 activations become player-authored transcript messages according to its normalization and visible-text rules. Background
-control activation is intended to receive equivalent history treatment once its upstream contract is defined. Preserve
-machine-readable activation provenance so the Player can later mark an action visually without forcing punctuation such
-as brackets to become canonical data. Exact visual action markers remain to be tuned.
+activation history remains an upstream runtime contract; when recorded, the Player uses the same player-authored action
+presentation and preserves machine-readable activation provenance. Visual markers must not become canonical punctuation;
+their exact appearance remains tuning work.
 
 The POC's letter-glyph avatars remain fixtures; accepted V30 speaker avatar references are the product capability.
 
@@ -532,7 +532,7 @@ hard-clipped; with one fixed timer the upper fade carries scrolling controls vis
 
 ### Background controls and status
 
-The intended Standard rail family contains:
+The Standard rail presentation supports:
 
 - momentary/background action button;
 - toggle/switch with persistent on/off value;
@@ -558,8 +558,7 @@ Ordering is stable and deterministic at the presentation level:
 Equal explicit priorities are valid because creation order is deterministic; when the eventual authored syntax makes
 such a static conflict detectable, compiler/authoring tooling should warn rather than reject it. Exact author syntax and
 runtime data representation remain upstream work. Long labels wrap rather than widening the rail.
-Valid background-control activations should eventually produce player-history/transcript provenance consistent with
-foreground action provenance; exact visible punctuation remains a presentation choice rather than canonical data.
+Recorded background-control activation history follows the transcript provenance rule above.
 
 ### Vertical placement and overflow
 
@@ -678,12 +677,22 @@ there is no Radix runtime or CSS dependency.
 
 The application palette does not own speaker/person colours, authored transcript spans, authored per-control fills,
 media ambience, or technical masks. The Player/theme accent remains theme-owned; local control colour never changes it.
-A package may alter the Player theme only through the eventual explicit theme contract.
 
-Still unresolved in [OPEN-DECISIONS.md](../OPEN-DECISIONS.md): theme precedence, dark-theme mappings, additional Standard
-Player theme properties, presentation-preference persistence, and constrained transcript rich text/BBCode. Ordinary
-transcript text does not accept unrestricted raw HTML; fully custom HTML/CSS/TypeScript uses the separate custom
-view/tool/stage capability inside the accepted sandbox.
+Standard Player theme precedence is: explicit user-selected theme, package/developer-selected default, then platform
+default. A package may select a default but cannot force it against a user override.
+
+Custom themes are standalone, light, or dark. A developer may provide one or a light/dark pair; both variants are not
+required. A standalone theme is used as authored. A mode-qualified theme uses the variant matching the effective
+light/dark mode; a missing variant falls back to the corresponding platform theme. Do not synthesize or auto-convert it.
+Exact author-facing schema/names remain upstream API work.
+
+Standard theming covers defined semantic colour roles, not arbitrary CSS. Geometry, fonts, spacing, DOM/chrome
+ownership, and other Standard Player properties remain Player-owned unless a later explicit capability says otherwise.
+Authored speaker/rich-text identity colours remain content styling. An explicit user accessibility/readability override
+takes precedence. Platform dark-theme values, theme API shape, preference persistence, rich-text allowlist, and numeric
+accessibility thresholds remain open; see [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). Ordinary transcript text does not
+accept unrestricted raw HTML. Fully custom HTML/CSS/TypeScript uses the separate custom view/tool/stage capability
+inside the accepted sandbox.
 
 ## Accessibility invariants
 
