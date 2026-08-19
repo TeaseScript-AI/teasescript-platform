@@ -102,16 +102,11 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Exact tuned thresholds/measurements for constraint-driven side-region dock/overlay decisions, compact geometry,
   fixed tool width, stage height, readable conversation bounds, composer growth, and focus-outline thickness.
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
-- Exact Standard/runtime API and author syntax for the right-rail control family. `ui/PLAYER-UI.md` fixes the current
-  owner-selected value ownership, polling/change-handler model, programmatic update capability, lifecycle, busy-in-place
-  behavior, deterministic single-handler scheduling, status/progress role, ordering, user-versus-script provenance, and
-  visible-history direction; exact data shapes, persistence binding, API names, and syntax remain unresolved.
-- Whether any additional Player-specific control widths, heights, or spacing should later join the already shared
-  border/radius/focus/state baseline for TeaseScript UI surfaces.
-- Exact custom-view registration/lifecycle API shape, typed input/event/result schemas, surface-isolation mechanism
-  (including optional Shadow DOM), and how reconstructible custom state is declared/validated. ADR 0012 fixes execution
-  modes, surface constraints, hide/dismiss/end distinctions, failure/cleanup direction, relevant focus/browser-Back
-  behavior, sandbox boundary, and recovery-frontier semantics.
+- Exact Standard/runtime API, data shapes, persistence binding, names, and author syntax for the owner-resolved
+  long-lived control family; current semantics and presentation are maintained in `ui/PLAYER-UI.md`.
+- Exact custom-view registration/lifecycle API, typed input/event/result schemas, author syntax, surface isolation
+  (including optional Shadow DOM), and reconstructible-state declaration/validation; ADR 0012 fixes capability
+  semantics.
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
 - Camera capability declarations, stream ownership, device switching, quality negotiation, restore, privacy
   indicators, and simultaneous-camera policy.
@@ -120,10 +115,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Motion detection, sampling, camera resource limits, and scene ownership.
 - Media layering, concurrent ownership, cleanup, recovery, and resource handles.
 - Persistent media identity, labels, timestamps, retrieval, privacy, retention, encryption, export, and quotas.
-- Custom-view author syntax within the accepted custom-view capability.
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
 - Time-integrity logging thresholds and whether a future typed anomaly hook is script-visible.
-
 
 ## Debugger and simulation
 

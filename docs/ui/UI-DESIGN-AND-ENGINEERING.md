@@ -1,29 +1,13 @@
 # UI design and engineering guide
 
 - **Status:** Current cross-surface UI engineering and design guidance.
-- **Use when:** modifying the Player, host-site UI, editor/debugger UI, responsive layouts, controls, media
-  presentation, or visual styling.
+- **Use when:** changing layout, responsive behavior, browser interaction presentation, controls, media presentation,
+  or visual styling in Player, host, editor, or debugger UI.
 - **Does not define:** product features, runtime/host protocols, trust boundaries, exact visual design, framework
   choice, or TeaseScript semantics.
 
-This guide distils recurring Player POC failures and visual-design research into reusable maintenance guidance. Specific
-Player incidents remain useful evidence, but the durable rules are intentionally phrased for any current or future UI
-surface. Architecture, security, runtime, and product contracts remain with their controlling sources.
-
-## Durable lessons from observed failures
-
-| Observed failure | General mistake | Reusable response |
-| --- | --- | --- |
-| Media gained an inset only at some widths. | More than one rule owned the same geometry for the same state. | Keep one authoritative geometry definition per state; responsive rules change it only for a real responsive state change. |
-| Collapsing a side region moved unrelated content or lost controls. | Visual background, layout reservation, foreground content, and interaction were treated as one responsibility. | Model those responsibilities separately so changing one does not implicitly remove or reposition the others. |
-| An overlay gained a title-sized gap or hid unrelated controls. | Overlay placement was coupled to normal-flow/Grid placement and sibling visibility. | Treat overlays as an independent presentation mode over the intended containing area; covering a sibling is not deleting it. |
-| Scrollbars overlapped content or changed usable control width. | Scroll space was treated as incidental padding. | Give scroll containers deliberate overflow and gutter behavior where stable geometry matters. |
-| A tapped phone button remained in its hover appearance. | Desktop pointer assumptions were applied to touch. | Gate hover to hover-capable pointers; use `:active` for press feedback and `:focus-visible` for keyboard focus. |
-| A JavaScript pointer-release workaround broke desktop behavior without fixing touch. | A CSS/input-capability problem was patched at the symptom layer. | Fix the owning abstraction first; avoid cross-input JavaScript state unless the interaction genuinely requires it. |
-| Hover movement exposed 1 px seams. | Decorative feedback changed shared-edge geometry. | Prefer paint-only feedback when movement is not semantically required. |
-| Visual experiments accumulated duplicate component rules. | A temporary override layer became a second implementation. | Use experiment layers temporarily; integrate accepted styling into the normal owner and remove duplicate overrides. |
-| A default accent differed between CSS and runtime/demo data. | The same default was owned in multiple layers with implicit precedence. | Keep one authoritative default or an explicit override contract; do not duplicate moving defaults across CSS and data. |
-| A texture/effect covered controls or visually recreated a collapsed surface. | Decoration was scoped as a structural layer instead of to the intended surface. | Clip decoration to its owner, keep it input-neutral, and do not use effects to recreate layout or hidden regions. |
+This guide distils recurring Player POC failures and design research into reusable rules for any UI surface.
+Architecture, security, runtime, and product contracts remain with their controlling sources.
 
 ## Engineering guardrails
 
@@ -136,7 +120,8 @@ hover-capable pen. Use capability-aware CSS for hover, touch press, and keyboard
 must prevent click-through when they intentionally intercept outside input.
 
 When a bug appears only on a real phone or another input class, treat that environment as evidence rather than forcing
-desktop emulation to reproduce it. Prefer the simplest input-specific rule that preserves the other input modes.
+desktop emulation to reproduce it. Prefer the simplest input-specific rule that preserves the other input modes. Do not
+add cross-input JavaScript state to patch CSS capability feedback unless the interaction actually requires that state.
 
 ### Keep content independent from demo markup and decorative chrome
 
@@ -153,7 +138,8 @@ real consumers.
 ### Treat browser edges as layout inputs, not patches
 
 Viewport height, orientation, safe areas, scrollbars, soft keyboards, and low-height windows can change usable space
-without changing the conceptual UI. Account for them in the owning layout/responsive layer. Avoid JavaScript layout
+without changing the conceptual UI. Account for them in the owning layout/responsive layer. Give scroll containers
+explicit overflow/gutter behavior when scrollbar appearance would change usable geometry. Avoid JavaScript layout
 measurement when modern CSS can express the same invariant more directly and reliably.
 
 ### Size responsive layouts from constraints

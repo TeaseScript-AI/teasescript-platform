@@ -23,10 +23,7 @@ server. That development route is not a public Player/host protocol.
   layers.
 - `demo-session.ts` and `demo-media/` are presentation fixtures, not runtime/package APIs.
 
-The implementation intentionally uses browser-native layout/features and has no UI-framework runtime dependency. Current
-CSS uses Grid, dynamic viewport units, `clamp()`, `color-mix()`, `aspect-ratio`, `field-sizing`, safe-area environment
-insets, stable scrollbar gutters, masks, input-capability media queries, and `prefers-reduced-motion` where they
-simplify the required presentation.
+The implementation intentionally uses browser-native layout/features and has no UI-framework runtime dependency.
 
 `styles/layout.css` currently owns the concrete light-theme palette values and semantic token mapping used by the
 source. Those values are also maintained as observable Player contract in `docs/ui/PLAYER-UI.md`; component CSS should

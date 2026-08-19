@@ -46,73 +46,36 @@ replace the Player-specific contract here.
 
 ## Current maturity boundary
 
-The current Player POC is a presentation implementation, not a completed production Player. In particular:
+Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.md);
+[`player/README.md`](../../player/README.md) records POC seams and demo-only behavior. This specification may lead the
+implementation. The current `player/` POC is a presentation implementation with incomplete runtime/host wiring;
+`Visual Lab`, `Scene`, placeholder content, and demo media are development fixtures rather than Standard Player product
+content. Values explicitly marked for retesting remain provisional tuning baselines.
 
-- transcript, timer, background controls, tools, and stage/media currently still consume demo presentation data;
-- the composer shell exists but runtime interaction wiring is incomplete;
-- Standard foreground controls are not yet wired end to end in the demo Player;
-- host/iframe messaging, production checkpoint transport, restore/reconnect, and package capability negotiation remain
-  outside this presentation specification;
-- exact final values marked below for visual retesting remain POC tuning baselines rather than frozen production values;
-- `Visual Lab` and `Scene`, placeholder avatar letters, demo action labels, and random local demo media are development
-  fixtures rather than Standard Player product content. `Visual Lab` may remain during the POC for live tuning, but must
-  be removed or separated from production Player content before production maturity.
-
-A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior in this
-specification is the target even when implementation lags, subject to a higher-authority conflict being surfaced rather
-than silently resolved.
+A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior here is
+the target unless higher authority conflicts with it.
 
 ## Upstream contract integration
 
-This is a temporary integration checklist for Owner-decided Player behavior whose corresponding runtime, Standard
-Library, persistence, or custom-view contract has not yet been fully synchronized. It is intentionally not a second
-permanent authority layer. `README-FIRST.md` and `docs/README.md` route Player work here while this section is non-empty.
-Remove each item when its controlling upstream source adopts it; remove this entire section and those router references
-when no items remain.
+This temporary checklist records Owner-decided behavior that still needs synchronization into its runtime, Standard
+Library, persistence, or accepted-language owner. It is not a second permanent authority layer. Remove an item when its
+controlling source adopts it; remove this section and its router references when empty.
 
-Current items:
-
-- **Time continuity across unavailability:** Standard session time is continuous rather than implicit active-playtime.
-  When the Player was unavailable, logical script execution may not skip past the first script event that should have
-  executed during that absence; later runtime work must implement the owner-selected missed-event barrier without
-  replaying events already materialized in a valid checkpoint. Exact checkpoint/deadline mechanics remain upstream work.
-- **Background-control family:** the right-rail presentation below covers momentary actions, toggles/switches,
-  single-choice selects, and non-interactive status/progress items. A stateful control owns one authoritative
-  serializable value: script code may poll it, an optional change handler may react to user changes, and an explicit
-  control-update API may change that same value programmatically. Controls remain until explicit removal or their
-  owning lifecycle cleans them up; disabled/inert preserves the visible control and state. Status/progress items are
-  non-interactive output that may be updated or removed. Exact Standard-Library syntax and API shapes remain upstream
-  work.
-- **Background-control handlers:** momentary controls, toggles, and selects use a distinct busy-in-place state while a
-  handler runs; busy is not disabled/inert and the control does not disappear merely because its handler is active.
-  The user's accepted value is committed before an optional change handler runs; a handler failure is an ordinary
-  runtime error and does not roll that value back. Handlers may use normal TeaseScript actions, including blocking
-  actions, and run one at a time through deterministic event scheduling. Existing audio/video continues unless the
-  handler explicitly changes it. A queued control event whose originating control instance was removed, disabled, or
-  otherwise invalidated before that handler starts is stale and is discarded rather than executed. Exact scheduling
-  representation and author syntax remain upstream work.
-- **Background ordering and progress:** authored controls may provide an explicit order/priority; controls with explicit
-  priority sort before controls without one, equal priorities preserve creation order, and unprioritized controls follow
-  in creation order. If a statically authored API later allows equal explicit priorities, authoring/compiler tooling
-  should warn rather than fail because creation order already provides a deterministic tie-breaker. Status and
-  interactive controls may present explicit determinate progress/fill. Exact data shapes and lifecycle semantics remain
-  upstream work.
-- **Transcript/history provenance:** every accepted user control action needs machine-readable canonical provenance so
-  history/LLM consumers can distinguish typed prose, momentary activation, toggle/select change, and other control
-  activity without relying on visual punctuation. Momentary actions remain player-authored transcript messages because
-  they are equivalent to the user submitting that action text. For toggle/select changes, the author chooses whether a
-  visible history/transcript indication is shown; exact informational presentation remains Player tuning. Programmatic
-  control updates are runtime-state changes rather than user actions and must not be presented as though the user made
-  them; when visible, the control should make script-initiated change recognizable. A future visible-transcript reset
-  starts a new visible segment without implicitly destroying retained canonical history; exact history retention and
-  LLM-context policy remain upstream work.
-- **Timer presentation metadata:** visible, mystery, and hidden timer presentation must work for blocking and non-blocking
-  timer semantics without revealing whether a visible timer blocks script execution. Hidden timers expose no Player UI.
-  A visible timer may have an optional authored label; when multiple visible timers coexist, an unlabeled visible timer
-  receives a generic user-facing label based only on visible timer order (for example `Timer 1`, `Timer 2`) rather than an
-  internal ID or any hidden timer. A lone unlabeled visible timer need not show a label. The accepted V30 `timer`,
-  `mysteryTimer`, `wait`, and background-timer semantics remain the language baseline; exact public metadata/API syntax
-  remains upstream work.
+- **Time continuity across unavailability:** session time is continuous, but restore may not skip the first script
+  event that should have executed while the Player was unavailable or replay events already materialized in a valid
+  checkpoint. Exact checkpoint/deadline mechanics remain upstream work.
+- **Long-lived control runtime:** momentary, toggle/select, and status/progress controls persist until explicit removal
+  or owning-lifecycle cleanup; disabled/inert preserves a visible control and its state. A toggle/select owns one
+  serializable value that script code may poll or update; an accepted user change commits before its optional handler.
+  Status/progress is non-interactive output that may be updated or removed. Handlers run ordinary TeaseScript one at a
+  time, may block, leave existing media running unless explicitly changed, and fail as ordinary runtime errors without
+  rolling back a committed value. Interactive controls remain busy in place while a handler runs; queued events from
+  controls invalidated before execution are stale and discarded. Machine-readable user-action provenance is required;
+  programmatic updates are not user actions. Ordering, progress, and visible-history presentation are defined below.
+  Exact runtime/Standard-Library representation, persistence binding, API names, and author syntax remain upstream work.
+- **Timer metadata:** visible, mystery, and hidden presentation applies independently of blocking versus non-blocking
+  timer execution; hidden timers expose no Player UI. Visible timers may have authored labels, with generic
+  visible-order labels for multiple unlabeled visible timers. Exact public metadata/API syntax remains upstream work.
 
 ## Surface hierarchy
 
