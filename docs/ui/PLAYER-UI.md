@@ -66,8 +66,8 @@ controlling source adopts it; remove this section and its router references when
   synchronization. Runtime value, scheduling, stale-event, media-continuity, lifecycle, and provenance semantics are
   maintained in [`RUNTIME.md`](../RUNTIME.md); exact public API names and author syntax remain open.
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
-  optional labeling, but exact runtime/Standard-Library metadata and author syntax remain unsynchronized pending final
-  visual testing.
+  optional labeling. The accepted label placement remains presentation-only; exact runtime/Standard-Library metadata,
+  author syntax, and stable generic-label numbering across timer lifecycle changes remain unsynchronized.
 
 ## Surface hierarchy
 
@@ -477,7 +477,8 @@ whether script execution is blocked. Multiple visible timers may coexist: only o
 path at once, but background timers may add further visible timers. A visible timer may have an authored label. A lone
 unlabeled visible timer need not display one; when multiple visible timers coexist, unlabeled visible timers receive
 generic labels from visible presentation order (for example `Timer 1`, `Timer 2`). Internal IDs and hidden timers must
-not leak through those labels. Exact label placement and stable numbering as timers enter/leave remain Phase-4 tuning.
+not leak through those labels. The accepted generic-label baseline places the label inside the timer below its time/value.
+Stable generic numbering as timers enter and leave remains open tuning.
 
 Normal timer text is:
 
@@ -486,8 +487,9 @@ Normal timer text is:
 
 The determinate ring represents elapsed fraction. The current circular size and package/theme accent treatment remain the
 POC visual baseline. In overlay chrome mode the timer may use the current compact title-height presentation; exact compact
-size remains visually tuneable. A timer disappears when its underlying visible timer action/lifecycle has completed and
-no longer requires presentation.
+size remains visually tuneable. Multiple compact timers wrap horizontally when the available rail width permits before
+adding another row. A timer disappears when its underlying visible timer action/lifecycle has completed and no longer
+requires presentation.
 
 When exactly one visible timer exists, it stays fixed while the background-control/status list scrolls beneath it. When
 multiple visible timers exist, they form part of the right-side stack and may scroll together with that stack when the
@@ -530,10 +532,11 @@ Recorded background-control activation history follows the transcript provenance
 
 ### Vertical placement and overflow
 
-With one timer, the control/status group is vertically centered in the **currently usable space that remains around the
-fixed timer** while all items fit. A software keyboard therefore reduces the space used for this calculation. Once the
-list no longer fits, only that list scrolls and the timer remains fixed. With multiple timers, the timers join the
-scrollable stack when required as described above.
+With one timer, the control/status group targets the Player viewport centre while all items fit, yielding downward only
+when the fixed timer would otherwise collide with it. A software keyboard reduces the usable space for this calculation.
+Once the control/status list no longer fits, only that list scrolls and the timer remains fixed. With multiple timers,
+timers and controls share the right-side scroll stack when its content exceeds the available height; compact timers wrap
+horizontally where width permits so timer count does not unnecessarily consume vertical Action space.
 
 ### Right background mode
 

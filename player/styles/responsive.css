@@ -272,44 +272,11 @@
         }
 
         .timer-cluster {
-          block-size: calc(var(--timer-size) + 15px);
-        }
-
-        .player[data-demo-timer-count="2"] {
-          --right-timer-stack-reserve:
-            calc(var(--timer-size) + var(--timer-size) + 50px);
-        }
-
-        .player[data-demo-timer-count="4"] {
-          --right-timer-stack-reserve:
-            calc(
-              var(--timer-size)
-              + var(--timer-size)
-              + var(--timer-size)
-              + var(--timer-size)
-              + 74px
-            );
-        }
-
-        .player[data-demo-timer-count="2"] .timer-cluster {
-          block-size:
-            calc(var(--timer-size) + var(--timer-size) + 27px);
-        }
-
-        .player[data-demo-timer-count="4"] .timer-cluster {
-          block-size:
-            calc(
-              var(--timer-size)
-              + var(--timer-size)
-              + var(--timer-size)
-              + var(--timer-size)
-              + 51px
-            );
+          min-block-size: calc(var(--timer-size) + 15px);
         }
 
         .timer-list {
-          left: 2px;
-          top: 15px;
+          padding-top: 15px;
         }
 
         .action-scroll {
@@ -345,7 +312,6 @@
       @media (max-height: 600px) {
         .player {
           --title-track: 0px;
-          --right-timer-stack-reserve: var(--title-height);
           --title-overlay-clearance:
             var(--title-height);
           --media-height: var(--media-height-overlay);
@@ -386,31 +352,20 @@
         }
 
         .timer-cluster {
-          inline-size: 78px;
-          block-size: 34px;
-          margin-inline-start: auto;
-        }
-
-        .player[data-demo-timer-count="2"] {
-          --right-timer-stack-reserve: calc(var(--title-height) + 40px);
-        }
-
-        .player[data-demo-timer-count="4"] {
-          --right-timer-stack-reserve: calc(var(--title-height) + 120px);
-        }
-
-        .player[data-demo-timer-count="2"] .timer-cluster {
-          block-size: 74px;
-        }
-
-        .player[data-demo-timer-count="4"] .timer-cluster {
-          block-size: 154px;
+          inline-size: 100%;
+          min-block-size: 34px;
+          margin-inline-start: 0;
         }
 
         .timer-list {
-          left: 0;
-          top: 0;
+          flex-direction: row;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          align-items: flex-start;
           gap: 6px;
+
+          padding-top: 0;
+          padding-inline-end: 44px;
         }
 
         .timer-cluster .timer {

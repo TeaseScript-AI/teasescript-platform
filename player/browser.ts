@@ -41,10 +41,9 @@ let accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
 let ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
 let vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
 let busyActionDemoStyle = "off";
-let timerLabelDemoPlacement = "off";
+let timerLabelDemoPlacement = "below";
 let timerCountDemo = 1;
-let actionAlignmentDemo = "current";
-let composerFontDemo = "default";
+let actionAlignmentDemo = "viewport-center";
 let presentation = DEMO_PRESENTATION;
 
 const layoutDebug = createLayoutDebugController(
@@ -165,6 +164,11 @@ toolStrip.addEventListener("input", (event) => {
 
   if (target instanceof HTMLInputElement && target.matches("[data-tuning-property]")) {
     applyTuningValue(target);
+    return;
+  }
+
+  if (target instanceof HTMLInputElement && target.matches("[data-demo-number]")) {
+    applyDemoNumber(target);
   }
 });
 
@@ -353,10 +357,9 @@ function resetVisualLab(): void {
   ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
   vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
   busyActionDemoStyle = "off";
-  timerLabelDemoPlacement = "off";
+  timerLabelDemoPlacement = "below";
   timerCountDemo = 1;
-  actionAlignmentDemo = "current";
-  composerFontDemo = "default";
+  actionAlignmentDemo = "viewport-center";
   document.documentElement.style.setProperty("--package-accent", accentColor);
   player.classList.toggle("fx-ambient", ambientEnabled);
   player.classList.toggle("fx-vignette", vignetteEnabled);
@@ -371,7 +374,7 @@ function resetVisualLab(): void {
 function setPresentationDemoSelection(key: string, value: string): void {
   switch (key) {
     case "busy-style":
-      if (!["off", "pulse", "sweep", "dots"].includes(value)) {
+      if (!["off", "pulse", "sweep", "dots", "corner-dot", "spinner", "wash"].includes(value)) {
         throw new Error(`Unknown busy Action style: ${value}`);
       }
       busyActionDemoStyle = value;
@@ -382,28 +385,32 @@ function setPresentationDemoSelection(key: string, value: string): void {
       }
       timerLabelDemoPlacement = value;
       break;
-    case "timer-count": {
-      const count = Number.parseInt(value, 10);
-      if (![1, 2, 4].includes(count)) {
-        throw new Error(`Unknown timer fixture count: ${value}`);
-      }
-      timerCountDemo = count;
-      break;
-    }
     case "action-alignment":
       if (!["current", "viewport-center"].includes(value)) {
         throw new Error(`Unknown Action alignment: ${value}`);
       }
       actionAlignmentDemo = value;
       break;
-    case "composer-font":
-      if (!["default", "12px", "13px", "14px", "15px"].includes(value)) {
-        throw new Error(`Unknown composer font size: ${value}`);
-      }
-      composerFontDemo = value;
-      break;
     default:
       throw new Error(`Unknown presentation demo selection: ${key}`);
+  }
+
+  syncVisualControls();
+}
+
+function applyDemoNumber(input: HTMLInputElement): void {
+  if (!Number.isFinite(input.valueAsNumber)) return;
+
+  const key = requiredDatasetValue(input, "demoNumber");
+  switch (key) {
+    case "timer-count": {
+      const count = Math.trunc(input.valueAsNumber);
+      if (count < 1) return;
+      timerCountDemo = count;
+      break;
+    }
+    default:
+      throw new Error(`Unknown presentation demo number: ${key}`);
   }
 
   syncVisualControls();
@@ -444,17 +451,21 @@ function syncVisualControls(): void {
       case "timer-label":
         select.value = timerLabelDemoPlacement;
         break;
-      case "timer-count":
-        select.value = String(timerCountDemo);
-        break;
       case "action-alignment":
         select.value = actionAlignmentDemo;
         break;
-      case "composer-font":
-        select.value = composerFontDemo;
-        break;
       default:
         throw new Error(`Unknown presentation demo selection: ${String(select.dataset.demoSelect)}`);
+    }
+  }
+
+  for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-demo-number]")) {
+    switch (input.dataset.demoNumber) {
+      case "timer-count":
+        input.value = String(timerCountDemo);
+        break;
+      default:
+        throw new Error(`Unknown presentation demo number: ${String(input.dataset.demoNumber)}`);
     }
   }
 
@@ -485,12 +496,6 @@ function syncVisualControls(): void {
     player.dataset.actionAlignment = "viewport-center";
   } else {
     delete player.dataset.actionAlignment;
-  }
-
-  if (composerFontDemo === "default") {
-    player.style.removeProperty("--composer-font-size");
-  } else {
-    player.style.setProperty("--composer-font-size", composerFontDemo);
   }
 
   const computed = getComputedStyle(player);
@@ -527,7 +532,7 @@ function createDemoTimer(index: number): HTMLElement {
 
   const text = document.createElement("span");
   text.className = "timer-text";
-  text.textContent = index === 2 ? "1:37" : index === 3 ? "0:54" : "0:21";
+  text.textContent = demoTimerText(index);
 
   element.append(label, text);
   return element;
@@ -543,6 +548,13 @@ function requiredDatasetValue(element: HTMLElement, key: string): string {
     throw new Error(`Player element is missing data-${key}.`);
   }
   return value;
+}
+
+function demoTimerText(index: number): string {
+  const fixtures = [161, 97, 54, 21];
+  const seconds = fixtures[index - 1] ?? (35 + ((index * 29) % 145));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function requiredElement<T extends Element>(

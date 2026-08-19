@@ -16,36 +16,20 @@
         position: relative;
 
         inline-size: 100%;
-        block-size: calc(var(--timer-size) + 17px);
+        min-block-size: calc(var(--timer-size) + 17px);
       }
 
       .timer-list {
-        position: absolute;
-        left:
-          max(
-            0px,
-            calc((100% - (var(--timer-size) + 50px)) / 2)
-          );
-        top: 17px;
+        box-sizing: border-box;
+        inline-size: 100%;
 
-        display: grid;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
         gap: 12px;
-      }
 
-      .player[data-demo-timer-count="2"] .timer-cluster {
-        block-size:
-          calc(var(--timer-size) + var(--timer-size) + 29px);
-      }
-
-      .player[data-demo-timer-count="4"] .timer-cluster {
-        block-size:
-          calc(
-            var(--timer-size)
-            + var(--timer-size)
-            + var(--timer-size)
-            + var(--timer-size)
-            + 53px
-          );
+        padding-top: 17px;
+        padding-inline-end: 44px;
       }
 
       .timer-label[hidden] {
@@ -207,6 +191,20 @@
       .player[data-action-alignment="viewport-center"] .action-scroll {
         grid-row: 2;
         max-block-size: 100%;
+      }
+
+      .player[data-demo-timer-count]:not([data-demo-timer-count="1"]) .timer-wrap {
+        grid-row: 1;
+      }
+
+      .player[data-demo-timer-count]:not([data-demo-timer-count="1"]) .action-scroll {
+        grid-row: 2;
+        min-block-size: max-content;
+        max-block-size: none;
+        overflow: visible;
+
+        -webkit-mask-image: none;
+        mask-image: none;
       }
 
       .action-button {

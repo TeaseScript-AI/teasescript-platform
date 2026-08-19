@@ -309,17 +309,18 @@ test("Player Visual Lab exposes grouped reversible Phase 4 review choices", asyn
   const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
 
   assert.match(html, /class="timer"[\s\S]*id="timer"[\s\S]*class="timer-label"[\s\S]*id="timerLabel"/u);
-  assert.match(render, /"Busy Action"[\s\S]*"busy-style"[\s\S]*"Soft pulse"[\s\S]*"Slow sweep"[\s\S]*"Three dots"/u);
+  assert.match(render, /"Busy Action"[\s\S]*"busy-style"[\s\S]*"Soft pulse"[\s\S]*"Slow sweep"[\s\S]*"Three dots"[\s\S]*"Corner pulse"[\s\S]*"Corner spinner"[\s\S]*"Soft wash"/u);
   assert.match(render, /"Timer label"[\s\S]*"timer-label"[\s\S]*"Inside · above"[\s\S]*"Inside · below"/u);
-  assert.match(render, /"Timer count"[\s\S]*"timer-count"[\s\S]*"1 timer"[\s\S]*"4 timers"/u);
+  assert.match(render, /createDemoNumberOption\([\s\S]*"Timer count"[\s\S]*"timer-count"[\s\S]*1,[\s\S]*1,/u);
   assert.match(render, /"Action alignment"[\s\S]*"viewport-center"[\s\S]*"Viewport centre"/u);
-  assert.match(render, /"Composer text"[\s\S]*"composer-font"[\s\S]*"12 px"[\s\S]*"15 px"/u);
+  assert.match(render, /createTuningInput\("Composer text"[\s\S]*"--composer-font-size"[\s\S]*"px"/u);
   assert.match(render, /select\.dataset\.demoSelect = key/u);
   assert.match(browser, /busyActionDemoStyle = "off"/u);
-  assert.match(browser, /timerLabelDemoPlacement = "off"/u);
+  assert.match(browser, /timerLabelDemoPlacement = "below"/u);
   assert.match(browser, /timerCountDemo = 1/u);
-  assert.match(browser, /actionAlignmentDemo = "current"/u);
-  assert.match(browser, /composerFontDemo = "default"/u);
+  assert.match(browser, /actionAlignmentDemo = "viewport-center"/u);
+  assert.doesNotMatch(browser, /composerFontDemo/u);
+  assert.match(browser, /data-demo-number/u);
   assert.match(browser, /label\.hidden = timerLabelDemoPlacement === "off"/u);
   assert.match(browser, /player\.dataset\.demoTimerCount = String\(timerCountDemo\)/u);
 });
@@ -334,6 +335,9 @@ test("Player busy Action review variants are paint-only, continuous, and reduced
   assert.match(effects, /data-busy-style="sweep"[\s\S]*transform: translateX\(-110%\)[\s\S]*animation: action-busy-sweep 2800ms linear infinite/u);
   assert.match(effects, /@keyframes action-busy-sweep[\s\S]*translateX\(-110%\)[\s\S]*translateX\(470%\)/u);
   assert.match(effects, /data-busy-style="dots"[\s\S]*animation: action-busy-dots 2200ms ease-in-out infinite/u);
+  assert.match(effects, /data-busy-style="corner-dot"[\s\S]*animation: action-busy-corner-dot 2600ms ease-in-out infinite/u);
+  assert.match(effects, /data-busy-style="spinner"[\s\S]*animation: action-busy-spinner 2400ms linear infinite/u);
+  assert.match(effects, /data-busy-style="wash"[\s\S]*animation: action-busy-wash 3600ms ease-in-out infinite/u);
   assert.match(effects, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.action-button\[aria-busy="true"\]::after \{[\s\S]*animation: none/u);
   assert.doesNotMatch(browser, /busyActionDemoStyle[\s\S]{0,300}\.disabled\s*=/u);
 });
@@ -346,8 +350,8 @@ test("Player timer-label review variants stay inside normal and compact timers",
   assert.match(actions, /data-label-placement="above"[\s\S]*\.timer-label[\s\S]*order: 0/u);
   assert.match(actions, /data-label-placement="below"[\s\S]*\.timer-label[\s\S]*order: 1/u);
   assert.doesNotMatch(actions, /timer-cluster:has\(\.timer-label/u);
-  assert.match(actions, /\.timer-list \{[\s\S]*display: grid;[\s\S]*gap: 12px/u);
-  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer-list \{[\s\S]*gap: 6px/u);
+  assert.match(actions, /\.timer-list \{[\s\S]*display: flex;[\s\S]*flex-direction: column;[\s\S]*gap: 12px/u);
+  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer-list \{[\s\S]*flex-direction: row;[\s\S]*flex-wrap: wrap;[\s\S]*gap: 6px/u);
   assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*data-label-placement="above"[\s\S]*font-size: 10px/u);
   assert.match(responsive, /data-label-placement="below"[\s\S]*\.timer-label[\s\S]*font-size: 7px/u);
 });
@@ -358,17 +362,16 @@ test("Player viewport-centred Action candidate stays centred until timer-stack c
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
   const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
 
-  assert.match(layout, /--right-timer-stack-reserve: calc\(var\(--timer-size\) \+ 42px\)/u);
   assert.match(
     layout,
-    /\.player\[data-action-alignment="viewport-center"\] \.right-zone \{[\s\S]*minmax\(var\(--right-timer-stack-reserve\), 1fr\)[\s\S]*auto[\s\S]*minmax\(0, 1fr\)[\s\S]*var\(--title-track\)/u,
+    /\.player\[data-action-alignment="viewport-center"\] \.right-zone \{[\s\S]*minmax\(max-content, 1fr\)[\s\S]*auto[\s\S]*minmax\(0, 1fr\)[\s\S]*var\(--title-track\)/u,
   );
-  assert.match(layout, /data-demo-timer-count="2"[\s\S]*--right-timer-stack-reserve/u);
-  assert.match(layout, /data-demo-timer-count="4"[\s\S]*--right-timer-stack-reserve/u);
+  assert.match(layout, /data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\)[\s\S]*overflow-y: auto/u);
   assert.match(actions, /data-action-alignment="viewport-center"[\s\S]*\.timer-wrap \{[\s\S]*grid-row: 1/u);
   assert.match(actions, /data-action-alignment="viewport-center"[\s\S]*\.action-scroll \{[\s\S]*grid-row: 2/u);
-  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*--right-timer-stack-reserve: var\(--title-height\)/u);
-  assert.match(responsive, /data-demo-timer-count="4"[\s\S]*--right-timer-stack-reserve: calc\(var\(--title-height\) \+ 120px\)/u);
+  assert.match(actions, /data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\)[\s\S]*\.action-scroll[\s\S]*overflow: visible/u);
+  assert.doesNotMatch(layout, /right-timer-stack-reserve/u);
+  assert.doesNotMatch(responsive, /data-demo-timer-count="(?:2|4)"/u);
   assert.match(browser, /function syncDemoTimers\(\): void/u);
   assert.match(browser, /for \(let index = 2; index <= timerCountDemo; index \+= 1\)/u);
 });
@@ -378,13 +381,15 @@ test("Player composer line tuning counts text lines and offers local font-size r
   const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
   const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
 
   assert.match(layout, /--composer-font-size: 11px/u);
   assert.match(composer, /--composer-input-block-chrome: 22px/u);
   assert.match(composer, /calc\(var\(--composer-max-lines\) \+ var\(--composer-input-block-chrome\)\)/u);
   assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*--composer-font-size: 10px/u);
-  assert.match(browser, /player\.style\.setProperty\("--composer-font-size", composerFontDemo\)/u);
-  assert.match(browser, /player\.style\.removeProperty\("--composer-font-size"\)/u);
+  assert.match(render, /createTuningInput\("Composer text"[\s\S]*"--composer-font-size"[\s\S]*"px"/u);
+  assert.match(browser, /player\.style\.setProperty\(property, `\$\{input\.valueAsNumber\}\$\{unit\}`\)/u);
+  assert.match(browser, /player\.style\.removeProperty\(requiredDatasetValue\(input, "tuningProperty"\)\)/u);
 });
 
 test("Player Layout Debug exposes live development-only geometry inspection", async () => {

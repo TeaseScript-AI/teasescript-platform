@@ -253,6 +253,9 @@ function createVisualTool(): HTMLElement {
         ["pulse", "Soft pulse"],
         ["sweep", "Slow sweep"],
         ["dots", "Three dots"],
+        ["corner-dot", "Corner pulse"],
+        ["spinner", "Corner spinner"],
+        ["wash", "Soft wash"],
       ],
     ),
     createSelectOption(
@@ -265,15 +268,12 @@ function createVisualTool(): HTMLElement {
         ["below", "Inside · below"],
       ],
     ),
-    createSelectOption(
+    createDemoNumberOption(
       "Timer count",
       "Presentation fixture for label and rail-pressure testing.",
       "timer-count",
-      [
-        ["1", "1 timer"],
-        ["2", "2 timers"],
-        ["4", "4 timers"],
-      ],
+      1,
+      1,
     ),
     createSelectOption(
       "Action alignment",
@@ -282,18 +282,6 @@ function createVisualTool(): HTMLElement {
       [
         ["current", "Current"],
         ["viewport-center", "Viewport centre"],
-      ],
-    ),
-    createSelectOption(
-      "Composer text",
-      "Compare typing size without changing other UI text.",
-      "composer-font",
-      [
-        ["default", "Current"],
-        ["12px", "12 px"],
-        ["13px", "13 px"],
-        ["14px", "14 px"],
-        ["15px", "15 px"],
       ],
     ),
   );
@@ -306,6 +294,7 @@ function createVisualTool(): HTMLElement {
     createTuningInput("Wide tool width", "Drawer remains viewport-bounded", "--tool-column-width", "px", 1),
     createTuningInput("Conversation max", "Readable width cap", "--conversation-max-width", "px", 1),
     createTuningInput("Conversation min", "Protected width floor", "--conversation-min-width", "px", 1),
+    createTuningInput("Composer text", "Typing-field font size", "--composer-font-size", "px", 1),
     createTuningInput("Composer lines", "Line-height cap", "--composer-max-lines", "lh", 1),
     createTuningInput("Composer viewport", "Viewport-height cap", "--composer-max-viewport-height", "dvh", 1),
   );
@@ -448,6 +437,40 @@ function createSelectOption(
   }
 
   row.append(copy, select);
+  return row;
+}
+
+function createDemoNumberOption(
+  title: string,
+  note: string,
+  key: string,
+  min: number,
+  step: number,
+): HTMLLabelElement {
+  const row = document.createElement("label");
+  row.className = "lab-option";
+
+  const copy = document.createElement("span");
+  copy.className = "lab-option-copy";
+
+  const titleElement = document.createElement("span");
+  titleElement.className = "lab-option-title";
+  titleElement.textContent = title;
+
+  const noteElement = document.createElement("span");
+  noteElement.className = "lab-option-note";
+  noteElement.textContent = note;
+  copy.append(titleElement, noteElement);
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.className = "lab-tuning-input";
+  input.dataset.demoNumber = key;
+  input.min = String(min);
+  input.step = String(step);
+  input.setAttribute("aria-label", title);
+
+  row.append(copy, input);
   return row;
 }
 

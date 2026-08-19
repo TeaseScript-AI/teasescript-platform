@@ -103,7 +103,6 @@
         --composer-max-viewport-height: 20dvh;
         --composer-font-size: 11px;
         --focus-outline-width: 2px;
-        --right-timer-stack-reserve: calc(var(--timer-size) + 42px);
 
         --scene-ambient: #f7cdaf;
         --timer-progress: 46%;
@@ -337,25 +336,37 @@
 
       .player[data-action-alignment="viewport-center"] .right-zone {
         grid-template-rows:
-          minmax(var(--right-timer-stack-reserve), 1fr)
+          minmax(max-content, 1fr)
           auto
           minmax(0, 1fr)
           var(--title-track);
       }
 
-      .player[data-demo-timer-count="2"] {
-        --right-timer-stack-reserve:
-          calc(var(--timer-size) + var(--timer-size) + 54px);
-      }
+      .player[data-demo-timer-count]:not([data-demo-timer-count="1"]) .right-zone {
+        grid-template-rows:
+          max-content
+          minmax(max-content, 1fr);
 
-      .player[data-demo-timer-count="4"] {
-        --right-timer-stack-reserve:
-          calc(
-            var(--timer-size)
-            + var(--timer-size)
-            + var(--timer-size)
-            + var(--timer-size)
-            + 78px
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
+
+        -webkit-mask-image:
+          linear-gradient(
+            to bottom,
+            transparent 0,
+            #000 18px,
+            #000 calc(100% - 18px),
+            transparent 100%
+          );
+        mask-image:
+          linear-gradient(
+            to bottom,
+            transparent 0,
+            #000 18px,
+            #000 calc(100% - 18px),
+            transparent 100%
           );
       }
 
