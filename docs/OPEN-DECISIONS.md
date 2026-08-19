@@ -103,7 +103,7 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   fixed tool width, stage height, readable conversation bounds, composer growth, and focus-outline thickness.
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
 - Exact Standard/runtime API, data shapes, persistence binding, names, and author syntax for the owner-resolved
-  long-lived control family; current semantics and presentation are maintained in `ui/PLAYER-UI.md`.
+  long-lived control family; runtime semantics are maintained in `RUNTIME.md` and presentation in `ui/PLAYER-UI.md`.
 - Exact custom-view registration/lifecycle API, typed input/event/result schemas, author syntax, surface isolation
   (including optional Shadow DOM), and reconstructible-state declaration/validation; ADR 0012 fixes capability
   semantics.

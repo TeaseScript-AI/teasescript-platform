@@ -290,7 +290,9 @@ A real interactive control has priority and must not also trigger viewport-wide 
 
 The normal Player application has no player-facing pause control and ADR 0018 adds no author-facing pause command. Developer mode may expose Pause alongside Run, Step, checkpoint, restore, and debugger controls. Developer pause is tooling and does not establish player-initiated pause semantics.
 
-Browser unavailability, reload, reconnect, device sleep, visibility changes, and server-authoritative deadlines remain separate lifecycle/time-integrity work.
+Browser unavailability, reload, reconnect, device sleep, and visibility changes are not implicit Player pause. The
+future continuity direction is maintained under
+[Owner-resolved future runtime semantics](#owner-resolved-future-runtime-semantics).
 
 ### Checkpoint and event requirements
 
@@ -331,6 +333,41 @@ and `choose` forms lowered into one generic foreground `interaction` family, and
 `chatPacingGate` pending-action lifecycle. Runtime state retains persisted session time, at most one foreground action,
 zero or one background pacing gate, monotonic action IDs, bounded settlement replay, prepared `say` output, explicit
 time observation, and typed completion operations. Browser scheduling and Standard Player controls remain out of scope.
+
+## Owner-resolved future runtime semantics
+
+These owner decisions are independent of final Player visual tuning but are not implemented capability or accepted
+author-facing syntax. Exact schemas and APIs remain future work.
+
+### Time continuity across unavailability
+
+Session time remains continuous across browser unavailability, reload, reconnect, device sleep, and visibility changes.
+After restore, explicit time observation may settle due work, but recovery must not skip the first script event that
+should have executed during the absence or replay events already materialized in the selected valid checkpoint. Exact
+checkpoint selection, deadline recalculation, reconnect, repeating-timer, and server-authoritative time mechanics remain
+open.
+
+### Long-lived Standard controls
+
+The later long-lived Standard control family uses these runtime semantics independently of final Player presentation:
+
+- a stateful toggle/select owns one authoritative serializable control value; script polling and programmatic updates
+  use that same value rather than an automatically synchronized second ordinary variable;
+- an accepted user value change commits before an optional handler runs, and a handler failure is an ordinary runtime
+  error rather than a rollback of the committed value;
+- status/progress items are non-interactive output state that may be updated or removed;
+- control handlers run one at a time at deterministic runtime boundaries and may use ordinary blocking TeaseScript
+  behavior; the interrupted script path does not execute in parallel, while existing audio/video continues unless the
+  handler explicitly changes it;
+- queued control events are revalidated before execution; an event from a removed, disabled/inert, or otherwise
+  invalidated originating control is stale and is discarded rather than executed; and
+- canonical event/history provenance distinguishes user control actions from programmatic control updates. Visible
+  transcript/history presentation is Player-owned.
+
+Controls persist until explicit removal or owning-lifecycle cleanup. Exact action/schema representation, persistence
+binding, Standard Library API names, author syntax, and Player busy/history presentation remain open or owned elsewhere.
+This section does not supersede accepted V30 permanent-button syntax or presentation semantics; any conflict with that
+accepted language baseline requires an accepted syntax/ADR update.
 
 ## Accepted resumable pending-action model
 

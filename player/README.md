@@ -5,8 +5,9 @@ observable UI contract is [`docs/ui/PLAYER-UI.md`](../docs/ui/PLAYER-UI.md). Do 
 from HTML structure, CSS selectors, TypeScript helpers, demo data, or other implementation details here.
 
 General cross-surface UI engineering/design guidance lives in
-[`docs/ui/UI-DESIGN-AND-ENGINEERING.md`](../docs/ui/UI-DESIGN-AND-ENGINEERING.md). Accepted runtime, interaction,
-security, and custom-view semantics remain in their controlling specifications and ADRs.
+[`docs/ui/UI-DESIGN-AND-ENGINEERING.md`](../docs/ui/UI-DESIGN-AND-ENGINEERING.md); narrow tasks use its focused reading
+route. Accepted runtime, interaction, security, and custom-view semantics remain in their controlling specifications and
+ADRs.
 
 For local inspection, `npm run playground` serves this implementation at `/player/` through the existing development
 server. That development route is not a public Player/host protocol.

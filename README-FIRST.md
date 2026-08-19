@@ -60,7 +60,7 @@ milestone, gate, integration-status, or current-capability work.
 - `docs/DEBUGGER.md`: runtime inspection, simulation, and debug execution.
 - `docs/ui/PLAYER-UI.md`: normative Standard Player UI. While `Upstream contract integration` is non-empty, Player work
   must also read that section.
-- `docs/ui/UI-DESIGN-AND-ENGINEERING.md`: shared guidance for UI layout, responsive/input behavior, and visual work.
+- `docs/ui/UI-DESIGN-AND-ENGINEERING.md`: shared UI guidance; narrow tasks use its focused reading route.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.
 - `docs/specifications/`: accepted consolidated specifications.
 - `docs/decisions/`: accepted and proposed ADRs.

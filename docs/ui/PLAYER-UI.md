@@ -61,21 +61,13 @@ This temporary checklist records Owner-decided behavior that still needs synchro
 Library, persistence, or accepted-language owner. It is not a second permanent authority layer. Remove an item when its
 controlling source adopts it; remove this section and its router references when empty.
 
-- **Time continuity across unavailability:** session time is continuous, but restore may not skip the first script
-  event that should have executed while the Player was unavailable or replay events already materialized in a valid
-  checkpoint. Exact checkpoint/deadline mechanics remain upstream work.
-- **Long-lived control runtime:** momentary, toggle/select, and status/progress controls persist until explicit removal
-  or owning-lifecycle cleanup; disabled/inert preserves a visible control and its state. A toggle/select owns one
-  serializable value that script code may poll or update; an accepted user change commits before its optional handler.
-  Status/progress is non-interactive output that may be updated or removed. Handlers run ordinary TeaseScript one at a
-  time, may block, leave existing media running unless explicitly changed, and fail as ordinary runtime errors without
-  rolling back a committed value. Interactive controls remain busy in place while a handler runs; queued events from
-  controls invalidated before execution are stale and discarded. Machine-readable user-action provenance is required;
-  programmatic updates are not user actions. Ordering, progress, and visible-history presentation are defined below.
-  Exact runtime/Standard-Library representation, persistence binding, API names, and author syntax remain upstream work.
-- **Timer metadata:** visible, mystery, and hidden presentation applies independently of blocking versus non-blocking
-  timer execution; hidden timers expose no Player UI. Visible timers may have authored labels, with generic
-  visible-order labels for multiple unlabeled visible timers. Exact public metadata/API syntax remains upstream work.
+- **Long-lived control presentation:** the maintained right-rail sections below currently choose busy-in-place and
+  visible-history behavior that still needs final visual testing and later accepted-language/Standard-Library
+  synchronization. Runtime value, scheduling, stale-event, media-continuity, lifecycle, and provenance semantics are
+  maintained in [`RUNTIME.md`](../RUNTIME.md); exact public API names and author syntax remain open.
+- **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
+  optional labeling, but exact runtime/Standard-Library metadata and author syntax remain unsynchronized pending final
+  visual testing.
 
 ## Surface hierarchy
 
@@ -189,8 +181,8 @@ scrollbar for the same axis/responsibility.
 
 ### Typography and visible control geometry
 
-PR #318 preserves the current typography and most component geometry as the provisional visual baseline. Values marked
-for tuning may change through `Visual Lab` before production without implying a compatibility promise.
+Current typography and component geometry are provisional visual baselines. Values marked for tuning may change through
+`Visual Lab` before production without implying a compatibility promise.
 
 | Element | Current Player baseline |
 | --- | --- |
@@ -205,7 +197,7 @@ for tuning may change through `Visual Lab` before production without implying a 
 | compact timer | current smaller timer values remain a visual-tuning baseline rather than a final `<= 480px` contract |
 | background control label | `12px`, weight `600`, line-height `1.2` |
 | global icon control | `34px` square, `6px` corner radius |
-| tool column | one fixed POC width; `250px` is the initial tuning value; column radius `8px` |
+| tool column | fixed width from the maintained global-geometry baseline; column radius `8px` |
 | tool-column header | minimum `44px` high; selector/add/close controls are `30px` high; add/close are `30px` square; controls use `6px` radius |
 | wide integrated composer shell | minimum `50px` high, `8px` corner radius; input minimum `38px`; Send `38px` high with `7px` radius |
 | narrow composer controls | input and Send `42px` minimum/high respectively, each `7px` radius |
@@ -320,7 +312,7 @@ second carousel state model. A gesture that became a pan/scroll must not acciden
 
 Tool growth must protect useful primary content, but a hard 1:1 stage boundary is not the layout algorithm. Use the full
 constraint set: stage usefulness, readable conversation width, right-side reservation, available height, and the fixed
-POC tool width. The current `900px`, `380px`, and stage-shape values remain visual/tuning inputs rather than hidden
+POC tool width. The maintained conversation bounds and stage-shape goal remain visual/tuning inputs rather than hidden
 additional responsive modes.
 
 `Visual Lab` and `Scene` remain development fixtures, not Standard Player tools. A real Debugger is a future platform
@@ -359,7 +351,7 @@ The transcript:
 
 - uses the canvas surface;
 - is centered within the actual middle content region rather than the full viewport;
-- keeps an ultrawide readability cap, with the current `900px` value pending visual retuning;
+- keeps the maintained ultrawide readability cap pending visual retuning;
 - owns vertical scrolling and contains overscroll;
 - uses the maintained soft top fade beneath the stage instead of a hard cut;
 - may hide the visible scrollbar on narrow layouts while retaining scroll behavior;

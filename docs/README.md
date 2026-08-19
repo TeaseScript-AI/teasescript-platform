@@ -25,7 +25,7 @@
 - `DEBUGGER.md`: runtime inspection, simulation, and debug execution.
 - `ui/PLAYER-UI.md`: normative Standard Player UI; while `Upstream contract integration` is non-empty, Player work also
   reads that section.
-- `ui/UI-DESIGN-AND-ENGINEERING.md`: shared guidance for UI layout, responsive/input behavior, and visual work.
+- `ui/UI-DESIGN-AND-ENGINEERING.md`: shared UI guidance; narrow tasks use its focused reading route.
 - `LLM-INTEGRATION.md`
 - `MATH-EXPRESSIONS.md`
 - `TESTING.md`: current testing strategy, runtime invariants, and future quality gates.

@@ -2,12 +2,35 @@
 
 - **Status:** Current cross-surface UI engineering and design guidance.
 - **Use when:** changing layout, responsive behavior, browser interaction presentation, controls, media presentation,
-  or visual styling in Player, host, editor, or debugger UI.
+  or visual styling in Player, host, editor, or debugger UI. Broad/cross-cutting UI work reads the complete guide;
+  narrow work uses the focused route below.
 - **Does not define:** product features, runtime/host protocols, trust boundaries, exact visual design, framework
   choice, or TeaseScript semantics.
 
 This guide distils recurring Player POC failures and design research into reusable rules for any UI surface.
 Architecture, security, runtime, and product contracts remain with their controlling sources.
+
+## Focused reading route
+
+For a narrow task, read only the matching subsections plus
+[Change and verification discipline](#change-and-verification-discipline) when editing. Read the full guide when the
+task crosses categories or the relevant ownership is unclear.
+
+- **Geometry, docking/overlay, scrolling, viewport, or responsive layout:**
+  [Keep one owner for geometry](#keep-one-owner-for-geometry),
+  [Separate presence, reservation, content, and interaction](#separate-presence-reservation-content-and-interaction),
+  [Treat browser edges as layout inputs, not patches](#treat-browser-edges-as-layout-inputs-not-patches), and
+  [Size responsive layouts from constraints](#size-responsive-layouts-from-constraints).
+- **Palette, themes, control visual states, focus, hover, or press feedback:**
+  [Keep defaults and visual roles explicit](#keep-defaults-and-visual-roles-explicit),
+  [Build colour systems from semantic roles](#build-colour-systems-from-semantic-roles),
+  [Shared control baseline](#shared-control-baseline), and
+  [Match interaction feedback to input capability](#match-interaction-feedback-to-input-capability).
+- **Demo/content independence, media decoration, or effect containment:**
+  [Keep content independent from demo markup and decorative
+  chrome](#keep-content-independent-from-demo-markup-and-decorative-chrome).
+- **Broad visual direction or generic-design critique:**
+  [Design quality and avoiding generic “AI slop”](#design-quality-and-avoiding-generic-ai-slop).
 
 ## Engineering guardrails
 
