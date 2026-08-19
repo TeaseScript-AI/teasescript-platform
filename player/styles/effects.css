@@ -121,6 +121,39 @@
         box-shadow: none;
       }
 
+      .action-button[aria-busy="true"]::after {
+        content: "";
+
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+
+        block-size: 2px;
+
+        background:
+          linear-gradient(
+            to right,
+            transparent 0 12%,
+            var(--package-accent) 12% 42%,
+            transparent 42% 100%
+          );
+        background-size: 240% 100%;
+
+        animation: action-busy-sweep 900ms linear infinite;
+        pointer-events: none;
+      }
+
+      @keyframes action-busy-sweep {
+        from {
+          background-position-x: 100%;
+        }
+
+        to {
+          background-position-x: -140%;
+        }
+      }
+
       .send-button:not(:disabled):active {
         border-color: var(--color-accent-solid-pressed);
         background: var(--color-accent-solid-pressed);
@@ -251,6 +284,11 @@
 
         .message.is-new {
           animation-duration: 0.001ms;
+        }
+
+        .action-button[aria-busy="true"]::after {
+          animation: none;
+          background-position-x: 20%;
         }
       }
     }

@@ -291,6 +291,45 @@ test("Player Visual Lab exposes reversible Phase 4 geometry tuning", async () =>
 });
 
 
+test("Player Visual Lab exposes reversible presentation-only Phase 4 probes", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.match(html, /class="timer-label"[\s\S]*id="timerLabel"[\s\S]*hidden/u);
+  assert.match(render, /"Busy Action test"[\s\S]*"demoState"[\s\S]*"busy-action"/u);
+  assert.match(render, /"Timer label test"[\s\S]*"demoState"[\s\S]*"timer-label"/u);
+  assert.match(render, /input\.dataset\[dataKey\] = dataValue/u);
+  assert.match(browser, /busyActionDemoEnabled = false/u);
+  assert.match(browser, /timerLabelDemoEnabled = false/u);
+  assert.match(browser, /timerLabel\.hidden = !timerLabelDemoEnabled/u);
+  assert.match(browser, /firstAction\?\.setAttribute\("aria-busy", "true"\)/u);
+  assert.match(browser, /firstAction\?\.removeAttribute\("aria-busy"\)/u);
+});
+
+test("Player busy Action probe is paint-only and reduced-motion safe", async () => {
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.match(actions, /\.action-button \{[\s\S]*position: relative/u);
+  assert.match(effects, /\.action-button\[aria-busy="true"\]::after \{[\s\S]*block-size: 2px/u);
+  assert.match(effects, /animation: action-busy-sweep 900ms linear infinite/u);
+  assert.match(effects, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.action-button\[aria-busy="true"\]::after \{[\s\S]*animation: none/u);
+  assert.doesNotMatch(browser, /busyActionDemoEnabled[\s\S]{0,300}\.disabled\s*=/u);
+});
+
+test("Player timer-label probe preserves wide and compact-height presentation", async () => {
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(actions, /\.timer-label \{[\s\S]*top: calc\(17px \+ var\(--timer-size\) \+ 5px\)/u);
+  assert.match(actions, /\.timer-cluster:has\(\.timer-label:not\(\[hidden\]\)\)[\s\S]*block-size: calc\(var\(--timer-size\) \+ 34px\)/u);
+  assert.match(responsive, /@media \(max-width: 480px\)[\s\S]*\.timer-label \{[\s\S]*top: calc\(15px \+ var\(--timer-size\) \+ 5px\)/u);
+  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer-cluster:has\(\.timer-label:not\(\[hidden\]\)\) \.timer \{[\s\S]*right: 44px;[\s\S]*left: auto;/u);
+  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer-cluster \.timer-label:not\(\[hidden\]\) \{[\s\S]*right: 84px;[\s\S]*left: 0;[\s\S]*display: flex;/u);
+});
+
 test("Player composition changes clear temporary panel overrides", async () => {
   const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
   assert.match(

@@ -29,6 +29,29 @@
         top: 17px;
       }
 
+      .timer-label {
+        position: absolute;
+        left:
+          max(
+            0px,
+            calc((100% - (var(--timer-size) + 50px)) / 2)
+          );
+        top: calc(17px + var(--timer-size) + 5px);
+
+        inline-size: var(--timer-size);
+
+        color: var(--color-text-muted);
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1.2;
+        text-align: center;
+        overflow-wrap: anywhere;
+      }
+
+      .timer-cluster:has(.timer-label:not([hidden])) {
+        block-size: calc(var(--timer-size) + 34px);
+      }
+
       .timer-cluster .right-toggle {
         position: absolute;
         z-index: 4;
@@ -141,6 +164,8 @@
       }
 
       .action-button {
+        position: relative;
+
         width: min(156px, calc(100% - 14px));
         min-block-size: max(44px, var(--action-min-height));
         margin-inline-start:
@@ -166,6 +191,7 @@
 
         white-space: normal;
         text-wrap: balance;
+        overflow: hidden;
         overflow-wrap: anywhere;
 
         cursor: pointer;

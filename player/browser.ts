@@ -28,6 +28,7 @@ const rightToggle = requiredElement<HTMLButtonElement>("rightToggle", HTMLButton
 const transcript = requiredElement<HTMLElement>("transcript", HTMLElement);
 const actions = requiredElement<HTMLElement>("actions", HTMLElement);
 const timerText = requiredElement<HTMLElement>("timerText", HTMLElement);
+const timerLabel = requiredElement<HTMLElement>("timerLabel", HTMLElement);
 const sceneMedia = requiredElement<HTMLImageElement>("sceneMedia", HTMLImageElement);
 const composerForm = requiredElement<HTMLFormElement>("composerForm", HTMLFormElement);
 
@@ -38,6 +39,8 @@ let nextToolColumnNumber = 2;
 let accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
 let ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
 let vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
+let busyActionDemoEnabled = false;
+let timerLabelDemoEnabled = false;
 let presentation = DEMO_PRESENTATION;
 
 renderPresentation(
@@ -115,6 +118,12 @@ toolStrip.addEventListener("change", (event) => {
   if (target instanceof HTMLInputElement && target.matches("[data-effect]")) {
     const effect = requiredDatasetValue(target, "effect");
     setVisualOption(effect, target.checked);
+    return;
+  }
+
+  if (target instanceof HTMLInputElement && target.matches("[data-demo-state]")) {
+    const state = requiredDatasetValue(target, "demoState");
+    setPresentationDemoState(state, target.checked);
   }
 });
 
@@ -312,12 +321,29 @@ function resetVisualLab(): void {
   accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
   ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
   vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
+  busyActionDemoEnabled = false;
+  timerLabelDemoEnabled = false;
   document.documentElement.style.setProperty("--package-accent", accentColor);
   player.classList.toggle("fx-ambient", ambientEnabled);
   player.classList.toggle("fx-vignette", vignetteEnabled);
 
   for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-tuning-property]")) {
     player.style.removeProperty(requiredDatasetValue(input, "tuningProperty"));
+  }
+
+  syncVisualControls();
+}
+
+function setPresentationDemoState(state: string, enabled: boolean): void {
+  switch (state) {
+    case "busy-action":
+      busyActionDemoEnabled = enabled;
+      break;
+    case "timer-label":
+      timerLabelDemoEnabled = enabled;
+      break;
+    default:
+      throw new Error(`Unknown presentation demo state: ${state}`);
   }
 
   syncVisualControls();
@@ -348,6 +374,27 @@ function syncVisualControls(): void {
       default:
         throw new Error(`Unknown visual option: ${String(input.dataset.effect)}`);
     }
+  }
+
+  for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-demo-state]")) {
+    switch (input.dataset.demoState) {
+      case "busy-action":
+        input.checked = busyActionDemoEnabled;
+        break;
+      case "timer-label":
+        input.checked = timerLabelDemoEnabled;
+        break;
+      default:
+        throw new Error(`Unknown presentation demo state: ${String(input.dataset.demoState)}`);
+    }
+  }
+
+  timerLabel.hidden = !timerLabelDemoEnabled;
+  const firstAction = actions.querySelector<HTMLButtonElement>(".action-button");
+  if (busyActionDemoEnabled) {
+    firstAction?.setAttribute("aria-busy", "true");
+  } else {
+    firstAction?.removeAttribute("aria-busy");
   }
 
   const computed = getComputedStyle(player);

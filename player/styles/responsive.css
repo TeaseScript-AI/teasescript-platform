@@ -272,9 +272,18 @@
           block-size: calc(var(--timer-size) + 15px);
         }
 
+        .timer-cluster:has(.timer-label:not([hidden])) {
+          block-size: calc(var(--timer-size) + 32px);
+        }
+
         .timer-cluster .timer {
           left: 2px;
           top: 15px;
+        }
+
+        .timer-label {
+          left: 2px;
+          top: calc(15px + var(--timer-size) + 5px);
         }
 
         .action-scroll {
@@ -355,6 +364,11 @@
           margin-inline-start: auto;
         }
 
+        .timer-cluster:has(.timer-label:not([hidden])) {
+          inline-size: 100%;
+          block-size: 34px;
+        }
+
         .timer-cluster .timer {
           left: 0;
           top: 0;
@@ -367,6 +381,27 @@
 
           border-radius: 50%;
           font-size: 12px;
+        }
+
+        .timer-cluster:has(.timer-label:not([hidden])) .timer {
+          right: 44px;
+          left: auto;
+        }
+
+        .timer-cluster .timer-label:not([hidden]) {
+          top: 0;
+          right: 84px;
+          left: 0;
+
+          inline-size: auto;
+          block-size: 34px;
+
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+
+          font-size: 10px;
+          text-align: right;
         }
 
         .timer-cluster .right-toggle {

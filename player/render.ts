@@ -232,15 +232,29 @@ function createVisualTool(): HTMLElement {
   const options = document.createElement("div");
   options.className = "lab-options";
   options.append(
-    createVisualOption(
+    createToggleOption(
       "Ambient media colour",
       "Weak scene colour bleed around media.",
+      "effect",
       "fx-ambient",
     ),
-    createVisualOption(
+    createToggleOption(
       "Vignette",
       "Universal edge darkening for any media content.",
+      "effect",
       "fx-vignette",
+    ),
+    createToggleOption(
+      "Busy Action test",
+      "POC-only in-place indeterminate activity.",
+      "demoState",
+      "busy-action",
+    ),
+    createToggleOption(
+      "Timer label test",
+      "POC-only generic visible-order label.",
+      "demoState",
+      "timer-label",
     ),
   );
 
@@ -326,10 +340,11 @@ function createTuningInput(
   return label;
 }
 
-function createVisualOption(
+function createToggleOption(
   title: string,
   note: string,
-  effect: string,
+  dataKey: "effect" | "demoState",
+  dataValue: string,
 ): HTMLLabelElement {
   const label = document.createElement("label");
   label.className = "lab-option";
@@ -351,7 +366,7 @@ function createVisualOption(
 
   const input = document.createElement("input");
   input.type = "checkbox";
-  input.dataset.effect = effect;
+  input.dataset[dataKey] = dataValue;
 
   const switchUi = document.createElement("span");
   switchUi.className = "switch-ui";
