@@ -1,0 +1,247 @@
+diff --git a/player/styles/effects.css b/player/styles/effects.css
+index 02521c5e9069cadad99b11c145a8b87f62124010..98c6ca396ac4c78bb7f6bc67d86ebb2cd1e52804 100644
+--- a/player/styles/effects.css
++++ b/player/styles/effects.css
+@@ -174,6 +174,67 @@
+         animation: action-busy-dots 2200ms ease-in-out infinite;
+       }
+ 
++      .action-button[aria-busy="true"][data-busy-style="corner-dot"]::after {
++        right: 9px;
++        bottom: 7px;
++
++        inline-size: 5px;
++        block-size: 5px;
++
++        border-radius: 50%;
++        background: var(--package-accent);
++        opacity: 0.24;
++
++        animation: action-busy-corner-dot 2600ms ease-in-out infinite;
++      }
++
++      .action-button[aria-busy="true"][data-busy-style="spinner"]::after {
++        right: 8px;
++        bottom: 6px;
++
++        inline-size: 9px;
++        block-size: 9px;
++
++        border-radius: 50%;
++        background:
++          conic-gradient(
++            var(--package-accent) 0 30%,
++            transparent 30% 100%
++          );
++        opacity: 0.48;
++
++        -webkit-mask:
++          radial-gradient(
++            farthest-side,
++            transparent calc(100% - 2px),
++            #000 0
++          );
++        mask:
++          radial-gradient(
++            farthest-side,
++            transparent calc(100% - 2px),
++            #000 0
++          );
++
++        animation: action-busy-spin 2400ms linear infinite;
++      }
++
++      .action-button[aria-busy="true"][data-busy-style="wash"]::after {
++        inset: 0;
++
++        border-radius: inherit;
++        background:
++          linear-gradient(
++            90deg,
++            transparent,
++            color-mix(in srgb, var(--package-accent) 10%, transparent),
++            transparent
++          );
++        opacity: 0.16;
++
++        animation: action-busy-wash 3000ms ease-in-out infinite;
++      }
++
+       @keyframes action-busy-pulse {
+         0%,
+         100% {
+@@ -206,6 +267,36 @@
+         }
+       }
+ 
++      @keyframes action-busy-corner-dot {
++        0%,
++        100% {
++          opacity: 0.18;
++          transform: scale(0.85);
++        }
++
++        50% {
++          opacity: 0.62;
++          transform: scale(1);
++        }
++      }
++
++      @keyframes action-busy-spin {
++        to {
++          transform: rotate(1turn);
++        }
++      }
++
++      @keyframes action-busy-wash {
++        0%,
++        100% {
++          opacity: 0.08;
++        }
++
++        50% {
++          opacity: 0.28;
++        }
++      }
++
+       .send-button:not(:disabled):active {
+         border-color: var(--color-accent-solid-pressed);
+         background: var(--color-accent-solid-pressed);
+@@ -349,5 +440,13 @@
+         .action-button[aria-busy="true"][data-busy-style="sweep"]::after {
+           transform: translateX(128%);
+         }
++
++        .action-button[aria-busy="true"][data-busy-style="corner-dot"]::after {
++          transform: scale(1);
++        }
++
++        .action-button[aria-busy="true"][data-busy-style="spinner"]::after {
++          transform: rotate(0.18turn);
++        }
+       }
+     }
+diff --git a/player/styles/layout.css b/player/styles/layout.css
+index 02884982e8d3f80028b8166b3ce352d59714544a..b4231ff6f1dbc4ea80819bae90422e72f52c1ff1 100644
+--- a/player/styles/layout.css
++++ b/player/styles/layout.css
+@@ -343,22 +343,6 @@
+           var(--title-track);
+       }
+ 
+-      .player[data-demo-timer-count="2"] {
+-        --right-timer-stack-reserve:
+-          calc(var(--timer-size) + var(--timer-size) + 54px);
+-      }
+-
+-      .player[data-demo-timer-count="4"] {
+-        --right-timer-stack-reserve:
+-          calc(
+-            var(--timer-size)
+-            + var(--timer-size)
+-            + var(--timer-size)
+-            + var(--timer-size)
+-            + 78px
+-          );
+-      }
+-
+       .player[data-right="overlay"] .right-zone {
+         grid-column: 2 / 4;
+         grid-row: 2 / 3;
+diff --git a/player/styles/responsive.css b/player/styles/responsive.css
+index b16be1dfd62b6b01c9c79d551af1cd566644575f..445e264748a86d5e57047a3c4624b92a1a744875 100644
+--- a/player/styles/responsive.css
++++ b/player/styles/responsive.css
+@@ -272,44 +272,11 @@
+         }
+ 
+         .timer-cluster {
+-          block-size: calc(var(--timer-size) + 15px);
+-        }
+-
+-        .player[data-demo-timer-count="2"] {
+-          --right-timer-stack-reserve:
+-            calc(var(--timer-size) + var(--timer-size) + 50px);
+-        }
+-
+-        .player[data-demo-timer-count="4"] {
+-          --right-timer-stack-reserve:
+-            calc(
+-              var(--timer-size)
+-              + var(--timer-size)
+-              + var(--timer-size)
+-              + var(--timer-size)
+-              + 74px
+-            );
+-        }
+-
+-        .player[data-demo-timer-count="2"] .timer-cluster {
+-          block-size:
+-            calc(var(--timer-size) + var(--timer-size) + 27px);
+-        }
+-
+-        .player[data-demo-timer-count="4"] .timer-cluster {
+-          block-size:
+-            calc(
+-              var(--timer-size)
+-              + var(--timer-size)
+-              + var(--timer-size)
+-              + var(--timer-size)
+-              + 51px
+-            );
++          min-block-size: calc(var(--timer-size) + 15px);
+         }
+ 
+         .timer-list {
+-          left: 2px;
+-          top: 15px;
++          padding-top: 15px;
+         }
+ 
+         .action-scroll {
+@@ -386,30 +353,12 @@
+         }
+ 
+         .timer-cluster {
+-          inline-size: 78px;
+-          block-size: 34px;
+-          margin-inline-start: auto;
+-        }
+-
+-        .player[data-demo-timer-count="2"] {
+-          --right-timer-stack-reserve: calc(var(--title-height) + 40px);
+-        }
+-
+-        .player[data-demo-timer-count="4"] {
+-          --right-timer-stack-reserve: calc(var(--title-height) + 120px);
+-        }
+-
+-        .player[data-demo-timer-count="2"] .timer-cluster {
+-          block-size: 74px;
+-        }
+-
+-        .player[data-demo-timer-count="4"] .timer-cluster {
+-          block-size: 154px;
++          inline-size: 100%;
++          min-block-size: 34px;
+         }
+ 
+         .timer-list {
+-          left: 0;
+-          top: 0;
++          padding-top: 0;
+           gap: 6px;
+         }
+ 
+@@ -441,11 +390,6 @@
+           font-size: 7px;
+         }
+ 
+-        .timer-cluster .right-toggle {
+-          top: 0;
+-          right: 0;
+-        }
+-
+         .action-scroll {
+           padding-top: 8px;
+         }

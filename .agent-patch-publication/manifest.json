@@ -1,0 +1,31 @@
+{
+  "formatVersion": 2,
+  "targetBranch": "feature/player-production-demo",
+  "expectedBaseSha": "fa90adc1426841377c01f6eed2ce5f454aa58ad8",
+  "expectedResultTreeSha": "3a5eeb2bbdda99b826f4d1a613a122595179c90b",
+  "patchSizeBytes": 32051,
+  "patchSha256": "59e08261e6a49d4cecc28178f50f3d9b22632be4ca86af1c970578860fd33057",
+  "parts": [
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0001-of-0004",
+      "sizeBytes": 10136,
+      "sha256": "b0ba5f8a6ba5bd749c81abd92bcbd0d07badbc5c782f9c700380722860a58c47"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0002-of-0004",
+      "sizeBytes": 6798,
+      "sha256": "97c8407abc2e08454a2a00975b629915da8cc8ea507fafdc43cf6593040fc596"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0003-of-0004",
+      "sizeBytes": 6426,
+      "sha256": "17cc7153f6230979055e43396abd7176321a8dde6cf4cc32ea2d45120a5cd28a"
+    },
+    {
+      "path": ".agent-patch-publication/parts/change.patch.part-0004-of-0004",
+      "sizeBytes": 8691,
+      "sha256": "469edcc437867b2e816f27146464b0fc6e260d7c46b5d17d90403040252487e5"
+    }
+  ],
+  "commitMessage": "Refine Player timer and tuning controls"
+}

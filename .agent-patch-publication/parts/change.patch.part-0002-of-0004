@@ -1,0 +1,235 @@
+diff --git a/player/render.ts b/player/render.ts
+index ffa80144074808d42405b20f5d51991d9ab7eb11..d14c99441590b13d112621e98e495222ed184f5a 100644
+--- a/player/render.ts
++++ b/player/render.ts
+@@ -253,6 +253,9 @@ function createVisualTool(): HTMLElement {
+         ["pulse", "Soft pulse"],
+         ["sweep", "Slow sweep"],
+         ["dots", "Three dots"],
++        ["corner-dot", "Corner pulse"],
++        ["spinner", "Small spinner"],
++        ["wash", "Soft wash"],
+       ],
+     ),
+     createSelectOption(
+@@ -265,37 +268,23 @@ function createVisualTool(): HTMLElement {
+         ["below", "Inside · below"],
+       ],
+     ),
+-    createSelectOption(
++    createDemoNumberOption(
+       "Timer count",
+       "Presentation fixture for label and rail-pressure testing.",
+       "timer-count",
+-      [
+-        ["1", "1 timer"],
+-        ["2", "2 timers"],
+-        ["4", "4 timers"],
+-      ],
++      "timers",
++      1,
++      1,
+     ),
+     createSelectOption(
+       "Action alignment",
+-      "Compare current flow with viewport-centred Actions.",
++      "Compare normal flow with viewport-centred Actions.",
+       "action-alignment",
+       [
+-        ["current", "Current"],
++        ["current", "Flow"],
+         ["viewport-center", "Viewport centre"],
+       ],
+     ),
+-    createSelectOption(
+-      "Composer text",
+-      "Compare typing size without changing other UI text.",
+-      "composer-font",
+-      [
+-        ["default", "Current"],
+-        ["12px", "12 px"],
+-        ["13px", "13 px"],
+-        ["14px", "14 px"],
+-        ["15px", "15 px"],
+-      ],
+-    ),
+   );
+ 
+   const tuning = document.createElement("div");
+@@ -308,6 +297,7 @@ function createVisualTool(): HTMLElement {
+     createTuningInput("Conversation min", "Protected width floor", "--conversation-min-width", "px", 1),
+     createTuningInput("Composer lines", "Line-height cap", "--composer-max-lines", "lh", 1),
+     createTuningInput("Composer viewport", "Viewport-height cap", "--composer-max-viewport-height", "dvh", 1),
++    createTuningInput("Composer text", "Typing size", "--composer-font-size", "px", 1),
+   );
+ 
+   const note = document.createElement("p");
+@@ -379,6 +369,49 @@ function createTuningInput(
+   return label;
+ }
+ 
++function createDemoNumberOption(
++  title: string,
++  note: string,
++  key: string,
++  unit: string,
++  minimum: number,
++  step: number,
++): HTMLLabelElement {
++  const row = document.createElement("label");
++  row.className = "lab-option";
++
++  const copy = document.createElement("span");
++  copy.className = "lab-option-copy";
++
++  const titleElement = document.createElement("span");
++  titleElement.className = "lab-option-title";
++  titleElement.textContent = title;
++
++  const noteElement = document.createElement("span");
++  noteElement.className = "lab-option-note";
++  noteElement.textContent = note;
++  copy.append(titleElement, noteElement);
++
++  const field = document.createElement("span");
++  field.className = "lab-tuning-field";
++
++  const input = document.createElement("input");
++  input.type = "number";
++  input.className = "lab-tuning-input";
++  input.dataset.demoNumber = key;
++  input.min = String(minimum);
++  input.step = String(step);
++  input.setAttribute("aria-label", title);
++
++  const unitElement = document.createElement("span");
++  unitElement.className = "lab-tuning-unit";
++  unitElement.textContent = unit;
++  field.append(input, unitElement);
++
++  row.append(copy, field);
++  return row;
++}
++
+ function createToggleOption(
+   title: string,
+   note: string,
+@@ -535,6 +568,7 @@ function createLayoutDebugTool(): HTMLElement {
+       ["Tool strip", "tool-strip-scroll"],
+       ["Tool bodies", "tool-bodies-scroll"],
+       ["Composer input", "composer-scroll"],
++      ["Right rail", "right-rail-scroll"],
+       ["Actions", "actions-scroll"],
+     ],
+     "overflow",
+diff --git a/player/styles/components-right-controls.css b/player/styles/components-right-controls.css
+index f4baefb8c8bb81d4171d32f73247b4002d900a67..de8bd06c06b27e75e99f28ff42345f5804571f5e 100644
+--- a/player/styles/components-right-controls.css
++++ b/player/styles/components-right-controls.css
+@@ -16,36 +16,26 @@
+         position: relative;
+ 
+         inline-size: 100%;
+-        block-size: calc(var(--timer-size) + 17px);
+-      }
+-
+-      .timer-list {
+-        position: absolute;
+-        left:
+-          max(
+-            0px,
+-            calc((100% - (var(--timer-size) + 50px)) / 2)
+-          );
+-        top: 17px;
++        min-block-size: calc(var(--timer-size) + 17px);
+ 
+         display: grid;
+-        gap: 12px;
++        grid-template-columns: minmax(0, 1fr) 34px;
++        align-items: start;
++        gap: 6px;
+       }
+ 
+-      .player[data-demo-timer-count="2"] .timer-cluster {
+-        block-size:
+-          calc(var(--timer-size) + var(--timer-size) + 29px);
+-      }
++      .timer-list {
++        grid-column: 1;
++        grid-row: 1;
+ 
+-      .player[data-demo-timer-count="4"] .timer-cluster {
+-        block-size:
+-          calc(
+-            var(--timer-size)
+-            + var(--timer-size)
+-            + var(--timer-size)
+-            + var(--timer-size)
+-            + 53px
+-          );
++        min-width: 0;
++        padding-top: 17px;
++
++        display: flex;
++        flex-wrap: wrap;
++        justify-content: center;
++        align-content: flex-start;
++        gap: 12px;
+       }
+ 
+       .timer-label[hidden] {
+@@ -89,10 +79,11 @@
+       }
+ 
+       .timer-cluster .right-toggle {
+-        position: absolute;
++        position: relative;
+         z-index: 4;
+-        top: 0;
+-        right: 0;
++
++        grid-column: 2;
++        grid-row: 1;
+ 
+         width: 34px;
+         height: 34px;
+@@ -160,6 +151,24 @@
+         content: none;
+       }
+ 
++      .player[data-demo-multiple-timers="true"] .right-zone {
++        grid-template-rows:
++          max-content
++          minmax(max-content, 1fr);
++
++        overflow-y: auto;
++        overscroll-behavior: contain;
++
++        scrollbar-width: thin;
++        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
++      }
++
++      .player[data-demo-multiple-timers="true"][data-action-alignment="viewport-center"] .right-zone {
++        grid-template-rows:
++          max-content
++          minmax(max-content, 1fr);
++      }
++
+       .action-scroll {
+         min-width: 0;
+         min-height: 0;
+@@ -199,6 +208,14 @@
+           );
+       }
+ 
++      .player[data-demo-multiple-timers="true"] .action-scroll {
++        min-block-size: max-content;
++        overflow-y: visible;
++        overscroll-behavior: auto;
++        -webkit-mask-image: none;
++        mask-image: none;
++      }
++
+       .player[data-action-alignment="viewport-center"] .timer-wrap {
+         grid-row: 1;
+         align-self: start;

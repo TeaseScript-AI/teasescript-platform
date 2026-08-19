@@ -1,0 +1,221 @@
+diff --git a/docs/ui/PLAYER-UI.md b/docs/ui/PLAYER-UI.md
+index 04edd56a46e733d31669fd0c1a198b58bd497e55..56622c5bd4dbc058ea1656921d54567b78a8e8c0 100644
+--- a/docs/ui/PLAYER-UI.md
++++ b/docs/ui/PLAYER-UI.md
+@@ -477,7 +477,8 @@ whether script execution is blocked. Multiple visible timers may coexist: only o
+ path at once, but background timers may add further visible timers. A visible timer may have an authored label. A lone
+ unlabeled visible timer need not display one; when multiple visible timers coexist, unlabeled visible timers receive
+ generic labels from visible presentation order (for example `Timer 1`, `Timer 2`). Internal IDs and hidden timers must
+-not leak through those labels. Exact label placement and stable numbering as timers enter/leave remain Phase-4 tuning.
++not leak through those labels. The maintained generic-label placement is inside the timer below its time/value; stable
++numbering as timers enter or leave remains Phase-4 tuning.
+ 
+ Normal timer text is:
+ 
+@@ -490,8 +491,9 @@ size remains visually tuneable. A timer disappears when its underlying visible t
+ no longer requires presentation.
+ 
+ When exactly one visible timer exists, it stays fixed while the background-control/status list scrolls beneath it. When
+-multiple visible timers exist, they form part of the right-side stack and may scroll together with that stack when the
+-available height is insufficient. Overflow content fades/softens at both top and bottom boundaries rather than being
++multiple visible timers exist, they prefer a horizontal row within the available rail width and wrap only when needed.
++Those timers form part of the same right-side stack as the background controls and scroll together with that stack when
++the available height is insufficient. Overflow content fades/softens at both top and bottom boundaries rather than being
+ hard-clipped; with one fixed timer the upper fade carries scrolling controls visually behind/beneath the timer region.
+ 
+ ### Background controls and status
+@@ -530,10 +532,12 @@ Recorded background-control activation history follows the transcript provenance
+ 
+ ### Vertical placement and overflow
+ 
+-With one timer, the control/status group is vertically centered in the **currently usable space that remains around the
+-fixed timer** while all items fit. A software keyboard therefore reduces the space used for this calculation. Once the
+-list no longer fits, only that list scrolls and the timer remains fixed. With multiple timers, the timers join the
+-scrollable stack when required as described above.
++With one timer, the control/status group targets the vertical center of the currently usable right-rail viewport while
++all items fit without colliding with the fixed timer or title/chrome clearance. Where the rail spans the Player viewport,
++this is the Player viewport center. A software keyboard therefore reduces the space used for this calculation. Timer
++pressure moves the group down only when that centered placement no longer fits.
++Once the control list itself no longer fits, only that list scrolls and the single timer remains fixed. With multiple
++timers, the timers and controls use the shared scrollable stack described above.
+ 
+ ### Right background mode
+ 
+diff --git a/player/browser.ts b/player/browser.ts
+index f1852d71a5ed25912eeb3afaf44f1829663c2189..5f92a3de3f5c7dc6ebeca466bbbf8e41a3723cce 100644
+--- a/player/browser.ts
++++ b/player/browser.ts
+@@ -41,10 +41,9 @@ let accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
+ let ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
+ let vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
+ let busyActionDemoStyle = "off";
+-let timerLabelDemoPlacement = "off";
++let timerLabelDemoPlacement = "below";
+ let timerCountDemo = 1;
+-let actionAlignmentDemo = "current";
+-let composerFontDemo = "default";
++let actionAlignmentDemo = "viewport-center";
+ let presentation = DEMO_PRESENTATION;
+ 
+ const layoutDebug = createLayoutDebugController(
+@@ -165,6 +164,11 @@ toolStrip.addEventListener("input", (event) => {
+ 
+   if (target instanceof HTMLInputElement && target.matches("[data-tuning-property]")) {
+     applyTuningValue(target);
++    return;
++  }
++
++  if (target instanceof HTMLInputElement && target.matches("[data-demo-number]")) {
++    applyDemoNumberValue(target);
+   }
+ });
+ 
+@@ -353,10 +357,9 @@ function resetVisualLab(): void {
+   ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
+   vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
+   busyActionDemoStyle = "off";
+-  timerLabelDemoPlacement = "off";
++  timerLabelDemoPlacement = "below";
+   timerCountDemo = 1;
+-  actionAlignmentDemo = "current";
+-  composerFontDemo = "default";
++  actionAlignmentDemo = "viewport-center";
+   document.documentElement.style.setProperty("--package-accent", accentColor);
+   player.classList.toggle("fx-ambient", ambientEnabled);
+   player.classList.toggle("fx-vignette", vignetteEnabled);
+@@ -371,7 +374,7 @@ function resetVisualLab(): void {
+ function setPresentationDemoSelection(key: string, value: string): void {
+   switch (key) {
+     case "busy-style":
+-      if (!["off", "pulse", "sweep", "dots"].includes(value)) {
++      if (!["off", "pulse", "sweep", "dots", "corner-dot", "spinner", "wash"].includes(value)) {
+         throw new Error(`Unknown busy Action style: ${value}`);
+       }
+       busyActionDemoStyle = value;
+@@ -382,26 +385,12 @@ function setPresentationDemoSelection(key: string, value: string): void {
+       }
+       timerLabelDemoPlacement = value;
+       break;
+-    case "timer-count": {
+-      const count = Number.parseInt(value, 10);
+-      if (![1, 2, 4].includes(count)) {
+-        throw new Error(`Unknown timer fixture count: ${value}`);
+-      }
+-      timerCountDemo = count;
+-      break;
+-    }
+     case "action-alignment":
+       if (!["current", "viewport-center"].includes(value)) {
+         throw new Error(`Unknown Action alignment: ${value}`);
+       }
+       actionAlignmentDemo = value;
+       break;
+-    case "composer-font":
+-      if (!["default", "12px", "13px", "14px", "15px"].includes(value)) {
+-        throw new Error(`Unknown composer font size: ${value}`);
+-      }
+-      composerFontDemo = value;
+-      break;
+     default:
+       throw new Error(`Unknown presentation demo selection: ${key}`);
+   }
+@@ -409,6 +398,23 @@ function setPresentationDemoSelection(key: string, value: string): void {
+   syncVisualControls();
+ }
+ 
++function applyDemoNumberValue(input: HTMLInputElement): void {
++  if (!Number.isFinite(input.valueAsNumber)) return;
++
++  const key = requiredDatasetValue(input, "demoNumber");
++  switch (key) {
++    case "timer-count": {
++      const count = input.valueAsNumber;
++      if (!Number.isInteger(count) || count < 1) return;
++      timerCountDemo = count;
++      syncVisualControls();
++      break;
++    }
++    default:
++      throw new Error(`Unknown presentation demo number: ${key}`);
++  }
++}
++
+ function applyTuningValue(input: HTMLInputElement): void {
+   if (!Number.isFinite(input.valueAsNumber)) return;
+ 
+@@ -444,20 +450,24 @@ function syncVisualControls(): void {
+       case "timer-label":
+         select.value = timerLabelDemoPlacement;
+         break;
+-      case "timer-count":
+-        select.value = String(timerCountDemo);
+-        break;
+       case "action-alignment":
+         select.value = actionAlignmentDemo;
+         break;
+-      case "composer-font":
+-        select.value = composerFontDemo;
+-        break;
+       default:
+         throw new Error(`Unknown presentation demo selection: ${String(select.dataset.demoSelect)}`);
+     }
+   }
+ 
++  for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-demo-number]")) {
++    switch (input.dataset.demoNumber) {
++      case "timer-count":
++        input.value = String(timerCountDemo);
++        break;
++      default:
++        throw new Error(`Unknown presentation demo number: ${String(input.dataset.demoNumber)}`);
++    }
++  }
++
+   syncDemoTimers();
+   for (const [index, timerElement] of [...timerList.querySelectorAll<HTMLElement>(".timer")].entries()) {
+     const label = timerElement.querySelector<HTMLElement>(".timer-label");
+@@ -471,6 +481,11 @@ function syncVisualControls(): void {
+     }
+   }
+   player.dataset.demoTimerCount = String(timerCountDemo);
++  if (timerCountDemo > 1) {
++    player.dataset.demoMultipleTimers = "true";
++  } else {
++    delete player.dataset.demoMultipleTimers;
++  }
+ 
+   const firstAction = actions.querySelector<HTMLButtonElement>(".action-button");
+   if (busyActionDemoStyle === "off") {
+@@ -487,12 +502,6 @@ function syncVisualControls(): void {
+     delete player.dataset.actionAlignment;
+   }
+ 
+-  if (composerFontDemo === "default") {
+-    player.style.removeProperty("--composer-font-size");
+-  } else {
+-    player.style.setProperty("--composer-font-size", composerFontDemo);
+-  }
+-
+   const computed = getComputedStyle(player);
+   for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-tuning-property]")) {
+     const property = requiredDatasetValue(input, "tuningProperty");
+diff --git a/player/layout-debug.ts b/player/layout-debug.ts
+index 4e106b6e29e5d5596eb74eda7a47732f0147b1cc..dc8814ccafd07a151cd20d7fe9fa49a6bc576573 100644
+--- a/player/layout-debug.ts
++++ b/player/layout-debug.ts
+@@ -277,6 +277,7 @@ export function createLayoutDebugController(
+       [transcript, "y", "transcript"],
+       [toolStripScroll, "x", "tool strip"],
+       [composerInput, "y", "composer input"],
++      [rightZone, "y", "right rail"],
+       [actions, "y", "actions"],
+     ];
+ 
+@@ -361,6 +362,7 @@ export function createLayoutDebugController(
+       "tool-strip-scroll": formatScrollMetrics(toolStripScroll, "x"),
+       "tool-bodies-scroll": formatToolBodyScroll(toolBodies),
+       "composer-scroll": formatScrollMetrics(composerInput, "y"),
++      "right-rail-scroll": formatScrollMetrics(rightZone, "y"),
+       "actions-scroll": formatScrollMetrics(actions, "y"),
+       "constraint-stage": `${formatPixels(mediaArea.getBoundingClientRect().height)} measured · target ${activeStageTarget}`,
+       "constraint-tool-column": firstToolColumn === null
