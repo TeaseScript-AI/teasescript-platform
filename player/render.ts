@@ -558,6 +558,7 @@ function createLayoutDebugTool(): HTMLElement {
       ["Tool strip", "tool-strip-scroll"],
       ["Tool bodies", "tool-bodies-scroll"],
       ["Composer input", "composer-scroll"],
+      ["Right rail", "right-rail-scroll"],
       ["Actions", "actions-scroll"],
     ],
     "overflow",

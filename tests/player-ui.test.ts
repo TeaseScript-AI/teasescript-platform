@@ -418,6 +418,7 @@ test("Player Layout Debug exposes live development-only geometry inspection", as
   assert.match(layoutDebug, /document\.addEventListener\("scroll", queueSync, true\)/u);
   assert.match(layoutDebug, /syncOverflow\(playerRect\)/u);
   assert.match(layoutDebug, /formatScrollMetrics\(transcript, "y"\)/u);
+  assert.match(layoutDebug, /formatScrollMetrics\(rightZone, "y"\)/u);
   assert.match(layoutDebug, /formatToolBodyScroll\(toolBodies\)/u);
   assert.match(layoutDebug, /"constraint-conversation"[\s\S]*--conversation-min-width[\s\S]*--conversation-max-width/u);
   assert.match(layoutDebug, /visualViewport\.offsetLeft[\s\S]*visualViewport\.offsetTop/u);

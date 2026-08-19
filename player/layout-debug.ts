@@ -277,6 +277,7 @@ export function createLayoutDebugController(
       [transcript, "y", "transcript"],
       [toolStripScroll, "x", "tool strip"],
       [composerInput, "y", "composer input"],
+      [rightZone, "y", "right rail"],
       [actions, "y", "actions"],
     ];
 
@@ -361,6 +362,7 @@ export function createLayoutDebugController(
       "tool-strip-scroll": formatScrollMetrics(toolStripScroll, "x"),
       "tool-bodies-scroll": formatToolBodyScroll(toolBodies),
       "composer-scroll": formatScrollMetrics(composerInput, "y"),
+      "right-rail-scroll": formatScrollMetrics(rightZone, "y"),
       "actions-scroll": formatScrollMetrics(actions, "y"),
       "constraint-stage": `${formatPixels(mediaArea.getBoundingClientRect().height)} measured · target ${activeStageTarget}`,
       "constraint-tool-column": firstToolColumn === null
