@@ -343,10 +343,6 @@
       }
 
       .player[data-demo-timer-count]:not([data-demo-timer-count="1"]) .right-zone {
-        grid-template-rows:
-          max-content
-          minmax(max-content, 1fr);
-
         overflow-y: auto;
         overscroll-behavior: contain;
         scrollbar-width: thin;
@@ -368,6 +364,12 @@
             #000 calc(100% - 18px),
             transparent 100%
           );
+      }
+
+      .player[data-action-alignment="below-timers"][data-demo-timer-count]:not([data-demo-timer-count="1"]) .right-zone {
+        grid-template-rows:
+          max-content
+          minmax(max-content, 1fr);
       }
 
       .player[data-right="overlay"] .right-zone {

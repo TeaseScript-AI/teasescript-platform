@@ -312,13 +312,16 @@ test("Player Visual Lab exposes grouped reversible Phase 4 review choices", asyn
   assert.match(render, /"Busy Action"[\s\S]*"busy-style"[\s\S]*"Soft pulse"[\s\S]*"Slow sweep"[\s\S]*"Three dots"[\s\S]*"Corner pulse"[\s\S]*"Corner spinner"[\s\S]*"Soft wash"/u);
   assert.match(render, /"Timer label"[\s\S]*"timer-label"[\s\S]*"Inside · above"[\s\S]*"Inside · below"/u);
   assert.match(render, /createDemoNumberOption\([\s\S]*"Timer count"[\s\S]*"timer-count"[\s\S]*1,[\s\S]*1,/u);
-  assert.match(render, /"Action alignment"[\s\S]*"viewport-center"[\s\S]*"Viewport centre"/u);
+  assert.match(render, /"Action alignment"[\s\S]*"below-timers"[\s\S]*"Centre below timers"[\s\S]*"viewport-center"[\s\S]*"Viewport centre"/u);
+  assert.doesNotMatch(render, /\["current", "Current"\]/u);
   assert.match(render, /createTuningInput\("Composer text"[\s\S]*"--composer-font-size"[\s\S]*"px"/u);
   assert.match(render, /select\.dataset\.demoSelect = key/u);
   assert.match(browser, /busyActionDemoStyle = "off"/u);
   assert.match(browser, /timerLabelDemoPlacement = "below"/u);
   assert.match(browser, /timerCountDemo = 1/u);
   assert.match(browser, /actionAlignmentDemo = "viewport-center"/u);
+  assert.match(browser, /\["below-timers", "viewport-center"\]\.includes\(value\)/u);
+  assert.match(browser, /player\.dataset\.actionAlignment = actionAlignmentDemo/u);
   assert.doesNotMatch(browser, /composerFontDemo/u);
   assert.match(browser, /data-demo-number/u);
   assert.match(browser, /label\.hidden = timerLabelDemoPlacement === "off"/u);
@@ -366,7 +369,16 @@ test("Player viewport-centred Action candidate stays centred until timer-stack c
     layout,
     /\.player\[data-action-alignment="viewport-center"\] \.right-zone \{[\s\S]*minmax\(max-content, 1fr\)[\s\S]*auto[\s\S]*minmax\(0, 1fr\)[\s\S]*var\(--title-track\)/u,
   );
-  assert.match(layout, /data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\)[\s\S]*overflow-y: auto/u);
+  assert.match(layout, /data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\) \.right-zone \{[\s\S]*overflow-y: auto/u);
+  assert.match(
+    layout,
+    /data-action-alignment="below-timers"\]\[data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\) \.right-zone \{[\s\S]*max-content[\s\S]*minmax\(max-content, 1fr\)/u,
+  );
+  const multiTimerRightZone = layout.match(
+    /\.player\[data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\) \.right-zone \{(?<body>[\s\S]*?)\n      \}/u,
+  );
+  assert.ok(multiTimerRightZone?.groups?.body);
+  assert.doesNotMatch(multiTimerRightZone.groups.body, /grid-template-rows/u);
   assert.match(actions, /data-action-alignment="viewport-center"[\s\S]*\.timer-wrap \{[\s\S]*grid-row: 1/u);
   assert.match(actions, /data-action-alignment="viewport-center"[\s\S]*\.action-scroll \{[\s\S]*grid-row: 2/u);
   assert.match(actions, /data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\)[\s\S]*\.action-scroll[\s\S]*overflow: visible/u);

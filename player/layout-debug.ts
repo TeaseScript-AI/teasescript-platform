@@ -342,7 +342,7 @@ export function createLayoutDebugController(
         : "full height",
       "action-layout": player.dataset.actionAlignment === "viewport-center"
         ? "viewport centre"
-        : "current",
+        : "centre below timers",
       viewport: `${formatPixels(window.innerWidth)} × ${formatPixels(window.innerHeight)}`,
       "visual-viewport-size": `${formatPixels(visualWidth)} × ${formatPixels(visualHeight)} · scale ${formatScale(visualViewport?.scale ?? 1)}`,
       "grid-columns": formatTrackList(columns),

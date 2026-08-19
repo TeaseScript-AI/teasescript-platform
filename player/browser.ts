@@ -386,7 +386,7 @@ function setPresentationDemoSelection(key: string, value: string): void {
       timerLabelDemoPlacement = value;
       break;
     case "action-alignment":
-      if (!["current", "viewport-center"].includes(value)) {
+      if (!["below-timers", "viewport-center"].includes(value)) {
         throw new Error(`Unknown Action alignment: ${value}`);
       }
       actionAlignmentDemo = value;
@@ -492,11 +492,7 @@ function syncVisualControls(): void {
     if (firstAction !== null) firstAction.dataset.busyStyle = busyActionDemoStyle;
   }
 
-  if (actionAlignmentDemo === "viewport-center") {
-    player.dataset.actionAlignment = "viewport-center";
-  } else {
-    delete player.dataset.actionAlignment;
-  }
+  player.dataset.actionAlignment = actionAlignmentDemo;
 
   const computed = getComputedStyle(player);
   for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-tuning-property]")) {

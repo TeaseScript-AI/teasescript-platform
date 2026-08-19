@@ -277,10 +277,10 @@ function createVisualTool(): HTMLElement {
     ),
     createSelectOption(
       "Action alignment",
-      "Compare current flow with viewport-centred Actions.",
+      "Compare below-timers centring with viewport-centred Actions.",
       "action-alignment",
       [
-        ["current", "Current"],
+        ["below-timers", "Centre below timers"],
         ["viewport-center", "Viewport centre"],
       ],
     ),
