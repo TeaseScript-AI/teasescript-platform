@@ -399,7 +399,10 @@ test("Player Layout Debug exposes live development-only geometry inspection", as
   assert.match(model, /PlayerToolId = "visuals" \| "scene" \| "layout-debug"/u);
   assert.match(demo, /\{ id: "layout-debug", label: "Layout Debug" \}/u);
   assert.match(render, /case "layout-debug":[\s\S]*createLayoutDebugTool/u);
-  assert.match(render, /"Grid tracks"[\s\S]*"Region bounds"[\s\S]*"Reserved regions"[\s\S]*"Safe areas"/u);
+  assert.match(
+    render,
+    /"Grid tracks"[\s\S]*"Region bounds"[\s\S]*"Reserved regions"[\s\S]*"Safe areas"[\s\S]*"Overflow \/ scroll"[\s\S]*"Constraint vs measured"[\s\S]*"Visual viewport offsets"/u,
+  );
   assert.match(render, /\["Foreground", "foreground"\]/u);
   assert.match(browser, /createLayoutDebugController\([\s\S]*\(\) => toolColumns/u);
   assert.match(browser, /layoutDebug\.setOption\(requiredDatasetValue\(target, "layoutDebug"\), target\.checked\)/u);
@@ -407,10 +410,18 @@ test("Player Layout Debug exposes live development-only geometry inspection", as
   assert.match(layoutDebug, /new ResizeObserver\(queueSync\)/u);
   assert.match(layoutDebug, /getComputedStyle\(player\)[\s\S]*gridTemplateColumns[\s\S]*gridTemplateRows/u);
   assert.match(layoutDebug, /window\.visualViewport\?\.addEventListener\("resize", queueSync\)/u);
+  assert.match(layoutDebug, /document\.addEventListener\("scroll", queueSync, true\)/u);
+  assert.match(layoutDebug, /syncOverflow\(playerRect\)/u);
+  assert.match(layoutDebug, /formatScrollMetrics\(transcript, "y"\)/u);
+  assert.match(layoutDebug, /formatToolBodyScroll\(toolBodies\)/u);
+  assert.match(layoutDebug, /"constraint-conversation"[\s\S]*--conversation-min-width[\s\S]*--conversation-max-width/u);
+  assert.match(layoutDebug, /visualViewport\.offsetLeft[\s\S]*visualViewport\.offsetTop/u);
+  assert.match(layoutDebug, /visualViewport\.pageLeft[\s\S]*visualViewport\.pageTop/u);
   assert.match(layoutDebug, /foreground === null[\s\S]*\? "not present"/u);
   assert.match(debugCss, /\.layout-debug-overlay \{[\s\S]*position: absolute;[\s\S]*pointer-events: none;/u);
   assert.match(debugCss, /height: var\(--safe-top\)/u);
   assert.match(debugCss, /width: var\(--safe-right\)/u);
+  assert.match(debugCss, /data-debug-kind="overflow"[\s\S]*#c026d3/u);
   assert.match(playerDocs, /`Visual\s+Lab`, `Layout Debug`, and `Scene` tools/u);
 });
 

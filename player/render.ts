@@ -478,6 +478,21 @@ function createLayoutDebugTool(): HTMLElement {
       "Shade the resolved device safe-area insets.",
       "safe-areas",
     ),
+    createLayoutDebugToggle(
+      "Overflow / scroll",
+      "Highlight overflowing scroll owners and show their live scroll range.",
+      "overflow",
+    ),
+    createLayoutDebugToggle(
+      "Constraint vs measured",
+      "Compare active layout constraints with the resulting measured geometry.",
+      "constraints",
+    ),
+    createLayoutDebugToggle(
+      "Visual viewport offsets",
+      "Show visual-viewport offset and page-origin values for keyboard, zoom, and browser chrome diagnosis.",
+      "viewport-offsets",
+    ),
   );
 
   const conditions = createLayoutDebugReadout(
@@ -512,11 +527,45 @@ function createLayoutDebugTool(): HTMLElement {
     ],
   );
 
+  const overflow = createLayoutDebugReadout(
+    "Overflow / scroll",
+    [
+      ["Player shell", "player-scroll"],
+      ["Transcript", "transcript-scroll"],
+      ["Tool strip", "tool-strip-scroll"],
+      ["Tool bodies", "tool-bodies-scroll"],
+      ["Composer input", "composer-scroll"],
+      ["Actions", "actions-scroll"],
+    ],
+    "overflow",
+  );
+
+  const constraints = createLayoutDebugReadout(
+    "Constraint vs measured",
+    [
+      ["Stage height", "constraint-stage"],
+      ["Tool column", "constraint-tool-column"],
+      ["Conversation", "constraint-conversation"],
+      ["Composer input", "constraint-composer"],
+      ["Right rail", "constraint-right-rail"],
+    ],
+    "constraints",
+  );
+
+  const viewportOffsets = createLayoutDebugReadout(
+    "Visual viewport offsets",
+    [
+      ["Offset", "visual-offset"],
+      ["Page origin", "visual-page-origin"],
+    ],
+    "viewport-offsets",
+  );
+
   const note = document.createElement("p");
   note.className = "lab-note";
   note.textContent = "Development-only inspection. Layout Debug never changes Player geometry.";
 
-  content.append(options, conditions, measurements, note);
+  content.append(options, conditions, measurements, overflow, constraints, viewportOffsets, note);
   return content;
 }
 
@@ -558,9 +607,11 @@ function createLayoutDebugToggle(
 function createLayoutDebugReadout(
   title: string,
   rows: readonly (readonly [label: string, key: string])[],
+  optionKey?: string,
 ): HTMLElement {
   const section = document.createElement("section");
   section.className = "layout-debug-readout-section";
+  if (optionKey !== undefined) section.dataset.layoutDebugSection = optionKey;
 
   const heading = document.createElement("h3");
   heading.className = "layout-debug-heading";

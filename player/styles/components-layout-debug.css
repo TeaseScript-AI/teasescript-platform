@@ -56,6 +56,7 @@
       .layout-debug-grid-layer,
       .layout-debug-region-layer,
       .layout-debug-reserve-layer,
+      .layout-debug-overflow-layer,
       .layout-debug-safe-layer {
         position: absolute;
         inset: 0;
@@ -123,6 +124,12 @@
 
       .layout-debug-box[data-debug-kind="right"] {
         --debug-box-color: #ea580c;
+      }
+
+      .layout-debug-box[data-debug-kind="overflow"] {
+        --debug-box-color: #c026d3;
+        border-style: solid;
+        box-shadow: inset 0 0 0 1px rgb(192 38 211 / 18%);
       }
 
       .layout-debug-box[data-debug-kind^="reserve-"] {
