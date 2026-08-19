@@ -36,6 +36,7 @@
 
       @media (max-width: 760px) {
         .player {
+          --composer-font-size: 10px;
           --mobile-drawer-width:
             min(300px, calc(100vw - 120px));
         }
@@ -97,12 +98,14 @@
         }
 
         .composer textarea {
+          --composer-input-block-chrome: 22px;
+
           min-block-size: 42px;
           padding: 10px 11px;
           border: 1px solid var(--color-border-default);
           border-radius: 7px;
           background: var(--color-surface-component);
-          font-size: 10px;
+          font-size: var(--composer-font-size);
         }
 
         .composer textarea:focus-visible {
@@ -272,18 +275,41 @@
           block-size: calc(var(--timer-size) + 15px);
         }
 
-        .timer-cluster:has(.timer-label:not([hidden])) {
-          block-size: calc(var(--timer-size) + 32px);
+        .player[data-demo-timer-count="2"] {
+          --right-timer-stack-reserve:
+            calc(var(--timer-size) + var(--timer-size) + 50px);
         }
 
-        .timer-cluster .timer {
+        .player[data-demo-timer-count="4"] {
+          --right-timer-stack-reserve:
+            calc(
+              var(--timer-size)
+              + var(--timer-size)
+              + var(--timer-size)
+              + var(--timer-size)
+              + 74px
+            );
+        }
+
+        .player[data-demo-timer-count="2"] .timer-cluster {
+          block-size:
+            calc(var(--timer-size) + var(--timer-size) + 27px);
+        }
+
+        .player[data-demo-timer-count="4"] .timer-cluster {
+          block-size:
+            calc(
+              var(--timer-size)
+              + var(--timer-size)
+              + var(--timer-size)
+              + var(--timer-size)
+              + 51px
+            );
+        }
+
+        .timer-list {
           left: 2px;
           top: 15px;
-        }
-
-        .timer-label {
-          left: 2px;
-          top: calc(15px + var(--timer-size) + 5px);
         }
 
         .action-scroll {
@@ -319,6 +345,7 @@
       @media (max-height: 600px) {
         .player {
           --title-track: 0px;
+          --right-timer-stack-reserve: var(--title-height);
           --title-overlay-clearance:
             var(--title-height);
           --media-height: var(--media-height-overlay);
@@ -364,44 +391,54 @@
           margin-inline-start: auto;
         }
 
-        .timer-cluster:has(.timer-label:not([hidden])) {
-          inline-size: 100%;
-          block-size: 34px;
+        .player[data-demo-timer-count="2"] {
+          --right-timer-stack-reserve: calc(var(--title-height) + 40px);
+        }
+
+        .player[data-demo-timer-count="4"] {
+          --right-timer-stack-reserve: calc(var(--title-height) + 120px);
+        }
+
+        .player[data-demo-timer-count="2"] .timer-cluster {
+          block-size: 74px;
+        }
+
+        .player[data-demo-timer-count="4"] .timer-cluster {
+          block-size: 154px;
+        }
+
+        .timer-list {
+          left: 0;
+          top: 0;
+          gap: 6px;
         }
 
         .timer-cluster .timer {
-          left: 0;
-          top: 0;
-          bottom: auto;
-
           inline-size: 34px;
           min-inline-size: 0;
           block-size: 34px;
           aspect-ratio: 1;
 
           border-radius: 50%;
+        }
+
+        .timer {
           font-size: 12px;
         }
 
-        .timer-cluster:has(.timer-label:not([hidden])) .timer {
-          right: 44px;
-          left: auto;
+        .timer[data-label-placement="above"],
+        .timer[data-label-placement="below"] {
+          gap: 1px;
         }
 
-        .timer-cluster .timer-label:not([hidden]) {
-          top: 0;
-          right: 84px;
-          left: 0;
-
-          inline-size: auto;
-          block-size: 34px;
-
-          display: flex;
-          align-items: center;
-          justify-content: flex-end;
-
+        .timer[data-label-placement="above"] .timer-text,
+        .timer[data-label-placement="below"] .timer-text {
           font-size: 10px;
-          text-align: right;
+        }
+
+        .timer[data-label-placement="above"] .timer-label,
+        .timer[data-label-placement="below"] .timer-label {
+          font-size: 7px;
         }
 
         .timer-cluster .right-toggle {

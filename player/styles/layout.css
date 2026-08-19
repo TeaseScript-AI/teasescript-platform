@@ -101,7 +101,9 @@
         --conversation-overlay-reserve: 0px;
         --composer-max-lines: 6lh;
         --composer-max-viewport-height: 20dvh;
+        --composer-font-size: 11px;
         --focus-outline-width: 2px;
+        --right-timer-stack-reserve: calc(var(--timer-size) + 42px);
 
         --scene-ambient: #f7cdaf;
         --timer-progress: 46%;
@@ -306,6 +308,7 @@
       }
 
       .right-zone {
+        position: relative;
         z-index: 20;
 
         grid-column: 3;
@@ -330,6 +333,30 @@
 
         border-left: 0;
         box-shadow: -3px 0 8px var(--color-structural-shadow);
+      }
+
+      .player[data-action-alignment="viewport-center"] .right-zone {
+        grid-template-rows:
+          minmax(var(--right-timer-stack-reserve), 1fr)
+          auto
+          minmax(0, 1fr)
+          var(--title-track);
+      }
+
+      .player[data-demo-timer-count="2"] {
+        --right-timer-stack-reserve:
+          calc(var(--timer-size) + var(--timer-size) + 54px);
+      }
+
+      .player[data-demo-timer-count="4"] {
+        --right-timer-stack-reserve:
+          calc(
+            var(--timer-size)
+            + var(--timer-size)
+            + var(--timer-size)
+            + var(--timer-size)
+            + 78px
+          );
       }
 
       .player[data-right="overlay"] .right-zone {

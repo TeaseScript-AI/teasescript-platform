@@ -235,26 +235,64 @@ function createVisualTool(): HTMLElement {
     createToggleOption(
       "Ambient media colour",
       "Weak scene colour bleed around media.",
-      "effect",
       "fx-ambient",
     ),
     createToggleOption(
       "Vignette",
       "Universal edge darkening for any media content.",
-      "effect",
       "fx-vignette",
     ),
-    createToggleOption(
-      "Busy Action test",
-      "POC-only in-place indeterminate activity.",
-      "demoState",
-      "busy-action",
+    createSelectOption(
+      "Busy Action",
+      "Compare low-distraction in-place activity cues.",
+      "busy-style",
+      [
+        ["off", "Off"],
+        ["pulse", "Soft pulse"],
+        ["sweep", "Slow sweep"],
+        ["dots", "Three dots"],
+      ],
     ),
-    createToggleOption(
-      "Timer label test",
-      "POC-only generic visible-order label.",
-      "demoState",
+    createSelectOption(
+      "Timer label",
+      "Compare generic visible-order label placement.",
       "timer-label",
+      [
+        ["off", "Off"],
+        ["above", "Inside · above"],
+        ["below", "Inside · below"],
+      ],
+    ),
+    createSelectOption(
+      "Timer count",
+      "Presentation fixture for label and rail-pressure testing.",
+      "timer-count",
+      [
+        ["1", "1 timer"],
+        ["2", "2 timers"],
+        ["4", "4 timers"],
+      ],
+    ),
+    createSelectOption(
+      "Action alignment",
+      "Compare current flow with viewport-centred Actions.",
+      "action-alignment",
+      [
+        ["current", "Current"],
+        ["viewport-center", "Viewport centre"],
+      ],
+    ),
+    createSelectOption(
+      "Composer text",
+      "Compare typing size without changing other UI text.",
+      "composer-font",
+      [
+        ["default", "Current"],
+        ["12px", "12 px"],
+        ["13px", "13 px"],
+        ["14px", "14 px"],
+        ["15px", "15 px"],
+      ],
     ),
   );
 
@@ -268,7 +306,6 @@ function createVisualTool(): HTMLElement {
     createTuningInput("Conversation min", "Protected width floor", "--conversation-min-width", "px", 1),
     createTuningInput("Composer lines", "Line-height cap", "--composer-max-lines", "lh", 1),
     createTuningInput("Composer viewport", "Viewport-height cap", "--composer-max-viewport-height", "dvh", 1),
-    createTuningInput("Focus ring", "Keyboard outline thickness", "--focus-outline-width", "px", 0.5),
   );
 
   const note = document.createElement("p");
@@ -343,8 +380,7 @@ function createTuningInput(
 function createToggleOption(
   title: string,
   note: string,
-  dataKey: "effect" | "demoState",
-  dataValue: string,
+  effect: string,
 ): HTMLLabelElement {
   const label = document.createElement("label");
   label.className = "lab-option";
@@ -366,7 +402,7 @@ function createToggleOption(
 
   const input = document.createElement("input");
   input.type = "checkbox";
-  input.dataset[dataKey] = dataValue;
+  input.dataset.effect = effect;
 
   const switchUi = document.createElement("span");
   switchUi.className = "switch-ui";
@@ -374,6 +410,43 @@ function createToggleOption(
 
   label.append(copy, switchElement);
   return label;
+}
+
+function createSelectOption(
+  title: string,
+  note: string,
+  key: string,
+  options: readonly (readonly [value: string, label: string])[],
+): HTMLLabelElement {
+  const row = document.createElement("label");
+  row.className = "lab-option";
+
+  const copy = document.createElement("span");
+  copy.className = "lab-option-copy";
+
+  const titleElement = document.createElement("span");
+  titleElement.className = "lab-option-title";
+  titleElement.textContent = title;
+
+  const noteElement = document.createElement("span");
+  noteElement.className = "lab-option-note";
+  noteElement.textContent = note;
+  copy.append(titleElement, noteElement);
+
+  const select = document.createElement("select");
+  select.className = "lab-select";
+  select.dataset.demoSelect = key;
+  select.setAttribute("aria-label", title);
+
+  for (const [value, label] of options) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.append(option);
+  }
+
+  row.append(copy, select);
+  return row;
 }
 
 function createSceneTool(presentation: PlayerPresentation): HTMLElement {

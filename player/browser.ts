@@ -27,8 +27,8 @@ const toolStripScroll = requiredElement<HTMLElement>("toolStripScroll", HTMLElem
 const rightToggle = requiredElement<HTMLButtonElement>("rightToggle", HTMLButtonElement);
 const transcript = requiredElement<HTMLElement>("transcript", HTMLElement);
 const actions = requiredElement<HTMLElement>("actions", HTMLElement);
+const timerList = requiredElement<HTMLElement>("timerList", HTMLElement);
 const timerText = requiredElement<HTMLElement>("timerText", HTMLElement);
-const timerLabel = requiredElement<HTMLElement>("timerLabel", HTMLElement);
 const sceneMedia = requiredElement<HTMLImageElement>("sceneMedia", HTMLImageElement);
 const composerForm = requiredElement<HTMLFormElement>("composerForm", HTMLFormElement);
 
@@ -39,8 +39,11 @@ let nextToolColumnNumber = 2;
 let accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
 let ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
 let vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
-let busyActionDemoEnabled = false;
-let timerLabelDemoEnabled = false;
+let busyActionDemoStyle = "off";
+let timerLabelDemoPlacement = "off";
+let timerCountDemo = 1;
+let actionAlignmentDemo = "current";
+let composerFontDemo = "default";
 let presentation = DEMO_PRESENTATION;
 
 renderPresentation(
@@ -121,9 +124,11 @@ toolStrip.addEventListener("change", (event) => {
     return;
   }
 
-  if (target instanceof HTMLInputElement && target.matches("[data-demo-state]")) {
-    const state = requiredDatasetValue(target, "demoState");
-    setPresentationDemoState(state, target.checked);
+  if (target instanceof HTMLSelectElement && target.matches("[data-demo-select]")) {
+    setPresentationDemoSelection(
+      requiredDatasetValue(target, "demoSelect"),
+      target.value,
+    );
   }
 });
 
@@ -321,8 +326,11 @@ function resetVisualLab(): void {
   accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
   ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
   vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
-  busyActionDemoEnabled = false;
-  timerLabelDemoEnabled = false;
+  busyActionDemoStyle = "off";
+  timerLabelDemoPlacement = "off";
+  timerCountDemo = 1;
+  actionAlignmentDemo = "current";
+  composerFontDemo = "default";
   document.documentElement.style.setProperty("--package-accent", accentColor);
   player.classList.toggle("fx-ambient", ambientEnabled);
   player.classList.toggle("fx-vignette", vignetteEnabled);
@@ -334,16 +342,42 @@ function resetVisualLab(): void {
   syncVisualControls();
 }
 
-function setPresentationDemoState(state: string, enabled: boolean): void {
-  switch (state) {
-    case "busy-action":
-      busyActionDemoEnabled = enabled;
+function setPresentationDemoSelection(key: string, value: string): void {
+  switch (key) {
+    case "busy-style":
+      if (!["off", "pulse", "sweep", "dots"].includes(value)) {
+        throw new Error(`Unknown busy Action style: ${value}`);
+      }
+      busyActionDemoStyle = value;
       break;
     case "timer-label":
-      timerLabelDemoEnabled = enabled;
+      if (!["off", "above", "below"].includes(value)) {
+        throw new Error(`Unknown timer label placement: ${value}`);
+      }
+      timerLabelDemoPlacement = value;
+      break;
+    case "timer-count": {
+      const count = Number.parseInt(value, 10);
+      if (![1, 2, 4].includes(count)) {
+        throw new Error(`Unknown timer fixture count: ${value}`);
+      }
+      timerCountDemo = count;
+      break;
+    }
+    case "action-alignment":
+      if (!["current", "viewport-center"].includes(value)) {
+        throw new Error(`Unknown Action alignment: ${value}`);
+      }
+      actionAlignmentDemo = value;
+      break;
+    case "composer-font":
+      if (!["default", "12px", "13px", "14px", "15px"].includes(value)) {
+        throw new Error(`Unknown composer font size: ${value}`);
+      }
+      composerFontDemo = value;
       break;
     default:
-      throw new Error(`Unknown presentation demo state: ${state}`);
+      throw new Error(`Unknown presentation demo selection: ${key}`);
   }
 
   syncVisualControls();
@@ -376,25 +410,61 @@ function syncVisualControls(): void {
     }
   }
 
-  for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-demo-state]")) {
-    switch (input.dataset.demoState) {
-      case "busy-action":
-        input.checked = busyActionDemoEnabled;
+  for (const select of toolStrip.querySelectorAll<HTMLSelectElement>("[data-demo-select]")) {
+    switch (select.dataset.demoSelect) {
+      case "busy-style":
+        select.value = busyActionDemoStyle;
         break;
       case "timer-label":
-        input.checked = timerLabelDemoEnabled;
+        select.value = timerLabelDemoPlacement;
+        break;
+      case "timer-count":
+        select.value = String(timerCountDemo);
+        break;
+      case "action-alignment":
+        select.value = actionAlignmentDemo;
+        break;
+      case "composer-font":
+        select.value = composerFontDemo;
         break;
       default:
-        throw new Error(`Unknown presentation demo state: ${String(input.dataset.demoState)}`);
+        throw new Error(`Unknown presentation demo selection: ${String(select.dataset.demoSelect)}`);
     }
   }
 
-  timerLabel.hidden = !timerLabelDemoEnabled;
+  syncDemoTimers();
+  for (const [index, timerElement] of [...timerList.querySelectorAll<HTMLElement>(".timer")].entries()) {
+    const label = timerElement.querySelector<HTMLElement>(".timer-label");
+    if (label === null) throw new Error("Demo timer is missing its label.");
+    label.textContent = `Timer ${index + 1}`;
+    label.hidden = timerLabelDemoPlacement === "off";
+    if (timerLabelDemoPlacement === "off") {
+      delete timerElement.dataset.labelPlacement;
+    } else {
+      timerElement.dataset.labelPlacement = timerLabelDemoPlacement;
+    }
+  }
+  player.dataset.demoTimerCount = String(timerCountDemo);
+
   const firstAction = actions.querySelector<HTMLButtonElement>(".action-button");
-  if (busyActionDemoEnabled) {
-    firstAction?.setAttribute("aria-busy", "true");
-  } else {
+  if (busyActionDemoStyle === "off") {
     firstAction?.removeAttribute("aria-busy");
+    if (firstAction !== null) delete firstAction.dataset.busyStyle;
+  } else {
+    firstAction?.setAttribute("aria-busy", "true");
+    if (firstAction !== null) firstAction.dataset.busyStyle = busyActionDemoStyle;
+  }
+
+  if (actionAlignmentDemo === "viewport-center") {
+    player.dataset.actionAlignment = "viewport-center";
+  } else {
+    delete player.dataset.actionAlignment;
+  }
+
+  if (composerFontDemo === "default") {
+    player.style.removeProperty("--composer-font-size");
+  } else {
+    player.style.setProperty("--composer-font-size", composerFontDemo);
   }
 
   const computed = getComputedStyle(player);
@@ -403,6 +473,36 @@ function syncVisualControls(): void {
     const value = Number.parseFloat(computed.getPropertyValue(property));
     if (Number.isFinite(value)) input.value = String(value);
   }
+}
+
+function syncDemoTimers(): void {
+  const existing = [...timerList.querySelectorAll<HTMLElement>("[data-demo-timer]")];
+  const requiredExtraTimers = timerCountDemo - 1;
+  if (existing.length === requiredExtraTimers) return;
+
+  for (const element of existing) element.remove();
+  for (let index = 2; index <= timerCountDemo; index += 1) {
+    timerList.append(createDemoTimer(index));
+  }
+}
+
+function createDemoTimer(index: number): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "timer";
+  element.dataset.demoTimer = "";
+  element.setAttribute("aria-label", `Timer ${index}`);
+  element.style.setProperty("--timer-progress", `${Math.min(84, 22 + (index * 17))}%`);
+
+  const label = document.createElement("span");
+  label.className = "timer-label";
+  label.hidden = true;
+
+  const text = document.createElement("span");
+  text.className = "timer-text";
+  text.textContent = index === 2 ? "1:37" : index === 3 ? "0:54" : "0:21";
+
+  element.append(label, text);
+  return element;
 }
 
 function isPlayerToolId(value: string): value is PlayerToolId {

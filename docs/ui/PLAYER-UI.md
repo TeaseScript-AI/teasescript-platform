@@ -163,8 +163,8 @@ set of layout constraints.
 
 Safe-area insets affect Player chrome and controls. Stage/media remains allowed to occupy its complete visual region
 rather than receiving identical safe-area padding by default. During the POC, `Visual Lab` may temporarily override stage
-heights, fixed tool width, conversation bounds, composer line/viewport caps, and focus-outline thickness; Reset removes
-those development-only overrides.
+heights, fixed tool width, conversation bounds, and composer line/viewport caps; Reset removes those development-only
+overrides. The shared `2px` focus outline is the accepted Player baseline rather than a tuning control.
 
 Scrolling ownership:
 
@@ -207,8 +207,8 @@ Tool-column header and body use one continuous `surface-component` background. T
 a second chrome-colour band; selector/add/close controls provide the header's raised hierarchy.
 
 The shared UI guide adopts the current `1px` border, moderate-radius, visible-focus, and interaction-state
-vocabulary as a shared starting baseline. Player-specific widths, heights, spacing, and tuned focus thickness remain
-owned here rather than becoming universal dimensions.
+vocabulary as a shared starting baseline. Player-specific widths, heights, and spacing remain owned here rather than
+becoming universal dimensions.
 
 ## Title and global panel controls
 
@@ -563,8 +563,7 @@ Ordinary neutral controls use the shared progression without geometric movement:
 1. default: quiet component surface with `border-subtle`;
 2. hover: `border-interactive` plus component-hover fill;
 3. pressed/active: `border-strong` plus component-pressed fill;
-4. keyboard focus: visible accent outline with separation and no layout shift; the current `2px` thickness is a Visual
-   Lab tuning value and may be reduced after owner testing;
+4. keyboard focus: use the shared `2px` accent-outline baseline with `1px` visible separation and no layout shift;
 5. disabled: dedicated readable disabled surface/border/text roles and non-interactive semantics/cursor behavior.
 
 A non-interactive status item is a separate semantic/visual class, not a disabled control.

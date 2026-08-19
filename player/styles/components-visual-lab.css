@@ -197,6 +197,20 @@
         overflow-wrap: anywhere;
       }
 
+
+      .lab-select {
+        width: 112px;
+        min-height: 30px;
+        padding: 4px 24px 4px 6px;
+        border: 1px solid var(--color-border-default);
+        border-radius: 5px;
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
+        font: inherit;
+        font-size: 10px;
+        cursor: pointer;
+      }
+
       .switch {
         position: relative;
 

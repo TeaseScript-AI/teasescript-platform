@@ -19,7 +19,7 @@
         block-size: calc(var(--timer-size) + 17px);
       }
 
-      .timer-cluster .timer {
+      .timer-list {
         position: absolute;
         left:
           max(
@@ -27,29 +27,65 @@
             calc((100% - (var(--timer-size) + 50px)) / 2)
           );
         top: 17px;
+
+        display: grid;
+        gap: 12px;
+      }
+
+      .player[data-demo-timer-count="2"] .timer-cluster {
+        block-size:
+          calc(var(--timer-size) + var(--timer-size) + 29px);
+      }
+
+      .player[data-demo-timer-count="4"] .timer-cluster {
+        block-size:
+          calc(
+            var(--timer-size)
+            + var(--timer-size)
+            + var(--timer-size)
+            + var(--timer-size)
+            + 53px
+          );
+      }
+
+      .timer-label[hidden] {
+        display: none;
       }
 
       .timer-label {
-        position: absolute;
-        left:
-          max(
-            0px,
-            calc((100% - (var(--timer-size) + 50px)) / 2)
-          );
-        top: calc(17px + var(--timer-size) + 5px);
-
-        inline-size: var(--timer-size);
+        display: block;
 
         color: var(--color-text-muted);
-        font-size: 10px;
-        font-weight: 600;
-        line-height: 1.2;
+        font-size: 9px;
+        font-weight: 650;
+        line-height: 1;
         text-align: center;
         overflow-wrap: anywhere;
       }
 
-      .timer-cluster:has(.timer-label:not([hidden])) {
-        block-size: calc(var(--timer-size) + 34px);
+      .timer[data-label-placement="above"],
+      .timer[data-label-placement="below"] {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+      }
+
+      .timer[data-label-placement="above"] .timer-label {
+        order: 0;
+      }
+
+      .timer[data-label-placement="above"] .timer-text {
+        order: 1;
+      }
+
+      .timer[data-label-placement="below"] .timer-text {
+        order: 0;
+      }
+
+      .timer[data-label-placement="below"] .timer-label {
+        order: 1;
       }
 
       .timer-cluster .right-toggle {
@@ -161,6 +197,16 @@
             #000 calc(100% - 18px),
             transparent 100%
           );
+      }
+
+      .player[data-action-alignment="viewport-center"] .timer-wrap {
+        grid-row: 1;
+        align-self: start;
+      }
+
+      .player[data-action-alignment="viewport-center"] .action-scroll {
+        grid-row: 2;
+        max-block-size: 100%;
       }
 
       .action-button {
