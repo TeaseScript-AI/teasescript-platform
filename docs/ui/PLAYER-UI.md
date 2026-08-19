@@ -49,8 +49,8 @@ replace the Player-specific contract here.
 Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.md);
 [`player/README.md`](../../player/README.md) records POC seams and demo-only behavior. This specification may lead the
 implementation. The current `player/` POC is a presentation implementation with incomplete runtime/host wiring;
-`Visual Lab`, `Scene`, placeholder content, and demo media are development fixtures rather than Standard Player product
-content. Values explicitly marked for retesting remain provisional tuning baselines.
+`Visual Lab`, `Layout Debug`, `Scene`, placeholder content, and demo media are development fixtures rather than
+Standard Player product content. Values explicitly marked for retesting remain provisional tuning baselines.
 
 A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior here is
 the target unless higher authority conflicts with it.

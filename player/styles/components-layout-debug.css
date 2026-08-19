@@ -1,0 +1,188 @@
+@layer components {
+      /* ---------- Development-only Layout Debug ---------- */
+
+      .layout-debug-readout-section {
+        padding: 11px 0 9px;
+        border-bottom: 1px solid var(--color-border-default);
+      }
+
+      .layout-debug-heading {
+        margin: 0 0 8px;
+        color: var(--color-text-primary);
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+
+      .layout-debug-readout {
+        margin: 0;
+
+        display: grid;
+        grid-template-columns: minmax(74px, auto) minmax(0, 1fr);
+        gap: 4px 8px;
+
+        font-size: 9px;
+        line-height: 1.3;
+      }
+
+      .layout-debug-readout dt {
+        min-width: 0;
+        color: var(--color-text-muted);
+      }
+
+      .layout-debug-readout dd {
+        min-width: 0;
+        margin: 0;
+
+        color: var(--color-text-primary);
+        font-family: ui-monospace, "DejaVu Sans Mono", Consolas, monospace;
+        text-align: right;
+        overflow-wrap: anywhere;
+      }
+
+      .layout-debug-overlay {
+        --debug-grid-color: #0098d8;
+        --debug-reserve-color: #d97706;
+        --debug-safe-color: #00a58a;
+
+        position: absolute;
+        z-index: 45;
+        inset: 0;
+
+        overflow: hidden;
+        pointer-events: none;
+      }
+
+      .layout-debug-grid-layer,
+      .layout-debug-region-layer,
+      .layout-debug-reserve-layer,
+      .layout-debug-safe-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .layout-debug-grid-outline {
+        position: absolute;
+        inset: 0;
+        border: 1px solid var(--debug-grid-color);
+      }
+
+      .layout-debug-grid-line {
+        position: absolute;
+        background: var(--debug-grid-color);
+        opacity: 0.78;
+      }
+
+      .layout-debug-grid-line.vertical {
+        top: 0;
+        bottom: 0;
+        width: 1px;
+      }
+
+      .layout-debug-grid-line.horizontal {
+        right: 0;
+        left: 0;
+        height: 1px;
+      }
+
+      .layout-debug-box {
+        --debug-box-color: #2563eb;
+
+        position: absolute;
+        min-width: 0;
+        min-height: 0;
+
+        border: 1px dashed var(--debug-box-color);
+        background: transparent;
+      }
+
+      .layout-debug-box[data-debug-kind="title"] {
+        --debug-box-color: #7c3aed;
+      }
+
+      .layout-debug-box[data-debug-kind="tools"] {
+        --debug-box-color: #9333ea;
+      }
+
+      .layout-debug-box[data-debug-kind="stage"] {
+        --debug-box-color: #b98900;
+      }
+
+      .layout-debug-box[data-debug-kind="transcript"] {
+        --debug-box-color: #2563eb;
+      }
+
+      .layout-debug-box[data-debug-kind="foreground"] {
+        --debug-box-color: #db2777;
+      }
+
+      .layout-debug-box[data-debug-kind="composer"] {
+        --debug-box-color: #159447;
+      }
+
+      .layout-debug-box[data-debug-kind="right"] {
+        --debug-box-color: #ea580c;
+      }
+
+      .layout-debug-box[data-debug-kind^="reserve-"] {
+        --debug-box-color: var(--debug-reserve-color);
+        background: rgb(217 119 6 / 11%);
+      }
+
+      .layout-debug-box-label {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+
+        max-width: calc(100% - 4px);
+        padding: 2px 4px;
+        border-radius: 3px;
+
+        background: rgb(20 20 20 / 82%);
+        color: #fff;
+        font: 700 9px/1.15 ui-monospace, "DejaVu Sans Mono", Consolas, monospace;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .layout-debug-safe-edge {
+        position: absolute;
+        opacity: 0;
+        background: rgb(0 165 138 / 17%);
+        box-shadow: inset 0 0 0 1px var(--debug-safe-color);
+      }
+
+      .layout-debug-safe-layer[data-active="true"] .layout-debug-safe-edge {
+        opacity: 1;
+      }
+
+      .layout-debug-safe-edge[data-edge="top"] {
+        top: 0;
+        right: 0;
+        left: 0;
+        height: var(--safe-top);
+      }
+
+      .layout-debug-safe-edge[data-edge="right"] {
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: var(--safe-right);
+      }
+
+      .layout-debug-safe-edge[data-edge="bottom"] {
+        right: 0;
+        bottom: 0;
+        left: 0;
+        height: var(--safe-bottom);
+      }
+
+      .layout-debug-safe-edge[data-edge="left"] {
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: var(--safe-left);
+      }
+    }

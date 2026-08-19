@@ -212,6 +212,8 @@ function createToolBody(
       return createVisualTool();
     case "scene":
       return createSceneTool(presentation);
+    case "layout-debug":
+      return createLayoutDebugTool();
   }
 }
 
@@ -447,6 +449,139 @@ function createSelectOption(
 
   row.append(copy, select);
   return row;
+}
+
+function createLayoutDebugTool(): HTMLElement {
+  const content = document.createElement("div");
+  content.className = "lab-content layout-debug-content";
+
+  const options = document.createElement("div");
+  options.className = "lab-options";
+  options.append(
+    createLayoutDebugToggle(
+      "Grid tracks",
+      "Show resolved Player grid boundaries and tracks.",
+      "grid",
+    ),
+    createLayoutDebugToggle(
+      "Region bounds",
+      "Outline title, tools, stage, transcript, foreground controls, composer, and right rail.",
+      "regions",
+    ),
+    createLayoutDebugToggle(
+      "Reserved regions",
+      "Shade left/right grid reservation and conversation overlay reserve.",
+      "reserves",
+    ),
+    createLayoutDebugToggle(
+      "Safe areas",
+      "Shade the resolved device safe-area insets.",
+      "safe-areas",
+    ),
+  );
+
+  const conditions = createLayoutDebugReadout(
+    "Active layout",
+    [
+      ["Composition", "composition"],
+      ["Chrome", "chrome"],
+      ["Orientation", "orientation"],
+      ["Tools", "left-panel"],
+      ["Right rail", "right-panel"],
+      ["Fullscreen", "fullscreen"],
+      ["Visual viewport", "visual-viewport"],
+      ["Action layout", "action-layout"],
+    ],
+  );
+
+  const measurements = createLayoutDebugReadout(
+    "Measurements",
+    [
+      ["Viewport", "viewport"],
+      ["Visual viewport", "visual-viewport-size"],
+      ["Grid columns", "grid-columns"],
+      ["Grid rows", "grid-rows"],
+      ["Stage", "stage"],
+      ["Transcript", "transcript"],
+      ["Foreground", "foreground"],
+      ["Composer", "composer"],
+      ["Tools", "tools"],
+      ["Right rail", "right-zone"],
+      ["Reserves", "reserves"],
+      ["Safe area", "safe-area"],
+    ],
+  );
+
+  const note = document.createElement("p");
+  note.className = "lab-note";
+  note.textContent = "Development-only inspection. Layout Debug never changes Player geometry.";
+
+  content.append(options, conditions, measurements, note);
+  return content;
+}
+
+function createLayoutDebugToggle(
+  title: string,
+  note: string,
+  key: string,
+): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "lab-option";
+
+  const copy = document.createElement("span");
+  copy.className = "lab-option-copy";
+
+  const titleElement = document.createElement("span");
+  titleElement.className = "lab-option-title";
+  titleElement.textContent = title;
+
+  const noteElement = document.createElement("span");
+  noteElement.className = "lab-option-note";
+  noteElement.textContent = note;
+  copy.append(titleElement, noteElement);
+
+  const switchElement = document.createElement("span");
+  switchElement.className = "switch";
+
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.dataset.layoutDebug = key;
+
+  const switchUi = document.createElement("span");
+  switchUi.className = "switch-ui";
+  switchElement.append(input, switchUi);
+
+  label.append(copy, switchElement);
+  return label;
+}
+
+function createLayoutDebugReadout(
+  title: string,
+  rows: readonly (readonly [label: string, key: string])[],
+): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "layout-debug-readout-section";
+
+  const heading = document.createElement("h3");
+  heading.className = "layout-debug-heading";
+  heading.textContent = title;
+
+  const list = document.createElement("dl");
+  list.className = "layout-debug-readout";
+
+  for (const [label, key] of rows) {
+    const term = document.createElement("dt");
+    term.textContent = label;
+
+    const value = document.createElement("dd");
+    value.dataset.layoutDebugValue = key;
+    value.textContent = "—";
+
+    list.append(term, value);
+  }
+
+  section.append(heading, list);
+  return section;
 }
 
 function createSceneTool(presentation: PlayerPresentation): HTMLElement {

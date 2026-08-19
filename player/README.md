@@ -20,6 +20,8 @@ server. That development route is not a public Player/host protocol.
 - `panel-state.ts` and `tool-columns.ts` keep the current local UI state transitions separate from rendering.
 - `browser.ts` wires local browser interactions, demo presentation state, responsive state synchronization, and demo
   media loading.
+- `layout-debug.ts` owns the development-only geometry observer and overlay/readout synchronization used by the local
+  `Layout Debug` fixture.
 - `styles/` separates reset, layout/theme ownership, components, effects, and responsive composition through cascade
   layers.
 - `demo-session.ts` and `demo-media/` are presentation fixtures, not runtime/package APIs.
@@ -34,7 +36,7 @@ mask colours remain separate presentation data.
 ## Demo-only behavior
 
 The local playground server may select a supported image from `player/demo-media/` when the Player opens. The `Visual
-Lab` and `Scene` tools, their fixture content, local accent/effect/geometry tuning controls, filename-derived scene
+Lab`, `Layout Debug`, and `Scene` tools, their fixture content, local tuning/inspection controls, filename-derived scene
 information, and the demo-media endpoint exist to exercise the presentation and are not Standard Library, runtime,
 package, or host APIs.
 

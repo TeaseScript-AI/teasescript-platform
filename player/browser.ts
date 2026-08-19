@@ -10,6 +10,7 @@ import type {
   PlayerToolId,
   RightPanelMode,
 } from "./model.js";
+import { createLayoutDebugController } from "./layout-debug.js";
 import { toggleLeftPanelMode, toggleRightPanelMode } from "./panel-state.js";
 import { renderPresentation, renderToolColumns } from "./render.js";
 import {
@@ -46,6 +47,21 @@ let actionAlignmentDemo = "current";
 let composerFontDemo = "default";
 let presentation = DEMO_PRESENTATION;
 
+const layoutDebug = createLayoutDebugController(
+  {
+    player,
+    toolStrip,
+    titleControls: requiredElement<HTMLElement>("titleControls", HTMLElement),
+    leftPanel,
+    mediaArea: requiredElement<HTMLElement>("mediaArea", HTMLElement),
+    transcript,
+    composer: requiredElement<HTMLElement>("composer", HTMLElement),
+    rightZone: requiredElement<HTMLElement>("rightZone", HTMLElement),
+    timerList,
+  },
+  () => toolColumns,
+);
+
 renderPresentation(
   { player, transcript, actions, timerText, sceneMedia },
   presentation,
@@ -55,6 +71,7 @@ resetVisualLab();
 syncPanelAccessibility();
 syncLeftPreferredWidth();
 syncLeftReserve();
+layoutDebug.sync();
 void loadDemoMedia();
 
 sceneMedia.addEventListener("error", () => {
@@ -124,6 +141,11 @@ toolStrip.addEventListener("change", (event) => {
     return;
   }
 
+  if (target instanceof HTMLInputElement && target.matches("[data-layout-debug]")) {
+    layoutDebug.setOption(requiredDatasetValue(target, "layoutDebug"), target.checked);
+    return;
+  }
+
   if (target instanceof HTMLSelectElement && target.matches("[data-demo-select]")) {
     setPresentationDemoSelection(
       requiredDatasetValue(target, "demoSelect"),
@@ -190,6 +212,7 @@ function renderTools(scrollMode: "preserve" | "end" = "preserve"): void {
   const previousScrollLeft = toolStripScroll.scrollLeft;
   renderToolColumns(toolStrip, toolColumns, DEMO_TOOL_DEFINITIONS, presentation);
   syncVisualControls();
+  layoutDebug.sync();
 
   requestAnimationFrame(() => {
     syncLeftPreferredWidth();
@@ -275,6 +298,7 @@ function syncPanelAccessibility(): void {
     "aria-label",
     rightDocked ? "Use overlay right panel background" : "Dock right panel background",
   );
+  layoutDebug.queueSync();
 }
 
 function queueLeftReserveSync(): void {
@@ -473,6 +497,8 @@ function syncVisualControls(): void {
     const value = Number.parseFloat(computed.getPropertyValue(property));
     if (Number.isFinite(value)) input.value = String(value);
   }
+
+  layoutDebug.queueSync();
 }
 
 function syncDemoTimers(): void {

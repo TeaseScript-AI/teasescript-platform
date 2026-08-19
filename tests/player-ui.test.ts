@@ -36,7 +36,7 @@ test("Player timer presentation is bounded and deterministic", () => {
 });
 
 test("Player tool columns prefer unused tools before deliberate blank or duplicate states", () => {
-  const order = ["visuals", "scene"] as const;
+  const order = ["visuals", "scene", "layout-debug"] as const;
   const initial = [{ id: "tool-column-1", toolId: "visuals" as const }];
   const withSecond = addToolColumn(initial, "tool-column-2", order);
   assert.deepEqual(withSecond, [
@@ -44,18 +44,27 @@ test("Player tool columns prefer unused tools before deliberate blank or duplica
     { id: "tool-column-2", toolId: "scene" },
   ]);
 
-  const withBlankThird = addToolColumn(withSecond, "tool-column-3", order);
-  assert.deepEqual(withBlankThird, [
+  const withThird = addToolColumn(withSecond, "tool-column-3", order);
+  assert.deepEqual(withThird, [
     { id: "tool-column-1", toolId: "visuals" },
     { id: "tool-column-2", toolId: "scene" },
-    { id: "tool-column-3", toolId: null },
+    { id: "tool-column-3", toolId: "layout-debug" },
   ]);
 
-  const duplicated = selectToolColumn(withBlankThird, "tool-column-3", "visuals");
-  assert.equal(duplicated[2]?.toolId, "visuals");
+  const withBlankFourth = addToolColumn(withThird, "tool-column-4", order);
+  assert.deepEqual(withBlankFourth, [
+    { id: "tool-column-1", toolId: "visuals" },
+    { id: "tool-column-2", toolId: "scene" },
+    { id: "tool-column-3", toolId: "layout-debug" },
+    { id: "tool-column-4", toolId: null },
+  ]);
+
+  const duplicated = selectToolColumn(withBlankFourth, "tool-column-4", "visuals");
+  assert.equal(duplicated[3]?.toolId, "visuals");
   assert.deepEqual(closeToolColumn(duplicated, "tool-column-2"), [
     { id: "tool-column-1", toolId: "visuals" },
-    { id: "tool-column-3", toolId: "visuals" },
+    { id: "tool-column-3", toolId: "layout-debug" },
+    { id: "tool-column-4", toolId: "visuals" },
   ]);
 });
 
@@ -81,6 +90,7 @@ test("Player entrypoint uses modular local assets without external runtime depen
   assert.match(html, /src="\/dist\/player\/browser\.js"/u);
   assert.match(html, /href="\/player\/styles\/layout\.css"/u);
   assert.match(html, /href="\/player\/styles\/components-tools\.css"/u);
+  assert.match(html, /href="\/player\/styles\/components-layout-debug\.css"/u);
   assert.doesNotMatch(html, /id="addToolColumn"/u);
   assert.match(html, /id="toolStrip"/u);
   assert.doesNotMatch(html, /tool-panel-header/u);
@@ -375,6 +385,33 @@ test("Player composer line tuning counts text lines and offers local font-size r
   assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*--composer-font-size: 10px/u);
   assert.match(browser, /player\.style\.setProperty\("--composer-font-size", composerFontDemo\)/u);
   assert.match(browser, /player\.style\.removeProperty\("--composer-font-size"\)/u);
+});
+
+test("Player Layout Debug exposes live development-only geometry inspection", async () => {
+  const model = await readFile(resolve(process.cwd(), "player/model.ts"), "utf8");
+  const demo = await readFile(resolve(process.cwd(), "player/demo-session.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const layoutDebug = await readFile(resolve(process.cwd(), "player/layout-debug.ts"), "utf8");
+  const debugCss = await readFile(resolve(process.cwd(), "player/styles/components-layout-debug.css"), "utf8");
+  const playerDocs = await readFile(resolve(process.cwd(), "player/README.md"), "utf8");
+
+  assert.match(model, /PlayerToolId = "visuals" \| "scene" \| "layout-debug"/u);
+  assert.match(demo, /\{ id: "layout-debug", label: "Layout Debug" \}/u);
+  assert.match(render, /case "layout-debug":[\s\S]*createLayoutDebugTool/u);
+  assert.match(render, /"Grid tracks"[\s\S]*"Region bounds"[\s\S]*"Reserved regions"[\s\S]*"Safe areas"/u);
+  assert.match(render, /\["Foreground", "foreground"\]/u);
+  assert.match(browser, /createLayoutDebugController\([\s\S]*\(\) => toolColumns/u);
+  assert.match(browser, /layoutDebug\.setOption\(requiredDatasetValue\(target, "layoutDebug"\), target\.checked\)/u);
+  assert.match(layoutDebug, /const options: Record<LayoutDebugKey, boolean>/u);
+  assert.match(layoutDebug, /new ResizeObserver\(queueSync\)/u);
+  assert.match(layoutDebug, /getComputedStyle\(player\)[\s\S]*gridTemplateColumns[\s\S]*gridTemplateRows/u);
+  assert.match(layoutDebug, /window\.visualViewport\?\.addEventListener\("resize", queueSync\)/u);
+  assert.match(layoutDebug, /foreground === null[\s\S]*\? "not present"/u);
+  assert.match(debugCss, /\.layout-debug-overlay \{[\s\S]*position: absolute;[\s\S]*pointer-events: none;/u);
+  assert.match(debugCss, /height: var\(--safe-top\)/u);
+  assert.match(debugCss, /width: var\(--safe-right\)/u);
+  assert.match(playerDocs, /`Visual\s+Lab`, `Layout Debug`, and `Scene` tools/u);
 });
 
 test("Player composition changes clear temporary panel overrides", async () => {

@@ -1,5 +1,5 @@
 export type MediaFit = "contain" | "cover";
-export type PlayerToolId = "visuals" | "scene";
+export type PlayerToolId = "visuals" | "scene" | "layout-debug";
 
 export interface PlayerToolDefinition {
   readonly id: PlayerToolId;

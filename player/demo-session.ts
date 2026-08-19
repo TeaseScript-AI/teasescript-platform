@@ -86,6 +86,7 @@ export const DEFAULT_VISUAL_PREFERENCES: PlayerVisualPreferences = {
 export const DEMO_TOOL_DEFINITIONS: readonly PlayerToolDefinition[] = [
   { id: "visuals", label: "Visual Lab" },
   { id: "scene", label: "Scene" },
+  { id: "layout-debug", label: "Layout Debug" },
 ];
 
 export const INITIAL_TOOL_COLUMNS: readonly PlayerToolColumnState[] = [
