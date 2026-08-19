@@ -119,13 +119,13 @@ behavior, persistence, operational behavior, and integration. Major redesign bec
 subsystems may still have different maturity levels.
 
 - [ ] **Complete the custom-view contract**
-  - **Outcome:** ADR 0012 fixes blocking/background ownership, supported Player presentation forms, sandbox confinement,
-    and recovery-frontier behavior. Complete registration, typed input/events/results, update/close/cancellation/failure,
-    reconstructible-state declaration, surface isolation/optional Shadow DOM, focus/keyboard/navigation/back behavior,
-    accessibility, preview/debug tooling, and the author-facing TypeScript/TeaseScript API. These are logical views inside
-    the Player, not browser pop-ups or
-    per-view iframes; genuine host capabilities remain a separate boundary. Add real-browser Player/host coverage when
-    package custom UI is implemented.
+  - **Outcome:** ADR 0012 fixes blocking versus non-blocking/asynchronous execution, supported Player presentation forms,
+    per-surface mode/dismissal rules, failure/cleanup, focus/browser-Back direction, sandbox confinement, and the recovery
+    frontier. Complete registration/lifecycle APIs, typed input/events/results, reconstructible-state declaration, surface
+    isolation/optional Shadow DOM, remaining keyboard/navigation behavior, accessibility, preview/debug tooling, and the
+    author-facing TypeScript/TeaseScript API. These are logical views inside the Player, not browser pop-ups or per-view
+    iframes; genuine host capabilities remain a separate boundary. Add real-browser Player/host coverage when package
+    custom UI is implemented.
   - **Reference:** [ADR 0012](../decisions/0012-custom-view-capability.md),
     [ADR 0015](../decisions/0015-serializable-runtime-architecture.md), [`RUNTIME.md`](../RUNTIME.md),
     [`LIBRARIES.md`](../LIBRARIES.md), [`SECURITY.md`](../SECURITY.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md),

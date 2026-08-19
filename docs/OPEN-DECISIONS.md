@@ -87,8 +87,6 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and Content Security Policy.
 - Action-kind-specific media completion, advanced timeout, cancellation, and recovery policies beyond ADR 0018's
   mandatory basic interactions.
-- Background-handler interruption, ordering, cleanup, and foreground-slot interaction after the public timer API is
-  decided.
 - Stable text-output target handles beyond the first Standard chat target.
 - Exact author-facing theme schema/registration API and platform dark-theme token values. `ui/PLAYER-UI.md` fixes
   precedence, standalone/light/dark theme semantics, missing-variant fallback, and the no-arbitrary-CSS boundary.
@@ -104,16 +102,16 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Exact tuned thresholds/measurements for constraint-driven side-region dock/overlay decisions, compact geometry,
   fixed tool width, stage height, readable conversation bounds, composer growth, and focus-outline thickness.
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
-- Exact Standard/runtime API for the right-rail control family: momentary controls, toggles, selects, status/progress
-  items, determinate fill, authored priority/order, update/removal, and optional disabled/busy-in-place handler behavior.
-  The intended presentation and ordering rules are maintained in `ui/PLAYER-UI.md`; syntax/data/lifecycle binding remain
-  unresolved.
+- Exact Standard/runtime API and author syntax for the right-rail control family. `ui/PLAYER-UI.md` fixes the current
+  owner-selected value ownership, polling/change-handler model, programmatic update capability, lifecycle, busy-in-place
+  behavior, deterministic single-handler scheduling, status/progress role, ordering, user-versus-script provenance, and
+  visible-history direction; exact data shapes, persistence binding, API names, and syntax remain unresolved.
 - Whether any additional Player-specific control widths, heights, or spacing should later join the already shared
   border/radius/focus/state baseline for TeaseScript UI surfaces.
-- Exact custom-view registration/lifecycle APIs, typed inputs/events/results, presentation-form to blocking/background
-  action mapping, surface-isolation mechanism (including optional Shadow DOM), focus/navigation/back behavior, and how
-  reconstructible custom state is declared/validated. ADR 0012 fixes the presentation forms, sandbox boundary, and
-  recovery-frontier semantics.
+- Exact custom-view registration/lifecycle API shape, typed input/event/result schemas, surface-isolation mechanism
+  (including optional Shadow DOM), and how reconstructible custom state is declared/validated. ADR 0012 fixes execution
+  modes, surface constraints, hide/dismiss/end distinctions, failure/cleanup direction, relevant focus/browser-Back
+  behavior, sandbox boundary, and recovery-frontier semantics.
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
 - Camera capability declarations, stream ownership, device switching, quality negotiation, restore, privacy
   indicators, and simultaneous-camera policy.

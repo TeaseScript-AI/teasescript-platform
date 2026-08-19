@@ -25,7 +25,7 @@ requirements.
 The most relevant higher-authority sources are:
 
 - [ADR 0001](../decisions/0001-browser-first.md): browser-first UI and responsive PWA direction;
-- [ADR 0012](../decisions/0012-custom-view-capability.md): accepted blocking/background custom-view capability;
+- [ADR 0012](../decisions/0012-custom-view-capability.md): accepted blocking and non-blocking/asynchronous custom-view capability;
 - [ADR 0016](../decisions/0016-resumable-pending-action-runtime-contract.md): foreground versus background pending
   actions and reconstruction from canonical state;
 - [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md): Standard chat composer, foreground controls,
@@ -77,26 +77,42 @@ Current items:
   executed during that absence; later runtime work must implement the owner-selected missed-event barrier without
   replaying events already materialized in a valid checkpoint. Exact checkpoint/deadline mechanics remain upstream work.
 - **Background-control family:** the right-rail presentation below covers momentary actions, toggles/switches,
-  single-choice selects, and non-interactive status/progress items. Accepted V30 permanent-button behavior remains the
-  current button semantic baseline; exact Standard-Library binding, persistence, update, and handler APIs remain
-  upstream work.
-- **Busy background controls:** accepted V30 disappear-while-handler-runs behavior remains available. A later control
-  contract must also allow a control to remain in place as disabled/busy while its handler runs; explicit removal is a
-  separate lifecycle action. Exact syntax/default remains upstream work.
+  single-choice selects, and non-interactive status/progress items. A stateful control owns one authoritative
+  serializable value: script code may poll it, an optional change handler may react to user changes, and an explicit
+  control-update API may change that same value programmatically. Controls remain until explicit removal or their
+  owning lifecycle cleans them up; disabled/inert preserves the visible control and state. Status/progress items are
+  non-interactive output that may be updated or removed. Exact Standard-Library syntax and API shapes remain upstream
+  work.
+- **Background-control handlers:** momentary controls, toggles, and selects use a distinct busy-in-place state while a
+  handler runs; busy is not disabled/inert and the control does not disappear merely because its handler is active.
+  The user's accepted value is committed before an optional change handler runs; a handler failure is an ordinary
+  runtime error and does not roll that value back. Handlers may use normal TeaseScript actions, including blocking
+  actions, and run one at a time through deterministic event scheduling. Existing audio/video continues unless the
+  handler explicitly changes it. A queued control event whose originating control instance was removed, disabled, or
+  otherwise invalidated before that handler starts is stale and is discarded rather than executed. Exact scheduling
+  representation and author syntax remain upstream work.
 - **Background ordering and progress:** authored controls may provide an explicit order/priority; controls with explicit
   priority sort before controls without one, equal priorities preserve creation order, and unprioritized controls follow
   in creation order. If a statically authored API later allows equal explicit priorities, authoring/compiler tooling
   should warn rather than fail because creation order already provides a deterministic tie-breaker. Status and
   interactive controls may present explicit determinate progress/fill. Exact data shapes and lifecycle semantics remain
   upstream work.
-- **Transcript/history provenance:** foreground and background control activations need machine-readable provenance so
-  history/LLM consumers can distinguish typed prose from button/choice/control activation without relying on visual
-  punctuation. A future visible-transcript reset starts a new visible segment without implicitly destroying retained
-  canonical history; exact history retention and LLM-context policy remain upstream work.
+- **Transcript/history provenance:** every accepted user control action needs machine-readable canonical provenance so
+  history/LLM consumers can distinguish typed prose, momentary activation, toggle/select change, and other control
+  activity without relying on visual punctuation. Momentary actions remain player-authored transcript messages because
+  they are equivalent to the user submitting that action text. For toggle/select changes, the author chooses whether a
+  visible history/transcript indication is shown; exact informational presentation remains Player tuning. Programmatic
+  control updates are runtime-state changes rather than user actions and must not be presented as though the user made
+  them; when visible, the control should make script-initiated change recognizable. A future visible-transcript reset
+  starts a new visible segment without implicitly destroying retained canonical history; exact history retention and
+  LLM-context policy remain upstream work.
 - **Timer presentation metadata:** visible, mystery, and hidden timer presentation must work for blocking and non-blocking
-  timer semantics without revealing whether a visible timer blocks script execution. The accepted V30 `timer`,
-  `mysteryTimer`, `wait`, and background-timer semantics remain the language baseline; final public background-timer
-  presentation metadata is still upstream work.
+  timer semantics without revealing whether a visible timer blocks script execution. Hidden timers expose no Player UI.
+  A visible timer may have an optional authored label; when multiple visible timers coexist, an unlabeled visible timer
+  receives a generic user-facing label based only on visible timer order (for example `Timer 1`, `Timer 2`) rather than an
+  internal ID or any hidden timer. A lone unlabeled visible timer need not show a label. The accepted V30 `timer`,
+  `mysteryTimer`, `wait`, and background-timer semantics remain the language baseline; exact public metadata/API syntax
+  remains upstream work.
 
 ## Surface hierarchy
 
@@ -412,10 +428,12 @@ current avatar, speaker-name, speaker-coloured rule, and message-width geometry 
 identity colour/font and per-message rich-text styling are content presentation, not application palette roles.
 
 ADR 0018 owns canonical transcript effects of foreground completion: valid text/number answers and choice/button
-activations become player-authored transcript messages according to its normalization and visible-text rules. Background
-activation history remains an upstream runtime contract; when recorded, the Player uses the same player-authored action
-presentation and preserves machine-readable activation provenance. Visual markers must not become canonical punctuation;
-their exact appearance remains tuning work.
+activations become player-authored transcript messages according to its normalization and visible-text rules. Every
+accepted user activation/change on the long-lived control family also carries machine-readable canonical provenance. A
+momentary action is shown as a player-authored transcript action; toggle/select visibility is author-controlled and, when
+shown, may use informational presentation rather than implying spoken prose. Programmatic control updates are not user
+activations and must not be attributed to the user. Visual markers must not become canonical punctuation; their exact
+appearance remains tuning work.
 
 The POC's letter-glyph avatars remain fixtures; accepted V30 speaker avatar references are the product capability.
 
@@ -496,12 +514,15 @@ The Standard Player supports three timer-presentation classes:
 1. **visible timer** — circular timer with actual remaining time and determinate elapsed-progress ring;
 2. **mystery timer** — the same visible timer vocabulary, but the center displays `?` and the accent ring uses a stable
    indeterminate/loading-style rotation rather than exposing duration or progress;
-3. **hidden timer** — no timer UI at all. Accepted blocking `wait` is the simple hidden blocking case; future
-   non-blocking timers may likewise request hidden presentation.
+3. **hidden timer** — no timer UI at all and no visible hint that a timer exists. Accepted blocking `wait` is the
+   simple hidden blocking case; future non-blocking timers may likewise request hidden presentation.
 
 A visible blocking timer and a visible non-blocking timer use the same visual vocabulary. Presentation must not reveal
 whether script execution is blocked. Multiple visible timers may coexist: only one blocking timer can own the foreground
-path at once, but background timers may add further visible timers.
+path at once, but background timers may add further visible timers. A visible timer may have an authored label. A lone
+unlabeled visible timer need not display one; when multiple visible timers coexist, unlabeled visible timers receive
+generic labels from visible presentation order (for example `Timer 1`, `Timer 2`). Internal IDs and hidden timers must
+not leak through those labels. Exact label placement and stable numbering as timers enter/leave remain Phase-4 tuning.
 
 Normal timer text is:
 
@@ -532,9 +553,13 @@ not styled or exposed as a disabled button. A switch exposes toggle semantics; a
 single-choice semantics. Determinate progress/fill may be shown on a status item and may also be used on an interactive
 control when the explicit progress data is meaningful and does not obscure the control state.
 
-For accepted V30 permanent buttons, disappearing while the handler executes remains the current semantic baseline. A
-future upstream option also permits the control to remain visible but disabled/busy while its handler executes. In both
-cases explicit removal is a separate lifecycle operation.
+Interactive right-rail controls remain in place while their handlers execute and expose a distinct busy state without
+changing the control's committed value or implying that the control was disabled or removed. This target supersedes the
+accepted V30 permanent-button disappear-while-handler-runs presentation once the controlling runtime/Standard-Library
+contract is synchronized. Exact busy animation is a Phase-4 visual-tuning question; it should use a familiar
+indeterminate-activity cue, must not require control reflow, and must remain distinguishable from keyboard focus and
+disabled/inert presentation. Programmatic updates visibly change the same control state but must remain recognizable as
+script-initiated rather than user input. Explicit removal is a separate lifecycle operation.
 
 Ordering is stable and deterministic at the presentation level:
 
