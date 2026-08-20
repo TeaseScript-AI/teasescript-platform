@@ -216,3 +216,37 @@ export type {
   UnaryExpression,
   WhileStatement,
 } from "./ast.js";
+
+export {
+  applyLanguageTextEdits,
+  createLanguageDocument,
+  formatLanguageDocument,
+  languageCompletions,
+  languageContextHelp,
+  languageDiagnostics,
+  languageHover,
+  languagePositionAt,
+  languageSignatureHelp,
+  type LanguageCompletionItem,
+  type LanguageCompletionKind,
+  type LanguageContextHelp,
+  type LanguageDiagnostic,
+  type LanguageDocument,
+  type LanguageFormatResult,
+  type LanguageHover,
+  type LanguagePosition,
+  type LanguageRange,
+  type LanguageSignatureHelp,
+  type LanguageTextEdit,
+} from "./language-tooling.js";
+
+export {
+  inspectRuntimeState,
+  type InvalidRuntimeStateInspection,
+  type RuntimeActionInspection,
+  type RuntimeInspectionError,
+  type RuntimeInspectionResult,
+  type RuntimePreparedSayInspection,
+  type RuntimeSettlementInspection,
+  type RuntimeStateInspection,
+} from "./runtime/inspection.js";
