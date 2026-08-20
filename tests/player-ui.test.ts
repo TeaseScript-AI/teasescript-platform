@@ -187,11 +187,13 @@ test("Player conversation spacing is based on its own grid column", async () => 
   assert.doesNotMatch(layout, /\.composer \{[\s\S]*border-top:/u);
 });
 
-test("Player composer preserves desktop shell focus and separate mobile controls", async () => {
+test("Player composer preserves default focus, desktop shell focus, and separate mobile controls", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
   const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
   const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
 
+  assert.match(html, /<textarea[\s\S]*autofocus[\s\S]*aria-label="User input"/u);
   assert.match(composer, /\.composer form[\s\S]*border: 1px solid var\(--color-border-default\)[\s\S]*background: var\(--color-surface-component\)/u);
   assert.match(composer, /textarea[\s\S]*border: 0;[\s\S]*background: transparent/u);
   assert.doesNotMatch(composer, /textarea:focus-visible/u);
@@ -418,11 +420,19 @@ test("Player Layout Debug exposes live development-only geometry inspection", as
   assert.match(render, /case "layout-debug":[\s\S]*createLayoutDebugTool/u);
   assert.match(
     render,
-    /"Grid tracks"[\s\S]*"Region bounds"[\s\S]*"Reserved regions"[\s\S]*"Safe areas"[\s\S]*"Overflow \/ scroll"[\s\S]*"Constraint vs measured"[\s\S]*"Visual viewport offsets"/u,
+    /createLayoutDebugModeToggle\(\),[\s\S]*"Grid tracks"[\s\S]*"Region bounds"[\s\S]*"Reserved regions"[\s\S]*"Safe areas"[\s\S]*"Overflow \/ scroll"[\s\S]*"Constraint vs measured"[\s\S]*"Visual viewport offsets"/u,
   );
+  assert.match(render, /titleElement\.textContent = "Debug mode"/u);
+  assert.match(render, /input\.dataset\.layoutDebugEnabled = ""/u);
   assert.match(render, /\["Foreground", "foreground"\]/u);
-  assert.match(browser, /createLayoutDebugController\([\s\S]*\(\) => toolColumns/u);
+  assert.match(browser, /createLayoutDebugController\([\s\S]*timerList,[\s\S]*\},[\s\S]*\);/u);
+  assert.doesNotMatch(browser, /createLayoutDebugController\([\s\S]*\(\) => toolColumns/u);
+  assert.match(browser, /layoutDebug\.setEnabled\(target\.checked\)/u);
   assert.match(browser, /layoutDebug\.setOption\(requiredDatasetValue\(target, "layoutDebug"\), target\.checked\)/u);
+  assert.match(layoutDebug, /let enabled = true/u);
+  assert.match(layoutDebug, /setEnabled\(nextEnabled: boolean\)/u);
+  assert.match(layoutDebug, /overlay\.root\.hidden = !enabled/u);
+  assert.doesNotMatch(layoutDebug, /debugToolOpen|getToolColumns/u);
   assert.match(layoutDebug, /const options: Record<LayoutDebugKey, boolean>/u);
   assert.match(layoutDebug, /new ResizeObserver\(queueSync\)/u);
   assert.match(layoutDebug, /getComputedStyle\(player\)[\s\S]*gridTemplateColumns[\s\S]*gridTemplateRows/u);
@@ -453,6 +463,19 @@ test("Player composition changes clear temporary panel overrides", async () => {
     browser,
     /if \(toolColumns\.length === 1\) \{[\s\S]*player\.dataset\.left = "closed";/u,
   );
+});
+
+test("Player right rail base width is fixed rather than viewport-proportional", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+
+  assert.match(layout, /--right-controls-width:\s*\d+px;/u);
+  assert.doesNotMatch(`${layout}\n${responsive}`, /--right-controls-width:\s*clamp\(/u);
+  assert.match(layout, /\.right-zone[\s\S]*inline-size: var\(--right-controls-width\);[\s\S]*max-inline-size: var\(--right-controls-width\);/u);
+  assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*\.right-zone[\s\S]*inline-size: var\(--right-controls-width\);[\s\S]*max-inline-size: var\(--right-controls-width\);/u);
+  assert.match(actions, /\.action-scroll \{[\s\S]*padding:[\s\S]*var\(--safe-right\)[\s\S]*var\(--safe-bottom\)/u);
+  assert.match(actions, /\.action-button \{[\s\S]*width: min\(156px, calc\(100% - 14px\)\)/u);
 });
 
 test("Player right rail centers fitting controls and fades overflow at both edges", async () => {

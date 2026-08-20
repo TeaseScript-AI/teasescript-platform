@@ -78,7 +78,7 @@
           Docked and overlay use exactly the same value.
           Long Action labels wrap vertically instead of widening the rail.
         */
-        --right-controls-width: clamp(150px, 18vw, 190px);
+        --right-controls-width: 190px;
         --right-track: var(--right-controls-width);
         --right-reserve: var(--right-controls-width);
 

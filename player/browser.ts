@@ -60,7 +60,6 @@ const layoutDebug = createLayoutDebugController(
     actions,
     timerList,
   },
-  () => toolColumns,
 );
 
 renderPresentation(
@@ -139,6 +138,11 @@ toolStrip.addEventListener("change", (event) => {
   if (target instanceof HTMLInputElement && target.matches("[data-effect]")) {
     const effect = requiredDatasetValue(target, "effect");
     setVisualOption(effect, target.checked);
+    return;
+  }
+
+  if (target instanceof HTMLInputElement && target.matches("[data-layout-debug-enabled]")) {
+    layoutDebug.setEnabled(target.checked);
     return;
   }
 

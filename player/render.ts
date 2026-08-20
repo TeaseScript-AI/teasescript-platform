@@ -481,6 +481,7 @@ function createLayoutDebugTool(): HTMLElement {
   const options = document.createElement("div");
   options.className = "lab-options";
   options.append(
+    createLayoutDebugModeToggle(),
     createLayoutDebugToggle(
       "Grid tracks",
       "Show resolved Player grid boundaries and tracks.",
@@ -591,6 +592,37 @@ function createLayoutDebugTool(): HTMLElement {
 
   content.append(options, conditions, measurements, overflow, constraints, viewportOffsets, note);
   return content;
+}
+
+function createLayoutDebugModeToggle(): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "lab-option";
+
+  const copy = document.createElement("span");
+  copy.className = "lab-option-copy";
+
+  const titleElement = document.createElement("span");
+  titleElement.className = "lab-option-title";
+  titleElement.textContent = "Debug mode";
+
+  const noteElement = document.createElement("span");
+  noteElement.className = "lab-option-note";
+  noteElement.textContent = "Show or hide the selected layout diagnostics without clearing them.";
+  copy.append(titleElement, noteElement);
+
+  const switchElement = document.createElement("span");
+  switchElement.className = "switch";
+
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.dataset.layoutDebugEnabled = "";
+
+  const switchUi = document.createElement("span");
+  switchUi.className = "switch-ui";
+  switchElement.append(input, switchUi);
+
+  label.append(copy, switchElement);
+  return label;
 }
 
 function createLayoutDebugToggle(

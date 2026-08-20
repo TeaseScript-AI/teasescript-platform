@@ -1,5 +1,3 @@
-import type { PlayerToolColumnState } from "./model.js";
-
 type LayoutDebugKey =
   | "grid"
   | "regions"
@@ -37,6 +35,7 @@ interface LayoutDebugElements {
 }
 
 export interface LayoutDebugController {
+  setEnabled(enabled: boolean): void;
   setOption(key: string, enabled: boolean): void;
   sync(): void;
   queueSync(): void;
@@ -44,7 +43,6 @@ export interface LayoutDebugController {
 
 export function createLayoutDebugController(
   elements: LayoutDebugElements,
-  getToolColumns: () => readonly PlayerToolColumnState[],
 ): LayoutDebugController {
   const {
     player,
@@ -75,11 +73,16 @@ export function createLayoutDebugController(
     "viewport-offsets": true,
   };
   const overlay = createLayoutDebugOverlay();
+  let enabled = true;
   let syncQueued = false;
 
   player.append(overlay.root);
 
   const controller: LayoutDebugController = {
+    setEnabled(nextEnabled: boolean): void {
+      enabled = nextEnabled;
+      sync();
+    },
     setOption(key: string, enabled: boolean): void {
       if (!isLayoutDebugKey(key)) {
         throw new Error(`Unknown layout debug option: ${key}`);
@@ -124,8 +127,11 @@ export function createLayoutDebugController(
   }
 
   function sync(): void {
-    const debugToolOpen = getToolColumns().some((column) => column.toolId === "layout-debug");
-    overlay.root.hidden = !debugToolOpen;
+    overlay.root.hidden = !enabled;
+
+    for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-layout-debug-enabled]")) {
+      input.checked = enabled;
+    }
 
     for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-layout-debug]")) {
       const key = requiredDatasetValue(input, "layoutDebug");
@@ -139,7 +145,7 @@ export function createLayoutDebugController(
       section.hidden = !options[key];
     }
 
-    if (!debugToolOpen) return;
+    if (!enabled) return;
 
     const playerRect = player.getBoundingClientRect();
     const gridStyle = getComputedStyle(player);
