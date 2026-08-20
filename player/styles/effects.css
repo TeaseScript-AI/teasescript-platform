@@ -121,14 +121,18 @@
         box-shadow: none;
       }
 
-      .action-button[aria-busy="true"]::after {
+      .right-control[aria-busy="true"] {
+        overflow: hidden;
+      }
+
+      .right-control[aria-busy="true"]::after {
         content: "";
 
         position: absolute;
         pointer-events: none;
       }
 
-      .action-button[aria-busy="true"][data-busy-style="pulse"]::after {
+      .right-control[aria-busy="true"][data-busy-style="pulse"]::after {
         right: 0;
         bottom: 0;
         left: 0;
@@ -141,7 +145,7 @@
         animation: action-busy-pulse 2400ms ease-in-out infinite;
       }
 
-      .action-button[aria-busy="true"][data-busy-style="sweep"]::after {
+      .right-control[aria-busy="true"][data-busy-style="sweep"]::after {
         bottom: 0;
         left: 0;
 
@@ -155,7 +159,7 @@
         animation: action-busy-sweep 2800ms linear infinite;
       }
 
-      .action-button[aria-busy="true"][data-busy-style="dots"]::after {
+      .right-control[aria-busy="true"][data-busy-style="dots"]::after {
         right: 8px;
         bottom: 3px;
 
@@ -174,7 +178,7 @@
         animation: action-busy-dots 2200ms ease-in-out infinite;
       }
 
-      .action-button[aria-busy="true"][data-busy-style="corner-dot"]::after {
+      .right-control[aria-busy="true"][data-busy-style="corner-dot"]::after {
         right: 8px;
         bottom: 7px;
 
@@ -188,7 +192,7 @@
         animation: action-busy-corner-dot 2600ms ease-in-out infinite;
       }
 
-      .action-button[aria-busy="true"][data-busy-style="spinner"]::after {
+      .right-control[aria-busy="true"][data-busy-style="spinner"]::after {
         right: 7px;
         bottom: 6px;
 
@@ -203,7 +207,7 @@
         animation: action-busy-spinner 2400ms linear infinite;
       }
 
-      .action-button[aria-busy="true"][data-busy-style="wash"]::after {
+      .right-control[aria-busy="true"][data-busy-style="wash"]::after {
         inset: 0;
 
         background:
@@ -302,6 +306,11 @@
         .tool-column-add,
         .tool-column-close,
         .action-button,
+        .foreground-button,
+        .foreground-choice-select,
+        .return-to-latest,
+        .right-toggle-control,
+        .right-select-control,
         .send-button,
         .lab-reset {
           -webkit-tap-highlight-color: transparent;
@@ -416,22 +425,136 @@
           animation-duration: 0.001ms;
         }
 
-        .action-button[aria-busy="true"]::after {
+        .right-control[aria-busy="true"]::after {
           animation: none;
           opacity: 0.42;
         }
 
-        .action-button[aria-busy="true"][data-busy-style="sweep"]::after {
+        .right-control[aria-busy="true"][data-busy-style="sweep"]::after {
           transform: translateX(128%);
         }
 
 
-        .action-button[aria-busy="true"][data-busy-style="spinner"]::after {
+        .right-control[aria-busy="true"][data-busy-style="spinner"]::after {
           transform: rotate(45deg);
         }
 
-        .action-button[aria-busy="true"][data-busy-style="wash"]::after {
+        .right-control[aria-busy="true"][data-busy-style="wash"]::after {
           transform: translateX(0);
         }
       }
     }
+
+@layer effects {
+      .foreground-button,
+      .foreground-choice-select,
+      .return-to-latest,
+      .right-toggle-control,
+      .right-select-control,
+      .right-select-control select,
+      .right-switch-ui {
+        transition:
+          background 120ms ease,
+          border-color 120ms ease,
+          box-shadow 120ms ease;
+      }
+
+      @media (any-hover: hover) {
+        .foreground-button:not(:disabled):hover,
+        .foreground-choice-select:not(:disabled):hover,
+        .return-to-latest:not(:disabled):hover,
+        .right-toggle-control:not(:has(input:disabled)):hover,
+        .right-select-control:not(:has(select:disabled)):hover {
+          border-color: var(--color-border-hover);
+          background: color-mix(in srgb, var(--color-component-hover) 60%, transparent);
+        }
+
+        .right-select-control select:not(:disabled):hover,
+        .right-toggle-control:not(:has(input:disabled)):hover .right-switch-ui {
+          border-color: var(--color-border-hover);
+        }
+      }
+
+      .foreground-button:not(:disabled):active,
+      .return-to-latest:not(:disabled):active,
+      .right-toggle-control:not(:has(input:disabled)):active,
+      .right-select-control:not(:has(select:disabled)):active {
+        border-color: var(--color-border-pressed);
+        background: color-mix(in srgb, var(--color-component-pressed) 60%, transparent);
+      }
+
+      .foreground-choice-select:not(:disabled):active,
+      .right-select-control select:not(:disabled):active {
+        border-color: var(--color-border-pressed);
+      }
+
+      .foreground-button:focus-visible,
+      .foreground-choice-select:focus-visible,
+      .return-to-latest:focus-visible,
+      .right-toggle-control input:focus-visible + .right-switch-ui,
+      .right-select-control select:focus-visible {
+        outline: var(--focus-outline-width) solid var(--color-accent-focus);
+        outline-offset: 1px;
+      }
+
+      .action-button[data-authored-fill]:not(:disabled),
+      .foreground-button[data-authored-fill]:not(:disabled) {
+        border-color: color-mix(in oklab, var(--authored-control-fill) 78%, black);
+        background: var(--authored-control-fill);
+        color: var(--authored-control-text);
+      }
+
+      @media (any-hover: hover) {
+        .action-button[data-authored-fill]:not(:disabled):hover,
+        .foreground-button[data-authored-fill]:not(:disabled):hover {
+          border-color: color-mix(in oklab, var(--authored-control-hover) 76%, black);
+          background: var(--authored-control-hover);
+          color: var(--authored-control-text);
+        }
+      }
+
+      .action-button[data-authored-fill]:not(:disabled):active,
+      .foreground-button[data-authored-fill]:not(:disabled):active {
+        border-color: color-mix(in oklab, var(--authored-control-pressed) 72%, black);
+        background: var(--authored-control-pressed);
+        color: var(--authored-control-text);
+      }
+
+      .timer[data-timer-kind="mystery"]::before {
+        background:
+          conic-gradient(
+            from 0deg,
+            transparent 0 18%,
+            var(--package-accent) 18% 52%,
+            transparent 52% 100%
+          );
+        animation: mystery-timer-ring 1500ms linear infinite;
+      }
+
+      @keyframes mystery-timer-ring {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .foreground-button,
+        .foreground-choice-select,
+        .return-to-latest,
+        .right-toggle-control,
+        .right-select-control,
+        .right-select-control select,
+        .right-switch-ui {
+          transition-duration: 0.001ms;
+        }
+
+        .right-switch-ui::after {
+          transition-duration: 0.001ms;
+        }
+
+        .timer[data-timer-kind="mystery"]::before {
+          animation: none;
+          transform: rotate(45deg);
+        }
+      }
+}

@@ -1,7 +1,9 @@
 import type {
-  PlayerActionPresentation,
+  PlayerForegroundPresentation,
+  PlayerForegroundOptionPresentation,
   PlayerMessagePresentation,
   PlayerPresentation,
+  PlayerRightControlPresentation,
   PlayerSpeakerPresentation,
   PlayerToolColumnState,
   PlayerToolDefinition,
@@ -10,8 +12,7 @@ import type {
 
 export interface PlayerRenderTargets {
   readonly player: HTMLElement;
-  readonly transcript: HTMLElement;
-  readonly actions: HTMLElement;
+  readonly rightControls: HTMLElement;
   readonly timerText: HTMLElement;
   readonly sceneMedia: HTMLImageElement;
 }
@@ -37,12 +38,8 @@ export function renderPresentation(
     targets.sceneMedia.src = presentation.media.src;
   }
 
-  targets.transcript.replaceChildren(
-    ...presentation.messages.map((message) => createMessage(message, presentation.speakers)),
-  );
-
-  targets.actions.replaceChildren(
-    ...presentation.actions.map(createActionButton),
+  targets.rightControls.replaceChildren(
+    ...orderRightControls(presentation.rightControls).map(createRightControl),
   );
 }
 
@@ -69,7 +66,7 @@ export function formatTimer(totalSeconds: number): string {
   return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function createMessage(
+export function createMessageElement(
   message: PlayerMessagePresentation,
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>,
 ): HTMLElement {
@@ -109,15 +106,223 @@ function createMessage(
   return article;
 }
 
-function createActionButton(action: PlayerActionPresentation): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "action-button";
-  button.dataset.actionId = action.id;
-  button.textContent = action.label;
-  return button;
+export function renderForegroundControls(
+  container: HTMLElement,
+  presentation: PlayerForegroundPresentation | null,
+): void {
+  container.replaceChildren();
+  if (presentation === null || presentation.kind === "ask-text" || presentation.kind === "ask-number") {
+    container.hidden = true;
+    delete container.dataset.foregroundKind;
+    return;
+  }
+
+  container.hidden = false;
+  container.dataset.foregroundKind = presentation.kind;
+
+  const shell = document.createElement("div");
+  shell.className = "foreground-shell";
+
+  if (presentation.kind === "show-button") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "foreground-button";
+    button.dataset.foregroundButton = "";
+    button.setAttribute("aria-label", presentation.accessibleName);
+    button.textContent = presentation.label;
+    if (presentation.authoredFill !== undefined) applyAuthoredControlFill(button, presentation.authoredFill);
+    shell.append(button);
+  } else {
+    const group = document.createElement("div");
+    group.className = "foreground-choice-buttons";
+    group.dataset.foregroundChoiceButtons = "";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", presentation.accessibleName);
+
+    for (const option of presentation.options) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "foreground-button";
+      button.dataset.foregroundChoice = option.id;
+      button.dataset.foregroundLabel = option.label;
+      button.textContent = option.label;
+      if (option.authoredFill !== undefined) applyAuthoredControlFill(button, option.authoredFill);
+      group.append(button);
+    }
+
+    const select = document.createElement("select");
+    select.className = "foreground-choice-select";
+    select.dataset.foregroundChoiceSelect = "";
+    select.setAttribute("aria-label", presentation.accessibleName);
+    select.hidden = true;
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Choose…";
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    select.append(placeholder);
+
+    for (const option of presentation.options) {
+      const item = document.createElement("option");
+      item.value = option.id;
+      item.textContent = option.label;
+      select.append(item);
+    }
+
+    shell.append(group, select);
+  }
+
+  container.append(shell);
 }
 
+export function matchForegroundChoiceByVisibleText(
+  options: readonly PlayerForegroundOptionPresentation[],
+  submittedText: string,
+): PlayerForegroundOptionPresentation | null {
+  const matches = options.filter((option) => option.label === submittedText);
+  return matches.length === 1 ? (matches[0] ?? null) : null;
+}
+
+export function orderRightControls(
+  controls: readonly PlayerRightControlPresentation[],
+): readonly PlayerRightControlPresentation[] {
+  return controls
+    .map((control, index) => ({ control, index }))
+    .sort((left, right) => {
+      const leftHasPriority = left.control.priority !== undefined;
+      const rightHasPriority = right.control.priority !== undefined;
+      if (leftHasPriority !== rightHasPriority) return leftHasPriority ? -1 : 1;
+      if (leftHasPriority && rightHasPriority) {
+        const priorityDifference = (left.control.priority ?? 0) - (right.control.priority ?? 0);
+        if (priorityDifference !== 0) return priorityDifference;
+      }
+      return left.index - right.index;
+    })
+    .map(({ control }) => control);
+}
+
+export function readableControlText(fill: string): "#000000" | "#ffffff" {
+  const match = /^#(?<red>[0-9a-f]{2})(?<green>[0-9a-f]{2})(?<blue>[0-9a-f]{2})$/iu.exec(fill);
+  if (match?.groups === undefined) throw new Error(`Unsupported authored control fill: ${fill}`);
+
+  const channels = [match.groups.red, match.groups.green, match.groups.blue].map((channel) => {
+    const encoded = Number.parseInt(channel ?? "00", 16) / 255;
+    return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = (channels[0] ?? 0) * 0.2126 + (channels[1] ?? 0) * 0.7152 + (channels[2] ?? 0) * 0.0722;
+  const blackContrast = (luminance + 0.05) / 0.05;
+  const whiteContrast = 1.05 / (luminance + 0.05);
+  return blackContrast >= whiteContrast ? "#000000" : "#ffffff";
+}
+
+function createRightControl(control: PlayerRightControlPresentation): HTMLElement {
+  switch (control.kind) {
+    case "action": {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "action-button right-control";
+      button.dataset.actionId = control.id;
+      button.dataset.controlLabel = control.label;
+      button.textContent = control.label;
+      if (control.authoredFill !== undefined) applyAuthoredControlFill(button, control.authoredFill);
+      return button;
+    }
+    case "toggle": {
+      const label = document.createElement("label");
+      label.className = "right-control right-toggle-control";
+      label.dataset.controlId = control.id;
+      label.dataset.controlLabel = control.label;
+      label.dataset.recordUserHistory = String(control.recordUserHistory);
+
+      const copy = document.createElement("span");
+      copy.className = "right-control-label";
+      copy.textContent = control.label;
+
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.setAttribute("role", "switch");
+      input.checked = control.value;
+      input.dataset.rightToggle = control.id;
+      input.setAttribute("aria-label", control.label);
+
+      const switchUi = document.createElement("span");
+      switchUi.className = "right-switch-ui";
+      switchUi.setAttribute("aria-hidden", "true");
+
+      label.append(copy, input, switchUi);
+      if (control.updateSource === "script") label.append(createControlOriginBadge());
+      return label;
+    }
+    case "select": {
+      const label = document.createElement("label");
+      label.className = "right-control right-select-control";
+      label.dataset.controlId = control.id;
+      label.dataset.controlLabel = control.label;
+      label.dataset.recordUserHistory = String(control.recordUserHistory);
+
+      const copy = document.createElement("span");
+      copy.className = "right-control-label";
+      copy.textContent = control.label;
+
+      const select = document.createElement("select");
+      select.dataset.rightSelect = control.id;
+      select.setAttribute("aria-label", control.label);
+      for (const [value, text] of control.options) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        option.selected = value === control.value;
+        select.append(option);
+      }
+
+      label.append(copy, select);
+      if (control.updateSource === "script") label.append(createControlOriginBadge());
+      return label;
+    }
+    case "status": {
+      const item = document.createElement("div");
+      item.className = "right-control right-status";
+      item.dataset.controlId = control.id;
+      item.setAttribute("role", "status");
+
+      const heading = document.createElement("span");
+      heading.className = "right-control-label";
+      heading.textContent = control.label;
+
+      const detail = document.createElement("span");
+      detail.className = "right-status-detail";
+      detail.textContent = control.detail;
+
+      item.append(heading, detail);
+      if (control.progress !== undefined) {
+        const progress = document.createElement("progress");
+        progress.className = "right-status-progress";
+        progress.max = 1;
+        progress.value = Math.max(0, Math.min(1, control.progress));
+        progress.setAttribute("aria-label", `${control.label} progress`);
+        item.append(progress);
+      }
+      return item;
+    }
+  }
+}
+
+function createControlOriginBadge(): HTMLSpanElement {
+  const badge = document.createElement("span");
+  badge.className = "right-control-origin";
+  badge.dataset.controlOrigin = "script";
+  badge.textContent = "Script update";
+  return badge;
+}
+
+function applyAuthoredControlFill(element: HTMLElement, fill: string): void {
+  element.dataset.authoredFill = "";
+  element.style.setProperty("--authored-control-fill", fill);
+  element.style.setProperty("--authored-control-hover", `color-mix(in oklab, ${fill} 88%, black)`);
+  element.style.setProperty("--authored-control-pressed", `color-mix(in oklab, ${fill} 76%, black)`);
+  element.style.setProperty("--authored-control-text", readableControlText(fill));
+}
 
 export function renderToolColumns(
   strip: HTMLElement,
@@ -259,6 +464,16 @@ function createVisualTool(): HTMLElement {
       ],
     ),
     createSelectOption(
+      "Busy control target",
+      "Apply the selected busy-in-place cue to each interactive right-rail control family.",
+      "busy-target",
+      [
+        ["action", "Action"],
+        ["toggle", "Toggle"],
+        ["select", "Select"],
+      ],
+    ),
+    createSelectOption(
       "Timer label",
       "Compare generic visible-order label placement.",
       "timer-label",
@@ -266,6 +481,15 @@ function createVisualTool(): HTMLElement {
         ["off", "Off"],
         ["above", "Inside · above"],
         ["below", "Inside · below"],
+      ],
+    ),
+    createSelectOption(
+      "Timer label content",
+      "Exercise generic visible-order labels and an authored visible timer label.",
+      "timer-label-content",
+      [
+        ["generic", "Generic"],
+        ["authored", "Authored first timer"],
       ],
     ),
     createDemoNumberOption(
@@ -284,6 +508,92 @@ function createVisualTool(): HTMLElement {
         ["viewport-center", "Viewport centre"],
       ],
     ),
+    createSelectOption(
+      "Media transition",
+      "Exercise direct replacement and accepted fade/crossfade presentation without runtime media wiring.",
+      "media-transition",
+      [
+        ["direct", "Direct"],
+        ["fade", "Fade"],
+        ["crossfade", "Crossfade"],
+      ],
+    ),
+    createSelectOption(
+      "Stage content",
+      "Exercise populated and intentionally empty stage presentation without changing stage geometry.",
+      "media-content",
+      [
+        ["present", "Media"],
+        ["empty", "Empty"],
+      ],
+    ),
+    createSelectOption(
+      "Foreground interaction",
+      "Exercise required foreground-control presentation without runtime wiring.",
+      "foreground-fixture",
+      [
+        ["none", "None"],
+        ["show-button", "showButton"],
+        ["choose", "choose"],
+        ["ask-text", "askText"],
+        ["ask-number", "askNumber"],
+      ],
+    ),
+    createSelectOption(
+      "Timer presentation",
+      "Exercise visible, mystery, and hidden timer presentation.",
+      "timer-kind",
+      [
+        ["visible", "Visible"],
+        ["mystery", "Mystery"],
+        ["hidden", "Hidden"],
+      ],
+    ),
+    createSelectOption(
+      "Pacing gate",
+      "Exercise Player click/Space skip presentation precedence.",
+      "pacing-gate",
+      [
+        ["off", "Off"],
+        ["skippable", "Skippable"],
+        ["unskippable", "Unskippable"],
+      ],
+    ),
+    createSelectOption(
+      "Ordinary control availability",
+      "Exercise Player-owned disabled styling without disabling mandatory foreground interactions.",
+      "control-availability",
+      [
+        ["enabled", "Enabled"],
+        ["disabled", "Disabled"],
+      ],
+    ),
+    createSelectOption(
+      "Script update target",
+      "Exercise recognizable programmatic updates on each persistent value-control family.",
+      "script-update-target",
+      [
+        ["toggle", "Toggle"],
+        ["select", "Select"],
+      ],
+    ),
+    createSelectOption(
+      "Right-rail controls",
+      "Hide fixture controls without changing backing/reservation so the empty-rail contract can be exercised.",
+      "right-controls-visibility",
+      [
+        ["visible", "Visible"],
+        ["none", "None"],
+      ],
+    ),
+    createDemoNumberOption(
+      "History messages",
+      "Retained-history fixture for smart-follow and DOM-windowing tests.",
+      "history-size",
+      0,
+      1,
+      10_000,
+    ),
   );
 
   const tuning = document.createElement("div");
@@ -298,6 +608,18 @@ function createVisualTool(): HTMLElement {
     createTuningInput("Composer lines", "Line-height cap", "--composer-max-lines", "lh", 1),
     createTuningInput("Composer viewport", "Viewport-height cap", "--composer-max-viewport-height", "dvh", 1),
   );
+
+  const scriptUpdate = document.createElement("button");
+  scriptUpdate.type = "button";
+  scriptUpdate.className = "lab-reset";
+  scriptUpdate.dataset.simulateScriptUpdate = "";
+  scriptUpdate.textContent = "Simulate script update";
+
+  const mediaReplacement = document.createElement("button");
+  mediaReplacement.type = "button";
+  mediaReplacement.className = "lab-reset";
+  mediaReplacement.dataset.replaceDemoMedia = "";
+  mediaReplacement.textContent = "Replace demo media";
 
   const note = document.createElement("p");
   note.className = "lab-note";
@@ -322,7 +644,7 @@ function createVisualTool(): HTMLElement {
   reset.dataset.resetVisuals = "";
   reset.textContent = "Reset visual tests";
 
-  content.append(picker, options, tuning, note, fixed, reset);
+  content.append(picker, options, tuning, scriptUpdate, mediaReplacement, note, fixed, reset);
   return content;
 }
 
@@ -446,6 +768,7 @@ function createDemoNumberOption(
   key: string,
   min: number,
   step: number,
+  max?: number,
 ): HTMLLabelElement {
   const row = document.createElement("label");
   row.className = "lab-option";
@@ -468,6 +791,7 @@ function createDemoNumberOption(
   input.dataset.demoNumber = key;
   input.min = String(min);
   input.step = String(step);
+  if (max !== undefined) input.max = String(max);
   input.setAttribute("aria-label", title);
 
   row.append(copy, input);

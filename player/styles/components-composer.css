@@ -33,7 +33,7 @@
         max-block-size:
           min(
             calc(var(--composer-max-lines) + var(--composer-input-block-chrome)),
-            var(--composer-max-viewport-height)
+            var(--composer-effective-viewport-height)
           );
 
         resize: none;
@@ -84,5 +84,19 @@
         background: var(--color-surface-disabled);
         color: var(--color-text-disabled);
         cursor: not-allowed;
+      }
+}
+
+@layer components {
+      .composer-feedback {
+        width: min(100%, var(--conversation-max-width));
+        margin: 4px auto 0;
+        color: var(--color-text-muted);
+        font-size: 10px;
+        line-height: 1.25;
+      }
+
+      .composer-feedback[hidden] {
+        display: none;
       }
 }

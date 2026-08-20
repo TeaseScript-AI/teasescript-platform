@@ -59,7 +59,6 @@ export function createLayoutDebugController(
   } = elements;
   const narrowScreen = window.matchMedia("(max-width: 760px)");
   const compactScreen = window.matchMedia("(max-width: 480px)");
-  const lowHeightScreen = window.matchMedia("(max-height: 600px)");
   const landscapeScreen = window.matchMedia("(orientation: landscape)");
   const composerInput = requireComposerInput(composer);
 
@@ -73,7 +72,7 @@ export function createLayoutDebugController(
     "viewport-offsets": true,
   };
   const overlay = createLayoutDebugOverlay();
-  let enabled = true;
+  let enabled = false;
   let syncQueued = false;
 
   player.append(overlay.root);
@@ -329,7 +328,7 @@ export function createLayoutDebugController(
     const firstToolColumn = toolStrip.querySelector<HTMLElement>(".tool-column");
     const activeStageTarget = cssCustomValue(
       playerStyle,
-      lowHeightScreen.matches ? "--media-height-overlay" : "--media-height-normal",
+      player.dataset.chrome === "overlay" ? "--media-height-overlay" : "--media-height-normal",
     );
 
     const values: Readonly<Record<string, string>> = {
@@ -338,7 +337,7 @@ export function createLayoutDebugController(
         : narrowScreen.matches
           ? "narrow"
           : "wide",
-      chrome: lowHeightScreen.matches ? "overlay chrome" : "normal",
+      chrome: player.dataset.chrome === "overlay" ? "overlay chrome" : "normal",
       orientation: landscapeScreen.matches ? "landscape" : "portrait",
       "left-panel": `${currentLeftMode()} → ${effectiveLeftPresentation()}`,
       "right-panel": `${currentRightMode()} → ${effectiveRightPresentation()}`,
@@ -357,7 +356,9 @@ export function createLayoutDebugController(
       transcript: formatRectSize(transcriptRect),
       foreground: foreground === null
         ? "not present"
-        : formatRectSize(foreground.getBoundingClientRect()),
+        : foreground.hidden
+          ? "inactive"
+          : formatRectSize(foreground.getBoundingClientRect()),
       composer: formatRectSize(composer.getBoundingClientRect()),
       tools: formatRectSize(leftPanel.getBoundingClientRect()),
       "right-zone": formatRectSize(rightZone.getBoundingClientRect()),

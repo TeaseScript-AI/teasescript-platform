@@ -1,0 +1,79 @@
+@layer components {
+      .foreground-controls {
+        grid-column: 2;
+        grid-row: 4;
+
+        min-width: 0;
+        padding:
+          4px
+          calc(12px + var(--safe-right))
+          4px
+          calc(12px + var(--safe-left));
+
+        background: var(--color-surface-canvas);
+      }
+
+      .foreground-controls[hidden] {
+        display: none;
+      }
+
+      .foreground-shell {
+        width: min(100%, var(--conversation-max-width));
+        min-width: 0;
+        margin-inline: auto;
+      }
+
+      .foreground-choice-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+      }
+
+      .foreground-choice-buttons[hidden],
+      .foreground-choice-select[hidden] {
+        display: none;
+      }
+
+      .foreground-button,
+      .foreground-choice-select {
+        min-block-size: 42px;
+
+        border: 1px solid var(--color-border-default);
+        border-radius: 6px;
+
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
+
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.2;
+      }
+
+      .foreground-button {
+        flex: 0 1 auto;
+        min-inline-size: min(112px, 100%);
+        max-inline-size: 100%;
+
+        padding: 9px 14px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        cursor: pointer;
+      }
+
+      .foreground-choice-select {
+        width: min(100%, 420px);
+        margin-inline: auto;
+        display: block;
+        padding: 8px 32px 8px 10px;
+        cursor: pointer;
+      }
+
+      .foreground-button:disabled,
+      .foreground-choice-select:disabled {
+        border-color: var(--color-border-disabled);
+        background: var(--color-surface-disabled);
+        color: var(--color-text-disabled);
+        cursor: not-allowed;
+      }
+}

@@ -4,7 +4,13 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import { toggleLeftPanelMode, toggleRightPanelMode } from "../player/panel-state.js";
-import { formatTimer, timerProgressPercent } from "../player/render.js";
+import {
+  formatTimer,
+  matchForegroundChoiceByVisibleText,
+  orderRightControls,
+  readableControlText,
+  timerProgressPercent,
+} from "../player/render.js";
 import {
   addToolColumn,
   closeToolColumn,
@@ -151,7 +157,7 @@ test("Player Actions stay in the dedicated right rail and are not tool-column co
   const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
 
   assert.match(html, /id="actions"/u);
-  assert.match(render, /targets\.actions\.replaceChildren/u);
+  assert.match(render, /targets\.rightControls\.replaceChildren/u);
   assert.doesNotMatch(demo, /\{ id: "actions", label: "Actions" \}/u);
   assert.doesNotMatch(render, /case "actions"/u);
 });
@@ -238,14 +244,14 @@ test("Player right background toggle keeps conversation geometry stable", async 
   assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*\.player\[data-right="auto"\],[\s\S]*\.player\[data-right="docked"\],[\s\S]*\.player\[data-right="overlay"\][\s\S]*--right-track: 0px/u);
 });
 
-test("Player narrow drawer remains opaque and timer compaction is height-driven", async () => {
+test("Player narrow drawer remains opaque and timer compaction follows usable-height chrome state", async () => {
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
 
   assert.match(responsive, /--mobile-drawer-width:/u);
   assert.match(responsive, /background: var\(--color-surface-chrome\);/u);
   assert.match(responsive, /background: var\(--color-structural-scrim\);/u);
   assert.doesNotMatch(responsive, /--control-padding:/u);
-  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer-cluster \.timer \{[\s\S]*inline-size: 34px;[\s\S]*border-radius: 50%;/u);
+  assert.match(responsive, /\.player\[data-chrome="overlay"\][\s\S]*\.timer-cluster \.timer \{[\s\S]*inline-size: 34px;[\s\S]*border-radius: 50%;/u);
   assert.doesNotMatch(responsive, /\.timer::before \{[\s\S]*content: none;/u);
 
   const overlayBreakpoint = responsive.indexOf("@media (max-width: 760px) {");
@@ -279,7 +285,6 @@ test("Player Visual Lab exposes reversible Phase 4 geometry tuning", async () =>
   const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
   const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
   const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
-  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
   const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
   const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
 
@@ -295,12 +300,12 @@ test("Player Visual Lab exposes reversible Phase 4 geometry tuning", async () =>
     /calc\(var\(--composer-max-lines\) \+ var\(--composer-input-block-chrome\)\)/u,
   );
   assert.match(composer, /font-size: var\(--composer-font-size\)/u);
-  assert.match(responsive, /--media-height: var\(--media-height-overlay\)/u);
+  assert.match(browser, /usableViewportLength\(overlay \? "--media-height-overlay" : "--media-height-normal", usableHeight\)/u);
   assert.match(render, /input\.dataset\.tuningProperty = property/u);
   assert.match(render, /"--conversation-max-width"/u);
   assert.doesNotMatch(render, /"--focus-outline-width"/u);
   assert.doesNotMatch(render, /Focus ring/u);
-  assert.match(browser, /player\.style\.setProperty\(property, `\$\{input\.valueAsNumber\}\$\{unit\}`\)/u);
+  assert.match(browser, /player\.style\.setProperty\(requiredDatasetValue\(input, "tuningProperty"\), `\$\{input\.valueAsNumber\}\$\{requiredDatasetValue\(input, "tuningUnit"\)\}`\)/u);
   assert.match(browser, /player\.style\.removeProperty\(requiredDatasetValue\(input, "tuningProperty"\)\)/u);
 });
 
@@ -327,6 +332,7 @@ test("Player Visual Lab exposes grouped reversible Phase 4 review choices", asyn
   assert.doesNotMatch(browser, /composerFontDemo/u);
   assert.match(browser, /data-demo-number/u);
   assert.match(browser, /label\.hidden = timerLabelDemoPlacement === "off"/u);
+  assert.match(browser, /timerKindDemo === "mystery" \? "\?" : demoTimerText\(index\)/u);
   assert.match(browser, /player\.dataset\.demoTimerCount = String\(timerCountDemo\)/u);
 });
 
@@ -343,7 +349,7 @@ test("Player busy Action review variants are paint-only, continuous, and reduced
   assert.match(effects, /data-busy-style="corner-dot"[\s\S]*animation: action-busy-corner-dot 2600ms ease-in-out infinite/u);
   assert.match(effects, /data-busy-style="spinner"[\s\S]*animation: action-busy-spinner 2400ms linear infinite/u);
   assert.match(effects, /data-busy-style="wash"[\s\S]*animation: action-busy-wash 3600ms ease-in-out infinite/u);
-  assert.match(effects, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.action-button\[aria-busy="true"\]::after \{[\s\S]*animation: none/u);
+  assert.match(effects, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.right-control\[aria-busy="true"\]::after \{[\s\S]*animation: none/u);
   assert.doesNotMatch(browser, /busyActionDemoStyle[\s\S]{0,300}\.disabled\s*=/u);
 });
 
@@ -356,8 +362,8 @@ test("Player timer-label review variants stay inside normal and compact timers",
   assert.match(actions, /data-label-placement="below"[\s\S]*\.timer-label[\s\S]*order: 1/u);
   assert.doesNotMatch(actions, /timer-cluster:has\(\.timer-label/u);
   assert.match(actions, /\.timer-list \{[\s\S]*display: flex;[\s\S]*flex-direction: column;[\s\S]*gap: 12px/u);
-  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*\.timer-list \{[\s\S]*flex-direction: row;[\s\S]*flex-wrap: wrap;[\s\S]*gap: 6px/u);
-  assert.match(responsive, /@media \(max-height: 600px\)[\s\S]*data-label-placement="above"[\s\S]*font-size: 10px/u);
+  assert.match(responsive, /\.player\[data-chrome="overlay"\] \.timer-list \{[\s\S]*flex-direction: row;[\s\S]*flex-wrap: wrap;[\s\S]*gap: 6px/u);
+  assert.match(responsive, /\.player\[data-chrome="overlay"\][\s\S]*data-label-placement="above"[\s\S]*font-size: 10px/u);
   assert.match(responsive, /data-label-placement="below"[\s\S]*\.timer-label[\s\S]*font-size: 7px/u);
 });
 
@@ -371,23 +377,23 @@ test("Player viewport-centred Action candidate stays centred until timer-stack c
     layout,
     /\.player\[data-action-alignment="viewport-center"\] \.right-zone \{[\s\S]*minmax\(max-content, 1fr\)[\s\S]*auto[\s\S]*minmax\(0, 1fr\)[\s\S]*var\(--title-track\)/u,
   );
-  assert.match(layout, /data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\) \.right-zone \{[\s\S]*overflow-y: auto/u);
+  assert.match(layout, /data-demo-multi-timer="true"\] \.right-zone \{[\s\S]*overflow-y: auto/u);
   assert.match(
     layout,
-    /data-action-alignment="below-timers"\]\[data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\) \.right-zone \{[\s\S]*max-content[\s\S]*minmax\(max-content, 1fr\)/u,
+    /data-action-alignment="below-timers"\]\[data-demo-multi-timer="true"\] \.right-zone \{[\s\S]*max-content[\s\S]*minmax\(max-content, 1fr\)/u,
   );
   const multiTimerRightZone = layout.match(
-    /\.player\[data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\) \.right-zone \{(?<body>[\s\S]*?)\n      \}/u,
+    /\.player\[data-demo-multi-timer="true"\] \.right-zone \{(?<body>[\s\S]*?)\n      \}/u,
   );
   assert.ok(multiTimerRightZone?.groups?.body);
   assert.doesNotMatch(multiTimerRightZone.groups.body, /grid-template-rows/u);
   assert.match(actions, /data-action-alignment="viewport-center"[\s\S]*\.timer-wrap \{[\s\S]*grid-row: 1/u);
   assert.match(actions, /data-action-alignment="viewport-center"[\s\S]*\.action-scroll \{[\s\S]*grid-row: 2/u);
-  assert.match(actions, /data-demo-timer-count\]:not\(\[data-demo-timer-count="1"\]\)[\s\S]*\.action-scroll[\s\S]*overflow: visible/u);
+  assert.match(actions, /data-demo-multi-timer="true"\][\s\S]*\.action-scroll[\s\S]*overflow: visible/u);
   assert.doesNotMatch(layout, /right-timer-stack-reserve/u);
   assert.doesNotMatch(responsive, /data-demo-timer-count="(?:2|4)"/u);
   assert.match(browser, /function syncDemoTimers\(\): void/u);
-  assert.match(browser, /for \(let index = 2; index <= timerCountDemo; index \+= 1\)/u);
+  assert.match(browser, /for \(let index = 1; index <= timerCountDemo; index \+= 1\)/u);
 });
 
 test("Player composer line tuning counts text lines and offers local font-size review choices", async () => {
@@ -402,7 +408,7 @@ test("Player composer line tuning counts text lines and offers local font-size r
   assert.match(composer, /calc\(var\(--composer-max-lines\) \+ var\(--composer-input-block-chrome\)\)/u);
   assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*--composer-font-size: 10px/u);
   assert.match(render, /createTuningInput\("Composer text"[\s\S]*"--composer-font-size"[\s\S]*"px"/u);
-  assert.match(browser, /player\.style\.setProperty\(property, `\$\{input\.valueAsNumber\}\$\{unit\}`\)/u);
+  assert.match(browser, /player\.style\.setProperty\(requiredDatasetValue\(input, "tuningProperty"\), `\$\{input\.valueAsNumber\}\$\{requiredDatasetValue\(input, "tuningUnit"\)\}`\)/u);
   assert.match(browser, /player\.style\.removeProperty\(requiredDatasetValue\(input, "tuningProperty"\)\)/u);
 });
 
@@ -425,11 +431,12 @@ test("Player Layout Debug exposes live development-only geometry inspection", as
   assert.match(render, /titleElement\.textContent = "Debug mode"/u);
   assert.match(render, /input\.dataset\.layoutDebugEnabled = ""/u);
   assert.match(render, /\["Foreground", "foreground"\]/u);
-  assert.match(browser, /createLayoutDebugController\([\s\S]*timerList,[\s\S]*\},[\s\S]*\);/u);
+  assert.match(browser, /createLayoutDebugController\(\{[\s\S]*timerList,[\s\S]*\}\);/u);
   assert.doesNotMatch(browser, /createLayoutDebugController\([\s\S]*\(\) => toolColumns/u);
   assert.match(browser, /layoutDebug\.setEnabled\(target\.checked\)/u);
   assert.match(browser, /layoutDebug\.setOption\(requiredDatasetValue\(target, "layoutDebug"\), target\.checked\)/u);
-  assert.match(layoutDebug, /let enabled = true/u);
+  assert.match(layoutDebug, /let enabled = false/u);
+  assert.match(browser, /syncLayoutDebugActivation\(\)[\s\S]*layoutDebug\.setEnabled\(true\)/u);
   assert.match(layoutDebug, /setEnabled\(nextEnabled: boolean\)/u);
   assert.match(layoutDebug, /overlay\.root\.hidden = !enabled/u);
   assert.doesNotMatch(layoutDebug, /debugToolOpen|getToolColumns/u);
@@ -512,4 +519,130 @@ test("Player left-panel growth protects media and conversation minimums independ
   assert.match(layout, /--primary-column-min:/u);
   assert.match(layout, /var\(--media-height\)/u);
   assert.match(layout, /var\(--conversation-min-width\)/u);
+});
+
+
+test("Player foreground interactions render above the composer and keep typed equivalence", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const foreground = await readFile(resolve(process.cwd(), "player/styles/components-foreground.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+
+  assert.ok(html.indexOf('id="transcript"') < html.indexOf('id="foregroundControls"'));
+  assert.ok(html.indexOf('id="foregroundControls"') < html.indexOf('id="composer"'));
+  assert.match(foreground, /\.foreground-controls[\s\S]*grid-row: 4/u);
+  assert.match(layout, /\.composer \{[\s\S]*grid-row: 5/u);
+  assert.match(foreground, /\.foreground-choice-buttons[\s\S]*flex-wrap: wrap/u);
+  assert.match(render, /presentation\.kind === "show-button"/u);
+  assert.match(render, /presentation\.kind === "ask-text" \|\| presentation\.kind === "ask-number"/u);
+  assert.match(browser, /case "ask-text"[\s\S]*case "ask-number"[\s\S]*case "show-button"[\s\S]*case "choose"/u);
+  assert.match(browser, /event\.key === "Enter" && !event\.shiftKey/u);
+  assert.match(browser, /event\.key === " "[\s\S]*foreground\?\.kind === "show-button"/u);
+
+  const options = [
+    { id: "one", label: "Continue steadily" },
+    { id: "two", label: "Choose the stricter option" },
+  ];
+  assert.equal(matchForegroundChoiceByVisibleText(options, "Continue steadily")?.id, "one");
+  assert.equal(matchForegroundChoiceByVisibleText(options, "continue steadily"), null);
+  assert.equal(matchForegroundChoiceByVisibleText([...options, { id: "three", label: "Continue steadily" }], "Continue steadily"), null);
+});
+
+test("Player transcript smart-follow preserves an explicit return path and bounded DOM window", async () => {
+  const controller = await readFile(resolve(process.cwd(), "player/transcript-controller.ts"), "utf8");
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const transcriptCss = await readFile(resolve(process.cwd(), "player/styles/components-transcript.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.match(html, /id="returnToLatest"[\s\S]*Return to latest/u);
+  assert.match(controller, /const WINDOW_SIZE = 120/u);
+  assert.match(controller, /const WINDOW_BUFFER = 32/u);
+  assert.match(controller, /const FOLLOW_DISTANCE_PX = 36/u);
+  assert.match(controller, /const SCROLL_SETTLE_MS = 140/u);
+  assert.match(controller, /followingLatest = distanceFromBottom\(\) <= FOLLOW_DISTANCE_PX/u);
+  assert.match(controller, /awayFromLatest && scrollSettled/u);
+  assert.match(controller, /createSpacer\(start \* averageMessageExtent, "before"\)/u);
+  assert.match(controller, /createSpacer\(\(messages\.length - end\) \* averageMessageExtent, "after"\)/u);
+  assert.match(transcriptCss, /\.transcript-window-spacer/u);
+  assert.match(browser, /MAX_DEMO_HISTORY_MESSAGES/u);
+  assert.match(browser, /createDemoHistoryMessages\(historySizeDemo\)/u);
+});
+
+test("Player right rail supports ordered action, toggle, select, and status presentation", async () => {
+  const demo = await readFile(resolve(process.cwd(), "player/demo-session.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const controls = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+
+  assert.match(demo, /kind: "action"[\s\S]*kind: "toggle"[\s\S]*kind: "select"[\s\S]*kind: "status"/u);
+  assert.match(render, /case "action"[\s\S]*case "toggle"[\s\S]*case "select"[\s\S]*case "status"/u);
+  assert.match(browser, /recordUserHistory[\s\S]*appendActivityMessage/u);
+  assert.match(browser, /updateSource: "script"/u);
+  assert.match(render, /badge\.textContent = "Script update"/u);
+  assert.match(controls, /\.right-toggle-control/u);
+  assert.match(controls, /\.right-select-control/u);
+  assert.match(controls, /\.right-status/u);
+
+  const ordered = orderRightControls([
+    { kind: "status", id: "status", label: "Status", detail: "ok" },
+    { kind: "action", id: "second", label: "Second", priority: 20 },
+    { kind: "action", id: "first", label: "First", priority: 10 },
+    { kind: "action", id: "tail", label: "Tail" },
+  ]);
+  assert.deepEqual(ordered.map((control) => control.id), ["first", "second", "status", "tail"]);
+});
+
+test("Player timer fixtures cover visible, mystery, and hidden presentation without changing rail ownership", async () => {
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const controls = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+
+  assert.match(browser, /timerKindDemo: PlayerTimerKind = "visible"/u);
+  assert.match(browser, /\["visible", "mystery", "hidden"\]\.includes\(value\)/u);
+  assert.match(browser, /timerKindDemo === "hidden"[\s\S]*delete player\.dataset\.demoMultiTimer/u);
+  assert.match(browser, /timerKindDemo === "mystery" \? "\?" : demoTimerText\(index\)/u);
+  assert.match(controls, /data-timer-kind="hidden"[\s\S]*\.timer-list[\s\S]*display: none/u);
+  assert.match(effects, /data-timer-kind="mystery"[\s\S]*mystery-timer-ring/u);
+});
+
+test("Player fullscreen and low usable-height presentation share one overlay-chrome state", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(html, /id="fullscreenToggle"/u);
+  assert.match(browser, /document\.fullscreenElement === player \|\| usableHeight <= 600/u);
+  assert.match(browser, /player\.dataset\.chrome = overlay \? "overlay" : "normal"/u);
+  assert.match(browser, /window\.visualViewport\?\.addEventListener\("resize"/u);
+  assert.match(layout, /--player-usable-height: 100dvh/u);
+  assert.match(layout, /height: min\(100dvh, var\(--player-usable-height\)\)/u);
+  assert.match(responsive, /\.player\[data-chrome="overlay"\]/u);
+  assert.doesNotMatch(responsive, /@media \(max-height: 600px\)/u);
+});
+
+test("Player media replacement exposes direct, fade, and crossfade fixtures with reduced-motion fallback", async () => {
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const media = await readFile(resolve(process.cwd(), "player/styles/components-media.css"), "utf8");
+
+  assert.match(browser, /mediaTransitionDemo: PlayerMediaTransitionFixture = "direct"/u);
+  assert.match(browser, /\["direct", "fade", "crossfade"\]\.includes\(value\)/u);
+  assert.match(browser, /prefers-reduced-motion: reduce/u);
+  assert.match(browser, /mediaTransitionDemo === "fade"[\s\S]*duration: 180/u);
+  assert.match(browser, /Promise\.all\([\s\S]*duration: 320/u);
+  assert.match(media, /\.media-transition-outgoing[\s\S]*position: absolute/u);
+});
+
+test("Player authored control fills compute readable text and preserve authored state hooks", async () => {
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+
+  assert.equal(readableControlText("#ffffff"), "#000000");
+  assert.equal(readableControlText("#000000"), "#ffffff");
+  assert.throws(() => readableControlText("red"), /Unsupported authored control fill/u);
+  assert.match(render, /--authored-control-fill/u);
+  assert.match(render, /--authored-control-hover/u);
+  assert.match(render, /--authored-control-pressed/u);
+  assert.match(effects, /data-authored-fill/u);
 });

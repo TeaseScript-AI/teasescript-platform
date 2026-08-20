@@ -96,3 +96,12 @@
         font-size: 13px;
       }
 }
+
+@layer components {
+      .transcript-window-spacer {
+        flex: 0 0 auto;
+        inline-size: 1px;
+        min-block-size: 0;
+        pointer-events: none;
+      }
+}

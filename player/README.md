@@ -40,6 +40,7 @@ Lab`, `Layout Debug`, and `Scene` tools, their fixture content, local tuning/ins
 information, and the demo-media endpoint exist to exercise the presentation and are not Standard Library, runtime,
 package, or host APIs.
 
-The current composer and rendered right-rail Action buttons are presentation-only and are not wired to the deterministic
-runtime. Accepted Standard interaction behavior remains controlled by ADR 0018 and the runtime contracts; the maintained
-placement/presentation boundary is described in `docs/ui/PLAYER-UI.md`.
+The current composer, foreground controls, transcript-history/smart-follow fixtures, timer fixtures, and rendered
+right-rail controls are presentation-only and are not wired to the deterministic runtime. Accepted Standard interaction
+behavior remains controlled by ADR 0018 and the runtime contracts; the maintained placement/presentation boundary is
+described in `docs/ui/PLAYER-UI.md`.

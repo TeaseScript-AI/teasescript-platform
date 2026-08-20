@@ -29,6 +29,7 @@
         }
 
         .player[data-right="overlay"] .transcript,
+        .player[data-right="overlay"] .foreground-controls,
         .player[data-right="overlay"] .composer {
           margin-inline-end: 0;
         }
@@ -222,7 +223,7 @@
       @media (min-width: 761px) and (orientation: landscape) {
         .player[data-right="overlay"] .right-zone {
           grid-column: 2 / 4;
-          grid-row: 2 / 5;
+          grid-row: 2 / 6;
         }
       }
 
@@ -243,20 +244,33 @@
         .player[data-right="docked"] .right-zone,
         .player[data-right="overlay"] .right-zone {
           grid-column: 2 / 4;
-          grid-row: 2 / 5;
+          grid-row: 2 / 6;
         }
 
         .player[data-right="auto"] .transcript,
+        .player[data-right="auto"] .foreground-controls,
         .player[data-right="auto"] .composer,
         .player[data-right="docked"] .transcript,
+        .player[data-right="docked"] .foreground-controls,
         .player[data-right="docked"] .composer,
         .player[data-right="overlay"] .transcript,
+        .player[data-right="overlay"] .foreground-controls,
         .player[data-right="overlay"] .composer {
+          margin-inline-end: var(--right-controls-width);
+        }
+
+        .player[data-right="auto"] .return-to-latest,
+        .player[data-right="docked"] .return-to-latest,
+        .player[data-right="overlay"] .return-to-latest {
           margin-inline-end: var(--right-controls-width);
         }
       }
 
       @media (max-width: 480px) {
+        .player {
+          --timer-size: 72px;
+        }
+
         /*
           Compact control geometry belongs to genuinely phone-sized widths.
           The 760px layout transition changes docking/overlay composition only;
@@ -291,6 +305,7 @@
           min-block-size: 42px;
         }
 
+        .foreground-controls,
         .composer {
           padding-left:
             calc(10px + var(--safe-left));
@@ -309,19 +324,17 @@
         CSS folds the timer and its toggle into that 52px strip without JS
         viewport bookkeeping.
       */
-      @media (max-height: 600px) {
-        .player {
-          --title-track: 0px;
-          --title-overlay-clearance:
-            var(--title-height);
-          --media-height: var(--media-height-overlay);
-        }
+      .player[data-chrome="overlay"] {
+        --title-track: 0px;
+        --title-overlay-clearance:
+          var(--title-height);
+      }
 
-        .title-bg {
+      .player[data-chrome="overlay"] .title-bg {
           background: transparent;
         }
 
-        .title-text {
+        .player[data-chrome="overlay"] .title-text {
           padding: 7px 9px;
           border: 1px solid var(--color-border-default);
           border-radius: 6px;
@@ -333,7 +346,7 @@
             );
         }
 
-        .icon-button {
+        .player[data-chrome="overlay"] .icon-button {
           background:
             color-mix(
               in srgb,
@@ -342,7 +355,7 @@
             );
         }
 
-        .timer-wrap {
+        .player[data-chrome="overlay"] .timer-wrap {
           min-block-size: var(--title-height);
           padding:
             calc(9px + var(--safe-top))
@@ -351,13 +364,13 @@
             8px;
         }
 
-        .timer-cluster {
+        .player[data-chrome="overlay"] .timer-cluster {
           inline-size: 100%;
           min-block-size: 34px;
           margin-inline-start: 0;
         }
 
-        .timer-list {
+        .player[data-chrome="overlay"] .timer-list {
           flex-direction: row;
           flex-wrap: wrap;
           justify-content: flex-end;
@@ -368,7 +381,7 @@
           padding-inline-end: 44px;
         }
 
-        .timer-cluster .timer {
+        .player[data-chrome="overlay"] .timer-cluster .timer {
           inline-size: 34px;
           min-inline-size: 0;
           block-size: 34px;
@@ -377,32 +390,31 @@
           border-radius: 50%;
         }
 
-        .timer {
+        .player[data-chrome="overlay"] .timer {
           font-size: 12px;
         }
 
-        .timer[data-label-placement="above"],
-        .timer[data-label-placement="below"] {
+        .player[data-chrome="overlay"] .timer[data-label-placement="above"],
+        .player[data-chrome="overlay"] .timer[data-label-placement="below"] {
           gap: 1px;
         }
 
-        .timer[data-label-placement="above"] .timer-text,
-        .timer[data-label-placement="below"] .timer-text {
+        .player[data-chrome="overlay"] .timer[data-label-placement="above"] .timer-text,
+        .player[data-chrome="overlay"] .timer[data-label-placement="below"] .timer-text {
           font-size: 10px;
         }
 
-        .timer[data-label-placement="above"] .timer-label,
-        .timer[data-label-placement="below"] .timer-label {
+        .player[data-chrome="overlay"] .timer[data-label-placement="above"] .timer-label,
+        .player[data-chrome="overlay"] .timer[data-label-placement="below"] .timer-label {
           font-size: 7px;
         }
 
-        .timer-cluster .right-toggle {
+        .player[data-chrome="overlay"] .timer-cluster .right-toggle {
           top: 0;
           right: 0;
         }
 
-        .action-scroll {
-          padding-top: 8px;
-        }
+      .player[data-chrome="overlay"] .action-scroll {
+        padding-top: 8px;
       }
-    }
+}

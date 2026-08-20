@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="/player/styles/components-layout-debug.css" />
   <link rel="stylesheet" href="/player/styles/components-media.css" />
   <link rel="stylesheet" href="/player/styles/components-transcript.css" />
+  <link rel="stylesheet" href="/player/styles/components-foreground.css" />
   <link rel="stylesheet" href="/player/styles/components-composer.css" />
   <link rel="stylesheet" href="/player/styles/components-right-controls.css" />
   <link rel="stylesheet" href="/player/styles/effects.css" />
@@ -30,6 +31,7 @@
     id="player"
     data-left="auto"
     data-right="auto"
+    data-chrome="normal"
   >
     <div class="title-bg" aria-hidden="true"></div>
 
@@ -54,6 +56,16 @@
       </div>
 
       <div class="toolbar-spacer"></div>
+
+      <button
+        class="icon-button fullscreen-toggle"
+        id="fullscreenToggle"
+        type="button"
+        aria-label="Enter fullscreen"
+        aria-pressed="false"
+      >
+        <span class="fullscreen-icon" aria-hidden="true">⛶</span>
+      </button>
     </header>
 
     <aside
@@ -95,6 +107,22 @@
       aria-label="Conversation transcript"
     ></section>
 
+    <button
+      class="return-to-latest"
+      id="returnToLatest"
+      type="button"
+      hidden
+    >
+      Return to latest
+    </button>
+
+    <section
+      class="foreground-controls"
+      id="foregroundControls"
+      aria-label="Foreground interaction"
+      hidden
+    ></section>
+
     <footer class="composer" id="composer">
       <form id="composerForm">
         <textarea
@@ -111,12 +139,20 @@
           Send
         </button>
       </form>
+
+      <div
+        class="composer-feedback"
+        id="composerFeedback"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
     </footer>
 
     <aside
       class="right-zone"
       id="rightZone"
-      aria-label="Timer and background actions"
+      aria-label="Timer and background controls"
     >
       <div class="timer-wrap">
         <div class="timer-cluster">
@@ -154,7 +190,7 @@
         class="action-scroll"
         id="actions"
         role="group"
-        aria-label="Available actions"
+        aria-label="Background controls and status"
       ></div>
     </aside>
   </main>
