@@ -16,6 +16,7 @@ import {
   closeToolColumn,
   selectToolColumn,
 } from "../player/tool-columns.js";
+import { allocateRightRailPaneHeights } from "../player/right-rail-layout.js";
 
 test("Player panel toggles preserve the current auto/manual semantics", () => {
   assert.equal(toggleLeftPanelMode("auto", true), "closed");
@@ -244,14 +245,15 @@ test("Player right background toggle keeps conversation geometry stable", async 
   assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*\.player\[data-right="auto"\],[\s\S]*\.player\[data-right="docked"\],[\s\S]*\.player\[data-right="overlay"\][\s\S]*--right-track: 0px/u);
 });
 
-test("Player narrow drawer remains opaque and timer compaction follows usable-height chrome state", async () => {
+test("Player narrow drawer remains opaque and overlay chrome uses one horizontal timer strip", async () => {
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
 
   assert.match(responsive, /--mobile-drawer-width:/u);
   assert.match(responsive, /background: var\(--color-surface-chrome\);/u);
   assert.match(responsive, /background: var\(--color-structural-scrim\);/u);
   assert.doesNotMatch(responsive, /--control-padding:/u);
-  assert.match(responsive, /\.player\[data-chrome="overlay"\][\s\S]*\.timer-cluster \.timer \{[\s\S]*inline-size: 34px;[\s\S]*border-radius: 50%;/u);
+  assert.match(responsive, /\.player\[data-chrome="overlay"\] \.timer-list \{[\s\S]*flex-direction: row;[\s\S]*flex-wrap: nowrap;[\s\S]*overflow-x: auto;[\s\S]*scroll-snap-type: inline proximity/u);
+  assert.match(responsive, /\.player\[data-chrome="overlay"\] \.timer \{[\s\S]*inline-size: 34px;[\s\S]*border-radius: 50%;/u);
   assert.doesNotMatch(responsive, /\.timer::before \{[\s\S]*content: none;/u);
 
   const overlayBreakpoint = responsive.indexOf("@media (max-width: 760px) {");
@@ -259,7 +261,6 @@ test("Player narrow drawer remains opaque and timer compaction follows usable-he
   assert.ok(overlayBreakpoint >= 0 && compactBreakpoint > overlayBreakpoint);
   const overlayOnlyRules = responsive.slice(overlayBreakpoint, compactBreakpoint);
   assert.doesNotMatch(overlayOnlyRules, /\.timer-wrap\s*\{/u);
-  assert.doesNotMatch(overlayOnlyRules, /\.timer-cluster \.timer\s*\{[^}]*inline-size/u);
 });
 
 test("Player chrome roles and restrained Penpot elevation stay on structural shells", async () => {
@@ -319,16 +320,12 @@ test("Player Visual Lab exposes grouped reversible Phase 4 review choices", asyn
   assert.match(render, /"Busy Action"[\s\S]*"busy-style"[\s\S]*"Soft pulse"[\s\S]*"Slow sweep"[\s\S]*"Three dots"[\s\S]*"Corner pulse"[\s\S]*"Corner spinner"[\s\S]*"Soft wash"/u);
   assert.match(render, /"Timer label"[\s\S]*"timer-label"[\s\S]*"Inside · above"[\s\S]*"Inside · below"/u);
   assert.match(render, /createDemoNumberOption\([\s\S]*"Timer count"[\s\S]*"timer-count"[\s\S]*1,[\s\S]*1,/u);
-  assert.match(render, /"Action alignment"[\s\S]*"below-timers"[\s\S]*"Centre below timers"[\s\S]*"viewport-center"[\s\S]*"Viewport centre"/u);
   assert.doesNotMatch(render, /\["current", "Current"\]/u);
   assert.match(render, /createTuningInput\("Composer text"[\s\S]*"--composer-font-size"[\s\S]*"px"/u);
   assert.match(render, /select\.dataset\.demoSelect = key/u);
   assert.match(browser, /busyActionDemoStyle = "off"/u);
   assert.match(browser, /timerLabelDemoPlacement = "below"/u);
   assert.match(browser, /timerCountDemo = 1/u);
-  assert.match(browser, /actionAlignmentDemo = "viewport-center"/u);
-  assert.match(browser, /\["below-timers", "viewport-center"\]\.includes\(value\)/u);
-  assert.match(browser, /player\.dataset\.actionAlignment = actionAlignmentDemo/u);
   assert.doesNotMatch(browser, /composerFontDemo/u);
   assert.match(browser, /data-demo-number/u);
   assert.match(browser, /label\.hidden = timerLabelDemoPlacement === "off"/u);
@@ -353,47 +350,49 @@ test("Player busy Action review variants are paint-only, continuous, and reduced
   assert.doesNotMatch(browser, /busyActionDemoStyle[\s\S]{0,300}\.disabled\s*=/u);
 });
 
-test("Player timer-label review variants stay inside normal and compact timers", async () => {
+test("Player timer-label review variants stay inside vertical and compact timers", async () => {
   const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
 
   assert.match(actions, /\.timer\[data-label-placement="above"\],[\s\S]*\.timer\[data-label-placement="below"\][\s\S]*display: flex/u);
   assert.match(actions, /data-label-placement="above"[\s\S]*\.timer-label[\s\S]*order: 0/u);
   assert.match(actions, /data-label-placement="below"[\s\S]*\.timer-label[\s\S]*order: 1/u);
-  assert.doesNotMatch(actions, /timer-cluster:has\(\.timer-label/u);
-  assert.match(actions, /\.timer-list \{[\s\S]*display: flex;[\s\S]*flex-direction: column;[\s\S]*gap: 12px/u);
-  assert.match(responsive, /\.player\[data-chrome="overlay"\] \.timer-list \{[\s\S]*flex-direction: row;[\s\S]*flex-wrap: wrap;[\s\S]*gap: 6px/u);
+  assert.match(actions, /\.timer-list \{[\s\S]*display: flex;[\s\S]*flex-direction: column;[\s\S]*gap: 12px;[\s\S]*overflow-y: auto/u);
+  assert.match(responsive, /\.player\[data-chrome="overlay"\] \.timer-list \{[\s\S]*flex-direction: row;[\s\S]*flex-wrap: nowrap;[\s\S]*gap: 10px/u);
   assert.match(responsive, /\.player\[data-chrome="overlay"\][\s\S]*data-label-placement="above"[\s\S]*font-size: 10px/u);
   assert.match(responsive, /data-label-placement="below"[\s\S]*\.timer-label[\s\S]*font-size: 7px/u);
 });
 
-test("Player viewport-centred Action candidate stays centred until timer-stack collision", async () => {
+test("Player right rail keeps independent timer and Action scroll owners", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
   const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
   const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
   const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
   const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
 
-  assert.match(
-    layout,
-    /\.player\[data-action-alignment="viewport-center"\] \.right-zone \{[\s\S]*minmax\(max-content, 1fr\)[\s\S]*auto[\s\S]*minmax\(0, 1fr\)[\s\S]*var\(--title-track\)/u,
-  );
-  assert.match(layout, /data-demo-multi-timer="true"\] \.right-zone \{[\s\S]*overflow-y: auto/u);
-  assert.match(
-    layout,
-    /data-action-alignment="below-timers"\]\[data-demo-multi-timer="true"\] \.right-zone \{[\s\S]*max-content[\s\S]*minmax\(max-content, 1fr\)/u,
-  );
-  const multiTimerRightZone = layout.match(
-    /\.player\[data-demo-multi-timer="true"\] \.right-zone \{(?<body>[\s\S]*?)\n      \}/u,
-  );
-  assert.ok(multiTimerRightZone?.groups?.body);
-  assert.doesNotMatch(multiTimerRightZone.groups.body, /grid-template-rows/u);
-  assert.match(actions, /data-action-alignment="viewport-center"[\s\S]*\.timer-wrap \{[\s\S]*grid-row: 1/u);
-  assert.match(actions, /data-action-alignment="viewport-center"[\s\S]*\.action-scroll \{[\s\S]*grid-row: 2/u);
-  assert.match(actions, /data-demo-multi-timer="true"\][\s\S]*\.action-scroll[\s\S]*overflow: visible/u);
-  assert.doesNotMatch(layout, /right-timer-stack-reserve/u);
+  assert.match(html, /id="compactTimerHost"[\s\S]*class="global-controls"[\s\S]*id="rightToggle"[\s\S]*id="fullscreenToggle"/u);
+  assert.match(html, /class="timer-wrap" id="timerWrap"/u);
+  assert.match(layout, /\.right-zone \{[\s\S]*grid-template-rows:[\s\S]*var\(--timer-pane-size[\s\S]*minmax\(0, 1fr\)/u);
+  assert.doesNotMatch(layout, /data-demo-multi-timer/u);
+  assert.match(actions, /\.timer-list \{[\s\S]*flex-direction: column;[\s\S]*overflow-y: auto/u);
+  assert.match(actions, /\.action-scroll \{[\s\S]*overflow-y: auto/u);
+  assert.match(actions, /\.right-zone > \.timer-wrap \{[\s\S]*grid-row: 1/u);
+  assert.match(actions, /\.right-zone > \.action-scroll \{[\s\S]*grid-row: 2/u);
+  assert.match(actions, /data-chrome="overlay"[\s\S]*\.right-zone \{[\s\S]*grid-template-rows: minmax\(0, 1fr\)/u);
+  assert.match(actions, /data-chrome="overlay"[\s\S]*\.right-zone > \.action-scroll[\s\S]*grid-row: 1/u);
+  assert.match(responsive, /data-chrome="overlay"[\s\S]*\.timer-list[\s\S]*overflow-x: auto/u);
+  assert.match(browser, /createRightRailLayoutController/u);
+  assert.match(browser, /rightRailLayout\.sync\(overlay\)/u);
   assert.doesNotMatch(responsive, /data-demo-timer-count="(?:2|4)"/u);
-  assert.match(browser, /function syncDemoTimers\(\): void/u);
-  assert.match(browser, /for \(let index = 1; index <= timerCountDemo; index \+= 1\)/u);
+});
+
+test("Player right rail allocation preserves small panes and shares contention fairly", () => {
+  assert.deepEqual(allocateRightRailPaneHeights(600, 180, 1200), { timers: 180, actions: 420 });
+  assert.deepEqual(allocateRightRailPaneHeights(600, 1200, 180), { timers: 420, actions: 180 });
+  assert.deepEqual(allocateRightRailPaneHeights(600, 900, 1000), { timers: 300, actions: 300 });
+  assert.deepEqual(allocateRightRailPaneHeights(600, 100, 100), { timers: 100, actions: 500 });
+  assert.deepEqual(allocateRightRailPaneHeights(600, 0, 1000), { timers: 0, actions: 600 });
+  assert.deepEqual(allocateRightRailPaneHeights(600, 1000, 0), { timers: 600, actions: 0 });
 });
 
 test("Player composer line tuning counts text lines and offers local font-size review choices", async () => {
@@ -447,7 +446,7 @@ test("Player Layout Debug exposes live development-only geometry inspection", as
   assert.match(layoutDebug, /document\.addEventListener\("scroll", queueSync, true\)/u);
   assert.match(layoutDebug, /syncOverflow\(playerRect\)/u);
   assert.match(layoutDebug, /formatScrollMetrics\(transcript, "y"\)/u);
-  assert.match(layoutDebug, /formatScrollMetrics\(rightZone, "y"\)/u);
+  assert.match(layoutDebug, /formatScrollMetrics\([\s\S]*timerList,[\s\S]*player\.dataset\.chrome === "overlay" \? "x" : "y"/u);
   assert.match(layoutDebug, /formatToolBodyScroll\(toolBodies\)/u);
   assert.match(layoutDebug, /"constraint-conversation"[\s\S]*--conversation-min-width[\s\S]*--conversation-max-width/u);
   assert.match(layoutDebug, /visualViewport\.offsetLeft[\s\S]*visualViewport\.offsetTop/u);
@@ -600,7 +599,7 @@ test("Player timer fixtures cover visible, mystery, and hidden presentation with
 
   assert.match(browser, /timerKindDemo: PlayerTimerKind = "visible"/u);
   assert.match(browser, /\["visible", "mystery", "hidden"\]\.includes\(value\)/u);
-  assert.match(browser, /timerKindDemo === "hidden"[\s\S]*delete player\.dataset\.demoMultiTimer/u);
+  assert.match(browser, /timerKindDemo === "hidden"[\s\S]*rightRailLayout\.queueSync\(\)/u);
   assert.match(browser, /timerKindDemo === "mystery" \? "\?" : demoTimerText\(index\)/u);
   assert.match(controls, /data-timer-kind="hidden"[\s\S]*\.timer-list[\s\S]*display: none/u);
   assert.match(effects, /data-timer-kind="mystery"[\s\S]*mystery-timer-ring/u);

@@ -73,7 +73,20 @@
       }
 
       .toolbar-spacer {
+        min-width: 0;
         flex: 1;
+
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+      }
+
+      .global-controls {
+        flex: 0 0 auto;
+
+        display: flex;
+        align-items: center;
+        gap: 10px;
       }
 
       .icon-button:disabled {

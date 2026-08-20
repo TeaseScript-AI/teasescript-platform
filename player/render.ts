@@ -500,15 +500,6 @@ function createVisualTool(): HTMLElement {
       1,
     ),
     createSelectOption(
-      "Action alignment",
-      "Compare below-timers centring with viewport-centred Actions.",
-      "action-alignment",
-      [
-        ["below-timers", "Centre below timers"],
-        ["viewport-center", "Viewport centre"],
-      ],
-    ),
-    createSelectOption(
       "Media transition",
       "Exercise direct replacement and accepted fade/crossfade presentation without runtime media wiring.",
       "media-transition",

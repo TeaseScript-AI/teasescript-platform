@@ -350,7 +350,7 @@
 
         display: grid;
         grid-template-rows:
-          auto
+          var(--timer-pane-size, calc(var(--timer-size) + 26px))
           minmax(0, 1fr);
 
         overflow: hidden;
@@ -361,43 +361,8 @@
         box-shadow: -3px 0 8px var(--color-structural-shadow);
       }
 
-      .player[data-action-alignment="viewport-center"] .right-zone {
-        grid-template-rows:
-          minmax(max-content, 1fr)
-          auto
-          minmax(0, 1fr)
-          var(--title-track);
-      }
 
-      .player[data-demo-multi-timer="true"] .right-zone {
-        overflow-y: auto;
-        overscroll-behavior: contain;
-        scrollbar-width: thin;
-        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
 
-        -webkit-mask-image:
-          linear-gradient(
-            to bottom,
-            transparent 0,
-            #000 18px,
-            #000 calc(100% - 18px),
-            transparent 100%
-          );
-        mask-image:
-          linear-gradient(
-            to bottom,
-            transparent 0,
-            #000 18px,
-            #000 calc(100% - 18px),
-            transparent 100%
-          );
-      }
-
-      .player[data-action-alignment="below-timers"][data-demo-multi-timer="true"] .right-zone {
-        grid-template-rows:
-          max-content
-          minmax(max-content, 1fr);
-      }
 
       .player[data-right="overlay"] .right-zone {
         grid-column: 2 / 4;

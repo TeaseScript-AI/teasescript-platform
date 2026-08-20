@@ -79,7 +79,6 @@
         }
 
         .icon-button:not(:disabled):hover,
-        .timer-cluster .right-toggle:not(:disabled):hover,
         .tool-column-add:not(:disabled):hover,
         .tool-column-close:not(:disabled):hover,
         .tool-selector:not(:disabled):hover,

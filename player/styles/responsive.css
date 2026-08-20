@@ -285,14 +285,6 @@
             10px;
         }
 
-        .timer-cluster {
-          min-block-size: calc(var(--timer-size) + 15px);
-        }
-
-        .timer-list {
-          padding-top: 15px;
-        }
-
         .action-scroll {
           padding-top: 8px;
         }
@@ -319,10 +311,9 @@
       }
 
       /*
-        A short viewport is the one state where the circular timer gives up
-        vertical space. The existing title-overlay mode is the geometry owner;
-        CSS folds the timer and its toggle into that 52px strip without JS
-        viewport bookkeeping.
+        Overlay chrome moves the timer presentation into the title strip.
+        The timer list stays one horizontal scroller while global controls keep
+        their own non-shrinking cluster.
       */
       .player[data-chrome="overlay"] {
         --title-track: 0px;
@@ -355,42 +346,59 @@
             );
         }
 
-        .player[data-chrome="overlay"] .timer-wrap {
-          min-block-size: var(--title-height);
-          padding:
-            calc(9px + var(--safe-top))
-            calc(8px + var(--safe-right))
-            9px
-            8px;
+        .player[data-chrome="overlay"] .title-text {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
-        .player[data-chrome="overlay"] .timer-cluster {
+        .player[data-chrome="overlay"] .compact-timer-host {
+          overflow: hidden;
+        }
+
+        .player[data-chrome="overlay"] .timer-wrap {
           inline-size: 100%;
-          min-block-size: 34px;
-          margin-inline-start: 0;
+          block-size: 44px;
+          min-block-size: 0;
+          overflow: hidden;
+          padding: 0;
         }
 
         .player[data-chrome="overlay"] .timer-list {
-          flex-direction: row;
-          flex-wrap: wrap;
-          justify-content: flex-end;
-          align-items: flex-start;
-          gap: 6px;
+          inline-size: 100%;
+          block-size: 44px;
 
-          padding-top: 0;
-          padding-inline-end: 44px;
+          flex-direction: row;
+          flex-wrap: nowrap;
+          justify-content: safe flex-end;
+          align-items: center;
+          gap: 10px;
+
+          overflow-x: auto;
+          overflow-y: hidden;
+          overscroll-behavior-inline: contain;
+
+          padding: 5px;
+
+          scroll-snap-type: inline proximity;
+          scrollbar-width: none;
         }
 
-        .player[data-chrome="overlay"] .timer-cluster .timer {
+        .player[data-chrome="overlay"] .timer-list::-webkit-scrollbar {
+          display: none;
+        }
+
+        .player[data-chrome="overlay"] .timer {
+          flex-basis: 34px;
           inline-size: 34px;
-          min-inline-size: 0;
+          min-inline-size: 34px;
           block-size: 34px;
           aspect-ratio: 1;
 
           border-radius: 50%;
-        }
+          scroll-snap-align: end;
 
-        .player[data-chrome="overlay"] .timer {
           font-size: 12px;
         }
 
@@ -407,11 +415,6 @@
         .player[data-chrome="overlay"] .timer[data-label-placement="above"] .timer-label,
         .player[data-chrome="overlay"] .timer[data-label-placement="below"] .timer-label {
           font-size: 7px;
-        }
-
-        .player[data-chrome="overlay"] .timer-cluster .right-toggle {
-          top: 0;
-          right: 0;
         }
 
       .player[data-chrome="overlay"] .action-scroll {

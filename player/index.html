@@ -55,17 +55,36 @@
         TeaseScript Player
       </div>
 
-      <div class="toolbar-spacer"></div>
+      <div
+        class="toolbar-spacer compact-timer-host"
+        id="compactTimerHost"
+      ></div>
 
-      <button
-        class="icon-button fullscreen-toggle"
-        id="fullscreenToggle"
-        type="button"
-        aria-label="Enter fullscreen"
-        aria-pressed="false"
-      >
-        <span class="fullscreen-icon" aria-hidden="true">⛶</span>
-      </button>
+      <div class="global-controls">
+        <button
+          class="icon-button right-toggle"
+          id="rightToggle"
+          type="button"
+          aria-label="Toggle right panel background"
+          aria-controls="rightZone"
+          aria-pressed="false"
+        >
+          <span
+            class="panel-icon"
+            aria-hidden="true"
+          ></span>
+        </button>
+
+        <button
+          class="icon-button fullscreen-toggle"
+          id="fullscreenToggle"
+          type="button"
+          aria-label="Enter fullscreen"
+          aria-pressed="false"
+        >
+          <span class="fullscreen-icon" aria-hidden="true">⛶</span>
+        </button>
+      </div>
     </header>
 
     <aside
@@ -154,35 +173,20 @@
       id="rightZone"
       aria-label="Timer and background controls"
     >
-      <div class="timer-wrap">
-        <div class="timer-cluster">
-          <div class="timer-list" id="timerList">
-            <div
-              class="timer"
-              id="timer"
-              aria-label="Timer 1"
-            >
-              <span
-                class="timer-label"
-                id="timerLabel"
-                hidden
-              >Timer 1</span>
-              <span class="timer-text" id="timerText">02:41</span>
-            </div>
-          </div>
-
-          <button
-            class="icon-button right-toggle"
-            id="rightToggle"
-            type="button"
-            aria-label="Toggle right panel background"
-            aria-pressed="false"
+      <div class="timer-wrap" id="timerWrap">
+        <div class="timer-list" id="timerList">
+          <div
+            class="timer"
+            id="timer"
+            aria-label="Timer 1"
           >
             <span
-              class="panel-icon"
-              aria-hidden="true"
-            ></span>
-          </button>
+              class="timer-label"
+              id="timerLabel"
+              hidden
+            >Timer 1</span>
+            <span class="timer-text" id="timerText">02:41</span>
+          </div>
         </div>
       </div>
 

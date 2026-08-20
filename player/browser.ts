@@ -37,6 +37,7 @@ import {
   selectToolColumn,
 } from "./tool-columns.js";
 import { createTranscriptController } from "./transcript-controller.js";
+import { createRightRailLayoutController } from "./right-rail-layout.js";
 
 const player = requiredElement<HTMLElement>("player", HTMLElement);
 const leftToggle = requiredElement<HTMLButtonElement>("leftToggle", HTMLButtonElement);
@@ -46,6 +47,8 @@ const toolStrip = requiredElement<HTMLElement>("toolStrip", HTMLElement);
 const toolStripScroll = requiredElement<HTMLElement>("toolStripScroll", HTMLElement);
 const rightToggle = requiredElement<HTMLButtonElement>("rightToggle", HTMLButtonElement);
 const rightZone = requiredElement<HTMLElement>("rightZone", HTMLElement);
+const compactTimerHost = requiredElement<HTMLElement>("compactTimerHost", HTMLElement);
+const timerWrap = requiredElement<HTMLElement>("timerWrap", HTMLElement);
 const transcript = requiredElement<HTMLElement>("transcript", HTMLElement);
 const returnToLatest = requiredElement<HTMLButtonElement>("returnToLatest", HTMLButtonElement);
 const foregroundControls = requiredElement<HTMLElement>("foregroundControls", HTMLElement);
@@ -62,6 +65,13 @@ const fullscreenToggle = requiredElement<HTMLButtonElement>("fullscreenToggle", 
 
 const narrowScreen = window.matchMedia("(max-width: 760px)");
 const transcriptController = createTranscriptController(transcript, returnToLatest);
+const rightRailLayout = createRightRailLayoutController({
+  rightZone,
+  compactTimerHost,
+  timerWrap,
+  timerList,
+  actions,
+});
 
 let toolColumns: readonly PlayerToolColumnState[] = INITIAL_TOOL_COLUMNS;
 let nextToolColumnNumber = 2;
@@ -74,7 +84,6 @@ let timerLabelDemoPlacement = "below";
 let timerLabelContentDemo: "generic" | "authored" = "generic";
 let timerCountDemo = 1;
 let timerKindDemo: PlayerTimerKind = "visible";
-let actionAlignmentDemo = "viewport-center";
 let mediaTransitionDemo: PlayerMediaTransitionFixture = "direct";
 let mediaContentDemo: "present" | "empty" = "present";
 let foregroundDemoKind: PlayerForegroundFixtureKind = "choose";
@@ -398,6 +407,7 @@ function renderCorePresentation(): void {
   syncForegroundPresentation();
   syncDemoTimers();
   syncControlAvailability();
+  rightRailLayout.queueSync();
 }
 
 function renderRightControls(): void {
@@ -408,6 +418,7 @@ function renderRightControls(): void {
   syncDemoTimers();
   syncControlAvailability();
   syncBusyAction();
+  rightRailLayout.queueSync();
   layoutDebug.queueSync();
 }
 
@@ -708,6 +719,7 @@ function syncOverlayChromeMode(): void {
   player.style.setProperty("--player-usable-height", `${Math.max(0, usableHeight)}px`);
   const overlay = document.fullscreenElement === player || usableHeight <= 600;
   player.dataset.chrome = overlay ? "overlay" : "normal";
+  rightRailLayout.sync(overlay);
   player.style.setProperty(
     "--media-height",
     usableViewportLength(overlay ? "--media-height-overlay" : "--media-height-normal", usableHeight),
@@ -862,7 +874,6 @@ function resetVisualLab(): void {
   timerLabelContentDemo = "generic";
   timerCountDemo = 1;
   timerKindDemo = "visible";
-  actionAlignmentDemo = "viewport-center";
   mediaTransitionDemo = "direct";
   mediaContentDemo = "present";
   foregroundDemoKind = "choose";
@@ -903,10 +914,6 @@ function setPresentationDemoSelection(key: string, value: string): void {
     case "timer-label-content":
       if (!["generic", "authored"].includes(value)) throw new Error(`Unknown timer label content: ${value}`);
       timerLabelContentDemo = value as "generic" | "authored";
-      break;
-    case "action-alignment":
-      if (!["below-timers", "viewport-center"].includes(value)) throw new Error(`Unknown Action alignment: ${value}`);
-      actionAlignmentDemo = value;
       break;
     case "media-transition":
       if (!["direct", "fade", "crossfade"].includes(value)) throw new Error(`Unknown media transition fixture: ${value}`);
@@ -989,7 +996,6 @@ function syncVisualControls(): void {
       case "busy-target": select.value = busyControlDemoTarget; break;
       case "timer-label": select.value = timerLabelDemoPlacement; break;
       case "timer-label-content": select.value = timerLabelContentDemo; break;
-      case "action-alignment": select.value = actionAlignmentDemo; break;
       case "media-transition": select.value = mediaTransitionDemo; break;
       case "media-content": select.value = mediaContentDemo; break;
       case "foreground-fixture": select.value = foregroundDemoKind; break;
@@ -1010,7 +1016,6 @@ function syncVisualControls(): void {
 
   syncDemoTimers();
   syncBusyAction();
-  player.dataset.actionAlignment = actionAlignmentDemo;
   syncControlAvailability();
   syncOverlayChromeMode();
 
@@ -1048,14 +1053,13 @@ function syncDemoTimers(): void {
   player.dataset.demoTimerCount = String(timerCountDemo);
 
   if (timerKindDemo === "hidden") {
-    delete player.dataset.demoMultiTimer;
+    rightRailLayout.queueSync();
     layoutDebug.queueSync();
     return;
   }
 
   for (let index = 1; index <= timerCountDemo; index += 1) timerList.append(createDemoTimer(index));
-  if (timerCountDemo > 1) player.dataset.demoMultiTimer = "true";
-  else delete player.dataset.demoMultiTimer;
+  rightRailLayout.queueSync();
   layoutDebug.queueSync();
 }
 

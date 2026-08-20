@@ -278,11 +278,12 @@ export function createLayoutDebugController(
     layer.hidden = !options.overflow;
     if (layer.hidden) return;
 
+    const timerAxis: ScrollAxis = player.dataset.chrome === "overlay" ? "x" : "y";
     const owners: Array<readonly [HTMLElement, ScrollAxis, string]> = [
       [transcript, "y", "transcript"],
       [toolStripScroll, "x", "tool strip"],
       [composerInput, "y", "composer input"],
-      [rightZone, "y", "right rail"],
+      [timerList, timerAxis, "timers"],
       [actions, "y", "actions"],
     ];
 
@@ -369,7 +370,10 @@ export function createLayoutDebugController(
       "tool-strip-scroll": formatScrollMetrics(toolStripScroll, "x"),
       "tool-bodies-scroll": formatToolBodyScroll(toolBodies),
       "composer-scroll": formatScrollMetrics(composerInput, "y"),
-      "right-rail-scroll": formatScrollMetrics(rightZone, "y"),
+      "right-rail-scroll": formatScrollMetrics(
+        timerList,
+        player.dataset.chrome === "overlay" ? "x" : "y",
+      ),
       "actions-scroll": formatScrollMetrics(actions, "y"),
       "constraint-stage": `${formatPixels(mediaArea.getBoundingClientRect().height)} measured · target ${activeStageTarget}`,
       "constraint-tool-column": firstToolColumn === null
