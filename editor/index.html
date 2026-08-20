@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TeaseScript Editor POC</title>
+    <link rel="stylesheet" href="/editor/styles.css" />
+  </head>
+  <body data-editor-state="loading">
+    <main class="editor-shell" aria-label="TeaseScript editor proof of concept">
+      <header class="editor-header">
+        <strong>main.tease</strong>
+        <span>Monaco editor proof of concept</span>
+      </header>
+      <div id="editor" class="editor-host"></div>
+      <pre id="startup-error" class="startup-error" hidden></pre>
+    </main>
+    <script src="/monaco/vs/loader.js"></script>
+    <script>
+      (() => {
+        const fail = (error) => {
+          document.body.dataset.editorState = "error";
+          const target = document.querySelector("#startup-error");
+          target.hidden = false;
+          target.textContent = String(error && (error.stack || error.message) || error);
+        };
+        window.addEventListener("error", (event) => fail(event.error || event.message));
+        window.require.config({ paths: { vs: "/monaco/vs" } });
+        window.require(["vs/editor/editor.main"], async () => {
+          try {
+            const module = await import("/dist/editor/browser.js");
+            module.startTeaseScriptEditor(window.monaco);
+          } catch (error) {
+            fail(error);
+          }
+        }, fail);
+      })();
+    </script>
+  </body>
+</html>

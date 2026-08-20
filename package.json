@@ -16,11 +16,14 @@
     "test:property": "npm run build && node dist/tests/property/replay.js",
     "test:compiled:full-output": "node ./tools/test-output-filter.mjs --full-output",
     "test:full-output": "npm run build && node ./tools/test-output-filter.mjs --full-output",
-    "check:full-output": "npm run test:full-output"
+    "check:full-output": "npm run test:full-output",
+    "editor": "npm run build && node dist/editor/server.js",
+    "test:editor-browser": "npm run build && node tools/editor-browser-smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
     "@typescript/native": "npm:typescript@7.0.2",
-    "ts-morph": "28.0.0"
+    "ts-morph": "28.0.0",
+    "monaco-editor": "0.56.0"
   }
 }
