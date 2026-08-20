@@ -74,6 +74,23 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 - Whether and how to revise the accepted V30 timer API for explicit handles and final pause/resume/stop/restart,
   repetition, persistence, and visible-presentation semantics.
 
+## Editor and authoring
+
+Current constraints: [`CODE-EDITOR.md`](CODE-EDITOR.md),
+[ADR 0017](decisions/0017-engine-primitives-and-standard-library-boundary.md), and the
+[`release roadmap`](planning/RELEASE-ROADMAP.md).
+
+- Exact beginner-default versus advanced editor feature set, progressive-disclosure behavior, and optional authoring
+  aids such as syntax/snippet browsers or custom context-menu actions.
+- Production Monaco delivery strategy: which editor features, languages, workers, and assets load eagerly or lazily,
+  what should be pruned for bundle/runtime cost, and whether a future fork/private patch is ever justified.
+- Whether full mobile-browser code authoring is a product requirement and, if so, whether Monaco remains sufficient or
+  needs a fallback/replacement for that surface.
+- Stable external tooling interface and timing for reusing editor-neutral TeaseScript services through a CLI, LSP, or
+  local IDE integration.
+- Package source/version-control and collaboration model, including whether platform-hosted projects use Git-backed
+  history and how browser editing, local clone/pull/push, authentication, collaboration, and conflict handling relate.
+
 ## Player and interactions
 
 Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
