@@ -18,5 +18,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "playground/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "playground/**/*.ts", "editor/**/*.ts"]
 }
