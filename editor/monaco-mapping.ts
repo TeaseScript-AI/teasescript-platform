@@ -12,7 +12,9 @@ export interface MonacoPositionLike {
   readonly column: number;
 }
 
-export interface MonacoRangeLike extends MonacoPositionLike {
+export interface MonacoRangeLike {
+  readonly startLineNumber: number;
+  readonly startColumn: number;
   readonly endLineNumber: number;
   readonly endColumn: number;
 }
@@ -73,8 +75,8 @@ export function toMonacoPosition(position: { readonly line: number; readonly col
 
 export function toMonacoRange(range: LanguageRange): MonacoRangeLike {
   return Object.freeze({
-    lineNumber: range.start.line + 1,
-    column: range.start.column + 1,
+    startLineNumber: range.start.line + 1,
+    startColumn: range.start.column + 1,
     endLineNumber: range.end.line + 1,
     endColumn: range.end.column + 1,
   });

@@ -23,14 +23,14 @@ const range = createSourceSpan(start, end);
 
 test("Monaco mapping translates zero-based positions and half-open ranges to one-based shapes", () => {
   assert.deepEqual(toMonacoPosition(start), { lineNumber: 2, column: 4 });
-  assert.deepEqual(toMonacoRange(range), { lineNumber: 2, column: 4, endLineNumber: 3, endColumn: 2 });
+  assert.deepEqual(toMonacoRange(range), { startLineNumber: 2, startColumn: 4, endLineNumber: 3, endColumn: 2 });
 });
 
 test("Monaco markers preserve canonical diagnostic code, message, severity, and range", () => {
   const diagnostic = createDiagnostic(DiagnosticSeverity.Error, "TST001", "bad", range);
   assert.deepEqual(toMonacoMarkers([diagnostic], { Error: 8, Warning: 4 }), [{
-    lineNumber: 2,
-    column: 4,
+    startLineNumber: 2,
+    startColumn: 4,
     endLineNumber: 3,
     endColumn: 2,
     severity: 8,
