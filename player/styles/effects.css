@@ -1,0 +1,589 @@
+@layer effects {
+      /* Optional effects here are cosmetic only and never change geometry. */
+
+      .media-area::before {
+        content: "";
+
+        position: absolute;
+        z-index: 0;
+        inset: -12%;
+
+        pointer-events: none;
+
+        opacity: 0;
+
+        background:
+          radial-gradient(
+            ellipse at 76% 44%,
+            color-mix(
+              in srgb,
+              var(--scene-ambient) 13%,
+              transparent
+            ),
+            transparent 58%
+          );
+      }
+
+      .player.fx-ambient .media-area::before {
+        opacity: 1;
+      }
+
+      /*
+        Universal media vignette:
+        this overlays .media-area itself, so it works with demo art,
+        <img>, <video>, canvas, or future package-rendered media.
+      */
+      .media-area::after {
+        content: "";
+
+        position: absolute;
+        z-index: 5;
+        inset: 0;
+
+        pointer-events: none;
+
+        opacity: 0;
+
+        background:
+          radial-gradient(
+            ellipse at center,
+            transparent 46%,
+            rgb(0 0 0 / 9%) 74%,
+            rgb(0 0 0 / 26%) 100%
+          );
+      }
+
+      .player.fx-vignette .media-area::after {
+        opacity: 1;
+      }
+
+
+      .composer form,
+      .icon-button,
+      .tool-column-add,
+      .tool-column-close,
+      .tool-selector,
+      .action-button,
+      .send-button,
+      .lab-reset {
+        transition:
+          background 120ms ease,
+          border-color 120ms ease,
+          box-shadow 120ms ease;
+      }
+
+      @media (any-hover: hover) {
+        .composer form:has(textarea:not(:disabled):hover) {
+          border-color: var(--color-border-hover);
+          background: var(--color-surface-component);
+        }
+
+        .icon-button:not(:disabled):hover,
+        .tool-column-add:not(:disabled):hover,
+        .tool-column-close:not(:disabled):hover,
+        .tool-selector:not(:disabled):hover,
+        .lab-reset:not(:disabled):hover {
+          border-color: var(--color-border-hover);
+          background: var(--color-component-hover);
+          box-shadow: none;
+        }
+
+        .send-button:not(:disabled):hover {
+          border-color: var(--color-accent-solid-hover);
+          background: var(--color-accent-solid-hover);
+          box-shadow: none;
+        }
+      }
+
+      .icon-button:not(:disabled):active,
+      .tool-column-add:not(:disabled):active,
+      .tool-column-close:not(:disabled):active,
+      .tool-selector:not(:disabled):active,
+      .lab-reset:not(:disabled):active {
+        border-color: var(--color-border-pressed);
+        background: var(--color-component-pressed);
+        box-shadow: none;
+      }
+
+
+      @media (any-hover: hover) {
+        .action-button:not(:disabled):hover {
+          border-color: var(--color-border-hover);
+          background: color-mix(in srgb, var(--color-component-hover) 60%, transparent);
+          box-shadow: none;
+        }
+      }
+
+      .action-button:not(:disabled):active {
+        border-color: var(--color-border-pressed);
+        background: color-mix(in srgb, var(--color-component-pressed) 60%, transparent);
+        box-shadow: none;
+      }
+
+      .right-control[aria-busy="true"] {
+        overflow: hidden;
+      }
+
+      .right-control[aria-busy="true"]::after {
+        content: "";
+
+        position: absolute;
+        pointer-events: none;
+      }
+
+      .right-control[aria-busy="true"][data-busy-style="pulse"]::after {
+        right: 0;
+        bottom: 0;
+        left: 0;
+
+        block-size: 2px;
+
+        background: var(--package-accent);
+        opacity: 0.22;
+
+        animation: action-busy-pulse 2400ms ease-in-out infinite;
+      }
+
+      .right-control[aria-busy="true"][data-busy-style="sweep"]::after {
+        bottom: 0;
+        left: 0;
+
+        inline-size: 28%;
+        block-size: 2px;
+
+        background: var(--package-accent);
+        opacity: 0.55;
+        transform: translateX(-110%);
+
+        animation: action-busy-sweep 2800ms linear infinite;
+      }
+
+      .right-control[aria-busy="true"][data-busy-style="dots"]::after {
+        right: 8px;
+        bottom: 3px;
+
+        inline-size: 18px;
+        block-size: 3px;
+
+        background:
+          radial-gradient(
+            circle,
+            var(--package-accent) 0 1.25px,
+            transparent 1.5px
+          )
+          0 50% / 6px 3px repeat-x;
+        opacity: 0.28;
+
+        animation: action-busy-dots 2200ms ease-in-out infinite;
+      }
+
+      .right-control[aria-busy="true"][data-busy-style="corner-dot"]::after {
+        right: 8px;
+        bottom: 7px;
+
+        inline-size: 6px;
+        block-size: 6px;
+        border-radius: 50%;
+
+        background: var(--package-accent);
+        opacity: 0.25;
+
+        animation: action-busy-corner-dot 2600ms ease-in-out infinite;
+      }
+
+      .right-control[aria-busy="true"][data-busy-style="spinner"]::after {
+        right: 7px;
+        bottom: 6px;
+
+        inline-size: 10px;
+        block-size: 10px;
+        border: 2px solid color-mix(in srgb, var(--package-accent) 22%, transparent);
+        border-top-color: var(--package-accent);
+        border-radius: 50%;
+
+        opacity: 0.6;
+
+        animation: action-busy-spinner 2400ms linear infinite;
+      }
+
+      .right-control[aria-busy="true"][data-busy-style="wash"]::after {
+        inset: 0;
+
+        background:
+          linear-gradient(
+            90deg,
+            transparent 0 24%,
+            color-mix(in srgb, var(--package-accent) 8%, transparent) 48% 52%,
+            transparent 76% 100%
+          );
+        opacity: 0.45;
+        transform: translateX(-34%);
+
+        animation: action-busy-wash 3600ms ease-in-out infinite;
+      }
+
+      @keyframes action-busy-pulse {
+        0%,
+        100% {
+          opacity: 0.18;
+        }
+
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      @keyframes action-busy-sweep {
+        from {
+          transform: translateX(-110%);
+        }
+
+        to {
+          transform: translateX(470%);
+        }
+      }
+
+      @keyframes action-busy-dots {
+        0%,
+        100% {
+          opacity: 0.22;
+        }
+
+        50% {
+          opacity: 0.58;
+        }
+      }
+
+      @keyframes action-busy-corner-dot {
+        0%,
+        100% {
+          opacity: 0.2;
+        }
+
+        50% {
+          opacity: 0.62;
+        }
+      }
+
+      @keyframes action-busy-spinner {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes action-busy-wash {
+        0%,
+        100% {
+          transform: translateX(-34%);
+          opacity: 0.28;
+        }
+
+        50% {
+          transform: translateX(34%);
+          opacity: 0.52;
+        }
+      }
+
+      .send-button:not(:disabled):active {
+        border-color: var(--color-accent-solid-pressed);
+        background: var(--color-accent-solid-pressed);
+        box-shadow: none;
+      }
+
+      .composer form:has(textarea:not(:disabled):active) {
+        border-color: var(--color-border-pressed);
+        background: var(--color-surface-component);
+      }
+
+      .composer form:has(textarea:disabled) {
+        border-color: var(--color-border-disabled);
+        background: var(--color-surface-disabled);
+      }
+
+      @media (hover: none), (pointer: coarse) {
+        .icon-button,
+        .tool-column-add,
+        .tool-column-close,
+        .action-button,
+        .foreground-button,
+        .return-to-latest,
+        .right-toggle-control,
+        .right-select-control,
+        .send-button,
+        .lab-reset {
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
+        }
+      }
+
+      .composer form:has(textarea:focus-visible) {
+        outline: var(--focus-outline-width) solid var(--color-accent-focus);
+        outline-offset: 1px;
+      }
+
+      .icon-button:focus-visible,
+      .tool-column-add:focus-visible,
+      .tool-column-close:focus-visible,
+      .tool-selector:focus-visible,
+      .action-button:focus-visible,
+      .send-button:focus-visible,
+      .lab-reset:focus-visible,
+      .theme-picker input[type="color"]:focus-visible,
+      .lab-tuning-input:focus-visible,
+      .lab-select:focus-visible {
+        outline: var(--focus-outline-width) solid var(--color-accent-focus);
+        outline-offset: 1px;
+      }
+
+      .switch input:focus-visible + .switch-ui {
+        outline: var(--focus-outline-width) solid var(--color-accent-focus);
+        outline-offset: 1px;
+      }
+
+      @media (any-hover: hover) {
+        .theme-picker input[type="color"]:not(:disabled):hover,
+        .lab-tuning-input:not(:disabled):hover,
+        .lab-select:not(:disabled):hover {
+          border-color: var(--color-border-hover);
+        }
+
+        .switch input:not(:disabled) + .switch-ui:hover {
+          background: var(--color-component-hover);
+        }
+      }
+
+      .theme-picker input[type="color"]:not(:disabled):active {
+        border-color: var(--color-border-pressed);
+      }
+
+      .switch input:not(:disabled) + .switch-ui:active {
+        border-color: var(--color-border-pressed);
+        background: var(--color-component-pressed);
+      }
+
+      .switch input:checked:not(:disabled) + .switch-ui:active {
+        border-color: var(--color-accent-solid);
+      }
+
+      .tool-column-add:disabled,
+      .tool-column-close:disabled,
+      .tool-selector:disabled,
+      .lab-reset:disabled,
+      .theme-picker input[type="color"]:disabled,
+      .lab-select:disabled {
+        border-color: var(--color-border-disabled);
+        background: var(--color-surface-disabled);
+        color: var(--color-text-disabled);
+        cursor: not-allowed;
+      }
+
+      .switch input:disabled + .switch-ui {
+        border-color: var(--color-border-disabled);
+        background: var(--color-surface-disabled);
+        cursor: not-allowed;
+      }
+
+      .switch input:disabled + .switch-ui::after {
+        background: var(--color-text-disabled);
+      }
+
+      @keyframes message-in {
+        from {
+          opacity: 0;
+          translate: 0 5px;
+        }
+
+        to {
+          opacity: 1;
+          translate: 0 0;
+        }
+      }
+
+      .message.is-new {
+        animation:
+          message-in
+          180ms
+          ease-out
+          both;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .composer form,
+        .icon-button,
+        .tool-column-add,
+        .tool-column-close,
+        .tool-selector,
+        .action-button,
+        .send-button,
+        .lab-reset {
+          transition-duration: 0.001ms;
+        }
+
+        .message.is-new {
+          animation-duration: 0.001ms;
+        }
+
+        .right-control[aria-busy="true"]::after {
+          animation: none;
+          opacity: 0.42;
+        }
+
+        .right-control[aria-busy="true"][data-busy-style="sweep"]::after {
+          transform: translateX(128%);
+        }
+
+
+        .right-control[aria-busy="true"][data-busy-style="spinner"]::after {
+          transform: rotate(45deg);
+        }
+
+        .right-control[aria-busy="true"][data-busy-style="wash"]::after {
+          transform: translateX(0);
+        }
+      }
+    }
+
+@layer effects {
+      .foreground-button,
+      .return-to-latest,
+      .right-toggle-control,
+      .right-select-control,
+      .right-select-control select,
+      .right-switch-ui {
+        transition:
+          background 120ms ease,
+          border-color 120ms ease,
+          box-shadow 120ms ease;
+      }
+
+      @media (any-hover: hover) {
+        .foreground-button:not(:disabled):hover,
+        .return-to-latest:not(:disabled):hover,
+        .right-toggle-control:not(:has(input:disabled)):hover,
+        .right-select-control:not(:has(select:disabled)):hover {
+          border-color: var(--color-border-hover);
+          background: color-mix(in srgb, var(--color-component-hover) 60%, transparent);
+        }
+
+        .right-select-control select:not(:disabled):hover,
+        .right-toggle-control:not(:has(input:disabled)):hover .right-switch-ui {
+          border-color: var(--color-border-hover);
+        }
+      }
+
+      .foreground-button:not(:disabled):active,
+      .return-to-latest:not(:disabled):active,
+      .right-toggle-control:not(:has(input:disabled)):active,
+      .right-select-control:not(:has(select:disabled)):active {
+        border-color: var(--color-border-pressed);
+        background: color-mix(in srgb, var(--color-component-pressed) 60%, transparent);
+      }
+
+      .right-select-control select:not(:disabled):active {
+        border-color: var(--color-border-pressed);
+      }
+
+      .foreground-button:focus-visible,
+      .return-to-latest:focus-visible,
+      .right-toggle-control input:focus-visible + .right-switch-ui,
+      .right-select-control select:focus-visible {
+        outline: var(--focus-outline-width) solid var(--color-accent-focus);
+        outline-offset: 1px;
+      }
+
+      .action-button[data-authored-fill]:not(:disabled) {
+        border-color: color-mix(in oklab, var(--authored-control-fill) 78%, black);
+        background: color-mix(in srgb, var(--authored-control-fill) 60%, transparent);
+        color: var(--authored-control-text);
+      }
+
+      .foreground-button[data-authored-fill]:not(:disabled) {
+        border-color: color-mix(in oklab, var(--authored-control-fill) 78%, black);
+        background: var(--authored-control-fill);
+        color: var(--authored-control-text);
+      }
+
+      @media (any-hover: hover) {
+        .action-button[data-authored-fill]:not(:disabled):hover {
+          border-color: color-mix(in oklab, var(--authored-control-hover) 76%, black);
+          background: color-mix(in srgb, var(--authored-control-hover) 60%, transparent);
+          color: var(--authored-control-text);
+        }
+
+        .foreground-button[data-authored-fill]:not(:disabled):hover {
+          border-color: color-mix(in oklab, var(--authored-control-hover) 76%, black);
+          background: var(--authored-control-hover);
+          color: var(--authored-control-text);
+        }
+      }
+
+      .action-button[data-authored-fill]:not(:disabled):active {
+        border-color: color-mix(in oklab, var(--authored-control-pressed) 72%, black);
+        background: color-mix(in srgb, var(--authored-control-pressed) 60%, transparent);
+        color: var(--authored-control-text);
+      }
+
+      .foreground-button[data-authored-fill]:not(:disabled):active {
+        border-color: color-mix(in oklab, var(--authored-control-pressed) 72%, black);
+        background: var(--authored-control-pressed);
+        color: var(--authored-control-text);
+      }
+
+      .right-control[data-script-update-feedback="highlight"] {
+        animation: script-update-highlight 2400ms ease-out both;
+      }
+
+      @keyframes script-update-highlight {
+        0%, 28% {
+          border-color: var(--package-accent);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--package-accent) 24%, transparent);
+        }
+
+        100% {
+          box-shadow: 0 0 0 0 transparent;
+        }
+      }
+
+      .timer[data-timer-kind="mystery"]::before {
+        background:
+          conic-gradient(
+            from 0deg,
+            transparent 0 18%,
+            var(--package-accent) 18% 52%,
+            transparent 52% 100%
+          );
+        animation: mystery-timer-ring 1500ms linear infinite;
+      }
+
+      @keyframes mystery-timer-ring {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .right-control[data-script-update-feedback="highlight"] {
+          animation: none;
+          border-color: var(--package-accent);
+          box-shadow: 0 0 0 2px color-mix(in srgb, var(--package-accent) 24%, transparent);
+        }
+
+        .foreground-button,
+        .return-to-latest,
+        .right-toggle-control,
+        .right-select-control,
+        .right-select-control select,
+        .right-switch-ui {
+          transition-duration: 0.001ms;
+        }
+
+        .right-switch-ui::after {
+          transition-duration: 0.001ms;
+        }
+
+        .timer[data-timer-kind="mystery"]::before {
+          animation: none;
+          transform: rotate(45deg);
+        }
+      }
+}

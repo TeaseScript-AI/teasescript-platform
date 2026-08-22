@@ -16,7 +16,7 @@ LANGUAGE
 The target language for source code, identifiers, TeaseScript keywords, API names, comments, documentation, package metadata, editor text, and website UI is English. Existing Dutch project documents are legacy and should be translated incrementally when substantially revised. Conversation with the user may remain Dutch.
 
 HOW TO USE THE PROJECT FILES
-These instructions provide project context, priorities, and routing. Exact syntax, schemas, algorithms, and unresolved choices belong in the package documents.
+These instructions route work; exact syntax, schemas, algorithms, and unresolved choices belong in repository documents.
 
 For every substantial repository task:
 1. Read applicable `AGENTS.md`, `README-FIRST.md`, and the assigned issue or PR.
@@ -35,25 +35,26 @@ Authority and status:
 
 DOCUMENT MAP
 - Scope and releases: `docs/PRODUCT.md`
-- Architecture and component boundaries: `docs/ARCHITECTURE.md`
+- Architecture: `docs/ARCHITECTURE.md`
 - TeaseScript and modules: `docs/TEASESCRIPT.md`
 - Runtime, scheduler, media, views, save/resume: `docs/RUNTIME.md`
 - Data model and APIs: `docs/DATA-AND-API.md`
-- TypeScript and Standard Library: `docs/LIBRARIES.md`
+- Libraries: `docs/LIBRARIES.md`
 - Isolation, network, validation, privacy: `docs/SECURITY.md`
-- Persistent personalities: `docs/CONTINUOUS-PERSONALITIES.md`
-- Editor, simulator, debugger: `docs/CODE-EDITOR.md`
+- Personalities: `docs/CONTINUOUS-PERSONALITIES.md`
+- Editor/debugger: `docs/CODE-EDITOR.md`, `docs/DEBUGGER.md`
+- UI: `docs/ui/PLAYER-UI.md`, `docs/ui/UI-DESIGN-AND-ENGINEERING.md`
 - LLM/vision: `docs/LLM-INTEGRATION.md`
 - Expressions and math.js proposal: `docs/MATH-EXPRESSIONS.md`
 - Capability research: `docs/CAPABILITY-MATRIX.md`, `docs/reference/`
 - Decisions: `docs/decisions/`
-- Product intent/history: `WISHES.xml`
+- Intent/history: `WISHES.xml`
 
 CORE ARCHITECTURE
-- Follow KISS: choose the simplest solution that meets the current need.
+- KISS: choose the simplest solution that meets the current need.
 - Backend: PHP 8 + Laravel; database: PostgreSQL.
 - Laravel is the only public backend and owns accounts, forum, catalog, publishing, moderation, persistent state, media metadata, and APIs.
-- The parser/runtime core is TypeScript compiled to JavaScript. Laravel may invoke a local Node/TypeScript CLI; do not add a second public Node server.
+- Parser/runtime core: TypeScript compiled to JavaScript. Laravel may invoke a local Node/TypeScript CLI; no second public Node server.
 - Use one engine, one state model, and one save format for finite sessions and long-running personalities.
 - Mobile starts as a responsive PWA. Add a small headless helper only for concrete browser limitations.
 - Do not introduce microservices, Kubernetes, Redis, WebRTC, Electron, native apps, or similar complexity without a documented need and decision.

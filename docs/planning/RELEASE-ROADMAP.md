@@ -48,7 +48,7 @@ architecture may change substantially while correctness and the basic model are 
     `say` pacing/skip behavior, together with the matching Standard Player controls and editor/simulator support. Keep the
     detailed runtime state-machine and checkpoint rules in their accepted runtime sources rather than repeating them here.
   - **Reference:** [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md), [`RUNTIME.md`](../RUNTIME.md),
-    [`LIBRARIES.md`](../LIBRARIES.md), and [`CODE-EDITOR.md`](../CODE-EDITOR.md).
+    [`LIBRARIES.md`](../LIBRARIES.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and [`DEBUGGER.md`](../DEBUGGER.md).
 
 - [ ] **Foreground and background timers**
   - **Outcome:** Let scripts use foreground timers that block script progress and background timers that continue while
@@ -62,7 +62,8 @@ architecture may change substantially while correctness and the basic model are 
   - **Outcome:** Replace the technical playground presentation with a practical Player interface for transcript output,
     Standard interactions, timers, status/errors, and the media capabilities selected for the POC. Keep development and
     debug controls secondary to the actual Player experience.
-  - **Reference:** [`PRODUCT.md`](../PRODUCT.md) and [`CODE-EDITOR.md`](../CODE-EDITOR.md).
+  - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`DEBUGGER.md`](../DEBUGGER.md),
+    [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
 - [ ] **Iframe development host and virtual viewport**
   - **Outcome:** Run the Player through a small local host shell using the product's iframe boundary without requiring a
@@ -76,7 +77,8 @@ architecture may change substantially while correctness and the basic model are 
   - **Outcome:** Provide the browser authoring environment with editing, diagnostics, simulation/debugging, and a Player
     preview that can use the same iframe host and virtual viewport. Keep the editor and Player as separate components even
     when they are shown side by side.
-  - **Reference:** [`CODE-EDITOR.md`](../CODE-EDITOR.md) and [`WISHES.xml` W-031](../../WISHES.xml).
+  - **Reference:** [`CODE-EDITOR.md`](../CODE-EDITOR.md), [`DEBUGGER.md`](../DEBUGGER.md), and
+    [`WISHES.xml` W-031](../../WISHES.xml).
 
 - [ ] **Audio and video playback**
   - **Outcome:** Support real Player audio and video playback for the POC, including blocking/foreground and background
@@ -116,24 +118,16 @@ for broader testing and eventual release.
 behavior, persistence, operational behavior, and integration. Major redesign becomes less desirable, but different
 subsystems may still have different maturity levels.
 
-- [ ] **Define the custom-view contract**
-  - **Outcome:** Define the smallest coherent package custom-view contract inside the Player runtime: registration and
-    ownership of package TypeScript views; blocking views with serializable results; background views with runtime
-    handles; typed input/events/results plus update, close, cancellation, failure, cleanup, and deterministic save/resume
-    reconstruction; the split between canonical runtime state and reconstructible UI state; and the Standard UI/package
-    UI boundary. Resolve DOM/CSS isolation and optional Shadow DOM, including interaction with package styling and
-    Standard UI; focus/keyboard/overlay/navigation/back behavior; accessibility; preview/editor/simulator/debugger needs;
-    and compare the viable TypeScript-only, small TeaseScript invocation, and fuller declarative TeaseScript API shapes.
-    These are logical views inside the Player, not browser pop-ups or an iframe per view; any genuine host capability is a
-    separate host-boundary decision. When custom views become supported, extend the real-browser Player/host test
-    coverage to package custom UI. The design is complete only after the Owner approves a coherent
-    lifecycle/state/security contract and the relevant ADRs/current documents are updated; roadmap placement does not
-    accept final syntax or implementation
-    APIs.
+- [ ] **Complete the custom-view contract**
+  - **Outcome:** Complete the parts ADR 0012 leaves open: registration/lifecycle APIs, typed input/events/results,
+    reconstructible-state declaration, surface isolation/optional Shadow DOM, remaining keyboard/navigation behavior,
+    accessibility, preview/debug tooling, and the author-facing TypeScript/TeaseScript API. Add real-browser Player/host
+    coverage when package custom UI is implemented.
   - **Reference:** [ADR 0012](../decisions/0012-custom-view-capability.md),
     [ADR 0015](../decisions/0015-serializable-runtime-architecture.md), [`RUNTIME.md`](../RUNTIME.md),
     [`LIBRARIES.md`](../LIBRARIES.md), [`SECURITY.md`](../SECURITY.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md),
-    [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), and [`WISHES.xml` W-042/W-055](../../WISHES.xml).
+    [`DEBUGGER.md`](../DEBUGGER.md), [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md), and
+    [`WISHES.xml` W-042/W-055](../../WISHES.xml).
 
 - [ ] **Establish a runtime performance baseline and optimization plan**
   - **Outcome:** Measure representative small, normal, stress, and long-running deterministic-runtime workloads before

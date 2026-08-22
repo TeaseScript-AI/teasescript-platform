@@ -2,11 +2,13 @@
 
 - **Status:** Active non-implemented planning
 - **Authority:** Non-authoritative owner-selected direction; accepted ADRs and current topic documents control
-- **Use when:** Planning public timer handles or author-defined recovery points
-- **Do not use for:** ADR 0018, current runtime status, browser time-integrity policy, or developer runtime Pause
+- **Use when:** Planning public timer handles, browser-unavailability mechanics, or author-defined recovery points
+- **Do not use for:** Accepted timer/runtime mechanics, the ADR 0012 recovery frontier, durable-effect rules, current
+  runtime status, or developer runtime Pause
 
-`docs/RUNTIME.md`, `docs/LIBRARIES.md`, and ADRs 0016–0018 own accepted and current timer foundations. This note retains
-only adjacent owner-selected work that is not yet accepted as a detailed contract.
+`docs/RUNTIME.md`, `docs/LIBRARIES.md`, and ADRs 0016–0018 own accepted/current timer foundations; ADR 0012 and
+`docs/DATA-AND-API.md` own accepted custom-view recovery and durable-effect rules. This note retains only adjacent
+owner-selected work that is not yet accepted as a detailed contract.
 
 ## Timer handles
 
@@ -23,7 +25,21 @@ The detailed contract must still define handle identity, checkpoint behavior, cl
 repetition, persistence, error results, and Standard UI presentation. Timer lifecycle operations are distinct from
 developer-mode runtime Pause.
 
-## Recovery points
+## Time continuity and missed-event barrier
+
+Standard elapsed-time behavior is based on continuous real/logical session time rather than an implicit "active playtime"
+clock. A script may build an active-playtime mechanic explicitly if desired. Blocking waits/timers and asynchronous
+timers remain distinct behaviors even when they share lower-level timed-action machinery.
+
+Browser unavailability creates a separate execution problem: TeaseScript cannot execute intermediate script events while
+the Player is closed or suspended. Logical script time therefore may not advance past the first event that should have
+executed while the Player was unavailable. A restore/resume design needs a **missed-event barrier** (or execution
+frontier) that resumes through that first missed event instead of jumping wall-clock time over dialogue, branches, or
+other script work that never executed. Events already materialized in a later valid checkpoint are not replayed. Exact
+checkpoint selection, deadline recalculation, repeating-timer behavior, and server-authoritative time policy require a
+later accepted runtime decision.
+
+## Author-defined recovery points
 
 Author-defined recovery points are an advanced feature beyond exact checkpoint resume. A rollback design must define the
 treatment of:

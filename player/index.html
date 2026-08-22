@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <!--
+    Keep the browser's default resizes-visual keyboard behavior. The Player
+    follows visualViewport itself; forcing resizes-content leaves hidden
+    Firefox Android toolbar space between the composer and keyboard.
+  -->
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  />
+  <meta name="color-scheme" content="light" />
+  <title>TeaseScript Player</title>
+
+  <link rel="stylesheet" href="/player/styles/cascade.css" />
+  <link rel="stylesheet" href="/player/styles/reset.css" />
+  <link rel="stylesheet" href="/player/styles/layout.css" />
+  <link rel="stylesheet" href="/player/styles/components-base.css" />
+  <link rel="stylesheet" href="/player/styles/components-tools.css" />
+  <link rel="stylesheet" href="/player/styles/components-visual-lab.css" />
+  <link rel="stylesheet" href="/player/styles/components-layout-debug.css" />
+  <link rel="stylesheet" href="/player/styles/components-media.css" />
+  <link rel="stylesheet" href="/player/styles/components-transcript.css" />
+  <link rel="stylesheet" href="/player/styles/components-foreground.css" />
+  <link rel="stylesheet" href="/player/styles/components-composer.css" />
+  <link rel="stylesheet" href="/player/styles/components-right-controls.css" />
+  <link rel="stylesheet" href="/player/styles/effects.css" />
+  <link rel="stylesheet" href="/player/styles/responsive.css" />
+</head>
+
+<body>
+  <main
+    class="player"
+    id="player"
+    data-left="auto"
+    data-right="auto"
+    data-right-layout="stage"
+    data-right-backing="overlay"
+    data-chrome="normal"
+    data-keyboard="closed"
+    data-keyboard-geometry="none"
+  >
+    <div class="title-bg" aria-hidden="true"></div>
+
+    <header class="title-controls" id="titleControls">
+      <button
+        class="icon-button"
+        id="leftToggle"
+        type="button"
+        aria-label="Toggle tools"
+        aria-controls="leftPanel"
+        aria-expanded="false"
+      >
+        <span class="menu-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+
+      <div class="title-text">
+        TeaseScript Player
+      </div>
+
+      <div
+        class="toolbar-spacer compact-timer-host"
+        id="compactTimerHost"
+      ></div>
+
+      <div class="global-controls">
+        <button
+          class="icon-button right-toggle"
+          id="rightToggle"
+          type="button"
+          aria-label="Toggle right panel background"
+          aria-controls="rightZone"
+          aria-pressed="false"
+        >
+          <span
+            class="panel-icon"
+            aria-hidden="true"
+          ></span>
+        </button>
+
+        <button
+          class="icon-button fullscreen-toggle"
+          id="fullscreenToggle"
+          type="button"
+          aria-label="Enter fullscreen"
+          aria-pressed="false"
+        >
+          <span class="fullscreen-icon" aria-hidden="true">⛶</span>
+        </button>
+      </div>
+    </header>
+
+    <aside
+      class="left-panel"
+      id="leftPanel"
+      aria-label="Player tools"
+    >
+      <div class="tool-strip-scroll" id="toolStripScroll">
+        <div class="tool-strip" id="toolStrip"></div>
+      </div>
+    </aside>
+
+    <div
+      class="left-scrim"
+      id="leftScrim"
+      aria-hidden="true"
+    ></div>
+
+    <section class="media-area" id="mediaArea">
+      <div
+        class="media-surface"
+        aria-label="Demo media"
+      >
+        <img
+          class="media-content"
+          id="sceneMedia"
+          alt="Demo media unavailable"
+          hidden
+        >
+      </div>
+    </section>
+
+    <section
+      class="transcript"
+      id="transcript"
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions text"
+      aria-label="Conversation transcript"
+    ></section>
+
+    <button
+      class="return-to-latest"
+      id="returnToLatest"
+      type="button"
+      aria-label="Return to latest message"
+      hidden
+    >
+      <span aria-hidden="true">↓</span>
+    </button>
+
+    <div
+      class="player-notification"
+      id="playerNotification"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      hidden
+    ></div>
+
+    <section
+      class="foreground-controls"
+      id="foregroundControls"
+      aria-label="Foreground interaction"
+      hidden
+    ></section>
+
+    <footer class="composer" id="composer">
+      <form id="composerForm">
+        <textarea
+          rows="1"
+          autofocus
+          aria-label="User input"
+          placeholder="Type your response…"
+        ></textarea>
+
+        <button
+          class="send-button"
+          type="submit"
+        >
+          Send
+        </button>
+      </form>
+
+      <div
+        class="composer-feedback"
+        id="composerFeedback"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
+    </footer>
+
+    <aside
+      class="right-zone"
+      id="rightZone"
+      aria-label="Timer and background controls"
+    >
+      <div class="timer-wrap" id="timerWrap">
+        <div class="timer-list" id="timerList">
+          <div
+            class="timer"
+            id="timer"
+            aria-label="Timer 1"
+          >
+            <span
+              class="timer-label"
+              id="timerLabel"
+              hidden
+            >Timer 1</span>
+            <span class="timer-text" id="timerText">02:41</span>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="action-scroll"
+        id="actions"
+        role="group"
+        aria-label="Background controls and status"
+      ></div>
+    </aside>
+  </main>
+
+  <script type="module" src="/dist/player/browser.js"></script>
+</body>
+</html>

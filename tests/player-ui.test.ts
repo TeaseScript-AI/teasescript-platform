@@ -1,0 +1,806 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import test from "node:test";
+
+import { canDockRightRail, toggleLeftPanelMode, toggleRightPanelMode } from "../player/panel-state.js";
+import {
+  formatTimer,
+  matchForegroundChoiceByVisibleText,
+  orderRightControls,
+  readableControlText,
+  timerProgressPercent,
+} from "../player/render.js";
+import {
+  addToolColumn,
+  closeToolColumn,
+  selectToolColumn,
+} from "../player/tool-columns.js";
+import { allocateRightRailPaneHeights } from "../player/right-rail-layout.js";
+
+test("Player panel toggles preserve the current auto/manual semantics", () => {
+  assert.equal(toggleLeftPanelMode("auto", true), "closed");
+  assert.equal(toggleLeftPanelMode("auto", false), "open");
+  assert.equal(toggleLeftPanelMode("open", false), "closed");
+  assert.equal(toggleLeftPanelMode("closed", true), "open");
+
+  assert.equal(toggleRightPanelMode("auto", true), "overlay");
+  assert.equal(toggleRightPanelMode("auto", false), "docked");
+  assert.equal(toggleRightPanelMode("docked", false), "overlay");
+  assert.equal(toggleRightPanelMode("overlay", true), "docked");
+
+  assert.equal(canDockRightRail(1_400, 625, 190, 495, false), true);
+  assert.equal(canDockRightRail(1_024, 625, 190, 492, false), false);
+  assert.equal(canDockRightRail(760, 0, 190, 380, true), false);
+});
+
+test("Player timer presentation is bounded and deterministic", () => {
+  assert.equal(timerProgressPercent(161, 300), 46);
+  assert.equal(timerProgressPercent(0, 300), 100);
+  assert.equal(timerProgressPercent(999, 300), 0);
+  assert.equal(timerProgressPercent(1, 0), 0);
+  assert.equal(formatTimer(161), "2:41");
+  assert.equal(formatTimer(3599), "59:59");
+  assert.equal(formatTimer(3600), "1:00:00");
+  assert.equal(formatTimer(3661), "1:01:01");
+  assert.equal(formatTimer(-1), "0:00");
+});
+
+test("Player tool columns prefer unused tools before deliberate blank or duplicate states", () => {
+  const order = ["visuals", "scene", "layout-debug"] as const;
+  const initial = [{ id: "tool-column-1", toolId: "visuals" as const }];
+  const withSecond = addToolColumn(initial, "tool-column-2", order);
+  assert.deepEqual(withSecond, [
+    { id: "tool-column-1", toolId: "visuals" },
+    { id: "tool-column-2", toolId: "scene" },
+  ]);
+
+  const withThird = addToolColumn(withSecond, "tool-column-3", order);
+  assert.deepEqual(withThird, [
+    { id: "tool-column-1", toolId: "visuals" },
+    { id: "tool-column-2", toolId: "scene" },
+    { id: "tool-column-3", toolId: "layout-debug" },
+  ]);
+
+  const withBlankFourth = addToolColumn(withThird, "tool-column-4", order);
+  assert.deepEqual(withBlankFourth, [
+    { id: "tool-column-1", toolId: "visuals" },
+    { id: "tool-column-2", toolId: "scene" },
+    { id: "tool-column-3", toolId: "layout-debug" },
+    { id: "tool-column-4", toolId: null },
+  ]);
+
+  const duplicated = selectToolColumn(withBlankFourth, "tool-column-4", "visuals");
+  assert.equal(duplicated[3]?.toolId, "visuals");
+  assert.deepEqual(closeToolColumn(duplicated, "tool-column-2"), [
+    { id: "tool-column-1", toolId: "visuals" },
+    { id: "tool-column-3", toolId: "layout-debug" },
+    { id: "tool-column-4", toolId: "visuals" },
+  ]);
+});
+
+test("Player tool column helpers preserve the retained final column invariant", () => {
+  const columns = [{ id: "tool-column-1", toolId: "visuals" as const }];
+  assert.throws(
+    () => addToolColumn(columns, "tool-column-1", ["visuals", "scene"]),
+    /Duplicate Player tool column/u,
+  );
+  assert.throws(() => selectToolColumn(columns, "missing", "scene"), /Unknown Player tool column/u);
+  assert.throws(() => closeToolColumn(columns, "missing"), /Unknown Player tool column/u);
+  assert.throws(() => closeToolColumn(columns, "tool-column-1"), /final Player tool column/u);
+});
+
+test("Player entrypoint uses modular local assets without external runtime dependencies", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+
+  assert.match(html, /viewport-fit=cover/u);
+  assert.match(
+    await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8"),
+    /safe-area-inset-top/u,
+  );
+  assert.match(html, /src="\/dist\/player\/browser\.js"/u);
+  assert.match(html, /href="\/player\/styles\/layout\.css"/u);
+  assert.match(html, /href="\/player\/styles\/components-tools\.css"/u);
+  assert.match(html, /href="\/player\/styles\/components-layout-debug\.css"/u);
+  assert.doesNotMatch(html, /id="addToolColumn"/u);
+  assert.match(html, /id="toolStrip"/u);
+  assert.doesNotMatch(html, /tool-panel-header/u);
+  assert.doesNotMatch(html, /<style>/u);
+  assert.doesNotMatch(html, /https?:\/\//u);
+});
+
+test("Player application colours use centralized OKLCH primitives and semantic component tokens", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
+
+  assert.match(layout, /--palette-surface-base:\s*oklch\(95\.839% 0\.01306 71\.33\)/u);
+  assert.match(layout, /--palette-border-strong:\s*oklch\(68\.851% 0\.04826 51\.55\)/u);
+  assert.match(layout, /--color-border-default:\s*var\(--palette-border-subtle\)/u);
+  assert.match(layout, /--color-border-pressed:\s*var\(--palette-border-strong\)/u);
+  assert.match(actions, /\.action-button[\s\S]*border: 1px solid var\(--color-border-default\)/u);
+  assert.match(tools, /\.tool-selector[\s\S]*background: var\(--color-surface-component\)/u);
+  assert.doesNotMatch(actions, /var\(--palette-/u);
+  assert.doesNotMatch(tools, /var\(--palette-/u);
+});
+
+test("Player tool chrome keeps one fixed column header and one vertical scroll owner", async () => {
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
+  const visualLab = await readFile(resolve(process.cwd(), "player/styles/components-visual-lab.css"), "utf8");
+
+  assert.match(render, /className = "tool-column-header"/u);
+  assert.match(render, /add\.dataset\.toolColumnAdd = ""/u);
+  assert.match(render, /header\.append\(selector, add, close\)/u);
+  assert.match(tools, /grid-template-columns: minmax\(0, 1fr\) auto auto/u);
+  assert.match(tools, /scroll-snap-type: x proximity/u);
+  assert.match(tools, /inline-size: var\(--tool-column-effective-width\)/u);
+  assert.match(tools, /scroll-snap-align: start/u);
+  assert.match(tools, /touch-action: pan-x pan-y pinch-zoom/u);
+  assert.match(tools, /@supports selector\(::scroll-button\(left\)\) and selector\(::scroll-marker\)/u);
+  assert.doesNotMatch(render, /lab-scroll/u);
+  assert.doesNotMatch(render, /className = "lab-title"/u);
+  const stripScroll = tools.match(/\.tool-strip-scroll\s*\{[^}]*\}/u)?.[0] ?? "";
+  const columnBody = tools.match(/\.tool-column-body\s*\{[^}]*\}/u)?.[0] ?? "";
+  assert.doesNotMatch(stripScroll, /scrollbar-gutter:\s*stable/u);
+  assert.match(columnBody, /overflow-y:\s*auto/u);
+  assert.match(columnBody, /overscroll-behavior-block:\s*contain/u);
+  assert.match(columnBody, /scrollbar-gutter:\s*stable/u);
+  assert.doesNotMatch(browser, /routeHorizontalWheel|installToolCarouselDrag/u);
+  assert.match(browser, /setHorizontalOverflowState[\s\S]*scrollWidth > scroller\.clientWidth \+ 1/u);
+  assert.match(tools, /data-overflow="true"[\s\S]*scroll-marker-group: after/u);
+  assert.match(render, /createLabOptionCopy[\s\S]*className = "lab-option-info"[\s\S]*dataset\.labOptionInfoTrigger/u);
+  assert.match(render, /copy\.dataset\.labOptionCopy = ""/u);
+  assert.doesNotMatch(render, /trigger\.title =/u);
+  assert.match(browser, /toggleLabOptionInfo[\s\S]*closeLabOptionInfo/u);
+  assert.match(browser, /target\.closest<HTMLElement>\("\[data-lab-option-copy\]"\)[\s\S]*toggleLabOptionInfo\(trigger\)/u);
+  assert.match(visualLab, /\.lab-option-copy:hover \.lab-option-note[\s\S]*display: block/u);
+  assert.doesNotMatch(visualLab, /overflow-y: auto/u);
+});
+
+test("Player tool-column add controls are local to each column", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.doesNotMatch(html, /id="addToolColumn"/u);
+  assert.doesNotMatch(html, /title-tool-column-add/u);
+  assert.doesNotMatch(browser, /addToolColumnButton/u);
+  assert.match(browser, /target\.closest\("\[data-tool-column-add\]"\)[\s\S]*appendToolColumn\(\)/u);
+});
+
+test("Player Actions stay in the dedicated right rail and are not tool-column content", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const demo = await readFile(resolve(process.cwd(), "player/demo-session.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+
+  assert.match(html, /id="actions"/u);
+  assert.match(render, /targets\.rightControls\.replaceChildren/u);
+  assert.doesNotMatch(demo, /\{ id: "actions", label: "Actions" \}/u);
+  assert.doesNotMatch(render, /case "actions"/u);
+});
+
+test("Player media uses image content without duplicate fit or caption overlays", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const demo = await readFile(resolve(process.cwd(), "player/demo-session.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+
+  assert.match(html, /id="sceneMedia"/u);
+  assert.doesNotMatch(html, /id="mediaFit"/u);
+  assert.doesNotMatch(html, /id="mediaCaption"/u);
+  assert.match(demo, /fit: "contain"/u);
+  assert.match(render, /targets\.sceneMedia\.src/u);
+});
+
+test("Player media content can shrink to its grid row before contain fitting", async () => {
+  const media = await readFile(resolve(process.cwd(), "player/styles/components-media.css"), "utf8");
+
+  assert.match(media, /\.media-content\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*0;/su);
+  assert.match(media, /object-fit:\s*var\(--media-fit, contain\)/u);
+  assert.match(media, /\.media-content\[hidden\]\s*\{[^}]*display:\s*none;/su);
+});
+
+test("Player conversation spacing is based on its own grid column", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
+
+  assert.doesNotMatch(layout, /100vw - var\(--conversation-max-width\)/u);
+  assert.match(layout, /calc\(\(100% - var\(--conversation-max-width\)\) \/ 2 \+ var\(--conversation-gap\)\)/u);
+  assert.match(composer, /width: min\(100%, var\(--conversation-max-width\)\)/u);
+  assert.match(layout, /\.composer \{[\s\S]*background: var\(--color-surface-canvas\)/u);
+  assert.doesNotMatch(layout, /\.composer \{[\s\S]*border-top:/u);
+});
+
+test("Player composer preserves default focus, desktop shell focus, and separate mobile controls", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(html, /<textarea[\s\S]*autofocus[\s\S]*aria-label="User input"/u);
+  assert.match(composer, /\.composer form[\s\S]*border: 1px solid var\(--color-border-default\)[\s\S]*background: var\(--color-surface-component\)/u);
+  assert.match(composer, /textarea[\s\S]*border: 0;[\s\S]*background: transparent/u);
+  assert.doesNotMatch(composer, /textarea:focus-visible/u);
+  assert.match(
+    effects,
+    /\.composer form:has\(textarea:focus-visible\)[\s\S]*outline: var\(--focus-outline-width\) solid var\(--color-accent-focus\)/u,
+  );
+  assert.match(effects, /\.composer form:has\(textarea:not\(:disabled\):hover\)[\s\S]*border-color: var\(--color-border-hover\)/u);
+  assert.match(effects, /\.composer form:has\(textarea:not\(:disabled\):active\)[\s\S]*border-color: var\(--color-border-pressed\)/u);
+  assert.match(effects, /\.composer form:has\(textarea:disabled\)[\s\S]*background: var\(--color-surface-disabled\)/u);
+  assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*\.composer form \{[\s\S]*border: 0;[\s\S]*background: transparent;/u);
+  assert.match(responsive, /\.composer textarea \{[\s\S]*border: 1px solid var\(--color-border-default\);[\s\S]*background: var\(--color-surface-component\)/u);
+  assert.match(responsive, /\.composer textarea:not\(:disabled\):active[\s\S]*border-color: var\(--color-border-pressed\)/u);
+  assert.match(responsive, /\.composer textarea:disabled[\s\S]*background: var\(--color-surface-disabled\)/u);
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  assert.match(layout, /--safe-bottom:\s*env\(safe-area-inset-bottom, 0px\);[\s\S]*--safe-bottom-reserve:\s*var\(--safe-bottom\)/u);
+  assert.doesNotMatch(layout, /safe-area-max-inset-bottom/u);
+  assert.match(responsive, /padding-bottom: calc\(10px \+ var\(--safe-bottom-reserve\)\)/u);
+  assert.doesNotMatch(responsive, /phone-corner-clearance/u);
+  assert.match(composer, /\.composer-feedback \{[\s\S]*position: absolute;[\s\S]*bottom: calc\(100% \+ 4px\)/u);
+});
+
+test("Player right controls keep the same translucent surfaces across backing modes", async () => {
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(actions, /\.timer[\s\S]*var\(--color-surface-component\) 60%/u);
+  assert.match(actions, /\.action-button[\s\S]*var\(--color-surface-component\) 60%/u);
+  assert.match(effects, /\.action-button:not\(:disabled\):hover[\s\S]*var\(--color-component-hover\) 60%/u);
+  assert.match(effects, /\.action-button:not\(:disabled\):active[\s\S]*var\(--color-component-pressed\) 60%/u);
+  assert.doesNotMatch(responsive, /data-right="overlay"[^}]*\.action-button[^}]*60%/u);
+});
+
+test("Player right background toggle exposes distinct docked and overlay states", async () => {
+  const base = await readFile(resolve(process.cwd(), "player/styles/components-base.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+
+  assert.match(base, /\.right-toggle\[aria-pressed="false"\] \.panel-icon::after/u);
+  assert.match(browser, /rightToggle\.setAttribute\("aria-pressed", String\(rightDocked\)\)/u);
+  assert.match(browser, /rightDocked \? "Use overlay right panel background" : "Dock right panel background"/u);
+  assert.match(browser, /toggleRightPanelMode\(currentRightMode\(\), usesDockedRightComposition\(\)\)/u);
+  assert.match(browser, /canDockRightRail\([\s\S]*desiredLeftWidth[\s\S]*minimumMiddleWidth/u);
+  assert.match(layout, /\.player\[data-right-backing="overlay"\] \.right-zone[\s\S]*background: transparent;[\s\S]*box-shadow: none/u);
+  assert.match(layout, /data-right-layout="rail"\]\[data-right-backing="overlay"\] \.media-area[\s\S]*grid-column: 2 \/ 4/u);
+});
+
+test("Player uses one responsive owner for spacious, medium, and narrow side-region geometry", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+  const foreground = await readFile(resolve(process.cwd(), "player/styles/components-foreground.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.match(layout, /--right-track:\s*0px;/u);
+  assert.match(layout, /\.right-zone \{[\s\S]*grid-column: 2 \/ 4;[\s\S]*grid-row: 2 \/ 3;/u);
+  assert.match(layout, /data-right-layout="rail"[\s\S]*--right-track: var\(--right-controls-width\)/u);
+  assert.match(layout, /data-right-layout="rail"\] \.right-zone[\s\S]*grid-column: 3;[\s\S]*grid-row: 2 \/ 6;/u);
+  assert.match(browser, /const minimumMiddleWidth = Math\.max\(conversationMinimum, stageMinimum\)/u);
+  assert.match(responsive, /@media \(min-width: 761px\)[\s\S]*--left-grid-track:/u);
+  assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*--left-grid-track: 0px;/u);
+  assert.match(layout, /\.transcript \{[\s\S]*grid-column: 2;/u);
+  assert.match(foreground, /\.foreground-controls \{[\s\S]*grid-column: 2;/u);
+  assert.match(layout, /\.composer \{[\s\S]*grid-column: 2;/u);
+  assert.doesNotMatch(responsive, /orientation:[\s\S]*right-zone/u);
+  assert.doesNotMatch(responsive, /@media \(min-width: 870px\)/u);
+});
+
+test("Player narrow drawer grows to its content cap and compact timers use one horizontal strip", async () => {
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(responsive, /--mobile-drawer-width:[\s\S]*min\(90vw, max\(var\(--left-open\), var\(--left-preferred\)\)\)/u);
+  assert.match(responsive, /background: var\(--color-surface-chrome\);/u);
+  assert.match(responsive, /background: var\(--color-structural-scrim\);/u);
+  assert.doesNotMatch(responsive, /--control-padding:/u);
+  assert.match(responsive, /\.player\[data-compact-timers="true"\] \.timer-list \{[\s\S]*flex-direction: row;[\s\S]*flex-wrap: nowrap;[\s\S]*overflow-x: auto;[\s\S]*scroll-snap-type: inline proximity/u);
+  assert.match(responsive, /\.player\[data-compact-timers="true"\] \.timer \{[\s\S]*inline-size: 34px;[\s\S]*border-radius: 50%;/u);
+  assert.doesNotMatch(responsive, /\.timer::before \{[\s\S]*content: none;/u);
+
+  const overlayBreakpoint = responsive.indexOf("@media (max-width: 760px) {");
+  const compactBreakpoint = responsive.indexOf("@media (max-width: 480px) {");
+  assert.ok(overlayBreakpoint >= 0 && compactBreakpoint > overlayBreakpoint);
+  const overlayOnlyRules = responsive.slice(overlayBreakpoint, compactBreakpoint);
+  assert.doesNotMatch(overlayOnlyRules, /\.timer-wrap\s*\{/u);
+});
+
+test("Player chrome roles and restrained Penpot elevation stay on structural shells", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
+  const visualLab = await readFile(resolve(process.cwd(), "player/styles/components-visual-lab.css"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+
+  assert.match(layout, /\.title-bg[\s\S]*box-shadow: 0 2px 6px var\(--color-structural-shadow\)/u);
+  assert.match(layout, /\.left-panel[\s\S]*box-shadow: 3px 0 8px var\(--color-structural-shadow\)/u);
+  assert.match(layout, /\.right-zone[\s\S]*box-shadow: -3px 0 8px var\(--color-structural-shadow\)/u);
+  assert.doesNotMatch(layout, /1px 0 0 var\(--color-border-default\) inset/u);
+  assert.match(layout, /\.player\[data-right-backing="overlay"\] \.right-zone[\s\S]*box-shadow: none/u);
+
+  assert.match(tools, /\.tool-column-header[\s\S]*background: transparent/u);
+  assert.match(tools, /\.tool-selector[\s\S]*background: var\(--color-surface-component\)/u);
+  assert.match(visualLab, /\.lab-fixed-note[\s\S]*background: var\(--color-surface-chrome\)/u);
+  assert.match(visualLab, /\.lab-fixed-note-title[\s\S]*color: var\(--package-accent\)/u);
+  assert.match(render, /fixedTitle\.textContent = "Always on"/u);
+});
+
+test("Player Visual Lab exposes reversible Phase 4 geometry tuning", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
+  const tools = await readFile(resolve(process.cwd(), "player/styles/components-tools.css"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.match(layout, /--tool-column-width: 300px/u);
+  assert.match(layout, /--left-open:[\s\S]*var\(--tool-column-width\)[\s\S]*var\(--tool-strip-inline-gutters\)/u);
+  assert.match(layout, /\.left-panel \{[\s\S]*padding-left: 0;[\s\S]*padding-right: 0;/u);
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+  assert.match(responsive, /data-left="open"\] \.left-panel[\s\S]*padding-left: var\(--tool-strip-gutter-start\)[\s\S]*padding-right: var\(--tool-strip-gutter-end\)/u);
+  assert.match(tools, /--tool-column-effective-width: var\(--tool-column-width\)/u);
+  assert.match(layout, /--media-height-normal: 55dvh/u);
+  assert.match(layout, /--media-height-overlay: 64dvh/u);
+  assert.match(layout, /--composer-max-lines: 6lh/u);
+  assert.match(layout, /--composer-max-viewport-height: 20dvh/u);
+  assert.match(layout, /--focus-outline-width: 2px/u);
+  assert.match(
+    composer,
+    /calc\(var\(--composer-max-lines\) \+ var\(--composer-input-block-chrome\)\)/u,
+  );
+  assert.match(composer, /font-size: var\(--composer-font-size\)/u);
+  assert.match(browser, /usableViewportLength\(overlayChrome \? "--media-height-overlay" : "--media-height-normal", usableHeight\)/u);
+  assert.match(render, /input\.dataset\.tuningProperty = property/u);
+  assert.match(render, /input\.autocomplete = "off"/u);
+  assert.match(render, /input\.inputMode = "decimal"/u);
+  assert.match(render, /createElement\("form"\)[\s\S]*content\.autocomplete = "off"[\s\S]*event\.preventDefault\(\)/u);
+  assert.match(render, /"--conversation-max-width"/u);
+  assert.doesNotMatch(render, /"--focus-outline-width"/u);
+  assert.doesNotMatch(render, /Focus ring/u);
+  assert.match(browser, /player\.style\.setProperty\(requiredDatasetValue\(input, "tuningProperty"\), `\$\{input\.valueAsNumber\}\$\{requiredDatasetValue\(input, "tuningUnit"\)\}`\)/u);
+  assert.match(browser, /player\.style\.removeProperty\(requiredDatasetValue\(input, "tuningProperty"\)\)/u);
+});
+
+
+test("Player Visual Lab exposes grouped reversible Phase 4 review choices", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.match(html, /class="timer"[\s\S]*id="timer"[\s\S]*class="timer-label"[\s\S]*id="timerLabel"/u);
+  assert.match(render, /"Busy Action"[\s\S]*"busy-style"[\s\S]*"Soft pulse"[\s\S]*"Slow sweep"[\s\S]*"Three dots"[\s\S]*"Corner pulse"[\s\S]*"Corner spinner"[\s\S]*"Soft wash"/u);
+  assert.match(render, /"Timer label"[\s\S]*"timer-label"[\s\S]*"Inside · above"[\s\S]*"Inside · below"/u);
+  assert.match(render, /createDemoNumberOption\([\s\S]*"Timer count"[\s\S]*"timer-count"[\s\S]*1,[\s\S]*1,/u);
+  assert.doesNotMatch(render, /\["current", "Current"\]/u);
+  assert.match(render, /createTuningInput\("Composer text"[\s\S]*"--composer-font-size"[\s\S]*"rem"/u);
+  assert.match(render, /select\.dataset\.demoSelect = key/u);
+  assert.match(browser, /busyActionDemoStyle = "off"/u);
+  assert.match(browser, /timerLabelDemoPlacement = "below"/u);
+  assert.match(browser, /timerLabelContentDemo: "generic" \| "authored" = "authored"/u);
+  assert.match(browser, /timerCountDemo = 1/u);
+  assert.doesNotMatch(browser, /composerFontDemo/u);
+  assert.match(browser, /data-demo-number/u);
+  assert.match(browser, /label\.hidden = timerLabelDemoPlacement === "off"/u);
+  assert.match(browser, /timerKindDemo === "mystery" \? "\?" : demoTimerText\(index\)/u);
+  assert.match(browser, /player\.dataset\.demoTimerCount = String\(timerCountDemo\)/u);
+  assert.match(browser, /const PACING_MESSAGE_DELAY_MS = 1_500/u);
+  assert.match(browser, /startPacingDemo[\s\S]*revealNextPacingMessage[\s\S]*setTimeout/u);
+  assert.match(browser, /pacingGateDemo !== "skippable" \|\| !hasPendingPacingMessage\(\)/u);
+});
+
+test("Player busy Action review variants are paint-only, continuous, and reduced-motion safe", async () => {
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.match(actions, /\.action-button \{[\s\S]*position: relative/u);
+  assert.match(effects, /data-busy-style="pulse"[\s\S]*animation: action-busy-pulse 2400ms ease-in-out infinite/u);
+  assert.match(effects, /data-busy-style="sweep"[\s\S]*transform: translateX\(-110%\)[\s\S]*animation: action-busy-sweep 2800ms linear infinite/u);
+  assert.match(effects, /@keyframes action-busy-sweep[\s\S]*translateX\(-110%\)[\s\S]*translateX\(470%\)/u);
+  assert.match(effects, /data-busy-style="dots"[\s\S]*animation: action-busy-dots 2200ms ease-in-out infinite/u);
+  assert.match(effects, /data-busy-style="corner-dot"[\s\S]*animation: action-busy-corner-dot 2600ms ease-in-out infinite/u);
+  assert.match(effects, /data-busy-style="spinner"[\s\S]*animation: action-busy-spinner 2400ms linear infinite/u);
+  assert.match(effects, /data-busy-style="wash"[\s\S]*animation: action-busy-wash 3600ms ease-in-out infinite/u);
+  assert.match(effects, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.right-control\[aria-busy="true"\]::after \{[\s\S]*animation: none/u);
+  assert.doesNotMatch(browser, /busyActionDemoStyle[\s\S]{0,300}\.disabled\s*=/u);
+});
+
+test("Player timer-label review variants stay inside vertical and compact timers", async () => {
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(actions, /\.timer\[data-label-placement="above"\],[\s\S]*\.timer\[data-label-placement="below"\][\s\S]*display: flex/u);
+  assert.match(actions, /data-label-placement="above"[\s\S]*\.timer-label[\s\S]*order: 0/u);
+  assert.match(actions, /data-label-placement="below"[\s\S]*\.timer-label[\s\S]*order: 1/u);
+  assert.match(actions, /\.timer-list \{[\s\S]*display: flex;[\s\S]*flex-direction: column;[\s\S]*gap: 12px;[\s\S]*overflow-y: hidden/u);
+  assert.match(actions, /\.timer-list:has\(\.timer:nth-child\(2\)\) \{[\s\S]*overflow-y: auto/u);
+  assert.match(responsive, /\.player\[data-compact-timers="true"\] \.timer-list \{[\s\S]*flex-direction: row;[\s\S]*flex-wrap: nowrap;[\s\S]*gap: 10px/u);
+  assert.match(responsive, /\.player\[data-compact-timers="true"\][\s\S]*data-label-placement="above"[\s\S]*font-size: 10px/u);
+  assert.match(responsive, /data-label-placement="below"[\s\S]*\.timer-label[\s\S]*font-size: 7px/u);
+});
+
+test("Player right rail keeps independent timer and Action scroll owners", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  assert.match(html, /id="compactTimerHost"[\s\S]*class="global-controls"[\s\S]*id="rightToggle"[\s\S]*id="fullscreenToggle"/u);
+  assert.match(html, /class="timer-wrap" id="timerWrap"/u);
+  assert.match(layout, /\.right-zone \{[\s\S]*grid-template-rows:[\s\S]*var\(--timer-pane-size[\s\S]*minmax\(0, 1fr\)/u);
+  assert.doesNotMatch(layout, /data-demo-multi-timer/u);
+  assert.match(actions, /\.timer-list \{[\s\S]*flex-direction: column;[\s\S]*overflow-y: hidden/u);
+  assert.match(actions, /\.timer-list:has\(\.timer:nth-child\(2\)\) \{[\s\S]*overflow-y: auto/u);
+  assert.match(actions, /\.action-scroll \{[\s\S]*overflow-y: auto/u);
+  assert.match(actions, /\.right-zone > \.timer-wrap \{[\s\S]*grid-row: 1/u);
+  assert.match(actions, /\.right-zone > \.action-scroll \{[\s\S]*grid-row: 2/u);
+  assert.match(actions, /data-compact-timers="true"[\s\S]*\.right-zone \{[\s\S]*grid-template-rows: minmax\(0, 1fr\)/u);
+  assert.match(actions, /data-compact-timers="true"[\s\S]*\.right-zone > \.action-scroll[\s\S]*grid-row: 1/u);
+  assert.match(responsive, /data-chrome="overlay"\] \.right-zone \{[\s\S]*margin-block-start: var\(--title-height\)/u);
+  assert.match(responsive, /data-compact-timers="true"[\s\S]*\.timer-list[\s\S]*overflow-x: auto/u);
+  assert.match(browser, /createRightRailLayoutController/u);
+  assert.match(browser, /rightRailLayout\.sync\(compactTimers\)/u);
+  assert.doesNotMatch(responsive, /data-demo-timer-count="(?:2|4)"/u);
+});
+
+test("Player right rail allocation preserves small panes and shares contention fairly", () => {
+  assert.deepEqual(allocateRightRailPaneHeights(600, 180, 1200), { timers: 180, actions: 420 });
+  assert.deepEqual(allocateRightRailPaneHeights(600, 1200, 180), { timers: 420, actions: 180 });
+  assert.deepEqual(allocateRightRailPaneHeights(600, 900, 1000), { timers: 300, actions: 300 });
+  assert.deepEqual(allocateRightRailPaneHeights(600, 100, 100), { timers: 100, actions: 500 });
+  assert.deepEqual(allocateRightRailPaneHeights(600, 0, 1000), { timers: 0, actions: 600 });
+  assert.deepEqual(allocateRightRailPaneHeights(600, 1000, 0), { timers: 600, actions: 0 });
+});
+
+test("Player composer line tuning counts text lines and offers local font-size review choices", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
+  const transcript = await readFile(resolve(process.cwd(), "player/styles/components-transcript.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+
+  assert.match(layout, /--composer-font-size: 1rem/u);
+  assert.match(transcript, /\.message-body \{[\s\S]*font-size: 1rem/u);
+  assert.match(transcript, /\.message\.user \.message-body \{[\s\S]*font-size: 1rem/u);
+  assert.match(composer, /--composer-input-block-chrome: 22px/u);
+  assert.doesNotMatch(composer, /field-sizing:\s*content/u);
+  assert.match(composer, /calc\(var\(--composer-max-lines\) \+ var\(--composer-input-block-chrome\)\)/u);
+  assert.doesNotMatch(responsive, /--composer-font-size:/u);
+  assert.match(render, /createTuningInput\("Composer text"[\s\S]*"--composer-font-size"[\s\S]*"rem"/u);
+  assert.match(browser, /player\.style\.setProperty\(requiredDatasetValue\(input, "tuningProperty"\), `\$\{input\.valueAsNumber\}\$\{requiredDatasetValue\(input, "tuningUnit"\)\}`\)/u);
+  assert.match(browser, /player\.style\.removeProperty\(requiredDatasetValue\(input, "tuningProperty"\)\)/u);
+  assert.match(browser, /function syncComposerInputSize\(\)[\s\S]*style\.blockSize = "auto"[\s\S]*scrollHeight \+ borderSize/u);
+  assert.match(browser, /composerInput\.addEventListener\("input", \(\) => \{[\s\S]*syncComposerInputSize\(\);[\s\S]*syncOverlayChromeMode\(\)/u);
+  assert.match(browser, /function syncViewportTransition\(\)[\s\S]*syncComposerInputSize\(\);[\s\S]*syncOverlayChromeMode\(\)/u);
+  assert.match(browser, /function requiredComposerHeight\(\)[\s\S]*composerForm\.getBoundingClientRect\(\)\.height[\s\S]*padding-block-start[\s\S]*padding-block-end/u);
+  assert.match(browser, /const measuredForegroundHeight = foregroundControls\.getBoundingClientRect\(\)\.height[\s\S]*measuredForegroundHeight > 0[\s\S]*foregroundControls\.hidden \? 0 : visibleForegroundHeight/u);
+  assert.match(browser, /function constrainedKeyboardMediaHeight[\s\S]*usableHeight - titleTrackHeight - requiredComposerHeight\(\) - foregroundHeight/u);
+  assert.match(browser, /const boundedTranscriptReserve = Math\.min\(transcriptReserve, availableConversationHeight\)/u);
+  assert.match(browser, /function syncForegroundPresentation\(\)[\s\S]*queueCarouselPresentationSync\(\);[\s\S]*syncOverlayChromeMode\(\)/u);
+  assert.doesNotMatch(browser, /restoreComposerFocus|composerInput\.focus/u);
+  assert.doesNotMatch(browser, /HeightComposition|heightComposition|typing-only|keyboard-conversation/u);
+});
+
+test("Player Layout Debug exposes live development-only geometry inspection", async () => {
+  const model = await readFile(resolve(process.cwd(), "player/model.ts"), "utf8");
+  const demo = await readFile(resolve(process.cwd(), "player/demo-session.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const layoutDebug = await readFile(resolve(process.cwd(), "player/layout-debug.ts"), "utf8");
+  const debugCss = await readFile(resolve(process.cwd(), "player/styles/components-layout-debug.css"), "utf8");
+  const playerDocs = await readFile(resolve(process.cwd(), "player/README.md"), "utf8");
+
+  assert.match(model, /PlayerToolId = "visuals" \| "scene" \| "layout-debug"/u);
+  assert.match(demo, /\{ id: "layout-debug", label: "Layout Debug" \}/u);
+  assert.match(render, /case "layout-debug":[\s\S]*createLayoutDebugTool/u);
+  assert.match(
+    render,
+    /createLayoutDebugModeToggle\(\),[\s\S]*"Grid tracks"[\s\S]*"Region bounds"[\s\S]*"Reserved regions"[\s\S]*"Safe areas"[\s\S]*"Overflow \/ scroll"[\s\S]*"Constraint vs measured"[\s\S]*"Visual viewport offsets"/u,
+  );
+  assert.match(render, /createLabOptionCopy\([\s\S]*"Debug mode"/u);
+  assert.match(render, /input\.dataset\.layoutDebugEnabled = ""/u);
+  assert.match(render, /\["Foreground", "foreground"\]/u);
+  assert.match(browser, /createLayoutDebugController\(\{[\s\S]*timerList,[\s\S]*\}\);/u);
+  assert.doesNotMatch(browser, /createLayoutDebugController\([\s\S]*\(\) => toolColumns/u);
+  assert.match(browser, /layoutDebug\.setEnabled\(target\.checked\)/u);
+  assert.match(browser, /layoutDebug\.setOption\(requiredDatasetValue\(target, "layoutDebug"\), target\.checked\)/u);
+  assert.match(layoutDebug, /let enabled = false/u);
+  assert.match(browser, /syncLayoutDebugActivation\(\)[\s\S]*layoutDebug\.setEnabled\(true\)/u);
+  assert.match(layoutDebug, /setEnabled\(nextEnabled: boolean\)/u);
+  assert.match(layoutDebug, /overlay\.root\.hidden = !enabled/u);
+  assert.doesNotMatch(layoutDebug, /debugToolOpen|getToolColumns/u);
+  assert.match(layoutDebug, /const options: Record<LayoutDebugKey, boolean>/u);
+  assert.match(layoutDebug, /new ResizeObserver\(queueSync\)/u);
+  assert.match(layoutDebug, /getComputedStyle\(player\)[\s\S]*gridTemplateColumns[\s\S]*gridTemplateRows/u);
+  assert.match(layoutDebug, /window\.visualViewport\?\.addEventListener\("resize", queueSync\)/u);
+  assert.match(layoutDebug, /document\.addEventListener\("scroll", queueSync, true\)/u);
+  assert.match(layoutDebug, /syncOverflow\(playerRect\)/u);
+  assert.match(layoutDebug, /formatScrollMetrics\(transcript, "y"\)/u);
+  assert.match(layoutDebug, /formatScrollMetrics\([\s\S]*timerList,[\s\S]*player\.dataset\.compactTimers === "true" \? "x" : "y"/u);
+  assert.match(layoutDebug, /formatToolBodyScroll\(toolBodies\)/u);
+  assert.match(layoutDebug, /"constraint-conversation"[\s\S]*--conversation-min-width[\s\S]*--conversation-max-width/u);
+  assert.match(layoutDebug, /visualViewport\.offsetLeft[\s\S]*visualViewport\.offsetTop/u);
+  assert.match(layoutDebug, /visualViewport\.pageLeft[\s\S]*visualViewport\.pageTop/u);
+  assert.match(layoutDebug, /foreground === null[\s\S]*\? "not present"/u);
+  assert.match(layoutDebug, /stageDiagnostics\.className = "layout-debug-stage-diagnostics"/u);
+  assert.match(layoutDebug, /syncStageDiagnostics\(playerRect, playerStyle, foreground\)/u);
+  assert.match(layoutDebug, /visualViewport\.offsetTop \+ visualViewport\.height/u);
+  assert.match(layoutDebug, /document\.fullscreenElement === player[\s\S]*player\.dataset\.keyboardGeometry/u);
+  assert.match(layoutDebug, /window\.isSecureContext/u);
+  assert.match(layoutDebug, /keyboard\?\.boundingRect/u);
+  assert.match(layoutDebug, /keyboard\?\.overlaysContent/u);
+  assert.match(layoutDebug, /JSON\.stringify\(composerInput\.value\)/u);
+  assert.match(layoutDebug, /JSON\.stringify\(composerInput\.placeholder\)/u);
+  assert.match(layoutDebug, /document\.activeElement === composerInput/u);
+  assert.match(debugCss, /\.layout-debug-overlay \{[\s\S]*position: absolute;[\s\S]*pointer-events: none;/u);
+  assert.match(debugCss, /\.layout-debug-stage-diagnostics \{[\s\S]*max-width: 240px;[\s\S]*overflow: hidden;[\s\S]*pointer-events: none;/u);
+  assert.match(debugCss, /height: var\(--safe-top\)/u);
+  assert.match(debugCss, /width: var\(--safe-right\)/u);
+  assert.match(debugCss, /data-debug-kind="overflow"[\s\S]*#c026d3/u);
+  assert.match(playerDocs, /`Visual\s+Lab`, `Layout Debug`, and `Scene` tools/u);
+});
+
+test("Player composition changes preserve panel intent and keep a focused drawer open", async () => {
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  assert.match(
+    browser,
+    /narrowScreen\.addEventListener\("change", \(\) => \{[\s\S]*leftPanel\.contains\(document\.activeElement\) \? "open" : "closed"/u,
+  );
+  assert.match(browser, /!narrowScreen\.matches && currentLeftMode\(\) === "auto"[\s\S]*player\.dataset\.left = "closed"/u);
+  assert.doesNotMatch(browser, /narrowScreen\.addEventListener\("change"[\s\S]{0,350}dataset\.right/u);
+  assert.match(
+    browser,
+    /if \(toolColumns\.length === 1\) \{[\s\S]*player\.dataset\.left = "closed";/u,
+  );
+});
+
+test("Player Actions retain one fixed control width across responsive compositions", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+
+  assert.match(layout, /--right-controls-width:\s*\d+px;/u);
+  assert.doesNotMatch(`${layout}\n${responsive}`, /--right-controls-width:\s*clamp\(/u);
+  assert.match(layout, /\.right-zone[\s\S]*inline-size: var\(--right-controls-width\);[\s\S]*max-inline-size: var\(--right-controls-width\);/u);
+  assert.match(layout, /data-right-layout="rail"\] \.right-zone[\s\S]*grid-column: 3;[\s\S]*grid-row: 2 \/ 6;/u);
+  assert.match(actions, /\.action-scroll \{[\s\S]*padding:[\s\S]*var\(--safe-right\)[\s\S]*var\(--safe-bottom-reserve\)/u);
+  assert.match(actions, /\.action-button \{[\s\S]*width: min\(156px, calc\(100% - 14px\)\)/u);
+});
+
+test("Player right rail centers fitting controls and keeps edge-faded controls fully reachable", async () => {
+  const actions = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  assert.match(actions, /align-content: safe center/u);
+  assert.match(actions, /--action-edge-fade:\s*10px/u);
+  assert.match(
+    actions,
+    /padding:[\s\S]*var\(--action-edge-fade\)[\s\S]*calc\(var\(--action-edge-fade\) \+ var\(--safe-bottom-reserve\)\)/u,
+  );
+  assert.match(actions, /scroll-padding-block:[\s\S]*var\(--action-edge-fade\)/u);
+  assert.match(
+    actions,
+    /linear-gradient\([\s\S]*transparent 0,[\s\S]*#000 var\(--action-edge-fade\),[\s\S]*#000 calc\(100% - var\(--action-edge-fade\)\),[\s\S]*transparent 100%/u,
+  );
+});
+
+test("Player hover styling supports hybrid devices without primary-pointer assumptions", async () => {
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+  assert.match(effects, /@media \(any-hover: hover\)/u);
+  assert.match(responsive, /@media \(any-hover: hover\)/u);
+  assert.doesNotMatch(effects, /\(hover: hover\) and \(pointer: fine\)/u);
+  assert.doesNotMatch(responsive, /\(hover: hover\) and \(pointer: fine\)/u);
+});
+
+test("Enabled quiet Visual Lab states do not reuse disabled semantics", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const visualLab = await readFile(resolve(process.cwd(), "player/styles/components-visual-lab.css"), "utf8");
+  assert.match(layout, /--color-text-quiet: var\(--palette-disabled-text\)/u);
+  assert.match(visualLab, /\.lab-option-note[\s\S]*color: var\(--color-text-muted\)/u);
+  assert.match(visualLab, /\.switch-ui::after[\s\S]*background: var\(--color-text-quiet\)/u);
+});
+
+test("Player left-panel growth protects media and conversation minimums independently", async () => {
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+
+  assert.match(layout, /--conversation-min-width:/u);
+  assert.match(layout, /--conversation-overlay-reserve:/u);
+  assert.match(layout, /--primary-column-min:/u);
+  assert.match(layout, /var\(--media-height\)/u);
+  assert.match(layout, /var\(--conversation-min-width\)/u);
+});
+
+
+test("Player foreground interactions render above the composer and keep typed equivalence", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const foreground = await readFile(resolve(process.cwd(), "player/styles/components-foreground.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+
+  assert.ok(html.indexOf('id="transcript"') < html.indexOf('id="foregroundControls"'));
+  assert.ok(html.indexOf('id="foregroundControls"') < html.indexOf('id="composer"'));
+  assert.match(foreground, /\.foreground-controls[\s\S]*grid-row: 4/u);
+  assert.match(layout, /\.composer \{[\s\S]*grid-row: 5/u);
+  assert.match(foreground, /\.foreground-choice-buttons[\s\S]*flex-wrap: nowrap[\s\S]*overflow-x: auto[\s\S]*scroll-snap-type: inline mandatory/u);
+  assert.match(foreground, /\.foreground-shell[\s\S]*width: 100%/u);
+  assert.match(foreground, /\.foreground-choice-buttons[\s\S]*justify-content: safe center/u);
+  assert.match(foreground, /@supports selector\(::scroll-button\(left\)\) and selector\(::scroll-marker\)/u);
+  assert.match(render, /className = "foreground-choice-item"[\s\S]*item\.append\(button\)/u);
+  assert.match(foreground, /\.foreground-choice-item::scroll-marker/u);
+  assert.doesNotMatch(foreground, /\.foreground-button::scroll-marker/u);
+  assert.match(foreground, /\.foreground-controls:has\(\.foreground-choice-buttons\[data-overflow="true"\]\) \{[\s\S]*padding-bottom: 0/u);
+  assert.match(foreground, /data-overflow="true"[\s\S]*--foreground-marker-strip: 18px[\s\S]*padding-right: 38px[\s\S]*padding-bottom: var\(--foreground-marker-strip\)[\s\S]*padding-left: 38px/u);
+  assert.match(foreground, /::scroll-button\(right\)[\s\S]*top: calc\(\(100% - var\(--foreground-marker-strip\)\) \/ 2\)[\s\S]*transform: translateY\(-50%\)/u);
+  assert.match(foreground, /::scroll-marker-group[\s\S]*bottom: 3px/u);
+  assert.match(foreground, /not\(\[data-overflow="true"\]\)::scroll-marker-group[\s\S]*display: none/u);
+  assert.doesNotMatch(render, /foreground-choice-select/u);
+  assert.doesNotMatch(browser, /syncChoicePresentationMode/u);
+  assert.match(render, /presentation\.kind === "show-button"/u);
+  assert.match(render, /presentation\.kind === "ask-text" \|\| presentation\.kind === "ask-number"/u);
+  assert.match(browser, /case "ask-text"[\s\S]*case "ask-number"[\s\S]*case "show-button"[\s\S]*case "choose"/u);
+  assert.match(browser, /event\.key === "Enter" && !event\.shiftKey/u);
+  assert.match(browser, /event\.key === " "[\s\S]*foreground\?\.kind === "show-button"/u);
+
+  const options = [
+    { id: "one", label: "Continue steadily" },
+    { id: "two", label: "Choose the stricter option" },
+  ];
+  assert.equal(matchForegroundChoiceByVisibleText(options, "Continue steadily")?.id, "one");
+  assert.equal(matchForegroundChoiceByVisibleText(options, "continue steadily"), null);
+  assert.equal(matchForegroundChoiceByVisibleText([...options, { id: "three", label: "Continue steadily" }], "Continue steadily"), null);
+});
+
+test("Player transcript smart-follow preserves an explicit return path and bounded DOM window", async () => {
+  const controller = await readFile(resolve(process.cwd(), "player/transcript-controller.ts"), "utf8");
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const transcriptCss = await readFile(resolve(process.cwd(), "player/styles/components-transcript.css"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  assert.match(html, /id="returnToLatest"[\s\S]*aria-label="Return to latest message"[\s\S]*<span aria-hidden="true">↓<\/span>/u);
+  assert.match(layout, /\.return-to-latest \{[\s\S]*justify-self: end;[\s\S]*inline-size: 36px;[\s\S]*backdrop-filter: blur\(6px\)/u);
+  assert.match(transcriptCss, /\.message \{[\s\S]*width: 90%;[\s\S]*max-width: 90%/u);
+  assert.match(transcriptCss, /\.message-copy \{[\s\S]*max-width: 65ch/u);
+  assert.match(controller, /const WINDOW_SIZE = 120/u);
+  assert.match(controller, /const WINDOW_BUFFER = 32/u);
+  assert.match(controller, /const FOLLOW_DISTANCE_PX = 36/u);
+  assert.match(controller, /const SCROLL_SETTLE_MS = 140/u);
+  assert.match(controller, /followingLatest = distanceFromBottom\(\) <= FOLLOW_DISTANCE_PX/u);
+  assert.match(controller, /awayFromLatest && scrollSettled/u);
+  assert.match(controller, /createSpacer\(start \* averageMessageExtent, "before"\)/u);
+  assert.match(controller, /createSpacer\(\(entries\.length - end\) \* averageMessageExtent, "after"\)/u);
+  assert.match(transcriptCss, /\.transcript-window-spacer/u);
+  assert.match(browser, /MAX_DEMO_HISTORY_MESSAGES/u);
+  assert.match(browser, /createDemoHistoryMessages\(historySizeDemo\)/u);
+});
+
+test("Player right rail supports ordered action, toggle, select, and status presentation", async () => {
+  const demo = await readFile(resolve(process.cwd(), "player/demo-session.ts"), "utf8");
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const model = await readFile(resolve(process.cwd(), "player/model.ts"), "utf8");
+  const controls = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+  const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
+  const transcript = await readFile(resolve(process.cwd(), "player/styles/components-transcript.css"), "utf8");
+
+  assert.match(demo, /kind: "action"[\s\S]*kind: "toggle"[\s\S]*kind: "select"[\s\S]*kind: "status"/u);
+  assert.match(render, /case "action"[\s\S]*case "toggle"[\s\S]*case "select"[\s\S]*case "status"/u);
+  assert.match(browser, /recordUserHistory[\s\S]*appendSessionEvent/u);
+  assert.doesNotMatch(render, /createControlOriginBadge|right-control-origin/u);
+  assert.match(render, /"Script update feedback"[\s\S]*"Toast"[\s\S]*"Control highlight"[\s\S]*"Toast \+ highlight"/u);
+  assert.doesNotMatch(render, /Update badge|Toast \+ badge/u);
+  assert.match(browser, /showScriptUpdateFeedback[\s\S]*SCRIPT_UPDATE_FEEDBACK_MS/u);
+  assert.match(browser, /appendSessionEvent\(`Script changed \$\{toggle\.label\}[\s\S]*appendSessionEvent\(`Script changed \$\{select\.label\}/u);
+  assert.match(effects, /data-script-update-feedback="highlight"[\s\S]*script-update-highlight/u);
+  assert.doesNotMatch(effects, /data-script-update-feedback="badge"|content: "Updated"/u);
+  assert.match(composer, /\.player-notification[\s\S]*pointer-events: none/u);
+  assert.match(model, /PlayerTranscriptEntryPresentation[\s\S]*PlayerMessagePresentation[\s\S]*PlayerSessionEventPresentation/u);
+  assert.match(render, /createTranscriptEntryElement[\s\S]*entry\.kind === "message"[\s\S]*session-event-text/u);
+  assert.match(transcript, /\.session-event \{[\s\S]*align-self: center[\s\S]*\.session-event-text \{/u);
+  assert.match(controls, /\.right-toggle-control/u);
+  assert.match(controls, /\.right-select-control/u);
+  assert.match(controls, /\.right-status/u);
+
+  const ordered = orderRightControls([
+    { kind: "status", id: "status", label: "Status", detail: "ok" },
+    { kind: "action", id: "second", label: "Second", priority: 20 },
+    { kind: "action", id: "first", label: "First", priority: 10 },
+    { kind: "action", id: "tail", label: "Tail" },
+  ]);
+  assert.deepEqual(ordered.map((control) => control.id), ["first", "second", "status", "tail"]);
+});
+
+test("Player timer fixtures cover visible, mystery, and hidden presentation without changing rail ownership", async () => {
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const controls = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+
+  assert.match(browser, /timerKindDemo: PlayerTimerKind = "visible"/u);
+  assert.match(browser, /\["visible", "mystery", "hidden"\]\.includes\(value\)/u);
+  assert.match(browser, /timerKindDemo === "hidden"[\s\S]*rightRailLayout\.queueSync\(\)/u);
+  assert.match(browser, /timerKindDemo === "mystery" \? "\?" : demoTimerText\(index\)/u);
+  assert.match(controls, /data-timer-kind="hidden"[\s\S]*\.timer-list[\s\S]*display: none/u);
+  assert.match(controls, /\.timer-list \{[\s\S]*overflow-y: hidden/u);
+  assert.match(controls, /\.timer-list:has\(\.timer:nth-child\(2\)\) \{[\s\S]*overflow-y: auto/u);
+  assert.match(effects, /data-timer-kind="mystery"[\s\S]*mystery-timer-ring/u);
+});
+
+test("Player fullscreen keyboard geometry preserves one bounded normal composition", async () => {
+  const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
+  const responsive = await readFile(resolve(process.cwd(), "player/styles/responsive.css"), "utf8");
+
+  assert.match(html, /id="fullscreenToggle"/u);
+  assert.match(browser, /const compactTimers = usableHeight <= 600/u);
+  assert.match(browser, /const overlayChrome = document\.fullscreenElement === player \|\| usableHeight <= 768/u);
+  assert.match(browser, /player\.dataset\.chrome = overlayChrome \? "overlay" : "normal"/u);
+  assert.match(browser, /player\.dataset\.compactTimers = compactTimers \? "true" : "false"/u);
+  assert.match(browser, /rightRailLayout\.sync\(compactTimers\)/u);
+  assert.match(browser, /window\.visualViewport\?\.addEventListener\("resize"/u);
+  assert.match(browser, /function currentUsableViewportHeight[\s\S]*visualViewport\.height \+ visualViewport\.offsetTop/u);
+  assert.match(browser, /const viewportHeight = currentUsableViewportHeight\(\)/u);
+  assert.match(browser, /function rememberViewportHeightBaseline[\s\S]*currentUsableViewportHeight\(\)/u);
+  assert.doesNotMatch(html, /interactive-widget=/u);
+  assert.match(html, /default resizes-visual keyboard behavior/u);
+  assert.match(browser, /interface BrowserVirtualKeyboard[\s\S]*boundingRect[\s\S]*overlaysContent/u);
+  assert.match(browser, /virtualKeyboard\?\.addEventListener\("geometrychange", syncViewportTransition\)/u);
+  assert.match(browser, /virtualKeyboard\.overlaysContent = document\.fullscreenElement === player/u);
+  assert.match(browser, /window\.innerHeight - visualViewport\.height - visualViewport\.offsetTop/u);
+  assert.match(browser, /virtualKeyboardRect\.width > 0[\s\S]*virtualKeyboardRect\.height > 0/u);
+  assert.match(browser, /document\.fullscreenElement === player[\s\S]*virtualKeyboard !== null[\s\S]*virtualKeyboard\.boundingRect/u);
+  assert.match(browser, /Math\.min\(viewportBaselineHeight, virtualKeyboardRect\.height\)/u);
+  assert.match(browser, /const usableHeight = virtualKeyboardVisible[\s\S]*viewportBaselineHeight - virtualKeyboardHeight[\s\S]*: viewportHeight/u);
+  assert.match(browser, /fullscreenHeight: virtualKeyboardVisible \? viewportBaselineHeight : null/u);
+  assert.match(browser, /const fullscreenInset = document\.fullscreenElement === player && measuredKeyboard[\s\S]*\? measuredKeyboardHeight/u);
+  assert.match(browser, /"none" \| "viewport" \| "virtual-keyboard"/u);
+  assert.doesNotMatch(browser, /userAgent/u);
+  assert.doesNotMatch(browser, /fullscreenFallback|geometry: "fallback"|typing-only/u);
+  assert.match(browser, /--fullscreen-keyboard-inset/u);
+  assert.match(layout, /--player-usable-height: 100dvh/u);
+  assert.match(layout, /--fullscreen-player-height: 100dvh/u);
+  assert.match(layout, /--fullscreen-keyboard-inset: 0px/u);
+  assert.match(layout, /--keyboard-transcript-reserve: 5rem/u);
+  assert.match(layout, /height: min\(100dvh, var\(--player-usable-height\)\)/u);
+  assert.match(layout, /grid-template-rows:[\s\S]*var\(--media-height\)[\s\S]*minmax\(0, 1fr\)[\s\S]*auto[\s\S]*auto/u);
+  assert.match(layout, /\.player \{[\s\S]*overflow: hidden/u);
+  assert.match(layout, /\.player\[data-keyboard="open"\] \{[\s\S]*--safe-bottom-reserve: 0px/u);
+  assert.match(layout, /\.player\[data-keyboard="open"\]:not\(:fullscreen\) \{[\s\S]*height: var\(--player-usable-height\)/u);
+  assert.match(layout, /\.player:fullscreen \{[\s\S]*height: var\(--fullscreen-player-height\);[\s\S]*padding-bottom: var\(--fullscreen-keyboard-inset\)/u);
+  assert.match(responsive, /\.player\[data-chrome="overlay"\]/u);
+  assert.match(browser, /const mediaHeight = keyboardLayout\.open[\s\S]*constrainedKeyboardMediaHeight\(preferredMediaHeight, usableHeight, overlayChrome\)/u);
+  assert.match(browser, /const boundedTranscriptReserve = Math\.min\(transcriptReserve, availableConversationHeight\)/u);
+  assert.match(browser, /Math\.max\(0, availableConversationHeight - boundedTranscriptReserve\)/u);
+  assert.match(browser, /function remPixelValue[\s\S]*remValue \* rootFontSize/u);
+  assert.doesNotMatch(html, /data-height-composition/u);
+  assert.doesNotMatch(responsive, /data-height-composition/u);
+  assert.doesNotMatch(responsive, /@media \(max-height: 600px\)/u);
+});
+
+test("Player media replacement exposes direct, fade, and crossfade fixtures with reduced-motion fallback", async () => {
+  const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const media = await readFile(resolve(process.cwd(), "player/styles/components-media.css"), "utf8");
+
+  assert.match(browser, /mediaTransitionDemo: PlayerMediaTransitionFixture = "direct"/u);
+  assert.match(browser, /\["direct", "fade", "crossfade"\]\.includes\(value\)/u);
+  assert.match(browser, /prefers-reduced-motion: reduce/u);
+  assert.match(browser, /mediaTransitionDemo === "fade"[\s\S]*duration: 180/u);
+  assert.match(browser, /Promise\.all\([\s\S]*duration: 320/u);
+  assert.match(media, /\.media-transition-outgoing[\s\S]*position: absolute/u);
+});
+
+test("Player authored control fills compute readable text and preserve authored state hooks", async () => {
+  const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
+  const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
+
+  assert.equal(readableControlText("#ffffff"), "#000000");
+  assert.equal(readableControlText("#000000"), "#ffffff");
+  assert.throws(() => readableControlText("red"), /Unsupported authored control fill/u);
+  assert.match(render, /--authored-control-fill/u);
+  assert.match(render, /--authored-control-hover/u);
+  assert.match(render, /--authored-control-pressed/u);
+  assert.match(effects, /data-authored-fill/u);
+  assert.match(effects, /\.action-button\[data-authored-fill\][\s\S]*background: color-mix\(in srgb, var\(--authored-control-fill\) 60%, transparent\)/u);
+  assert.match(effects, /\.foreground-button\[data-authored-fill\][\s\S]*background: var\(--authored-control-fill\)/u);
+  assert.match(effects, /\.foreground-button\[data-authored-fill\][\s\S]*background: var\(--authored-control-hover\)/u);
+});

@@ -31,9 +31,14 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTUR
 - Minimal engine primitive families for background timed work and future media capabilities under ADR 0017.
 - Serializable lowering or engine-managed continuation representation for resumable library workflows not covered by
   ADR 0018's full-lowering choice.
-- Browser unavailability, reload, reconnect, device-sleep, and visibility-change time-integrity policy for local timed
-  work.
-- Optional author-defined recovery points, including rollback scope and treatment of irreversible external effects.
+- Exact checkpoint selection, deadline recalculation, repeating-timer, and server-authoritative-time mechanics needed
+  to implement the owner-selected missed-event barrier for browser unavailability/reload/reconnect/device sleep.
+- Exact recovery-frontier mechanics for non-restorable custom presentation, including checkpoint selection and optional
+  advanced reconstruction/snapshot support.
+- Exact durable external-effect protocol across recovery boundaries: effect identity, ownership/release authority,
+  transactional checkpoint/effect commit, reservation/lease lifecycle, idempotency, and cleanup behavior.
+- Optional author-defined recovery points beyond automatic recovery frontiers, including rollback scope and treatment of
+  irreversible external effects.
 
 ## Language, Standard Library, and modules
 
@@ -65,14 +70,14 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
   autoplay.
 - Constrained LLM interpretation contract and author-facing options for natural-language numbers and non-exact choice
   answers.
-- Exact button-row/dropdown breakpoints, measurements, and overflow behavior.
 - Whether and how to revise the accepted V30 timer API for explicit handles and final pause/resume/stop/restart,
   repetition, persistence, and visible-presentation semantics.
 
 ## Player and interactions
 
 Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
-[`CODE-EDITOR.md`](CODE-EDITOR.md), [ADR 0010](decisions/0010-package-network-policy.md),
+[`ui/PLAYER-UI.md`](ui/PLAYER-UI.md),
+[ADR 0010](decisions/0010-package-network-policy.md),
 [ADR 0012](decisions/0012-custom-view-capability.md),
 [ADR 0016](decisions/0016-resumable-pending-action-runtime-contract.md), and
 [ADR 0018](decisions/0018-first-standard-library-poc-contract.md). Owner-selected release-stage design outcomes
@@ -81,9 +86,29 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and Content Security Policy.
 - Action-kind-specific media completion, advanced timeout, cancellation, and recovery policies beyond ADR 0018's
   mandatory basic interactions.
-- Background-handler interruption, ordering, cleanup, and foreground-slot interaction after the public timer API is
-  decided.
 - Stable text-output target handles beyond the first Standard chat target.
+- Exact author-facing theme schema/registration API and platform dark-theme token values. `ui/PLAYER-UI.md` fixes
+  precedence, standalone/light/dark theme semantics, missing-variant fallback, and the no-arbitrary-CSS boundary.
+- Exact author-facing data/API form for supported Standard Player per-control base/fill colours. The Player already owns
+  derived interaction styling and automatic readable black/white control-label text; syntax, serialization, and which
+  Standard control kinds expose the colour input remain unresolved.
+- Constrained transcript rich-text/BBCode capability: allowed formatting elements/attributes, sanitization, and how
+  accessibility treatment preserves authored colour/formatting semantics while meeting readability needs.
+- Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
+  readable scaling/zoom behavior, minimum control sizing, contrast thresholds, and browser/platform responsibility.
+- Player UI preference persistence: which panel/tool/theme/media-fit/text-display preferences survive reload or session
+  changes and whether restoration is automatic, explicit, or both.
+- Exact tuned thresholds/measurements for constraint-driven side-region dock/overlay decisions, compact geometry,
+  fixed tool width, stage height, readable conversation bounds, composer growth, and focus-outline thickness.
+- Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
+- Exact developer-facing declaration for a Player-generated Standard tool that combines a title, ordered static
+  content, and typed controls such as toggles, numeric/text fields, and selects, including value binding, updates,
+  submission, persistence, accessibility metadata, and the boundary with fully custom tools.
+- Exact Standard/runtime API, data shapes, persistence binding, names, and author syntax for the owner-resolved
+  long-lived control family; runtime semantics are maintained in `RUNTIME.md` and presentation in `ui/PLAYER-UI.md`.
+- Exact custom-view registration/lifecycle API, typed input/event/result schemas, author syntax, surface isolation
+  (including optional Shadow DOM), and reconstructible-state declaration/validation; ADR 0012 fixes capability
+  semantics.
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
 - Camera capability declarations, stream ownership, device switching, quality negotiation, restore, privacy
   indicators, and simultaneous-camera policy.
@@ -92,9 +117,16 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Motion detection, sampling, camera resource limits, and scene ownership.
 - Media layering, concurrent ownership, cleanup, recovery, and resource handles.
 - Persistent media identity, labels, timestamps, retrieval, privacy, retention, encryption, export, and quotas.
-- Custom-view author syntax within the accepted custom-view capability.
 - Browser-helper boundary for files, toys, camera, offline behavior, and OS capabilities.
 - Time-integrity logging thresholds and whether a future typed anomaly hook is script-visible.
+
+## Debugger and simulation
+
+Current constraints: [`DEBUGGER.md`](DEBUGGER.md), [`RUNTIME.md`](RUNTIME.md), and
+[`DATA-AND-API.md`](DATA-AND-API.md).
+
+- Player/developer debugger enablement, authorization, and history marking.
+- Server test/simulation namespaces and external-effect behavior for disposable active-debug forks.
 
 ## Platform and continuous personalities
 

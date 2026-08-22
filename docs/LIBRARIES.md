@@ -229,6 +229,10 @@ The normal Player application has no player-facing pause control, and this POC i
 
 ### Deferred Standard Library details
 
+Future long-lived control wrappers must preserve the runtime semantics maintained in [`RUNTIME.md`](RUNTIME.md). Exact
+momentary/toggle/select/status/progress API names, data shapes, persistence binding, update/removal surface, and author
+syntax remain deferred.
+
 The first POC does not settle:
 
 - advanced parenthesized call forms;

@@ -21,7 +21,11 @@
 - `LIBRARIES.md`
 - `SECURITY.md`
 - `CONTINUOUS-PERSONALITIES.md`
-- `CODE-EDITOR.md`
+- `CODE-EDITOR.md`: browser code editor and tooling integration.
+- `DEBUGGER.md`: runtime inspection, simulation, and debug execution.
+- `ui/PLAYER-UI.md`: normative Standard Player UI; while `Upstream contract integration` is non-empty, Player work also
+  reads that section.
+- `ui/UI-DESIGN-AND-ENGINEERING.md`: shared UI guidance; narrow tasks use its focused reading route.
 - `LLM-INTEGRATION.md`
 - `MATH-EXPRESSIONS.md`
 - `TESTING.md`: current testing strategy, runtime invariants, and future quality gates.
@@ -61,7 +65,8 @@ progress record plus active, non-implemented planning; entries do not schedule t
 
 - `planning/RELEASE-ROADMAP.md` records owner-selected release-stage placement, open release-stage outcomes, and
   compact roadmap progress history.
-- `planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md` retains open timer-handle and advanced recovery-point direction.
+- `planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md` retains open timer-handle, browser-unavailability, and author-defined
+  recovery-point direction.
 - `planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md` retains open camera ownership, capture, media-lifetime, and
   browser/server time-integrity direction.
 - `planning/MAINTENANCE-CANDIDATES.md` lists optimization and maintenance candidates to revalidate when selected for
