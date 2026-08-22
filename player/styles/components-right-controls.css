@@ -24,13 +24,17 @@
         align-items: center;
         gap: 12px;
 
-        overflow-y: auto;
+        overflow-y: hidden;
         overscroll-behavior: contain;
 
         padding-block: 5px;
 
         scrollbar-width: thin;
         scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
+      }
+
+      .timer-list:has(.timer:nth-child(2)) {
+        overflow-y: auto;
       }
 
       .timer-label[hidden] {
@@ -153,15 +157,17 @@
         grid-row: 2;
       }
 
-      .player[data-chrome="overlay"] .right-zone {
+      .player[data-compact-timers="true"] .right-zone {
         grid-template-rows: minmax(0, 1fr);
       }
 
-      .player[data-chrome="overlay"] .right-zone > .action-scroll {
+      .player[data-compact-timers="true"] .right-zone > .action-scroll {
         grid-row: 1;
       }
 
       .action-scroll {
+        --action-edge-fade: 10px;
+
         min-width: 0;
         min-height: 0;
 
@@ -174,10 +180,14 @@
         overscroll-behavior: contain;
 
         padding:
-          12px
+          var(--action-edge-fade)
           var(--safe-right)
-          calc(10px + var(--safe-bottom))
+          calc(var(--action-edge-fade) + var(--safe-bottom-reserve))
           0;
+
+        scroll-padding-block:
+          var(--action-edge-fade)
+          calc(var(--action-edge-fade) + var(--safe-bottom-reserve));
 
         scrollbar-width: thin;
         scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
@@ -186,16 +196,16 @@
           linear-gradient(
             to bottom,
             transparent 0,
-            #000 18px,
-            #000 calc(100% - 18px),
+            #000 var(--action-edge-fade),
+            #000 calc(100% - var(--action-edge-fade)),
             transparent 100%
           );
         mask-image:
           linear-gradient(
             to bottom,
             transparent 0,
-            #000 18px,
-            #000 calc(100% - 18px),
+            #000 var(--action-edge-fade),
+            #000 calc(100% - var(--action-edge-fade)),
             transparent 100%
           );
       }
@@ -368,14 +378,6 @@
 
       .right-status-progress::-moz-progress-bar {
         background: var(--package-accent);
-      }
-
-      .right-control-origin {
-        grid-column: 1 / -1;
-        color: var(--color-text-muted);
-        font-size: 9px;
-        font-weight: 650;
-        line-height: 1.1;
       }
 
       .right-toggle-control:has(input:disabled),

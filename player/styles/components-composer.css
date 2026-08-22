@@ -27,8 +27,6 @@
         width: 100%;
         min-width: 0;
 
-        field-sizing: content;
-
         min-block-size: 38px;
         max-block-size:
           min(
@@ -89,14 +87,65 @@
 
 @layer components {
       .composer-feedback {
-        width: min(100%, var(--conversation-max-width));
-        margin: 4px auto 0;
-        color: var(--color-text-muted);
-        font-size: 10px;
-        line-height: 1.25;
+        position: absolute;
+        z-index: 25;
+        right: calc(12px + var(--safe-right));
+        bottom: calc(100% + 4px);
+        left: calc(12px + var(--safe-left));
+
+        width: auto;
+        max-width: var(--conversation-max-width);
+        margin-inline: auto;
+        padding: 8px 10px;
+        border: 1px solid var(--color-border-default);
+        border-radius: 7px;
+        background: var(--color-surface-component);
+        box-shadow: 0 3px 10px var(--color-structural-shadow);
+        color: var(--color-text-primary);
+        font-size: 12px;
+        line-height: 1.3;
       }
 
       .composer-feedback[hidden] {
         display: none;
+      }
+
+      .player-notification {
+        position: relative;
+        z-index: 45;
+        grid-column: 2;
+        grid-row: 3 / 5;
+        align-self: end;
+        justify-self: center;
+
+        max-width: min(90%, 36rem);
+        margin: 0 12px 12px;
+        padding: 9px 12px;
+        border: 1px solid var(--color-border-default);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--color-surface-component) 90%, transparent);
+        box-shadow: 0 3px 10px var(--color-structural-shadow);
+        color: var(--color-text-primary);
+        font-size: 12px;
+        font-weight: 650;
+        line-height: 1.25;
+        text-align: center;
+        pointer-events: none;
+      }
+
+      .player-notification[hidden] {
+        display: none;
+      }
+
+      .player-notification[data-visible="false"] {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
       }
 }

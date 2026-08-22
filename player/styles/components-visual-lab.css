@@ -57,6 +57,7 @@
       }
 
       .lab-tuning-row {
+        position: relative;
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
@@ -153,6 +154,7 @@
       }
 
       .lab-option {
+        position: relative;
         display: grid;
         grid-template-columns:
           minmax(0, 1fr)
@@ -162,7 +164,7 @@
         gap: 10px;
 
         min-width: 0;
-        min-block-size: 67px;
+        min-block-size: 50px;
 
         padding: 10px 0;
 
@@ -172,6 +174,10 @@
 
       .lab-option-copy {
         min-width: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 6px;
       }
 
       .lab-option-title {
@@ -186,15 +192,72 @@
       }
 
       .lab-option-note {
+        position: absolute;
+        z-index: 15;
+        top: calc(100% - 6px);
+        right: 0;
+        left: 0;
         display: block;
 
-        margin-top: 2px;
+        padding: 8px 9px;
+        border: 1px solid var(--color-border-default);
+        border-radius: 6px;
+        background: var(--color-surface-component);
+        box-shadow: 0 3px 10px var(--color-structural-shadow);
 
-        color: var(--color-text-quiet);
-        font-size: 9px;
-        line-height: 1.25;
+        color: var(--color-text-muted);
+        font-size: 10px;
+        line-height: 1.35;
 
         overflow-wrap: anywhere;
+      }
+
+      .lab-option:has(.lab-option-copy:hover),
+      .lab-option:has(.lab-option-info-trigger:focus-visible),
+      .lab-option:has(.lab-option-info[data-open="true"]),
+      .lab-tuning-row:has(.lab-option-copy:hover),
+      .lab-tuning-row:has(.lab-option-info-trigger:focus-visible),
+      .lab-tuning-row:has(.lab-option-info[data-open="true"]) {
+        z-index: 10;
+      }
+
+      .lab-option-info {
+        display: block;
+      }
+
+      .lab-option-note {
+        display: none;
+      }
+
+      .lab-option-copy:hover .lab-option-note {
+        display: block;
+      }
+
+      .lab-option-info-trigger:focus-visible + .lab-option-note,
+      .lab-option-info[data-open="true"] .lab-option-note {
+        display: block;
+      }
+
+      .lab-option-info-trigger {
+        width: 20px;
+        height: 20px;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: 1px solid var(--color-border-default);
+        border-radius: 50%;
+        background: var(--color-surface-component);
+        color: var(--color-text-muted);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
+        list-style: none;
+        cursor: pointer;
+      }
+
+      .lab-option-info-trigger:focus-visible {
+        outline: var(--focus-outline-width) solid var(--color-accent-focus);
+        outline-offset: 1px;
       }
 
 

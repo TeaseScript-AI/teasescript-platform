@@ -90,7 +90,6 @@ export interface PlayerRightTogglePresentation extends PlayerRightControlBase {
   readonly kind: "toggle";
   readonly value: boolean;
   readonly recordUserHistory: boolean;
-  readonly updateSource?: "script";
 }
 
 export interface PlayerRightSelectPresentation extends PlayerRightControlBase {
@@ -98,7 +97,6 @@ export interface PlayerRightSelectPresentation extends PlayerRightControlBase {
   readonly value: string;
   readonly options: readonly (readonly [value: string, label: string])[];
   readonly recordUserHistory: boolean;
-  readonly updateSource?: "script";
 }
 
 export interface PlayerRightStatusPresentation extends PlayerRightControlBase {

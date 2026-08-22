@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta
     name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
+    content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
   />
   <meta name="color-scheme" content="light" />
   <title>TeaseScript Player</title>
@@ -31,6 +31,8 @@
     id="player"
     data-left="auto"
     data-right="auto"
+    data-right-layout="stage"
+    data-right-backing="overlay"
     data-chrome="normal"
   >
     <div class="title-bg" aria-hidden="true"></div>
@@ -130,10 +132,20 @@
       class="return-to-latest"
       id="returnToLatest"
       type="button"
+      aria-label="Return to latest message"
       hidden
     >
-      Return to latest
+      <span aria-hidden="true">↓</span>
     </button>
+
+    <div
+      class="player-notification"
+      id="playerNotification"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      hidden
+    ></div>
 
     <section
       class="foreground-controls"

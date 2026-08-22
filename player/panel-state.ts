@@ -15,3 +15,14 @@ export function toggleRightPanelMode(
   const isDocked = current === "docked" || (current === "auto" && usesWideDefaultLayout);
   return isDocked ? "overlay" : "docked";
 }
+
+export function canDockRightRail(
+  viewportWidth: number,
+  desiredLeftWidth: number,
+  rightRailWidth: number,
+  minimumMiddleWidth: number,
+  narrowComposition: boolean,
+): boolean {
+  if (narrowComposition) return false;
+  return viewportWidth - desiredLeftWidth - rightRailWidth >= minimumMiddleWidth;
+}

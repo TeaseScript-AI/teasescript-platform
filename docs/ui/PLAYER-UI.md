@@ -116,10 +116,10 @@ currently available visual-viewport height.
 
 | Condition | Current POC role | Intended behavior |
 | --- | --- | --- |
-| width `>= 761px` | wide-composition baseline | Side regions may reserve space. Automatic tools are open and the automatic right backing rail is docked when constraints permit. |
-| width `<= 760px` | narrow-composition baseline | Left tools become an overlay drawer. Right-side presentation uses overlay/reservation rules that protect readable content rather than a device label. |
+| width `>= 761px` | wide tool-composition baseline | Open tools use a docked horizontal strip. Right-control docking is decided separately from the width breakpoint by the space left after the complete preferred tool-strip width. |
+| width `<= 760px` | narrow tool-composition baseline | Left tools become an overlay drawer. Right-side presentation overlays the stage so the conversation can use the full width beneath it. |
 | width `<= 480px` | compact review target | Re-audit selected control geometry. If compact values remain, use deliberate discrete values rather than continuous viewport-driven shrinking. Do not shrink arbitrary tool content. |
-| low usable height or fullscreen | **overlay chrome mode** | Ordinary title chrome auto-hides/overlays so stage height is not consumed unnecessarily; required tools/fullscreen-exit/global controls remain reachable. |
+| usable visual-viewport height `<= 768px`, or fullscreen | **overlay chrome mode** | Ordinary title chrome auto-hides/overlays so stage height is not consumed unnecessarily; required tools/fullscreen-exit/global controls remain reachable. Timer compaction is a separate height decision and currently starts at `<= 600px`. |
 
 The old term `low-height mode` is therefore replaced by **overlay chrome mode**. Low available height and actual
 fullscreen may activate the same chrome presentation rather than maintaining two unrelated implementations. Fullscreen
@@ -131,10 +131,12 @@ content, while a wide/short shape can preserve vertical control extent because h
 A narrow tall desktop window and a similarly shaped phone should therefore converge on the same layout reasoning.
 Foldables likewise use their currently available dimensions rather than a special device category.
 
-Manual panel choices are temporary overrides **within the current wide/narrow composition class**. Resizing inside the
-same class preserves that explicit choice. Crossing between wide and narrow re-evaluates the responsive default instead
-of carrying a stale override into a materially different composition. A future persistent user preference may refine
-this policy separately.
+Manual open/closed tool intent is preserved across resizing and rotation when the tool region owns focus or remains the
+active interaction context. A responsive change must not spontaneously open a previously closed drawer. When an open
+docked strip becomes an overlay drawer while focus is elsewhere, it may close so that it does not unexpectedly block the
+active Player region. Right backing intent is likewise stable, while the layout independently decides whether the right
+controls can occupy a reserved rail or must overlay the stage. A future persistent user preference may refine this
+session-local policy separately.
 
 The Player must size against the currently usable visual viewport when a software keyboard or similar browser UI reduces
 available space.
@@ -146,30 +148,33 @@ content. Major numerical values below are POC reconstruction/tuning baselines un
 
 | Item | POC baseline / intended rule |
 | --- | --- |
-| Player viewport | full viewport width and `100dvh`; outer document is not the normal scroll owner |
+| Player viewport | full viewport width and currently usable visual-viewport height; `100dvh` is the CSS baseline and the outer document is not the normal scroll owner |
 | normal title bar | `52px` plus top safe-area inset; visually retestable |
-| normal stage row | current `62dvh` baseline; expose as a development tuning value and visually re-evaluate |
+| normal stage row | current `55dvh` baseline; expose as a development tuning value and visually re-evaluate |
 | overlay-chrome stage row | current `64dvh` baseline; visually re-evaluate with low-height and fullscreen cases |
-| tool column | move to one fixed default POC width rather than viewport-proportional `clamp()` sizing; use the current `250px` clamp maximum as the initial Visual Lab test value, not a frozen final width |
+| tool column | fixed `300px` default; individual columns do not shrink to hide their content |
 | readable conversation maximum | current `900px` baseline; keep a cap for ultrawide readability and visually retest, including browser zoom |
 | protected conversation minimum | current `380px` baseline; remeasure after tool-width/right-rail simplification |
 | normal conversation side gap | current `18px` baseline before safe-area contribution |
-| narrow tools drawer | current `min(300px, 100vw - 120px)` baseline, preserving an outside dismissal area |
+| narrow tools drawer | grows from one complete `300px` tool plus strip gutters when more columns are open, capped at `90vw`; the remaining outside area dismisses the drawer |
 
 Keeping the stage roughly square when practical is a design goal, not a hard 1:1 layout invariant. The goal exists so
 both portrait and landscape media remain useful. Side panels should not casually crush the stage into a narrow strip,
 but a rigid 1:1 rule must not cause surprising responsive transitions. Final dock/overlay decisions should use the full
 set of layout constraints.
 
-Safe-area insets affect Player chrome and controls. Stage/media remains allowed to occupy its complete visual region
-rather than receiving identical safe-area padding by default. During the POC, `Visual Lab` may temporarily override stage
+Current dynamic safe-area insets reported by the browser affect Player chrome and controls. Do not permanently reserve
+the static maximum inset, infer rounded hardware corners, or add a device/UA-based fallback when the browser reports
+zero; rectangular and currently unobstructed viewports must not lose space. Stage/media remains allowed to occupy its
+complete visual region rather than receiving identical safe-area padding by default. During the POC, `Visual Lab` may
+temporarily override stage
 heights, fixed tool width, conversation bounds, and composer line/viewport caps; Reset removes those development-only
 overrides. The shared `2px` focus outline is the accepted Player baseline rather than a tuning control.
 
 Scrolling ownership:
 
 - transcript: vertical conversation scrolling;
-- tool-column strip: horizontal carousel/scrolling;
+- tool-column strip: native horizontal scrolling, with carousel navigation only while content actually overflows;
 - each tool body: its own vertical scrolling;
 - right background-control/status stack: vertical scrolling when needed;
 - composer input: internal vertical scrolling after its constraint-based growth limit;
@@ -189,10 +194,10 @@ Current typography and component geometry are provisional visual baselines. Valu
 | UI font stack | `"Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` |
 | title | `14px`, weight `700` |
 | speaker name | `9px`, weight `700`, line-height `1.2` |
-| speaker message | `12px`, line-height `1.25`; authored speaker font may replace the UI font |
-| player-authored message | `13px`; otherwise follows transcript message rhythm |
-| normal composer text / Send | `11px`; Send weight `700` |
-| narrow composer text | `10px`; Send remains `11px` |
+| speaker message | `16px` (`1rem`), line-height `1.25`; authored speaker font may replace the UI font |
+| player-authored message | `16px` (`1rem`), following the same transcript rhythm |
+| normal composer text / Send | composer `16px` (`1rem`); Send remains `11px`, weight `700` |
+| narrow composer text | composer remains `16px` (`1rem`); Send remains `11px` |
 | normal timer | `18px`, weight `700`, tabular numerals |
 | compact timer | current smaller timer values remain a visual-tuning baseline rather than a final `<= 480px` contract |
 | background control label | `12px`, weight `600`, line-height `1.2` |
@@ -235,8 +240,9 @@ horizontal carousel behavior, responsive drawer behavior, and surrounding layout
 
 The left tools area has `auto`, explicit `open`, and explicit `closed` presentation states. `auto` opens/reserves on wide
 layouts and closes on narrow layouts under the current baseline. The tools toggle changes `auto` to the opposite of the
-current responsive default and thereafter toggles explicit state. Explicit state is preserved while the Player remains
-in the same wide/narrow composition class; crossing that composition boundary re-evaluates the automatic policy.
+current responsive default and thereafter toggles explicit state. Rotation/resizing preserves the user's closed intent;
+an open tool region remains open across composition changes only while it owns the active interaction/focus context, so
+a newly overlaid drawer does not unexpectedly cover the Player while the user is working elsewhere.
 
 On wide layouts an open tools area reserves horizontal space. On narrow layouts it becomes an opaque chrome-surface
 drawer rather than shrinking the main Player content.
@@ -306,7 +312,17 @@ Scroll Snap rather than bespoke swipe physics. In effectively single-tool narrow
 boundary should settle a nearly completed swipe cleanly onto the adjacent tool. When the viewport can usefully display
 more than one tool or partial views of multiple tools, do not force page-like snapping; positions such as two tools each
 roughly 75% visible remain valid. Previous/next arrow controls may advance by logical tool columns without creating a
-second carousel state model. A gesture that became a pan/scroll must not accidentally fire a child button click.
+second carousel state model. Arrows and scroll markers appear only when the strip actually overflows; strip gutters are
+part of its visible allocation and must not create a false overflow state at the final column. Native horizontal
+wheel/trackpad, touch-pan, and keyboard scrolling remain the fallback where enhanced CSS carousel controls are not
+supported. A gesture that became a pan/scroll must not accidentally fire a child button click, and navigation markers
+must never activate the tool/control whose position they reveal.
+
+Compact explanatory copy for Visual Lab-style options may be disclosed without permanently consuming every row. The
+complete title/copy area reveals its information on pointer hover and toggles it on tap/click; a visible information
+button remains the touch and keyboard affordance. Keyboard focus reveals the same text. At most one such disclosure is
+latched open, and an outside activation or `Escape` closes it. This disclosure behavior is Player/tool chrome behavior,
+not a requirement that every custom tool use the same explanatory-copy component.
 
 ### Wide sizing direction
 
@@ -374,13 +390,17 @@ Smart follow reactivates when either:
 The return-to-latest control appears only when the user is sufficiently away from current content and is not in the
 middle of an active touch/scroll gesture. On touch, wait until the finger is released and scrolling has settled rather
 than placing a button under the user's moving finger. Hide the control once latest content is reached/follow resumes.
-Its exact threshold and placement remain visual tuning details; it must not permanently occupy reading space.
+It is a compact, translucent down-arrow control at the lower right of the transcript, using the conversation's unused
+side margin instead of claiming a new vertical row. It may overlap an avatar margin before it obscures message text and
+uses restrained backdrop blur where supported. Its exact threshold remains a tuning detail.
 
 ### Message presentation and provenance
 
-Speaker/package output aligns to the normal reading side; player-authored output aligns to the opposite side. The
-current avatar, speaker-name, speaker-coloured rule, and message-width geometry remain the POC visual baseline. Speaker
-identity colour/font and per-message rich-text styling are content presentation, not application palette roles.
+Speaker/package output aligns to the normal reading side; player-authored output aligns to the opposite side. A message
+row may use at most `90%` of the conversation width, while its readable copy is capped at `65ch`; this preserves an
+opposite-side margin on narrow layouts without forcing short wrapping on wider ones. The current avatar, speaker-name,
+and speaker-coloured rule remain the POC visual baseline. Speaker identity colour/font and per-message rich-text styling
+are content presentation, not application palette roles.
 
 ADR 0018 owns canonical transcript effects of foreground completion: valid text/number answers and choice/button
 activations become player-authored transcript messages according to its normalization and visible-text rules. Every
@@ -414,7 +434,14 @@ control are separate visible component surfaces on the canvas. This is an intent
 The input grows upward only within the conversation area. Its maximum height is constraint-based: a large desktop may
 show more lines than a phone with its software keyboard open. After the limit, only the input scrolls internally. Composer
 growth may reduce the visible transcript viewport but must never push or resize the stage out of its allocated position,
-and the composer may never grow larger than the conversation area available beneath the stage.
+and the composer may never grow larger than the conversation area available beneath the stage. The composer row must
+contain the complete measured input and Send control; a growing textarea may not paint beyond that row or beneath the
+visual-viewport/keyboard boundary.
+
+The Player requests layout-viewport resizing for the software keyboard and re-evaluates from the visual viewport during
+and after keyboard/orientation transitions. If the remaining height cannot fit the composer plus a useful transcript or
+stage slice, the focused composer becomes the only visible primary region; this is based on available height rather than
+a hard-coded landscape-phone rule. Browser-reported safe areas remain in force in this state.
 
 The composer receives focus by default. Non-interactive Player clicks should not arbitrarily steal typing focus; an
 explicitly focused tool/input/control naturally owns keyboard input while it is active. Standard keyboard behavior is:
@@ -446,11 +473,17 @@ click/tap on Player background/unused space or Space with the empty focused comp
 Actual interactive controls always take precedence and must not also fire the viewport-wide pacing shortcut.
 
 A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Its width is bounded by
-the available conversation control area, has a practical touch/click minimum, and otherwise grows with its label rather
-than becoming arbitrarily full-width. Long labels may wrap. `choose` uses one or two rows of buttons when practical and
-dynamically switches to a dropdown/select when option count, label length, font metrics, zoom, accessibility settings, or
-available space make buttons impractical. Button-versus-dropdown presentation is Player UI state, not canonical runtime
-or checkpoint state.
+the available foreground-control lane, has a practical touch/click minimum, and otherwise grows with its label rather
+than becoming arbitrarily full-width. Long labels may wrap. The foreground-control lane spans the available middle
+region between an open tools strip and reserved right rail; unlike prose, it is not capped by the `900px` reading width.
+Buttons are centered while they fit. When they overflow they remain individually authored buttons in a native
+horizontal scroll/snap carousel, preserving authored colour and semantics rather than changing into a dropdown.
+Enhanced CSS arrows/markers appear only during real overflow and are navigation only; selecting a marker reveals a
+button but never activates it. The arrows sit at the left and right edges beside the button row; only a compact marker
+strip sits beneath the buttons, so carousel chrome does not claim another control-height row. Browsers without those
+enhanced controls keep the usable native horizontal scroller. Carousel position is Player UI state, not canonical
+runtime or checkpoint state. Authored foreground buttons use their solid authored colour because media never sits behind
+this lane; authored right-rail actions retain the translucent floating-control treatment described below.
 
 Validation content and retry semantics come from the controlling interaction/runtime contract. The Player must not
 invent a competing inline-error semantic merely because the current POC lacks the richer accepted V30 `invalidMessage`
@@ -487,14 +520,16 @@ Normal timer text is:
 
 The determinate ring represents elapsed fraction. The current circular size and package/theme accent treatment remain the
 POC visual baseline. In overlay chrome mode the timer may use the current compact title-height presentation; exact compact
-size remains visually tuneable. Multiple compact timers wrap horizontally when the available rail width permits before
-adding another row. A timer disappears when its underlying visible timer action/lifecycle has completed and no longer
-requires presentation.
+size remains visually tuneable. Multiple compact timers use one horizontally scrollable row rather than consuming
+additional Action height. A timer disappears when its underlying visible timer action/lifecycle has completed and no
+longer requires presentation.
 
-When exactly one visible timer exists, it stays fixed while the background-control/status list scrolls beneath it. When
-multiple visible timers exist, they form part of the right-side stack and may scroll together with that stack when the
-available height is insufficient. Overflow content fades/softens at both top and bottom boundaries rather than being
-hard-clipped; with one fixed timer the upper fade carries scrolling controls visually behind/beneath the timer region.
+When exactly one visible timer exists, its timer pane never presents a scrollbar; the complete ring fits and stays fixed
+while the background-control/status list scrolls independently beneath it. When multiple visible timers exist, the timer
+pane may scroll only when those timers actually exceed its allocation. A hidden timer removes its complete pane and does
+not leave a scrollbar, gap, or lifecycle hint. Overflow content fades/softens at relevant boundaries rather than being
+hard-clipped; with one fixed timer the upper action fade carries scrolling controls visually behind/beneath the timer
+region.
 
 ### Background controls and status
 
@@ -516,7 +551,10 @@ accepted V30 permanent-button disappear-while-handler-runs presentation once the
 contract is synchronized. Exact busy animation is a Phase-4 visual-tuning question; it should use a familiar
 indeterminate-activity cue, must not require control reflow, and must remain distinguishable from keyboard focus and
 disabled/inert presentation. Programmatic updates visibly change the same control state but must remain recognizable as
-script-initiated rather than user input. Explicit removal is a separate lifecycle operation.
+script-initiated rather than user input. Their feedback is transient and must not add permanent text to the control or
+change rail geometry. The Visual Lab currently compares toast, local highlight, local badge, and toast-plus-local
+combinations; this fixture intentionally does not select the final paint treatment. Explicit removal is a separate
+lifecycle operation.
 
 Ordering is stable and deterministic at the presentation level:
 
@@ -535,27 +573,32 @@ Recorded background-control activation history follows the transcript provenance
 With one timer, the control/status group targets the Player viewport centre while all items fit, yielding downward only
 when the fixed timer would otherwise collide with it. A software keyboard reduces the usable space for this calculation.
 Once the control/status list no longer fits, only that list scrolls and the timer remains fixed. With multiple timers,
-timers and controls share the right-side scroll stack when its content exceeds the available height; compact timers wrap
-horizontally where width permits so timer count does not unnecessarily consume vertical Action space.
+the timer pane owns timer overflow and the action pane continues to own action overflow; compact timers use a horizontal
+row so timer count does not unnecessarily consume vertical Action space.
 
 ### Right background mode
 
-The right backing region has automatic docked/overlay behavior plus an explicit user override. The compact toggle changes
-only the **rail background/reservation mode**, not whether timers or controls exist. Its icon should change to represent
-the effective expanded/docked versus collapsed/overlay state rather than using one unchanged glyph.
+The right presentation has two independent state axes: **control geometry** (`rail` or stage overlay) and **backing
+paint** (docked surface or transparent overlay). The compact toggle changes only the backing preference; it never moves
+the controls, changes their vertical owner, or alters timer/control existence. Its icon represents the effective backing
+state.
 
-- automatic mode uses the current wide/narrow responsive policy subject to actual layout constraints;
-- explicit mode is stable inside the current wide/narrow composition class;
-- crossing that composition boundary re-evaluates the responsive policy;
-- a docked/open backing reservation remains stable even when no timer/control/status item is currently visible so later
-  content does not recenter the transcript or stage;
-- removing the rail background does not alter timer/control geometry or state styling;
-- timer and ordinary background-control surfaces keep the already tuned approximately `60%` component-surface opacity in
-  both docked and overlay backing modes. Sliding the backing surface underneath them must not change their opacity.
+Automatic control geometry is constraint-driven rather than tied to a second viewport breakpoint. It considers the
+complete preferred width of all currently open docked tool columns, the `190px` right-control width, and the larger of
+the protected conversation minimum and useful stage minimum. If that full composition fits, controls occupy the
+right-rail track from the title boundary downward. If it does not fit—or tools use the narrow drawer—the right track is
+returned to the middle region and the same controls overlay the stage. This one geometry decision applies to the timer
+and complete action stack; no action-specific alignment owner may move the buttons at another threshold.
 
-On wide layouts an overlay backing may retain the same right-side reservation so transcript/composer geometry does not
-recenter while stage media extends behind floating controls. On narrow layouts the final overlay/reservation split is
-constraint-driven; protect readable transcript/composer content rather than assuming a physical device category.
+- explicit backing preference remains stable while geometry changes;
+- a docked backing may remain reserved even when no timer/control/status item is currently visible so later content does
+  not cause geometry churn;
+- removing the backing surface does not alter control geometry or state styling;
+- in rail geometry with transparent backing, stage media may extend behind the floating controls while transcript and
+  composer retain their readable rail reservation;
+- in stage-overlay geometry, stage, transcript, foreground lane, and composer all reclaim the returned right track;
+- timer and ordinary background-control surfaces keep the tuned approximately `60%` component-surface opacity in both
+  backing modes, while explicitly authored action colour uses the same translucent right-rail treatment.
 
 ## Interaction states and input methods
 

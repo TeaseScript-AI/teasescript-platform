@@ -24,7 +24,7 @@ import type {
   RightPanelMode,
 } from "./model.js";
 import { createLayoutDebugController } from "./layout-debug.js";
-import { toggleLeftPanelMode, toggleRightPanelMode } from "./panel-state.js";
+import { canDockRightRail, toggleLeftPanelMode, toggleRightPanelMode } from "./panel-state.js";
 import {
   matchForegroundChoiceByVisibleText,
   renderForegroundControls,
@@ -51,6 +51,7 @@ const compactTimerHost = requiredElement<HTMLElement>("compactTimerHost", HTMLEl
 const timerWrap = requiredElement<HTMLElement>("timerWrap", HTMLElement);
 const transcript = requiredElement<HTMLElement>("transcript", HTMLElement);
 const returnToLatest = requiredElement<HTMLButtonElement>("returnToLatest", HTMLButtonElement);
+const playerNotification = requiredElement<HTMLElement>("playerNotification", HTMLElement);
 const foregroundControls = requiredElement<HTMLElement>("foregroundControls", HTMLElement);
 const actions = requiredElement<HTMLElement>("actions", HTMLElement);
 const timerList = requiredElement<HTMLElement>("timerList", HTMLElement);
@@ -81,7 +82,7 @@ let vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
 let busyActionDemoStyle = "off";
 let busyControlDemoTarget: "action" | "toggle" | "select" = "action";
 let timerLabelDemoPlacement = "below";
-let timerLabelContentDemo: "generic" | "authored" = "generic";
+let timerLabelContentDemo: "generic" | "authored" = "authored";
 let timerCountDemo = 1;
 let timerKindDemo: PlayerTimerKind = "visible";
 let mediaTransitionDemo: PlayerMediaTransitionFixture = "direct";
@@ -94,10 +95,23 @@ let presentation = DEMO_PRESENTATION;
 let rightControlsDemo: readonly PlayerRightControlPresentation[] = DEMO_PRESENTATION.rightControls;
 let rightControlsVisibleDemo = true;
 let scriptUpdateDemoTarget: "toggle" | "select" = "toggle";
+let scriptUpdateFeedbackDemo: ScriptUpdateFeedbackDemo = "toast-highlight";
 let activityMessages: readonly PlayerMessagePresentation[] = [];
+let pacingMessages: readonly PlayerMessagePresentation[] = [];
+let pacingSequenceIndex = 0;
+let pacingTimer: ReturnType<typeof setTimeout> | null = null;
+let scriptUpdateFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+let viewportSettleTimer: ReturnType<typeof setTimeout> | null = null;
 let activitySequence = 1;
-let choiceResizeQueued = false;
 let layoutDebugActivated = false;
+let carouselPresentationSyncQueued = false;
+let rightCompositionSyncQueued = false;
+let visibleForegroundHeight = 0;
+
+type ScriptUpdateFeedbackDemo = "toast" | "highlight" | "badge" | "toast-highlight" | "toast-badge";
+
+const PACING_MESSAGE_DELAY_MS = 1_500;
+const SCRIPT_UPDATE_FEEDBACK_MS = 2_400;
 
 const layoutDebug = createLayoutDebugController({
   player,
@@ -116,10 +130,12 @@ const layoutDebug = createLayoutDebugController({
 renderCorePresentation();
 renderTools();
 resetVisualLab();
+syncComposerInputSize();
 syncPanelAccessibility();
 syncLeftPreferredWidth();
 syncLeftReserve();
 syncOverlayChromeMode();
+syncRightComposition();
 syncFullscreenControl();
 layoutDebug.sync();
 void loadDemoMedia();
@@ -128,10 +144,21 @@ sceneMedia.addEventListener("error", () => {
   sceneMedia.hidden = true;
 });
 
-new ResizeObserver(syncLeftReserve).observe(leftPanel);
-new ResizeObserver(syncLeftPreferredWidth).observe(toolStrip);
-new ResizeObserver(queueChoicePresentationSync).observe(foregroundControls);
 new ResizeObserver(() => {
+  syncLeftReserve();
+  queueRightCompositionSync();
+}).observe(leftPanel);
+new ResizeObserver(syncLeftPreferredWidth).observe(toolStrip);
+new ResizeObserver(queueCarouselPresentationSync).observe(toolStripScroll);
+new ResizeObserver(queueCarouselPresentationSync).observe(toolStrip);
+new ResizeObserver(queueCarouselPresentationSync).observe(foregroundControls);
+let composerInlineSize = -1;
+new ResizeObserver(() => {
+  const nextInlineSize = composer.clientWidth;
+  if (nextInlineSize !== composerInlineSize) {
+    composerInlineSize = nextInlineSize;
+    syncComposerInputSize();
+  }
   transcriptController.sync();
   layoutDebug.queueSync();
 }).observe(composer);
@@ -151,7 +178,8 @@ leftScrim.addEventListener("click", () => {
 });
 
 rightToggle.addEventListener("click", () => {
-  player.dataset.right = toggleRightPanelMode(currentRightMode(), usesWideDefaultLayout());
+  player.dataset.right = toggleRightPanelMode(currentRightMode(), usesDockedRightComposition());
+  syncRightComposition();
   syncPanelAccessibility();
 });
 
@@ -166,20 +194,35 @@ document.addEventListener("fullscreenchange", () => {
 });
 
 narrowScreen.addEventListener("change", () => {
-  player.dataset.left = "auto";
-  player.dataset.right = "auto";
+  if (narrowScreen.matches && currentLeftMode() !== "closed") {
+    player.dataset.left = leftPanel.contains(document.activeElement) ? "open" : "closed";
+  } else if (!narrowScreen.matches && currentLeftMode() === "auto") {
+    player.dataset.left = "closed";
+  }
   syncPanelAccessibility();
   queueLeftReserveSync();
-  queueChoicePresentationSync();
 });
 
 window.addEventListener("resize", () => {
+  syncComposerInputSize();
   syncOverlayChromeMode();
-  queueChoicePresentationSync();
+  queueRightCompositionSync();
+  queueCarouselPresentationSync();
 });
 window.visualViewport?.addEventListener("resize", () => {
+  syncComposerInputSize();
   syncOverlayChromeMode();
-  queueChoicePresentationSync();
+  queueRightCompositionSync();
+  queueCarouselPresentationSync();
+});
+window.visualViewport?.addEventListener("scroll", syncViewportTransition);
+window.addEventListener("orientationchange", syncViewportTransition);
+
+composerInput.addEventListener("focus", syncViewportTransition);
+composerInput.addEventListener("blur", syncViewportTransition);
+composerInput.addEventListener("input", () => {
+  syncComposerInputSize();
+  syncOverlayChromeMode();
 });
 
 player.addEventListener("click", (event) => {
@@ -191,6 +234,7 @@ player.addEventListener("click", (event) => {
   if (
     foregroundDemoKind === "none"
     && pacingGateDemo === "skippable"
+    && hasPendingPacingMessage()
     && isPacingBackgroundTarget(target)
   ) {
     settlePacingGate();
@@ -198,6 +242,7 @@ player.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && closeLabOptionInfo()) return;
   if (
     event.key === "Escape"
     && narrowScreen.matches
@@ -208,6 +253,12 @@ document.addEventListener("keydown", (event) => {
     queueLeftReserveSync();
     leftToggle.focus();
   }
+});
+
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  if (target.closest("[data-lab-option-copy]") === null) closeLabOptionInfo();
 });
 
 composerInput.addEventListener("keydown", (event) => {
@@ -230,7 +281,7 @@ composerInput.addEventListener("keydown", (event) => {
       completeForeground(foreground.label);
       return;
     }
-    if (foreground === null && pacingGateDemo === "skippable") {
+    if (foreground === null && pacingGateDemo === "skippable" && hasPendingPacingMessage()) {
       event.preventDefault();
       settlePacingGate();
     }
@@ -256,16 +307,6 @@ foregroundControls.addEventListener("click", (event) => {
   }
 });
 
-foregroundControls.addEventListener("change", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLSelectElement) || !target.matches("[data-foreground-choice-select]")) return;
-  if (target.value.length === 0 || target.disabled) return;
-  const foreground = currentForegroundPresentation();
-  if (foreground?.kind !== "choose") return;
-  const option = foreground.options.find((item) => item.id === target.value);
-  if (option !== undefined) completeForeground(option.label);
-});
-
 actions.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
@@ -279,8 +320,7 @@ actions.addEventListener("change", (event) => {
   if (target instanceof HTMLInputElement && target.matches("[data-right-toggle]") && !target.disabled) {
     rightControlsDemo = rightControlsDemo.map((control) => {
       if (control.kind !== "toggle" || control.id !== target.dataset.rightToggle) return control;
-      const { updateSource: _updateSource, ...rest } = control;
-      return { ...rest, value: target.checked };
+      return { ...control, value: target.checked };
     });
     const control = rightControlsDemo.find((item) => item.kind === "toggle" && item.id === target.dataset.rightToggle);
     if (control?.kind === "toggle" && control.recordUserHistory) {
@@ -293,8 +333,7 @@ actions.addEventListener("change", (event) => {
   if (target instanceof HTMLSelectElement && target.matches("[data-right-select]") && !target.disabled) {
     rightControlsDemo = rightControlsDemo.map((control) => {
       if (control.kind !== "select" || control.id !== target.dataset.rightSelect) return control;
-      const { updateSource: _updateSource, ...rest } = control;
-      return { ...rest, value: target.value };
+      return { ...control, value: target.value };
     });
     const control = rightControlsDemo.find((item) => item.kind === "select" && item.id === target.dataset.rightSelect);
     if (control?.kind === "select" && control.recordUserHistory) {
@@ -354,6 +393,20 @@ toolStrip.addEventListener("input", (event) => {
 toolStrip.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
+
+  const infoTrigger = target.closest<HTMLButtonElement>("[data-lab-option-info-trigger]");
+  if (infoTrigger !== null) {
+    toggleLabOptionInfo(infoTrigger);
+    return;
+  }
+
+  const infoCopy = target.closest<HTMLElement>("[data-lab-option-copy]");
+  if (infoCopy !== null && target.closest(".lab-option-info") === null) {
+    const trigger = infoCopy.querySelector<HTMLButtonElement>("[data-lab-option-info-trigger]");
+    if (trigger === null) throw new Error("Visual Lab information copy is missing its trigger.");
+    toggleLabOptionInfo(trigger);
+    return;
+  }
 
   if (target.closest("[data-tool-column-add]") !== null) {
     appendToolColumn();
@@ -424,7 +477,7 @@ function renderRightControls(): void {
 
 function syncTranscript(): void {
   transcriptController.setMessages(
-    [...createDemoHistoryMessages(historySizeDemo), ...activityMessages],
+    [...createDemoHistoryMessages(historySizeDemo), ...pacingMessages, ...activityMessages],
     presentation.speakers,
   );
 }
@@ -461,40 +514,9 @@ function syncForegroundPresentation(): void {
   }
 
   syncControlAvailability();
-  queueChoicePresentationSync();
+  queueCarouselPresentationSync();
+  syncOverlayChromeMode();
   layoutDebug.queueSync();
-}
-
-function queueChoicePresentationSync(): void {
-  if (choiceResizeQueued) return;
-  choiceResizeQueued = true;
-  requestAnimationFrame(() => {
-    choiceResizeQueued = false;
-    syncChoicePresentationMode();
-  });
-}
-
-function syncChoicePresentationMode(): void {
-  const group = foregroundControls.querySelector<HTMLElement>("[data-foreground-choice-buttons]");
-  const select = foregroundControls.querySelector<HTMLSelectElement>("[data-foreground-choice-select]");
-  if (group === null || select === null) return;
-
-  group.hidden = false;
-  select.hidden = true;
-  const buttons = [...group.querySelectorAll<HTMLButtonElement>("[data-foreground-choice]")];
-  const rows = new Set(buttons.map((button) => Math.round(button.offsetTop)));
-  const excessivelyTall = buttons.some((button) => button.getBoundingClientRect().height > 72);
-  const transcriptStyle = getComputedStyle(transcript);
-  const transcriptVerticalPadding =
-    Number.parseFloat(transcriptStyle.paddingTop) + Number.parseFloat(transcriptStyle.paddingBottom);
-  const leavesTranscriptContent = transcript.clientHeight - transcriptVerticalPadding > 1;
-  const playerRect = player.getBoundingClientRect();
-  const composerRect = composer.getBoundingClientRect();
-  const playerOverflows = player.scrollHeight > player.clientHeight + 1 || composerRect.bottom > playerRect.bottom + 1;
-  const useSelect = rows.size > 2 || excessivelyTall || playerOverflows || !leavesTranscriptContent;
-  group.hidden = useSelect;
-  select.hidden = !useSelect;
-  syncControlAvailability();
 }
 
 function syncControlAvailability(): void {
@@ -502,7 +524,7 @@ function syncControlAvailability(): void {
   const foregroundActive = currentForegroundPresentation() !== null;
   composerInput.disabled = disabled && !foregroundActive;
   sendButton.disabled = disabled && !foregroundActive;
-  for (const control of foregroundControls.querySelectorAll<HTMLButtonElement | HTMLSelectElement>("button, select")) {
+  for (const control of foregroundControls.querySelectorAll<HTMLButtonElement>("button")) {
     control.disabled = false;
   }
   for (const control of actions.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>("button, input, select")) {
@@ -567,18 +589,24 @@ function isAcceptedNumberText(value: string): boolean {
 
 function completeComposerSubmission(text: string): void {
   appendActivityMessage(text);
-  composerInput.value = "";
+  clearComposerValue();
   clearComposerFeedback();
   restoreComposerFocus();
 }
 
 function completeForeground(text: string): void {
   appendActivityMessage(text);
-  composerInput.value = "";
+  clearComposerValue();
   foregroundDemoKind = "none";
   syncForegroundPresentation();
   syncVisualControls();
   restoreComposerFocus();
+}
+
+function clearComposerValue(): void {
+  composerInput.value = "";
+  syncComposerInputSize();
+  syncOverlayChromeMode();
 }
 
 function showComposerFeedback(message: string): void {
@@ -592,8 +620,55 @@ function clearComposerFeedback(): void {
 }
 
 function settlePacingGate(): void {
-  pacingGateDemo = "off";
-  syncVisualControls();
+  if (pacingGateDemo !== "skippable" || !hasPendingPacingMessage()) return;
+  cancelPacingTimer();
+  revealNextPacingMessage();
+}
+
+function startPacingDemo(): void {
+  cancelPacingTimer();
+  pacingMessages = [];
+  pacingSequenceIndex = 0;
+  if (pacingGateDemo === "off") {
+    syncTranscript();
+    return;
+  }
+
+  historySizeDemo = 0;
+  activityMessages = [];
+  foregroundDemoKind = "none";
+  syncForegroundPresentation();
+  syncTranscript();
+  revealNextPacingMessage();
+}
+
+function revealNextPacingMessage(): void {
+  const source = createDemoHistoryMessages(DEMO_PRESENTATION.messages.length)[pacingSequenceIndex];
+  if (source === undefined) {
+    cancelPacingTimer();
+    return;
+  }
+
+  const message = { ...source, id: `pacing-${pacingSequenceIndex + 1}` };
+  pacingSequenceIndex += 1;
+  pacingMessages = [...pacingMessages, message];
+  transcriptController.appendMessage(message, presentation.speakers);
+  if (hasPendingPacingMessage()) {
+    pacingTimer = setTimeout(() => {
+      pacingTimer = null;
+      revealNextPacingMessage();
+    }, PACING_MESSAGE_DELAY_MS);
+  }
+}
+
+function hasPendingPacingMessage(): boolean {
+  return pacingSequenceIndex < DEMO_PRESENTATION.messages.length;
+}
+
+function cancelPacingTimer(): void {
+  if (pacingTimer === null) return;
+  clearTimeout(pacingTimer);
+  pacingTimer = null;
 }
 
 function isInteractiveTarget(target: Element): boolean {
@@ -615,9 +690,10 @@ function simulateScriptUpdate(): void {
     const toggle = rightControlsDemo.find((control): control is PlayerRightTogglePresentation => control.kind === "toggle");
     if (toggle === undefined) return;
     rightControlsDemo = rightControlsDemo.map((control) => control.id === toggle.id
-      ? { ...toggle, value: !toggle.value, updateSource: "script" }
+      ? { ...toggle, value: !toggle.value }
       : control);
     renderRightControls();
+    showScriptUpdateFeedback(toggle.id, `${toggle.label} changed by the script.`);
     return;
   }
 
@@ -627,9 +703,45 @@ function simulateScriptUpdate(): void {
   const next = select.options[(currentIndex + 1) % select.options.length];
   if (next === undefined) return;
   rightControlsDemo = rightControlsDemo.map((control) => control.id === select.id
-    ? { ...select, value: next[0], updateSource: "script" }
+    ? { ...select, value: next[0] }
     : control);
   renderRightControls();
+  showScriptUpdateFeedback(select.id, `${select.label} changed by the script.`);
+}
+
+function showScriptUpdateFeedback(controlId: string, message: string): void {
+  clearScriptUpdateFeedback();
+  const showsToast = scriptUpdateFeedbackDemo === "toast"
+    || scriptUpdateFeedbackDemo === "toast-highlight"
+    || scriptUpdateFeedbackDemo === "toast-badge";
+  const localPresentation = scriptUpdateFeedbackDemo === "highlight"
+    || scriptUpdateFeedbackDemo === "toast-highlight"
+      ? "highlight"
+      : scriptUpdateFeedbackDemo === "badge" || scriptUpdateFeedbackDemo === "toast-badge"
+        ? "badge"
+        : null;
+
+  playerNotification.hidden = false;
+  playerNotification.textContent = message;
+  playerNotification.dataset.visible = String(showsToast);
+  const control = actions.querySelector<HTMLElement>(`[data-control-id="${CSS.escape(controlId)}"]`);
+  if (control !== null && localPresentation !== null) {
+    control.dataset.scriptUpdateFeedback = localPresentation;
+  }
+  scriptUpdateFeedbackTimer = setTimeout(clearScriptUpdateFeedback, SCRIPT_UPDATE_FEEDBACK_MS);
+}
+
+function clearScriptUpdateFeedback(): void {
+  if (scriptUpdateFeedbackTimer !== null) {
+    clearTimeout(scriptUpdateFeedbackTimer);
+    scriptUpdateFeedbackTimer = null;
+  }
+  for (const control of actions.querySelectorAll<HTMLElement>("[data-script-update-feedback]")) {
+    delete control.dataset.scriptUpdateFeedback;
+  }
+  playerNotification.textContent = "";
+  playerNotification.hidden = true;
+  delete playerNotification.dataset.visible;
 }
 
 async function replaceDemoMedia(): Promise<void> {
@@ -717,18 +829,58 @@ function syncFullscreenControl(): void {
 function syncOverlayChromeMode(): void {
   const usableHeight = window.visualViewport?.height ?? window.innerHeight;
   player.style.setProperty("--player-usable-height", `${Math.max(0, usableHeight)}px`);
-  const overlay = document.fullscreenElement === player || usableHeight <= 600;
-  player.dataset.chrome = overlay ? "overlay" : "normal";
-  rightRailLayout.sync(overlay);
+  const compactTimers = usableHeight <= 600;
+  const overlayChrome = document.fullscreenElement === player || usableHeight <= 768;
+  player.dataset.chrome = overlayChrome ? "overlay" : "normal";
+  player.dataset.compactTimers = compactTimers ? "true" : "false";
+  player.dataset.heightComposition = usesComposerOnlyComposition(usableHeight) ? "composer-only" : "standard";
+  rightRailLayout.sync(compactTimers);
   player.style.setProperty(
     "--media-height",
-    usableViewportLength(overlay ? "--media-height-overlay" : "--media-height-normal", usableHeight),
+    usableViewportLength(overlayChrome ? "--media-height-overlay" : "--media-height-normal", usableHeight),
   );
   player.style.setProperty(
     "--composer-effective-viewport-height",
     usableViewportLength("--composer-max-viewport-height", usableHeight),
   );
+  queueRightCompositionSync();
   layoutDebug.queueSync();
+}
+
+function syncViewportTransition(): void {
+  syncComposerInputSize();
+  syncOverlayChromeMode();
+  queueCarouselPresentationSync();
+  if (viewportSettleTimer !== null) clearTimeout(viewportSettleTimer);
+  viewportSettleTimer = setTimeout(() => {
+    viewportSettleTimer = null;
+    syncComposerInputSize();
+    syncOverlayChromeMode();
+    queueCarouselPresentationSync();
+  }, 300);
+}
+
+function syncComposerInputSize(): void {
+  composerInput.style.blockSize = "auto";
+  const borderSize = composerInput.offsetHeight - composerInput.clientHeight;
+  composerInput.style.blockSize = `${composerInput.scrollHeight + borderSize}px`;
+}
+
+function usesComposerOnlyComposition(usableHeight: number): boolean {
+  if (document.activeElement !== composerInput) return false;
+  const stageHeight = Number.parseFloat(usableViewportLength("--media-height-overlay", usableHeight));
+  const minimumConversationHeight = Number.parseFloat(getComputedStyle(player).fontSize) * 1.5;
+  const measuredForegroundHeight = foregroundControls.getBoundingClientRect().height;
+  if (measuredForegroundHeight > 0) visibleForegroundHeight = measuredForegroundHeight;
+  const foregroundHeight = foregroundControls.hidden ? 0 : visibleForegroundHeight;
+  return usableHeight < requiredComposerHeight() + foregroundHeight + stageHeight + minimumConversationHeight;
+}
+
+function requiredComposerHeight(): number {
+  const style = getComputedStyle(composer);
+  return composerForm.getBoundingClientRect().height
+    + cssPixelValue(style, "padding-block-start")
+    + cssPixelValue(style, "padding-block-end");
 }
 
 function usableViewportLength(property: string, usableHeight: number): string {
@@ -769,6 +921,7 @@ function renderTools(scrollMode: "preserve" | "end" = "preserve"): void {
       toolStripScroll.scrollLeft = Math.min(previousScrollLeft, maxScrollLeft);
     }
     syncLeftReserve();
+    syncCarouselPresentation();
   });
 }
 
@@ -805,6 +958,10 @@ function usesWideDefaultLayout(): boolean {
   return !narrowScreen.matches;
 }
 
+function usesDockedRightComposition(): boolean {
+  return player.dataset.rightLayout === "rail";
+}
+
 function currentLeftMode(): LeftPanelMode {
   const value = player.dataset.left;
   if (value === "auto" || value === "open" || value === "closed") return value;
@@ -823,11 +980,49 @@ function syncPanelAccessibility(): void {
   const leftOpen = leftMode === "open" || (leftMode === "auto" && wideDefault);
   leftToggle.setAttribute("aria-expanded", String(leftOpen));
 
-  const rightMode = currentRightMode();
-  const rightDocked = rightMode === "docked" || (rightMode === "auto" && wideDefault);
+  const rightDocked = player.dataset.rightBacking === "docked";
   rightToggle.setAttribute("aria-pressed", String(rightDocked));
   rightToggle.setAttribute("aria-label", rightDocked ? "Use overlay right panel background" : "Dock right panel background");
   layoutDebug.queueSync();
+}
+
+function queueRightCompositionSync(): void {
+  if (rightCompositionSyncQueued) return;
+  rightCompositionSyncQueued = true;
+  requestAnimationFrame(() => {
+    rightCompositionSyncQueued = false;
+    syncRightComposition();
+  });
+}
+
+function syncRightComposition(): void {
+  const style = getComputedStyle(player);
+  const rightWidth = cssPixelValue(style, "--right-controls-width");
+  const conversationMinimum = cssPixelValue(style, "--conversation-min-width");
+  const stageMinimum = cssPixelValue(style, "--media-height");
+  const desiredLeftWidth = usesWideDefaultLayout() && currentLeftMode() !== "closed"
+    ? cssPixelValue(style, "--left-preferred")
+    : 0;
+  const minimumMiddleWidth = Math.max(conversationMinimum, stageMinimum);
+  const railFits = canDockRightRail(
+    player.clientWidth,
+    desiredLeftWidth,
+    rightWidth,
+    minimumMiddleWidth,
+    narrowScreen.matches,
+  );
+
+  player.dataset.rightLayout = railFits ? "rail" : "stage";
+  const rightMode = currentRightMode();
+  const dockedBacking = rightMode === "docked" || (rightMode === "auto" && railFits);
+  player.dataset.rightBacking = dockedBacking ? "docked" : "overlay";
+  syncPanelAccessibility();
+  layoutDebug.queueSync();
+}
+
+function cssPixelValue(style: CSSStyleDeclaration, property: string): number {
+  const value = Number.parseFloat(style.getPropertyValue(property));
+  return Number.isFinite(value) ? value : 0;
 }
 
 function queueLeftReserveSync(): void {
@@ -841,6 +1036,47 @@ function syncLeftPreferredWidth(): void {
   const stripWidth = Math.ceil(toolStrip.getBoundingClientRect().width);
   const panelChromeWidth = Math.max(0, Math.ceil(leftPanel.getBoundingClientRect().width - toolStripScroll.clientWidth));
   player.style.setProperty("--left-preferred", `${stripWidth + panelChromeWidth}px`);
+}
+
+function queueCarouselPresentationSync(): void {
+  if (carouselPresentationSyncQueued) return;
+  carouselPresentationSyncQueued = true;
+  requestAnimationFrame(() => {
+    carouselPresentationSyncQueued = false;
+    syncCarouselPresentation();
+  });
+}
+
+function syncCarouselPresentation(): void {
+  setHorizontalOverflowState(toolStripScroll);
+  const foregroundCarousel = foregroundControls.querySelector<HTMLElement>("[data-foreground-choice-buttons]");
+  if (foregroundCarousel !== null) setHorizontalOverflowState(foregroundCarousel);
+}
+
+function setHorizontalOverflowState(scroller: HTMLElement): void {
+  scroller.dataset.overflow = String(scroller.scrollWidth > scroller.clientWidth + 1);
+}
+
+function toggleLabOptionInfo(trigger: HTMLButtonElement): void {
+  const info = trigger.closest<HTMLElement>(".lab-option-info");
+  if (info === null) throw new Error("Visual Lab information trigger is missing its owner.");
+  const open = info.dataset.open !== "true";
+  closeLabOptionInfo(info);
+  if (open) info.dataset.open = "true";
+  else delete info.dataset.open;
+  trigger.setAttribute("aria-expanded", String(open));
+}
+
+function closeLabOptionInfo(except?: HTMLElement): boolean {
+  let closed = false;
+  for (const info of toolStrip.querySelectorAll<HTMLElement>('.lab-option-info[data-open="true"]')) {
+    if (info === except) continue;
+    delete info.dataset.open;
+    const trigger = info.querySelector<HTMLButtonElement>("[data-lab-option-info-trigger]");
+    trigger?.setAttribute("aria-expanded", "false");
+    closed = true;
+  }
+  return closed;
 }
 
 function syncLeftReserve(): void {
@@ -865,13 +1101,15 @@ function setVisualOption(effect: string, enabled: boolean): void {
 }
 
 function resetVisualLab(): void {
+  cancelPacingTimer();
+  clearScriptUpdateFeedback();
   accentColor = DEFAULT_VISUAL_PREFERENCES.accentColor;
   ambientEnabled = DEFAULT_VISUAL_PREFERENCES.ambient;
   vignetteEnabled = DEFAULT_VISUAL_PREFERENCES.vignette;
   busyActionDemoStyle = "off";
   busyControlDemoTarget = "action";
   timerLabelDemoPlacement = "below";
-  timerLabelContentDemo = "generic";
+  timerLabelContentDemo = "authored";
   timerCountDemo = 1;
   timerKindDemo = "visible";
   mediaTransitionDemo = "direct";
@@ -883,7 +1121,10 @@ function resetVisualLab(): void {
   rightControlsDemo = DEMO_PRESENTATION.rightControls;
   rightControlsVisibleDemo = true;
   scriptUpdateDemoTarget = "toggle";
+  scriptUpdateFeedbackDemo = "toast-highlight";
   activityMessages = [];
+  pacingMessages = [];
+  pacingSequenceIndex = 0;
   document.documentElement.style.setProperty("--package-accent", accentColor);
   player.classList.toggle("fx-ambient", ambientEnabled);
   player.classList.toggle("fx-vignette", vignetteEnabled);
@@ -936,6 +1177,7 @@ function setPresentationDemoSelection(key: string, value: string): void {
     case "pacing-gate":
       if (!["off", "skippable", "unskippable"].includes(value)) throw new Error(`Unknown pacing fixture: ${value}`);
       pacingGateDemo = value as PlayerPacingFixture;
+      startPacingDemo();
       break;
     case "control-availability":
       if (!["enabled", "disabled"].includes(value)) throw new Error(`Unknown control availability: ${value}`);
@@ -944,6 +1186,11 @@ function setPresentationDemoSelection(key: string, value: string): void {
     case "script-update-target":
       if (!["toggle", "select"].includes(value)) throw new Error(`Unknown script-update target: ${value}`);
       scriptUpdateDemoTarget = value as "toggle" | "select";
+      break;
+    case "script-update-feedback":
+      if (!["toast", "highlight", "badge", "toast-highlight", "toast-badge"].includes(value)) throw new Error(`Unknown script-update feedback: ${value}`);
+      scriptUpdateFeedbackDemo = value as ScriptUpdateFeedbackDemo;
+      clearScriptUpdateFeedback();
       break;
     case "right-controls-visibility":
       if (!["visible", "none"].includes(value)) throw new Error(`Unknown right-control visibility fixture: ${value}`);
@@ -1003,6 +1250,7 @@ function syncVisualControls(): void {
       case "pacing-gate": select.value = pacingGateDemo; break;
       case "control-availability": select.value = controlAvailabilityDemo; break;
       case "script-update-target": select.value = scriptUpdateDemoTarget; break;
+      case "script-update-feedback": select.value = scriptUpdateFeedbackDemo; break;
       case "right-controls-visibility": select.value = rightControlsVisibleDemo ? "visible" : "none"; break;
       default: throw new Error(`Unknown presentation demo selection: ${String(select.dataset.demoSelect)}`);
     }

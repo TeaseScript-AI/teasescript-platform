@@ -278,7 +278,7 @@ export function createLayoutDebugController(
     layer.hidden = !options.overflow;
     if (layer.hidden) return;
 
-    const timerAxis: ScrollAxis = player.dataset.chrome === "overlay" ? "x" : "y";
+    const timerAxis: ScrollAxis = player.dataset.compactTimers === "true" ? "x" : "y";
     const owners: Array<readonly [HTMLElement, ScrollAxis, string]> = [
       [transcript, "y", "transcript"],
       [toolStripScroll, "x", "tool strip"],
@@ -287,7 +287,7 @@ export function createLayoutDebugController(
       [actions, "y", "actions"],
     ];
 
-    for (const [index, toolBody] of [...toolStrip.querySelectorAll<HTMLElement>(".tool-body")].entries()) {
+    for (const [index, toolBody] of [...toolStrip.querySelectorAll<HTMLElement>(".tool-column-body")].entries()) {
       owners.push([toolBody, "y", `tool body ${index + 1}`]);
     }
 
@@ -372,7 +372,7 @@ export function createLayoutDebugController(
       "composer-scroll": formatScrollMetrics(composerInput, "y"),
       "right-rail-scroll": formatScrollMetrics(
         timerList,
-        player.dataset.chrome === "overlay" ? "x" : "y",
+        player.dataset.compactTimers === "true" ? "x" : "y",
       ),
       "actions-scroll": formatScrollMetrics(actions, "y"),
       "constraint-stage": `${formatPixels(mediaArea.getBoundingClientRect().height)} measured · target ${activeStageTarget}`,
@@ -404,11 +404,9 @@ export function createLayoutDebugController(
   }
 
   function effectiveRightPresentation(): string {
-    const mode = currentRightMode();
-    if (narrowScreen.matches) {
-      return mode === "docked" ? "overlay geometry · docked backing" : "overlay";
-    }
-    return mode === "overlay" ? "overlay" : "docked";
+    const layout = player.dataset.rightLayout === "rail" ? "rail geometry" : "stage overlay";
+    const backing = player.dataset.rightBacking === "docked" ? "docked backing" : "no backing";
+    return `${layout} · ${backing}`;
   }
 
   function currentLeftMode(): "auto" | "closed" | "open" {

@@ -306,7 +306,6 @@
         .tool-column-close,
         .action-button,
         .foreground-button,
-        .foreground-choice-select,
         .return-to-latest,
         .right-toggle-control,
         .right-select-control,
@@ -446,7 +445,6 @@
 
 @layer effects {
       .foreground-button,
-      .foreground-choice-select,
       .return-to-latest,
       .right-toggle-control,
       .right-select-control,
@@ -460,7 +458,6 @@
 
       @media (any-hover: hover) {
         .foreground-button:not(:disabled):hover,
-        .foreground-choice-select:not(:disabled):hover,
         .return-to-latest:not(:disabled):hover,
         .right-toggle-control:not(:has(input:disabled)):hover,
         .right-select-control:not(:has(select:disabled)):hover {
@@ -482,13 +479,11 @@
         background: color-mix(in srgb, var(--color-component-pressed) 60%, transparent);
       }
 
-      .foreground-choice-select:not(:disabled):active,
       .right-select-control select:not(:disabled):active {
         border-color: var(--color-border-pressed);
       }
 
       .foreground-button:focus-visible,
-      .foreground-choice-select:focus-visible,
       .return-to-latest:focus-visible,
       .right-toggle-control input:focus-visible + .right-switch-ui,
       .right-select-control select:focus-visible {
@@ -496,7 +491,12 @@
         outline-offset: 1px;
       }
 
-      .action-button[data-authored-fill]:not(:disabled),
+      .action-button[data-authored-fill]:not(:disabled) {
+        border-color: color-mix(in oklab, var(--authored-control-fill) 78%, black);
+        background: color-mix(in srgb, var(--authored-control-fill) 60%, transparent);
+        color: var(--authored-control-text);
+      }
+
       .foreground-button[data-authored-fill]:not(:disabled) {
         border-color: color-mix(in oklab, var(--authored-control-fill) 78%, black);
         background: var(--authored-control-fill);
@@ -504,7 +504,12 @@
       }
 
       @media (any-hover: hover) {
-        .action-button[data-authored-fill]:not(:disabled):hover,
+        .action-button[data-authored-fill]:not(:disabled):hover {
+          border-color: color-mix(in oklab, var(--authored-control-hover) 76%, black);
+          background: color-mix(in srgb, var(--authored-control-hover) 60%, transparent);
+          color: var(--authored-control-text);
+        }
+
         .foreground-button[data-authored-fill]:not(:disabled):hover {
           border-color: color-mix(in oklab, var(--authored-control-hover) 76%, black);
           background: var(--authored-control-hover);
@@ -512,11 +517,48 @@
         }
       }
 
-      .action-button[data-authored-fill]:not(:disabled):active,
+      .action-button[data-authored-fill]:not(:disabled):active {
+        border-color: color-mix(in oklab, var(--authored-control-pressed) 72%, black);
+        background: color-mix(in srgb, var(--authored-control-pressed) 60%, transparent);
+        color: var(--authored-control-text);
+      }
+
       .foreground-button[data-authored-fill]:not(:disabled):active {
         border-color: color-mix(in oklab, var(--authored-control-pressed) 72%, black);
         background: var(--authored-control-pressed);
         color: var(--authored-control-text);
+      }
+
+      .right-control[data-script-update-feedback="highlight"] {
+        animation: script-update-highlight 2400ms ease-out both;
+      }
+
+      .right-control[data-script-update-feedback="badge"]::after {
+        content: "Updated";
+        position: absolute;
+        z-index: 2;
+        top: -7px;
+        right: 7px;
+        padding: 2px 6px;
+        border: 1px solid var(--package-accent);
+        border-radius: 999px;
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
+        font-size: 9px;
+        font-weight: 700;
+        line-height: 1.2;
+        pointer-events: none;
+      }
+
+      @keyframes script-update-highlight {
+        0%, 28% {
+          border-color: var(--package-accent);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--package-accent) 24%, transparent);
+        }
+
+        100% {
+          box-shadow: 0 0 0 0 transparent;
+        }
       }
 
       .timer[data-timer-kind="mystery"]::before {
@@ -537,8 +579,13 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
+        .right-control[data-script-update-feedback="highlight"] {
+          animation: none;
+          border-color: var(--package-accent);
+          box-shadow: 0 0 0 2px color-mix(in srgb, var(--package-accent) 24%, transparent);
+        }
+
         .foreground-button,
-        .foreground-choice-select,
         .return-to-latest,
         .right-toggle-control,
         .right-select-control,

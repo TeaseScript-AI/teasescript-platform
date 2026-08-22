@@ -44,3 +44,13 @@ The current composer, foreground controls, transcript-history/smart-follow fixtu
 right-rail controls are presentation-only and are not wired to the deterministic runtime. Accepted Standard interaction
 behavior remains controlled by ADR 0018 and the runtime contracts; the maintained placement/presentation boundary is
 described in `docs/ui/PLAYER-UI.md`.
+
+Current Visual Lab fixtures deliberately exercise several presentation questions without promoting their fixture state
+to runtime or product semantics:
+
+- the timer starts with the authored-label example; generic labels, mystery presentation, hidden presentation, and
+  multiple-timer pressure remain selectable;
+- the pacing-gate fixture reveals a short message sequence over time, with Player-background/empty-composer Space
+  skipping available only in the skippable variant;
+- script-initiated control changes compare toast, local highlight, local badge, and toast-plus-local feedback. Every
+  variant is transient and avoids a permanent rail row; the final visual treatment remains a playtest decision.

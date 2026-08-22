@@ -10,6 +10,8 @@ import type {
   PlayerToolId,
 } from "./model.js";
 
+let nextLabOptionInfoId = 1;
+
 export interface PlayerRenderTargets {
   readonly player: HTMLElement;
   readonly rightControls: HTMLElement;
@@ -140,6 +142,9 @@ export function renderForegroundControls(
     group.setAttribute("aria-label", presentation.accessibleName);
 
     for (const option of presentation.options) {
+      const item = document.createElement("span");
+      item.className = "foreground-choice-item";
+
       const button = document.createElement("button");
       button.type = "button";
       button.className = "foreground-button";
@@ -147,30 +152,10 @@ export function renderForegroundControls(
       button.dataset.foregroundLabel = option.label;
       button.textContent = option.label;
       if (option.authoredFill !== undefined) applyAuthoredControlFill(button, option.authoredFill);
-      group.append(button);
+      item.append(button);
+      group.append(item);
     }
-
-    const select = document.createElement("select");
-    select.className = "foreground-choice-select";
-    select.dataset.foregroundChoiceSelect = "";
-    select.setAttribute("aria-label", presentation.accessibleName);
-    select.hidden = true;
-
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "Choose…";
-    placeholder.disabled = true;
-    placeholder.selected = true;
-    select.append(placeholder);
-
-    for (const option of presentation.options) {
-      const item = document.createElement("option");
-      item.value = option.id;
-      item.textContent = option.label;
-      select.append(item);
-    }
-
-    shell.append(group, select);
+    shell.append(group);
   }
 
   container.append(shell);
@@ -251,7 +236,6 @@ function createRightControl(control: PlayerRightControlPresentation): HTMLElemen
       switchUi.setAttribute("aria-hidden", "true");
 
       label.append(copy, input, switchUi);
-      if (control.updateSource === "script") label.append(createControlOriginBadge());
       return label;
     }
     case "select": {
@@ -277,7 +261,6 @@ function createRightControl(control: PlayerRightControlPresentation): HTMLElemen
       }
 
       label.append(copy, select);
-      if (control.updateSource === "script") label.append(createControlOriginBadge());
       return label;
     }
     case "status": {
@@ -306,14 +289,6 @@ function createRightControl(control: PlayerRightControlPresentation): HTMLElemen
       return item;
     }
   }
-}
-
-function createControlOriginBadge(): HTMLSpanElement {
-  const badge = document.createElement("span");
-  badge.className = "right-control-origin";
-  badge.dataset.controlOrigin = "script";
-  badge.textContent = "Script update";
-  return badge;
 }
 
 function applyAuthoredControlFill(element: HTMLElement, fill: string): void {
@@ -423,8 +398,10 @@ function createToolBody(
 }
 
 function createVisualTool(): HTMLElement {
-  const content = document.createElement("div");
+  const content = document.createElement("form");
   content.className = "lab-content";
+  content.autocomplete = "off";
+  content.addEventListener("submit", (event) => event.preventDefault());
 
   const picker = document.createElement("label");
   picker.className = "theme-picker";
@@ -569,6 +546,18 @@ function createVisualTool(): HTMLElement {
       ],
     ),
     createSelectOption(
+      "Script update feedback",
+      "Compare transient global, local, and combined programmatic-update feedback without changing control geometry.",
+      "script-update-feedback",
+      [
+        ["toast", "Toast"],
+        ["highlight", "Control highlight"],
+        ["badge", "Update badge"],
+        ["toast-highlight", "Toast + highlight"],
+        ["toast-badge", "Toast + badge"],
+      ],
+    ),
+    createSelectOption(
       "Right-rail controls",
       "Hide fixture controls without changing backing/reservation so the empty-rail contract can be exercised.",
       "right-controls-visibility",
@@ -595,7 +584,7 @@ function createVisualTool(): HTMLElement {
     createTuningInput("Wide tool width", "Drawer remains viewport-bounded", "--tool-column-width", "px", 1),
     createTuningInput("Conversation max", "Readable width cap", "--conversation-max-width", "px", 1),
     createTuningInput("Conversation min", "Protected width floor", "--conversation-min-width", "px", 1),
-    createTuningInput("Composer text", "Typing-field font size", "--composer-font-size", "px", 1),
+    createTuningInput("Composer text", "Typing-field font size", "--composer-font-size", "rem", 0.125),
     createTuningInput("Composer lines", "Line-height cap", "--composer-max-lines", "lh", 1),
     createTuningInput("Composer viewport", "Viewport-height cap", "--composer-max-viewport-height", "dvh", 1),
   );
@@ -645,21 +634,10 @@ function createTuningInput(
   property: string,
   unit: string,
   step: number,
-): HTMLLabelElement {
-  const label = document.createElement("label");
-  label.className = "lab-tuning-row";
-
-  const copy = document.createElement("span");
-  copy.className = "lab-option-copy";
-
-  const titleElement = document.createElement("span");
-  titleElement.className = "lab-option-title";
-  titleElement.textContent = title;
-
-  const noteElement = document.createElement("span");
-  noteElement.className = "lab-option-note";
-  noteElement.textContent = note;
-  copy.append(titleElement, noteElement);
+): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "lab-tuning-row";
+  const copy = createLabOptionCopy(title, note);
 
   const field = document.createElement("span");
   field.className = "lab-tuning-field";
@@ -670,6 +648,8 @@ function createTuningInput(
   input.dataset.tuningProperty = property;
   input.dataset.tuningUnit = unit;
   input.step = String(step);
+  input.autocomplete = "off";
+  input.inputMode = "decimal";
   input.setAttribute("aria-label", `${title} (${unit})`);
 
   const unitElement = document.createElement("span");
@@ -677,43 +657,33 @@ function createTuningInput(
   unitElement.textContent = unit;
   field.append(input, unitElement);
 
-  label.append(copy, field);
-  return label;
+  row.append(copy, field);
+  return row;
 }
 
 function createToggleOption(
   title: string,
   note: string,
   effect: string,
-): HTMLLabelElement {
-  const label = document.createElement("label");
-  label.className = "lab-option";
+): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "lab-option";
+  const copy = createLabOptionCopy(title, note);
 
-  const copy = document.createElement("span");
-  copy.className = "lab-option-copy";
-
-  const titleElement = document.createElement("span");
-  titleElement.className = "lab-option-title";
-  titleElement.textContent = title;
-
-  const noteElement = document.createElement("span");
-  noteElement.className = "lab-option-note";
-  noteElement.textContent = note;
-  copy.append(titleElement, noteElement);
-
-  const switchElement = document.createElement("span");
+  const switchElement = document.createElement("label");
   switchElement.className = "switch";
 
   const input = document.createElement("input");
   input.type = "checkbox";
   input.dataset.effect = effect;
+  input.setAttribute("aria-label", title);
 
   const switchUi = document.createElement("span");
   switchUi.className = "switch-ui";
   switchElement.append(input, switchUi);
 
-  label.append(copy, switchElement);
-  return label;
+  row.append(copy, switchElement);
+  return row;
 }
 
 function createSelectOption(
@@ -721,21 +691,10 @@ function createSelectOption(
   note: string,
   key: string,
   options: readonly (readonly [value: string, label: string])[],
-): HTMLLabelElement {
-  const row = document.createElement("label");
+): HTMLElement {
+  const row = document.createElement("div");
   row.className = "lab-option";
-
-  const copy = document.createElement("span");
-  copy.className = "lab-option-copy";
-
-  const titleElement = document.createElement("span");
-  titleElement.className = "lab-option-title";
-  titleElement.textContent = title;
-
-  const noteElement = document.createElement("span");
-  noteElement.className = "lab-option-note";
-  noteElement.textContent = note;
-  copy.append(titleElement, noteElement);
+  const copy = createLabOptionCopy(title, note);
 
   const select = document.createElement("select");
   select.className = "lab-select";
@@ -760,21 +719,10 @@ function createDemoNumberOption(
   min: number,
   step: number,
   max?: number,
-): HTMLLabelElement {
-  const row = document.createElement("label");
+): HTMLElement {
+  const row = document.createElement("div");
   row.className = "lab-option";
-
-  const copy = document.createElement("span");
-  copy.className = "lab-option-copy";
-
-  const titleElement = document.createElement("span");
-  titleElement.className = "lab-option-title";
-  titleElement.textContent = title;
-
-  const noteElement = document.createElement("span");
-  noteElement.className = "lab-option-note";
-  noteElement.textContent = note;
-  copy.append(titleElement, noteElement);
+  const copy = createLabOptionCopy(title, note);
 
   const input = document.createElement("input");
   input.type = "number";
@@ -782,6 +730,8 @@ function createDemoNumberOption(
   input.dataset.demoNumber = key;
   input.min = String(min);
   input.step = String(step);
+  input.autocomplete = "off";
+  input.inputMode = "numeric";
   if (max !== undefined) input.max = String(max);
   input.setAttribute("aria-label", title);
 
@@ -909,70 +859,85 @@ function createLayoutDebugTool(): HTMLElement {
   return content;
 }
 
-function createLayoutDebugModeToggle(): HTMLLabelElement {
-  const label = document.createElement("label");
-  label.className = "lab-option";
+function createLayoutDebugModeToggle(): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "lab-option";
+  const copy = createLabOptionCopy(
+    "Debug mode",
+    "Show or hide the selected layout diagnostics without clearing them.",
+  );
 
-  const copy = document.createElement("span");
-  copy.className = "lab-option-copy";
-
-  const titleElement = document.createElement("span");
-  titleElement.className = "lab-option-title";
-  titleElement.textContent = "Debug mode";
-
-  const noteElement = document.createElement("span");
-  noteElement.className = "lab-option-note";
-  noteElement.textContent = "Show or hide the selected layout diagnostics without clearing them.";
-  copy.append(titleElement, noteElement);
-
-  const switchElement = document.createElement("span");
+  const switchElement = document.createElement("label");
   switchElement.className = "switch";
 
   const input = document.createElement("input");
   input.type = "checkbox";
   input.dataset.layoutDebugEnabled = "";
+  input.setAttribute("aria-label", "Debug mode");
 
   const switchUi = document.createElement("span");
   switchUi.className = "switch-ui";
   switchElement.append(input, switchUi);
 
-  label.append(copy, switchElement);
-  return label;
+  row.append(copy, switchElement);
+  return row;
 }
 
 function createLayoutDebugToggle(
   title: string,
   note: string,
   key: string,
-): HTMLLabelElement {
-  const label = document.createElement("label");
-  label.className = "lab-option";
+): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "lab-option";
+  const copy = createLabOptionCopy(title, note);
 
-  const copy = document.createElement("span");
-  copy.className = "lab-option-copy";
-
-  const titleElement = document.createElement("span");
-  titleElement.className = "lab-option-title";
-  titleElement.textContent = title;
-
-  const noteElement = document.createElement("span");
-  noteElement.className = "lab-option-note";
-  noteElement.textContent = note;
-  copy.append(titleElement, noteElement);
-
-  const switchElement = document.createElement("span");
+  const switchElement = document.createElement("label");
   switchElement.className = "switch";
 
   const input = document.createElement("input");
   input.type = "checkbox";
   input.dataset.layoutDebug = key;
+  input.setAttribute("aria-label", title);
 
   const switchUi = document.createElement("span");
   switchUi.className = "switch-ui";
   switchElement.append(input, switchUi);
 
-  label.append(copy, switchElement);
-  return label;
+  row.append(copy, switchElement);
+  return row;
+}
+
+function createLabOptionCopy(title: string, note: string): HTMLElement {
+  const copy = document.createElement("span");
+  copy.className = "lab-option-copy";
+  copy.dataset.labOptionCopy = "";
+
+  const titleElement = document.createElement("span");
+  titleElement.className = "lab-option-title";
+  titleElement.textContent = title;
+
+  const disclosure = document.createElement("span");
+  disclosure.className = "lab-option-info";
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "lab-option-info-trigger";
+  trigger.dataset.labOptionInfoTrigger = "";
+  trigger.setAttribute("aria-label", `About ${title}`);
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.textContent = "i";
+
+  const noteElement = document.createElement("span");
+  noteElement.className = "lab-option-note";
+  noteElement.id = `lab-option-info-${nextLabOptionInfoId}`;
+  nextLabOptionInfoId += 1;
+  noteElement.setAttribute("role", "tooltip");
+  noteElement.textContent = note;
+  trigger.setAttribute("aria-describedby", noteElement.id);
+  disclosure.append(trigger, noteElement);
+  copy.append(titleElement, disclosure);
+  return copy;
 }
 
 function createLayoutDebugReadout(

@@ -12,34 +12,16 @@
         .player[data-left="auto"] .left-panel,
         .player[data-left="open"] .left-panel {
           min-inline-size: var(--left-open);
+          padding-left: var(--tool-strip-gutter-start);
+          padding-right: var(--tool-strip-gutter-end);
         }
 
-        /*
-          The right toggle changes only the rail background. Keep the Grid
-          track stable so media/transcript/composer geometry cannot recenter.
-        */
-        .player[data-right="overlay"] {
-          --right-track: var(--right-controls-width);
-          --right-reserve: var(--right-controls-width);
-          --conversation-overlay-reserve: 0px;
-        }
-
-        .player[data-right="overlay"] .media-area {
-          grid-column: 2 / 4;
-        }
-
-        .player[data-right="overlay"] .transcript,
-        .player[data-right="overlay"] .foreground-controls,
-        .player[data-right="overlay"] .composer {
-          margin-inline-end: 0;
-        }
       }
 
       @media (max-width: 760px) {
         .player {
-          --composer-font-size: 10px;
           --mobile-drawer-width:
-            min(300px, calc(100vw - 120px));
+            min(90vw, max(var(--left-open), var(--left-preferred)));
         }
 
         .player[data-left="auto"],
@@ -48,37 +30,11 @@
           --left-reserve: 0px;
         }
 
-        .player[data-right="auto"],
-        .player[data-right="docked"],
-        .player[data-right="overlay"] {
-          --right-track: 0px;
-          --right-reserve: 0px;
-        }
-
-        .player[data-right="auto"] .right-zone,
-        .player[data-right="docked"] .right-zone,
-        .player[data-right="overlay"] .right-zone {
-          grid-column: 2 / 4;
-          grid-row: 2 / 3;
-
-          justify-self: end;
-
-          inline-size: var(--right-controls-width);
-          max-inline-size: var(--right-controls-width);
-
-          background: transparent;
-          border-left: 0;
-          box-shadow: none;
-        }
-
-        .player[data-right="docked"] .right-zone {
-          background: var(--color-surface-chrome);
-          box-shadow: -3px 0 8px var(--color-structural-shadow);
-        }
-
         .composer {
           padding-top: 9px;
-          padding-bottom: calc(10px + var(--safe-bottom));
+          padding-bottom: calc(10px + var(--safe-bottom-reserve));
+          padding-left: calc(10px + var(--safe-left));
+          padding-right: calc(10px + var(--safe-right));
         }
 
         /*
@@ -191,78 +147,23 @@
 
           width: var(--mobile-drawer-width);
           padding-top: 0;
+          padding-left: var(--tool-strip-gutter-start);
+          padding-right: var(--tool-strip-gutter-end);
 
           background: var(--color-surface-chrome);
           border-right: 1px solid var(--color-border-default);
           box-shadow: 3px 0 8px var(--color-structural-shadow);
         }
 
-        .player[data-left="open"] .tool-strip {
-          padding-left: calc(5px + var(--safe-left));
-          padding-right: 4px;
-        }
-
         .player[data-left="open"] .tool-column {
           --tool-column-effective-width:
-            max(
-              180px,
+            min(
+              var(--tool-column-width),
               calc(
                 var(--mobile-drawer-width)
-                - 10px
-                - var(--safe-left)
+                - var(--tool-strip-inline-gutters)
               )
             );
-        }
-      }
-
-      /*
-        Wide overlay keeps the same right Grid track as docked mode. In
-        landscape the controls may still span the full Player height, but
-        transcript/composer geometry remains unchanged.
-      */
-      @media (min-width: 761px) and (orientation: landscape) {
-        .player[data-right="overlay"] .right-zone {
-          grid-column: 2 / 4;
-          grid-row: 2 / 6;
-        }
-      }
-
-      /*
-        Narrow auto mode is an overlay. In landscape it follows the same
-        full-height/reserved-strip strategy. In portrait, the controls stay
-        over the media only and transcript/composer keep the full width.
-      */
-      @media (max-width: 760px) and (orientation: landscape) {
-        .player[data-right="auto"],
-        .player[data-right="docked"],
-        .player[data-right="overlay"] {
-          --right-reserve: 0px;
-          --conversation-overlay-reserve: var(--right-controls-width);
-        }
-
-        .player[data-right="auto"] .right-zone,
-        .player[data-right="docked"] .right-zone,
-        .player[data-right="overlay"] .right-zone {
-          grid-column: 2 / 4;
-          grid-row: 2 / 6;
-        }
-
-        .player[data-right="auto"] .transcript,
-        .player[data-right="auto"] .foreground-controls,
-        .player[data-right="auto"] .composer,
-        .player[data-right="docked"] .transcript,
-        .player[data-right="docked"] .foreground-controls,
-        .player[data-right="docked"] .composer,
-        .player[data-right="overlay"] .transcript,
-        .player[data-right="overlay"] .foreground-controls,
-        .player[data-right="overlay"] .composer {
-          margin-inline-end: var(--right-controls-width);
-        }
-
-        .player[data-right="auto"] .return-to-latest,
-        .player[data-right="docked"] .return-to-latest,
-        .player[data-right="overlay"] .return-to-latest {
-          margin-inline-end: var(--right-controls-width);
         }
       }
 
@@ -285,10 +186,6 @@
             10px;
         }
 
-        .action-scroll {
-          padding-top: 8px;
-        }
-
         .timer {
           font-size: 15px;
         }
@@ -298,7 +195,7 @@
         }
 
         .foreground-controls,
-        .composer {
+        .composer-feedback {
           padding-left:
             calc(10px + var(--safe-left));
           padding-right:
@@ -319,6 +216,11 @@
         --title-track: 0px;
         --title-overlay-clearance:
           var(--title-height);
+      }
+
+      /* Keep the Actions scroll boundary below the visible overlay chrome. */
+      .player[data-chrome="overlay"] .right-zone {
+        margin-block-start: var(--title-height);
       }
 
       .player[data-chrome="overlay"] .title-bg {
@@ -357,7 +259,7 @@
           overflow: hidden;
         }
 
-        .player[data-chrome="overlay"] .timer-wrap {
+        .player[data-compact-timers="true"] .timer-wrap {
           inline-size: 100%;
           block-size: 44px;
           min-block-size: 0;
@@ -365,7 +267,7 @@
           padding: 0;
         }
 
-        .player[data-chrome="overlay"] .timer-list {
+        .player[data-compact-timers="true"] .timer-list {
           inline-size: 100%;
           block-size: 44px;
 
@@ -385,11 +287,11 @@
           scrollbar-width: none;
         }
 
-        .player[data-chrome="overlay"] .timer-list::-webkit-scrollbar {
+        .player[data-compact-timers="true"] .timer-list::-webkit-scrollbar {
           display: none;
         }
 
-        .player[data-chrome="overlay"] .timer {
+        .player[data-compact-timers="true"] .timer {
           flex-basis: 34px;
           inline-size: 34px;
           min-inline-size: 34px;
@@ -402,22 +304,42 @@
           font-size: 12px;
         }
 
-        .player[data-chrome="overlay"] .timer[data-label-placement="above"],
-        .player[data-chrome="overlay"] .timer[data-label-placement="below"] {
+        .player[data-compact-timers="true"] .timer[data-label-placement="above"],
+        .player[data-compact-timers="true"] .timer[data-label-placement="below"] {
           gap: 1px;
         }
 
-        .player[data-chrome="overlay"] .timer[data-label-placement="above"] .timer-text,
-        .player[data-chrome="overlay"] .timer[data-label-placement="below"] .timer-text {
+        .player[data-compact-timers="true"] .timer[data-label-placement="above"] .timer-text,
+        .player[data-compact-timers="true"] .timer[data-label-placement="below"] .timer-text {
           font-size: 10px;
         }
 
-        .player[data-chrome="overlay"] .timer[data-label-placement="above"] .timer-label,
-        .player[data-chrome="overlay"] .timer[data-label-placement="below"] .timer-label {
+        .player[data-compact-timers="true"] .timer[data-label-placement="above"] .timer-label,
+        .player[data-compact-timers="true"] .timer[data-label-placement="below"] .timer-label {
           font-size: 7px;
         }
 
-      .player[data-chrome="overlay"] .action-scroll {
-        padding-top: 8px;
+      .player[data-height-composition="composer-only"] {
+        --title-track: 0px;
+        --media-height: 0px;
+        grid-template-rows: 0 0 0 0 minmax(0, 1fr);
       }
+
+      .player[data-height-composition="composer-only"] .title-bg,
+      .player[data-height-composition="composer-only"] .title-controls,
+      .player[data-height-composition="composer-only"] .left-panel,
+      .player[data-height-composition="composer-only"] .left-scrim,
+      .player[data-height-composition="composer-only"] .media-area,
+      .player[data-height-composition="composer-only"] .transcript,
+      .player[data-height-composition="composer-only"] .return-to-latest,
+      .player[data-height-composition="composer-only"] .foreground-controls,
+      .player[data-height-composition="composer-only"] .right-zone {
+        display: none;
+      }
+
+      .player[data-height-composition="composer-only"] .composer {
+        display: flex;
+        align-items: flex-end;
+      }
+
 }

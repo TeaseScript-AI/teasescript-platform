@@ -165,12 +165,20 @@ without changing the conceptual UI. Account for them in the owning layout/respon
 explicit overflow/gutter behavior when scrollbar appearance would change usable geometry. Avoid JavaScript layout
 measurement when modern CSS can express the same invariant more directly and reliably.
 
+Consume current dynamic safe-area insets as browser-reported layout inputs; do not permanently reserve their static
+maximum, infer physical corner shapes from a device or user agent, or subtract guessed space from rectangular viewports.
+For software keyboards, use the visual viewport and the browser's interactive-widget/layout-viewport behavior, and
+re-evaluate after viewport transitions settle instead of assuming a fixed keyboard height.
+
 ### Size responsive layouts from constraints
 
 Base layout decisions on usable viewport/container geometry and content needs rather than hard device categories. Phone,
 tablet, laptop, desktop, TV, and ultrawide shapes are useful test cases, but they should not become separate modes when
 the same constraints produce the same layout. CSS `orientation` describes whether the viewport is wider than it is tall;
 it does not require or imply a physical orientation sensor.
+
+When optional side regions compete with primary content, include their current intrinsic/preferred reservations in the
+fit decision. An outer viewport breakpoint alone cannot tell whether one open side panel fits while several do not.
 
 Use each browser layout mechanism for the problem it solves:
 
