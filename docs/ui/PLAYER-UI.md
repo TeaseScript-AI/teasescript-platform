@@ -300,6 +300,11 @@ A future stepper may be added for small fixed-step ranges when it is clearer tha
 independent booleans can use multiple switches. Fully custom tool HTML/CSS/TypeScript may use any otherwise permitted
 control, including sliders; the restriction applies only to the Standard structured control set.
 
+The exact developer-facing declaration that combines a tool title, ordered static content, and these typed controls
+into a Player-generated Standard tool remains open. This specification fixes the presentation vocabulary and shared
+tool ownership only; it does not invent author syntax, value binding, submission, or persistence semantics. That contract
+is tracked in [OPEN-DECISIONS.md](../OPEN-DECISIONS.md).
+
 ### Tool body isolation and scrolling
 
 The selected tool body occupies the remaining column height and owns vertical overflow. The tool name is not repeated as
@@ -405,10 +410,10 @@ are content presentation, not application palette roles.
 ADR 0018 owns canonical transcript effects of foreground completion: valid text/number answers and choice/button
 activations become player-authored transcript messages according to its normalization and visible-text rules. Every
 accepted user activation/change on the long-lived control family also carries machine-readable canonical provenance. A
-momentary action is shown as a player-authored transcript action; toggle/select visibility is author-controlled and, when
-shown, may use informational presentation rather than implying spoken prose. Programmatic control updates are not user
-activations and must not be attributed to the user. Visual markers must not become canonical punctuation; their exact
-appearance remains tuning work.
+momentary action is shown as a player-authored transcript action; toggle/select visibility is author-controlled and,
+when shown, uses a neutral session-event presentation rather than implying spoken prose. Programmatic control updates
+are not user activations and use the same neutral event family with their script origin identified. Visual markers must
+not become canonical punctuation; their exact appearance remains tuning work.
 
 The POC's letter-glyph avatars remain fixtures; accepted V30 speaker avatar references are the product capability.
 
@@ -438,10 +443,23 @@ and the composer may never grow larger than the conversation area available bene
 contain the complete measured input and Send control; a growing textarea may not paint beyond that row or beneath the
 visual-viewport/keyboard boundary.
 
-The Player requests layout-viewport resizing for the software keyboard and re-evaluates from the visual viewport during
-and after keyboard/orientation transitions. If the remaining height cannot fit the composer plus a useful transcript or
-stage slice, the focused composer becomes the only visible primary region; this is based on available height rather than
-a hard-coded landscape-phone rule. Browser-reported safe areas remain in force in this state.
+The Player re-evaluates during and after keyboard/orientation transitions. Normal browser presentation uses the visual
+viewport that the browser already resizes. Fullscreen uses feature-detected software-keyboard geometry when available,
+because fullscreen viewport resizing is not reliable. The outer fullscreen Player remains full-size while its internal
+content allocation reserves the reported keyboard height against the stable pre-keyboard viewport. The Player does not
+request layout-viewport resizing.
+
+An open measured keyboard does not select a separate Player composition. The normal stage, transcript, foreground, and
+composer ownership remains intact. The stage may shrink below its preferred height so the complete measured composer,
+any foreground controls, and a `5rem` transcript target reserve fit in the actually available height. That reserve is
+bounded by the real remainder rather than enforced as a hard minimum; the transcript may receive more when the stage is
+already at its preferred height, or less when less space exists. The Player itself never grows or becomes a vertical
+scroll owner. A fullscreen browser that reports neither keyboard nor viewport geometry keeps the stable normal
+composition rather than guessing an occlusion or replacing the Player with a full-area editor. Browser-reported safe
+areas remain in force, but a measured open keyboard already owns the usable bottom edge and is not combined with a
+second bottom-safe-area reservation. While that keyboard is open, the measured usable height also owns the outer Player
+height instead of being capped again by a potentially stale dynamic-viewport unit. For a shifted visual viewport, that
+usable bottom edge includes its reported top offset rather than treating its height alone as a document coordinate.
 
 The composer receives focus by default. Non-interactive Player clicks should not arbitrarily steal typing focus; an
 explicitly focused tool/input/control naturally owns keyboard input while it is active. Standard keyboard behavior is:
@@ -551,10 +569,10 @@ accepted V30 permanent-button disappear-while-handler-runs presentation once the
 contract is synchronized. Exact busy animation is a Phase-4 visual-tuning question; it should use a familiar
 indeterminate-activity cue, must not require control reflow, and must remain distinguishable from keyboard focus and
 disabled/inert presentation. Programmatic updates visibly change the same control state but must remain recognizable as
-script-initiated rather than user input. Their feedback is transient and must not add permanent text to the control or
-change rail geometry. The Visual Lab currently compares toast, local highlight, local badge, and toast-plus-local
-combinations; this fixture intentionally does not select the final paint treatment. Explicit removal is a separate
-lifecycle operation.
+script-initiated rather than user input. They add a neutral session event to transcript history rather than a speaker
+message. Additional feedback is transient and must not add permanent text to the control or change rail geometry. The
+Visual Lab currently compares toast, local highlight, and toast-plus-highlight; this fixture intentionally does not
+select the final transient paint treatment. Explicit removal is a separate lifecycle operation.
 
 Ordering is stable and deterministic at the presentation level:
 

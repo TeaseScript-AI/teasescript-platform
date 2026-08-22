@@ -10,21 +10,25 @@ import type {
 
 const BASE_MESSAGES: readonly PlayerMessagePresentation[] = [
   {
+    kind: "message",
     id: "message-1",
     speakerId: "eva",
     text: "You have plenty of time. I am interested in whether you can follow the instruction exactly.",
   },
   {
+    kind: "message",
     id: "message-2",
     speakerId: "nora",
     text: "The clean prototype keeps Speaker presentation separate from Player layout.",
   },
   {
+    kind: "message",
     id: "message-3",
     speakerId: "user",
     text: "That makes it easier to test visual ideas without changing how the interface fits together.",
   },
   {
+    kind: "message",
     id: "message-4",
     speakerId: "eva",
     text: "Good. The important rule is simple: cosmetic switches are not allowed to change layout geometry.",

@@ -319,27 +319,4 @@
           font-size: 7px;
         }
 
-      .player[data-height-composition="composer-only"] {
-        --title-track: 0px;
-        --media-height: 0px;
-        grid-template-rows: 0 0 0 0 minmax(0, 1fr);
-      }
-
-      .player[data-height-composition="composer-only"] .title-bg,
-      .player[data-height-composition="composer-only"] .title-controls,
-      .player[data-height-composition="composer-only"] .left-panel,
-      .player[data-height-composition="composer-only"] .left-scrim,
-      .player[data-height-composition="composer-only"] .media-area,
-      .player[data-height-composition="composer-only"] .transcript,
-      .player[data-height-composition="composer-only"] .return-to-latest,
-      .player[data-height-composition="composer-only"] .foreground-controls,
-      .player[data-height-composition="composer-only"] .right-zone {
-        display: none;
-      }
-
-      .player[data-height-composition="composer-only"] .composer {
-        display: flex;
-        align-items: flex-end;
-      }
-
 }

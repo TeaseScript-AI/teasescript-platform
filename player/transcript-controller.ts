@@ -1,8 +1,8 @@
 import type {
-  PlayerMessagePresentation,
   PlayerSpeakerPresentation,
+  PlayerTranscriptEntryPresentation,
 } from "./model.js";
-import { createMessageElement } from "./render.js";
+import { createTranscriptEntryElement } from "./render.js";
 
 const WINDOW_SIZE = 120;
 const WINDOW_BUFFER = 32;
@@ -11,12 +11,12 @@ const SCROLL_SETTLE_MS = 140;
 const DEFAULT_MESSAGE_EXTENT_PX = 78;
 
 export interface TranscriptController {
-  setMessages(
-    messages: readonly PlayerMessagePresentation[],
+  setEntries(
+    entries: readonly PlayerTranscriptEntryPresentation[],
     speakers: Readonly<Record<string, PlayerSpeakerPresentation>>,
   ): void;
-  appendMessage(
-    message: PlayerMessagePresentation,
+  appendEntry(
+    entry: PlayerTranscriptEntryPresentation,
     speakers: Readonly<Record<string, PlayerSpeakerPresentation>>,
   ): void;
   sync(): void;
@@ -26,7 +26,7 @@ export function createTranscriptController(
   transcript: HTMLElement,
   returnToLatest: HTMLButtonElement,
 ): TranscriptController {
-  let messages: readonly PlayerMessagePresentation[] = [];
+  let entries: readonly PlayerTranscriptEntryPresentation[] = [];
   let speakers: Readonly<Record<string, PlayerSpeakerPresentation>> = {};
   let windowStart = 0;
   let renderedStart = 0;
@@ -59,13 +59,13 @@ export function createTranscriptController(
     syncReturnControl();
   });
 
-  function setMessages(
-    nextMessages: readonly PlayerMessagePresentation[],
+  function setEntries(
+    nextEntries: readonly PlayerTranscriptEntryPresentation[],
     nextSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>>,
   ): void {
     const preserveViewport = !followingLatest;
     const previousAnchor = preserveViewport ? captureAnchor() : null;
-    messages = nextMessages;
+    entries = nextEntries;
     speakers = nextSpeakers;
 
     if (followingLatest) {
@@ -80,14 +80,14 @@ export function createTranscriptController(
     syncReturnControl();
   }
 
-  function appendMessage(
-    message: PlayerMessagePresentation,
+  function appendEntry(
+    entry: PlayerTranscriptEntryPresentation,
     nextSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>>,
   ): void {
     const wasFollowing = followingLatest;
     const previousAnchor = wasFollowing ? null : captureAnchor();
     speakers = nextSpeakers;
-    messages = [...messages, message];
+    entries = [...entries, entry];
 
     if (wasFollowing) windowStart = latestWindowStart();
     else windowStart = Math.min(windowStart, latestWindowStart());
@@ -131,11 +131,11 @@ export function createTranscriptController(
   }
 
   function latestWindowStart(): number {
-    return Math.max(0, messages.length - WINDOW_SIZE);
+    return Math.max(0, entries.length - WINDOW_SIZE);
   }
 
   function syncWindowForScroll(): void {
-    if (messages.length <= WINDOW_SIZE) return;
+    if (entries.length <= WINDOW_SIZE) return;
     const estimatedAbsoluteOffset = transcript.scrollTop + (renderedStart * averageMessageExtent);
     const visibleIndex = Math.max(0, Math.floor(estimatedAbsoluteOffset / averageMessageExtent));
     const desiredStart = clamp(
@@ -153,17 +153,17 @@ export function createTranscriptController(
 
   function renderWindow(): void {
     const start = Math.min(windowStart, latestWindowStart());
-    const end = Math.min(messages.length, start + WINDOW_SIZE);
+    const end = Math.min(entries.length, start + WINDOW_SIZE);
     const fragment = document.createDocumentFragment();
 
     if (start > 0) fragment.append(createSpacer(start * averageMessageExtent, "before"));
     for (let index = start; index < end; index += 1) {
-      const message = messages[index];
-      if (message === undefined) continue;
-      fragment.append(createMessageElement(message, speakers));
+      const entry = entries[index];
+      if (entry === undefined) continue;
+      fragment.append(createTranscriptEntryElement(entry, speakers));
     }
-    if (end < messages.length) {
-      fragment.append(createSpacer((messages.length - end) * averageMessageExtent, "after"));
+    if (end < entries.length) {
+      fragment.append(createSpacer((entries.length - end) * averageMessageExtent, "after"));
     }
 
     transcript.replaceChildren(fragment);
@@ -182,29 +182,29 @@ export function createTranscriptController(
   }
 
   function updateAverageExtent(): void {
-    const renderedMessages = [...transcript.querySelectorAll<HTMLElement>(".message")];
-    if (renderedMessages.length === 0) return;
-    const first = renderedMessages[0];
-    const last = renderedMessages.at(-1);
+    const renderedEntries = [...transcript.querySelectorAll<HTMLElement>(".message, .session-event")];
+    if (renderedEntries.length === 0) return;
+    const first = renderedEntries[0];
+    const last = renderedEntries.at(-1);
     if (first === undefined || last === undefined) return;
 
     const firstRect = first.getBoundingClientRect();
     const lastRect = last.getBoundingClientRect();
     const extent = Math.max(1, lastRect.bottom - firstRect.top);
-    averageMessageExtent = Math.max(1, extent / renderedMessages.length);
+    averageMessageExtent = Math.max(1, extent / renderedEntries.length);
 
     const before = transcript.querySelector<HTMLElement>('[data-window-spacer="before"]');
     if (before !== null) before.style.blockSize = `${renderedStart * averageMessageExtent}px`;
     const after = transcript.querySelector<HTMLElement>('[data-window-spacer="after"]');
-    if (after !== null) after.style.blockSize = `${(messages.length - renderedEnd) * averageMessageExtent}px`;
+    if (after !== null) after.style.blockSize = `${(entries.length - renderedEnd) * averageMessageExtent}px`;
   }
 
   function captureAnchor(): { readonly id: string; readonly offset: number } | null {
     const transcriptTop = transcript.getBoundingClientRect().top;
-    for (const element of transcript.querySelectorAll<HTMLElement>(".message")) {
+    for (const element of transcript.querySelectorAll<HTMLElement>(".message, .session-event")) {
       const rect = element.getBoundingClientRect();
       if (rect.bottom < transcriptTop) continue;
-      const id = element.dataset.messageId;
+      const id = element.dataset.transcriptEntryId;
       if (id !== undefined) return { id, offset: rect.top - transcriptTop };
     }
     return null;
@@ -212,8 +212,8 @@ export function createTranscriptController(
 
   function restoreAnchor(anchor: { readonly id: string; readonly offset: number } | null): void {
     if (anchor === null) return;
-    const element = [...transcript.querySelectorAll<HTMLElement>(".message")]
-      .find((candidate) => candidate.dataset.messageId === anchor.id);
+    const element = [...transcript.querySelectorAll<HTMLElement>(".message, .session-event")]
+      .find((candidate) => candidate.dataset.transcriptEntryId === anchor.id);
     if (element === undefined) return;
     const transcriptTop = transcript.getBoundingClientRect().top;
     const delta = (element.getBoundingClientRect().top - transcriptTop) - anchor.offset;
@@ -245,7 +245,7 @@ export function createTranscriptController(
     return Math.max(0, transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop);
   }
 
-  return { setMessages, appendMessage, sync };
+  return { setEntries, appendEntry, sync };
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

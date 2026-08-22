@@ -70,7 +70,6 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
   autoplay.
 - Constrained LLM interpretation contract and author-facing options for natural-language numbers and non-exact choice
   answers.
-- Exact button-row/dropdown breakpoints, measurements, and overflow behavior.
 - Whether and how to revise the accepted V30 timer API for explicit handles and final pause/resume/stop/restart,
   repetition, persistence, and visible-presentation semantics.
 
@@ -102,6 +101,9 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Exact tuned thresholds/measurements for constraint-driven side-region dock/overlay decisions, compact geometry,
   fixed tool width, stage height, readable conversation bounds, composer growth, and focus-outline thickness.
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
+- Exact developer-facing declaration for a Player-generated Standard tool that combines a title, ordered static
+  content, and typed controls such as toggles, numeric/text fields, and selects, including value binding, updates,
+  submission, persistence, accessibility metadata, and the boundary with fully custom tools.
 - Exact Standard/runtime API, data shapes, persistence binding, names, and author syntax for the owner-resolved
   long-lived control family; runtime semantics are maintained in `RUNTIME.md` and presentation in `ui/PLAYER-UI.md`.
 - Exact custom-view registration/lifecycle API, typed input/event/result schemas, author syntax, surface isolation

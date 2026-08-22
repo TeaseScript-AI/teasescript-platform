@@ -533,23 +533,6 @@
         animation: script-update-highlight 2400ms ease-out both;
       }
 
-      .right-control[data-script-update-feedback="badge"]::after {
-        content: "Updated";
-        position: absolute;
-        z-index: 2;
-        top: -7px;
-        right: 7px;
-        padding: 2px 6px;
-        border: 1px solid var(--package-accent);
-        border-radius: 999px;
-        background: var(--color-surface-component);
-        color: var(--color-text-primary);
-        font-size: 9px;
-        font-weight: 700;
-        line-height: 1.2;
-        pointer-events: none;
-      }
-
       @keyframes script-update-highlight {
         0%, 28% {
           border-color: var(--package-accent);

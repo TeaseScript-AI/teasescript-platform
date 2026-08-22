@@ -21,6 +21,7 @@ import type {
   PlayerTimerKind,
   PlayerToolColumnState,
   PlayerToolId,
+  PlayerTranscriptEntryPresentation,
   RightPanelMode,
 } from "./model.js";
 import { createLayoutDebugController } from "./layout-debug.js";
@@ -40,6 +41,7 @@ import { createTranscriptController } from "./transcript-controller.js";
 import { createRightRailLayoutController } from "./right-rail-layout.js";
 
 const player = requiredElement<HTMLElement>("player", HTMLElement);
+const titleControls = requiredElement<HTMLElement>("titleControls", HTMLElement);
 const leftToggle = requiredElement<HTMLButtonElement>("leftToggle", HTMLButtonElement);
 const leftPanel = requiredElement<HTMLElement>("leftPanel", HTMLElement);
 const leftScrim = requiredElement<HTMLElement>("leftScrim", HTMLElement);
@@ -96,7 +98,7 @@ let rightControlsDemo: readonly PlayerRightControlPresentation[] = DEMO_PRESENTA
 let rightControlsVisibleDemo = true;
 let scriptUpdateDemoTarget: "toggle" | "select" = "toggle";
 let scriptUpdateFeedbackDemo: ScriptUpdateFeedbackDemo = "toast-highlight";
-let activityMessages: readonly PlayerMessagePresentation[] = [];
+let activityEntries: readonly PlayerTranscriptEntryPresentation[] = [];
 let pacingMessages: readonly PlayerMessagePresentation[] = [];
 let pacingSequenceIndex = 0;
 let pacingTimer: ReturnType<typeof setTimeout> | null = null;
@@ -107,17 +109,33 @@ let layoutDebugActivated = false;
 let carouselPresentationSyncQueued = false;
 let rightCompositionSyncQueued = false;
 let visibleForegroundHeight = 0;
+let composerTouchInputExpected = false;
 
-type ScriptUpdateFeedbackDemo = "toast" | "highlight" | "badge" | "toast-highlight" | "toast-badge";
+type ScriptUpdateFeedbackDemo = "toast" | "highlight" | "toast-highlight";
+
+interface BrowserVirtualKeyboard extends EventTarget {
+  readonly boundingRect: DOMRectReadOnly;
+  overlaysContent: boolean;
+}
+
+interface KeyboardLayout {
+  readonly fullscreenHeight: number | null;
+  readonly fullscreenInset: number;
+  readonly geometry: "none" | "viewport" | "virtual-keyboard";
+  readonly open: boolean;
+  readonly usableHeight: number;
+}
 
 const PACING_MESSAGE_DELAY_MS = 1_500;
 const SCRIPT_UPDATE_FEEDBACK_MS = 2_400;
+const virtualKeyboard = browserVirtualKeyboard();
+const viewportHeightBaselines = new Map<string, number>();
 
 const layoutDebug = createLayoutDebugController({
   player,
   toolStrip,
   toolStripScroll,
-  titleControls: requiredElement<HTMLElement>("titleControls", HTMLElement),
+  titleControls,
   leftPanel,
   mediaArea: requiredElement<HTMLElement>("mediaArea", HTMLElement),
   transcript,
@@ -130,6 +148,8 @@ const layoutDebug = createLayoutDebugController({
 renderCorePresentation();
 renderTools();
 resetVisualLab();
+rememberViewportHeightBaseline();
+syncVirtualKeyboardMode();
 syncComposerInputSize();
 syncPanelAccessibility();
 syncLeftPreferredWidth();
@@ -188,6 +208,7 @@ fullscreenToggle.addEventListener("click", () => {
 });
 
 document.addEventListener("fullscreenchange", () => {
+  syncVirtualKeyboardMode();
   syncFullscreenControl();
   syncOverlayChromeMode();
   layoutDebug.queueSync();
@@ -217,9 +238,18 @@ window.visualViewport?.addEventListener("resize", () => {
 });
 window.visualViewport?.addEventListener("scroll", syncViewportTransition);
 window.addEventListener("orientationchange", syncViewportTransition);
+virtualKeyboard?.addEventListener("geometrychange", syncViewportTransition);
 
+composerInput.addEventListener("pointerdown", (event) => {
+  composerTouchInputExpected = event.pointerType !== "mouse";
+  queueMicrotask(syncViewportTransition);
+});
 composerInput.addEventListener("focus", syncViewportTransition);
-composerInput.addEventListener("blur", syncViewportTransition);
+composerInput.addEventListener("blur", () => {
+  composerTouchInputExpected = false;
+  rememberViewportHeightBaseline();
+  syncViewportTransition();
+});
 composerInput.addEventListener("input", () => {
   syncComposerInputSize();
   syncOverlayChromeMode();
@@ -324,7 +354,7 @@ actions.addEventListener("change", (event) => {
     });
     const control = rightControlsDemo.find((item) => item.kind === "toggle" && item.id === target.dataset.rightToggle);
     if (control?.kind === "toggle" && control.recordUserHistory) {
-      appendActivityMessage(`${control.label}: ${target.checked ? "on" : "off"}`);
+      appendSessionEvent(`You changed ${control.label} to ${target.checked ? "on" : "off"}.`);
     }
     renderRightControls();
     return;
@@ -338,7 +368,7 @@ actions.addEventListener("change", (event) => {
     const control = rightControlsDemo.find((item) => item.kind === "select" && item.id === target.dataset.rightSelect);
     if (control?.kind === "select" && control.recordUserHistory) {
       const label = control.options.find(([value]) => value === target.value)?.[1] ?? target.value;
-      appendActivityMessage(`${control.label}: ${label}`);
+      appendSessionEvent(`You changed ${control.label} to ${label}.`);
     }
     renderRightControls();
   }
@@ -476,21 +506,33 @@ function renderRightControls(): void {
 }
 
 function syncTranscript(): void {
-  transcriptController.setMessages(
-    [...createDemoHistoryMessages(historySizeDemo), ...pacingMessages, ...activityMessages],
+  transcriptController.setEntries(
+    [...createDemoHistoryMessages(historySizeDemo), ...pacingMessages, ...activityEntries],
     presentation.speakers,
   );
 }
 
 function appendActivityMessage(text: string): void {
   const message: PlayerMessagePresentation = {
+    kind: "message",
     id: `activity-${activitySequence}`,
     speakerId: "user",
     text,
   };
   activitySequence += 1;
-  activityMessages = [...activityMessages, message];
-  transcriptController.appendMessage(message, presentation.speakers);
+  activityEntries = [...activityEntries, message];
+  transcriptController.appendEntry(message, presentation.speakers);
+}
+
+function appendSessionEvent(text: string): void {
+  const event: PlayerTranscriptEntryPresentation = {
+    kind: "session-event",
+    id: `activity-${activitySequence}`,
+    text,
+  };
+  activitySequence += 1;
+  activityEntries = [...activityEntries, event];
+  transcriptController.appendEntry(event, presentation.speakers);
 }
 
 function currentForegroundPresentation(): PlayerForegroundPresentation | null {
@@ -591,7 +633,6 @@ function completeComposerSubmission(text: string): void {
   appendActivityMessage(text);
   clearComposerValue();
   clearComposerFeedback();
-  restoreComposerFocus();
 }
 
 function completeForeground(text: string): void {
@@ -600,7 +641,6 @@ function completeForeground(text: string): void {
   foregroundDemoKind = "none";
   syncForegroundPresentation();
   syncVisualControls();
-  restoreComposerFocus();
 }
 
 function clearComposerValue(): void {
@@ -635,7 +675,7 @@ function startPacingDemo(): void {
   }
 
   historySizeDemo = 0;
-  activityMessages = [];
+  activityEntries = [];
   foregroundDemoKind = "none";
   syncForegroundPresentation();
   syncTranscript();
@@ -652,7 +692,7 @@ function revealNextPacingMessage(): void {
   const message = { ...source, id: `pacing-${pacingSequenceIndex + 1}` };
   pacingSequenceIndex += 1;
   pacingMessages = [...pacingMessages, message];
-  transcriptController.appendMessage(message, presentation.speakers);
+  transcriptController.appendEntry(message, presentation.speakers);
   if (hasPendingPacingMessage()) {
     pacingTimer = setTimeout(() => {
       pacingTimer = null;
@@ -681,18 +721,16 @@ function isPacingBackgroundTarget(target: Element): boolean {
   return mediaSurface !== null && target.closest(".media-content") === null;
 }
 
-function restoreComposerFocus(): void {
-  if (!composerInput.disabled) composerInput.focus({ preventScroll: true });
-}
-
 function simulateScriptUpdate(): void {
   if (scriptUpdateDemoTarget === "toggle") {
     const toggle = rightControlsDemo.find((control): control is PlayerRightTogglePresentation => control.kind === "toggle");
     if (toggle === undefined) return;
+    const nextValue = !toggle.value;
     rightControlsDemo = rightControlsDemo.map((control) => control.id === toggle.id
-      ? { ...toggle, value: !toggle.value }
+      ? { ...toggle, value: nextValue }
       : control);
     renderRightControls();
+    appendSessionEvent(`Script changed ${toggle.label} to ${nextValue ? "on" : "off"}.`);
     showScriptUpdateFeedback(toggle.id, `${toggle.label} changed by the script.`);
     return;
   }
@@ -706,20 +744,18 @@ function simulateScriptUpdate(): void {
     ? { ...select, value: next[0] }
     : control);
   renderRightControls();
+  appendSessionEvent(`Script changed ${select.label} to ${next[1]}.`);
   showScriptUpdateFeedback(select.id, `${select.label} changed by the script.`);
 }
 
 function showScriptUpdateFeedback(controlId: string, message: string): void {
   clearScriptUpdateFeedback();
   const showsToast = scriptUpdateFeedbackDemo === "toast"
-    || scriptUpdateFeedbackDemo === "toast-highlight"
-    || scriptUpdateFeedbackDemo === "toast-badge";
+    || scriptUpdateFeedbackDemo === "toast-highlight";
   const localPresentation = scriptUpdateFeedbackDemo === "highlight"
     || scriptUpdateFeedbackDemo === "toast-highlight"
       ? "highlight"
-      : scriptUpdateFeedbackDemo === "badge" || scriptUpdateFeedbackDemo === "toast-badge"
-        ? "badge"
-        : null;
+      : null;
 
   playerNotification.hidden = false;
   playerNotification.textContent = message;
@@ -826,23 +862,42 @@ function syncFullscreenControl(): void {
   fullscreenToggle.setAttribute("aria-label", active ? "Exit fullscreen" : "Enter fullscreen");
 }
 
+function syncVirtualKeyboardMode(): void {
+  if (virtualKeyboard === null) return;
+  virtualKeyboard.overlaysContent = document.fullscreenElement === player;
+}
+
 function syncOverlayChromeMode(): void {
-  const usableHeight = window.visualViewport?.height ?? window.innerHeight;
-  player.style.setProperty("--player-usable-height", `${Math.max(0, usableHeight)}px`);
+  const keyboardLayout = resolveKeyboardLayout();
+  const { usableHeight } = keyboardLayout;
+  player.style.setProperty("--player-usable-height", `${usableHeight}px`);
+  player.style.setProperty(
+    "--fullscreen-player-height",
+    keyboardLayout.fullscreenHeight === null ? "100dvh" : `${keyboardLayout.fullscreenHeight}px`,
+  );
+  player.style.setProperty("--fullscreen-keyboard-inset", `${keyboardLayout.fullscreenInset}px`);
+  player.dataset.keyboard = keyboardLayout.open ? "open" : "closed";
+  player.dataset.keyboardGeometry = keyboardLayout.geometry;
   const compactTimers = usableHeight <= 600;
   const overlayChrome = document.fullscreenElement === player || usableHeight <= 768;
   player.dataset.chrome = overlayChrome ? "overlay" : "normal";
   player.dataset.compactTimers = compactTimers ? "true" : "false";
-  player.dataset.heightComposition = usesComposerOnlyComposition(usableHeight) ? "composer-only" : "standard";
   rightRailLayout.sync(compactTimers);
+  const preferredMediaHeight = Number.parseFloat(
+    usableViewportLength(overlayChrome ? "--media-height-overlay" : "--media-height-normal", usableHeight),
+  );
+  const mediaHeight = keyboardLayout.open
+    ? constrainedKeyboardMediaHeight(preferredMediaHeight, usableHeight, overlayChrome)
+    : preferredMediaHeight;
   player.style.setProperty(
     "--media-height",
-    usableViewportLength(overlayChrome ? "--media-height-overlay" : "--media-height-normal", usableHeight),
+    `${Math.max(0, mediaHeight)}px`,
   );
   player.style.setProperty(
     "--composer-effective-viewport-height",
     usableViewportLength("--composer-max-viewport-height", usableHeight),
   );
+  syncComposerInputSize();
   queueRightCompositionSync();
   layoutDebug.queueSync();
 }
@@ -866,14 +921,83 @@ function syncComposerInputSize(): void {
   composerInput.style.blockSize = `${composerInput.scrollHeight + borderSize}px`;
 }
 
-function usesComposerOnlyComposition(usableHeight: number): boolean {
-  if (document.activeElement !== composerInput) return false;
-  const stageHeight = Number.parseFloat(usableViewportLength("--media-height-overlay", usableHeight));
-  const minimumConversationHeight = Number.parseFloat(getComputedStyle(player).fontSize) * 1.5;
+function resolveKeyboardLayout(): KeyboardLayout {
+  const visualViewport = window.visualViewport;
+  const viewportHeight = currentUsableViewportHeight();
+  const orientation = viewportOrientation();
+  const composerFocused = document.activeElement === composerInput;
+
+  if (!composerFocused || !composerTouchInputExpected) {
+    viewportHeightBaselines.set(orientation, viewportHeight);
+  }
+
+  const softwareKeyboardExpected = composerFocused && composerTouchInputExpected;
+  const baselineReduction = softwareKeyboardExpected
+    ? Math.max(0, (viewportHeightBaselines.get(orientation) ?? viewportHeight) - viewportHeight)
+    : 0;
+  const visualViewportReduction = softwareKeyboardExpected && visualViewport !== null
+    ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
+    : 0;
+  const virtualKeyboardRect = softwareKeyboardExpected
+    && document.fullscreenElement === player
+    && virtualKeyboard !== null
+    ? virtualKeyboard.boundingRect
+    : null;
+  const virtualKeyboardVisible = virtualKeyboardRect !== null
+    && virtualKeyboardRect.width > 0
+    && virtualKeyboardRect.height > 0;
+  const viewportBaselineHeight = Math.max(
+    viewportHeightBaselines.get(orientation) ?? viewportHeight,
+    viewportHeight,
+  );
+  const virtualKeyboardHeight = virtualKeyboardVisible
+    ? Math.max(0, Math.min(viewportBaselineHeight, virtualKeyboardRect.height))
+    : 0;
+  const viewportMeasuredHeight = Math.max(baselineReduction, visualViewportReduction);
+  const measuredKeyboardHeight = virtualKeyboardVisible
+    ? virtualKeyboardHeight
+    : viewportMeasuredHeight;
+  const measuredKeyboard = measuredKeyboardHeight > 0;
+  const usableHeight = virtualKeyboardVisible
+    ? Math.max(0, viewportBaselineHeight - virtualKeyboardHeight)
+    : viewportHeight;
+  const fullscreenInset = document.fullscreenElement === player && measuredKeyboard
+    ? measuredKeyboardHeight
+    : 0;
+
+  return {
+    fullscreenHeight: virtualKeyboardVisible ? viewportBaselineHeight : null,
+    fullscreenInset,
+    geometry: virtualKeyboardVisible
+      ? "virtual-keyboard"
+      : measuredKeyboard
+        ? "viewport"
+        : "none",
+    open: measuredKeyboard,
+    usableHeight,
+  };
+}
+
+function constrainedKeyboardMediaHeight(
+  preferredMediaHeight: number,
+  usableHeight: number,
+  overlayChrome: boolean,
+): number {
   const measuredForegroundHeight = foregroundControls.getBoundingClientRect().height;
   if (measuredForegroundHeight > 0) visibleForegroundHeight = measuredForegroundHeight;
   const foregroundHeight = foregroundControls.hidden ? 0 : visibleForegroundHeight;
-  return usableHeight < requiredComposerHeight() + foregroundHeight + stageHeight + minimumConversationHeight;
+  const playerStyle = getComputedStyle(player);
+  const transcriptReserve = remPixelValue(playerStyle, "--keyboard-transcript-reserve");
+  const titleTrackHeight = overlayChrome ? 0 : titleControls.getBoundingClientRect().height;
+  const availableConversationHeight = Math.max(
+    0,
+    usableHeight - titleTrackHeight - requiredComposerHeight() - foregroundHeight,
+  );
+  const boundedTranscriptReserve = Math.min(transcriptReserve, availableConversationHeight);
+  return Math.min(
+    Math.max(0, preferredMediaHeight),
+    Math.max(0, availableConversationHeight - boundedTranscriptReserve),
+  );
 }
 
 function requiredComposerHeight(): number {
@@ -890,6 +1014,34 @@ function usableViewportLength(property: string, usableHeight: number): string {
     if (Number.isFinite(percent)) return `${Math.max(0, usableHeight * percent / 100)}px`;
   }
   return raw.length > 0 ? raw : "0px";
+}
+
+function rememberViewportHeightBaseline(): void {
+  viewportHeightBaselines.set(
+    viewportOrientation(),
+    currentUsableViewportHeight(),
+  );
+}
+
+function currentUsableViewportHeight(): number {
+  const visualViewport = window.visualViewport;
+  return Math.max(
+    0,
+    visualViewport === null
+      ? window.innerHeight
+      : visualViewport.height + visualViewport.offsetTop,
+  );
+}
+
+function viewportOrientation(): string {
+  const type = window.screen.orientation?.type;
+  if (type !== undefined) return type.startsWith("landscape") ? "landscape" : "portrait";
+  return window.screen.width > window.screen.height ? "landscape" : "portrait";
+}
+
+function browserVirtualKeyboard(): BrowserVirtualKeyboard | null {
+  const extendedNavigator = navigator as Navigator & { readonly virtualKeyboard?: BrowserVirtualKeyboard };
+  return extendedNavigator.virtualKeyboard ?? null;
 }
 
 function syncLayoutDebugActivation(): void {
@@ -1025,6 +1177,14 @@ function cssPixelValue(style: CSSStyleDeclaration, property: string): number {
   return Number.isFinite(value) ? value : 0;
 }
 
+function remPixelValue(style: CSSStyleDeclaration, property: string): number {
+  const raw = style.getPropertyValue(property).trim();
+  if (!raw.endsWith("rem")) return 0;
+  const remValue = Number.parseFloat(raw);
+  const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+  return Number.isFinite(remValue) && Number.isFinite(rootFontSize) ? remValue * rootFontSize : 0;
+}
+
 function queueLeftReserveSync(): void {
   requestAnimationFrame(() => {
     syncLeftPreferredWidth();
@@ -1122,7 +1282,7 @@ function resetVisualLab(): void {
   rightControlsVisibleDemo = true;
   scriptUpdateDemoTarget = "toggle";
   scriptUpdateFeedbackDemo = "toast-highlight";
-  activityMessages = [];
+  activityEntries = [];
   pacingMessages = [];
   pacingSequenceIndex = 0;
   document.documentElement.style.setProperty("--package-accent", accentColor);
@@ -1188,7 +1348,7 @@ function setPresentationDemoSelection(key: string, value: string): void {
       scriptUpdateDemoTarget = value as "toggle" | "select";
       break;
     case "script-update-feedback":
-      if (!["toast", "highlight", "badge", "toast-highlight", "toast-badge"].includes(value)) throw new Error(`Unknown script-update feedback: ${value}`);
+      if (!["toast", "highlight", "toast-highlight"].includes(value)) throw new Error(`Unknown script-update feedback: ${value}`);
       scriptUpdateFeedbackDemo = value as ScriptUpdateFeedbackDemo;
       clearScriptUpdateFeedback();
       break;

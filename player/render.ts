@@ -5,6 +5,7 @@ import type {
   PlayerPresentation,
   PlayerRightControlPresentation,
   PlayerSpeakerPresentation,
+  PlayerTranscriptEntryPresentation,
   PlayerToolColumnState,
   PlayerToolDefinition,
   PlayerToolId,
@@ -79,7 +80,7 @@ export function createMessageElement(
 
   const article = document.createElement("article");
   article.className = `message${message.speakerId === "user" ? " user" : ""}`;
-  article.dataset.messageId = message.id;
+  article.dataset.transcriptEntryId = message.id;
   article.style.setProperty("--speaker-accent", speaker.accent);
   article.style.setProperty("--speaker-font", speaker.fontFamily);
 
@@ -106,6 +107,23 @@ export function createMessageElement(
   row.append(...(message.speakerId === "user" ? [copy, avatar] : [avatar, copy]));
   article.append(row);
   return article;
+}
+
+export function createTranscriptEntryElement(
+  entry: PlayerTranscriptEntryPresentation,
+  speakers: Readonly<Record<string, PlayerSpeakerPresentation>>,
+): HTMLElement {
+  if (entry.kind === "message") return createMessageElement(entry, speakers);
+
+  const event = document.createElement("article");
+  event.className = "session-event";
+  event.dataset.transcriptEntryId = entry.id;
+
+  const text = document.createElement("span");
+  text.className = "session-event-text";
+  text.textContent = entry.text;
+  event.append(text);
+  return event;
 }
 
 export function renderForegroundControls(
@@ -552,9 +570,7 @@ function createVisualTool(): HTMLElement {
       [
         ["toast", "Toast"],
         ["highlight", "Control highlight"],
-        ["badge", "Update badge"],
         ["toast-highlight", "Toast + highlight"],
-        ["toast-badge", "Toast + badge"],
       ],
     ),
     createSelectOption(

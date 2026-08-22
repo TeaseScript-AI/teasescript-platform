@@ -52,5 +52,5 @@ to runtime or product semantics:
   multiple-timer pressure remain selectable;
 - the pacing-gate fixture reveals a short message sequence over time, with Player-background/empty-composer Space
   skipping available only in the skippable variant;
-- script-initiated control changes compare toast, local highlight, local badge, and toast-plus-local feedback. Every
-  variant is transient and avoids a permanent rail row; the final visual treatment remains a playtest decision.
+- script-initiated control changes add a neutral event to transcript history and compare toast, local highlight, and
+  toast-plus-highlight as transient feedback. The final transient treatment remains a playtest decision.

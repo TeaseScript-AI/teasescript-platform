@@ -41,10 +41,21 @@ export interface PlayerSpeakerPresentation {
 }
 
 export interface PlayerMessagePresentation {
+  readonly kind: "message";
   readonly id: string;
   readonly speakerId: string;
   readonly text: string;
 }
+
+export interface PlayerSessionEventPresentation {
+  readonly kind: "session-event";
+  readonly id: string;
+  readonly text: string;
+}
+
+export type PlayerTranscriptEntryPresentation =
+  | PlayerMessagePresentation
+  | PlayerSessionEventPresentation;
 
 export interface PlayerForegroundOptionPresentation {
   readonly id: string;

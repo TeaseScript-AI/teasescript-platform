@@ -83,8 +83,12 @@
       }
 
       @supports selector(::scroll-button(left)) and selector(::scroll-marker) {
+        .foreground-controls:has(.foreground-choice-buttons[data-overflow="true"]) {
+          padding-bottom: 0;
+        }
+
         .foreground-choice-buttons[data-overflow="true"] {
-          --foreground-marker-strip: 14px;
+          --foreground-marker-strip: 18px;
 
           scroll-marker-group: after;
           padding-right: 38px;
@@ -138,7 +142,7 @@
         .foreground-choice-buttons::scroll-marker-group {
           position: absolute;
           right: 38px;
-          bottom: 2px;
+          bottom: 3px;
           left: 38px;
           display: flex;
           justify-content: center;

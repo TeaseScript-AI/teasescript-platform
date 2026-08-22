@@ -167,8 +167,11 @@ measurement when modern CSS can express the same invariant more directly and rel
 
 Consume current dynamic safe-area insets as browser-reported layout inputs; do not permanently reserve their static
 maximum, infer physical corner shapes from a device or user agent, or subtract guessed space from rectangular viewports.
-For software keyboards, use the visual viewport and the browser's interactive-widget/layout-viewport behavior, and
-re-evaluate after viewport transitions settle instead of assuming a fixed keyboard height.
+For software keyboards, use the browser-resized visual viewport in normal presentation. In fullscreen, prefer
+feature-detected keyboard geometry when the browser exposes it and otherwise use the visual viewport. Do not combine a
+reported keyboard occlusion with a second bottom-safe-area reservation. Re-evaluate after viewport transitions settle
+instead of assuming a fixed keyboard height. When a fullscreen browser exposes neither measurement, preserve the stable
+normal composition rather than guessing the hidden keyboard size or inventing an unmeasured replacement layout.
 
 ### Size responsive layouts from constraints
 

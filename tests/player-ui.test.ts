@@ -472,9 +472,12 @@ test("Player composer line tuning counts text lines and offers local font-size r
   assert.match(browser, /composerInput\.addEventListener\("input", \(\) => \{[\s\S]*syncComposerInputSize\(\);[\s\S]*syncOverlayChromeMode\(\)/u);
   assert.match(browser, /function syncViewportTransition\(\)[\s\S]*syncComposerInputSize\(\);[\s\S]*syncOverlayChromeMode\(\)/u);
   assert.match(browser, /function requiredComposerHeight\(\)[\s\S]*composerForm\.getBoundingClientRect\(\)\.height[\s\S]*padding-block-start[\s\S]*padding-block-end/u);
-  assert.match(browser, /const measuredForegroundHeight = foregroundControls\.getBoundingClientRect\(\)\.height[\s\S]*measuredForegroundHeight > 0[\s\S]*foregroundControls\.hidden \? 0 : visibleForegroundHeight[\s\S]*requiredComposerHeight\(\) \+ foregroundHeight/u);
+  assert.match(browser, /const measuredForegroundHeight = foregroundControls\.getBoundingClientRect\(\)\.height[\s\S]*measuredForegroundHeight > 0[\s\S]*foregroundControls\.hidden \? 0 : visibleForegroundHeight/u);
+  assert.match(browser, /function constrainedKeyboardMediaHeight[\s\S]*usableHeight - titleTrackHeight - requiredComposerHeight\(\) - foregroundHeight/u);
+  assert.match(browser, /const boundedTranscriptReserve = Math\.min\(transcriptReserve, availableConversationHeight\)/u);
   assert.match(browser, /function syncForegroundPresentation\(\)[\s\S]*queueCarouselPresentationSync\(\);[\s\S]*syncOverlayChromeMode\(\)/u);
-  assert.doesNotMatch(browser, /usesComposerOnlyComposition[\s\S]{0,500}composer\.scrollHeight/u);
+  assert.doesNotMatch(browser, /restoreComposerFocus|composerInput\.focus/u);
+  assert.doesNotMatch(browser, /HeightComposition|heightComposition|typing-only|keyboard-conversation/u);
 });
 
 test("Player Layout Debug exposes live development-only geometry inspection", async () => {
@@ -518,7 +521,18 @@ test("Player Layout Debug exposes live development-only geometry inspection", as
   assert.match(layoutDebug, /visualViewport\.offsetLeft[\s\S]*visualViewport\.offsetTop/u);
   assert.match(layoutDebug, /visualViewport\.pageLeft[\s\S]*visualViewport\.pageTop/u);
   assert.match(layoutDebug, /foreground === null[\s\S]*\? "not present"/u);
+  assert.match(layoutDebug, /stageDiagnostics\.className = "layout-debug-stage-diagnostics"/u);
+  assert.match(layoutDebug, /syncStageDiagnostics\(playerRect, playerStyle, foreground\)/u);
+  assert.match(layoutDebug, /visualViewport\.offsetTop \+ visualViewport\.height/u);
+  assert.match(layoutDebug, /document\.fullscreenElement === player[\s\S]*player\.dataset\.keyboardGeometry/u);
+  assert.match(layoutDebug, /window\.isSecureContext/u);
+  assert.match(layoutDebug, /keyboard\?\.boundingRect/u);
+  assert.match(layoutDebug, /keyboard\?\.overlaysContent/u);
+  assert.match(layoutDebug, /JSON\.stringify\(composerInput\.value\)/u);
+  assert.match(layoutDebug, /JSON\.stringify\(composerInput\.placeholder\)/u);
+  assert.match(layoutDebug, /document\.activeElement === composerInput/u);
   assert.match(debugCss, /\.layout-debug-overlay \{[\s\S]*position: absolute;[\s\S]*pointer-events: none;/u);
+  assert.match(debugCss, /\.layout-debug-stage-diagnostics \{[\s\S]*max-width: 240px;[\s\S]*overflow: hidden;[\s\S]*pointer-events: none;/u);
   assert.match(debugCss, /height: var\(--safe-top\)/u);
   assert.match(debugCss, /width: var\(--safe-right\)/u);
   assert.match(debugCss, /data-debug-kind="overflow"[\s\S]*#c026d3/u);
@@ -613,9 +627,10 @@ test("Player foreground interactions render above the composer and keep typed eq
   assert.match(render, /className = "foreground-choice-item"[\s\S]*item\.append\(button\)/u);
   assert.match(foreground, /\.foreground-choice-item::scroll-marker/u);
   assert.doesNotMatch(foreground, /\.foreground-button::scroll-marker/u);
-  assert.match(foreground, /data-overflow="true"[\s\S]*--foreground-marker-strip: 14px[\s\S]*padding-right: 38px[\s\S]*padding-bottom: var\(--foreground-marker-strip\)[\s\S]*padding-left: 38px/u);
+  assert.match(foreground, /\.foreground-controls:has\(\.foreground-choice-buttons\[data-overflow="true"\]\) \{[\s\S]*padding-bottom: 0/u);
+  assert.match(foreground, /data-overflow="true"[\s\S]*--foreground-marker-strip: 18px[\s\S]*padding-right: 38px[\s\S]*padding-bottom: var\(--foreground-marker-strip\)[\s\S]*padding-left: 38px/u);
   assert.match(foreground, /::scroll-button\(right\)[\s\S]*top: calc\(\(100% - var\(--foreground-marker-strip\)\) \/ 2\)[\s\S]*transform: translateY\(-50%\)/u);
-  assert.match(foreground, /::scroll-marker-group[\s\S]*bottom: 2px/u);
+  assert.match(foreground, /::scroll-marker-group[\s\S]*bottom: 3px/u);
   assert.match(foreground, /not\(\[data-overflow="true"\]\)::scroll-marker-group[\s\S]*display: none/u);
   assert.doesNotMatch(render, /foreground-choice-select/u);
   assert.doesNotMatch(browser, /syncChoicePresentationMode/u);
@@ -652,7 +667,7 @@ test("Player transcript smart-follow preserves an explicit return path and bound
   assert.match(controller, /followingLatest = distanceFromBottom\(\) <= FOLLOW_DISTANCE_PX/u);
   assert.match(controller, /awayFromLatest && scrollSettled/u);
   assert.match(controller, /createSpacer\(start \* averageMessageExtent, "before"\)/u);
-  assert.match(controller, /createSpacer\(\(messages\.length - end\) \* averageMessageExtent, "after"\)/u);
+  assert.match(controller, /createSpacer\(\(entries\.length - end\) \* averageMessageExtent, "after"\)/u);
   assert.match(transcriptCss, /\.transcript-window-spacer/u);
   assert.match(browser, /MAX_DEMO_HISTORY_MESSAGES/u);
   assert.match(browser, /createDemoHistoryMessages\(historySizeDemo\)/u);
@@ -662,19 +677,26 @@ test("Player right rail supports ordered action, toggle, select, and status pres
   const demo = await readFile(resolve(process.cwd(), "player/demo-session.ts"), "utf8");
   const render = await readFile(resolve(process.cwd(), "player/render.ts"), "utf8");
   const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
+  const model = await readFile(resolve(process.cwd(), "player/model.ts"), "utf8");
   const controls = await readFile(resolve(process.cwd(), "player/styles/components-right-controls.css"), "utf8");
   const effects = await readFile(resolve(process.cwd(), "player/styles/effects.css"), "utf8");
   const composer = await readFile(resolve(process.cwd(), "player/styles/components-composer.css"), "utf8");
+  const transcript = await readFile(resolve(process.cwd(), "player/styles/components-transcript.css"), "utf8");
 
   assert.match(demo, /kind: "action"[\s\S]*kind: "toggle"[\s\S]*kind: "select"[\s\S]*kind: "status"/u);
   assert.match(render, /case "action"[\s\S]*case "toggle"[\s\S]*case "select"[\s\S]*case "status"/u);
-  assert.match(browser, /recordUserHistory[\s\S]*appendActivityMessage/u);
+  assert.match(browser, /recordUserHistory[\s\S]*appendSessionEvent/u);
   assert.doesNotMatch(render, /createControlOriginBadge|right-control-origin/u);
-  assert.match(render, /"Script update feedback"[\s\S]*"Toast"[\s\S]*"Control highlight"[\s\S]*"Update badge"[\s\S]*"Toast \+ highlight"[\s\S]*"Toast \+ badge"/u);
+  assert.match(render, /"Script update feedback"[\s\S]*"Toast"[\s\S]*"Control highlight"[\s\S]*"Toast \+ highlight"/u);
+  assert.doesNotMatch(render, /Update badge|Toast \+ badge/u);
   assert.match(browser, /showScriptUpdateFeedback[\s\S]*SCRIPT_UPDATE_FEEDBACK_MS/u);
+  assert.match(browser, /appendSessionEvent\(`Script changed \$\{toggle\.label\}[\s\S]*appendSessionEvent\(`Script changed \$\{select\.label\}/u);
   assert.match(effects, /data-script-update-feedback="highlight"[\s\S]*script-update-highlight/u);
-  assert.match(effects, /data-script-update-feedback="badge"[\s\S]*content: "Updated"/u);
+  assert.doesNotMatch(effects, /data-script-update-feedback="badge"|content: "Updated"/u);
   assert.match(composer, /\.player-notification[\s\S]*pointer-events: none/u);
+  assert.match(model, /PlayerTranscriptEntryPresentation[\s\S]*PlayerMessagePresentation[\s\S]*PlayerSessionEventPresentation/u);
+  assert.match(render, /createTranscriptEntryElement[\s\S]*entry\.kind === "message"[\s\S]*session-event-text/u);
+  assert.match(transcript, /\.session-event \{[\s\S]*align-self: center[\s\S]*\.session-event-text \{/u);
   assert.match(controls, /\.right-toggle-control/u);
   assert.match(controls, /\.right-select-control/u);
   assert.match(controls, /\.right-status/u);
@@ -703,7 +725,7 @@ test("Player timer fixtures cover visible, mystery, and hidden presentation with
   assert.match(effects, /data-timer-kind="mystery"[\s\S]*mystery-timer-ring/u);
 });
 
-test("Player fullscreen chrome and low-height timer compaction remain independent", async () => {
+test("Player fullscreen keyboard geometry preserves one bounded normal composition", async () => {
   const html = await readFile(resolve(process.cwd(), "player/index.html"), "utf8");
   const browser = await readFile(resolve(process.cwd(), "player/browser.ts"), "utf8");
   const layout = await readFile(resolve(process.cwd(), "player/styles/layout.css"), "utf8");
@@ -716,11 +738,42 @@ test("Player fullscreen chrome and low-height timer compaction remain independen
   assert.match(browser, /player\.dataset\.compactTimers = compactTimers \? "true" : "false"/u);
   assert.match(browser, /rightRailLayout\.sync\(compactTimers\)/u);
   assert.match(browser, /window\.visualViewport\?\.addEventListener\("resize"/u);
-  assert.match(html, /interactive-widget=resizes-content/u);
+  assert.match(browser, /function currentUsableViewportHeight[\s\S]*visualViewport\.height \+ visualViewport\.offsetTop/u);
+  assert.match(browser, /const viewportHeight = currentUsableViewportHeight\(\)/u);
+  assert.match(browser, /function rememberViewportHeightBaseline[\s\S]*currentUsableViewportHeight\(\)/u);
+  assert.doesNotMatch(html, /interactive-widget=/u);
+  assert.match(html, /default resizes-visual keyboard behavior/u);
+  assert.match(browser, /interface BrowserVirtualKeyboard[\s\S]*boundingRect[\s\S]*overlaysContent/u);
+  assert.match(browser, /virtualKeyboard\?\.addEventListener\("geometrychange", syncViewportTransition\)/u);
+  assert.match(browser, /virtualKeyboard\.overlaysContent = document\.fullscreenElement === player/u);
+  assert.match(browser, /window\.innerHeight - visualViewport\.height - visualViewport\.offsetTop/u);
+  assert.match(browser, /virtualKeyboardRect\.width > 0[\s\S]*virtualKeyboardRect\.height > 0/u);
+  assert.match(browser, /document\.fullscreenElement === player[\s\S]*virtualKeyboard !== null[\s\S]*virtualKeyboard\.boundingRect/u);
+  assert.match(browser, /Math\.min\(viewportBaselineHeight, virtualKeyboardRect\.height\)/u);
+  assert.match(browser, /const usableHeight = virtualKeyboardVisible[\s\S]*viewportBaselineHeight - virtualKeyboardHeight[\s\S]*: viewportHeight/u);
+  assert.match(browser, /fullscreenHeight: virtualKeyboardVisible \? viewportBaselineHeight : null/u);
+  assert.match(browser, /const fullscreenInset = document\.fullscreenElement === player && measuredKeyboard[\s\S]*\? measuredKeyboardHeight/u);
+  assert.match(browser, /"none" \| "viewport" \| "virtual-keyboard"/u);
+  assert.doesNotMatch(browser, /userAgent/u);
+  assert.doesNotMatch(browser, /fullscreenFallback|geometry: "fallback"|typing-only/u);
+  assert.match(browser, /--fullscreen-keyboard-inset/u);
   assert.match(layout, /--player-usable-height: 100dvh/u);
+  assert.match(layout, /--fullscreen-player-height: 100dvh/u);
+  assert.match(layout, /--fullscreen-keyboard-inset: 0px/u);
+  assert.match(layout, /--keyboard-transcript-reserve: 5rem/u);
   assert.match(layout, /height: min\(100dvh, var\(--player-usable-height\)\)/u);
+  assert.match(layout, /grid-template-rows:[\s\S]*var\(--media-height\)[\s\S]*minmax\(0, 1fr\)[\s\S]*auto[\s\S]*auto/u);
+  assert.match(layout, /\.player \{[\s\S]*overflow: hidden/u);
+  assert.match(layout, /\.player\[data-keyboard="open"\] \{[\s\S]*--safe-bottom-reserve: 0px/u);
+  assert.match(layout, /\.player\[data-keyboard="open"\]:not\(:fullscreen\) \{[\s\S]*height: var\(--player-usable-height\)/u);
+  assert.match(layout, /\.player:fullscreen \{[\s\S]*height: var\(--fullscreen-player-height\);[\s\S]*padding-bottom: var\(--fullscreen-keyboard-inset\)/u);
   assert.match(responsive, /\.player\[data-chrome="overlay"\]/u);
-  assert.match(responsive, /\.player\[data-height-composition="composer-only"\][\s\S]*grid-template-rows: 0 0 0 0 minmax\(0, 1fr\)/u);
+  assert.match(browser, /const mediaHeight = keyboardLayout\.open[\s\S]*constrainedKeyboardMediaHeight\(preferredMediaHeight, usableHeight, overlayChrome\)/u);
+  assert.match(browser, /const boundedTranscriptReserve = Math\.min\(transcriptReserve, availableConversationHeight\)/u);
+  assert.match(browser, /Math\.max\(0, availableConversationHeight - boundedTranscriptReserve\)/u);
+  assert.match(browser, /function remPixelValue[\s\S]*remValue \* rootFontSize/u);
+  assert.doesNotMatch(html, /data-height-composition/u);
+  assert.doesNotMatch(responsive, /data-height-composition/u);
   assert.doesNotMatch(responsive, /@media \(max-height: 600px\)/u);
 });
 

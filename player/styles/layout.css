@@ -58,6 +58,8 @@
         --safe-bottom-reserve: var(--safe-bottom);
         --safe-left: env(safe-area-inset-left, 0px);
         --player-usable-height: 100dvh;
+        --fullscreen-player-height: 100dvh;
+        --fullscreen-keyboard-inset: 0px;
 
         --title-bar-height: 52px;
         --title-height:
@@ -107,6 +109,7 @@
         --conversation-min-width: 380px;
         --conversation-gap: 18px;
         --conversation-overlay-reserve: 0px;
+        --keyboard-transcript-reserve: 5rem;
         --composer-max-lines: 6lh;
         --composer-max-viewport-height: 20dvh;
         --composer-effective-viewport-height: var(--composer-max-viewport-height);
@@ -152,6 +155,28 @@
 
         overflow: hidden;
         background: var(--color-surface-canvas);
+      }
+
+      /*
+        A measured open keyboard replaces the physical screen bottom as the
+        usable edge. Do not reserve the device bottom inset a second time.
+      */
+      .player[data-keyboard="open"] {
+        --safe-bottom-reserve: 0px;
+      }
+
+      .player[data-keyboard="open"]:not(:fullscreen) {
+        height: var(--player-usable-height);
+      }
+
+      /*
+        Browsers keep the fullscreen element itself full-size. Reserve the
+        measured keyboard occlusion inside the Player instead of asking the
+        browser to resize fullscreen.
+      */
+      .player:fullscreen {
+        height: var(--fullscreen-player-height);
+        padding-bottom: var(--fullscreen-keyboard-inset);
       }
 
       .player[data-left="closed"] {

@@ -2,9 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <!--
+    Keep the browser's default resizes-visual keyboard behavior. The Player
+    follows visualViewport itself; forcing resizes-content leaves hidden
+    Firefox Android toolbar space between the composer and keyboard.
+  -->
   <meta
     name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
   />
   <meta name="color-scheme" content="light" />
   <title>TeaseScript Player</title>
@@ -34,6 +39,8 @@
     data-right-layout="stage"
     data-right-backing="overlay"
     data-chrome="normal"
+    data-keyboard="closed"
+    data-keyboard-geometry="none"
   >
     <div class="title-bg" aria-hidden="true"></div>
 

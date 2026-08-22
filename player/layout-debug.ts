@@ -9,6 +9,7 @@ type LayoutDebugKey =
 
 interface LayoutDebugOverlay {
   readonly root: HTMLElement;
+  readonly stageDiagnostics: HTMLElement;
   readonly gridLayer: HTMLElement;
   readonly regionLayer: HTMLElement;
   readonly reserveLayer: HTMLElement;
@@ -32,6 +33,11 @@ interface LayoutDebugElements {
   readonly rightZone: HTMLElement;
   readonly actions: HTMLElement;
   readonly timerList: HTMLElement;
+}
+
+interface BrowserVirtualKeyboard {
+  readonly boundingRect: DOMRectReadOnly;
+  readonly overlaysContent: boolean;
 }
 
 export interface LayoutDebugController {
@@ -394,6 +400,63 @@ export function createLayoutDebugController(
       const key = requiredDatasetValue(element, "layoutDebugValue");
       element.textContent = values[key] ?? "—";
     }
+
+    syncStageDiagnostics(playerRect, playerStyle, foreground);
+  }
+
+  function syncStageDiagnostics(
+    playerRect: DOMRect,
+    playerStyle: CSSStyleDeclaration,
+    foreground: HTMLElement | null,
+  ): void {
+    const stageRect = mediaArea.getBoundingClientRect();
+    const titleRect = titleControls.getBoundingClientRect();
+    const rightRect = rightZone.getBoundingClientRect();
+    const transcriptRect = transcript.getBoundingClientRect();
+    const foregroundRect = foreground?.getBoundingClientRect() ?? null;
+    const composerRect = composer.getBoundingClientRect();
+    const inputRect = composerInput.getBoundingClientRect();
+    const visualViewport = window.visualViewport;
+    const keyboard = browserVirtualKeyboard();
+    const keyboardRect = keyboard?.boundingRect ?? null;
+    const visibleBottom = visualViewport === null
+      ? window.innerHeight
+      : visualViewport.offsetTop + visualViewport.height;
+    const cardTop = Math.max(stageRect.top, titleRect.bottom) + 6;
+    const cardRight = rightRect.left > stageRect.left && rightRect.left < stageRect.right
+      ? rightRect.left - 6
+      : stageRect.right - 6;
+    const cardBottom = Math.min(stageRect.bottom, visibleBottom) - 6;
+
+    overlay.stageDiagnostics.style.left = `${Math.max(6, stageRect.left - playerRect.left + 6)}px`;
+    overlay.stageDiagnostics.style.top = `${Math.max(6, cardTop - playerRect.top)}px`;
+    overlay.stageDiagnostics.style.width = `${Math.max(0, cardRight - stageRect.left - 12)}px`;
+    overlay.stageDiagnostics.style.maxHeight = `${Math.max(0, cardBottom - cardTop)}px`;
+
+    const visualDescription = visualViewport === null
+      ? "unsupported"
+      : `${formatRectSize(visualViewport)} @${formatNumber(visualViewport.offsetLeft)},${formatNumber(visualViewport.offsetTop)} p${formatNumber(visualViewport.pageLeft)},${formatNumber(visualViewport.pageTop)} s${formatScale(visualViewport.scale)}`;
+    const keyboardDescription = keyboardRect === null
+      ? "unsupported"
+      : `${formatRectPositionAndSize(keyboardRect)} · overlay ${yesNo(keyboard?.overlaysContent === true)}`;
+    const foregroundDescription = foregroundRect === null || foreground?.hidden === true
+      ? "inactive"
+      : formatRectRange(foregroundRect);
+    const inputValue = JSON.stringify(composerInput.value).slice(0, 34);
+    const placeholder = JSON.stringify(composerInput.placeholder).slice(0, 34);
+
+    overlay.stageDiagnostics.textContent = [
+      `FS ${yesNo(document.fullscreenElement === player)} · KB ${player.dataset.keyboard ?? "—"}/${player.dataset.keyboardGeometry ?? "—"} · secure ${yesNo(window.isSecureContext)}`,
+      `win ${formatPixels(window.innerWidth)}×${formatPixels(window.innerHeight)} · vv ${visualDescription}`,
+      `VK ${keyboardDescription}`,
+      `player ${formatRectRange(playerRect)} · css ${playerStyle.height}`,
+      `vars usable ${cssCustomValue(playerStyle, "--player-usable-height")} · fs ${cssCustomValue(playerStyle, "--fullscreen-player-height")} · inset ${cssCustomValue(playerStyle, "--fullscreen-keyboard-inset")}`,
+      `stage ${formatRectRange(stageRect)}`,
+      `transcript ${formatRectRange(transcriptRect)} · foreground ${foregroundDescription}`,
+      `composer ${formatRectRange(composerRect)} · input ${formatRectRange(inputRect)}`,
+      `focus ${yesNo(document.activeElement === composerInput)} · value ${inputValue} · placeholder ${placeholder}`,
+      `input scroll ${composerInput.scrollTop}/${Math.max(0, composerInput.scrollHeight - composerInput.clientHeight)} · doc ${window.scrollY}/${Math.max(0, document.documentElement.scrollHeight - document.documentElement.clientHeight)}`,
+    ].join("\n");
   }
 
   function effectiveLeftPresentation(): string {
@@ -431,6 +494,8 @@ function createLayoutDebugOverlay(): LayoutDebugOverlay {
   const reserveLayer = createDebugLayer("layout-debug-reserve-layer");
   const overflowLayer = createDebugLayer("layout-debug-overflow-layer");
   const safeLayer = createDebugLayer("layout-debug-safe-layer");
+  const stageDiagnostics = document.createElement("pre");
+  stageDiagnostics.className = "layout-debug-stage-diagnostics";
 
   const safeTop = createSafeAreaEdge("top");
   const safeRight = createSafeAreaEdge("right");
@@ -438,9 +503,10 @@ function createLayoutDebugOverlay(): LayoutDebugOverlay {
   const safeLeft = createSafeAreaEdge("left");
   safeLayer.append(safeTop, safeRight, safeBottom, safeLeft);
 
-  root.append(gridLayer, reserveLayer, regionLayer, overflowLayer, safeLayer);
+  root.append(gridLayer, reserveLayer, regionLayer, overflowLayer, safeLayer, stageDiagnostics);
   return {
     root,
+    stageDiagnostics,
     gridLayer,
     regionLayer,
     reserveLayer,
@@ -527,8 +593,16 @@ function parseResolvedTracks(value: string): readonly number[] {
     .filter(Number.isFinite);
 }
 
-function formatRectSize(rect: DOMRect): string {
+function formatRectSize(rect: { readonly width: number; readonly height: number }): string {
   return `${formatPixels(rect.width)} × ${formatPixels(rect.height)}`;
+}
+
+function formatRectPositionAndSize(rect: DOMRectReadOnly): string {
+  return `${formatNumber(rect.x)},${formatNumber(rect.y)} ${formatNumber(rect.width)}×${formatNumber(rect.height)}`;
+}
+
+function formatRectRange(rect: DOMRectReadOnly): string {
+  return `y${formatNumber(rect.top)}–${formatNumber(rect.bottom)} h${formatNumber(rect.height)}`;
 }
 
 function formatTrackList(tracks: readonly number[]): string {
@@ -541,6 +615,14 @@ function formatPixels(value: number): string {
 
 function formatScale(value: number): string {
   return Number.isFinite(value) ? value.toFixed(2) : "1.00";
+}
+
+function formatNumber(value: number): string {
+  return String(Math.round(value));
+}
+
+function yesNo(value: boolean): "yes" | "no" {
+  return value ? "yes" : "no";
 }
 
 type ScrollAxis = "x" | "y";
@@ -589,6 +671,13 @@ function formatToolBodyScroll(toolBodies: readonly HTMLElement[]): string {
 function cssCustomValue(style: CSSStyleDeclaration, name: string): string {
   const value = style.getPropertyValue(name).trim();
   return value.length === 0 ? "—" : value;
+}
+
+function browserVirtualKeyboard(): BrowserVirtualKeyboard | null {
+  const extendedNavigator = navigator as Navigator & {
+    readonly virtualKeyboard?: BrowserVirtualKeyboard;
+  };
+  return extendedNavigator.virtualKeyboard ?? null;
 }
 
 function isLayoutDebugKey(value: string): value is LayoutDebugKey {
