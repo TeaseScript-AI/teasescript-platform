@@ -58,6 +58,16 @@ test("serves the modular Player demo and its local assets", async () => {
   assert.match(css.body, /--right-controls-width/u);
 });
 
+test("serves the built Vue Player parity candidate independently from the legacy reference", async () => {
+  const html = await get("/player-vue/");
+
+  assert.equal(html.status, 200);
+  assert.match(html.contentType, /^text\/html/u);
+  assert.match(html.body, /Vue parity candidate/u);
+  assert.match(html.body, /\/player-vue\/assets\/index-[^"]+\.js/u);
+  assert.doesNotMatch(html.body, /\/dist\/player\/browser\.js/u);
+});
+
 test("Player demo media endpoint discovers supported image files from the demo-media folder", async (context) => {
   const projectRoot = await mkdtemp(join(tmpdir(), "teasescript-player-media-"));
   context.after(async () => rm(projectRoot, { recursive: true, force: true }));

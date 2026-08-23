@@ -314,6 +314,14 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
   if (pathname === "/player" || pathname === "/player/") {
     return { root: roots.playerRoot, path: resolve(roots.playerRoot, "index.html") };
   }
+  if (pathname === "/player-vue" || pathname === "/player-vue/") {
+    const playerVueRoot = resolve(roots.distRoot, "player-vue");
+    return { root: playerVueRoot, path: resolve(playerVueRoot, "index.html") };
+  }
+  if (pathname.startsWith("/player-vue/")) {
+    const playerVueRoot = resolve(roots.distRoot, "player-vue");
+    return resolveInside(playerVueRoot, pathname.slice("/player-vue/".length));
+  }
   if (pathname.startsWith("/player/")) {
     return resolveInside(roots.playerRoot, pathname.slice("/player/".length));
   }

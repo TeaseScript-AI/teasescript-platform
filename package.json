@@ -7,8 +7,11 @@
     "node": "24.18.0"
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "npm run build:typescript && npm run typecheck:player && npm run build:player",
+    "build:typescript": "tsc",
+    "build:player": "vite build --config player/vue/vite.config.ts",
+    "typecheck": "tsc --noEmit && npm run typecheck:player",
+    "typecheck:player": "node ./tools/vue-typecheck.cjs --noEmit -p player/vue/tsconfig.json",
     "test:compiled": "node ./tools/test-output-filter.mjs",
     "test": "npm run build && node ./tools/test-output-filter.mjs",
     "check": "npm test",
@@ -21,6 +24,14 @@
   "devDependencies": {
     "@types/node": "24.13.3",
     "@typescript/native": "npm:typescript@7.0.2",
-    "ts-morph": "28.0.0"
+    "@vitejs/plugin-vue": "6.0.8",
+    "@vue/tsconfig": "0.9.1",
+    "ts-morph": "28.0.0",
+    "typescript-vue": "npm:typescript@5.9.3",
+    "vite": "8.2.2",
+    "vue-tsc": "3.3.11"
+  },
+  "dependencies": {
+    "vue": "3.5.41"
   }
 }

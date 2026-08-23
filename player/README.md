@@ -9,13 +9,17 @@ General cross-surface UI engineering/design guidance lives in
 route. Accepted runtime, interaction, security, and custom-view semantics remain in their controlling specifications and
 ADRs.
 
-For local inspection, `npm run playground` serves this implementation at `/player/` through the existing development
-server. That development route is not a public Player/host protocol.
+For local inspection, `npm run playground` serves the manual comparison implementation at `/player/` and the Vue 3
+parity candidate at `/player-vue/` through the existing development server. These development routes are not a public
+Player/host protocol. The manual route remains only until the Vue core has passed explicit visual and interaction
+acceptance; it is not a second production frontend.
 
 ## Implementation seams
 
-- `index.html` is the local Player entry point and static shell.
+- `index.html` and `browser.ts` are the temporary manual comparison entry point and wiring.
+- `vue/` contains the production-direction Vue 3 component core, its Vite build, and a thin demo adapter.
 - `model.ts` contains presentation-only POC data shapes.
+- `presentation.ts` contains framework-independent presentation ordering, formatting, matching, and colour helpers.
 - `render.ts` renders presentation data and demo tool-column content.
 - `panel-state.ts` and `tool-columns.ts` keep the current local UI state transitions separate from rendering.
 - `browser.ts` wires local browser interactions, demo presentation state, responsive state synchronization, and demo
@@ -26,7 +30,9 @@ server. That development route is not a public Player/host protocol.
   layers.
 - `demo-session.ts` and `demo-media/` are presentation fixtures, not runtime/package APIs.
 
-The implementation intentionally uses browser-native layout/features and has no UI-framework runtime dependency.
+Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
+presentation state in the parity candidate; the engine and shared presentation contracts remain framework-independent
+as required by ADR 0020.
 
 `styles/layout.css` currently owns the concrete light-theme palette values and semantic token mapping used by the
 source. Those values are also maintained as observable Player contract in `docs/ui/PLAYER-UI.md`; component CSS should
@@ -39,6 +45,9 @@ The local playground server may select a supported image from `player/demo-media
 Lab`, `Layout Debug`, and `Scene` tools, their fixture content, local tuning/inspection controls, filename-derived scene
 information, and the demo-media endpoint exist to exercise the presentation and are not Standard Library, runtime,
 package, or host APIs.
+
+Visual Lab and Layout Debug intentionally remain on the manual comparison route during the core migration. Their
+absence from the Vue production core is a boundary, not a decision to remove those playtest tools.
 
 The current composer, foreground controls, transcript-history/smart-follow fixtures, timer fixtures, and rendered
 right-rail controls are presentation-only and are not wired to the deterministic runtime. Accepted Standard interaction
