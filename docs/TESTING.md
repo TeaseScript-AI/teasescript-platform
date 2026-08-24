@@ -21,6 +21,9 @@ The current repository uses:
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
+The accepted Player direction is a separate local Playwright suite with axe-core checks. It does not join `npm run check`
+or normal GitHub CI without an explicit owner decision based on measured cost and stability.
+
 ## Normal and diagnostic verification
 
 `npm run check` is the normal complete configured suite and preserves actionable
@@ -92,6 +95,18 @@ source route retain focused public or trusted-boundary coverage until one
 exists.
 
 End-to-end testing does not replace focused unit, validator, and invariant tests.
+
+## Player browser and visual verification
+
+Use focused unit tests for deterministic presentation logic and local Playwright tests for changed browser behavior,
+including layout, focus, input, scrolling, overlays, and accessibility across the relevant supported engines. Keep the
+full browser matrix outside normal CI by default.
+
+After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
+(computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This
+is a scoped visual check, not a full UI audit; it catches clipping, overlap, unreadable wrapping, misplaced popovers,
+and other failures that source assertions or DOM semantics do not prove. Use a real device when the behavior depends on
+mobile browser chrome, a software keyboard, safe areas, or input hardware that emulation cannot reproduce.
 
 ## Regression-test rule
 
@@ -461,7 +476,7 @@ equivalence, and adversarial snapshot/checkpoint validation. Boundary regression
 exhaustion and terminal transition atomicity. Standard Player click/touch/Space behavior remains assigned to its later
 browser slice.
 
-## Browser E2E gate
+## Host browser E2E gate
 
 Real browser automation becomes required after the cross-origin host shell and player exist. Coverage should then include:
 
@@ -475,7 +490,8 @@ Real browser automation becomes required after the cross-origin host shell and p
 - fullscreen and navigation;
 - invalid host/player messages.
 
-No browser framework is selected yet. Playwright or another dependency should be chosen only when a concrete browser surface and its maintenance requirements can be evaluated.
+The host gate should reuse the local Playwright stack selected for the Player unless evidence from the implemented host
+surface shows that it cannot prove the required boundary.
 
 ## Coverage and performance boundaries
 

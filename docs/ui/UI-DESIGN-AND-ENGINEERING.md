@@ -29,6 +29,9 @@ task crosses categories or the relevant ownership is unclear.
 - **Demo/content independence, media decoration, or effect containment:**
   [Keep content independent from demo markup and decorative
   chrome](#keep-content-independent-from-demo-markup-and-decorative-chrome).
+- **Popover or anchored-menu placement:**
+  [Keep anchored floating UI inside usable space](#keep-anchored-floating-ui-inside-usable-space) and
+  [Match interaction feedback to input capability](#match-interaction-feedback-to-input-capability).
 - **Broad visual direction or generic-design critique:**
   [Design quality and avoiding generic “AI slop”](#design-quality-and-avoiding-generic-ai-slop).
 
@@ -172,6 +175,14 @@ feature-detected keyboard geometry when the browser exposes it and otherwise use
 reported keyboard occlusion with a second bottom-safe-area reservation. Re-evaluate after viewport transitions settle
 instead of assuming a fixed keyboard height. When a fullscreen browser exposes neither measurement, preserve the stable
 normal composition rather than guessing the hidden keyboard size or inventing an unmeasured replacement layout.
+
+### Keep anchored floating UI inside usable space
+
+Vue owns the state, semantics, focus, dismissal, and content of production popovers and anchored menus. Floating UI owns
+their placement once the first concrete production surface is migrated: use its collision-aware flip/shift behavior
+instead of hand-maintained viewport offsets. Keep the trigger usable for pointer, keyboard, and touch input; dismiss on
+the accepted outside/Escape paths and restore focus where appropriate. The positioning helper does not own general
+Player geometry or justify a generic overlay system without concrete consumers.
 
 ### Size responsive layouts from constraints
 

@@ -44,6 +44,10 @@ General reusable UI engineering and visual-design guidance lives in
 [UI-DESIGN-AND-ENGINEERING.md](UI-DESIGN-AND-ENGINEERING.md). That guide informs implementation quality but does not
 replace the Player-specific contract here.
 
+Player verification follows [`TESTING.md`](../TESTING.md), including its local browser and scoped visual-check route.
+ADR 0001 fixes the responsive PWA direction; exact offline, storage, cache, and update lifecycle choices remain in
+[`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md) rather than being duplicated here.
+
 ## Current maturity boundary
 
 Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.md);
@@ -379,7 +383,9 @@ The transcript:
 - must remain performant for histories that can reach extremely large sizes. Do not retain millions of words as active
   DOM nodes. Use virtualization/windowing or an equivalent technique while preserving stable scroll position and the
   illusion that the complete retained history is continuously present; loading/rendering older content must not make a
-  user who appeared near the top suddenly jump to a different relative location.
+  user who appeared near the top suddenly jump to a different relative location. The presentation mechanism must use
+  stable entry identities, support variable message heights, bound rendered DOM, and preserve the visible anchor across
+  prepend, append, measurement, and resize; it does not own or truncate canonical history.
 
 ### Smart follow and return to latest
 
