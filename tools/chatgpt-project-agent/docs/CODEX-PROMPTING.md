@@ -22,6 +22,10 @@ when execution volume, unresolved implementation strategy, an intervening owner 
 independent review value, or dependency/ownership safety materially favors separation. When splitting, end each package
 in a durable repository state and start dependent work from its verified head or explicit handoff state.
 
+When a repetitive migration applies a judgment-heavy pattern that automated checks cannot validate, use a representative
+first slice to validate the approach before propagating it broadly. This is a bounded review checkpoint, not a reason to
+split the remaining work into microtasks.
+
 Before splitting behavior-changing work, trace its immediate dependencies. Include every transition, state,
 serialization, validation, or other path that ordinary successful execution can immediately reach. When a
 representation-changing foundation makes later repairs depend on a still-moving representation, prefer a durable
@@ -30,11 +34,20 @@ prescribed and reliably executable together. Do not turn that rule into microtas
 the representation and required invariants are stable enough for one reliable package. A behavior-neutral prerequisite
 may stand alone when it leaves a useful durable state.
 
-Define milestones by dependency order and **measurable durable capability states**, not by prompt or repair count. A
-milestone stays open until its acceptance state is satisfied; reviews, retries, and repairs do not create new
-milestones. A later assignment may combine remaining repairs with adjacent milestone work when the package remains
-coherent, dependency-safe, and reliably executable. Milestones are planning structure, not automatic prompt, branch,
-pull-request, context, or model-selection boundaries.
+Define the intended milestones before delegation by dependency order and **measurable durable capability states**, not
+by prompt or repair count. Keep that milestone set stable: reviews, retries, and repairs do not create new milestones
+merely because additional work was discovered. A milestone stays open until its acceptance state is satisfied.
+
+Combine remaining repairs with the next planned milestone when the resulting package remains coherent, dependency-safe,
+and reliably executable. Only when the repair burden is large enough to compromise the next milestone should repair
+work be completed first; once that burden is no longer large, continue with the next planned milestone and carry any
+remaining bounded repairs with it. Revise the milestone plan only when the underlying scope, dependency structure, or
+accepted outcome materially changes; do not invent successive milestones merely to continue work.
+
+Milestones are planning structure, not automatic branch, pull-request, context, or model-selection boundaries. For Luna,
+prefer smaller sequential assignments derived from the planned milestones; one assignment may cover one or a few
+adjacent milestones when the package remains tightly bounded and clear. The orchestrator reviews each Luna result before
+issuing the next planned stage.
 
 ## Select only material context
 
@@ -60,6 +73,10 @@ Make **Goal, Context, Constraints, and Done when** clear; these are organizing c
 filled with invented content. `Done when` states the external completion state, including checks and repository/GitHub
 writes actually assigned, resulting identity when needed, and any material deviation or unresolved uncertainty.
 
+For Luna, make `Done when` mechanically decidable for the assigned stage: state the required durable result and checks.
+If `Done when` is not satisfied and no explicit stop condition applies, continue working rather than asking whether to
+proceed.
+
 Include task-relevant authority, likely code areas or patterns, critical invariants, acceptance criteria, established
 verification, permitted writes, and materially necessary write prohibitions only when they reduce search or ambiguity.
 Treat likely files as starting points, not exhaustive boundaries. Specify outcomes, invariants, ordering, exceptions,
@@ -72,11 +89,14 @@ remains unsatisfied. A temporarily red suite, inconsistent in-progress worktree,
 publish is likewise an intermediate implementation state when the assigned semantics still determine a recoverable
 path; it is not by itself a reason to stop or hand back partial work.
 
-Define stop conditions only for genuine blockers such as an unresolved owner/architecture decision, an invalidated
-required branch or immutable head, unavailable permission/evidence with no permitted alternative, a trust-boundary
-concern, or a repair that would materially broaden scope or change accepted behavior. Recoverable tool or GitHub
-failures normally require diagnosis or a supported route. Resolve minor ambiguity from current repository evidence
-instead of manufacturing a stop; report only assumptions or deviations that materially affect the final handoff.
+Define stop conditions only for concrete blockers: a required owner or architecture decision that the available
+authority does not answer; an invalidated required branch or immutable head; unavailable required permission or
+evidence after supported alternatives are exhausted; a trust-boundary concern; or a repair that would materially
+broaden scope or change accepted behavior.
+
+Recoverable tool, build, test, or GitHub failures are work to diagnose, not stop conditions. Resolve minor ambiguity
+from current repository authority. If a material ambiguity requires choosing behavior or architecture that the prompt
+does not authorize, stop and report the exact unresolved decision and the evidence that leaves it open.
 
 A reference SHA is not a stop condition when the task starts from current `main`; synchronize authoritative remote
 `main` and branch from it. Require an exact-SHA stop only when immutable source identity actually controls the task. A
@@ -111,14 +131,13 @@ Use a temporary checklist only when it materially helps retain a multi-step assi
 do not require per-item evidence, commentary, logs, or deletion proofs unless that output is itself needed. Request
 progress reports, inventories, or intermediate proofs only when they have a concrete execution or handoff consumer.
 
-Match specificity to the selected configuration: Luna needs narrower decisions and concrete checks; Terra needs
-implementation direction, ownership boundaries, and normal local freedom; Sol needs precise contracts, relevant
-evidence, and critical invariants with broader implementation freedom. For Terra, resolve known semantic choices,
-architectural boundaries, dependency order, and relevant existing precedent before delegation when those materially
-narrow the correct route. Prescribe the contract and constraints, not the patch: do not make Terra rediscover a strategy
-the prompt author can already establish from authority and repository evidence, but leave ordinary code structure and
-local implementation choices free. Low reasoning needs a well-bounded path, Medium normal repository investigation,
-and High the actual unresolved questions, trade-offs, or diagnostic burden rather than extra procedure.
+Match specificity to the selected configuration. Luna needs all material semantic choices, architecture, and
+important boundaries resolved before delegation. Give it a clear goal, affected regions or patterns, critical
+invariants, and concrete checks, while leaving ordinary code structure and local implementation choices free when the
+repository makes them clear. Sol needs precise contracts, relevant evidence, and critical invariants while retaining
+broader freedom to investigate and choose implementation strategy. Astra should receive the objective, authority,
+consequential constraints, and critical invariants while retaining broad freedom for difficult decomposition, judgment,
+and review.
 
 ## Mandatory prompt-author preflight
 
@@ -147,8 +166,8 @@ If any item fails, revise the prompt first.
   semantic readability.
 - **Administration:** Does every checklist, log, evidence, progress, or reporting request have a concrete purpose?
   Remove ceremonial work.
-- **Completion:** Does `Done when` cover actual checks, complete diff review, assigned publication, and final state
-  without restating the prompt?
+- **Completion:** Is `Done when` objectively decidable for the selected executor, and does it cover actual checks,
+  complete diff review, assigned publication, and final state without restating the prompt?
 
 The goal is not the shortest prompt. Use the smallest context that preserves everything that materially improves the
 chance of an accepted result.
