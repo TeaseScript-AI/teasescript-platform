@@ -27,6 +27,8 @@ tester.run("anti-slop/no-known-value-widening", noKnownValueWideningRule, {
 		"const isUser = (value: unknown): value is User => true; declare const known: User; isUser(known);",
 		"declare function isUser(value: unknown): value is User; declare const known: User; isUser(known);",
 		"type Record<K, V> = { key: K; value: V }; const value: Record<string, unknown> = { key: 'id', value: 1 };",
+		"interface Value {} function local() { interface Value { id: string } const values: Record<string, Value> = { known: { id: 'x' } }; }",
+		"interface Value {} interface Value { id: string } const values: Record<string, Value> = { known: { id: 'x' } };",
 	],
 	invalid: [
 		{ code: "const value: unknown = {};", errors: [error] },
@@ -51,6 +53,14 @@ tester.run("anti-slop/no-known-value-widening", noKnownValueWideningRule, {
 		},
 		{
 			code: "type Values = Readonly<Record<string, any>>; const values: Values = { known: 1 };",
+			errors: [error],
+		},
+		{
+			code: "interface Value { id: string } function local() { interface Value {} const values: Record<string, Value> = { known: {} }; }",
+			errors: [error],
+		},
+		{
+			code: "interface Value {} interface Value {} const values: Record<string, Value> = { known: {} };",
 			errors: [error],
 		},
 	],

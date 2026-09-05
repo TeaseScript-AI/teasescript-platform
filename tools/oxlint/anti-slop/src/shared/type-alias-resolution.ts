@@ -7,6 +7,7 @@ type TypeScope = ESTree.Node;
 
 type TypeBinding = {
 	readonly alias: ESTree.TSTypeAliasDeclaration | null;
+	readonly interfaceDeclaration: ESTree.TSInterfaceDeclaration | null;
 	readonly name: string;
 	readonly scope: TypeScope;
 };
@@ -59,25 +60,30 @@ function enclosingTypeScope(node: ESTree.Node): TypeScope {
 
 function declaredTypeBinding(node: ESTree.Node): {
 	readonly alias: ESTree.TSTypeAliasDeclaration | null;
+	readonly interfaceDeclaration: ESTree.TSInterfaceDeclaration | null;
 	readonly name: string;
 } | null {
 	if (node.type === "TSTypeAliasDeclaration") {
-		return { alias: node, name: node.id.name };
+		return { alias: node, interfaceDeclaration: null, name: node.id.name };
+	}
+	if (node.type === "TSInterfaceDeclaration") {
+		return { alias: null, interfaceDeclaration: node, name: node.id.name };
 	}
 	if (
-		node.type === "TSInterfaceDeclaration" ||
 		node.type === "TSEnumDeclaration" ||
 		node.type === "ClassDeclaration" ||
 		node.type === "ClassExpression"
 	) {
-		return node.id === null ? null : { alias: null, name: node.id.name };
+		return node.id === null
+			? null
+			: { alias: null, interfaceDeclaration: null, name: node.id.name };
 	}
 	if (
 		node.type === "ImportSpecifier" ||
 		node.type === "ImportDefaultSpecifier" ||
 		node.type === "ImportNamespaceSpecifier"
 	) {
-		return { alias: null, name: node.local.name };
+		return { alias: null, interfaceDeclaration: null, name: node.local.name };
 	}
 	return null;
 }
@@ -169,6 +175,22 @@ export function visibleTypeAlias(
 	if (lexicalTypeParameterNames(use, environment.visitorKeys).has(name)) return null;
 	const bindings = nearestTypeBindings(name, use, environment);
 	return bindings.length === 1 ? (bindings[0]?.alias ?? null) : null;
+}
+
+/** Resolve the nearest visible same-scope interface declaration group. */
+export function visibleInterfaceDeclarations(
+	name: string,
+	use: ESTree.Node,
+	environment: TypeAliasEnvironment,
+): readonly ESTree.TSInterfaceDeclaration[] | null {
+	if (lexicalTypeParameterNames(use, environment.visitorKeys).has(name)) return null;
+	const bindings = nearestTypeBindings(name, use, environment);
+	if (bindings.length === 0 || bindings.some((binding) => binding.interfaceDeclaration === null)) {
+		return null;
+	}
+	return bindings.flatMap((binding) =>
+		binding.interfaceDeclaration === null ? [] : [binding.interfaceDeclaration],
+	);
 }
 
 /** Return whether a local declaration shadows a built-in type at this use. */

@@ -24,6 +24,8 @@ tester.run("anti-slop/no-unsafe-dictionary-type", noUnsafeDictionaryTypeRule, {
 		"type Payload = Map<string, any>;",
 		"import { Record } from './local'; type Payload = Record<string, any>;",
 		"type Record<K, V> = { key: K; value: V }; type Payload = Record<string, any>;",
+		"interface Value {} function local() { interface Value { id: string } type Payload = Record<string, Value>; }",
+		"interface Value {} interface Value { id: string } type Payload = Record<string, Value>;",
 	],
 	invalid: [
 		{ code: "type Payload = Record<string, any>;", errors: [error] },
@@ -51,6 +53,14 @@ tester.run("anti-slop/no-unsafe-dictionary-type", noUnsafeDictionaryTypeRule, {
 		{
 			code: "function local() { type Record<K, V> = { key: K; value: V }; type A = Record<string, any>; } function global() { type A = Record<string, any>; }",
 			errors: 1,
+		},
+		{
+			code: "interface Value { id: string } function local() { interface Value {} type Payload = Record<string, Value>; }",
+			errors: [error],
+		},
+		{
+			code: "interface Value {} interface Value {} type Payload = Record<string, Value>;",
+			errors: [error],
 		},
 	],
 });
