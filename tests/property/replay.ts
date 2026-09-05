@@ -605,9 +605,13 @@ function compilePlan(
 function delayCompletion(
   snapshot: RuntimeSnapshot,
   currentSessionTimeMs: number,
-): object {
+): {
+  readonly actionId: number;
+  readonly actionKind: "delay";
+  readonly payload: { readonly kind: "time"; readonly currentSessionTimeMs: number };
+} {
   const actionId = snapshot.foregroundAction?.actionId;
-  assert.notEqual(actionId, undefined);
+  assert.ok(actionId !== undefined);
   return {
     actionId,
     actionKind: "delay",

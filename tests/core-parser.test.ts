@@ -294,7 +294,7 @@ function typeShape(
   name: string,
   collection: "list" | "set" | null,
   optional: boolean,
-): object {
+) {
   return {
     name,
     collection,

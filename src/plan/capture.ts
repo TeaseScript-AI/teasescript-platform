@@ -22,6 +22,7 @@ export function captureInstructionPlan(value: unknown): CapturedInstructionPlanR
   const validation = validateCapturedInstructionPlan(capture.value);
   return Object.freeze({
     validation,
+    // EVIDENCE: validation: validateCapturedInstructionPlan checked this immutable captured graph above.
     plan: validation.valid ? (capture.value as InstructionPlan) : null,
   });
 }

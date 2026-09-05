@@ -360,14 +360,14 @@ test("preserves decoded multiline string and template values", () => {
   );
 });
 
-function sourceSpan(source: string, start: number, end: number): object {
+function sourceSpan(source: string, start: number, end: number) {
   return {
     start: sourcePosition(source, start),
     end: sourcePosition(source, end),
   };
 }
 
-function sourcePosition(source: string, offset: number): object {
+function sourcePosition(source: string, offset: number) {
   let line = 0;
   let column = 0;
 

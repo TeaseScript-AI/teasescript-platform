@@ -387,6 +387,7 @@ test("positive pacing control-flow paths have equivalent uninterrupted and resto
 test("pacing creation provenance rejects an impossible function owner", () => {
   const compiled = plan('function f { say "first" }\nf()');
   const completed = run(compiled, createFreshRuntimeSnapshot(compiled));
+  // EVIDENCE: fixture: parse a serialized completed checkpoint into the persisted action-owner shape mutated below.
   const corrupted = JSON.parse(serializeCheckpoint(
     createCheckpoint(compiled, completed.snapshot),
   )) as { snapshot: { backgroundActions: Array<{ ownerCallFrameId: number | null }> } };
@@ -1281,6 +1282,7 @@ test("say instruction plans and public pacing failures stay at their validation 
 
   const base = plan('speaker vera {}\nsay as vera skippable "text", 1');
   const sayIndex = base.instructions.findIndex((instruction) => instruction.kind === "say");
+  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture table: each callback deliberately violates a different persisted say-instruction field before runtime validation.
   const invalidPlans: Array<[string, (candidate: any) => void]> = [
     ["missing skip policy", (candidate) => { delete candidate.instructions[sayIndex].skipPolicy; }],
     ["invalid skip policy", (candidate) => { candidate.instructions[sayIndex].skipPolicy = "later"; }],
@@ -1292,6 +1294,7 @@ test("say instruction plans and public pacing failures stay at their validation 
     ["malformed location", (candidate) => { candidate.instructions[sayIndex].span.so = -1; }],
   ];
   for (const [label, mutate] of invalidPlans) {
+    // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture: expose the cloned say instruction to the deliberate invalid mutation selected above.
     const hostile = structuredClone(base) as any;
     mutate(hostile);
     const validation = validateInstructionPlan(hostile);

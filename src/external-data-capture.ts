@@ -233,6 +233,7 @@ export function captureExternalData(
     if (array && keys.length !== arrayLength! + 1) {
       return captureFailure("nonJsonSafeValue", item.path, rootPath);
     }
+    // EVIDENCE: validation: prototype is Object.prototype or null; Object.create starts an empty capture dictionary.
     const captured = array
       ? createCapturedArray(arrayLength!)
       : (Object.create(prototype) as Record<string, unknown>);
@@ -268,6 +269,7 @@ function assignCaptured(
     return;
   }
   if (target.arrayIndex !== null) {
+    // EVIDENCE: invariant: arrayIndex is set only for numeric slots of engine-created captured arrays.
     (target.container as unknown[])[target.arrayIndex] = value;
     return;
   }
@@ -306,6 +308,7 @@ export function createCapturedArray(length: number): unknown[] {
 }
 
 function createCapturedArrayPrototype(): object {
+  // EVIDENCE: invariant: Object.create(null) creates the object populated with copied array descriptors below.
   const prototype = Object.create(null) as object;
   for (const key of Reflect.ownKeys(Array.prototype)) {
     if (typeof key === "string" && canonicalArrayIndex(key) !== null) continue;

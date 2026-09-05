@@ -93,6 +93,7 @@ test("captured settings clone, validate, and checkpoint through JSON", () => {
 
 test("snapshot and checkpoint reject malformed persisted chat pacing settings", () => {
   const compiled = plan();
+  // EVIDENCE: fixture: parse a serialized checkpoint into the persisted shape used for malformed pacing mutations.
   const checkpoint = JSON.parse(serializeCheckpoint(
     createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)),
   )) as { snapshot: { chatPacingSettings: Record<string, unknown> } };
@@ -133,6 +134,7 @@ test("captured pacing settings and representable pacing arithmetic retain the sa
 
 test("snapshot and checkpoint reject their previous versions", () => {
   const compiled = plan();
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: expose the otherwise readonly snapshot version to test rejection of an obsolete version.
   const snapshot = createFreshRuntimeSnapshot(compiled) as unknown as { version: number };
   snapshot.version = RUNTIME_SNAPSHOT_VERSION - 1;
   assert.deepEqual(validateRuntimeSnapshot(snapshot, compiled).errors, [

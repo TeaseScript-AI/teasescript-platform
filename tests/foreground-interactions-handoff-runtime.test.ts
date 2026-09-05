@@ -209,8 +209,10 @@ test("removed lifecycle fields are rejected structurally", () => {
   });
   const snapshot = createFreshRuntimeSnapshot(plan);
 
-  const oldLifecycle = structuredClone(snapshot) as any;
-  oldLifecycle.lastSettlementResultState = "none";
+  const oldLifecycle = {
+    ...structuredClone(snapshot),
+    lastSettlementResultState: "none",
+  };
   assert.equal(validateRuntimeSnapshot(oldLifecycle, plan).valid, false);
   assert.throws(() => createCheckpoint(plan, oldLifecycle));
 });
@@ -304,6 +306,7 @@ function injectInteraction(
     ? destinationTemporary + 1
     : null;
   const insertedInstructionCount = callTransferTemporary === null ? 2 : 3;
+  // EVIDENCE: replaceLiteralMarker recursively preserves this compiler-produced instruction except for its marker.
   const original = shiftInstructionTargets(replaceLiteralMarker(
     base.instructions[targetIndex],
     marker,
@@ -404,6 +407,7 @@ test("injectInteraction inserts one exact canonical boundary without collateral 
     const markerInstruction = markerInstructions[0]!;
     const markerIndex = original.instructions.indexOf(markerInstruction);
     const injected = injectTextInteraction(row.source);
+    // EVIDENCE: replacement preserves the compiler-produced marker instruction while substituting one expression.
     const expectedContinuation = replaceLiteralMarker(
       markerInstruction,
       marker,
@@ -501,6 +505,7 @@ function shiftInstructionTargets(
 function containsLiteralMarker(value: unknown, marker: string): boolean {
   if (Array.isArray(value)) return value.some((item) => containsLiteralMarker(item, marker));
   if (typeof value !== "object" || value === null) return false;
+  // EVIDENCE: after array and null checks, this read-only traversal examines the remaining object's enumerable values.
   const record = value as Record<string, unknown>;
   if (record.kind === "literal" && record.value === marker) return true;
   return Object.values(record).some((nested) => containsLiteralMarker(nested, marker));
@@ -510,13 +515,15 @@ function replaceLiteralMarker(
   value: unknown,
   marker: string,
   destinationTemporary: number,
-): unknown {
+): unknown { // oxlint-disable-line anti-slop/no-unknown-returns -- EVIDENCE: recursive heterogeneous plan transformation returns unknown until its instruction caller restores and checks the contract.
   if (Array.isArray(value)) {
     return value.map((item) => replaceLiteralMarker(item, marker, destinationTemporary));
   }
   if (typeof value !== "object" || value === null) return value;
+  // EVIDENCE: after array and null checks, replacement copies the remaining object's own enumerable fields.
   const record = value as Record<string, unknown>;
   if (record.kind === "literal" && record.value === marker) {
+    // oxlint-disable-next-line anti-slop/no-known-value-widening -- EVIDENCE: marker replacement returns an unvalidated temporary expression through this recursive unknown-data transformer.
     return {
       kind: "temporary",
       temporaryId: destinationTemporary,
@@ -658,6 +665,7 @@ function bindingValue(snapshot: RuntimeSnapshot, name: string) {
 function assertPreparedReference(value: unknown): void {
   assert.notEqual(value, null);
   assert.equal(typeof value, "object");
+  // EVIDENCE: the assertions above establish an object; the following kind/property checks verify its serialized shape.
   const reference = value as SerializableRuntimeObject;
   assert.equal(reference.kind, "object");
   assert.equal(getSerializableProperty(reference, "marker"), "preparedReference");
@@ -673,6 +681,7 @@ type ExternalRecord = Record<string, unknown>;
 function externalRecord(value: unknown, label: string): ExternalRecord {
   assert.equal(typeof value, "object", `${label} must be an object`);
   assert.notEqual(value, null, `${label} must not be null`);
+  // EVIDENCE: the preceding assertions exclude primitives and null before external fields are inspected.
   return value as ExternalRecord;
 }
 
@@ -936,6 +945,7 @@ function handoffPlanWithMalformedExpression(
   // Deliberately malformed external plan data cannot be represented by Instruction.
   return replaceHandoffInstruction(
     injected,
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture injects an unvalidated expression into declareBinding to test malformed-plan rejection.
     instruction as unknown as Instruction,
     temporaryCount,
   );
@@ -1284,6 +1294,7 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
     {
       id: "PR194-expression-template-text-metadata",
       category: "metadata",
+      // oxlint-disable-next-line anti-slop/no-known-value-widening -- EVIDENCE: fixture adds forbidden temporary metadata to a template text part for plan rejection.
       expression: {
         kind: "template",
         parts: [
@@ -1427,6 +1438,7 @@ test("PR194 matrix: continuation kinds read only their canonical expression fiel
   ];
   for (const row of invalidRows) {
     // Deliberately unsupported sibling fields exercise public malformed-plan validation.
+    // EVIDENCE: each row adds a named unsupported instruction field while retaining the dispatch instruction shape.
     const plan = replaceHandoffInstruction(
       injected,
       row.instruction as Instruction,
@@ -1560,7 +1572,10 @@ function assertRejectedSettlementHandoffSnapshot(
   const beforeCheckpoint = structuredClone(invalidSnapshot);
   // The external snapshot is deliberately malformed at this public boundary.
   assert.throws(
-    () => createCheckpoint(plan, invalidSnapshot as unknown as RuntimeSnapshot),
+    () => {
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture passes the malformed external record through the typed checkpoint boundary to verify rejection.
+      return createCheckpoint(plan, invalidSnapshot as unknown as RuntimeSnapshot);
+    },
     (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002",
     id,
   );
@@ -2886,15 +2901,18 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
     const before = structuredClone(snapshot);
     const planBefore = structuredClone(injected.plan);
     // Deliberately malformed external snapshot data must be rejected before completion mutates it.
-    assert.throws(() => completeAction(injected.plan, snapshot as unknown as RuntimeSnapshot, {
-      actionId,
-      actionKind: "interaction",
-      interactionKind: "text",
-      payload: {
-        kind: "submittedText",
-        submittedText: "committed",
-      },
-    }), (error: unknown) => {
+    assert.throws(() => {
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture passes the malformed external record to completion to verify atomic rejection.
+      return completeAction(injected.plan, snapshot as unknown as RuntimeSnapshot, {
+        actionId,
+        actionKind: "interaction",
+        interactionKind: "text",
+        payload: {
+          kind: "submittedText",
+          submittedText: "committed",
+        },
+      });
+    }, (error: unknown) => {
       assert.ok(error instanceof RuntimeDataError, row.id);
       assert.equal(error.code, "TSR101", row.id);
       assert.equal(error.message, row.message, row.id);

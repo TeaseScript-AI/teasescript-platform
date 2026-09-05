@@ -245,7 +245,7 @@ test("preserves checkpoint round trips for valid function control flow", () => {
   const initial = createFreshRuntimeSnapshot(compiled);
   const first = executeInstruction(compiled, initial);
   const checkpoint = createCheckpoint(compiled, first.snapshot);
-  const restored = restoreCheckpoint(JSON.parse(JSON.stringify(checkpoint)) as unknown);
+  const restored = restoreCheckpoint(JSON.parse(JSON.stringify(checkpoint)));
   const uninterrupted = run(compiled, first.snapshot);
   const resumed = run(restored.plan, restored.snapshot);
 
@@ -299,6 +299,7 @@ test("rejects malformed cross-region plans during checkpoint restoration", () =>
     "target",
     original.functions[0]!.bodyEntryInstruction,
   );
+  // EVIDENCE: JSON round-trips the runtime-created checkpoint before replacing its plan with the malformed clone.
   const checkpoint = JSON.parse(
     JSON.stringify(createCheckpoint(original, createFreshRuntimeSnapshot(original))),
   ) as { plan: InstructionPlan };
@@ -329,9 +330,13 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   const ordinary = plan('say "first", instant\nsay "second", instant');
   const secondSay = ordinary.instructions.findIndex((instruction, index) => index > 0 && instruction.kind === "say");
   assert.ok(secondSay >= 0);
+  // EVIDENCE: JSON preserves the compiler-produced plan before the fixture forges a prepared speaker temporary.
   const forgedSpeaker = JSON.parse(JSON.stringify(ordinary)) as InstructionPlan & { temporaryCount: number };
   forgedSpeaker.temporaryCount = 1;
-  (forgedSpeaker.instructions[secondSay] as any).speakerTemporary = 0;
+  const forgedSay = forgedSpeaker.instructions[secondSay];
+  assert.ok(forgedSay?.kind === "say");
+  // EVIDENCE: fixture adds a prepared speaker temporary to an otherwise static say instruction.
+  (forgedSay as { speakerTemporary?: number }).speakerTemporary = 0;
   assert.equal(validateInstructionPlan(forgedSpeaker).valid, false);
   assert.throws(
     () => run(forgedSpeaker, createFreshRuntimeSnapshot(ordinary)),
@@ -371,6 +376,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   assert.ok(pacingCall >= 0);
   assert.ok(pacingStore >= 0);
 
+  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks deliberately rewrite prepared-say producer, consumer, temporary, and control-flow fields into invalid combinations.
   const cases: Array<[string, (candidate: any) => void]> = [
     ["forged text temporary", (candidate) => {
       candidate.temporaryCount += 1;
@@ -456,10 +462,13 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ["contextual capture before its output speaker", contextualSpeakerPreparation, contextualCapture],
     ["contextual capture after a text payload consumer", contextualCapture, contextualTextPreparation],
   ] as const) {
-    const malformed = structuredClone(contextual) as any;
-    [malformed.instructions[left], malformed.instructions[right]] = [
-      malformed.instructions[right],
-      malformed.instructions[left],
+    const malformed = structuredClone(contextual);
+    // EVIDENCE: fixture reorders two compiler-produced instructions while preserving each instruction value.
+    const mutableInstructions = malformed.instructions as Instruction[];
+    assert.ok(mutableInstructions[left] !== undefined && mutableInstructions[right] !== undefined);
+    [mutableInstructions[left], mutableInstructions[right]] = [
+      mutableInstructions[right],
+      mutableInstructions[left],
     ];
     assert.equal(validateInstructionPlan(malformed).valid, false, name);
     const initial = createFreshRuntimeSnapshot(contextual);
@@ -526,9 +535,11 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     assert.ok(speakerPreparation >= 0);
     assert.ok(contextualPreparation >= 0);
     assert.ok(payloadConsumer >= 0);
-    const malformed = structuredClone(canonical) as any;
-    const pair = malformed.instructions.splice(speakerPreparation, 2);
-    malformed.instructions.splice(payloadConsumer - 1, 0, ...pair);
+    const malformed = structuredClone(canonical);
+    // EVIDENCE: fixture relocates the compiler-produced contextual-speaker preparation pair without changing it.
+    const mutableInstructions = malformed.instructions as Instruction[];
+    const pair = mutableInstructions.splice(speakerPreparation, 2);
+    mutableInstructions.splice(payloadConsumer - 1, 0, ...pair);
     assert.equal(validateInstructionPlan(malformed).valid, false, scenario.name);
     const initial = createFreshRuntimeSnapshot(canonical);
     const beforeExecution = structuredClone(initial);
@@ -571,8 +582,12 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     (instruction, index) => index < bypassTextPreparation && instruction.kind === "jumpIfFalse",
   );
   assert.ok(bypassJump >= 0);
+  // EVIDENCE: JSON preserves the compiler-produced plan before its conditional target is redirected.
   const malformedBypass = JSON.parse(JSON.stringify(bypassable)) as InstructionPlan;
-  (malformedBypass.instructions[bypassJump] as any).target = bypassSay;
+  const malformedJump = malformedBypass.instructions[bypassJump];
+  assert.ok(malformedJump?.kind === "jumpIfFalse");
+  // EVIDENCE: fixture mutates only the validated conditional target so prepared text is bypassed.
+  (malformedJump as { target: number }).target = bypassSay;
   assert.equal(validateInstructionPlan(malformedBypass).valid, false, "bypassed prepared text");
 });
 
@@ -696,8 +711,14 @@ function mutateTarget(
   field: "target" | "continueTarget" | "returnInstruction",
   target: number,
 ): InstructionPlan {
+  // EVIDENCE: JSON preserves the compiler-produced plan before the selected control-flow target is changed.
   const clone = JSON.parse(JSON.stringify(plan)) as InstructionPlan;
-  const instruction = clone.instructions[instructionIndex] as unknown as Record<string, unknown>;
+  // EVIDENCE: the caller selects a numeric control-flow field present on the instruction kind found for this fixture.
+  const instruction = clone.instructions[instructionIndex] as Instruction & {
+    continueTarget?: number;
+    returnInstruction?: number;
+    target?: number;
+  };
   instruction[field] = target;
   return clone;
 }
@@ -707,9 +728,15 @@ function targetOf(
   instructionIndex: number,
   field: "target" | "continueTarget" | "returnInstruction",
 ): number {
-  const instruction = plan.instructions[instructionIndex] as unknown as Record<string, unknown>;
+  // EVIDENCE: callers request a numeric control-flow field from an instruction index selected by kind.
+  const instruction = plan.instructions[instructionIndex] as Instruction & {
+    continueTarget?: number;
+    returnInstruction?: number;
+    target?: number;
+  };
   const target = instruction[field];
   assert.equal(typeof target, "number");
+  // EVIDENCE: the immediately preceding assertion narrows the selected control-flow target to number.
   return target as number;
 }
 

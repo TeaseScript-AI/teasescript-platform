@@ -61,13 +61,15 @@ test("preserves relevant statement and nested expression source spans", () => {
 
 test("survives JSON stringify and parse as an equivalent executable plan", () => {
   const original = plan('let value = [1, 2]\nsay `${value.first}`\nexit');
-  const restored = JSON.parse(JSON.stringify(original)) as unknown;
+  const restored: unknown = JSON.parse(JSON.stringify(original));
 
   assert.equal(validateInstructionPlan(restored).valid, true);
   assert.deepEqual(restored, original);
+  // EVIDENCE: validation above established that the JSON-round-tripped value is an InstructionPlan.
+  const restoredPlan = restored as InstructionPlan;
   const result = run(
-    restored as InstructionPlan,
-    createFreshRuntimeSnapshot(restored as InstructionPlan),
+    restoredPlan,
+    createFreshRuntimeSnapshot(restoredPlan),
   );
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
@@ -76,6 +78,7 @@ test("survives JSON stringify and parse as an equivalent executable plan", () =>
 });
 
 test("rejects malformed instructions and out-of-range jumps", () => {
+  // EVIDENCE: fixture: parse a compiler-produced plan into a mutable instruction dictionary for malformed jump injection.
   const malformed = JSON.parse(JSON.stringify(plan("if true { exit }"))) as {
     instructions: Array<Record<string, unknown>>;
   };
@@ -93,6 +96,7 @@ test("contains no non-JSON-safe values and rejects them when supplied", () => {
   assert.doesNotThrow(() => JSON.stringify(compiled));
   assert.equal(findNonJsonValue(compiled), null);
 
+  // EVIDENCE: fixture: parse the JSON-safe compiled plan into mutable instruction dictionaries for invalid-value injection.
   const malformed = JSON.parse(JSON.stringify(compiled)) as {
     instructions: Array<Record<string, unknown>>;
   };

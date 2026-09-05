@@ -6,7 +6,6 @@ import { createCheckpoint, deserializeCheckpoint, serializeCheckpoint } from "..
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import type { RuntimeDelayActionSnapshot } from "../src/runtime/actions/model.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
@@ -21,8 +20,8 @@ test("wait lowers to a foreground delay and settles only after an explicit obser
   const compiled = plan('wait 1.5 s\nsay "done"\nexit');
   const waiting = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   assert.equal(waiting.snapshot.status, "waiting");
-  assert.equal(waiting.snapshot.foregroundAction?.kind, "delay");
-  assert.equal((waiting.snapshot.foregroundAction as RuntimeDelayActionSnapshot).deadlineMs, 1500);
+  assert.ok(waiting.snapshot.foregroundAction?.kind === "delay");
+  assert.equal(waiting.snapshot.foregroundAction.deadlineMs, 1500);
   assert.deepEqual(waiting.events.map((event) => event.kind), ["actionRequested"]);
 
   const early = observeTime(compiled, waiting.snapshot, 1499);

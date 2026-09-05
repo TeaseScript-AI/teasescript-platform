@@ -159,11 +159,13 @@ test("loop plans are deterministic, JSON-safe, and reject malformed targets", ()
   const first = plan(source);
   const second = plan(source);
   assert.deepEqual(first, second);
+  // EVIDENCE: fixture: JSON round-trip preserves the compiler-produced instruction plan shape.
   const parsed = JSON.parse(JSON.stringify(first)) as InstructionPlan;
   assert.deepEqual(parsed, first);
   assert.equal(validateInstructionPlan(parsed).valid, true);
   const control = parsed.instructions.find((instruction) => instruction.kind === "loopControl");
   assert.ok(control?.kind === "loopControl");
+  // EVIDENCE: fixture: the loopControl guard above exposes its readonly target for malformed-plan validation.
   (control as { target: number }).target = parsed.instructions.length;
   assert.equal(validateInstructionPlan(parsed).valid, false);
 });
@@ -191,7 +193,7 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
   const uninterrupted = run(compiled, initial);
   const first = stepToEvent(compiled, initial);
   const checkpoint = restoreCheckpoint(
-    JSON.parse(JSON.stringify(createCheckpoint(compiled, first.snapshot))) as unknown,
+    JSON.parse(JSON.stringify(createCheckpoint(compiled, first.snapshot))),
   );
   const rest = run(checkpoint.plan, checkpoint.snapshot);
 
@@ -203,11 +205,14 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
 test("rejects malformed serialized loop state", () => {
   const compiled = plan("for value in 1..=3 { say value }");
   const active = stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+  // EVIDENCE: fixture: parse the serialized checkpoint as a mutable dictionary for malformed loop-position injection.
   const checkpoint = JSON.parse(
     JSON.stringify(createCheckpoint(compiled, active.snapshot)),
   ) as Record<string, unknown>;
 
+  // EVIDENCE: fixture: the checkpoint serializer emitted the snapshot object inspected here.
   const snapshot = checkpoint.snapshot as Record<string, unknown>;
+  // EVIDENCE: fixture: the active for-loop checkpoint emitted the loop-frame array mutated here.
   const loops = snapshot.loopFrames as Array<Record<string, unknown>>;
   loops[0]!.position = 99;
   assertCheckpointRejected(checkpoint, "TSK002");
@@ -216,6 +221,7 @@ test("rejects malformed serialized loop state", () => {
 test("rejects loop frames that do not match the next plan instruction", () => {
   const compiled = plan('repeat 2 { say "again" }');
   const active = stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+  // EVIDENCE: fixture: parse the serialized active repeat checkpoint into the narrow mutable shape used below.
   const checkpoint = JSON.parse(
     JSON.stringify(createCheckpoint(compiled, active.snapshot)),
   ) as { snapshot: { loopFrames: Array<{ loopId: number }> } };

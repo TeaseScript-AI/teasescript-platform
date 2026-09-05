@@ -321,23 +321,25 @@ export class InstructionCompiler {
       case "functionDeclaration":
         throw new TypeError("Nested function declaration reached compilation.");
     }
+    statement satisfies never;
   }
 
   #compileIf(statement: Extract<Statement, { kind: "ifStatement" }>): void {
     const lowered = this.#lowerExpression(statement.condition);
     const conditional = this.instructions.length;
-    this.instructions.push({
+    const conditionalInstruction: JumpIfFalseInstruction = {
       kind: "jumpIfFalse",
       condition: lowered.plan,
       target: -1,
       span: copySpan(statement.condition.span),
-    });
+    };
+    this.instructions.push(conditionalInstruction);
     this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
     this.#compileBlock(statement.thenBlock);
     if (statement.elseBlock === null) {
       const falseCleanup = this.instructions.length;
       this.instructions[conditional] = {
-        ...(this.instructions[conditional] as JumpIfFalseInstruction),
+        ...conditionalInstruction,
         target: falseCleanup,
       };
       this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
@@ -345,14 +347,15 @@ export class InstructionCompiler {
     }
 
     const jump = this.instructions.length;
-    this.instructions.push({
+    const jumpInstruction: JumpInstruction = {
       kind: "jump",
       target: -1,
       span: copySpan(statement.span),
-    });
+    };
+    this.instructions.push(jumpInstruction);
     const falseCleanup = this.instructions.length;
     this.instructions[conditional] = {
-      ...(this.instructions[conditional] as JumpIfFalseInstruction),
+      ...conditionalInstruction,
       target: falseCleanup,
     };
     this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
@@ -362,7 +365,7 @@ export class InstructionCompiler {
       this.#compileBlock(statement.elseBlock);
     }
     this.instructions[jump] = {
-      ...(this.instructions[jump] as JumpInstruction),
+      ...jumpInstruction,
       target: this.instructions.length,
     };
   }
@@ -408,10 +411,11 @@ export class InstructionCompiler {
         };
     this.instructions.push(instruction);
     this.#emitTemporaryCleanup(lowered.temporaryIds, expression.span);
+    const breaks: number[] = [];
     const context = {
       loopId,
       continueTarget: instruction.continueTarget,
-      breaks: [] as number[],
+      breaks,
     };
     this.#loops.push(context);
     this.compileStatements(body.statements);
@@ -428,6 +432,7 @@ export class InstructionCompiler {
     this.#emitTemporaryCleanup(lowered.temporaryIds, expression.span);
     const exit = this.instructions.length;
     for (const index of context.breaks) {
+      // EVIDENCE: break indices are recorded only when emitting loopControl instructions above.
       this.instructions[index] = {
         ...(this.instructions[index] as LoopControlInstruction),
         target: exit,
@@ -456,13 +461,14 @@ export class InstructionCompiler {
     });
     declaration.parameters.forEach((parameter, parameterIndex) => {
       const prepareIndex = this.instructions.length;
-      this.instructions.push({
+      const prepareInstruction: PrepareParameterDefaultInstruction = {
         kind: "prepareParameterDefault",
         functionId: registered.id,
         parameterIndex,
         target: -1,
         span: copySpan(parameter.span),
-      });
+      };
+      this.instructions.push(prepareInstruction);
       if (parameter.defaultValue !== null) {
         const lowered = this.#lowerExpression(parameter.defaultValue);
         this.instructions.push({
@@ -475,7 +481,7 @@ export class InstructionCompiler {
         this.#emitTemporaryCleanup(lowered.temporaryIds, parameter.span);
       }
       this.instructions[prepareIndex] = {
-        ...(this.instructions[prepareIndex] as PrepareParameterDefaultInstruction),
+        ...prepareInstruction,
         target: this.instructions.length,
       };
     });
@@ -760,15 +766,14 @@ export class InstructionCompiler {
       ? expression.options.map((option) => option.value)
       : expression.hint === null ? [] : [expression.hint];
     const staticValues = values.map(staticVisibleText);
-    const allStatic = staticValues.every((value) => value !== undefined);
     const labelType = interactionLabelType(expression);
     const expectedResult = expression.interactionKind === "number" ||
       (expression.interactionKind === "choice" && labelType === "number")
       ? "number" as const
       : "string" as const;
 
-    if (allStatic) {
-      const ui = staticInteractionUi(expression, staticValues as string[], labelType);
+    if (staticValues.every((value): value is string => value !== undefined)) {
+      const ui = staticInteractionUi(expression, staticValues, labelType);
       return this.#emitResultInteraction({
         interactionKind: expression.interactionKind,
         target: "standardChat",
@@ -1072,6 +1077,7 @@ export class InstructionCompiler {
   #lowerUserFunctionCall(
     expression: Extract<Expression, { kind: "callExpression" }>,
   ): LoweredExpression {
+    // EVIDENCE: invariant: the caller selects this path only for a registered identifier callee.
     const name = (expression.callee as Extract<Expression, { kind: "identifier" }>).name;
     const registered = this.#functionByName.get(name)!;
     const temporaryIds: number[] = [];
@@ -1149,12 +1155,13 @@ export class InstructionCompiler {
     };
     if (expression.operator === "and") {
       const conditional = this.instructions.length;
-      this.instructions.push({
+      const conditionalInstruction: JumpIfFalseInstruction = {
         kind: "jumpIfFalse",
         condition,
         target: -1,
         span: copySpan(expression.span),
-      });
+      };
+      this.instructions.push(conditionalInstruction);
       const right = this.#lowerExpression(expression.right);
       this.instructions.push({
         kind: "storeTemporary",
@@ -1164,7 +1171,7 @@ export class InstructionCompiler {
         span: copySpan(expression.right.span),
       });
       this.instructions[conditional] = {
-        ...(this.instructions[conditional] as JumpIfFalseInstruction),
+        ...conditionalInstruction,
         target: this.instructions.length,
       };
       return {
@@ -1173,16 +1180,22 @@ export class InstructionCompiler {
       };
     }
     const conditional = this.instructions.length;
-    this.instructions.push({
+    const conditionalInstruction: JumpIfFalseInstruction = {
       kind: "jumpIfFalse",
       condition,
       target: -1,
       span: copySpan(expression.span),
-    });
+    };
+    this.instructions.push(conditionalInstruction);
     const skipRight = this.instructions.length;
-    this.instructions.push({ kind: "jump", target: -1, span: copySpan(expression.span) });
+    const skipRightInstruction: JumpInstruction = {
+      kind: "jump",
+      target: -1,
+      span: copySpan(expression.span),
+    };
+    this.instructions.push(skipRightInstruction);
     this.instructions[conditional] = {
-      ...(this.instructions[conditional] as JumpIfFalseInstruction),
+      ...conditionalInstruction,
       target: this.instructions.length,
     };
     const right = this.#lowerExpression(expression.right);
@@ -1194,7 +1207,7 @@ export class InstructionCompiler {
       span: copySpan(expression.right.span),
     });
     this.instructions[skipRight] = {
-      ...(this.instructions[skipRight] as JumpInstruction),
+      ...skipRightInstruction,
       target: this.instructions.length,
     };
     return {

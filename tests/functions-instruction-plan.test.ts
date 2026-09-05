@@ -239,7 +239,7 @@ test("accepts nested calls and short-circuit lowering inside defaults", () => {
 
 test("function plans survive JSON round trips with preserved spans", () => {
   const original = plan("function add(left, right) { return left + right }\nlet result = add(2, 3)");
-  const restored = JSON.parse(JSON.stringify(original)) as unknown;
+  const restored: unknown = JSON.parse(JSON.stringify(original));
 
   assert.deepEqual(restored, original);
   assert.equal(validateInstructionPlan(restored).valid, true);
@@ -270,6 +270,7 @@ test("rejects malformed function metadata, targets, and temporaries", () => {
   );
   assert.ok(declaration?.kind === "declareBinding");
   if (declaration?.kind === "declareBinding") {
+    // EVIDENCE: fixture: expose the compiler-produced temporary reference for malformed-ID validation.
     (declaration.value as { temporaryId: number }).temporaryId = 999;
   }
   assertInvalid(badTemporary, /Temporary/u);
@@ -294,8 +295,9 @@ test("rejects malformed function metadata, targets, and temporaries", () => {
   const prepare = malformedPrologue.instructions.find(
     (instruction) => instruction.kind === "beginFunctionDefaults",
   );
-  assert.ok(prepare !== undefined);
-  prepare.kind = "enterFunctionBody";
+  assert.ok(prepare?.kind === "beginFunctionDefaults");
+  const malformedPrepare: { kind: string } = prepare;
+  malformedPrepare.kind = "enterFunctionBody";
   assertInvalid(malformedPrologue, /prologue|entry/u);
 });
 
@@ -338,7 +340,8 @@ test("rejects malformed function regions and aliased call temporaries", () => {
       instruction.kind === "bindDefaultParameter",
   );
   assert.ok(bindIndex >= 0);
-  const bind = returnBeforeBody.instructions[bindIndex]!;
+  const bind = returnBeforeBody.instructions[bindIndex];
+  assert.ok(bind?.kind === "bindDefaultParameter");
   returnBeforeBody.instructions[bindIndex] = {
     kind: "returnValue",
     value: bind.value,
@@ -381,7 +384,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
   const duplicateBatch = duplicateCleanup.instructions.find(
     (instruction) => instruction.kind === "clearTemporaries",
   )!;
-  duplicateBatch.temporaryIds.push(duplicateBatch.temporaryIds[0]);
+  duplicateBatch.temporaryIds.push(duplicateBatch.temporaryIds[0]!);
   assertInvalid(duplicateCleanup, /must not contain duplicates/u);
 
   const unknownCleanup = mutable(callsWithCleanup);
@@ -394,7 +397,8 @@ test("rejects malformed function regions and aliased call temporaries", () => {
   const unpreparedAssignment = mutable(plan("let items = [0]\nitems[0] = 1"));
   const assignment = unpreparedAssignment.instructions.find(
     (instruction) => instruction.kind === "assign",
-  )!;
+  );
+  assert.ok(assignment?.kind === "assign" && assignment.target.kind === "index");
   assignment.target.index = {
     kind: "literal",
     value: 0,
@@ -410,13 +414,16 @@ function plan(source: string): InstructionPlan {
   return result.plan!;
 }
 
-type MutablePlan = {
-  -readonly [Key in keyof InstructionPlan]: Key extends "functions" | "instructions"
-    ? Array<Record<string, any>>
-    : InstructionPlan[Key];
-};
+type Mutable<Value> = Value extends readonly (infer Item)[]
+  ? Mutable<Item>[]
+  : Value extends object
+    ? { -readonly [Key in keyof Value]: Mutable<Value[Key]> }
+    : Value;
+
+type MutablePlan = Mutable<InstructionPlan>;
 
 function mutable(value: InstructionPlan): MutablePlan {
+  // EVIDENCE: fixture: JSON round-trip preserves the plan shape while removing readonly ownership for malformed-field tests.
   return JSON.parse(JSON.stringify(value)) as MutablePlan;
 }
 

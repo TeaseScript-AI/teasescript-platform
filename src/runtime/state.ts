@@ -303,6 +303,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     if (failure !== null) throw new TypeError(failure);
     bindings.push({
       name,
+      // EVIDENCE: validation: validateCapturedSerializableValue accepted this captured global value above.
       value: value as SerializableRuntimeValue,
     });
   }
@@ -386,6 +387,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       if (frame.kind === "while") return { ...frame };
       return {
         ...frame,
+        // EVIDENCE: validation: cloning preserves the validated for-loop source collection kind.
         source: cloneCapturedSerializableValue(frame.source) as RuntimeForLoopFrameSnapshot["source"],
       };
     }),
@@ -614,7 +616,7 @@ export function captureRuntimeSnapshotWithValidatedPlan(
   return Object.freeze({
     validation,
     snapshot: validation.valid
-      ? snapshotCapture.value as RuntimeSnapshot
+      ? /* EVIDENCE: validation: the preceding snapshot validation accepted this captured graph. */ snapshotCapture.value as RuntimeSnapshot
       : null,
   });
 }
@@ -754,21 +756,21 @@ export function validateCapturedRuntimeSnapshot(
   if (
     !nonNegativeSafeInteger(value.nextScopeId) ||
     value.nextScopeId < 1 ||
-    frameIds.some((id) => id >= (value.nextScopeId as number))
+    frameIds.some((id) => id >= (/* EVIDENCE: validation: nextScopeId passed the integer/range guard before this callback. */ value.nextScopeId as number))
   ) {
     errors.push("Runtime nextScopeId must be a positive unused safe integer ID.");
   }
   if (
     !nonNegativeSafeInteger(value.nextSpeakerId) ||
     value.nextSpeakerId < 1 ||
-    [...speakerIds].some((id) => id >= (value.nextSpeakerId as number))
+    [...speakerIds].some((id) => id >= (/* EVIDENCE: validation: nextSpeakerId passed the integer/range guard before this callback. */ value.nextSpeakerId as number))
   ) {
     errors.push("Runtime nextSpeakerId must be a positive unused safe integer ID.");
   }
   if (
     !nonNegativeSafeInteger(value.nextCallFrameId) ||
     value.nextCallFrameId < 1 ||
-    [...callFrameIds].some((id) => id >= (value.nextCallFrameId as number))
+    [...callFrameIds].some((id) => id >= (/* EVIDENCE: validation: nextCallFrameId passed the integer/range guard before this callback. */ value.nextCallFrameId as number))
   ) {
     errors.push("Runtime nextCallFrameId must be a positive unused safe integer ID.");
   }
@@ -917,6 +919,7 @@ function iterationLength(source: Record<string, unknown>): number {
     Number.isSafeInteger(source.end) &&
     typeof source.inclusive === "boolean"
   ) {
+    // EVIDENCE: validation: both range endpoints passed Number.isSafeInteger above.
     const size = (source.end as number) - (source.start as number) +
       (source.inclusive ? 1 : 0);
     return Number.isSafeInteger(size) ? Math.max(0, size) : -1;
@@ -1673,8 +1676,8 @@ function validateParameterBindings(
   }
   const scope = frames[frame.scopeBaseDepth];
   if (!isPlainRecord(scope) || !Array.isArray(scope.bindings)) return;
-  const argumentsList = frame.arguments as unknown[];
-  const parameterState = frame.parameterState as Record<string, unknown>;
+  const argumentsList = frame.arguments;
+  const parameterState = frame.parameterState;
   const bindingNames = new Set(
     scope.bindings
       .filter(isPlainRecord)
@@ -1691,6 +1694,7 @@ function validateParameterBindings(
     const argument = argumentsList[index];
     if (!isPlainRecord(argument) || typeof argument.supplied !== "boolean") return;
     const phase = parameterState.phase;
+    // EVIDENCE: validation: parameterIndex passed nonNegativeSafeInteger before iterating parameters.
     const progress = parameterState.parameterIndex as number;
     const shouldBeBound =
       phase === "body" ||
@@ -2243,7 +2247,7 @@ function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>):
   const actions = [snapshot.foregroundAction, ...backgroundActions];
   const requiredCompletionEvents = actions.reduce(
     (count, action) => count + (isPlainRecord(action)
-      ? requiredActionCompletionEvents(action as unknown as RuntimePendingActionSnapshot)
+      ? requiredActionCompletionEvents(action)
       : 0),
     0,
   );
@@ -3004,6 +3008,7 @@ function validInteractionAction(action: Record<string, unknown>, snapshot: Recor
     Array.isArray(snapshot.temporaries) &&
     snapshot.temporaries.some((temporary) => isPlainRecord(temporary) && temporary.id === action.destinationTemporary)
   ) return false;
+  // EVIDENCE: validation: the preceding discriminator check restricts interactionKind to the four UI variants.
   if (!validInteractionUiShape(action.interactionKind as "button" | "text" | "number" | "choice", action.ui)) return false;
   if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
   const instruction = plan.instructions[action.owningInstruction];
@@ -3056,6 +3061,7 @@ function validPreparedInteractionAction(
   return preparedInteractionUiMatchesAction(instruction.preparedUi, action.ui, snapshot.temporaries);
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: boundary: a temporary payload remains unvalidated while snapshot consistency is checked.
 function runtimeTemporaryValue(temporaries: readonly unknown[], id: number): unknown {
   const temporary = temporaries.find((candidate) => isPlainRecord(candidate) && candidate.id === id);
   return isPlainRecord(temporary) ? temporary.value : undefined;
@@ -3099,6 +3105,7 @@ function accessibleNameEqual(
     : actual.text === expected.text;
 }
 
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: boundary: binding payloads remain unvalidated during snapshot lineage checks.
 function visibleRuntimeBindingValue(snapshot: Record<string, unknown>, name: string): unknown {
   if (!Array.isArray(snapshot.frames)) return undefined;
   const lastCall = Array.isArray(snapshot.callFrames) ? snapshot.callFrames.at(-1) : undefined;
@@ -3204,7 +3211,9 @@ function validInteractionUiShape(kind: "button" | "text" | "number" | "choice", 
       labels.add(label);
     }
     if (!measurementExhausted && value.labelType === "none") {
+      // EVIDENCE: validation: the option text passed the string validation before duplicate checking.
       if (texts.has(optionText as string)) return false;
+      // EVIDENCE: validation: the option text passed the string validation before insertion.
       texts.add(optionText as string);
     }
   }
@@ -3377,6 +3386,7 @@ function validPacingSettlementReleaseLineage(
   const releasedInstruction = settlement.releasedPreparedOutputInstruction;
   if (releasedInstruction === null) return true;
   return pacingSettlementCanReleasePreparedOutput(
+    // EVIDENCE: validation: this helper only compares completed/skipped strings; other values return false.
     settlement.settlementKind as RuntimeChatPacingGateSettlementSnapshot["settlementKind"],
   ) &&
     nonNegativeSafeInteger(releasedInstruction) &&
@@ -3928,11 +3938,11 @@ function validSpan(value: unknown): value is SourceSpan {
     isPlainRecord(value) &&
     validPosition(value.start) &&
     validPosition(value.end) &&
-    (value.end as { offset: number }).offset >= (value.start as { offset: number }).offset
+    value.end.offset >= value.start.offset
   );
 }
 
-function validPosition(value: unknown): boolean {
+function validPosition(value: unknown): value is { offset: number; line: number; column: number } {
   return (
     isPlainRecord(value) &&
     nonNegativeSafeInteger(value.offset) &&
@@ -3955,6 +3965,7 @@ function cloneTemporary(
 }
 
 function nonNegativeSafeInteger(value: unknown): value is number {
+  // EVIDENCE: validation: Number.isSafeInteger establishes the numeric value before comparison.
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 

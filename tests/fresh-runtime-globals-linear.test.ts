@@ -22,7 +22,7 @@ test("fresh global initialization does not rescan previously constructed binding
   let bindingComparisons = 0;
   Array.prototype.some = function <T>(
     this: T[],
-    predicate: (value: T, index: number, array: T[]) => unknown,
+    predicate: Parameters<T[]["some"]>[0],
     thisArg?: unknown,
   ): boolean {
     return originalSome.call(this, (value: T, index: number, array: T[]) => {

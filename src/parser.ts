@@ -606,7 +606,7 @@ class Parser {
     }
     return Object.freeze({
       kind: "typeAnnotation",
-      name: token.lexeme as ScalarTypeName,
+      name: token.lexeme,
       collection,
       optional,
       span: spanFrom(token.span, end),
@@ -1178,6 +1178,7 @@ class Parser {
     }
     for (let index = operators.length - 1; index >= 0; index -= 1) {
       const operator = operators[index]!;
+      // EVIDENCE: invariant: operators contains only the plus/minus tokens collected by the loop above.
       expression = this.#unary(operator, expression, operator.lexeme as "+" | "-");
     }
     return expression;
@@ -2022,6 +2023,7 @@ const scalarTypes = new Set<ScalarTypeName>([
 ]);
 
 function isScalarType(value: string): value is ScalarTypeName {
+  // EVIDENCE: invariant: Set.has accepts arbitrary lookup strings; membership, not this cast, proves the scalar name.
   return scalarTypes.has(value as ScalarTypeName);
 }
 
@@ -2087,6 +2089,7 @@ function isComparisonKind(kind: TokenKind): boolean {
 }
 
 function binaryOperator(token: Token): BinaryExpression["operator"] {
+  // EVIDENCE: invariant: precedence parsers call this only after matching a binary-operator token kind.
   return token.lexeme as BinaryExpression["operator"];
 }
 

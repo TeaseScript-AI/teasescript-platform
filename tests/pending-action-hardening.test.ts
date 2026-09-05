@@ -22,8 +22,8 @@ import {
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 function delayAction(snapshot: RuntimeSnapshot): RuntimeDelayActionSnapshot {
-  assert.equal(snapshot.foregroundAction?.kind, "delay");
-  return snapshot.foregroundAction as RuntimeDelayActionSnapshot;
+  assert.ok(snapshot.foregroundAction?.kind === "delay");
+  return snapshot.foregroundAction;
 }
 
 function plan(source: string) {
@@ -40,7 +40,8 @@ function waiting(source = "wait 10 ms\nexit") {
   return { compiled, snapshot };
 }
 
-function mutable(snapshot: RuntimeSnapshot): any {
+function mutable(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  // EVIDENCE: fixture: JSON round-trip preserves the RuntimeSnapshot shape before individual invalid mutations.
   return JSON.parse(JSON.stringify(snapshot)) as RuntimeSnapshot;
 }
 
@@ -53,12 +54,12 @@ test("#78 rejects due foreground delays through direct and checkpoint boundaries
   }
 
   const due = mutable(snapshot);
-  due.currentSessionTimeMs = due.foregroundAction!.deadlineMs;
+  due.currentSessionTimeMs = delayAction(due).deadlineMs;
   const checkpoint = { ...createCheckpoint(compiled, snapshot), snapshot: due };
   assert.throws(() => restoreCheckpoint(checkpoint), checkpointError);
   assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), checkpointError);
   assert.throws(() => serializeCheckpoint(checkpoint), checkpointError);
-  const jsonRoundTrip = JSON.parse(JSON.stringify(checkpoint)) as unknown;
+  const jsonRoundTrip: unknown = JSON.parse(JSON.stringify(checkpoint));
   assert.throws(() => restoreCheckpoint(jsonRoundTrip), checkpointError);
 });
 
@@ -101,6 +102,7 @@ test("rejects every forged running root-end shape outside the settled terminal d
   assert.equal(settled.nextInstruction, compiled.rootEndInstruction);
   assert.equal(validateRuntimeSnapshot(settled, compiled).valid, true);
 
+  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture table: callbacks deliberately violate distinct pending-delay snapshot invariants before validation.
   const invalid: Readonly<Record<string, (snapshot: any) => void>> = {
     extraRootScope: (snapshot) => {
       snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });
@@ -202,6 +204,7 @@ test("#79 validates every settlement relationship and preserves valid replay", (
   assert.equal(active.status, "waiting");
   assert.notEqual(active.lastSettlement, null);
 
+  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture table: callbacks deliberately violate distinct settled-delay snapshot invariants before validation.
   const invalid: Readonly<Record<string, (snapshot: any) => void>> = {
     unissuedActionId: (snapshot) => { snapshot.lastSettlement!.actionId = snapshot.nextActionId; },
     activeActionId: (snapshot) => { snapshot.lastSettlement!.actionId = snapshot.foregroundAction!.actionId; },
@@ -282,7 +285,8 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
 
   const functionWait = waiting("function pause { wait 1 ms }\npause()\nexit");
   const forgedOwner = mutable(functionWait.snapshot);
-  forgedOwner.foregroundAction!.ownerCallFrameId = null;
+  // EVIDENCE: fixture: expose the readonly pending-action owner to forge invalid call ownership.
+  (forgedOwner.foregroundAction! as { ownerCallFrameId: number | null }).ownerCallFrameId = null;
   assert.equal(validateRuntimeSnapshot(forgedOwner, functionWait.compiled).valid, false);
   const forgedContinuation = mutable(functionWait.snapshot);
   forgedContinuation.nextInstruction = forgedContinuation.foregroundAction!.continuationInstruction;
@@ -290,11 +294,13 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
 
   const scopedWait = waiting("if true {\n  wait 1 ms\n}\nexit");
   const forgedScope = mutable(scopedWait.snapshot);
-  forgedScope.foregroundAction!.scopeDepth = 1;
+  // EVIDENCE: fixture: expose the readonly pending-action scope depth to forge invalid scope ownership.
+  (forgedScope.foregroundAction! as { scopeDepth: number }).scopeDepth = 1;
   assert.equal(validateRuntimeSnapshot(forgedScope, scopedWait.compiled).valid, false);
   const loopWait = waiting("repeat 1 {\n  wait 1 ms\n}\nexit");
   const forgedLoop = mutable(loopWait.snapshot);
-  forgedLoop.foregroundAction!.loopDepth = 0;
+  // EVIDENCE: fixture: expose the readonly pending-action loop depth to forge invalid loop ownership.
+  (forgedLoop.foregroundAction! as { loopDepth: number }).loopDepth = 0;
   assert.equal(validateRuntimeSnapshot(forgedLoop, loopWait.compiled).valid, false);
 
   const temporaryWait = waiting("function one { return 1 }\nwait one() ms\nexit");
@@ -302,6 +308,7 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
   missingTemporary.temporaries.length = 0;
   assert.equal(validateRuntimeSnapshot(missingTemporary, temporaryWait.compiled).valid, false);
 
+  // EVIDENCE: fixture: Object.create(null) supplies the property dictionary used as a hostile completion request.
   const hostileKind = Object.create(null) as Record<string, unknown>;
   assert.doesNotThrow(() => completeAction(temporaryWait.compiled, temporaryWait.snapshot, {
     actionId: temporaryWait.snapshot.foregroundAction!.actionId,

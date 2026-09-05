@@ -37,7 +37,7 @@ test("rejects function boundaries outside the instruction array without dependen
   for (const [field, value] of mutations) {
     const malformed = mutablePlan(original);
     malformed.functions[0]![field] = value;
-    const result = validateInstructionPlan(malformed as unknown as InstructionPlan);
+    const result = validateInstructionPlan(malformed);
     assert.equal(result.valid, false, field);
     assert.ok(
       result.errors.some(
@@ -60,7 +60,7 @@ test("rejects an extreme root boundary without building a metadata-sized region"
   const malformed = mutablePlan(functionPlan());
   malformed.rootEndInstruction = Number.MAX_SAFE_INTEGER;
 
-  const result = validateInstructionPlan(malformed as unknown as InstructionPlan);
+  const result = validateInstructionPlan(malformed);
 
   assert.equal(result.valid, false);
   assert.deepEqual(result.errors[0], {
@@ -73,9 +73,10 @@ test("rejects an extreme root boundary without building a metadata-sized region"
 test("rejects unsafe persisted temporary and loop identities", () => {
   const unsafe = Number.MAX_SAFE_INTEGER + 1;
   const sourcePlan = mutablePlan(functionPlan());
+  // EVIDENCE: fixture: mutate the cloned readonly source offset to an unsafe integer.
   (sourcePlan.sourceSpan as { so: number }).so = unsafe;
 
-  const sourceValidation = validateInstructionPlan(sourcePlan as unknown as InstructionPlan);
+  const sourceValidation = validateInstructionPlan(sourcePlan);
   assert.equal(sourceValidation.valid, false);
   assert.ok(sourceValidation.errors.some((error) =>
     error.path === "$.sourceSpan" && error.message === "Plan source location values must be non-negative safe integers."
@@ -84,34 +85,42 @@ test("rejects unsafe persisted temporary and loop identities", () => {
   const temporaryPlan = mutablePlan(functionPlan());
   temporaryPlan.temporaryCount = unsafe;
 
-  const temporaryValidation = validateInstructionPlan(temporaryPlan as unknown as InstructionPlan);
+  const temporaryValidation = validateInstructionPlan(temporaryPlan);
   assert.equal(temporaryValidation.valid, false);
   assert.ok(temporaryValidation.errors.some((error) =>
     error.path === "$.temporaryCount" && error.message === "temporaryCount must be a non-negative safe integer."
   ));
 
   const loopPlan = mutablePlan(compiledPlan("repeat 1 { say 1 }"));
+  // EVIDENCE: fixture: the compiled repeat emits a loopStart whose ID is deliberately corrupted.
   const loopStart = loopPlan.instructions.find((instruction) => instruction.kind === "loopStart")! as { loopId: number };
+  // EVIDENCE: fixture: the compiled repeat emits a loopControl whose ID is deliberately corrupted.
   const loopControl = loopPlan.instructions.find((instruction) => instruction.kind === "loopControl")! as { loopId: number };
   loopStart.loopId = unsafe;
   loopControl.loopId = unsafe;
 
-  const loopValidation = validateInstructionPlan(loopPlan as unknown as InstructionPlan);
+  const loopValidation = validateInstructionPlan(loopPlan);
   assert.equal(loopValidation.valid, false);
   assert.ok(loopValidation.errors.some((error) =>
     error.path.endsWith(".loopId") && error.message === "Expected a positive safe integer."
   ));
   assert.throws(
-    () => createFreshRuntimeSnapshot(loopPlan as unknown as InstructionPlan),
+    () => {
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: the compiled loop plan retains its complete structure while this fixture sets both loop IDs outside the accepted safe-integer range.
+      return createFreshRuntimeSnapshot(loopPlan as unknown as InstructionPlan);
+    },
     (error: unknown) => error instanceof TypeError && error.message === "Expected a positive safe integer.",
   );
 
   const validLoopPlan = compiledPlan("repeat 1 { say 1 }");
+  // EVIDENCE: fixture: parse the serialized checkpoint into a mutable copy for identity/range corruption.
   const checkpoint = JSON.parse(JSON.stringify(createCheckpoint(
     validLoopPlan,
     createFreshRuntimeSnapshot(validLoopPlan),
   ))) as MutableCheckpoint;
+  // EVIDENCE: fixture: the compiled repeat emits a loopStart whose checkpoint ID is deliberately corrupted.
   const checkpointLoopStart = checkpoint.plan.instructions.find((instruction) => instruction.kind === "loopStart")! as { loopId: number };
+  // EVIDENCE: fixture: the compiled repeat emits a loopControl whose checkpoint ID is deliberately corrupted.
   const checkpointLoopControl = checkpoint.plan.instructions.find((instruction) => instruction.kind === "loopControl")! as { loopId: number };
   checkpointLoopStart.loopId = unsafe;
   checkpointLoopControl.loopId = unsafe;
@@ -149,7 +158,7 @@ test("rejects unsafe, negative, and fractional function boundaries before depend
   for (const value of [Number.MAX_SAFE_INTEGER + 1, -1, 1.5]) {
     const malformed = mutablePlan(functionPlan());
     malformed.functions[0]!.endInstruction = value;
-    const result = validateInstructionPlan(malformed as unknown as InstructionPlan);
+    const result = validateInstructionPlan(malformed);
     assert.ok(result.errors.some((error) =>
       error.path === "$.functions[0]" && error.message === BOUNDARY_ERROR
     ));
@@ -184,7 +193,7 @@ test("rejects impossible ordering, gaps, overlaps, and pre-root entries", () => 
   for (const mutate of cases) {
     const malformed = mutablePlan(twoFunctionPlan());
     mutate(malformed);
-    const result = validateInstructionPlan(malformed as unknown as InstructionPlan);
+    const result = validateInstructionPlan(malformed);
     assert.equal(result.valid, false);
     assert.ok(result.errors.some((error) => error.message === RANGE_ERROR));
   }
@@ -195,7 +204,7 @@ test("continues independent metadata validation after an unsafe function range",
   malformed.functions[0]!.endInstruction = Number.MAX_SAFE_INTEGER;
   malformed.functions[1]!.id = malformed.functions[0]!.id;
 
-  const result = validateInstructionPlan(malformed as unknown as InstructionPlan);
+  const result = validateInstructionPlan(malformed);
 
   assert.equal(result.valid, false);
   assert.ok(result.errors.some((error) =>
@@ -211,6 +220,7 @@ test("public runtime and checkpoint routes reject an extreme range before side e
   const original = functionPlan('say random()\nexit');
   const malformed = mutablePlan(original);
   malformed.functions[0]!.endInstruction = Number.MAX_SAFE_INTEGER;
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture changes only the function endInstruction to an extreme safe integer before exercising typed public runtime APIs.
   const invalid = malformed as unknown as InstructionPlan;
   const snapshot = createFreshRuntimeSnapshot(original);
   const before = structuredClone(snapshot);
@@ -248,6 +258,7 @@ test("public runtime and checkpoint routes reject an extreme range before side e
     isMalformedPlanCheckpointError,
   );
 
+  // EVIDENCE: fixture: parse the serialized checkpoint into a mutable copy for identity/range corruption.
   const checkpoint = JSON.parse(
     JSON.stringify(createCheckpoint(original, snapshot)),
   ) as MutableCheckpoint;
@@ -341,5 +352,6 @@ function compiledPlan(source: string): InstructionPlan {
 }
 
 function mutablePlan(plan: InstructionPlan): MutablePlan {
+  // EVIDENCE: JSON serialization preserves the compiled plan's data shape; individual callers apply their documented invalid field mutations to this mutable copy.
   return JSON.parse(JSON.stringify(plan)) as MutablePlan;
 }

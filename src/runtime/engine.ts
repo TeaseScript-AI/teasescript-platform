@@ -730,6 +730,7 @@ function executePlannedInstruction(
       );
       return;
   }
+  instruction satisfies never;
 }
 
 function preparedInteractionSpeaker(
@@ -1161,6 +1162,7 @@ function executeLoopStart(
         loopId: instruction.loopId,
         scopeDepth,
         variable: instruction.variable,
+        // EVIDENCE: the guards above narrow source to the three iterable runtime collection variants.
         source: cloneCapturedSerializableValue(source) as Extract<RuntimeLoopFrameSnapshot, { kind: "for" }>["source"],
         position: 0,
         callFrameId: currentCallFrameId(snapshot),
@@ -2041,7 +2043,9 @@ class Evaluator {
   }
 
   #findRandom(span: SourceSpan, rng = this.snapshot.rng): number {
-    const random = this.capabilities.random?.next() ?? nextXorShift32(rng);
+    const random = this.capabilities.random === undefined
+      ? nextXorShift32(rng)
+      : this.capabilities.random.next();
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
       throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
     }
@@ -2307,7 +2311,6 @@ function readPreparedReference(
   ) {
     throw fault("TSR053", "Prepared reference state is malformed.", span);
   }
-  const captured = capturedRoot as SerializableRuntimeValue;
   const path: PreparedReferenceStep[] = [];
   for (const item of pathValue.items) {
     if (!isObject(item)) {
@@ -2336,7 +2339,7 @@ function readPreparedReference(
     rootFrameId,
     rootName,
     path,
-    capturedRoot: captured,
+    capturedRoot,
     detached,
   };
 }
@@ -2882,11 +2885,12 @@ function preparedOutputSpeaker(
     (typeof color !== "string" && color !== null) ||
     (typeof font !== "string" && font !== null) ||
     (typeof avatar !== "string" && avatar !== null) ||
+    typeof speakerId !== "number" ||
     !Number.isSafeInteger(speakerId)
   ) throw fault("TSR052", "Prepared say speaker is invalid.", span);
   return {
     output: Object.freeze({ identifier, displayName, color, font, avatar }),
-    speakerId: speakerId as number,
+    speakerId,
   };
 }
 

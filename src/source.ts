@@ -26,6 +26,7 @@ export function createSourcePosition(
   assertNonNegativeInteger(line, "line");
   assertNonNegativeInteger(column, "column");
 
+  // EVIDENCE: invariant: the checked integer coordinates establish this constructor-only, compile-time brand.
   return Object.freeze({ offset, line, column }) as SourcePosition;
 }
 
@@ -38,6 +39,7 @@ export function createSourceSpan(
     throw new RangeError("A source span cannot end before it starts.");
   }
 
+  // EVIDENCE: invariant: ordered endpoints are copied through the branded position constructor below.
   return Object.freeze({
     start: copySourcePosition(start),
     end: copySourcePosition(end),

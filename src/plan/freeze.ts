@@ -20,7 +20,7 @@ export function freezeInstructionPlan(plan: InstructionPlan): InstructionPlan {
       }
       continue;
     }
-    for (const nested of Object.values(current as Record<string, unknown>)) {
+    for (const nested of Object.values(current)) {
       if (typeof nested === "object" && nested !== null && !Object.isFrozen(nested)) {
         work.push([nested, false]);
       }

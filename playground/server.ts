@@ -188,7 +188,7 @@ async function serveWorkspaceApi(request: IncomingMessage, pathname: string, wor
   sendJson(response, 405, { error: { code: "methodNotAllowed", message: "Unsupported workspace route or method." } });
 }
 
-function workspaceView(workspace: AutomationWorkspace): object {
+function workspaceView(workspace: AutomationWorkspace) {
   return { source: workspace.source, sourceRevision: workspace.sourceRevision, resultRevision: workspace.resultRevision, stale: workspace.resultRevision !== workspace.sourceRevision, result: workspace.lastRunResult ?? workspace.lastCompileResult };
 }
 

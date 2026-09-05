@@ -111,19 +111,23 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
 test("workspace automation stores revisions and returns compile and run results", async () => {
   const uploaded = await api("PUT", "/api/workspace/source", 'say "automation"', "text/plain; charset=utf-8");
   assert.equal(uploaded.status, 200);
+  // EVIDENCE: integration fixture: the successful workspace-source route returns this documented response shape.
   const workspace = JSON.parse(uploaded.body) as { source: string; sourceRevision: number; stale: boolean };
   assert.equal(workspace.source, 'say "automation"');
   assert.equal(workspace.stale, true);
   const compiled = await api("POST", "/api/workspace/compile");
   assert.equal(compiled.status, 200);
+  // EVIDENCE: integration fixture: the successful compile route returns a result status.
   assert.equal((JSON.parse(compiled.body) as { result: { status: string } }).result.status, "ready");
   const run = await api("POST", "/api/workspace/run");
+  // EVIDENCE: integration fixture: the successful run route returns status and event records asserted below.
   const runBody = JSON.parse(run.body) as { result: { status: string; events: { kind: string }[] } };
   assert.equal(run.status, 200);
   assert.equal(runBody.result.status, "halted");
   assert.deepEqual(runBody.result.events.map((event) => event.kind), ["say", "actionRequested", "complete"]);
   const result = await api("GET", "/api/workspace/result");
   assert.equal(result.status, 200);
+  // EVIDENCE: integration fixture: the successful result route returns the stale flag asserted here.
   assert.equal((JSON.parse(result.body) as { stale: boolean }).stale, false);
 });
 
@@ -132,6 +136,7 @@ test("workspace automation accepts source beyond the former local byte limit", a
   const uploaded = await api("PUT", "/api/workspace/source", source, "text/plain; charset=utf-8");
 
   assert.equal(uploaded.status, 200);
+  // EVIDENCE: integration fixture: a successful source upload echoes its stored source.
   assert.equal((JSON.parse(uploaded.body) as { source: string }).source, source);
 });
 
@@ -139,6 +144,7 @@ test("workspace automation rejects malformed UTF-8 source", async () => {
   const uploaded = await api("PUT", "/api/workspace/source", Buffer.from([0xc3, 0x28]), "text/plain; charset=utf-8");
 
   assert.equal(uploaded.status, 400);
+  // EVIDENCE: integration fixture: malformed UTF-8 responses carry the asserted structured error code.
   assert.equal((JSON.parse(uploaded.body) as { error: { code: string } }).error.code, "malformedUtf8");
 });
 

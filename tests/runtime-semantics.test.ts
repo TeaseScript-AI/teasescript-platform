@@ -410,7 +410,9 @@ function captureInto(values: unknown[]): RuntimeBuiltinFunction {
   };
 }
 
-function toNative(value: SerializableRuntimeValue): unknown {
+type NativeValue = null | boolean | number | string | NativeValue[] | { [key: string]: NativeValue };
+
+function toNative(value: SerializableRuntimeValue): NativeValue {
   if (value === null || typeof value !== "object") return value;
   if (value.kind === "list" || value.kind === "set") {
     return value.items.map(toNative);
