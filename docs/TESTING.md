@@ -23,8 +23,9 @@ The repository currently has no browser-automation dependency and no external pr
 
 ## Normal and diagnostic verification
 
-`npm run check` is the normal complete configured suite and preserves actionable
-failure information. `npm run test:full-output` and `npm run check:full-output`
+`npm run check` runs lint, lint-rule/exception fixtures, and the build with compiled tests, preserving actionable
+failure information. `npm run lint` applies the [type-evidence policy](LINTING.md); `npm run test:lint` type-checks and
+tests the maintained rule implementation. `npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply

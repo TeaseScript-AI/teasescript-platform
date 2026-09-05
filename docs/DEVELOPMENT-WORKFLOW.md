@@ -423,7 +423,8 @@ git diff --check
 ```
 
 The canonical compiler is the `@typescript/native` npm alias pinned in `package.json`; build and typecheck use
-its public `tsc` command. The separately pinned `ts-morph` package is a development-only agent codemod tool. Do
+its public `tsc` command. The separately pinned `ts-morph` package supports development-only codemods and
+[lint exception parsing](LINTING.md). Do
 not replace either dependency without an explicit dependency migration.
 
 Inspect the complete diff and run any change-specific playground, browser, security, migration, or integration
