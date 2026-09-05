@@ -11,16 +11,20 @@
     "typecheck": "tsc --noEmit",
     "test:compiled": "node ./tools/test-output-filter.mjs",
     "test": "npm run build && node ./tools/test-output-filter.mjs",
-    "check": "npm test",
+    "check": "npm run lint && npm run test:lint && npm test",
+    "lint": "node tools/oxlint/run.mjs",
+    "test:lint": "tsc -p tools/oxlint/tsconfig.json && node tools/oxlint/test.mjs",
     "playground": "npm run build && node dist/playground/server.js",
     "test:property": "npm run build && node dist/tests/property/replay.js",
     "test:compiled:full-output": "node ./tools/test-output-filter.mjs --full-output",
     "test:full-output": "npm run build && node ./tools/test-output-filter.mjs --full-output",
-    "check:full-output": "npm run test:full-output"
+    "check:full-output": "npm run lint && npm run test:lint -- --full-output && npm run test:full-output"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.81.0",
     "@types/node": "24.13.3",
     "@typescript/native": "npm:typescript@7.0.2",
+    "oxlint": "1.81.0",
     "ts-morph": "28.0.0"
   }
 }

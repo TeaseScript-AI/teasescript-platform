@@ -75,6 +75,7 @@ const FALLBACK_SPAN = createSourceSpan(
  */
 export function captureProgramAst(value: unknown): CapturedProgramAstResult {
   const active = new Set<object>();
+  // EVIDENCE: invariant: this empty engine-created array receives only WorkItem entries below.
   const work = createCapturedArray(0) as WorkItem[];
   work.push({ kind: "visit", value, depth: 0, target: null });
   let capturedRoot: unknown;
@@ -148,6 +149,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     if (prototype !== Object.prototype && prototype !== null) {
       return captureFailure("Direct AST input must contain only plain objects and arrays.");
     }
+    // EVIDENCE: invariant: Object.create(null) creates an empty own-property capture dictionary.
     const captured = Object.create(null) as Record<string, unknown>;
     let values: ObjectPropertyStage | null = null;
     for (const key of keys) {
@@ -194,7 +196,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     return captureFailure("Direct AST input must be a valid program-shaped object.");
   }
   return Object.freeze({
-    program: capturedRoot as Program,
+    program: capturedRoot,
     diagnostic: null,
   });
 }
@@ -216,7 +218,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
   program: Program,
 ): readonly Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
-  const work = createCapturedArray(0) as unknown[];
+  const work = createCapturedArray(0);
   work.push(program);
   while (work.length > 0) {
     const value = work.pop();
@@ -227,6 +229,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
       }
       continue;
     }
+    // EVIDENCE: invariant: value is an object; these optional fields remain unknown until checked below.
     const node = value as {
       readonly kind?: unknown;
       readonly value?: unknown;
@@ -252,6 +255,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
   return Object.freeze(diagnostics);
 }
 
+// oxlint-disable-next-line anti-slop/no-object-parameters -- EVIDENCE: boundary: inspect array descriptors before trusting length or elements.
 function captureArrayHeader(value: object): CapturedArrayHeader | null {
   let lengthDescriptor: PropertyDescriptor | undefined;
   let keys: readonly (string | symbol)[];
@@ -273,6 +277,7 @@ function captureArrayHeader(value: object): CapturedArrayHeader | null {
   }
 
   const length = lengthDescriptor.value;
+  // EVIDENCE: invariant: the empty null-prototype dictionary stores descriptor values captured below.
   const values = Object.create(null) as Record<string, unknown>;
   const seen = new Set<number>();
   for (const key of keys) {

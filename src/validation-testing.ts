@@ -9,6 +9,7 @@ export function beginValidationTestStatistics(): () => ValidationTestStatistics 
   if (active !== null) {
     throw new Error("A validation test statistics session is already active.");
   }
+  // EVIDENCE: invariant: this empty null-prototype dictionary receives only numeric work counters.
   active = Object.create(null) as Record<string, number>;
   return () => {
     if (active === null) {

@@ -78,6 +78,7 @@ test("parameters are deep copies of caller lists, objects, and sets", () => {
     kind: "object",
     properties: [{ name: "nested", value: { kind: "list", items: [1] } }],
   });
+  // EVIDENCE: source fixture declares setValue as a set before reading its captured items.
   assert.deepEqual((rootValue(result.snapshot, "setValue") as SerializableRuntimeSet).items, [1, 2]);
 });
 
@@ -97,15 +98,17 @@ test("returned lists, objects, and sets are independent deep copies", () => {
     "copiedSet.add(3)",
   ].join("\n"));
 
-  assert.deepEqual(
-    ((rootValue(result.snapshot, "sourceList") as SerializableRuntimeList).items[0] as SerializableRuntimeList).items,
-    [1],
-  );
-  assert.deepEqual(
-    objectProperty(rootValue(result.snapshot, "sourceObject") as SerializableRuntimeObject, "nested"),
-    { kind: "list", items: [1] },
-  );
+  const sourceList = rootValue(result.snapshot, "sourceList");
+  assert.ok(sourceList !== null && typeof sourceList === "object" && sourceList.kind === "list");
+  const nestedList = sourceList.items[0];
+  assert.ok(nestedList !== null && typeof nestedList === "object" && nestedList.kind === "list");
+  assert.deepEqual(nestedList.items, [1]);
+  const sourceObject = rootValue(result.snapshot, "sourceObject");
+  assert.ok(sourceObject !== null && typeof sourceObject === "object" && sourceObject.kind === "object");
+  assert.deepEqual(objectProperty(sourceObject, "nested"), { kind: "list", items: [1] });
+  // EVIDENCE: source fixture declares sourceSet as a set before reading its captured items.
   assert.deepEqual((rootValue(result.snapshot, "sourceSet") as SerializableRuntimeSet).items, [1, 2]);
+  // EVIDENCE: source fixture declares copiedSet as a set before reading its captured items.
   assert.deepEqual((rootValue(result.snapshot, "copiedSet") as SerializableRuntimeSet).items, [1, 2, 3]);
 });
 
@@ -327,6 +330,7 @@ test("fails an invalid prepared receiver before evaluating a user-call argument"
   ].join("\n"));
 
   assert.equal(result.snapshot.status, "failed");
+  // EVIDENCE: source fixture initializes order as a list before the failing function call.
   assert.deepEqual(
     (rootValue(result.snapshot, "order") as SerializableRuntimeList).items,
     [],
@@ -341,6 +345,7 @@ test("fails an earlier ordinary expression before a later user-call side effect"
   ].join("\n"));
 
   assert.equal(result.snapshot.status, "failed");
+  // EVIDENCE: source fixture initializes order as a list before the failing recursive call.
   assert.deepEqual(
     (rootValue(result.snapshot, "order") as SerializableRuntimeList).items,
     [],

@@ -108,7 +108,7 @@ function captureCheckpointEnvelope(value: unknown): CheckpointEnvelope {
     keys.some(
       (key) =>
         typeof key !== "string" ||
-        !CHECKPOINT_KEYS.includes(key as typeof CHECKPOINT_KEYS[number]),
+        !CHECKPOINT_KEYS.includes(/* EVIDENCE: invariant: includes tests membership; it does not assume the external key is accepted. */ key as typeof CHECKPOINT_KEYS[number]),
     )
   ) {
     throw checkpointError(
@@ -139,13 +139,18 @@ function captureCheckpointEnvelope(value: unknown): CheckpointEnvelope {
     }
     captured[key] = descriptor.value;
   }
-  return captured as unknown as CheckpointEnvelope;
+  return {
+    format: captured.format,
+    version: captured.version,
+    plan: captured.plan,
+    snapshot: captured.snapshot,
+  };
 }
 
 export function deserializeCheckpoint(json: string): RuntimeCheckpoint {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(json) as unknown;
+    parsed = JSON.parse(json);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw checkpointError("TSK003", `Checkpoint JSON is invalid: ${message}`, "$.");
@@ -170,6 +175,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
       `$.plan${first?.path.slice(1) ?? ""}`,
     );
   }
+  // EVIDENCE: validation: validateCapturedInstructionPlan accepted this JSON-parsed plan above.
   const plan = freezeInstructionPlan(envelope.plan as InstructionPlan);
   const snapshotValidation = validateCapturedRuntimeSnapshot(
     envelope.snapshot,
@@ -189,6 +195,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
     plan,
+    // EVIDENCE: validation: validateCapturedRuntimeSnapshot accepted this snapshot against the validated plan above.
     snapshot: envelope.snapshot as RuntimeSnapshot,
   });
 }

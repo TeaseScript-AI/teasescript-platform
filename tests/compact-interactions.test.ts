@@ -333,17 +333,31 @@ test("interaction result domains participate in existing numeric semantic checks
 });
 
 test("prepared-plan validation rejects malformed new shapes and stale plan revisions", () => {
-  const plan = structuredClone(compiled("showButton payload", { globals: ["payload"] })) as any;
-  const interaction = plan.instructions.find((instruction: any) => instruction.kind === "interaction");
-  interaction.preparedUi.buttonLabelTemporary = plan.temporaryCount + 1;
+  const plan = structuredClone(compiled("showButton payload", { globals: ["payload"] }));
+  const interaction = plan.instructions.find((instruction) => instruction.kind === "interaction");
+  assert.ok(
+    interaction?.kind === "interaction" &&
+    "preparedUi" in interaction &&
+    interaction.preparedUi.kind === "button",
+  );
+  // EVIDENCE: fixture mutates only the prepared button-label temporary to an out-of-range ID.
+  (interaction.preparedUi as { buttonLabelTemporary: number }).buttonLabelTemporary = plan.temporaryCount + 1;
   assert.equal(validateInstructionPlan(plan).valid, false);
 
-  const aliased = structuredClone(compiled("let answer = askText hint", { globals: ["hint"] })) as any;
-  const aliasedInteraction = aliased.instructions.find((instruction: any) => instruction.kind === "interaction");
-  aliasedInteraction.preparedUi.hintTemporary = aliasedInteraction.speakerTemporary;
+  const aliased = structuredClone(compiled("let answer = askText hint", { globals: ["hint"] }));
+  const aliasedInteraction = aliased.instructions.find((instruction) => instruction.kind === "interaction");
+  assert.ok(
+    aliasedInteraction?.kind === "interaction" &&
+    "preparedUi" in aliasedInteraction &&
+    aliasedInteraction.preparedUi.kind === "text",
+  );
+  // EVIDENCE: fixture aliases the prepared text hint and speaker temporaries for plan rejection.
+  (aliasedInteraction.preparedUi as { hintTemporary: number | null }).hintTemporary =
+    aliasedInteraction.speakerTemporary;
   assert.equal(validateInstructionPlan(aliased).valid, false);
 
-  const oldVersion = structuredClone(compiled("let answer = askText")) as any;
+  // EVIDENCE: fixture mutation widens only the plan revision so validation can reject the obsolete value 7.
+  const oldVersion = structuredClone(compiled("let answer = askText")) as { version: number };
   oldVersion.version = 7;
   assert.equal(validateInstructionPlan(oldVersion).valid, false);
 });
@@ -703,6 +717,7 @@ test("interaction expressions preserve function-argument source order across sus
       mark: (call) => {
         const value = call.positional[0];
         assert.equal(typeof value, "string");
+        // EVIDENCE: the immediately preceding assertion narrows this recorded positional value to string.
         marks.push(value as string);
         return value!;
       },
@@ -873,8 +888,10 @@ test("dynamic settlement uses prepared UI provenance while available and intrins
   const buttonPending = run(buttonPlan, createFreshRuntimeSnapshot(buttonPlan, { globals: { label: "Continue" } }));
   const buttonCompleted = completePending(buttonPlan, buttonPending.snapshot, "button", { kind: "activate" });
   assert.equal(validateRuntimeSnapshot(buttonCompleted.snapshot, buttonPlan).valid, true);
-  const wrongButton = structuredClone(buttonCompleted.snapshot) as any;
-  wrongButton.lastSettlement.transcriptText = "Wrong";
+  const wrongButton = structuredClone(buttonCompleted.snapshot);
+  assert.ok(wrongButton.lastSettlement?.actionKind === "interaction");
+  // EVIDENCE: fixture mutates only retained interaction transcript text to contradict prepared button UI provenance.
+  (wrongButton.lastSettlement as { transcriptText: string | null }).transcriptText = "Wrong";
   assert.equal(validateRuntimeSnapshot(wrongButton, buttonPlan).valid, false);
   const buttonAfterCleanup = run(buttonPlan, buttonCompleted.snapshot).snapshot;
   assert.equal(validateRuntimeSnapshot(buttonAfterCleanup, buttonPlan).valid, true);
@@ -883,9 +900,16 @@ test("dynamic settlement uses prepared UI provenance while available and intrins
   const choicePlan = compiled("let result = choose first, second", { globals: ["first", "second"] });
   const choicePending = run(choicePlan, createFreshRuntimeSnapshot(choicePlan, { globals: { first: "One", second: "Two" } }));
   const choiceCompleted = completePending(choicePlan, choicePending.snapshot, "choice", { kind: "selectedText", selectedText: "One" });
-  const wrongChoice = structuredClone(choiceCompleted.snapshot) as any;
-  wrongChoice.lastSettlement.result = "Two";
-  wrongChoice.temporaries.find((temporary: any) => temporary.id === wrongChoice.lastSettlement.destinationTemporary).value = "Two";
+  const wrongChoice = structuredClone(choiceCompleted.snapshot);
+  assert.ok(wrongChoice.lastSettlement?.actionKind === "interaction");
+  assert.notEqual(wrongChoice.interactionResultHandoff, null);
+  // EVIDENCE: fixture mutates only the retained choice result to disagree with its destination value.
+  (wrongChoice.lastSettlement as { result: unknown }).result = "Two";
+  const wrongChoiceDestination = wrongChoice.temporaries.find(
+    (temporary) => temporary.id === wrongChoice.interactionResultHandoff?.destinationTemporary,
+  );
+  assert.ok(wrongChoiceDestination !== undefined);
+  wrongChoiceDestination.value = "Two";
   assert.equal(validateRuntimeSnapshot(wrongChoice, choicePlan).valid, false);
   const choiceAfterCleanup = run(choicePlan, choiceCompleted.snapshot).snapshot;
   assert.equal(validateRuntimeSnapshot(choiceAfterCleanup, choicePlan).valid, true);
@@ -893,14 +917,20 @@ test("dynamic settlement uses prepared UI provenance while available and intrins
   const labelledPending = run(labelledPlan, createFreshRuntimeSnapshot(labelledPlan, { globals: { firstText: "Alpha", secondText: "Beta" } }));
   const labelledCompleted = completePending(labelledPlan, labelledPending.snapshot, "choice", { kind: "selectedLabel", selectedLabel: "first" });
   const labelledAfterCleanup = run(labelledPlan, labelledCompleted.snapshot).snapshot;
-  const differentPossibleHistory = structuredClone(labelledAfterCleanup) as any;
-  differentPossibleHistory.lastSettlement.transcriptText = "Beta";
+  const differentPossibleHistory = structuredClone(labelledAfterCleanup);
+  assert.ok(differentPossibleHistory.lastSettlement?.actionKind === "interaction");
+  // EVIDENCE: post-cleanup validation deliberately permits alternate historical transcript text.
+  (differentPossibleHistory.lastSettlement as { transcriptText: string | null }).transcriptText = "Beta";
   assert.equal(validateRuntimeSnapshot(differentPossibleHistory, labelledPlan).valid, true);
-  const mismatchedLabel = structuredClone(labelledAfterCleanup) as any;
-  mismatchedLabel.lastSettlement.result = "third";
+  const mismatchedLabel = structuredClone(labelledAfterCleanup);
+  assert.ok(mismatchedLabel.lastSettlement?.actionKind === "interaction");
+  // EVIDENCE: fixture mutates only the retained label result to a label absent from the interaction domain.
+  (mismatchedLabel.lastSettlement as { result: unknown }).result = "third";
   assert.equal(validateRuntimeSnapshot(mismatchedLabel, labelledPlan).valid, false);
-  const mismatchedLabelCheckpoint = structuredClone(createCheckpoint(labelledPlan, labelledAfterCleanup)) as any;
-  mismatchedLabelCheckpoint.snapshot.lastSettlement.result = "third";
+  const mismatchedLabelCheckpoint = structuredClone(createCheckpoint(labelledPlan, labelledAfterCleanup));
+  assert.ok(mismatchedLabelCheckpoint.snapshot.lastSettlement?.actionKind === "interaction");
+  // EVIDENCE: fixture mutates only the checkpoint settlement result to an absent choice label.
+  (mismatchedLabelCheckpoint.snapshot.lastSettlement as { result: unknown }).result = "third";
   assert.throws(() => deserializeCheckpoint(JSON.stringify(mismatchedLabelCheckpoint)));
 });
 

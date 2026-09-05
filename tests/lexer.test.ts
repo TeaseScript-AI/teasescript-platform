@@ -270,7 +270,7 @@ function span(
   endOffset: number,
   endLine: number,
   endColumn: number,
-): object {
+) {
   return {
     start: { offset: startOffset, line: startLine, column: startColumn },
     end: { offset: endOffset, line: endLine, column: endColumn },

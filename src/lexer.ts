@@ -542,6 +542,7 @@ class Lexer {
   ): void {
     this.#tokens.push(
       createToken({
+        // EVIDENCE: invariant: literal/identifier scanners create their payload tokens separately from this emitter.
         kind: kind as Exclude<
           TokenKind,
           | typeof TokenKind.Identifier

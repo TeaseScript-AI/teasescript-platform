@@ -25,6 +25,7 @@
 - `LLM-INTEGRATION.md`
 - `MATH-EXPRESSIONS.md`
 - `TESTING.md`: current testing strategy, runtime invariants, and future quality gates.
+- `LINTING.md`: type-evidence rules, narrow exceptions, and lint maintenance.
 
 These files provide maintained topic detail and orientation. They must not duplicate or override accepted syntax or
 ADRs.

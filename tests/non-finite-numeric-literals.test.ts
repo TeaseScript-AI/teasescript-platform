@@ -58,6 +58,7 @@ test("direct lowering rejects a non-finite literal with a structured compiler er
 function mutableProgram(source: string): Program {
   const parsed = parse(source);
   assert.deepEqual(parsed.diagnostics, []);
+  // EVIDENCE: fixture: JSON round-trip preserves the parser-produced Program shape before numeric mutation.
   return JSON.parse(JSON.stringify(parsed.program)) as Program;
 }
 
@@ -77,8 +78,10 @@ function numberLiterals(program: Program): MutableNumberLiteral[] {
       value.forEach(visit);
       return;
     }
+    // EVIDENCE: fixture traversal: the object guard above permits inspection of optional AST-like fields.
     const node = value as { kind?: unknown; value?: unknown; span?: unknown };
     if (node.kind === "numberLiteral" && typeof node.value === "number") {
+      // EVIDENCE: fixture traversal: the kind and numeric-value guards establish the mutable literal fields used below.
       literals.push(node as MutableNumberLiteral);
     }
     Object.values(value).forEach(visit);

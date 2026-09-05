@@ -63,7 +63,7 @@ export type RuntimePendingActionSnapshot = RuntimeDelayActionSnapshot | RuntimeI
 
 /** Completion events that an active action must still be able to publish. */
 export function requiredActionCompletionEvents(
-  action: RuntimePendingActionSnapshot | null,
+  action: { readonly kind?: unknown } | null,
 ): number {
   if (action?.kind === "interaction") return 2;
   if (action?.kind === "delay" || action?.kind === "chatPacingGate") return 1;

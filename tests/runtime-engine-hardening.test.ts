@@ -226,10 +226,12 @@ test("keeps re-entrant runtime operation contexts isolated", () => {
 
 function inheritedBuiltinPlan(name: string): InstructionPlan {
   const compiled = compile("let output = injectedBuiltin()", ["injectedBuiltin"]);
+  // EVIDENCE: fixture: clone a compiler-produced plan before deliberately changing its builtin identifier.
   const plan = JSON.parse(JSON.stringify(compiled)) as InstructionPlan;
   const call = bindingCall(plan);
   assert.equal(call.callee.kind, "identifier");
   if (call.callee.kind !== "identifier") throw new Error("Expected an identifier callee.");
+  // EVIDENCE: fixture: expose the guarded identifier's readonly name to test inherited builtin lookup.
   (call.callee as { name: string }).name = name;
   return plan;
 }
@@ -242,12 +244,14 @@ function namedBuiltinPlan(names: readonly string[]): InstructionPlan {
     `let output = capture(${argumentsSource})`,
     ["capture"],
   );
+  // EVIDENCE: fixture: clone a compiler-produced plan before deliberately changing its named arguments.
   const plan = JSON.parse(JSON.stringify(compiled)) as InstructionPlan;
   const call = bindingCall(plan);
   assert.equal(call.arguments.length, names.length);
   call.arguments.forEach((argument, index) => {
     assert.equal(argument.kind, "named");
     if (argument.kind !== "named") throw new Error("Expected a named argument.");
+    // EVIDENCE: fixture: expose the guarded named argument's readonly name for invalid-name validation.
     (argument as { name: string }).name = names[index]!;
   });
   return plan;

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import type { InstructionPlan } from "../src/plan/model.js";
+import type { Instruction, InstructionPlan } from "../src/plan/model.js";
 import {
   CHECKPOINT_VERSION,
   CheckpointError,
@@ -17,7 +17,10 @@ import {
   type RuntimeBuiltinFunction,
 } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
+import type {
+  SerializableRuntimeObject,
+  SerializableRuntimeValue,
+} from "../src/runtime/serializable-values.js";
 import {
   createFreshRuntimeSnapshot,
   MAX_SUPPORTED_CALL_DEPTH,
@@ -228,10 +231,10 @@ test("validates suspended caller liveness without historical argument-value comp
   const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === 3);
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
 
-  const missing = structuredClone(snapshot) as any;
+  const missing: any = structuredClone(snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture removes suspended caller temporaries from a runtime-produced snapshot.
   missing.callFrames[0].callerTemporaries = [];
   assert.equal(validateRuntimeSnapshot(missing, compiled).valid, false);
-  const changed = structuredClone(snapshot) as any;
+  const changed: any = structuredClone(snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes a retained call argument value without altering its supply metadata.
   changed.callFrames[0].arguments[0].value = 99;
   assert.equal(validateRuntimeSnapshot(changed, compiled).valid, true);
 });
@@ -242,7 +245,7 @@ test("treats unbound call-frame argument values as canonical resumable state", (
     candidate.callFrames.at(-1)?.parameterState.phase === "supplied" &&
     candidate.callFrames.at(-1)?.parameterState.parameterIndex === 0
   );
-  const changed = structuredClone(snapshot) as any;
+  const changed: any = structuredClone(snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes a deeply nested unbound call argument while preserving its canonical surrounding snapshot.
   changed.callFrames[0].arguments[0].value.properties[0].value.properties[0].value.items[1] = 99;
   assert.equal(validateRuntimeSnapshot(changed, compiled).valid, true);
   assert.doesNotThrow(() => restoreCheckpoint(createCheckpoint(compiled, changed)));
@@ -268,8 +271,8 @@ test("detailed validation records liveness work without rejecting valid state", 
 
 test("checkpoint creation defensively isolates the supplied plan", () => {
   const original = mutablePlan(plan("function value { return 1 }\nsay value()"));
-  const snapshot = createImmediatePacingRuntimeSnapshot(original as InstructionPlan);
-  const checkpoint = createCheckpoint(original as InstructionPlan, snapshot);
+  const snapshot = createImmediatePacingRuntimeSnapshot(original);
+  const checkpoint = createCheckpoint(original, snapshot);
   const originalName = checkpoint.plan.functions[0]!.name;
 
   original.functions[0]!.name = "mutated";
@@ -494,7 +497,7 @@ test("rejects malformed prepared-reference state in active and suspended tempora
     )
   );
   const base = mutableCheckpoint(createCheckpoint(compiled, suspended));
-  const mutations: Array<(descriptor: any) => void> = [
+  const mutations: Array<(descriptor: SerializableRuntimeObject) => void> = [
     (descriptor) => {
       descriptor.properties.push({ name: "unexpected", value: null });
     },
@@ -506,7 +509,9 @@ test("rejects malformed prepared-reference state in active and suspended tempora
     },
     (descriptor) => {
       const path = serializedObjectProperty(descriptor, "path");
+      assert.ok(path?.kind === "list");
       const firstStep = path.items[0];
+      assert.ok(firstStep?.kind === "object");
       setSerializedObjectProperty(firstStep, "name", "");
     },
     (descriptor) => {
@@ -575,13 +580,13 @@ test("rejects missing suspended results at multiple recursion depths", () => {
   for (let frameIndex = 1; frameIndex < snapshot.callFrames.length; frameIndex += 1) {
     const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
     const frame = checkpoint.snapshot.callFrames[frameIndex]!;
-    const call = checkpoint.plan.instructions[frame.returnInstruction - 1];
-    assert.equal(call.kind, "callFunction");
-    const argumentIds = new Set(call.arguments.flatMap((argument: any) =>
+    const call: Instruction = checkpoint.plan.instructions[frame.returnInstruction - 1];
+    assert.ok(call.kind === "callFunction");
+    const argumentIds = new Set(call.arguments.flatMap((argument) =>
       argument.value.kind === "temporary" ? [argument.value.temporaryId] : []
     ));
     const missingIndex = frame.callerTemporaries.findIndex(
-      (temporary: any) => !argumentIds.has(temporary.id),
+      (temporary: { id: number }) => !argumentIds.has(temporary.id),
     );
     assert.ok(missingIndex >= 0);
     frame.callerTemporaries.splice(missingIndex, 1);
@@ -644,11 +649,11 @@ test("rejects malformed function-region plans inside checkpoints", () => {
     "say sample()",
   ].join("\n"));
   const sample = defaults.functions.find((definition) => definition.name === "sample")!;
-  const plans: any[] = [];
+  const plans: InstructionPlan[] = [];
 
   const statementInDefault = mutablePlan(defaults);
   const clearIndex = statementInDefault.instructions.findIndex(
-    (instruction: any, index: number) =>
+    (instruction: Instruction, index: number) =>
       index >= sample.entryInstruction &&
       index < sample.bodyEntryInstruction &&
       instruction.kind === "clearTemporary",
@@ -670,23 +675,26 @@ test("rejects malformed function-region plans inside checkpoints", () => {
 
   const returnBeforeBody = mutablePlan(defaults);
   const bindIndex = returnBeforeBody.instructions.findIndex(
-    (instruction: any, index: number) =>
+    (instruction: Instruction, index: number) =>
       index >= sample.entryInstruction &&
       index < sample.bodyEntryInstruction &&
       instruction.kind === "bindDefaultParameter",
   );
+  const bindInstruction = returnBeforeBody.instructions[bindIndex];
+  assert.ok(bindInstruction?.kind === "bindDefaultParameter");
   returnBeforeBody.instructions[bindIndex] = {
     kind: "returnValue",
-    value: returnBeforeBody.instructions[bindIndex].value,
-    span: returnBeforeBody.instructions[bindIndex].span,
+    value: bindInstruction.value,
+    span: bindInstruction.span,
   };
   plans.push(returnBeforeBody);
 
   const calls = plan("function pair(left, right) { return left + right }\nsay pair(1, 2)");
   const aliasedDestination = mutablePlan(calls);
   const aliasedCall = aliasedDestination.instructions.find(
-    (instruction: any) => instruction.kind === "callFunction",
+    (instruction: Instruction) => instruction.kind === "callFunction",
   );
+  assert.ok(aliasedCall?.kind === "callFunction");
   aliasedCall.arguments[0].value = {
     kind: "temporary",
     temporaryId: aliasedCall.destinationTemporary,
@@ -696,8 +704,9 @@ test("rejects malformed function-region plans inside checkpoints", () => {
 
   const duplicateArgument = mutablePlan(calls);
   const duplicateCall = duplicateArgument.instructions.find(
-    (instruction: any) => instruction.kind === "callFunction",
+    (instruction: Instruction) => instruction.kind === "callFunction",
   );
+  assert.ok(duplicateCall?.kind === "callFunction");
   duplicateCall.arguments[1].parameterName = duplicateCall.arguments[0].parameterName;
   plans.push(duplicateArgument);
 
@@ -745,11 +754,12 @@ test("rejects cyclic runtime state without overflowing validation", () => {
     version: CHECKPOINT_VERSION,
     plan: compiled,
     snapshot,
-  } as Record<string, unknown>;
-  const cyclic = { kind: "list", items: [] as unknown[] };
+  };
+  const cyclic: { kind: "list"; items: unknown[] } = { kind: "list", items: [] };
   cyclic.items.push(cyclic);
   snapshot.frames[0]!.bindings.push({
     name: "cyclic",
+    // EVIDENCE: fixture intentionally presents this self-referential list as runtime data to test cycle rejection.
     value: cyclic as SerializableRuntimeValue,
   });
 
@@ -760,9 +770,12 @@ test("cyclic builtin results become source-associated runtime failures", () => {
   const compiledResult = compileSource("say cyclic()", { builtins: ["cyclic"] });
   assert.deepEqual(compiledResult.diagnostics, []);
   const compiled = compiledResult.plan!;
-  const cyclic = { kind: "list", items: [] as unknown[] };
+  const cyclic: { kind: "list"; items: unknown[] } = { kind: "list", items: [] };
   cyclic.items.push(cyclic);
-  const builtin: RuntimeBuiltinFunction = () => cyclic as SerializableRuntimeValue;
+  const builtin: RuntimeBuiltinFunction = () => {
+    // EVIDENCE: fixture intentionally returns the self-referential list through the builtin result boundary.
+    return cyclic as SerializableRuntimeValue;
+  };
   const result = run(
     compiled,
     createImmediatePacingRuntimeSnapshot(compiled),
@@ -811,14 +824,17 @@ function plan(source: string): InstructionPlan {
 
 type MutableCheckpoint = ReturnType<typeof mutableCheckpoint>;
 
+// oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: checkpoint fixtures mutate readonly and invalid fields across the checkpoint validation matrix.
 function mutableCheckpoint(checkpoint: ReturnType<typeof createCheckpoint>): any {
   return JSON.parse(JSON.stringify(checkpoint));
 }
 
+// oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: plan fixtures mutate readonly and invalid instruction fields across the plan validation matrix.
 function mutablePlan(compiled: InstructionPlan): any {
   return JSON.parse(JSON.stringify(compiled));
 }
 
+// oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: helper locates the serialized prepared-reference object whose malformed properties are the fixture under test.
 function preparedReferenceValue(temporaries: any[]): any {
   const temporary = temporaries.find(
     (candidate) =>
@@ -828,21 +844,22 @@ function preparedReferenceValue(temporaries: any[]): any {
   return temporary.value;
 }
 
+// oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: helper reads named properties from serialized object fixtures before their shape is mutated.
 function serializedObjectProperty(value: any, name: string): any {
   if (value?.kind !== "object" || !Array.isArray(value.properties)) return undefined;
-  return value.properties.find((property: any) => property.name === name)?.value;
+  return value.properties.find((property: any) => property.name === name)?.value; // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: serialized property entries are selected by their runtime `name` field.
 }
 
-function setSerializedObjectProperty(value: any, name: string, replacement: any): void {
+function setSerializedObjectProperty(value: any, name: string, replacement: any): void { // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture helper mutates named fields within serialized prepared-reference objects to invalid values.
   assert.equal(value?.kind, "object");
-  const property = value.properties.find((candidate: any) => candidate.name === name);
+  const property = value.properties.find((candidate: any) => candidate.name === name); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: serialized property entries are selected by their runtime `name` field.
   assert.ok(property !== undefined);
   property.value = replacement;
 }
 
-function removeSerializedObjectProperty(value: any, name: string): void {
+function removeSerializedObjectProperty(value: any, name: string): void { // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture helper removes a required named field from a serialized prepared-reference object.
   assert.equal(value?.kind, "object");
-  const index = value.properties.findIndex((candidate: any) => candidate.name === name);
+  const index = value.properties.findIndex((candidate: any) => candidate.name === name); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: serialized property entries are selected by their runtime `name` field.
   assert.ok(index >= 0);
   value.properties.splice(index, 1);
 }

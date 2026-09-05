@@ -59,8 +59,10 @@ export class SerializableValueError extends Error {
 export function createSerializableList(
   items: readonly SerializableRuntimeValue[],
 ): SerializableRuntimeList {
+  // EVIDENCE: validation: cloneSerializableValue captures and validates the list and preserves its kind.
   return cloneSerializableValue({
     kind: "list",
+    // EVIDENCE: validation: the readonly input is only read during capture; the result has independent mutable items.
     items: items as SerializableRuntimeValue[],
   }) as SerializableRuntimeList;
 }
@@ -78,8 +80,10 @@ export function createCapturedSerializableList(
 export function createSerializableObject(
   properties: readonly SerializableRuntimeProperty[],
 ): SerializableRuntimeObject {
+  // EVIDENCE: validation: cloneSerializableValue captures and validates the object and preserves its kind.
   return cloneSerializableValue({
     kind: "object",
+    // EVIDENCE: validation: the readonly properties are only read during capture into an independent result.
     properties: properties as SerializableRuntimeProperty[],
   }) as SerializableRuntimeObject;
 }
@@ -167,11 +171,13 @@ export function cloneCapturedSerializableValue(
   type CompositeValue = SerializableRuntimeList | SerializableRuntimeObject;
   const work: Array<readonly [CompositeValue, CompositeValue]> = [[
     value,
+    // EVIDENCE: validation: the non-scalar root clone preserves the list/object kind of the source.
     root as CompositeValue,
   ]];
   while (work.length > 0) {
     const [source, target] = work.pop()!;
     if (source.kind === "list") {
+      // EVIDENCE: validation: work pairs each list source with its newly allocated list clone.
       const targetItems = (target as SerializableRuntimeList).items;
       for (let index = 0; index < source.items.length; index += 1) {
         const nested = source.items[index]!;
@@ -179,11 +185,13 @@ export function cloneCapturedSerializableValue(
         targetItems[index] = cloned;
         if (typeof nested === "object" && nested !== null &&
           (nested.kind === "list" || nested.kind === "object")) {
+          // EVIDENCE: validation: cloneSerializableNode preserves the composite kind checked on nested.
           work.push([nested, cloned as CompositeValue]);
         }
       }
       continue;
     }
+    // EVIDENCE: validation: the remaining composite source and its paired clone are objects.
     const targetProperties = (target as SerializableRuntimeObject).properties;
     for (let index = 0; index < source.properties.length; index += 1) {
       const property = source.properties[index]!;
@@ -192,6 +200,7 @@ export function cloneCapturedSerializableValue(
       const nested = property.value;
       if (typeof nested === "object" && nested !== null &&
         (nested.kind === "list" || nested.kind === "object")) {
+        // EVIDENCE: validation: cloneSerializableNode preserves the composite kind checked on nested.
         work.push([nested, cloned as CompositeValue]);
       }
     }
@@ -331,6 +340,7 @@ function captureAndValidateSerializableValue(
     path,
   );
   return Object.freeze({
+    // EVIDENCE: validation: validateSerializableValueInternal accepted the captured value when failure is null.
     value: failure === null ? capture.value as SerializableRuntimeValue : null,
     failure,
   });
@@ -421,7 +431,7 @@ function validateSerializableValueInternal(
     if (current.kind === "speakerReference") {
       if (
         !Number.isSafeInteger(current.speakerId) ||
-        (current.speakerId as number) < 0 ||
+        (/* EVIDENCE: validation: Number.isSafeInteger checked speakerId in the preceding condition. */ current.speakerId as number) < 0 ||
         typeof current.identifier !== "string" ||
         current.identifier.length === 0
       ) return `${path()} contains a malformed speaker reference.`;

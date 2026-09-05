@@ -113,6 +113,7 @@ function validatePreparedReferenceStructure(
       instruction.kind === "prepareReference" &&
       Number.isInteger(instruction.destinationTemporary)
     ) {
+      // EVIDENCE: validation: Number.isInteger accepted destinationTemporary above.
       const temporaryId = instruction.destinationTemporary as number;
       if (producers.has(temporaryId)) {
         errors.push(planError(
@@ -158,6 +159,7 @@ function collectPreparedReferenceIds(
   }
   if (!isRecord(value)) return;
   if (value.kind === "preparedReference" && Number.isInteger(value.temporaryId)) {
+    // EVIDENCE: validation: the prepared-reference temporary ID passed Number.isInteger.
     output.add(value.temporaryId as number);
     return;
   }
@@ -184,22 +186,25 @@ function validateLoopStructure(
       !Number.isInteger(instruction.target) ||
       !Number.isInteger(instruction.continueTarget)
     ) continue;
-    const loopId = instruction.loopId as number;
+    const loopId = instruction.loopId;
     if (starts.has(loopId)) {
       errors.push(planError("TSC002", "Loop IDs must be unique.", `$.instructions[${index}].loopId`));
     } else {
       starts.set(loopId, {
         index,
+        // EVIDENCE: validation: the loop target passed Number.isInteger before insertion.
         target: instruction.target as number,
         breakTarget: loopBreakTarget(instructions, index, instruction),
+        // EVIDENCE: validation: the continue target passed Number.isInteger before insertion.
         continueTarget: instruction.continueTarget as number,
       });
     }
+    // EVIDENCE: validation: the loop target passed Number.isInteger above.
     if ((instruction.target as number) <= index) {
       errors.push(planError("TSC002", "Loop exit target must follow its start.", `$.instructions[${index}].target`));
     }
     if (
-      (instruction.loopKind === "while" && (instruction.continueTarget as number) > index) ||
+      (instruction.loopKind === "while" && (/* EVIDENCE: validation: the continue target passed Number.isInteger above. */ instruction.continueTarget as number) > index) ||
       (instruction.loopKind !== "while" && instruction.continueTarget !== index)
     ) {
       errors.push(planError("TSC002", "Loop continue target is invalid.", `$.instructions[${index}].continueTarget`));
@@ -209,7 +214,7 @@ function validateLoopStructure(
     const instruction = instructions[index];
     if (!isRecord(instruction) || instruction.kind !== "loopControl") continue;
     if (!positiveSafeInteger(instruction.loopId) || !Number.isInteger(instruction.target)) continue;
-    const start = starts.get(instruction.loopId as number);
+    const start = starts.get(instruction.loopId);
     if (start === undefined) {
       errors.push(planError("TSC002", "Loop control refers to an unknown loop.", `$.instructions[${index}].loopId`));
       continue;
@@ -228,6 +233,7 @@ function loopBreakTarget(
   loopStartIndex: number,
   loopStart: Record<string, unknown>,
 ): number {
+  // EVIDENCE: validation: the sole caller checked the loop-start target with Number.isInteger.
   let target = loopStart.target as number;
   let trueCleanup = loopStartIndex + 1;
   while (true) {
@@ -393,6 +399,7 @@ function validateInstruction(
             isRecord(argument) &&
             expressionMayReferenceTemporary(
               argument.value,
+              // EVIDENCE: validation: the enclosing condition checked destinationTemporary before this callback.
               value.destinationTemporary as number,
             ),
         )
@@ -629,9 +636,11 @@ function validateStaticInteractionUi(
           labels.add(label);
         }
         if (!measurementExhausted && textValid && labelType === "none") {
+          // EVIDENCE: validation: textValid records the option text string check above.
           if (visible.has(option.text as string)) {
             errors.push(planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`));
           }
+          // EVIDENCE: validation: textValid records the option text string check above.
           visible.add(option.text as string);
         }
       }
@@ -724,8 +733,8 @@ function validatePreparedInteractionUi(
   addTemporary(ui.optionsTemporary, `${path}.optionsTemporary`);
   if (
     !Number.isSafeInteger(ui.optionCount) ||
-    (ui.optionCount as number) < 1 ||
-    (ui.optionCount as number) > MAX_INTERACTION_OPTION_ENTRIES
+    (/* EVIDENCE: validation: optionCount passed Number.isSafeInteger in the preceding condition. */ ui.optionCount as number) < 1 ||
+    (/* EVIDENCE: validation: optionCount passed Number.isSafeInteger in the preceding condition. */ ui.optionCount as number) > MAX_INTERACTION_OPTION_ENTRIES
   ) {
     errors.push(planError("TSC002", "Prepared choice option count exceeds the shared collection boundary or is empty.", `${path}.optionCount`));
   }
@@ -1018,7 +1027,7 @@ function collectFunctionIds(value: unknown): ReadonlySet<number> {
     value
       .filter(isRecord)
       .map((item) => item.id)
-      .filter((id): id is number => Number.isInteger(id) && (id as number) > 0),
+      .filter((id): id is number => Number.isInteger(id) && (/* EVIDENCE: validation: Number.isInteger establishes the numeric ID before comparison. */ id as number) > 0),
   );
 }
 
@@ -1282,6 +1291,7 @@ function validatePreparedSayProducer(
   errors: PlanValidationError[],
 ): void {
   if (!Number.isSafeInteger(temporaryId)) return;
+  // EVIDENCE: validation: temporaryId passed Number.isSafeInteger above.
   const preparedTemporaryId = temporaryId as number;
   const candidates = producers.get(preparedTemporaryId) ?? [];
   const producerIndex = candidates.length === 1 ? candidates[0] : undefined;
@@ -1355,11 +1365,12 @@ function validatePreparedSayContextualSpeaker(
   errors: PlanValidationError[],
 ): void {
   if (!Number.isSafeInteger(temporaryId)) return;
+  // EVIDENCE: validation: temporaryId passed Number.isSafeInteger above.
   const candidates = producers.get(temporaryId as number) ?? [];
   const producerIndex = candidates.length === 1 ? candidates[0] : undefined;
   const producer = producerIndex === undefined ? undefined : instructions[producerIndex];
   const speakerCandidates = Number.isSafeInteger(speakerTemporary)
-    ? producers.get(speakerTemporary as number) ?? []
+    ? producers.get(/* EVIDENCE: validation: the conditional checks speakerTemporary with Number.isSafeInteger. */ speakerTemporary as number) ?? []
     : [];
   const speakerProducerIndex = speakerCandidates.length === 1
     ? speakerCandidates[0]
@@ -1383,6 +1394,7 @@ function validatePreparedSayContextualSpeaker(
     return;
   }
   consumed.add(producerIndex);
+  // EVIDENCE: validation: temporaryId passed Number.isSafeInteger before this analysis.
   if (preparedSayTemporaryIsCleared(instructions, producerIndex, sayIndex, temporaryId as number)) {
     errors.push(planError("TSC002", "Prepared say contextual speaker is cleared before its consuming say instruction.", path));
   }
@@ -1391,6 +1403,7 @@ function validatePreparedSayContextualSpeaker(
     index,
     region,
     producerIndex,
+    // EVIDENCE: validation: temporaryId passed Number.isSafeInteger before this analysis.
     temporaryId as number,
   )) {
     errors.push(planError(
@@ -1593,7 +1606,7 @@ function validateCanonicalInteractionResultHandoffs(
       producers.set(produced, indices);
     }
     for (const target of explicitInstructionTargets(instruction)) {
-      if (Number.isSafeInteger(target)) explicitTargets.add(target as number);
+      if (Number.isSafeInteger(target)) explicitTargets.add(/* EVIDENCE: validation: only safe-integer instruction targets enter this set. */ target as number);
     }
   });
 
@@ -1604,6 +1617,7 @@ function validateCanonicalInteractionResultHandoffs(
       instruction.interactionKind === "button" ||
       !Number.isSafeInteger(instruction.destinationTemporary)
     ) return;
+    // EVIDENCE: validation: destinationTemporary passed the safe-integer guard above.
     const destinationTemporary = instruction.destinationTemporary as number;
     const path = `$.instructions[${instructionIndex}]`;
     const region = index.owners[instructionIndex];
@@ -1715,6 +1729,7 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
   ) {
     value = instruction.destinationTemporary;
   }
+  // EVIDENCE: validation: Number.isSafeInteger proves the returned numeric value.
   return Number.isSafeInteger(value) ? value as number : null;
 }
 
@@ -1896,6 +1911,7 @@ function validateFunctionDefinitions(
       ));
       return;
     }
+    // EVIDENCE: validation: all four fixed instruction boundaries passed nonNegativeSafeInteger above.
     const [entry, bodyEntry, implicitReturn, end] = points as [
       number,
       number,
@@ -1918,11 +1934,13 @@ function validateFunctionDefinitions(
       return;
     }
     const functionId = definition.id;
+    // EVIDENCE: validation: Number.isSafeInteger establishes the numeric function ID.
     if (!Number.isSafeInteger(functionId) || (functionId as number) < 1) return;
 
     const validatedRange: ValidatedFunctionRange = {
       definition,
       path,
+      // EVIDENCE: validation: functionId passed the positive safe-integer check above.
       id: functionId as number,
       entryInstruction: entry,
       bodyEntryInstruction: bodyEntry,
@@ -2348,6 +2366,7 @@ function validateFunctionId(
   functionIds: ReadonlySet<number>,
   errors: PlanValidationError[],
 ): void {
+  // EVIDENCE: validation: Number.isInteger establishes the numeric function ID before lookup.
   if (!Number.isInteger(value) || !functionIds.has(value as number)) {
     errors.push(planError("TSC002", "Instruction refers to an unknown function ID.", path));
   }
@@ -2362,6 +2381,7 @@ function validateSpan(value: unknown, path: string, errors: PlanValidationError[
     errors.push(planError("TSC002", "Plan source location values must be non-negative safe integers.", path));
     return;
   }
+  // EVIDENCE: validation: every source-location field passed nonNegativeSafeInteger above.
   if ((value.eo as number) < (value.so as number)) {
     errors.push(planError("TSC002", "Plan source location ends before it starts.", path));
   }
@@ -2391,6 +2411,7 @@ function requirePositiveInteger(
   path: string,
   errors: PlanValidationError[],
 ): void {
+  // EVIDENCE: validation: Number.isInteger establishes the numeric value before comparison.
   if (!Number.isInteger(value) || (value as number) < 1) {
     errors.push(planError("TSC002", "Expected a positive integer.", path));
   }
@@ -2431,20 +2452,23 @@ function validInstructionBoundary(
 ): value is number {
   return (
     Number.isSafeInteger(value) &&
-    (value as number) >= 0 &&
-    (value as number) <= instructionCount
+    (/* EVIDENCE: validation: Number.isSafeInteger establishes the numeric target before comparison. */ value as number) >= 0 &&
+    (/* EVIDENCE: validation: Number.isSafeInteger establishes the numeric target before comparison. */ value as number) <= instructionCount
   );
 }
 
 function nonNegativeSafeInteger(value: unknown): value is number {
+  // EVIDENCE: validation: Number.isSafeInteger establishes the numeric value before comparison.
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 function positiveSafeInteger(value: unknown): value is number {
+  // EVIDENCE: validation: Number.isSafeInteger establishes the numeric value before comparison.
   return Number.isSafeInteger(value) && (value as number) >= 1;
 }
 
 function nonNegativeInteger(value: unknown): value is number {
+  // EVIDENCE: validation: Number.isInteger establishes the numeric value before comparison.
   return Number.isInteger(value) && (value as number) >= 0;
 }
 

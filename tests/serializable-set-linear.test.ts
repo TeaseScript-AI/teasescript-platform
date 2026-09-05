@@ -14,9 +14,10 @@ import {
 function countArraySomeCalls(operation: () => void): number {
   const original = Array.prototype.some;
   let calls = 0;
+  // EVIDENCE: fixture: the wrapper preserves Array.prototype.some's call and return contract while counting invocations.
   Array.prototype.some = function countedSome<T>(
     this: T[],
-    predicate: (value: T, index: number, array: T[]) => unknown,
+    predicate: Parameters<T[]["some"]>[0],
     thisArg?: unknown,
   ): boolean {
     return original.call(this, (value: T, index: number, array: T[]) => {

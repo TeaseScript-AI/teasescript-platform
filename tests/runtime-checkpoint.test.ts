@@ -35,7 +35,7 @@ import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js"
 test("runtime snapshots survive JSON stringify and parse validation", () => {
   const compiled = plan("let values = set[3, 1, 2]\nexit");
   const execution = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
-  const parsed = JSON.parse(JSON.stringify(execution.snapshot)) as unknown;
+  const parsed: unknown = JSON.parse(JSON.stringify(execution.snapshot));
 
   assert.deepEqual(parsed, execution.snapshot);
   assert.equal(validateRuntimeSnapshot(parsed, compiled).valid, true);
@@ -83,6 +83,7 @@ test("checkpoint accepts a large valid plan and snapshot without a shared work r
 
 test("checkpoint envelope rejects malformed metadata without invoking accessors", () => {
   const compiled = plan("exit");
+  // EVIDENCE: serialization created the canonical envelope; this typed view permits metadata corruption below.
   const checkpoint = JSON.parse(
     serializeCheckpoint(createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled))),
   ) as Record<string, unknown>;
@@ -159,7 +160,9 @@ test("preserves nested deep-copy independence and ordered sets after restore", (
     serializeCheckpoint(createCheckpoint(compiled, snapshot)),
   );
   const completed = run(restored.plan, restored.snapshot);
+  // EVIDENCE: the compiled declarations initialize both bindings with object literals before checkpointing.
   const original = rootValue(completed.snapshot, "original") as SerializableRuntimeObject;
+  // EVIDENCE: copied is assigned from the object-valued original binding in the compiled source.
   const copied = rootValue(completed.snapshot, "copied") as SerializableRuntimeObject;
 
   assert.deepEqual(objectProperty(original, "nested"), {
@@ -170,7 +173,9 @@ test("preserves nested deep-copy independence and ordered sets after restore", (
     kind: "list",
     items: [{ kind: "list", items: [9] }],
   });
+  // EVIDENCE: both `values` properties originate from the `set[3, 1, 2]` literal in the compiled source.
   assert.deepEqual((objectProperty(original, "values") as SerializableRuntimeSet).items, [3, 1, 2]);
+  // EVIDENCE: the copied `values` property retains the set kind after the source adds one item.
   assert.deepEqual((objectProperty(copied, "values") as SerializableRuntimeSet).items, [3, 1, 2, 4]);
 });
 
@@ -297,7 +302,8 @@ test("continues deterministic RNG state after restore", () => {
 test("accepts current internal format revisions and rejects non-current or malformed revisions", () => {
   const compiled = plan("exit");
   const snapshot = createFreshRuntimeSnapshot(compiled);
-  const checkpoint = structuredClone(createCheckpoint(compiled, snapshot)) as unknown as {
+  // EVIDENCE: fixture mutation widens only the three validated revision fields of this canonical checkpoint.
+  const checkpoint = structuredClone(createCheckpoint(compiled, snapshot)) as {
     version: unknown;
     plan: { version: unknown };
     snapshot: { version: unknown };
@@ -307,7 +313,8 @@ test("accepts current internal format revisions and rejects non-current or malfo
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
   assert.doesNotThrow(() => restoreCheckpoint(checkpoint));
 
-  const previousPlan = structuredClone(compiled) as unknown as { version: unknown };
+  // EVIDENCE: fixture mutation widens only the plan revision to exercise obsolete-version rejection.
+  const previousPlan = structuredClone(compiled) as { version: unknown };
   previousPlan.version = 7;
   assert.deepEqual(validateInstructionPlan(previousPlan).errors[0], {
     code: "TSC001",
@@ -338,7 +345,8 @@ test("accepts current internal format revisions and rejects non-current or malfo
   });
 
   for (const replacement of [compiled.version + 1, String(compiled.version)]) {
-    const invalidPlan = structuredClone(compiled) as unknown as { version: unknown };
+    // EVIDENCE: fixture mutation widens only the plan revision for numeric and wrong-type replacements.
+    const invalidPlan = structuredClone(compiled) as { version: unknown };
     invalidPlan.version = replacement;
     assert.deepEqual(validateInstructionPlan(invalidPlan).errors[0], {
       code: "TSC001",
@@ -348,7 +356,8 @@ test("accepts current internal format revisions and rejects non-current or malfo
   }
 
   for (const replacement of [snapshot.version + 1, String(snapshot.version)]) {
-    const invalidSnapshot = structuredClone(snapshot) as unknown as { version: unknown };
+    // EVIDENCE: fixture mutation widens only the snapshot revision for numeric and wrong-type replacements.
+    const invalidSnapshot = structuredClone(snapshot) as { version: unknown };
     invalidSnapshot.version = replacement;
     assert.deepEqual(validateRuntimeSnapshot(invalidSnapshot, compiled).errors, [
       "Unsupported runtime-snapshot version.",
@@ -384,6 +393,7 @@ test("accepts current internal format revisions and rejects non-current or malfo
 
 test("rejects corrupted checkpoint data through structured errors", () => {
   const compiled = plan("exit");
+  // EVIDENCE: serialization supplies the canonical envelope before this fixture replaces snapshot frames.
   const checkpoint = JSON.parse(
     serializeCheckpoint(createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled))),
   ) as { snapshot: Record<string, unknown> };
@@ -402,6 +412,7 @@ test("rejects colliding or malformed scope-frame identity state", () => {
     createFreshRuntimeSnapshot(compiled),
   );
   const entered = executeInstruction(compiled, conditional.snapshot);
+  // EVIDENCE: serialization supplies a canonical checkpoint with the runtime snapshot shape used below.
   const checkpoint = JSON.parse(
     serializeCheckpoint(createCheckpoint(compiled, entered.snapshot)),
   ) as { snapshot: RuntimeSnapshot };
@@ -409,6 +420,7 @@ test("rejects colliding or malformed scope-frame identity state", () => {
   checkpoint.snapshot.nextScopeId = checkpoint.snapshot.frames[1]!.id;
   assertCheckpointCode(checkpoint, "TSK002");
   checkpoint.snapshot.nextScopeId = 2;
+  // EVIDENCE: the root frame exists in this runtime-produced snapshot; the fixture corrupts its identity.
   (checkpoint.snapshot.frames[0] as { id: number }).id = 9;
   assertCheckpointCode(checkpoint, "TSK002");
 });

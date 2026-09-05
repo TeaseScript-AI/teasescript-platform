@@ -51,7 +51,7 @@ test("every fixed repository playground example compiles and completes", async (
 
 test("checkpoint storage keys are format-versioned and example-specific", () => {
   const keys = Object.keys(PLAYGROUND_EXAMPLES).map((name) =>
-    checkpointStorageKey(name as keyof typeof PLAYGROUND_EXAMPLES)
+    checkpointStorageKey(/* EVIDENCE: Object.keys returns only own keys of PLAYGROUND_EXAMPLES. */ name as keyof typeof PLAYGROUND_EXAMPLES)
   );
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(keys.every((key) => key.includes(`checkpoint-v${CHECKPOINT_VERSION}:`)));

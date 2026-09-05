@@ -85,6 +85,7 @@ function compileAndReset(): void {
 function execute(mode: "run" | "step"): void {
   if (!runtimeIsCurrent()) { setActionStatus("Compile the current source before execution; the previous runtime is stale."); return; }
   try {
+    // EVIDENCE: invariant: runtimeIsCurrent checked both retained values and the source revision synchronously.
     applyResult(executeValidatedWorkspaceSnapshot(
       plan as InstructionPlan,
       snapshot as RuntimeSnapshot,
@@ -107,6 +108,7 @@ function runtimeIsCurrent(): boolean { return plan !== null && snapshot !== null
 function saveCheckpoint(): void {
   if (!runtimeIsCurrent()) { setActionStatus("Checkpoints require a current compiled runtime."); return; }
   try {
+    // EVIDENCE: invariant: runtimeIsCurrent checked the retained plan and snapshot before this synchronous save.
     const checkpoint = createCheckpoint(
       plan as InstructionPlan,
       snapshot as RuntimeSnapshot,
@@ -136,7 +138,7 @@ async function importSource(): Promise<void> {
 function exportSource(): void { const blob = new Blob([elements.source.value], { type: "text/plain;charset=utf-8" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "teasescript-workspace.tease"; link.click(); URL.revokeObjectURL(link.href); setActionStatus("Source exported as teasescript-workspace.tease."); }
 
 async function refreshAutomationWorkspace(): Promise<void> {
-  try { const response = await fetch("/api/workspace", { cache: "no-store" }); if (!response.ok) throw new Error(`Automation workspace request failed with HTTP ${response.status}.`); const data = await response.json() as { source: string; resultRevision: number | null; result: WorkspaceResult | null }; replaceSource(data.source, "Automation source loaded; local execution is stale until compiled.", "Automation workspace"); if (data.result !== null) { applyResult(data.result, true); compiledRevision = null; renderState(); setActionStatus(`Automation result revision ${data.resultRevision ?? "unknown"} is displayed as view-only; compile before local execution.`); } } catch (error) { setActionStatus(errorMessage(error)); }
+  try { const response = await fetch("/api/workspace", { cache: "no-store" }); if (!response.ok) throw new Error(`Automation workspace request failed with HTTP ${response.status}.`); /* EVIDENCE: boundary: this same-origin development server returns workspaceView; results are display-only until recompilation. */ const data = await response.json() as { source: string; resultRevision: number | null; result: WorkspaceResult | null }; replaceSource(data.source, "Automation source loaded; local execution is stale until compiled.", "Automation workspace"); if (data.result !== null) { applyResult(data.result, true); compiledRevision = null; renderState(); setActionStatus(`Automation result revision ${data.resultRevision ?? "unknown"} is displayed as view-only; compile before local execution.`); } } catch (error) { setActionStatus(errorMessage(error)); }
 }
 
 function renderDiagnostics(diagnostics: readonly { code: string; message: string; line: number; column: number; length: number }[]): void { elements.diagnostics.replaceChildren(); if (diagnostics.length === 0) { const item = document.createElement("li"); item.className = "diagnostic-ok"; item.textContent = "No parser or semantic diagnostics."; elements.diagnostics.append(item); return; } for (const diagnostic of diagnostics) { const button = document.createElement("button"); button.className = "diagnostic-button"; button.textContent = `${diagnostic.code} (${diagnostic.line}:${diagnostic.column}) ${diagnostic.message}`; button.addEventListener("click", () => { const start = offsetAt(elements.source.value, diagnostic.line, diagnostic.column); elements.source.focus(); elements.source.setSelectionRange(start, start + Math.max(1, diagnostic.length)); }); const item = document.createElement("li"); item.append(button); elements.diagnostics.append(item); } }

@@ -65,6 +65,7 @@ test("rejects a malformed span supplied to the combining helper", () => {
     createSourcePosition(0, 0, 0),
     createSourcePosition(10, 0, 10),
   );
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the reversed endpoints deliberately violate SourceSpan construction invariants at the typed helper boundary.
   const malformed = {
     start: createSourcePosition(8, 0, 8),
     end: createSourcePosition(2, 0, 2),
