@@ -41,7 +41,10 @@ export function renderPresentation(
   targets.player.style.setProperty("--media-fit", presentation.media.fit);
   targets.player.dataset.mediaFit = presentation.media.fit;
 
-  const progress = timerProgressPercent(presentation.timer.remainingSeconds, presentation.timer.totalSeconds);
+  const progress = timerProgressPercent(
+    presentation.timer.remainingSeconds,
+    presentation.timer.totalSeconds,
+  );
   targets.player.style.setProperty("--timer-progress", `${progress}%`);
   targets.timerText.textContent = formatTimer(presentation.timer.remainingSeconds);
 
@@ -121,7 +124,11 @@ export function renderForegroundControls(
   presentation: PlayerForegroundPresentation | null,
 ): void {
   container.replaceChildren();
-  if (presentation === null || presentation.kind === "ask-text" || presentation.kind === "ask-number") {
+  if (
+    presentation === null ||
+    presentation.kind === "ask-text" ||
+    presentation.kind === "ask-number"
+  ) {
     container.hidden = true;
     delete container.dataset.foregroundKind;
     return;
@@ -140,7 +147,8 @@ export function renderForegroundControls(
     button.dataset.foregroundButton = "";
     button.setAttribute("aria-label", presentation.accessibleName);
     button.textContent = presentation.label;
-    if (presentation.authoredFill !== undefined) applyAuthoredControlFill(button, presentation.authoredFill);
+    if (presentation.authoredFill !== undefined)
+      applyAuthoredControlFill(button, presentation.authoredFill);
     shell.append(button);
   } else {
     const group = document.createElement("div");
@@ -178,7 +186,8 @@ function createRightControl(control: PlayerRightControlPresentation): HTMLElemen
       button.dataset.actionId = control.id;
       button.dataset.controlLabel = control.label;
       button.textContent = control.label;
-      if (control.authoredFill !== undefined) applyAuthoredControlFill(button, control.authoredFill);
+      if (control.authoredFill !== undefined)
+        applyAuthoredControlFill(button, control.authoredFill);
       return button;
     }
     case "toggle": {
@@ -263,7 +272,10 @@ function applyAuthoredControlFill(element: HTMLElement, fill: string): void {
   element.dataset.authoredFill = "";
   element.style.setProperty("--authored-control-fill", fill);
   element.style.setProperty("--authored-control-hover", `color-mix(in oklab, ${fill} 88%, black)`);
-  element.style.setProperty("--authored-control-pressed", `color-mix(in oklab, ${fill} 76%, black)`);
+  element.style.setProperty(
+    "--authored-control-pressed",
+    `color-mix(in oklab, ${fill} 76%, black)`,
+  );
   element.style.setProperty("--authored-control-text", readableControlText(fill));
 }
 
@@ -276,14 +288,13 @@ export function renderToolColumns(
   if (columns.length === 0) {
     const empty = document.createElement("p");
     empty.className = "tool-empty-state";
-    empty.textContent = "No tool columns are open. Add one with + when you want another tool visible.";
+    empty.textContent =
+      "No tool columns are open. Add one with + when you want another tool visible.";
     strip.replaceChildren(empty);
     return;
   }
 
-  strip.replaceChildren(
-    ...columns.map((column) => createToolColumn(column, tools, presentation)),
-  );
+  strip.replaceChildren(...columns.map((column) => createToolColumn(column, tools, presentation)));
 }
 
 function createToolColumn(
@@ -345,10 +356,7 @@ function createToolColumn(
   return section;
 }
 
-function createToolBody(
-  toolId: PlayerToolId | null,
-  presentation: PlayerPresentation,
-): Node {
+function createToolBody(toolId: PlayerToolId | null, presentation: PlayerPresentation): Node {
   switch (toolId) {
     case null: {
       const placeholder = document.createElement("p");
@@ -546,13 +554,49 @@ function createVisualTool(): HTMLElement {
   tuning.className = "lab-tuning";
   tuning.append(
     createTuningInput("Stage height", "Normal composition", "--media-height-normal", "dvh", 1),
-    createTuningInput("Overlay stage", "Low-height/fullscreen composition", "--media-height-overlay", "dvh", 1),
-    createTuningInput("Wide tool width", "Drawer remains viewport-bounded", "--tool-column-width", "px", 1),
-    createTuningInput("Conversation max", "Readable width cap", "--conversation-max-width", "px", 1),
-    createTuningInput("Conversation min", "Protected width floor", "--conversation-min-width", "px", 1),
-    createTuningInput("Composer text", "Typing-field font size", "--composer-font-size", "rem", 0.125),
+    createTuningInput(
+      "Overlay stage",
+      "Low-height/fullscreen composition",
+      "--media-height-overlay",
+      "dvh",
+      1,
+    ),
+    createTuningInput(
+      "Wide tool width",
+      "Drawer remains viewport-bounded",
+      "--tool-column-width",
+      "px",
+      1,
+    ),
+    createTuningInput(
+      "Conversation max",
+      "Readable width cap",
+      "--conversation-max-width",
+      "px",
+      1,
+    ),
+    createTuningInput(
+      "Conversation min",
+      "Protected width floor",
+      "--conversation-min-width",
+      "px",
+      1,
+    ),
+    createTuningInput(
+      "Composer text",
+      "Typing-field font size",
+      "--composer-font-size",
+      "rem",
+      0.125,
+    ),
     createTuningInput("Composer lines", "Line-height cap", "--composer-max-lines", "lh", 1),
-    createTuningInput("Composer viewport", "Viewport-height cap", "--composer-max-viewport-height", "dvh", 1),
+    createTuningInput(
+      "Composer viewport",
+      "Viewport-height cap",
+      "--composer-max-viewport-height",
+      "dvh",
+      1,
+    ),
   );
 
   const scriptUpdate = document.createElement("button");
@@ -580,7 +624,8 @@ function createVisualTool(): HTMLElement {
 
   const fixedCopy = document.createElement("span");
   fixedCopy.className = "lab-fixed-note-copy";
-  fixedCopy.textContent = "accent · timer ring · refined controls · surface depth · speaker identity · speaker typography · micro-motion · transcript fade";
+  fixedCopy.textContent =
+    "accent · timer ring · refined controls · surface depth · speaker identity · speaker typography · micro-motion · transcript fade";
 
   fixed.append(fixedTitle, fixedCopy);
 
@@ -627,11 +672,7 @@ function createTuningInput(
   return row;
 }
 
-function createToggleOption(
-  title: string,
-  note: string,
-  effect: string,
-): HTMLElement {
+function createToggleOption(title: string, note: string, effect: string): HTMLElement {
   const row = document.createElement("div");
   row.className = "lab-option";
   const copy = createLabOptionCopy(title, note);
@@ -750,37 +791,31 @@ function createLayoutDebugTool(): HTMLElement {
     ),
   );
 
-  const conditions = createLayoutDebugReadout(
-    "Active layout",
-    [
-      ["Composition", "composition"],
-      ["Chrome", "chrome"],
-      ["Orientation", "orientation"],
-      ["Tools", "left-panel"],
-      ["Right rail", "right-panel"],
-      ["Fullscreen", "fullscreen"],
-      ["Visual viewport", "visual-viewport"],
-      ["Action layout", "action-layout"],
-    ],
-  );
+  const conditions = createLayoutDebugReadout("Active layout", [
+    ["Composition", "composition"],
+    ["Chrome", "chrome"],
+    ["Orientation", "orientation"],
+    ["Tools", "left-panel"],
+    ["Right rail", "right-panel"],
+    ["Fullscreen", "fullscreen"],
+    ["Visual viewport", "visual-viewport"],
+    ["Action layout", "action-layout"],
+  ]);
 
-  const measurements = createLayoutDebugReadout(
-    "Measurements",
-    [
-      ["Viewport", "viewport"],
-      ["Visual viewport", "visual-viewport-size"],
-      ["Grid columns", "grid-columns"],
-      ["Grid rows", "grid-rows"],
-      ["Stage", "stage"],
-      ["Transcript", "transcript"],
-      ["Foreground", "foreground"],
-      ["Composer", "composer"],
-      ["Tools", "tools"],
-      ["Right rail", "right-zone"],
-      ["Reserves", "reserves"],
-      ["Safe area", "safe-area"],
-    ],
-  );
+  const measurements = createLayoutDebugReadout("Measurements", [
+    ["Viewport", "viewport"],
+    ["Visual viewport", "visual-viewport-size"],
+    ["Grid columns", "grid-columns"],
+    ["Grid rows", "grid-rows"],
+    ["Stage", "stage"],
+    ["Transcript", "transcript"],
+    ["Foreground", "foreground"],
+    ["Composer", "composer"],
+    ["Tools", "tools"],
+    ["Right rail", "right-zone"],
+    ["Reserves", "reserves"],
+    ["Safe area", "safe-area"],
+  ]);
 
   const overflow = createLayoutDebugReadout(
     "Overflow / scroll",
@@ -849,11 +884,7 @@ function createLayoutDebugModeToggle(): HTMLElement {
   return row;
 }
 
-function createLayoutDebugToggle(
-  title: string,
-  note: string,
-  key: string,
-): HTMLElement {
+function createLayoutDebugToggle(title: string, note: string, key: string): HTMLElement {
   const row = document.createElement("div");
   row.className = "lab-option";
   const copy = createLabOptionCopy(title, note);

@@ -32,12 +32,7 @@ export const PROPERTY_DEFAULT_SEED = 1_364_229_357;
 export const PROPERTY_DEFAULT_RUNS = 128;
 export const MAX_PROPERTY_RUNS = 100_000;
 
-const OPERATION_VARIANTS = [
-  "run",
-  "executeInstruction",
-  "observeTime",
-  "completeAction",
-] as const;
+const OPERATION_VARIANTS = ["run", "executeInstruction", "observeTime", "completeAction"] as const;
 const REJECTION_VARIANTS = ["not-due", "duplicate-settlement"] as const;
 const MALFORMED_VARIANTS = ["plan", "snapshot", "checkpoint"] as const;
 
@@ -94,12 +89,9 @@ export class PropertyCampaignFailure extends Error {
     readonly replayCommand: string,
     cause: unknown,
   ) {
-    const causeText = cause instanceof Error
-      ? `${cause.name}: ${cause.message}`
-      : String(cause);
-    const sourceLines = result.source === undefined
-      ? []
-      : ["source-begin", result.source, "source-end"];
+    const causeText = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
+    const sourceLines =
+      result.source === undefined ? [] : ["source-begin", result.source, "source-end"];
 
     super(
       [
@@ -126,8 +118,7 @@ export function createPropertyDefinitions(
   const dependencies = {
     compileSource: overrides.compileSource ?? compileSource,
     createValidSourceCase: overrides.createValidSourceCase ?? createValidSourceCase,
-    createNearValidSourceCase:
-      overrides.createNearValidSourceCase ?? createNearValidSourceCase,
+    createNearValidSourceCase: overrides.createNearValidSourceCase ?? createNearValidSourceCase,
   };
 
   return [
@@ -172,22 +163,16 @@ export function createPropertyDefinitions(
       "near-valid-source-diagnostics",
       "package-root compile",
       dependencies.createNearValidSourceCase,
-      (scenario) =>
-        assertNearValidSourceDiagnostics(scenario, dependencies.compileSource),
+      (scenario) => assertNearValidSourceDiagnostics(scenario, dependencies.compileSource),
     ),
   ];
 }
 
 export function defaultPropertyCampaignConfig(): PropertyCampaignConfig {
-  return Object.freeze({
-    seed: PROPERTY_DEFAULT_SEED,
-    runs: PROPERTY_DEFAULT_RUNS,
-  });
+  return Object.freeze({ seed: PROPERTY_DEFAULT_SEED, runs: PROPERTY_DEFAULT_RUNS });
 }
 
-export function parsePropertyCliArguments(
-  argv: readonly string[],
-): PropertyCampaignConfig {
+export function parsePropertyCliArguments(argv: readonly string[]): PropertyCampaignConfig {
   let seed = PROPERTY_DEFAULT_SEED;
   let runs = PROPERTY_DEFAULT_RUNS;
   let caseIndex: number | undefined;
@@ -222,9 +207,7 @@ export function parsePropertyCliArguments(
     }
   }
 
-  const config = caseIndex === undefined
-    ? { seed, runs }
-    : { seed, runs, caseIndex };
+  const config = caseIndex === undefined ? { seed, runs } : { seed, runs, caseIndex };
   validateConfig(config);
   return Object.freeze(config);
 }
@@ -248,12 +231,7 @@ export function runPropertyCampaign(
       result = prepared.result;
       prepared.execute();
     } catch (error) {
-      throw new PropertyCampaignFailure(
-        config,
-        result,
-        createReplayCommand(config, index),
-        error,
-      );
+      throw new PropertyCampaignFailure(config, result, createReplayCommand(config, index), error);
     }
 
     firstCase ??= result;
@@ -292,9 +270,7 @@ export function runPropertyCli(argv: readonly string[]): number {
     );
     return 0;
   } catch (error) {
-    process.stderr.write(
-      `${error instanceof Error ? error.message : String(error)}\n`,
-    );
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
 }
@@ -327,13 +303,7 @@ function sourceProperty<T extends ValidSourceCase | NearValidSourceCase>(
     prepare: (seed, index) => {
       const scenario = createScenario(seed, index);
       return {
-        result: createPropertyCaseResult(
-          seed,
-          index,
-          id,
-          boundary,
-          describeSourceCase(scenario),
-        ),
+        result: createPropertyCaseResult(seed, index, id, boundary, describeSourceCase(scenario)),
         execute: () => executeScenario(scenario, seed, index),
       };
     },
@@ -397,14 +367,9 @@ function runOperationVariant(
   }
 }
 
-function describeOperationClosure(
-  _seed: number,
-  index: number,
-): PropertyCaseContext {
+function describeOperationClosure(_seed: number, index: number): PropertyCaseContext {
   const variant = OPERATION_VARIANTS[index % OPERATION_VARIANTS.length]!;
-  return {
-    description: `operation=${variant} source=repository-authored`,
-  };
+  return { description: `operation=${variant} source=repository-authored` };
 }
 
 function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
@@ -416,9 +381,7 @@ function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
   const waitingBefore = structuredClone(waiting);
   const variant = REJECTION_VARIANTS[index % REJECTION_VARIANTS.length]!;
   const request = delayCompletion(waiting, variant === "not-due" ? 9 : 10);
-  const input = variant === "not-due"
-    ? waiting
-    : completeAction(plan, waiting, request).snapshot;
+  const input = variant === "not-due" ? waiting : completeAction(plan, waiting, request).snapshot;
   const inputBefore = structuredClone(input);
   const result = completeAction(plan, input, request);
 
@@ -428,14 +391,9 @@ function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
   assert.deepEqual(waiting, waitingBefore);
 }
 
-function describeRejectedCompletion(
-  _seed: number,
-  index: number,
-): PropertyCaseContext {
+function describeRejectedCompletion(_seed: number, index: number): PropertyCaseContext {
   const variant = REJECTION_VARIANTS[index % REJECTION_VARIANTS.length]!;
-  return {
-    description: `rejected-completion=${variant} source=repository-authored`,
-  };
+  return { description: `rejected-completion=${variant} source=repository-authored` };
 }
 
 function assertCheckpointRoundTripAndResume(seed: number, index: number): void {
@@ -461,15 +419,11 @@ function assertCheckpointRoundTripAndResume(seed: number, index: number): void {
 }
 
 function describeCheckpointRoundTrip(): PropertyCaseContext {
-  return {
-    description: "wait-checkpoint-json-restore-resume source=repository-authored",
-  };
+  return { description: "wait-checkpoint-json-restore-resume source=repository-authored" };
 }
 
 function assertSameSeedIsDeterministic(seed: number, index: number): void {
-  const plan = compilePlan(
-    "let value = randomInteger(1..=100)\nsay `\${value}`\nexit",
-  );
+  const plan = compilePlan("let value = randomInteger(1..=100)\nsay `\${value}`\nexit");
   const runtimeSeed = caseSeed(seed, index);
   const first = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: runtimeSeed }));
   const second = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: runtimeSeed }));
@@ -479,9 +433,7 @@ function assertSameSeedIsDeterministic(seed: number, index: number): void {
 }
 
 function describeSameSeed(): PropertyCaseContext {
-  return {
-    description: "randomInteger same-source same-seed source=repository-authored",
-  };
+  return { description: "randomInteger same-source same-seed source=repository-authored" };
 }
 
 function assertMalformedBoundaryRejection(seed: number, index: number): void {
@@ -491,16 +443,10 @@ function assertMalformedBoundaryRejection(seed: number, index: number): void {
 
   switch (variant) {
     case "plan":
-      assert.equal(
-        validateInstructionPlan({ ...plan, version: plan.version + 1 }).valid,
-        false,
-      );
+      assert.equal(validateInstructionPlan({ ...plan, version: plan.version + 1 }).valid, false);
       break;
     case "snapshot":
-      assert.equal(
-        validateRuntimeSnapshot({ ...snapshot, status: "invalid" }, plan).valid,
-        false,
-      );
+      assert.equal(validateRuntimeSnapshot({ ...snapshot, status: "invalid" }, plan).valid, false);
       break;
     case "checkpoint":
       assert.throws(() => restoreCheckpoint({}), CheckpointError);
@@ -510,9 +456,7 @@ function assertMalformedBoundaryRejection(seed: number, index: number): void {
 
 function describeMalformedBoundary(seed: number, index: number): PropertyCaseContext {
   const variant = MALFORMED_VARIANTS[(seed + index) % MALFORMED_VARIANTS.length]!;
-  return {
-    description: `malformed=${variant} fixture=deliberately-mutated-external-data`,
-  };
+  return { description: `malformed=${variant} fixture=deliberately-mutated-external-data` };
 }
 
 function assertValidSourcePipeline(
@@ -536,9 +480,12 @@ function assertValidSourcePipeline(
 }
 
 function runSourceToHalt(plan: InstructionPlan, seed: number) {
-  return run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed }), {}, {
-    instructionBudget: SOURCE_FUZZ_INSTRUCTION_BUDGET,
-  });
+  return run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { seed }),
+    {},
+    { instructionBudget: SOURCE_FUZZ_INSTRUCTION_BUDGET },
+  );
 }
 
 function assertNearValidSourceDiagnostics(
@@ -565,12 +512,9 @@ function assertNearValidSourceDiagnostics(
   }
 }
 
-function describeSourceCase(
-  scenario: ValidSourceCase | NearValidSourceCase,
-): PropertyCaseContext {
-  const diagnostic = "diagnosticCodes" in scenario
-    ? ` diagnostic=${scenario.diagnosticCodes.join(",")}`
-    : "";
+function describeSourceCase(scenario: ValidSourceCase | NearValidSourceCase): PropertyCaseContext {
+  const diagnostic =
+    "diagnosticCodes" in scenario ? ` diagnostic=${scenario.diagnosticCodes.join(",")}` : "";
   return {
     description: [
       `classification=${scenario.classification}`,
@@ -605,20 +549,17 @@ function compilePlan(
 function delayCompletion(
   snapshot: RuntimeSnapshot,
   currentSessionTimeMs: number,
-): object {
+): {
+  readonly actionId: number;
+  readonly actionKind: "delay";
+  readonly payload: { readonly kind: "time"; readonly currentSessionTimeMs: number };
+} {
   const actionId = snapshot.foregroundAction?.actionId;
-  assert.notEqual(actionId, undefined);
-  return {
-    actionId,
-    actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs },
-  };
+  assert.ok(actionId !== undefined);
+  return { actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs } };
 }
 
-function assertValidSnapshot(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
-): void {
+function assertValidSnapshot(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {
   assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
 }
 
@@ -627,19 +568,15 @@ function validateConfig(config: PropertyCampaignConfig): void {
     throw new Error("--seed must be an integer from 1 through 4294967295.");
   }
   if (!Number.isSafeInteger(config.runs) || config.runs < 1 || config.runs > MAX_PROPERTY_RUNS) {
-    throw new Error(
-      `--runs must be an integer from 1 through ${MAX_PROPERTY_RUNS}.`,
-    );
+    throw new Error(`--runs must be an integer from 1 through ${MAX_PROPERTY_RUNS}.`);
   }
   if (
-    config.caseIndex !== undefined
-    && (!Number.isSafeInteger(config.caseIndex)
-      || config.caseIndex < 0
-      || config.caseIndex >= config.runs)
+    config.caseIndex !== undefined &&
+    (!Number.isSafeInteger(config.caseIndex) ||
+      config.caseIndex < 0 ||
+      config.caseIndex >= config.runs)
   ) {
-    throw new Error(
-      `--case must be an integer from 0 through ${config.runs - 1}.`,
-    );
+    throw new Error(`--case must be an integer from 0 through ${config.runs - 1}.`);
   }
 }
 
@@ -659,11 +596,7 @@ function caseSeed(seed: number, index: number): number {
   return mixed === 0 ? 1 : mixed;
 }
 
-function formatCaseContext(
-  seed: number,
-  index: number,
-  context: PropertyCaseContext,
-): string {
+function formatCaseContext(seed: number, index: number, context: PropertyCaseContext): string {
   return `variantSeed=${caseSeed(seed, index)} ${context.description}`;
 }
 

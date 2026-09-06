@@ -3,10 +3,7 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
-import {
-  run,
-  type RuntimeOperationResult,
-} from "../src/runtime/engine.js";
+import { run, type RuntimeOperationResult } from "../src/runtime/engine.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 test("selects an eligible visible list value exactly once", () => {
@@ -15,10 +12,7 @@ test("selects an eligible visible list value exactly once", () => {
   assert.equal(direct.randomCalls, 1);
   assert.deepEqual(sayTexts(direct.result), ["2"]);
 
-  const template = runSource([
-    'let values = ["left", 2]',
-    'say `Value: ${values}`',
-  ].join("\n"), 0);
+  const template = runSource(['let values = ["left", 2]', "say `Value: ${values}`"].join("\n"), 0);
   assert.equal(template.result.snapshot.failure, null);
   assert.equal(template.randomCalls, 1);
   assert.deepEqual(sayTexts(template.result), ["Value: left"]);
@@ -45,11 +39,7 @@ test("rejects ineligible automatically selected list values with one RNG call", 
 });
 
 test("preserves direct scalar visible-text conversion", () => {
-  const execution = runSource([
-    "say true",
-    "say null",
-    "say 3.5",
-  ].join("\n"), 0);
+  const execution = runSource(["say true", "say null", "say 3.5"].join("\n"), 0);
 
   assert.equal(execution.result.snapshot.failure, null);
   assert.equal(execution.randomCalls, 0);
@@ -62,18 +52,14 @@ function runSource(
 ): { readonly result: RuntimeOperationResult; readonly randomCalls: number } {
   const plan = compile(source);
   let randomCalls = 0;
-  const result = run(
-    plan,
-    createImmediatePacingRuntimeSnapshot(plan),
-    {
-      random: {
-        next(): number {
-          randomCalls += 1;
-          return randomValue;
-        },
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan), {
+    random: {
+      next(): number {
+        randomCalls += 1;
+        return randomValue;
       },
     },
-  );
+  });
   return { result, randomCalls };
 }
 
@@ -85,7 +71,5 @@ function compile(source: string): InstructionPlan {
 }
 
 function sayTexts(result: RuntimeOperationResult): string[] {
-  return result.events
-    .filter((event) => event.kind === "say")
-    .map((event) => event.text);
+  return result.events.filter((event) => event.kind === "say").map((event) => event.text);
 }

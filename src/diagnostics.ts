@@ -1,12 +1,8 @@
 import { createSourceSpan, type SourceSpan } from "./source.js";
 
-export const DiagnosticSeverity = {
-  Error: "error",
-  Warning: "warning",
-} as const;
+export const DiagnosticSeverity = { Error: "error", Warning: "warning" } as const;
 
-export type DiagnosticSeverity =
-  (typeof DiagnosticSeverity)[keyof typeof DiagnosticSeverity];
+export type DiagnosticSeverity = (typeof DiagnosticSeverity)[keyof typeof DiagnosticSeverity];
 
 export interface Diagnostic {
   readonly severity: DiagnosticSeverity;
@@ -21,10 +17,5 @@ export function createDiagnostic(
   message: string,
   span: SourceSpan,
 ): Diagnostic {
-  return Object.freeze({
-    severity,
-    code,
-    message,
-    span: createSourceSpan(span.start, span.end),
-  });
+  return Object.freeze({ severity, code, message, span: createSourceSpan(span.start, span.end) });
 }

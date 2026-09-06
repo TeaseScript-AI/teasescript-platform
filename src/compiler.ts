@@ -1,19 +1,12 @@
 import type { Program } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
-import {
-  createDiagnostic,
-  DiagnosticSeverity,
-  type Diagnostic,
-} from "./diagnostics.js";
+import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileStableProgram, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
-import {
-  validateSemantics,
-  type SemanticValidationOptions,
-} from "./semantic.js";
+import { validateSemantics, type SemanticValidationOptions } from "./semantic.js";
 
 export interface CompileOptions extends SemanticValidationOptions {}
 
@@ -28,10 +21,7 @@ export interface CompilationResult {
 export { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 
 /** Parses, validates, and compiles source without executing it. */
-export function compileSource(
-  source: string,
-  options: CompileOptions = {},
-): CompilationResult {
+export function compileSource(source: string, options: CompileOptions = {}): CompilationResult {
   const parsed = parse(source);
   const parserDiagnostics = Object.freeze([
     ...parsed.diagnostics,
@@ -42,10 +32,7 @@ export function compileSource(
     ? Object.freeze({ diagnostics: Object.freeze([]) })
     : validateSemantics(parsed.program, {
         ...options,
-        builtins: Object.freeze([
-          ...CORE_RUNTIME_BUILTINS,
-          ...(options.builtins ?? []),
-        ]),
+        builtins: Object.freeze([...CORE_RUNTIME_BUILTINS, ...(options.builtins ?? [])]),
       });
   let plan: InstructionPlan | null = null;
   const loweringDiagnostics: Diagnostic[] = [];
@@ -72,16 +59,17 @@ export function compileSource(
   });
 }
 
-function compiledPlanValidationDiagnostic(
-  plan: InstructionPlan,
-): Diagnostic | null {
+function compiledPlanValidationDiagnostic(plan: InstructionPlan): Diagnostic | null {
   const validation = validateCapturedInstructionPlan(plan);
   if (validation.valid) return null;
   const match = validation.errors.flatMap((error) => {
     const instructionMatch = /^\$\.instructions\[(\d+)\]/u.exec(error.path);
     if (instructionMatch === null) return [];
     const instructionIndex = Number(instructionMatch[1]);
-    if (!Number.isSafeInteger(instructionIndex) || plan.instructions[instructionIndex]?.kind !== "interaction") {
+    if (
+      !Number.isSafeInteger(instructionIndex) ||
+      plan.instructions[instructionIndex]?.kind !== "interaction"
+    ) {
       return [];
     }
     return [{ error, instructionIndex }];
@@ -104,7 +92,5 @@ function compiledPlanValidationDiagnostic(
 }
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
-  return diagnostics.some(
-    (diagnostic) => diagnostic.severity === DiagnosticSeverity.Error,
-  );
+  return diagnostics.some((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error);
 }

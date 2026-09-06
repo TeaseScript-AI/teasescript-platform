@@ -1,11 +1,5 @@
 type LayoutDebugKey =
-  | "grid"
-  | "regions"
-  | "reserves"
-  | "safe-areas"
-  | "overflow"
-  | "constraints"
-  | "viewport-offsets";
+  "grid" | "regions" | "reserves" | "safe-areas" | "overflow" | "constraints" | "viewport-offsets";
 
 interface LayoutDebugOverlay {
   readonly root: HTMLElement;
@@ -47,9 +41,7 @@ export interface LayoutDebugController {
   queueSync(): void;
 }
 
-export function createLayoutDebugController(
-  elements: LayoutDebugElements,
-): LayoutDebugController {
+export function createLayoutDebugController(elements: LayoutDebugElements): LayoutDebugController {
   const {
     player,
     toolStrip,
@@ -134,7 +126,9 @@ export function createLayoutDebugController(
   function sync(): void {
     overlay.root.hidden = !enabled;
 
-    for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-layout-debug-enabled]")) {
+    for (const input of toolStrip.querySelectorAll<HTMLInputElement>(
+      "[data-layout-debug-enabled]",
+    )) {
       input.checked = enabled;
     }
 
@@ -245,7 +239,9 @@ export function createLayoutDebugController(
     const rightReserve = columns.at(-1) ?? 0;
 
     if (leftReserve > 0.5) {
-      layer.append(createDebugBox(0, titleTrack, leftReserve, bodyHeight, "reserve-left", "left reserve"));
+      layer.append(
+        createDebugBox(0, titleTrack, leftReserve, bodyHeight, "reserve-left", "left reserve"),
+      );
     }
 
     if (rightReserve > 0.5) {
@@ -293,7 +289,9 @@ export function createLayoutDebugController(
       [actions, "y", "actions"],
     ];
 
-    for (const [index, toolBody] of [...toolStrip.querySelectorAll<HTMLElement>(".tool-column-body")].entries()) {
+    for (const [index, toolBody] of [
+      ...toolStrip.querySelectorAll<HTMLElement>(".tool-column-body"),
+    ].entries()) {
       owners.push([toolBody, "y", `tool body ${index + 1}`]);
     }
 
@@ -349,23 +347,24 @@ export function createLayoutDebugController(
       "left-panel": `${currentLeftMode()} → ${effectiveLeftPresentation()}`,
       "right-panel": `${currentRightMode()} → ${effectiveRightPresentation()}`,
       fullscreen: document.fullscreenElement === null ? "inactive" : "active",
-      "visual-viewport": visualReduction > 1
-        ? `reduced by ${formatPixels(visualReduction)}`
-        : "full height",
-      "action-layout": player.dataset.actionAlignment === "viewport-center"
-        ? "viewport centre"
-        : "centre below timers",
+      "visual-viewport":
+        visualReduction > 1 ? `reduced by ${formatPixels(visualReduction)}` : "full height",
+      "action-layout":
+        player.dataset.actionAlignment === "viewport-center"
+          ? "viewport centre"
+          : "centre below timers",
       viewport: `${formatPixels(window.innerWidth)} × ${formatPixels(window.innerHeight)}`,
       "visual-viewport-size": `${formatPixels(visualWidth)} × ${formatPixels(visualHeight)} · scale ${formatScale(visualViewport?.scale ?? 1)}`,
       "grid-columns": formatTrackList(columns),
       "grid-rows": formatTrackList(rows),
       stage: formatRectSize(mediaArea.getBoundingClientRect()),
       transcript: formatRectSize(transcriptRect),
-      foreground: foreground === null
-        ? "not present"
-        : foreground.hidden
-          ? "inactive"
-          : formatRectSize(foreground.getBoundingClientRect()),
+      foreground:
+        foreground === null
+          ? "not present"
+          : foreground.hidden
+            ? "inactive"
+            : formatRectSize(foreground.getBoundingClientRect()),
       composer: formatRectSize(composer.getBoundingClientRect()),
       tools: formatRectSize(leftPanel.getBoundingClientRect()),
       "right-zone": formatRectSize(rightZone.getBoundingClientRect()),
@@ -382,18 +381,21 @@ export function createLayoutDebugController(
       ),
       "actions-scroll": formatScrollMetrics(actions, "y"),
       "constraint-stage": `${formatPixels(mediaArea.getBoundingClientRect().height)} measured · target ${activeStageTarget}`,
-      "constraint-tool-column": firstToolColumn === null
-        ? "not present"
-        : `${formatPixels(firstToolColumn.getBoundingClientRect().width)} measured · target ${cssCustomValue(playerStyle, "--tool-column-width")}`,
+      "constraint-tool-column":
+        firstToolColumn === null
+          ? "not present"
+          : `${formatPixels(firstToolColumn.getBoundingClientRect().width)} measured · target ${cssCustomValue(playerStyle, "--tool-column-width")}`,
       "constraint-conversation": `${formatPixels(transcriptRect.width)} measured · min ${cssCustomValue(playerStyle, "--conversation-min-width")} · max ${cssCustomValue(playerStyle, "--conversation-max-width")}`,
       "constraint-composer": `${formatPixels(composerInput.getBoundingClientRect().height)} measured · max ${cssCustomValue(playerStyle, "--composer-max-lines")} / ${cssCustomValue(playerStyle, "--composer-max-viewport-height")}`,
       "constraint-right-rail": `${formatPixels(rightZone.getBoundingClientRect().width)} measured · target ${cssCustomValue(playerStyle, "--right-controls-width")}`,
-      "visual-offset": visualViewport === null
-        ? "unsupported"
-        : `x ${formatPixels(visualViewport.offsetLeft)} · y ${formatPixels(visualViewport.offsetTop)}`,
-      "visual-page-origin": visualViewport === null
-        ? "unsupported"
-        : `x ${formatPixels(visualViewport.pageLeft)} · y ${formatPixels(visualViewport.pageTop)}`,
+      "visual-offset":
+        visualViewport === null
+          ? "unsupported"
+          : `x ${formatPixels(visualViewport.offsetLeft)} · y ${formatPixels(visualViewport.offsetTop)}`,
+      "visual-page-origin":
+        visualViewport === null
+          ? "unsupported"
+          : `x ${formatPixels(visualViewport.pageLeft)} · y ${formatPixels(visualViewport.pageTop)}`,
     };
 
     for (const element of toolStrip.querySelectorAll<HTMLElement>("[data-layout-debug-value]")) {
@@ -419,13 +421,15 @@ export function createLayoutDebugController(
     const visualViewport = window.visualViewport;
     const keyboard = browserVirtualKeyboard();
     const keyboardRect = keyboard?.boundingRect ?? null;
-    const visibleBottom = visualViewport === null
-      ? window.innerHeight
-      : visualViewport.offsetTop + visualViewport.height;
+    const visibleBottom =
+      visualViewport === null
+        ? window.innerHeight
+        : visualViewport.offsetTop + visualViewport.height;
     const cardTop = Math.max(stageRect.top, titleRect.bottom) + 6;
-    const cardRight = rightRect.left > stageRect.left && rightRect.left < stageRect.right
-      ? rightRect.left - 6
-      : stageRect.right - 6;
+    const cardRight =
+      rightRect.left > stageRect.left && rightRect.left < stageRect.right
+        ? rightRect.left - 6
+        : stageRect.right - 6;
     const cardBottom = Math.min(stageRect.bottom, visibleBottom) - 6;
 
     overlay.stageDiagnostics.style.left = `${Math.max(6, stageRect.left - playerRect.left + 6)}px`;
@@ -433,15 +437,18 @@ export function createLayoutDebugController(
     overlay.stageDiagnostics.style.width = `${Math.max(0, cardRight - stageRect.left - 12)}px`;
     overlay.stageDiagnostics.style.maxHeight = `${Math.max(0, cardBottom - cardTop)}px`;
 
-    const visualDescription = visualViewport === null
-      ? "unsupported"
-      : `${formatRectSize(visualViewport)} @${formatNumber(visualViewport.offsetLeft)},${formatNumber(visualViewport.offsetTop)} p${formatNumber(visualViewport.pageLeft)},${formatNumber(visualViewport.pageTop)} s${formatScale(visualViewport.scale)}`;
-    const keyboardDescription = keyboardRect === null
-      ? "unsupported"
-      : `${formatRectPositionAndSize(keyboardRect)} · overlay ${yesNo(keyboard?.overlaysContent === true)}`;
-    const foregroundDescription = foregroundRect === null || foreground?.hidden === true
-      ? "inactive"
-      : formatRectRange(foregroundRect);
+    const visualDescription =
+      visualViewport === null
+        ? "unsupported"
+        : `${formatRectSize(visualViewport)} @${formatNumber(visualViewport.offsetLeft)},${formatNumber(visualViewport.offsetTop)} p${formatNumber(visualViewport.pageLeft)},${formatNumber(visualViewport.pageTop)} s${formatScale(visualViewport.scale)}`;
+    const keyboardDescription =
+      keyboardRect === null
+        ? "unsupported"
+        : `${formatRectPositionAndSize(keyboardRect)} · overlay ${yesNo(keyboard?.overlaysContent === true)}`;
+    const foregroundDescription =
+      foregroundRect === null || foreground?.hidden === true
+        ? "inactive"
+        : formatRectRange(foregroundRect);
     const inputValue = JSON.stringify(composerInput.value).slice(0, 34);
     const placeholder = JSON.stringify(composerInput.placeholder).slice(0, 34);
 
@@ -641,20 +648,15 @@ function measureScroll(element: HTMLElement, axis: ScrollAxis): ScrollMetrics {
   const content = axis === "x" ? element.scrollWidth : element.scrollHeight;
   const position = axis === "x" ? element.scrollLeft : element.scrollTop;
   const mode = axis === "x" ? style.overflowX : style.overflowY;
-  return {
-    viewport,
-    content,
-    position,
-    max: Math.max(0, content - viewport),
-    mode,
-  };
+  return { viewport, content, position, max: Math.max(0, content - viewport), mode };
 }
 
 function formatScrollMetrics(element: HTMLElement, axis: ScrollAxis): string {
   const metrics = measureScroll(element, axis);
-  const state = metrics.max > 1
-    ? `scroll ${formatPixels(metrics.position)}/${formatPixels(metrics.max)}`
-    : "fits";
+  const state =
+    metrics.max > 1
+      ? `scroll ${formatPixels(metrics.position)}/${formatPixels(metrics.max)}`
+      : "fits";
   return `view ${formatPixels(metrics.viewport)} · content ${formatPixels(metrics.content)} · ${metrics.mode} · ${state}`;
 }
 
@@ -674,6 +676,7 @@ function cssCustomValue(style: CSSStyleDeclaration, name: string): string {
 }
 
 function browserVirtualKeyboard(): BrowserVirtualKeyboard | null {
+  // EVIDENCE: external contract: VirtualKeyboard is an optional browser extension of Navigator, and the optional property is feature-detected before use.
   const extendedNavigator = navigator as Navigator & {
     readonly virtualKeyboard?: BrowserVirtualKeyboard;
   };
@@ -681,13 +684,15 @@ function browserVirtualKeyboard(): BrowserVirtualKeyboard | null {
 }
 
 function isLayoutDebugKey(value: string): value is LayoutDebugKey {
-  return value === "grid"
-    || value === "regions"
-    || value === "reserves"
-    || value === "safe-areas"
-    || value === "overflow"
-    || value === "constraints"
-    || value === "viewport-offsets";
+  return (
+    value === "grid" ||
+    value === "regions" ||
+    value === "reserves" ||
+    value === "safe-areas" ||
+    value === "overflow" ||
+    value === "constraints" ||
+    value === "viewport-offsets"
+  );
 }
 
 function requireComposerInput(composer: HTMLElement): HTMLTextAreaElement {

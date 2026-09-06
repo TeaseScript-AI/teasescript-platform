@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import { createCheckpoint, deserializeCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
+import {
+  createCheckpoint,
+  deserializeCheckpoint,
+  serializeCheckpoint,
+} from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import type { RuntimeDelayActionSnapshot } from "../src/runtime/actions/model.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
@@ -21,9 +24,12 @@ test("wait lowers to a foreground delay and settles only after an explicit obser
   const compiled = plan('wait 1.5 s\nsay "done"\nexit');
   const waiting = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   assert.equal(waiting.snapshot.status, "waiting");
-  assert.equal(waiting.snapshot.foregroundAction?.kind, "delay");
-  assert.equal((waiting.snapshot.foregroundAction as RuntimeDelayActionSnapshot).deadlineMs, 1500);
-  assert.deepEqual(waiting.events.map((event) => event.kind), ["actionRequested"]);
+  assert.ok(waiting.snapshot.foregroundAction?.kind === "delay");
+  assert.equal(waiting.snapshot.foregroundAction.deadlineMs, 1500);
+  assert.deepEqual(
+    waiting.events.map((event) => event.kind),
+    ["actionRequested"],
+  );
 
   const early = observeTime(compiled, waiting.snapshot, 1499);
   assert.equal(early.outcome.kind, "observed");
@@ -32,21 +38,32 @@ test("wait lowers to a foreground delay and settles only after an explicit obser
 
   const due = observeTime(compiled, early.snapshot, 1500);
   assert.equal(due.snapshot.status, "running");
-  assert.deepEqual(due.events.map((event) => event.kind), ["actionCompleted"]);
+  assert.deepEqual(
+    due.events.map((event) => event.kind),
+    ["actionCompleted"],
+  );
   const done = run(compiled, due.snapshot);
   assert.equal(done.snapshot.status, "halted");
-  assert.deepEqual(done.events.map((event) => event.kind), ["say", "exit"]);
+  assert.deepEqual(
+    done.events.map((event) => event.kind),
+    ["say", "exit"],
+  );
 });
 
 test("zero waits allocate no action and waiting checkpoints restore without clock reads", () => {
   const zero = plan("wait 0\nexit");
   const completed = run(zero, createFreshRuntimeSnapshot(zero));
   assert.equal(completed.snapshot.nextActionId, 1);
-  assert.deepEqual(completed.events.map((event) => event.kind), ["exit"]);
+  assert.deepEqual(
+    completed.events.map((event) => event.kind),
+    ["exit"],
+  );
 
   const delayed = plan("wait 2 min\nexit");
   const waiting = run(delayed, createFreshRuntimeSnapshot(delayed));
-  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(delayed, waiting.snapshot)));
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(delayed, waiting.snapshot)),
+  );
   assert.equal(restored.snapshot.status, "waiting");
   assert.equal(validateRuntimeSnapshot(restored.snapshot, restored.plan).valid, true);
   assert.equal(observeTime(restored.plan, restored.snapshot, 120_000).snapshot.status, "running");

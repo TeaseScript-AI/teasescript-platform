@@ -14,10 +14,7 @@ export type TimeObservationOutcome =
       readonly currentSessionTimeMs: number;
       readonly completion: RuntimeActionSettlementSnapshot | null;
     }
-  | {
-      readonly kind: "invalidObservation";
-      readonly message: string;
-    };
+  | { readonly kind: "invalidObservation"; readonly message: string };
 
 export interface PendingActionOperationResult<T> extends RuntimeOperationResult {
   readonly outcome: T;

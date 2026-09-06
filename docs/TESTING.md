@@ -26,8 +26,12 @@ or normal GitHub CI without an explicit owner decision based on measured cost an
 
 ## Normal and diagnostic verification
 
-`npm run check` is the normal complete configured suite and preserves actionable
-failure information. `npm run test:full-output` and `npm run check:full-output`
+`npm run check` runs formatting verification, lint, lint-rule/exception fixtures, Knip, and the build with compiled
+tests, preserving actionable failure information. `npm run format` applies the formatter policy;
+`npm run format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md);
+`npm run test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected
+unused-code and dependency categories.
+`npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
@@ -472,7 +476,7 @@ The implemented ADR 0018 `say` pacing slice adds source-to-runtime coverage for 
 smart-autoplay settings, Unicode code-point and word counting, exact/zero/`instant` pacing, speaker skip defaults,
 background gate creation, same-identity foreground promotion, prepared-output exact-once behavior, typed/time
 settlement, `wait` coexistence, interaction consumption, deterministic event ordering, checkpoint/JSON restore
-equivalence, and adversarial snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
+equivalence, and negative snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
 exhaustion and terminal transition atomicity. Standard Player click/touch/Space behavior remains assigned to its later
 browser slice.
 

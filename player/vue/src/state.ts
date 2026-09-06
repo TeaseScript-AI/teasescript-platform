@@ -111,11 +111,11 @@ function changeRightToggle(
 
   const next = {
     ...state,
-    rightControls: state.rightControls.map((control) => (
+    rightControls: state.rightControls.map((control) =>
       control.kind === "toggle" && control.id === controlId
         ? { ...control, value: checked }
-        : control
-    )),
+        : control,
+    ),
   };
   return current.recordUserHistory
     ? appendSessionEvent(next, `You changed ${current.label} to ${checked ? "on" : "off"}.`)
@@ -130,15 +130,14 @@ function changeRightSelect(
   const current = state.rightControls.find(
     (candidate) => candidate.kind === "select" && candidate.id === controlId,
   );
-  if (current?.kind !== "select" || !current.options.some(([option]) => option === value)) return state;
+  if (current?.kind !== "select" || !current.options.some(([option]) => option === value))
+    return state;
 
   const next = {
     ...state,
-    rightControls: state.rightControls.map((control) => (
-      control.kind === "select" && control.id === controlId
-        ? { ...control, value }
-        : control
-    )),
+    rightControls: state.rightControls.map((control) =>
+      control.kind === "select" && control.id === controlId ? { ...control, value } : control,
+    ),
   };
   if (!current.recordUserHistory) return next;
   const label = current.options.find(([option]) => option === value)?.[1] ?? value;

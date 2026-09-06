@@ -9,37 +9,46 @@ no longer fresh in active context, especially after substantial code or review i
 a task switch, or other context-heavy work. Consecutive related selection and prompting steps may reuse guidance that
 remains fresh. When uncertain whether it is still fresh, re-read it.
 
-Choose the lowest-cost executor likely to produce an accepted result. When Codex is selected, choose its lowest-cost
-model and reasoning level. Optimize for expected total cost, including handoff/context transfer, retries, debugging,
-review corrections, CI failures, unnecessary repository exploration, publication friction, context or usage limits, and
-human intervention. Do not automatically select Codex, the strongest model, or the highest reasoning level.
+Treat this guide as the maintained cost-performance policy for model routing. Do not perform live pricing or benchmark
+research during routine task selection. Optimize for expected total work, including orchestration, execution, retries,
+repair, review, handoff, and hidden defects, rather than per-token price or model size alone.
 
-### Step 0: Select the executor
+### Step 0: Select direct execution or delegation
 
-A **Sol agent** is a ChatGPT project agent with the shared local environment and GitHub connector; **Codex Sol** is the
-strongest Codex model tier below. Prefer a Sol agent when reading, review, architecture, diagnosis, or difficult
-semantic reasoning dominates; when the current session already holds the useful context; or when a separate Codex
-handoff would cost more than direct execution. Prefer Codex when direct `git` and `gh` materially reduce publication
-friction, many related edits must remain consistent, or a well-specified Luna or Terra task can be strongly verified.
+The **orchestrating agent** is responsible for decomposition, routing, integration, and review. It may be a ChatGPT
+project agent or an agent running in the shared LXC under Codex or another harness; do not assume orchestration and
+execution use different environments or model families.
 
-Diff size is one factor, not the rule: a Sol agent may publish a large diff through the connector route, while a small
-Codex-suitable change should stay with the current Sol agent when handoff costs more than direct execution. When Codex
-is selected, let it obtain current repository and GitHub state through normal `git` and `gh`; do not supply Source
-artifacts, copied canonical documents, or broad context packages without a concrete identity, availability, trust, or
-task-specific reason.
+Choose between direct execution and delegation by expected total work across the orchestrator and executor.
+
+- **Astra orchestrator:** delegate bounded implementation to Sol early when a short handoff can preserve meaningful
+  implementation freedom; keep expensive Astra execution and repeated Astra review loops shallow.
+- **Sol orchestrator:** avoid delegating merely to use Luna when Sol must first perform most of the investigation and
+  prompt construction, Luna must then reacquire the same context, and Sol must repeat substantial review.
+- **Any orchestrator:** delegate when it reduces expected total cost, materially improves capability, or enables useful
+  parallelism.
+
+Parallel work packages must not overlap in implementation responsibility. For sequential delegation, do not perform the
+delegated implementation yourself while waiting; wait for the result or work only on clearly non-overlapping work.
+
+Diff size is one factor, not the rule. When Codex is selected for execution, let it obtain current repository and GitHub
+state through normal `git` and `gh`; do not supply Source artifacts, copied canonical documents, or broad context
+packages without a concrete identity, availability, trust, or task-specific reason.
 
 ### Model and reasoning are separate choices
 
 Use model strength for semantic capability:
 
-- **Luna:** mechanical, localized, repetitive, and strongly verifiable work.
-- **Terra:** repository-aware implementation, accepted-architecture integration, compatibility work, and moderately
-  complex debugging.
-- **Sol:** selecting or reconciling architecture, altering behavior-critical canonical state, or resolving ambiguity
-  across difficult-to-verify invariants.
+- **Luna:** prescribed implementation where the material semantics, architecture, boundaries, and intended behavior are
+  already resolved. The work may span multiple files or modules and may require ordinary local coding judgment; it does
+  not need to be mechanical, repetitive, or localized.
+- **Sol:** work where the executor must discover, choose, reconcile, or diagnose material semantics, boundaries,
+  implementation strategy, interacting invariants, or nonlocal behavior; also demanding integration and independent
+  review.
+- **Astra:** difficult cross-boundary reasoning, orchestration, complex diagnosis, integration judgment, or independent
+  semantic review beyond a normal Sol Medium assignment.
 
-Use reasoning effort for the amount of exploration, strategy comparison, diagnosis, and verification still required.
-More reasoning does not make a smaller model equivalent to a stronger model.
+Reasoning effort and model strength are separate choices, but their cost-performance tradeoff is model-specific. Do not assume that a smaller model at higher reasoning is cheaper per completed task, or that a stronger model is necessarily more expensive once token use, retries, and repair are included. Higher reasoning cannot compensate for semantic decisions beyond the selected model's reliable capability.
 
 ### Step 1: Classify the task
 
@@ -54,66 +63,83 @@ Classify using six dimensions:
   and publication in one execution?
 
 Task size, file count, architectural vocabulary, and large diffs do not by themselves increase conceptual complexity,
-but execution volume still determines whether the work fits one run. A task may be Terra-level yet require several
-bounded work packages. Do not use a stronger model or higher reasoning to compensate for excessive execution volume.
-Strong verification permits a cheaper configuration only when it covers the relevant failure modes. Green tests are
-insufficient when ownership, compatibility, API leakage, ordering, or other important properties are not tested.
+but execution volume still determines whether the work fits one run. A task may require several bounded work packages
+without requiring a stronger model. Do not use a stronger model or higher reasoning to compensate for excessive
+execution volume.
+Strong verification permits a cheaper configuration only when it covers the relevant failure modes and independently
+verifies the property being relied on. Passing tests, lint, or type checks are insufficient when they cannot detect
+incorrect ownership, compatibility, API leakage, ordering, unsupported exceptions, false evidence claims, or other
+important semantic failures.
 
 ### Step 2: Select the model
 
 #### Select Luna when
 
-Use Luna when most of the following are true:
+Use Luna when the material semantic route is already resolved:
 
-- the change is mechanical or repetitive;
-- paths, ownership, and edit patterns are explicit;
-- little architectural interpretation is required;
-- failures are detected reliably by tooling;
-- the work can be divided into deterministic operations.
+- intended behavior, architecture, ownership, and important boundaries are explicit in the prompt or controlling
+  repository authority;
+- the executor may make ordinary local coding choices but does not need to choose material behavior, architecture, or
+  ownership;
+- affected regions or patterns, critical invariants, and verification are sufficiently explicit to keep the assignment
+  prescribed;
+- larger work can be divided into bounded planned stages without making Luna rediscover the implementation strategy.
 
-Typical examples include file moves, import migrations, compatibility facades, documentation updates, straightforward
-fixtures, and running established verification.
+The work may span several files or modules. Typical Luna work includes file moves, import migrations, compatibility
+facades, documentation updates, straightforward fixtures, accepted-architecture integration, prescribed canonical-state
+or transactional repairs, tooling or UI adapters against defined contracts, behavior-neutral refactors with named
+regions or patterns, and established verification.
 
-#### Select Terra when
+Keep Luna work packages more tightly bounded and context-focused than Sol work. For larger Luna work, define the
+intended milestone sequence before the first delegation and send bounded stages from that plan rather than the entire
+assignment at once. Review each completed stage before selecting the next planned stage.
 
-Use Terra when one or more of the following are true:
-
-- several related modules must be understood;
-- accepted architecture or ownership boundaries must be implemented, connected, tested, or audited rather than
-  invented;
-- existing code must be extracted, integrated, or repaired without redesigning canonical behavior;
-- a prescribed canonical-state, transactional, atomicity, or serialization repair preserves the accepted state model,
-  serialized representation, and public contracts;
-- dependency direction, compatibility, public surfaces, or private helpers require care;
-- tooling, UI adapters, test harnesses, or acceptance layers consume an already defined engine or compiler contract;
-- several precise corrections must remain mutually consistent;
-- failures are detectable through focused tests, conformance checks, diff review, or independent review.
-
-Typical examples include specified ownership extraction, accepted-architecture integration, presentation or tooling
-connected to authoritative APIs, compatibility and facade audits, grammar-aware tooling, deterministic test harnesses,
-vertical acceptance work with narrow repairs, and behavior-neutral repository refactors.
+Use Luna Medium for straightforward prescribed implementation. Use Luna Max for more demanding prescribed work when
+the semantic route remains fixed but careful execution, coordination, or verification benefits materially from
+additional reasoning. Do not use Luna Max to compensate for unresolved semantic or architectural decisions.
 
 #### Select Sol when
 
 Select Sol when at least one capability-specific Sol trigger applies:
 
-- the agent must choose, redesign, or reconcile an architectural boundary;
+- the executor must discover, choose, redesign, or reconcile an important architectural, ownership, or behavioral
+  boundary;
+- several modules or interacting invariants must be understood in order to determine the correct implementation route,
+  rather than merely execute an already resolved route;
 - a canonical state model, transition semantics, event-ordering contract, continuation model, transaction contract, or
   atomicity contract must be designed, extended, or reconciled;
-- serialization requires choosing a new behavioral representation or provenance model rather than applying a
-  prescribed repair or schema update;
+- serialization requires choosing a new behavioral representation or provenance model rather than applying a prescribed
+  repair or schema update;
 - materially different strategies have different correctness or compatibility consequences;
-- subtle nonlocal failures require independent diagnosis because the important invariants or failure mechanism have
-  not already been identified and made testable;
-- final review must detect plausible cross-boundary semantic inconsistencies that cheaper models may miss.
+- subtle nonlocal failures require independent diagnosis because the important invariants or failure mechanism have not
+  already been identified and made testable;
+- repeated exceptions or evidence claims must be judged against nonlocal invariants, while automated checks can still
+  pass when those claims, suppressions, assertions, or type weakenings are semantically unjustified;
+- integration or final review must detect plausible cross-boundary semantic inconsistencies that Luna may miss.
 
 High impact, broad scope, many invariants, checkpoints, several layers, or expensive rework are not sufficient alone.
-When the authoritative design is fixed and the task mainly implements, connects, tests, or documents it, Terra is
-usually sufficient.
+When semantics, architecture, boundaries, and intended behavior are resolved and the remaining task is prescribed
+implementation, Luna may still be sufficient even when the work spans several modules.
 
 Typical Sol work includes new canonical runtime state models, changed transition or ordering contracts, new continuation
 or transaction semantics, lifecycle or state-machine redesign, unresolved module boundaries, subtle nonlocal behavioral
-regressions, and high-risk semantic audits.
+regressions, difficult integration, and high-risk semantic audits.
+
+#### Select Astra when
+
+Astra is a constrained-capacity tier. An agent may recommend Astra but must not select or spawn an Astra sub-agent
+without explicit owner authorization.
+
+Recommend Astra when semantic completeness is difficult to verify mechanically and subtle omissions or cross-boundary
+inconsistencies could plausibly survive competent Sol work; when difficult nonlocal diagnosis or integration judgment
+exceeds a normal Sol Medium assignment; or when Sol work warrants a stronger independent semantic review.
+
+When Astra is authorized, default to Astra Low. An agent may recommend higher Astra reasoning, but must not select
+it without explicit owner authorization.
+
+When Astra is the orchestrating agent, delegate implementation to Sol by default. Sol may further delegate sufficiently
+specified work to Luna and perform the first review and repair pass before returning the integrated result to Astra.
+This keeps expensive Astra review loops shallow.
 
 ### Step 3: Select reasoning effort
 
@@ -121,9 +147,6 @@ regressions, and high-risk semantic audits.
 
 Use Low when the task is deterministic, the path is well bounded, relevant files and expected results are known, little
 repository exploration is needed, and errors are immediately visible through tooling.
-
-Use Terra Low when Terra's semantic capability is needed but the implementation direction, relevant boundaries, affected
-files, expected behavior, and focused verification are already explicit.
 
 Do not use Low merely because the code change is small.
 
@@ -153,39 +176,31 @@ Use High only when Medium is likely insufficient because a specific burden remai
 Do not select High merely because the task is large, high-risk, touches canonical state, requires atomicity, or must be
 completed coherently. State the unresolved uncertainty, strategy comparison, or diagnostic burden that requires it.
 
+#### Max reasoning
+
+Use Luna Max for demanding prescribed work when semantics, architecture, and important boundaries are already resolved
+and additional deliberate execution or verification materially improves reliability. Do not use Max to substitute for
+semantic or architectural judgment that belongs with Sol.
+
 ### Default configurations
 
 ```text
-Mechanical, explicit, strongly verified:
-Luna Low or Luna Medium
-
-Repository exploration within a deterministic pattern:
+Straightforward prescribed implementation with resolved semantics and boundaries:
 Luna Medium
 
-Bounded repository-aware semantic work with explicit implementation
-direction, known relevant files, and strong focused verification:
-Terra Low
+More demanding prescribed implementation with a fixed semantic route:
+Luna Max
 
-Repository-aware work following accepted boundaries that requires normal
-exploration, coordination, or several mutually consistent changes:
-Terra Medium
-
-Prescribed canonical-state, transactional, atomicity, provenance,
-or serialization repair with explicit semantics and strong verification:
-Terra Low when localized and the implementation path is known; otherwise Terra Medium
-
-Accepted-architecture work with unclear mutation surfaces, incomplete
-verification, coupled nonlocal behavior, or substantial diagnosis:
-Terra High
-
-New or changed canonical state models, transition semantics, ordering
-contracts, continuation models, behavioral serialization, transaction
-contracts, or atomicity contracts:
+Work requiring material semantic or boundary decisions, broader repository
+reasoning, nonlocal diagnosis, integration judgment, or difficult review:
 Sol Medium
 
-Unresolved architecture, competing strategies, or difficult-to-verify
-behavioral design:
-Sol High
+Work materially beyond a normal Sol Medium assignment or requiring stronger
+semantic review:
+Recommend Astra Low
+
+Astra-authorized work:
+Astra Low
 ```
 
 Use the cheapest configuration likely to produce an accepted result without costly retries or hidden defects. Consider
@@ -203,11 +218,12 @@ Classify the repair by what remains unresolved, not by the risk category of the 
 state, serialization, ordering, or atomicity does not by itself require Sol when the review already specifies the
 required semantics, permitted implementation boundary, stop conditions, and verification.
 
-- **Luna:** explicit, localized, mechanical repairs with strong verification.
-- **Terra:** repository-aware semantic repairs within an accepted contract, including prescribed canonical-state or
-  transactional repairs that preserve the existing model and representation.
-- **Sol:** repairs that still require architectural choice, a new or changed canonical behavior contract, unresolved
-  representation design, or difficult nonlocal diagnosis of invariants not already identified and made testable.
+- **Luna:** repairs where review has resolved the defect, required semantics, implementation boundary, and verification
+  sufficiently to make the remaining work prescribed.
+- **Sol:** repairs where material semantic judgment, boundary discovery, reconciliation, representation design, or
+  difficult nonlocal diagnosis remains.
+- **Astra:** recommend owner-authorized Astra Low when subtle omissions or cross-boundary inconsistencies could plausibly
+  survive competent Sol work or stronger independent semantic review is warranted.
 
 Select reasoning independently. Use Low when the repair is bounded, the relevant files and implementation path are
 known, and focused checks directly cover the change. Otherwise use Medium by default when the repair direction and
@@ -223,6 +239,10 @@ serialization, ordering, or restore repairs merely to force a cheaper configurat
 Escalate reasoning on the same model when inspection reveals unresolved dependencies or competing strategies, focused
 failures require nonlocal diagnosis, or a well-specified attempt failed because it did not investigate or verify deeply
 enough.
+
+Treat unsupported evidence claims, broadened exceptions, or weakened meaningful assertions used to satisfy checks as
+semantic failure, not successful verification. When review establishes that the verification oracle can be satisfied
+without preserving the intended property, do not repeat an equivalent attempt under the same configuration.
 
 Escalate to a stronger model when the current model repeatedly makes incorrect ownership or semantic decisions, cannot
 preserve interacting invariants, produces superficially green but incomplete work, or consumes the expected saving
@@ -246,9 +266,9 @@ only task-relevant routing findings into concrete execution constraints or check
 pricing, rejected configurations, or model-selection rationale into the Codex prompt.
 
 ```text
-Executor: Sol agent or Codex
+Execution: direct or delegated
 Execution volume: one run or requires bounded work-package planning
-Codex model/reasoning, when applicable:
+Executor model/reasoning, when delegated:
 Escalation trigger:
 ```
 

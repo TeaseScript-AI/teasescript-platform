@@ -3,10 +3,7 @@ import type {
   PlayerRightControlPresentation,
 } from "./model.js";
 
-export function timerProgressPercent(
-  remainingSeconds: number,
-  totalSeconds: number,
-): number {
+export function timerProgressPercent(remainingSeconds: number, totalSeconds: number): number {
   if (!Number.isFinite(remainingSeconds) || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
     return 0;
   }
@@ -60,7 +57,8 @@ export function readableControlText(fill: string): "#000000" | "#ffffff" {
     const encoded = Number.parseInt(channel ?? "00", 16) / 255;
     return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
   });
-  const luminance = (channels[0] ?? 0) * 0.2126 + (channels[1] ?? 0) * 0.7152 + (channels[2] ?? 0) * 0.0722;
+  const luminance =
+    (channels[0] ?? 0) * 0.2126 + (channels[1] ?? 0) * 0.7152 + (channels[2] ?? 0) * 0.0722;
   const blackContrast = (luminance + 0.05) / 0.05;
   const whiteContrast = 1.05 / (luminance + 0.05);
   return blackContrast >= whiteContrast ? "#000000" : "#ffffff";

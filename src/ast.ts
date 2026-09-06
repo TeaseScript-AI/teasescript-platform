@@ -91,14 +91,7 @@ export interface LetStatement {
 }
 
 export type ScalarTypeName =
-  | "string"
-  | "boolean"
-  | "integer"
-  | "number"
-  | "date"
-  | "time"
-  | "datetime"
-  | "duration";
+  "string" | "boolean" | "integer" | "number" | "date" | "time" | "datetime" | "duration";
 
 export interface TypeAnnotation {
   readonly kind: "typeAnnotation";
@@ -108,10 +101,7 @@ export interface TypeAnnotation {
   readonly span: SourceSpan;
 }
 
-export type AssignmentTarget =
-  | Identifier
-  | PropertyAccessExpression
-  | IndexExpression;
+export type AssignmentTarget = Identifier | PropertyAccessExpression | IndexExpression;
 
 export interface AssignmentStatement {
   readonly kind: "assignmentStatement";
@@ -366,19 +356,7 @@ export interface UnaryExpression {
 export interface BinaryExpression {
   readonly kind: "binaryExpression";
   readonly operator:
-    | "*"
-    | "/"
-    | "%"
-    | "+"
-    | "-"
-    | "=="
-    | "!="
-    | "<"
-    | "<="
-    | ">"
-    | ">="
-    | "and"
-    | "or";
+    "*" | "/" | "%" | "+" | "-" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "and" | "or";
   readonly left: Expression;
   readonly right: Expression;
   readonly span: SourceSpan;

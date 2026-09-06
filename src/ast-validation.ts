@@ -1,21 +1,8 @@
 import type { Program } from "./ast.js";
-import {
-  createDiagnostic,
-  DiagnosticSeverity,
-  type Diagnostic,
-} from "./diagnostics.js";
-import {
-  createCapturedArray,
-} from "./external-data-capture.js";
-import {
-  createSourcePosition,
-  createSourceSpan,
-  type SourceSpan,
-} from "./source.js";
-import {
-  recordValidationTestMaximum,
-  recordValidationTestWork,
-} from "./validation-testing.js";
+import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
+import { createCapturedArray } from "./external-data-capture.js";
+import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
+import { recordValidationTestMaximum, recordValidationTestWork } from "./validation-testing.js";
 
 export const AST_VALIDATION_CODES = {
   nonFiniteNumericLiteral: "TSC001",
@@ -28,14 +15,8 @@ export interface CapturedProgramAstResult {
 }
 
 type AssignmentTarget =
-  | {
-      readonly container: Record<string, unknown>;
-      readonly key: string;
-    }
-  | {
-      readonly container: unknown[];
-      readonly index: number;
-    };
+  | { readonly container: Record<string, unknown>; readonly key: string }
+  | { readonly container: unknown[]; readonly index: number };
 
 interface ObjectPropertyStage {
   readonly key: string;
@@ -56,11 +37,7 @@ type WorkItem =
       readonly depth: number;
       readonly target: AssignmentTarget | null;
     }
-  | {
-      readonly kind: "leave";
-      readonly source: object;
-      readonly captured: object;
-    };
+  | { readonly kind: "leave"; readonly source: object; readonly captured: object };
 
 const FALLBACK_SPAN = createSourceSpan(
   createSourcePosition(0, 0, 0),
@@ -75,6 +52,7 @@ const FALLBACK_SPAN = createSourceSpan(
  */
 export function captureProgramAst(value: unknown): CapturedProgramAstResult {
   const active = new Set<object>();
+  // EVIDENCE: invariant: this empty engine-created array receives only WorkItem entries below.
   const work = createCapturedArray(0) as WorkItem[];
   work.push({ kind: "visit", value, depth: 0, target: null });
   let capturedRoot: unknown;
@@ -148,6 +126,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     if (prototype !== Object.prototype && prototype !== null) {
       return captureFailure("Direct AST input must contain only plain objects and arrays.");
     }
+    // EVIDENCE: invariant: Object.create(null) creates an empty own-property capture dictionary.
     const captured = Object.create(null) as Record<string, unknown>;
     let values: ObjectPropertyStage | null = null;
     for (const key of keys) {
@@ -161,11 +140,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
       } catch {
         return captureFailure("Direct AST input contains an unstable object.");
       }
-      if (
-        descriptor === undefined ||
-        !descriptor.enumerable ||
-        !("value" in descriptor)
-      ) {
+      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
         return captureFailure("Direct AST input may contain only enumerable data properties.");
       }
       values = { key, value: descriptor.value, previous: values };
@@ -176,11 +151,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     });
     active.add(current);
     work.push({ kind: "leave", source: current, captured });
-    for (
-      let currentValue = values;
-      currentValue !== null;
-      currentValue = currentValue.previous
-    ) {
+    for (let currentValue = values; currentValue !== null; currentValue = currentValue.previous) {
       work.push({
         kind: "visit",
         value: currentValue.value,
@@ -193,22 +164,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
   if (!isProgramRoot(capturedRoot)) {
     return captureFailure("Direct AST input must be a valid program-shaped object.");
   }
-  return Object.freeze({
-    program: capturedRoot as Program,
-    diagnostic: null,
-  });
-}
-
-/** Returns compiler diagnostics for numeric literals that cannot enter JSON-safe plans. */
-export function findNonFiniteNumericLiteralDiagnostics(
-  program: Program,
-): readonly Diagnostic[] {
-  const capture = captureProgramAst(program);
-  if (capture.program === null) {
-    return Object.freeze([capture.diagnostic!]);
-  }
-
-  return findNonFiniteNumericLiteralDiagnosticsInStableProgram(capture.program);
+  return Object.freeze({ program: capturedRoot, diagnostic: null });
 }
 
 /** Internal traversal for parser-owned or already captured AST data. */
@@ -216,7 +172,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
   program: Program,
 ): readonly Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
-  const work = createCapturedArray(0) as unknown[];
+  const work = createCapturedArray(0);
   work.push(program);
   while (work.length > 0) {
     const value = work.pop();
@@ -227,6 +183,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
       }
       continue;
     }
+    // EVIDENCE: invariant: value is an object; these optional fields remain unknown until checked below.
     const node = value as {
       readonly kind?: unknown;
       readonly value?: unknown;
@@ -252,6 +209,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
   return Object.freeze(diagnostics);
 }
 
+// oxlint-disable-next-line anti-slop/no-object-parameters -- EVIDENCE: boundary: inspect array descriptors before trusting length or elements.
 function captureArrayHeader(value: object): CapturedArrayHeader | null {
   let lengthDescriptor: PropertyDescriptor | undefined;
   let keys: readonly (string | symbol)[];
@@ -273,6 +231,7 @@ function captureArrayHeader(value: object): CapturedArrayHeader | null {
   }
 
   const length = lengthDescriptor.value;
+  // EVIDENCE: invariant: the empty null-prototype dictionary stores descriptor values captured below.
   const values = Object.create(null) as Record<string, unknown>;
   const seen = new Set<number>();
   for (const key of keys) {
@@ -289,11 +248,7 @@ function captureArrayHeader(value: object): CapturedArrayHeader | null {
     } catch {
       return null;
     }
-    if (
-      descriptor === undefined ||
-      !descriptor.enumerable ||
-      !("value" in descriptor)
-    ) {
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
       return null;
     }
     seen.add(index);
@@ -337,10 +292,12 @@ function captureFailure(message: string): CapturedProgramAstResult {
 }
 
 function isProgramRoot(value: unknown): value is Program {
-  return isPlainRecord(value) &&
+  return (
+    isPlainRecord(value) &&
     value.kind === "program" &&
     Array.isArray(value.statements) &&
-    isSourceSpan(value.span);
+    isSourceSpan(value.span)
+  );
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -355,7 +312,8 @@ function isSourceSpan(value: unknown): value is SourceSpan {
 }
 
 function isSourcePosition(value: unknown): boolean {
-  return isPlainRecord(value) &&
+  return (
+    isPlainRecord(value) &&
     Number.isSafeInteger(value.offset) &&
     typeof value.offset === "number" &&
     value.offset >= 0 &&
@@ -364,5 +322,6 @@ function isSourcePosition(value: unknown): boolean {
     value.line >= 0 &&
     Number.isSafeInteger(value.column) &&
     typeof value.column === "number" &&
-    value.column >= 0;
+    value.column >= 0
+  );
 }

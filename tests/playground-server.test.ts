@@ -133,14 +133,8 @@ test("rejects encoded path traversal", async () => {
 });
 
 test("query and encoded example-path manipulation cannot select a file", async () => {
-  assert.equal(
-    (await get("/examples/playground/not-allowed.tease?name=main")).status,
-    404,
-  );
-  assert.equal(
-    (await get("/examples/playground/%2e%2e/main.tease")).status,
-    400,
-  );
+  assert.equal((await get("/examples/playground/not-allowed.tease?name=main")).status, 404);
+  assert.equal((await get("/examples/playground/%2e%2e/main.tease")).status, 400);
 });
 
 test("rejects symlinks that escape an exposed static root", async (context) => {
@@ -166,21 +160,42 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
 });
 
 test("workspace automation stores revisions and returns compile and run results", async () => {
-  const uploaded = await api("PUT", "/api/workspace/source", 'say "automation"', "text/plain; charset=utf-8");
+  const uploaded = await api(
+    "PUT",
+    "/api/workspace/source",
+    'say "automation"',
+    "text/plain; charset=utf-8",
+  );
   assert.equal(uploaded.status, 200);
-  const workspace = JSON.parse(uploaded.body) as { source: string; sourceRevision: number; stale: boolean };
+  // EVIDENCE: integration fixture: the successful workspace-source route returns this documented response shape.
+  const workspace = JSON.parse(uploaded.body) as {
+    source: string;
+    sourceRevision: number;
+    stale: boolean;
+  };
   assert.equal(workspace.source, 'say "automation"');
   assert.equal(workspace.stale, true);
   const compiled = await api("POST", "/api/workspace/compile");
   assert.equal(compiled.status, 200);
-  assert.equal((JSON.parse(compiled.body) as { result: { status: string } }).result.status, "ready");
+  // EVIDENCE: integration fixture: the successful compile route returns a result status.
+  assert.equal(
+    (JSON.parse(compiled.body) as { result: { status: string } }).result.status,
+    "ready",
+  );
   const run = await api("POST", "/api/workspace/run");
-  const runBody = JSON.parse(run.body) as { result: { status: string; events: { kind: string }[] } };
+  // EVIDENCE: integration fixture: the successful run route returns status and event records asserted below.
+  const runBody = JSON.parse(run.body) as {
+    result: { status: string; events: { kind: string }[] };
+  };
   assert.equal(run.status, 200);
   assert.equal(runBody.result.status, "halted");
-  assert.deepEqual(runBody.result.events.map((event) => event.kind), ["say", "actionRequested", "complete"]);
+  assert.deepEqual(
+    runBody.result.events.map((event) => event.kind),
+    ["say", "actionRequested", "complete"],
+  );
   const result = await api("GET", "/api/workspace/result");
   assert.equal(result.status, 200);
+  // EVIDENCE: integration fixture: the successful result route returns the stale flag asserted here.
   assert.equal((JSON.parse(result.body) as { stale: boolean }).stale, false);
 });
 
@@ -189,14 +204,24 @@ test("workspace automation accepts source beyond the former local byte limit", a
   const uploaded = await api("PUT", "/api/workspace/source", source, "text/plain; charset=utf-8");
 
   assert.equal(uploaded.status, 200);
+  // EVIDENCE: integration fixture: a successful source upload echoes its stored source.
   assert.equal((JSON.parse(uploaded.body) as { source: string }).source, source);
 });
 
 test("workspace automation rejects malformed UTF-8 source", async () => {
-  const uploaded = await api("PUT", "/api/workspace/source", Buffer.from([0xc3, 0x28]), "text/plain; charset=utf-8");
+  const uploaded = await api(
+    "PUT",
+    "/api/workspace/source",
+    Buffer.from([0xc3, 0x28]),
+    "text/plain; charset=utf-8",
+  );
 
   assert.equal(uploaded.status, 400);
-  assert.equal((JSON.parse(uploaded.body) as { error: { code: string } }).error.code, "malformedUtf8");
+  // EVIDENCE: integration fixture: malformed UTF-8 responses carry the asserted structured error code.
+  assert.equal(
+    (JSON.parse(uploaded.body) as { error: { code: string } }).error.code,
+    "malformedUtf8",
+  );
 });
 
 test("workspace automation rejects unsafe methods, content, and non-empty operation bodies", async () => {
@@ -212,7 +237,15 @@ test("workspace automation rejects clients outside the permitted loopback addres
   const isolatedServer = createPlaygroundServer();
   const isolatedPort = await listenAt(isolatedServer, "0.0.0.0");
   context.after(async () => close(isolatedServer));
-  const response = await api("GET", "/api/workspace", undefined, undefined, isolatedPort, false, "127.0.0.2");
+  const response = await api(
+    "GET",
+    "/api/workspace",
+    undefined,
+    undefined,
+    isolatedPort,
+    false,
+    "127.0.0.2",
+  );
   assert.equal(response.status, 403);
 });
 
@@ -226,7 +259,15 @@ function get(path: string, requestPort = port): Promise<HttpResult> {
   return api("GET", path, undefined, undefined, requestPort);
 }
 
-function api(method: string, path: string, body?: string | Buffer, contentType?: string, requestPort = port, omitContentLength = false, localAddress?: string): Promise<HttpResult> {
+function api(
+  method: string,
+  path: string,
+  body?: string | Buffer,
+  contentType?: string,
+  requestPort = port,
+  omitContentLength = false,
+  localAddress?: string,
+): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
     const outgoing = request(
       {
@@ -235,10 +276,13 @@ function api(method: string, path: string, body?: string | Buffer, contentType?:
         method,
         path,
         localAddress,
-        headers: body === undefined ? undefined : {
-          ...(contentType === undefined ? {} : { "Content-Type": contentType }),
-          ...(omitContentLength ? {} : { "Content-Length": Buffer.byteLength(body) }),
-        },
+        headers:
+          body === undefined
+            ? undefined
+            : {
+                ...(contentType === undefined ? {} : { "Content-Type": contentType }),
+                ...(omitContentLength ? {} : { "Content-Length": Buffer.byteLength(body) }),
+              },
       },
       (incoming) => {
         incoming.setEncoding("utf8");
@@ -266,7 +310,10 @@ function listenAt(target: typeof server, host: string): Promise<number> {
     target.listen(0, host, () => {
       target.off("error", reject);
       const address = target.address();
-      if (address === null || typeof address === "string") { reject(new Error("Expected an IP server address.")); return; }
+      if (address === null || typeof address === "string") {
+        reject(new Error("Expected an IP server address."));
+        return;
+      }
       resolve(address.port);
     });
   });

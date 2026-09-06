@@ -19,10 +19,11 @@ function runFixtures(fixtures: Record<string, string>, fullOutput = false) {
   });
 
   try {
-    return spawnSync(process.execPath, [filterPath, ...(fullOutput ? ["--full-output"] : []), ...fixturePaths], {
-      encoding: "utf8",
-      env: environment,
-    });
+    return spawnSync(
+      process.execPath,
+      [filterPath, ...(fullOutput ? ["--full-output"] : []), ...fixturePaths],
+      { encoding: "utf8", env: environment },
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -50,12 +51,15 @@ test("filter removes passing test lines and preserves Node's full summary", () =
 });
 
 test("full-output mode preserves passing test lines", () => {
-  const result = runFixtures({
-    "passing.test.mjs": `
+  const result = runFixtures(
+    {
+      "passing.test.mjs": `
       import test from "node:test";
       test("visible passing test", () => {});
     `,
-  }, true);
+    },
+    true,
+  );
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /✔ visible passing test/);

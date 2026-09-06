@@ -45,13 +45,7 @@ export function allocateRightRailPaneHeights(
 export function createRightRailLayoutController(
   elements: RightRailLayoutElements,
 ): RightRailLayoutController {
-  const {
-    rightZone,
-    compactTimerHost,
-    timerWrap,
-    timerList,
-    actions,
-  } = elements;
+  const { rightZone, compactTimerHost, timerWrap, timerList, actions } = elements;
   let compactTimers = false;
   let syncQueued = false;
 
@@ -72,9 +66,10 @@ export function createRightRailLayoutController(
     }
 
     const availableHeight = rightZone.clientHeight;
-    const timerRequiredHeight = timerWrap.hidden || getComputedStyle(timerWrap).display === "none"
-      ? 0
-      : naturalStackBlockSize(timerList) + verticalPadding(timerWrap);
+    const timerRequiredHeight =
+      timerWrap.hidden || getComputedStyle(timerWrap).display === "none"
+        ? 0
+        : naturalStackBlockSize(timerList) + verticalPadding(timerWrap);
     const actionRequiredHeight = naturalStackBlockSize(actions);
     const allocation = allocateRightRailPaneHeights(
       availableHeight,
@@ -112,7 +107,8 @@ export function createRightRailLayoutController(
 function naturalStackBlockSize(element: HTMLElement): number {
   const style = getComputedStyle(element);
   const children = [...element.children].filter(
-    (child): child is HTMLElement => child instanceof HTMLElement && child.getClientRects().length > 0,
+    (child): child is HTMLElement =>
+      child instanceof HTMLElement && child.getClientRects().length > 0,
   );
   if (children.length === 0) return 0;
 
@@ -120,16 +116,19 @@ function naturalStackBlockSize(element: HTMLElement): number {
     (total, child) => total + child.getBoundingClientRect().height,
     0,
   );
-  const gap = children.length > 1
-    ? finiteNonNegative(Number.parseFloat(style.rowGap)) * (children.length - 1)
-    : 0;
+  const gap =
+    children.length > 1
+      ? finiteNonNegative(Number.parseFloat(style.rowGap)) * (children.length - 1)
+      : 0;
   return childrenHeight + gap + verticalPadding(element);
 }
 
 function verticalPadding(element: HTMLElement): number {
   const style = getComputedStyle(element);
-  return finiteNonNegative(Number.parseFloat(style.paddingTop))
-    + finiteNonNegative(Number.parseFloat(style.paddingBottom));
+  return (
+    finiteNonNegative(Number.parseFloat(style.paddingTop)) +
+    finiteNonNegative(Number.parseFloat(style.paddingBottom))
+  );
 }
 
 function finiteNonNegative(value: number): number {

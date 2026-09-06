@@ -8,11 +8,7 @@ test("reports a missing speaker identifier and parses the next statement", () =>
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSP003",
-      "Expected a speaker identifier after 'speaker'.",
-      [7, 0, 7, 7, 0, 7],
-    ],
+    ["TSP003", "Expected a speaker identifier after 'speaker'.", [7, 0, 7, 7, 0, 7]],
   ]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
@@ -22,11 +18,7 @@ test("reports a missing say-as identifier without consuming the next line", () =
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSP003",
-      "Expected a speaker identifier after 'as'.",
-      [7, 0, 7, 7, 0, 7],
-    ],
+    ["TSP003", "Expected a speaker identifier after 'as'.", [7, 0, 7, 7, 0, 7]],
   ]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
@@ -36,11 +28,7 @@ test("reports a missing say string and recovers at LF", () => {
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSP006",
-      "Expected a string or template after 'say'.",
-      [3, 0, 3, 3, 0, 3],
-    ],
+    ["TSP006", "Expected a string or template after 'say'.", [3, 0, 3, 3, 0, 3]],
   ]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
@@ -57,49 +45,21 @@ test("reports missing property names, colons, and strings at bounded lines", () 
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSP004",
-      "Expected a speaker property name.",
-      [15, 1, 0, 15, 1, 0],
-    ],
-    [
-      "TSP005",
-      "Expected ':' after the speaker property name.",
-      [39, 2, 12, 39, 2, 12],
-    ],
-    [
-      "TSP006",
-      "Expected a string or template for the speaker property.",
-      [56, 3, 6, 56, 3, 6],
-    ],
+    ["TSP004", "Expected a speaker property name.", [15, 1, 0, 15, 1, 0]],
+    ["TSP005", "Expected ':' after the speaker property name.", [39, 2, 12, 39, 2, 12]],
+    ["TSP006", "Expected a string or template for the speaker property.", [56, 3, 6, 56, 3, 6]],
   ]);
-  assert.deepEqual(statementKinds(result), [
-    "speakerDeclaration",
-    "exitStatement",
-  ]);
+  assert.deepEqual(statementKinds(result), ["speakerDeclaration", "exitStatement"]);
 });
 
 test("recovers a missing closing brace before a valid statement", () => {
-  const source = [
-    "speaker vera {",
-    'displayName: "Vera"',
-    'say "Still parsed"',
-    "exit",
-  ].join("\n");
+  const source = ["speaker vera {", 'displayName: "Vera"', 'say "Still parsed"', "exit"].join("\n");
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSP007",
-      "Expected '}' to close the speaker declaration.",
-      [35, 2, 0, 35, 2, 0],
-    ],
+    ["TSP007", "Expected '}' to close the speaker declaration.", [35, 2, 0, 35, 2, 0]],
   ]);
-  assert.deepEqual(statementKinds(result), [
-    "speakerDeclaration",
-    "sayStatement",
-    "exitStatement",
-  ]);
+  assert.deepEqual(statementKinds(result), ["speakerDeclaration", "sayStatement", "exitStatement"]);
   assert.deepEqual(result.program.statements[0]?.span, {
     start: { offset: 0, line: 0, column: 0 },
     end: { offset: 34, line: 1, column: 19 },
@@ -111,11 +71,7 @@ test("reports a missing closing brace at EOF once", () => {
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSP007",
-      "Expected '}' to close the speaker declaration.",
-      [37, 1, 21, 37, 1, 21],
-    ],
+    ["TSP007", "Expected '}' to close the speaker declaration.", [37, 1, 21, 37, 1, 21]],
   ]);
   assert.deepEqual(statementKinds(result), ["speakerDeclaration"]);
 });
@@ -125,11 +81,7 @@ test("reports an empty template interpolation and parses a later statement", () 
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSP008",
-      "Expected an expression inside the template interpolation.",
-      [13, 0, 13, 13, 0, 13],
-    ],
+    ["TSP008", "Expected an expression inside the template interpolation.", [13, 0, 13, 13, 0, 13]],
   ]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
@@ -153,11 +105,7 @@ test("reports a missing property after dot without cascading", () => {
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSP010",
-      "Expected a property name after '.'.",
-      [14, 0, 14, 14, 0, 14],
-    ],
+    ["TSP010", "Expected a property name after '.'.", [14, 0, 14, 14, 0, 14]],
   ]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
@@ -167,11 +115,7 @@ test("does not duplicate lexer diagnostics for an unterminated interpolation", (
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSL005",
-      "Unterminated template interpolation.",
-      [11, 0, 11, 19, 0, 19],
-    ],
+    ["TSL005", "Unterminated template interpolation.", [11, 0, 11, 19, 0, 19]],
   ]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
@@ -181,16 +125,8 @@ test("treats a backtick after an interpolation start as a nested template", () =
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSL004",
-      "Unterminated template string.",
-      [13, 0, 13, 19, 1, 4],
-    ],
-    [
-      "TSL005",
-      "Unterminated template interpolation.",
-      [11, 0, 11, 19, 1, 4],
-    ],
+    ["TSL004", "Unterminated template string.", [13, 0, 13, 19, 1, 4]],
+    ["TSL005", "Unterminated template interpolation.", [11, 0, 11, 19, 1, 4]],
     [
       "TSP009",
       "Expected a supported expression inside the template interpolation.",
@@ -205,20 +141,14 @@ test("rejects a non-slice statement and recovers at the next CRLF line", () => {
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSP001",
-      "Expected a supported TeaseScript statement.",
-      [0, 0, 0, 7, 0, 7],
-    ],
+    ["TSP001", "Expected a supported TeaseScript statement.", [0, 0, 0, 7, 0, 7]],
   ]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
 function compactDiagnostics(
   result: ReturnType<typeof parse>,
-): Array<
-  [string, string, [number, number, number, number, number, number]]
-> {
+): Array<[string, string, [number, number, number, number, number, number]]> {
   return result.diagnostics.map((diagnostic) => [
     diagnostic.code,
     diagnostic.message,

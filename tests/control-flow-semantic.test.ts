@@ -12,14 +12,9 @@ test("rejects break and continue outside loops", () => {
 });
 
 test("accepts loop control in nested loops", () => {
-  const result = compileSource([
-    "repeat 2 {",
-    "  while true {",
-    "    break",
-    "  }",
-    "  continue",
-    "}",
-  ].join("\n"));
+  const result = compileSource(
+    ["repeat 2 {", "  while true {", "    break", "  }", "  continue", "}"].join("\n"),
+  );
 
   assert.deepEqual(result.diagnostics, []);
   assert.notEqual(result.plan, null);
@@ -55,16 +50,16 @@ test("rejects statically invalid range operands and repeat counts", () => {
   const cases = [
     'let bad = "a"..3',
     "for value in 1.5..3 { say value }",
-    "repeat -1 { say \"never\" }",
-    "repeat 1.5 { say \"never\" }",
+    'repeat -1 { say "never" }',
+    'repeat 1.5 { say "never" }',
     'repeat "twice" { say "never" }',
   ];
   for (const source of cases) {
     const result = compileSource(source);
     assert.equal(result.plan, null);
-    assert.ok(result.semanticDiagnostics.some((item) =>
-      item.code === "TSV010" || item.code === "TSV011"
-    ));
+    assert.ok(
+      result.semanticDiagnostics.some((item) => item.code === "TSV010" || item.code === "TSV011"),
+    );
   }
 });
 
@@ -74,9 +69,7 @@ test("semantic range validation detects chained ASTs independently", () => {
   assert.equal(result.plan, null);
   assert.ok(
     result.parserDiagnostics.some((item) => item.code === "TSP022") ||
-      result.semanticDiagnostics.some((item) =>
-        item.code === "TSV009" || item.code === "TSV010"
-      ),
+      result.semanticDiagnostics.some((item) => item.code === "TSV009" || item.code === "TSV010"),
   );
 });
 

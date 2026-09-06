@@ -56,22 +56,12 @@ export const DEMO_FOREGROUND_PRESENTATIONS: Readonly<
       { id: "rules", label: "Review the current rules first" },
     ],
   },
-  "ask-text": {
-    kind: "ask-text",
-    accessibleName: "Text answer",
-    hint: "Type your answer…",
-  },
-  "ask-number": {
-    kind: "ask-number",
-    accessibleName: "Number answer",
-    hint: "Enter a number…",
-  },
+  "ask-text": { kind: "ask-text", accessibleName: "Text answer", hint: "Type your answer…" },
+  "ask-number": { kind: "ask-number", accessibleName: "Number answer", hint: "Enter a number…" },
 };
 
 export const DEMO_PRESENTATION: PlayerPresentation = {
-  package: {
-    accentColor: "#e84c71",
-  },
+  package: { accentColor: "#e84c71" },
 
   media: {
     id: "demo-media-unavailable",
@@ -81,10 +71,7 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
     ambientColor: "#f7cdaf",
   },
 
-  timer: {
-    remainingSeconds: 161,
-    totalSeconds: 300,
-  },
+  timer: { remainingSeconds: 161, totalSeconds: 300 },
 
   speakers: {
     eva: {
@@ -165,10 +152,7 @@ export const INITIAL_TOOL_COLUMNS: readonly PlayerToolColumnState[] = [
 ];
 
 export function createDemoHistoryMessages(count: number): readonly PlayerMessagePresentation[] {
-  const safeCount = Math.min(
-    MAX_DEMO_HISTORY_MESSAGES,
-    Math.max(0, Math.trunc(count)),
-  );
+  const safeCount = Math.min(MAX_DEMO_HISTORY_MESSAGES, Math.max(0, Math.trunc(count)));
   if (safeCount === 0) return [];
   if (safeCount === BASE_MESSAGES.length) return BASE_MESSAGES;
 
@@ -179,9 +163,10 @@ export function createDemoHistoryMessages(count: number): readonly PlayerMessage
     messages.push({
       ...source,
       id: `history-${index + 1}`,
-      text: index < BASE_MESSAGES.length
-        ? source.text
-        : `${source.text} · retained history item ${index + 1}`,
+      text:
+        index < BASE_MESSAGES.length
+          ? source.text
+          : `${source.text} · retained history item ${index + 1}`,
     });
   }
   return messages;

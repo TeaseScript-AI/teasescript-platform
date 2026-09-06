@@ -1,9 +1,5 @@
-import {
-  type InstructionPlan,
-} from "../plan/model.js";
-import {
-  captureInstructionPlan,
-} from "../plan/capture.js";
+import { type InstructionPlan } from "../plan/model.js";
+import { captureInstructionPlan } from "../plan/capture.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
 import { validateCapturedInstructionPlan } from "../plan/validation.js";
 import {
@@ -65,12 +61,7 @@ export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {
 
   const plan = capturePlan(envelope.plan, "$.plan");
   const snapshot = captureSnapshot(envelope.snapshot, plan, "$.snapshot");
-  return Object.freeze({
-    format: CHECKPOINT_FORMAT,
-    version: CHECKPOINT_VERSION,
-    plan,
-    snapshot,
-  });
+  return Object.freeze({ format: CHECKPOINT_FORMAT, version: CHECKPOINT_VERSION, plan, snapshot });
 }
 
 interface CheckpointEnvelope {
@@ -108,7 +99,9 @@ function captureCheckpointEnvelope(value: unknown): CheckpointEnvelope {
     keys.some(
       (key) =>
         typeof key !== "string" ||
-        !CHECKPOINT_KEYS.includes(key as typeof CHECKPOINT_KEYS[number]),
+        !CHECKPOINT_KEYS.includes(
+          /* EVIDENCE: invariant: includes tests membership; it does not assume the external key is accepted. */ key as (typeof CHECKPOINT_KEYS)[number],
+        ),
     )
   ) {
     throw checkpointError(
@@ -124,28 +117,25 @@ function captureCheckpointEnvelope(value: unknown): CheckpointEnvelope {
     try {
       descriptor = Reflect.getOwnPropertyDescriptor(value, key);
     } catch {
-      throw checkpointError(
-        "TSK002",
-        "Checkpoint contains a non-JSON-safe value.",
-        `$.${key}`,
-      );
+      throw checkpointError("TSK002", "Checkpoint contains a non-JSON-safe value.", `$.${key}`);
     }
     if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
-      throw checkpointError(
-        "TSK002",
-        "Checkpoint contains a non-JSON-safe value.",
-        `$.${key}`,
-      );
+      throw checkpointError("TSK002", "Checkpoint contains a non-JSON-safe value.", `$.${key}`);
     }
     captured[key] = descriptor.value;
   }
-  return captured as unknown as CheckpointEnvelope;
+  return {
+    format: captured.format,
+    version: captured.version,
+    plan: captured.plan,
+    snapshot: captured.snapshot,
+  };
 }
 
 export function deserializeCheckpoint(json: string): RuntimeCheckpoint {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(json) as unknown;
+    parsed = JSON.parse(json);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw checkpointError("TSK003", `Checkpoint JSON is invalid: ${message}`, "$.");
@@ -170,11 +160,9 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
       `$.plan${first?.path.slice(1) ?? ""}`,
     );
   }
+  // EVIDENCE: validation: validateCapturedInstructionPlan accepted this JSON-parsed plan above.
   const plan = freezeInstructionPlan(envelope.plan as InstructionPlan);
-  const snapshotValidation = validateCapturedRuntimeSnapshot(
-    envelope.snapshot,
-    plan,
-  );
+  const snapshotValidation = validateCapturedRuntimeSnapshot(envelope.snapshot, plan);
   if (!snapshotValidation.valid) {
     const message = checkpointComponentCaptureMessage(
       snapshotValidation.errors[0] ?? "Runtime snapshot is malformed.",
@@ -189,6 +177,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
     plan,
+    // EVIDENCE: validation: validateCapturedRuntimeSnapshot accepted this snapshot against the validated plan above.
     snapshot: envelope.snapshot as RuntimeSnapshot,
   });
 }
@@ -199,20 +188,14 @@ function capturePlan(value: unknown, path: string): InstructionPlan {
     const first = captured.validation.errors[0];
     throw checkpointError(
       first?.code === "TSC001" ? "TSK001" : "TSK002",
-      checkpointComponentCaptureMessage(
-        first?.message ?? "Instruction plan is malformed.",
-      ),
+      checkpointComponentCaptureMessage(first?.message ?? "Instruction plan is malformed."),
       `${path}${first?.path.slice(1) ?? ""}`,
     );
   }
   return captured.plan;
 }
 
-function captureSnapshot(
-  value: unknown,
-  plan: InstructionPlan,
-  path: string,
-): RuntimeSnapshot {
+function captureSnapshot(value: unknown, plan: InstructionPlan, path: string): RuntimeSnapshot {
   const captured = captureRuntimeSnapshotWithValidatedPlan(value, plan);
   if (!captured.validation.valid || captured.snapshot === null) {
     const message = checkpointComponentCaptureMessage(
@@ -237,10 +220,7 @@ function checkpointComponentCaptureMessage(message: string): string {
   ) {
     return "Checkpoint contains a non-JSON-safe value.";
   }
-  if (
-    message === "Plan contains a cycle." ||
-    message === "Runtime snapshot contains a cycle."
-  ) {
+  if (message === "Plan contains a cycle." || message === "Runtime snapshot contains a cycle.") {
     return "Checkpoint contains a cycle.";
   }
   if (

@@ -1,13 +1,10 @@
-import {
-  computed,
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  type Ref,
-} from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import type { LeftPanelMode, RightPanelMode } from "../../../model.js";
-import { canDockRightRail, toggleLeftPanelMode, toggleRightPanelMode } from "../../../panel-state.js";
+import {
+  canDockRightRail,
+  toggleLeftPanelMode,
+  toggleRightPanelMode,
+} from "../../../panel-state.js";
 
 interface PlayerLayoutElements {
   readonly player: Ref<HTMLElement | null>;
@@ -46,9 +43,9 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
   let resizeObserver: ResizeObserver | null = null;
   let narrowScreen: MediaQueryList | null = null;
 
-  const leftOpen = computed(() => (
-    leftMode.value === "open" || (leftMode.value === "auto" && !narrow.value)
-  ));
+  const leftOpen = computed(
+    () => leftMode.value === "open" || (leftMode.value === "auto" && !narrow.value),
+  );
   const rightDocked = computed(() => rightBacking.value === "docked");
 
   onMounted(() => {
@@ -68,7 +65,11 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
       queueRightCompositionSync();
     });
     const player = elements.player.value;
-    for (const element of [player, player?.querySelector<HTMLElement>(".tool-strip"), player?.querySelector<HTMLElement>(".tool-strip-scroll")]) {
+    for (const element of [
+      player,
+      player?.querySelector<HTMLElement>(".tool-strip"),
+      player?.querySelector<HTMLElement>(".tool-strip-scroll"),
+    ]) {
       if (element !== null && element !== undefined) resizeObserver.observe(element);
     }
 
@@ -193,7 +194,11 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
       ),
     );
     const mediaHeight = layout.open
-      ? constrainedKeyboardMediaHeight(preferredMediaHeight, layout.usableHeight, chrome.value === "overlay")
+      ? constrainedKeyboardMediaHeight(
+          preferredMediaHeight,
+          layout.usableHeight,
+          chrome.value === "overlay",
+        )
       : preferredMediaHeight;
     player.style.setProperty("--media-height", `${Math.max(0, mediaHeight)}px`);
     player.style.setProperty(
@@ -219,17 +224,18 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     const baselineReduction = softwareKeyboardExpected
       ? Math.max(0, (viewportHeightBaselines.get(orientation) ?? viewportHeight) - viewportHeight)
       : 0;
-    const visualViewportReduction = softwareKeyboardExpected && visualViewport !== null
-      ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
-      : 0;
-    const virtualKeyboardRect = softwareKeyboardExpected
-      && fullscreenActive.value
-      && virtualKeyboard !== null
-      ? virtualKeyboard.boundingRect
-      : null;
-    const virtualKeyboardVisible = virtualKeyboardRect !== null
-      && virtualKeyboardRect.width > 0
-      && virtualKeyboardRect.height > 0;
+    const visualViewportReduction =
+      softwareKeyboardExpected && visualViewport !== null
+        ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
+        : 0;
+    const virtualKeyboardRect =
+      softwareKeyboardExpected && fullscreenActive.value && virtualKeyboard !== null
+        ? virtualKeyboard.boundingRect
+        : null;
+    const virtualKeyboardVisible =
+      virtualKeyboardRect !== null &&
+      virtualKeyboardRect.width > 0 &&
+      virtualKeyboardRect.height > 0;
     const baselineHeight = Math.max(
       viewportHeightBaselines.get(orientation) ?? viewportHeight,
       viewportHeight,
@@ -248,7 +254,11 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     return {
       fullscreenHeight: virtualKeyboardVisible ? baselineHeight : null,
       fullscreenInset: fullscreenActive.value && measuredKeyboard ? measuredKeyboardHeight : 0,
-      geometry: virtualKeyboardVisible ? "virtual-keyboard" : measuredKeyboard ? "viewport" : "none",
+      geometry: virtualKeyboardVisible
+        ? "virtual-keyboard"
+        : measuredKeyboard
+          ? "viewport"
+          : "none",
       open: measuredKeyboard,
       usableHeight,
     };
@@ -298,20 +308,23 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     const conversationMinimum = cssPixelValue(style, "--conversation-min-width");
     const stageMinimum = cssPixelValue(style, "--media-height");
     const hasTools = player.querySelector(".tool-strip") !== null;
-    const desiredLeftWidth = hasTools && !narrow.value && leftMode.value !== "closed"
-      ? cssPixelValue(style, "--left-preferred")
-      : 0;
+    const desiredLeftWidth =
+      hasTools && !narrow.value && leftMode.value !== "closed"
+        ? cssPixelValue(style, "--left-preferred")
+        : 0;
     rightLayout.value = canDockRightRail(
       player.clientWidth,
       desiredLeftWidth,
       rightWidth,
       Math.max(conversationMinimum, stageMinimum),
       narrow.value,
-    ) ? "rail" : "stage";
-    rightBacking.value = rightMode.value === "docked"
-      || (rightMode.value === "auto" && rightLayout.value === "rail")
-      ? "docked"
-      : "overlay";
+    )
+      ? "rail"
+      : "stage";
+    rightBacking.value =
+      rightMode.value === "docked" || (rightMode.value === "auto" && rightLayout.value === "rail")
+        ? "docked"
+        : "overlay";
   }
 
   function syncLeftPreferredWidth(): void {
@@ -329,7 +342,7 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     const raw = getComputedStyle(player).getPropertyValue(property).trim();
     if (raw.endsWith("dvh")) {
       const percent = Number.parseFloat(raw);
-      if (Number.isFinite(percent)) return `${Math.max(0, usableHeight * percent / 100)}px`;
+      if (Number.isFinite(percent)) return `${Math.max(0, (usableHeight * percent) / 100)}px`;
     }
     return raw.length > 0 ? raw : "0px";
   }
@@ -376,9 +389,7 @@ function currentUsableViewportHeight(): number {
   const visualViewport = window.visualViewport;
   return Math.max(
     0,
-    visualViewport === null
-      ? window.innerHeight
-      : visualViewport.height + visualViewport.offsetTop,
+    visualViewport === null ? window.innerHeight : visualViewport.height + visualViewport.offsetTop,
   );
 }
 
@@ -389,6 +400,9 @@ function viewportOrientation(): string {
 }
 
 function browserVirtualKeyboard(): BrowserVirtualKeyboard | null {
-  const extendedNavigator = navigator as Navigator & { readonly virtualKeyboard?: BrowserVirtualKeyboard };
+  // EVIDENCE: external contract: VirtualKeyboard is an optional browser extension of Navigator, and the optional property is feature-detected before use.
+  const extendedNavigator = navigator as Navigator & {
+    readonly virtualKeyboard?: BrowserVirtualKeyboard;
+  };
   return extendedNavigator.virtualKeyboard ?? null;
 }

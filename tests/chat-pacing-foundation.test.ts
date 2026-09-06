@@ -28,15 +28,8 @@ function plan() {
   return compiled.plan!;
 }
 
-function settings(
-  overrides: Partial<ChatPacingSettings> = {},
-): ChatPacingSettings {
-  return {
-    baseDelayMs: 1500,
-    delayPerWordMs: 300,
-    delayPerCharacterMs: 30,
-    ...overrides,
-  };
+function settings(overrides: Partial<ChatPacingSettings> = {}): ChatPacingSettings {
+  return { baseDelayMs: 1500, delayPerWordMs: 300, delayPerCharacterMs: 30, ...overrides };
 }
 
 test("fresh runtime captures default and explicit chat pacing settings", () => {
@@ -85,17 +78,16 @@ test("captured settings clone, validate, and checkpoint through JSON", () => {
   assert.deepEqual(cloned.chatPacingSettings, snapshot.chatPacingSettings);
   assert.equal(validateRuntimeSnapshot(cloned, compiled).valid, true);
 
-  const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, snapshot)),
-  );
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
   assert.deepEqual(restored.snapshot.chatPacingSettings, snapshot.chatPacingSettings);
 });
 
 test("snapshot and checkpoint reject malformed persisted chat pacing settings", () => {
   const compiled = plan();
-  const checkpoint = JSON.parse(serializeCheckpoint(
-    createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)),
-  )) as { snapshot: { chatPacingSettings: Record<string, unknown> } };
+  // EVIDENCE: fixture: parse a serialized checkpoint into the persisted shape used for malformed pacing mutations.
+  const checkpoint = JSON.parse(
+    serializeCheckpoint(createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled))),
+  ) as { snapshot: { chatPacingSettings: Record<string, unknown> } };
   checkpoint.snapshot.chatPacingSettings.baseDelayMs = -1;
 
   assert.equal(validateRuntimeSnapshot(checkpoint.snapshot, compiled).valid, false);
@@ -113,19 +105,17 @@ test("captured pacing settings and representable pacing arithmetic retain the sa
     Number.MAX_SAFE_INTEGER,
   );
   assert.equal(
-    calculateSmartPacingDurationMs("", settings({
-      baseDelayMs: Number.MAX_SAFE_INTEGER,
-      delayPerWordMs: 0,
-      delayPerCharacterMs: 0,
-    })),
+    calculateSmartPacingDurationMs(
+      "",
+      settings({ baseDelayMs: Number.MAX_SAFE_INTEGER, delayPerWordMs: 0, delayPerCharacterMs: 0 }),
+    ),
     Number.MAX_SAFE_INTEGER,
   );
   assert.equal(
-    calculateSmartPacingDurationMs("word", settings({
-      baseDelayMs: 0,
-      delayPerWordMs: Number.MAX_SAFE_INTEGER,
-      delayPerCharacterMs: 0,
-    })),
+    calculateSmartPacingDurationMs(
+      "word",
+      settings({ baseDelayMs: 0, delayPerWordMs: Number.MAX_SAFE_INTEGER, delayPerCharacterMs: 0 }),
+    ),
     Number.MAX_SAFE_INTEGER,
   );
   assert.equal(calculatePacingDeadlineMs(0, Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
@@ -133,6 +123,7 @@ test("captured pacing settings and representable pacing arithmetic retain the sa
 
 test("snapshot and checkpoint reject their previous versions", () => {
   const compiled = plan();
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: expose the otherwise readonly snapshot version to test rejection of an obsolete version.
   const snapshot = createFreshRuntimeSnapshot(compiled) as unknown as { version: number };
   snapshot.version = RUNTIME_SNAPSHOT_VERSION - 1;
   assert.deepEqual(validateRuntimeSnapshot(snapshot, compiled).errors, [
@@ -140,21 +131,26 @@ test("snapshot and checkpoint reject their previous versions", () => {
   ]);
 
   const checkpoint = createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled));
-  assert.throws(() => deserializeCheckpoint(JSON.stringify({
-    ...checkpoint,
-    version: CHECKPOINT_VERSION - 1,
-  })));
+  assert.throws(() =>
+    deserializeCheckpoint(JSON.stringify({ ...checkpoint, version: CHECKPOINT_VERSION - 1 })),
+  );
 });
 
 test("smart pacing duration counts words, whitespace, and Unicode code points", () => {
   assert.equal(calculateSmartPacingDurationMs("one two", settings()), 2100);
   assert.equal(calculateSmartPacingDurationMs(" one\t\ntwo  ", settings()), 2100);
   assert.equal(
-    calculateSmartPacingDurationMs("😀", settings({ baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 10 })),
+    calculateSmartPacingDurationMs(
+      "😀",
+      settings({ baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 10 }),
+    ),
     10,
   );
   assert.equal(
-    calculateSmartPacingDurationMs("anything", settings({ baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 })),
+    calculateSmartPacingDurationMs(
+      "anything",
+      settings({ baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 }),
+    ),
     0,
   );
 });
@@ -171,14 +167,18 @@ test("smart pacing counts large text without changing word semantics", () => {
 });
 
 test("smart pacing duration rejects multiplication and addition overflow", () => {
-  assert.throws(() => calculateSmartPacingDurationMs(
-    "aa",
-    settings({ baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: Number.MAX_SAFE_INTEGER }),
-  ));
-  assert.throws(() => calculateSmartPacingDurationMs(
-    "a",
-    settings({ baseDelayMs: Number.MAX_SAFE_INTEGER, delayPerWordMs: 1, delayPerCharacterMs: 0 }),
-  ));
+  assert.throws(() =>
+    calculateSmartPacingDurationMs(
+      "aa",
+      settings({ baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: Number.MAX_SAFE_INTEGER }),
+    ),
+  );
+  assert.throws(() =>
+    calculateSmartPacingDurationMs(
+      "a",
+      settings({ baseDelayMs: Number.MAX_SAFE_INTEGER, delayPerWordMs: 1, delayPerCharacterMs: 0 }),
+    ),
+  );
 });
 
 test("exact pacing seconds preserve fractional milliseconds and reject unsupported values", () => {
@@ -186,7 +186,14 @@ test("exact pacing seconds preserve fractional milliseconds and reject unsupport
   assert.equal(secondsToPacingMilliseconds(2), 2000);
   assert.equal(secondsToPacingMilliseconds(1.5), 1500);
   assert.equal(secondsToPacingMilliseconds(0.0005), 0.5);
-  for (const value of [-1, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER, Number.MAX_VALUE, "1"]) {
+  for (const value of [
+    -1,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER,
+    Number.MAX_VALUE,
+    "1",
+  ]) {
     assert.throws(() => secondsToPacingMilliseconds(value));
   }
 });

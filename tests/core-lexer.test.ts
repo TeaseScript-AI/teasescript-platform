@@ -113,11 +113,6 @@ test("skips line and block comments", () => {
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(
     result.tokens.map((token) => token.kind),
-    [
-      TokenKind.KeywordLet,
-      TokenKind.Newline,
-      TokenKind.Identifier,
-      TokenKind.EndOfFile,
-    ],
+    [TokenKind.KeywordLet, TokenKind.Newline, TokenKind.Identifier, TokenKind.EndOfFile],
   );
 });

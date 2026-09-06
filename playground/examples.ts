@@ -19,9 +19,7 @@ export const PLAYGROUND_EXAMPLES = Object.freeze({
 
 export type PlaygroundExampleName = keyof typeof PLAYGROUND_EXAMPLES;
 
-export function isPlaygroundExampleName(
-  value: string,
-): value is PlaygroundExampleName {
+export function isPlaygroundExampleName(value: string): value is PlaygroundExampleName {
   return Object.hasOwn(PLAYGROUND_EXAMPLES, value);
 }
 

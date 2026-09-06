@@ -11,11 +11,7 @@ import {
   serializeCheckpoint,
   type RuntimeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import {
-  executeInstruction,
-  run,
-  RuntimeDataError,
-} from "../src/runtime/engine.js";
+import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine.js";
 import {
   createFreshRuntimeSnapshot,
   validateRuntimeSnapshot,
@@ -49,16 +45,8 @@ test("rejects a fresh non-empty snapshot changed only to halted", () => {
 
 test("accepts and round-trips every runtime-produced halted shape", () => {
   const scenarios = [
-    {
-      name: "normal root completion",
-      source: 'say "done"',
-      expectedKinds: ["say", "complete"],
-    },
-    {
-      name: "empty root",
-      source: "",
-      expectedKinds: [],
-    },
+    { name: "normal root completion", source: 'say "done"', expectedKinds: ["say", "complete"] },
+    { name: "empty root", source: "", expectedKinds: [] },
     {
       name: "root exit",
       source: 'say "before"\nexit\nsay "after"',
@@ -66,12 +54,7 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
     },
     {
       name: "function exit",
-      source: [
-        "function stop { exit }",
-        'say "before"',
-        "stop()",
-        'say "after"',
-      ].join("\n"),
+      source: ["function stop { exit }", 'say "before"', "stop()", 'say "after"'].join("\n"),
       expectedKinds: ["say", "exit"],
     },
     {
@@ -93,38 +76,41 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
     const compiled = plan(scenario.source);
     const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
     assert.equal(result.snapshot.status, "halted", scenario.name);
-    assert.deepEqual(result.events.map((event) => event.kind), scenario.expectedKinds, scenario.name);
+    assert.deepEqual(
+      result.events.map((event) => event.kind),
+      scenario.expectedKinds,
+      scenario.name,
+    );
     assert.equal(validateRuntimeSnapshot(result.snapshot, compiled).valid, true, scenario.name);
 
     const restored = deserializeCheckpoint(
       serializeCheckpoint(createCheckpoint(compiled, result.snapshot)),
     );
     assert.deepEqual(restored.snapshot, result.snapshot, scenario.name);
-    assert.equal(validateRuntimeSnapshot(restored.snapshot, restored.plan).valid, true, scenario.name);
+    assert.equal(
+      validateRuntimeSnapshot(restored.snapshot, restored.plan).valid,
+      true,
+      scenario.name,
+    );
   }
 });
 
 test("keeps valid halted execution resume-equivalent", () => {
-  const result = assertRuntimeResumeEquivalent([
-    "function inner { return 2 }",
-    'say `value:${inner()}`',
-    "exit",
-  ].join("\n"), {
-    scenarioName: "runtime snapshot invariant resume equivalence",
-  });
+  const result = assertRuntimeResumeEquivalent(
+    ["function inner { return 2 }", "say `value:${inner()}`", "exit"].join("\n"),
+    { scenarioName: "runtime snapshot invariant resume equivalence" },
+  );
 
   assert.equal(result.finalSnapshot.status, "halted");
-  assert.deepEqual(result.events.map((event) => event.kind), ["say", "exit"]);
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["say", "exit"],
+  );
 });
 
 test("validates allocator counters across the JavaScript safe-integer boundary", () => {
   const compiled = plan("exit");
-  const fields = [
-    "nextEventSequence",
-    "nextScopeId",
-    "nextSpeakerId",
-    "nextCallFrameId",
-  ] as const;
+  const fields = ["nextEventSequence", "nextScopeId", "nextSpeakerId", "nextCallFrameId"] as const;
   const accepted = [1, MAX_SAFE - 1, MAX_SAFE];
   const rejected = [
     { name: "MAX_SAFE_INTEGER + 1", value: MAX_SAFE + 1 },
@@ -198,10 +184,7 @@ test("rejects exhausted scope, speaker, and call-frame allocators before collisi
   scopeSnapshot.nextScopeId = MAX_SAFE;
   scopeSnapshot = executeInstruction(scopePlan, scopeSnapshot).snapshot;
   assert.equal(scopePlan.instructions[scopeSnapshot.nextInstruction]?.kind, "enterScope");
-  assert.throws(
-    () => executeInstruction(scopePlan, scopeSnapshot),
-    allocatorError("nextScopeId"),
-  );
+  assert.throws(() => executeInstruction(scopePlan, scopeSnapshot), allocatorError("nextScopeId"));
   assert.equal(scopeSnapshot.frames.length, 1);
   assert.equal(scopeSnapshot.nextScopeId, MAX_SAFE);
 
@@ -236,6 +219,7 @@ test("requires safe integers for nested runtime identities, positions, and progr
     createFreshRuntimeSnapshot(speakerPlan),
   ).snapshot;
   const speakerSnapshot = structuredClone(declared);
+  // EVIDENCE: fixture: expose the readonly speaker ID on a cloned snapshot for unsafe-integer validation.
   (speakerSnapshot.speakers[0] as { id: number }).id = 2 ** 53;
   assert.equal(validateRuntimeSnapshot(speakerSnapshot, speakerPlan).valid, false);
 
@@ -243,6 +227,7 @@ test("requires safe integers for nested runtime identities, positions, and progr
   let enteredScope = createFreshRuntimeSnapshot(scopePlan);
   enteredScope = executeInstruction(scopePlan, enteredScope).snapshot;
   enteredScope = executeInstruction(scopePlan, enteredScope).snapshot;
+  // EVIDENCE: fixture: expose the readonly scope ID on an active snapshot for unsafe-integer validation.
   (enteredScope.frames[1] as { id: number }).id = 2 ** 53;
   enteredScope.nextScopeId = MAX_SAFE;
   assert.equal(validateRuntimeSnapshot(enteredScope, scopePlan).valid, false);
@@ -252,11 +237,13 @@ test("requires safe integers for nested runtime identities, positions, and progr
   while (activeCall.callFrames.length === 0) {
     activeCall = executeInstruction(callPlan, activeCall).snapshot;
   }
+  // EVIDENCE: fixture: expose the readonly call-frame ID on an active snapshot for unsafe-integer validation.
   (activeCall.callFrames[0] as { id: number }).id = 2 ** 53;
   activeCall.nextCallFrameId = MAX_SAFE;
   assert.equal(validateRuntimeSnapshot(activeCall, callPlan).valid, false);
 
   const parameterSnapshot = structuredClone(activeCall);
+  // EVIDENCE: fixture: expose the readonly call-frame ID to isolate malformed parameter-state validation.
   (parameterSnapshot.callFrames[0] as { id: number }).id = 1;
   parameterSnapshot.nextCallFrameId = 2;
   parameterSnapshot.callFrames[0]!.parameterState.parameterIndex = 2 ** 53;
@@ -266,6 +253,7 @@ test("requires safe integers for nested runtime identities, positions, and progr
   const failed = run(failedPlan, createFreshRuntimeSnapshot(failedPlan)).snapshot;
   assert.equal(failed.status, "failed");
   const spanSnapshot = structuredClone(failed);
+  // EVIDENCE: fixture: expose the readonly failure offset for unsafe source-span validation.
   (spanSnapshot.failure!.span.start as { offset: number }).offset = 2 ** 53;
   assert.equal(validateRuntimeSnapshot(spanSnapshot, failedPlan).valid, false);
 });
@@ -306,7 +294,10 @@ function mutableCheckpoint(checkpoint: RuntimeCheckpoint): {
 }
 
 function assertCheckpointRejected(value: unknown, code: string): void {
-  assert.throws(() => restoreCheckpoint(value), (error: unknown) => {
-    return error instanceof CheckpointError && error.info.code === code;
-  });
+  assert.throws(
+    () => restoreCheckpoint(value),
+    (error: unknown) => {
+      return error instanceof CheckpointError && error.info.code === code;
+    },
+  );
 }

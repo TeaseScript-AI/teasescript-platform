@@ -17,27 +17,22 @@ export interface SourceSpan {
 /**
  * Creates a zero-based source position. Offsets count UTF-16 code units.
  */
-export function createSourcePosition(
-  offset: number,
-  line: number,
-  column: number,
-): SourcePosition {
+export function createSourcePosition(offset: number, line: number, column: number): SourcePosition {
   assertNonNegativeInteger(offset, "offset");
   assertNonNegativeInteger(line, "line");
   assertNonNegativeInteger(column, "column");
 
+  // EVIDENCE: invariant: the checked integer coordinates establish this constructor-only, compile-time brand.
   return Object.freeze({ offset, line, column }) as SourcePosition;
 }
 
 /** Creates a half-open source span from start inclusive to end exclusive. */
-export function createSourceSpan(
-  start: SourcePosition,
-  end: SourcePosition,
-): SourceSpan {
+export function createSourceSpan(start: SourcePosition, end: SourcePosition): SourceSpan {
   if (end.offset < start.offset) {
     throw new RangeError("A source span cannot end before it starts.");
   }
 
+  // EVIDENCE: invariant: ordered endpoints are copied through the branded position constructor below.
   return Object.freeze({
     start: copySourcePosition(start),
     end: copySourcePosition(end),
@@ -45,10 +40,7 @@ export function createSourceSpan(
 }
 
 /** Creates the smallest source span containing every supplied span. */
-export function combineSourceSpans(
-  first: SourceSpan,
-  ...rest: readonly SourceSpan[]
-): SourceSpan {
+export function combineSourceSpans(first: SourceSpan, ...rest: readonly SourceSpan[]): SourceSpan {
   const validatedFirst = createSourceSpan(first.start, first.end);
   let start = validatedFirst.start;
   let end = validatedFirst.end;

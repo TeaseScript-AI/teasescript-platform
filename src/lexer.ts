@@ -1,13 +1,5 @@
-import {
-  createDiagnostic,
-  DiagnosticSeverity,
-  type Diagnostic,
-} from "./diagnostics.js";
-import {
-  createSourcePosition,
-  createSourceSpan,
-  type SourcePosition,
-} from "./source.js";
+import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
+import { createSourcePosition, createSourceSpan, type SourcePosition } from "./source.js";
 import { createToken, TokenKind, type Token } from "./token.js";
 
 export interface LexResult {
@@ -159,13 +151,7 @@ class Lexer {
     const lexeme = this.source.slice(startOffset, this.#offset);
     const kind = keywordKinds.get(lexeme);
     if (kind === undefined) {
-      this.#emitValuedToken(
-        TokenKind.Identifier,
-        startOffset,
-        start,
-        this.#position(),
-        lexeme,
-      );
+      this.#emitValuedToken(TokenKind.Identifier, startOffset, start, this.#position(), lexeme);
     } else {
       this.#emitToken(kind, startOffset, start, this.#position());
     }
@@ -204,13 +190,7 @@ class Lexer {
     }
 
     const lexeme = this.source.slice(startOffset, this.#offset);
-    this.#emitValuedToken(
-      TokenKind.NumberLiteral,
-      startOffset,
-      start,
-      this.#position(),
-      lexeme,
-    );
+    this.#emitValuedToken(TokenKind.NumberLiteral, startOffset, start, this.#position(), lexeme);
   }
 
   #scanRangeToken(): void {
@@ -218,9 +198,7 @@ class Lexer {
     const start = this.#position();
     this.#advanceCodeUnit();
     this.#advanceCodeUnit();
-    const kind = this.#peek() === "="
-      ? TokenKind.RangeInclusive
-      : TokenKind.RangeExclusive;
+    const kind = this.#peek() === "=" ? TokenKind.RangeInclusive : TokenKind.RangeExclusive;
     if (kind === TokenKind.RangeInclusive) this.#advanceCodeUnit();
     this.#emitToken(kind, startOffset, start, this.#position());
   }
@@ -290,13 +268,7 @@ class Lexer {
     while (!this.#isAtEnd()) {
       if (this.#peek() === '"') {
         this.#advanceCodeUnit();
-        this.#emitValuedToken(
-          TokenKind.StringLiteral,
-          startOffset,
-          start,
-          this.#position(),
-          value,
-        );
+        this.#emitValuedToken(TokenKind.StringLiteral, startOffset, start, this.#position(), value);
         return;
       }
       if (this.#peek() === "\\") {
@@ -313,13 +285,7 @@ class Lexer {
       value += this.#advanceCodePoint();
     }
 
-    this.#emitValuedToken(
-      TokenKind.StringLiteral,
-      startOffset,
-      start,
-      this.#position(),
-      value,
-    );
+    this.#emitValuedToken(TokenKind.StringLiteral, startOffset, start, this.#position(), value);
     this.#report(
       diagnosticCodes.unterminatedString,
       "Unterminated string literal.",
@@ -332,12 +298,7 @@ class Lexer {
     const templateOffset = this.#offset;
     const templateStart = this.#position();
     this.#advanceCodeUnit();
-    this.#emitToken(
-      TokenKind.TemplateStart,
-      templateOffset,
-      templateStart,
-      this.#position(),
-    );
+    this.#emitToken(TokenKind.TemplateStart, templateOffset, templateStart, this.#position());
 
     let textOffset = this.#offset;
     let textStart = this.#position();
@@ -348,12 +309,7 @@ class Lexer {
         const endOffset = this.#offset;
         const endStart = this.#position();
         this.#advanceCodeUnit();
-        this.#emitToken(
-          TokenKind.TemplateEnd,
-          endOffset,
-          endStart,
-          this.#position(),
-        );
+        this.#emitToken(TokenKind.TemplateEnd, endOffset, endStart, this.#position());
         return;
       }
       if (this.#peek() === "$" && this.#peek(1) === "{") {
@@ -397,21 +353,14 @@ class Lexer {
     );
   }
 
-  #scanInterpolation(
-    interpolationStart: SourcePosition,
-  ): "closed" | "templateEnd" | "eof" {
+  #scanInterpolation(interpolationStart: SourcePosition): "closed" | "templateEnd" | "eof" {
     let braceDepth = 0;
     while (!this.#isAtEnd()) {
       if (this.#peek() === "}" && braceDepth === 0) {
         const endOffset = this.#offset;
         const endStart = this.#position();
         this.#advanceCodeUnit();
-        this.#emitToken(
-          TokenKind.InterpolationEnd,
-          endOffset,
-          endStart,
-          this.#position(),
-        );
+        this.#emitToken(TokenKind.InterpolationEnd, endOffset, endStart, this.#position());
         return "closed";
       }
       if (this.#peek() === "`" && !this.#canStartNestedTemplate()) {
@@ -485,11 +434,7 @@ class Lexer {
       );
       return "";
     }
-    if (
-      context === "template" &&
-      this.#peek() === "$" &&
-      this.#peek(1) === "{"
-    ) {
+    if (context === "template" && this.#peek() === "$" && this.#peek(1) === "{") {
       this.#advanceCodeUnit();
       this.#advanceCodeUnit();
       return "${";
@@ -507,19 +452,9 @@ class Lexer {
     return escaped;
   }
 
-  #emitTemplateText(
-    startOffset: number,
-    start: SourcePosition,
-    value: string,
-  ): void {
+  #emitTemplateText(startOffset: number, start: SourcePosition, value: string): void {
     if (this.#offset !== startOffset) {
-      this.#emitValuedToken(
-        TokenKind.TemplateText,
-        startOffset,
-        start,
-        this.#position(),
-        value,
-      );
+      this.#emitValuedToken(TokenKind.TemplateText, startOffset, start, this.#position(), value);
     }
   }
 
@@ -542,6 +477,7 @@ class Lexer {
   ): void {
     this.#tokens.push(
       createToken({
+        // EVIDENCE: invariant: literal/identifier scanners create their payload tokens separately from this emitter.
         kind: kind as Exclude<
           TokenKind,
           | typeof TokenKind.Identifier
@@ -583,12 +519,7 @@ class Lexer {
     end: SourcePosition,
   ): void {
     this.#diagnostics.push(
-      createDiagnostic(
-        DiagnosticSeverity.Error,
-        code,
-        message,
-        createSourceSpan(start, end),
-      ),
+      createDiagnostic(DiagnosticSeverity.Error, code, message, createSourceSpan(start, end)),
     );
   }
 
@@ -603,9 +534,7 @@ class Lexer {
       indentationLength += 1;
       offset -= 1;
     }
-    return indentationLength === 0
-      ? value
-      : value.slice(0, -indentationLength);
+    return indentationLength === 0 ? value : value.slice(0, -indentationLength);
   }
 
   #consumeNewline(): void {
@@ -643,10 +572,7 @@ class Lexer {
   }
 
   #isNewline(): boolean {
-    return (
-      this.#peek() === "\n" ||
-      (this.#peek() === "\r" && this.#peek(1) === "\n")
-    );
+    return this.#peek() === "\n" || (this.#peek() === "\r" && this.#peek(1) === "\n");
   }
 }
 
@@ -668,10 +594,7 @@ const singleCharacterKinds: Readonly<Record<string, TokenKind>> = {
   "%": TokenKind.Percent,
 };
 
-function escapeValue(
-  escaped: string,
-  context: "string" | "template",
-): string | undefined {
+function escapeValue(escaped: string, context: "string" | "template"): string | undefined {
   switch (escaped) {
     case "\\":
       return "\\";

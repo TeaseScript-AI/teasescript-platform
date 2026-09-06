@@ -7,38 +7,25 @@ test("parses an empty immutable program", () => {
   const result = parse("");
 
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.program, {
-    kind: "program",
-    statements: [],
-    span: sourceSpan("", 0, 0),
-  });
+  assert.deepEqual(result.program, { kind: "program", statements: [], span: sourceSpan("", 0, 0) });
   assert.equal(Object.isFrozen(result), true);
   assert.equal(Object.isFrozen(result.program), true);
   assert.equal(Object.isFrozen(result.program.statements), true);
 });
 
 test("parses a speaker declaration with exact nested spans", () => {
-  const source =
-    'speaker mistressVera {\n    displayName: "Mistress Vera"\n}';
+  const source = 'speaker mistressVera {\n    displayName: "Mistress Vera"\n}';
   const result = parse(source);
   const statement = result.program.statements[0];
 
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(statement, {
     kind: "speakerDeclaration",
-    name: {
-      kind: "identifier",
-      name: "mistressVera",
-      span: sourceSpan(source, 8, 20),
-    },
+    name: { kind: "identifier", name: "mistressVera", span: sourceSpan(source, 8, 20) },
     properties: [
       {
         kind: "speakerProperty",
-        name: {
-          kind: "identifier",
-          name: "displayName",
-          span: sourceSpan(source, 27, 38),
-        },
+        name: { kind: "identifier", name: "displayName", span: sourceSpan(source, 27, 38) },
         value: {
           kind: "stringLiteral",
           raw: '"Mistress Vera"',
@@ -52,8 +39,7 @@ test("parses a speaker declaration with exact nested spans", () => {
   });
   assert.equal(Object.isFrozen(statement), true);
   assert.equal(
-    statement?.kind === "speakerDeclaration" &&
-      Object.isFrozen(statement.properties),
+    statement?.kind === "speakerDeclaration" && Object.isFrozen(statement.properties),
     true,
   );
 });
@@ -69,19 +55,14 @@ test("distinguishes a speaker setter from a declaration using lookahead", () => 
   );
   assert.deepEqual(result.program.statements[0], {
     kind: "speakerSetterStatement",
-    speaker: {
-      kind: "identifier",
-      name: "mistressVera",
-      span: sourceSpan(source, 8, 20),
-    },
+    speaker: { kind: "identifier", name: "mistressVera", span: sourceSpan(source, 8, 20) },
     span: sourceSpan(source, 0, 20),
   });
   assert.deepEqual(result.program.statements[1]?.span, sourceSpan(source, 21, 39));
 });
 
 test("parses say, say as, and exit statements", () => {
-  const source =
-    'say "Kneel."\nsay as cashier "Your total is five euros."\nexit';
+  const source = 'say "Kneel."\nsay as cashier "Your total is five euros."\nexit';
   const result = parse(source);
 
   assert.deepEqual(result.diagnostics, []);
@@ -101,11 +82,7 @@ test("parses say, say as, and exit statements", () => {
     },
     {
       kind: "sayStatement",
-      speaker: {
-        kind: "identifier",
-        name: "cashier",
-        span: sourceSpan(source, 20, 27),
-      },
+      speaker: { kind: "identifier", name: "cashier", span: sourceSpan(source, 20, 27) },
       skipPolicy: null,
       value: {
         kind: "stringLiteral",
@@ -116,10 +93,7 @@ test("parses say, say as, and exit statements", () => {
       pacing: null,
       span: sourceSpan(source, 13, 55),
     },
-    {
-      kind: "exitStatement",
-      span: sourceSpan(source, 56, 60),
-    },
+    { kind: "exitStatement", span: sourceSpan(source, 56, 60) },
   ]);
 });
 
@@ -140,7 +114,7 @@ test("parses say pacing and skip syntax with pacing spans", () => {
   );
   assert.deepEqual(first?.span, sourceSpan(source, 0, source.indexOf("\n")));
   assert.equal(second?.kind === "sayStatement" ? second.pacing : null, "instant");
-  assert.deepEqual(second?.span, sourceSpan(source, source.indexOf("say \"Now\""), source.length));
+  assert.deepEqual(second?.span, sourceSpan(source, source.indexOf('say "Now"'), source.length));
 });
 
 test("treats say skip words as modifiers only when the existing expression cannot finish", () => {
@@ -165,43 +139,50 @@ test("treats say skip words as modifiers only when the existing expression canno
     (statement): statement is Extract<typeof statement, { kind: "sayStatement" }> =>
       statement.kind === "sayStatement",
   );
-  assert.deepEqual(statements.map((statement) => statement.skipPolicy), [
-    "skippable",
-    "unskippable",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-  ]);
-  assert.deepEqual(statements.slice(2).map((statement) => statement.value.kind), [
-    "identifier",
-    "identifier",
-    "binaryExpression",
-    "identifier",
-    "identifier",
-    "indexExpression",
-    "callExpression",
-    "propertyAccessExpression",
-    "indexExpression",
-    "indexExpression",
-  ]);
+  assert.deepEqual(
+    statements.map((statement) => statement.skipPolicy),
+    ["skippable", "unskippable", null, null, null, null, null, null, null, null, null, null],
+  );
+  assert.deepEqual(
+    statements.slice(2).map((statement) => statement.value.kind),
+    [
+      "identifier",
+      "identifier",
+      "binaryExpression",
+      "identifier",
+      "identifier",
+      "indexExpression",
+      "callExpression",
+      "propertyAccessExpression",
+      "indexExpression",
+      "indexExpression",
+    ],
+  );
   assert.equal(statements[5]?.pacing, "instant");
   assert.equal(statements[11]?.pacing, "instant");
-  assert.deepEqual(statements[4]?.value.span, sourceSpan(source, source.indexOf("skippable + suffix"), source.indexOf("skippable + suffix") + "skippable + suffix".length));
+  assert.deepEqual(
+    statements[4]?.value.span,
+    sourceSpan(
+      source,
+      source.indexOf("skippable + suffix"),
+      source.indexOf("skippable + suffix") + "skippable + suffix".length,
+    ),
+  );
   const indexedStart = source.lastIndexOf("skippable[0]");
-  assert.deepEqual(statements[11]?.value.span, sourceSpan(source, indexedStart, indexedStart + "skippable[0]".length));
+  assert.deepEqual(
+    statements[11]?.value.span,
+    sourceSpan(source, indexedStart, indexedStart + "skippable[0]".length),
+  );
 });
 
 test("rejects missing say pacing expressions", () => {
   const result = parse('say "later",');
   assert.equal(result.program.statements.length, 0);
-  assert.ok(result.diagnostics.some((diagnostic) => diagnostic.message === "Expected a pacing value after ','."));
+  assert.ok(
+    result.diagnostics.some(
+      (diagnostic) => diagnostic.message === "Expected a pacing value after ','.",
+    ),
+  );
 });
 
 test("preserves template text and identifier interpolation", () => {
@@ -216,27 +197,13 @@ test("preserves template text and identifier interpolation", () => {
     value: {
       kind: "templateLiteral",
       parts: [
-        {
-          kind: "templateText",
-          raw: "Hello ",
-          value: "Hello ",
-          span: sourceSpan(source, 5, 11),
-        },
+        { kind: "templateText", raw: "Hello ", value: "Hello ", span: sourceSpan(source, 5, 11) },
         {
           kind: "templateInterpolation",
-          expression: {
-            kind: "identifier",
-            name: "player",
-            span: sourceSpan(source, 13, 19),
-          },
+          expression: { kind: "identifier", name: "player", span: sourceSpan(source, 13, 19) },
           span: sourceSpan(source, 11, 20),
         },
-        {
-          kind: "templateText",
-          raw: "!",
-          value: "!",
-          span: sourceSpan(source, 20, 21),
-        },
+        { kind: "templateText", raw: "!", value: "!", span: sourceSpan(source, 20, 21) },
       ],
       span: sourceSpan(source, 4, 22),
     },
@@ -252,10 +219,7 @@ test("builds left-associated chained property access in interpolation", () => {
 
   assert.deepEqual(result.diagnostics, []);
   assert.equal(statement?.kind, "sayStatement");
-  if (
-    statement?.kind !== "sayStatement" ||
-    statement.value.kind !== "templateLiteral"
-  ) {
+  if (statement?.kind !== "sayStatement" || statement.value.kind !== "templateLiteral") {
     assert.fail("Expected a template say statement.");
   }
 
@@ -266,23 +230,11 @@ test("builds left-associated chained property access in interpolation", () => {
       kind: "propertyAccessExpression",
       object: {
         kind: "propertyAccessExpression",
-        object: {
-          kind: "identifier",
-          name: "player",
-          span: sourceSpan(source, 13, 19),
-        },
-        property: {
-          kind: "identifier",
-          name: "profile",
-          span: sourceSpan(source, 20, 27),
-        },
+        object: { kind: "identifier", name: "player", span: sourceSpan(source, 13, 19) },
+        property: { kind: "identifier", name: "profile", span: sourceSpan(source, 20, 27) },
         span: sourceSpan(source, 13, 27),
       },
-      property: {
-        kind: "identifier",
-        name: "name",
-        span: sourceSpan(source, 28, 32),
-      },
+      property: { kind: "identifier", name: "name", span: sourceSpan(source, 28, 32) },
       span: sourceSpan(source, 13, 32),
     },
     span: sourceSpan(source, 11, 33),
@@ -290,17 +242,13 @@ test("builds left-associated chained property access in interpolation", () => {
 });
 
 test("parses the contextual speaker reference in interpolation", () => {
-  const source =
-    "say as mistressVera `You will obey your ${speaker.title}.`";
+  const source = "say as mistressVera `You will obey your ${speaker.title}.`";
   const result = parse(source);
   const statement = result.program.statements[0];
 
   assert.deepEqual(result.diagnostics, []);
   assert.equal(statement?.kind, "sayStatement");
-  if (
-    statement?.kind !== "sayStatement" ||
-    statement.value.kind !== "templateLiteral"
-  ) {
+  if (statement?.kind !== "sayStatement" || statement.value.kind !== "templateLiteral") {
     assert.fail("Expected a template say statement.");
   }
 
@@ -308,16 +256,8 @@ test("parses the contextual speaker reference in interpolation", () => {
     kind: "templateInterpolation",
     expression: {
       kind: "propertyAccessExpression",
-      object: {
-        kind: "identifier",
-        name: "speaker",
-        span: sourceSpan(source, 42, 49),
-      },
-      property: {
-        kind: "identifier",
-        name: "title",
-        span: sourceSpan(source, 50, 55),
-      },
+      object: { kind: "identifier", name: "speaker", span: sourceSpan(source, 42, 49) },
+      property: { kind: "identifier", name: "title", span: sourceSpan(source, 50, 55) },
       span: sourceSpan(source, 42, 55),
     },
     span: sourceSpan(source, 40, 56),
@@ -360,14 +300,11 @@ test("preserves decoded multiline string and template values", () => {
   );
 });
 
-function sourceSpan(source: string, start: number, end: number): object {
-  return {
-    start: sourcePosition(source, start),
-    end: sourcePosition(source, end),
-  };
+function sourceSpan(source: string, start: number, end: number) {
+  return { start: sourcePosition(source, start), end: sourcePosition(source, end) };
 }
 
-function sourcePosition(source: string, offset: number): object {
+function sourcePosition(source: string, offset: number) {
   let line = 0;
   let column = 0;
 

@@ -32,11 +32,7 @@ import {
   renderPresentation,
   renderToolColumns,
 } from "./render.js";
-import {
-  addToolColumn,
-  closeToolColumn,
-  selectToolColumn,
-} from "./tool-columns.js";
+import { addToolColumn, closeToolColumn, selectToolColumn } from "./tool-columns.js";
 import { createTranscriptController } from "./transcript-controller.js";
 import { createRightRailLayoutController } from "./right-rail-layout.js";
 
@@ -61,8 +57,16 @@ const timerText = requiredElement<HTMLElement>("timerText", HTMLElement);
 const sceneMedia = requiredElement<HTMLImageElement>("sceneMedia", HTMLImageElement);
 const composer = requiredElement<HTMLElement>("composer", HTMLElement);
 const composerForm = requiredElement<HTMLFormElement>("composerForm", HTMLFormElement);
-const composerInput = requiredQuery<HTMLTextAreaElement>(composerForm, "textarea", HTMLTextAreaElement);
-const sendButton = requiredQuery<HTMLButtonElement>(composerForm, ".send-button", HTMLButtonElement);
+const composerInput = requiredQuery<HTMLTextAreaElement>(
+  composerForm,
+  "textarea",
+  HTMLTextAreaElement,
+);
+const sendButton = requiredQuery<HTMLButtonElement>(
+  composerForm,
+  ".send-button",
+  HTMLButtonElement,
+);
 const composerFeedback = requiredElement<HTMLElement>("composerFeedback", HTMLElement);
 const fullscreenToggle = requiredElement<HTMLButtonElement>("fullscreenToggle", HTMLButtonElement);
 
@@ -262,10 +266,10 @@ player.addEventListener("click", (event) => {
   if (window.getSelection()?.toString().length) return;
 
   if (
-    foregroundDemoKind === "none"
-    && pacingGateDemo === "skippable"
-    && hasPendingPacingMessage()
-    && isPacingBackgroundTarget(target)
+    foregroundDemoKind === "none" &&
+    pacingGateDemo === "skippable" &&
+    hasPendingPacingMessage() &&
+    isPacingBackgroundTarget(target)
   ) {
     settlePacingGate();
   }
@@ -273,11 +277,7 @@ player.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && closeLabOptionInfo()) return;
-  if (
-    event.key === "Escape"
-    && narrowScreen.matches
-    && player.dataset.left === "open"
-  ) {
+  if (event.key === "Escape" && narrowScreen.matches && player.dataset.left === "open") {
     player.dataset.left = "closed";
     syncPanelAccessibility();
     queueLeftReserveSync();
@@ -301,9 +301,9 @@ composerInput.addEventListener("keydown", (event) => {
   }
 
   if (
-    event.key === " "
-    && composerInput.value.length === 0
-    && composerInput.selectionStart === composerInput.selectionEnd
+    event.key === " " &&
+    composerInput.value.length === 0 &&
+    composerInput.selectionStart === composerInput.selectionEnd
   ) {
     const foreground = currentForegroundPresentation();
     if (foreground?.kind === "show-button") {
@@ -347,12 +347,18 @@ actions.addEventListener("click", (event) => {
 
 actions.addEventListener("change", (event) => {
   const target = event.target;
-  if (target instanceof HTMLInputElement && target.matches("[data-right-toggle]") && !target.disabled) {
+  if (
+    target instanceof HTMLInputElement &&
+    target.matches("[data-right-toggle]") &&
+    !target.disabled
+  ) {
     rightControlsDemo = rightControlsDemo.map((control) => {
       if (control.kind !== "toggle" || control.id !== target.dataset.rightToggle) return control;
       return { ...control, value: target.checked };
     });
-    const control = rightControlsDemo.find((item) => item.kind === "toggle" && item.id === target.dataset.rightToggle);
+    const control = rightControlsDemo.find(
+      (item) => item.kind === "toggle" && item.id === target.dataset.rightToggle,
+    );
     if (control?.kind === "toggle" && control.recordUserHistory) {
       appendSessionEvent(`You changed ${control.label} to ${target.checked ? "on" : "off"}.`);
     }
@@ -360,12 +366,18 @@ actions.addEventListener("change", (event) => {
     return;
   }
 
-  if (target instanceof HTMLSelectElement && target.matches("[data-right-select]") && !target.disabled) {
+  if (
+    target instanceof HTMLSelectElement &&
+    target.matches("[data-right-select]") &&
+    !target.disabled
+  ) {
     rightControlsDemo = rightControlsDemo.map((control) => {
       if (control.kind !== "select" || control.id !== target.dataset.rightSelect) return control;
       return { ...control, value: target.value };
     });
-    const control = rightControlsDemo.find((item) => item.kind === "select" && item.id === target.dataset.rightSelect);
+    const control = rightControlsDemo.find(
+      (item) => item.kind === "select" && item.id === target.dataset.rightSelect,
+    );
     if (control?.kind === "select" && control.recordUserHistory) {
       const label = control.options.find(([value]) => value === target.value)?.[1] ?? target.value;
       appendSessionEvent(`You changed ${control.label} to ${label}.`);
@@ -380,7 +392,11 @@ toolStrip.addEventListener("change", (event) => {
     const column = target.closest<HTMLElement>("[data-tool-column-id]");
     if (column === null) throw new Error("Tool selector is not inside a tool column.");
     if (!isPlayerToolId(target.value)) throw new Error(`Unknown Player tool: ${target.value}`);
-    toolColumns = selectToolColumn(toolColumns, requiredDatasetValue(column, "toolColumnId"), target.value);
+    toolColumns = selectToolColumn(
+      toolColumns,
+      requiredDatasetValue(column, "toolColumnId"),
+      target.value,
+    );
     renderTools();
     return;
   }
@@ -474,9 +490,10 @@ toolStrip.addEventListener("click", (event) => {
 function currentRenderedPresentation(): typeof DEMO_PRESENTATION {
   return {
     ...presentation,
-    media: mediaContentDemo === "present"
-      ? presentation.media
-      : { ...presentation.media, src: "", title: "Empty stage" },
+    media:
+      mediaContentDemo === "present"
+        ? presentation.media
+        : { ...presentation.media, src: "", title: "Empty stage" },
     rightControls: rightControlsVisibleDemo ? rightControlsDemo : [],
   };
 }
@@ -569,7 +586,9 @@ function syncControlAvailability(): void {
   for (const control of foregroundControls.querySelectorAll<HTMLButtonElement>("button")) {
     control.disabled = false;
   }
-  for (const control of actions.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>("button, input, select")) {
+  for (const control of actions.querySelectorAll<
+    HTMLButtonElement | HTMLInputElement | HTMLSelectElement
+  >("button, input, select")) {
     control.disabled = disabled;
   }
 }
@@ -712,37 +731,49 @@ function cancelPacingTimer(): void {
 }
 
 function isInteractiveTarget(target: Element): boolean {
-  return target.closest("button, input, select, textarea, a, [role='button'], [contenteditable='true']") !== null;
+  return (
+    target.closest(
+      "button, input, select, textarea, a, [role='button'], [contenteditable='true']",
+    ) !== null
+  );
 }
 
 function isPacingBackgroundTarget(target: Element): boolean {
-  if (target === player || target === transcript || target.classList.contains("title-bg")) return true;
+  if (target === player || target === transcript || target.classList.contains("title-bg"))
+    return true;
   const mediaSurface = target.closest(".media-surface");
   return mediaSurface !== null && target.closest(".media-content") === null;
 }
 
 function simulateScriptUpdate(): void {
   if (scriptUpdateDemoTarget === "toggle") {
-    const toggle = rightControlsDemo.find((control): control is PlayerRightTogglePresentation => control.kind === "toggle");
+    const toggle = rightControlsDemo.find(
+      (control): control is PlayerRightTogglePresentation => control.kind === "toggle",
+    );
     if (toggle === undefined) return;
     const nextValue = !toggle.value;
-    rightControlsDemo = rightControlsDemo.map((control) => control.id === toggle.id
-      ? { ...toggle, value: nextValue }
-      : control);
+    rightControlsDemo = rightControlsDemo.map((control) =>
+      control.id === toggle.id ? { ...toggle, value: nextValue } : control,
+    );
     renderRightControls();
     appendSessionEvent(`Script changed ${toggle.label} to ${nextValue ? "on" : "off"}.`);
     showScriptUpdateFeedback(toggle.id, `${toggle.label} changed by the script.`);
     return;
   }
 
-  const select = rightControlsDemo.find((control): control is PlayerRightSelectPresentation => control.kind === "select");
+  const select = rightControlsDemo.find(
+    (control): control is PlayerRightSelectPresentation => control.kind === "select",
+  );
   if (select === undefined) return;
-  const currentIndex = Math.max(0, select.options.findIndex(([value]) => value === select.value));
+  const currentIndex = Math.max(
+    0,
+    select.options.findIndex(([value]) => value === select.value),
+  );
   const next = select.options[(currentIndex + 1) % select.options.length];
   if (next === undefined) return;
-  rightControlsDemo = rightControlsDemo.map((control) => control.id === select.id
-    ? { ...select, value: next[0] }
-    : control);
+  rightControlsDemo = rightControlsDemo.map((control) =>
+    control.id === select.id ? { ...select, value: next[0] } : control,
+  );
   renderRightControls();
   appendSessionEvent(`Script changed ${select.label} to ${next[1]}.`);
   showScriptUpdateFeedback(select.id, `${select.label} changed by the script.`);
@@ -750,17 +781,19 @@ function simulateScriptUpdate(): void {
 
 function showScriptUpdateFeedback(controlId: string, message: string): void {
   clearScriptUpdateFeedback();
-  const showsToast = scriptUpdateFeedbackDemo === "toast"
-    || scriptUpdateFeedbackDemo === "toast-highlight";
-  const localPresentation = scriptUpdateFeedbackDemo === "highlight"
-    || scriptUpdateFeedbackDemo === "toast-highlight"
+  const showsToast =
+    scriptUpdateFeedbackDemo === "toast" || scriptUpdateFeedbackDemo === "toast-highlight";
+  const localPresentation =
+    scriptUpdateFeedbackDemo === "highlight" || scriptUpdateFeedbackDemo === "toast-highlight"
       ? "highlight"
       : null;
 
   playerNotification.hidden = false;
   playerNotification.textContent = message;
   playerNotification.dataset.visible = String(showsToast);
-  const control = actions.querySelector<HTMLElement>(`[data-control-id="${CSS.escape(controlId)}"]`);
+  const control = actions.querySelector<HTMLElement>(
+    `[data-control-id="${CSS.escape(controlId)}"]`,
+  );
   if (control !== null && localPresentation !== null) {
     control.dataset.scriptUpdateFeedback = localPresentation;
   }
@@ -783,9 +816,9 @@ function clearScriptUpdateFeedback(): void {
 async function replaceDemoMedia(): Promise<void> {
   const nextPresentation = await loadDemoPresentation();
   if (
-    mediaTransitionDemo === "direct"
-    || sceneMedia.hidden
-    || window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    mediaTransitionDemo === "direct" ||
+    sceneMedia.hidden ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
   ) {
     presentation = nextPresentation;
     renderCorePresentation();
@@ -793,6 +826,7 @@ async function replaceDemoMedia(): Promise<void> {
     return;
   }
 
+  // EVIDENCE: DOM contract: cloneNode returns a node of the same type, and sceneMedia is an HTMLImageElement.
   const outgoing = sceneMedia.cloneNode(true) as HTMLImageElement;
   outgoing.removeAttribute("id");
   outgoing.classList.add("media-transition-outgoing");
@@ -807,25 +841,37 @@ async function replaceDemoMedia(): Promise<void> {
   await waitForImageReady(sceneMedia);
 
   if (mediaTransitionDemo === "fade") {
-    await outgoing.animate(
-      [{ opacity: 1 }, { opacity: 0 }],
-      { duration: 180, easing: "ease", fill: "forwards" },
-    ).finished.catch(() => undefined);
+    await outgoing
+      .animate([{ opacity: 1 }, { opacity: 0 }], {
+        duration: 180,
+        easing: "ease",
+        fill: "forwards",
+      })
+      .finished.catch(() => undefined);
     outgoing.remove();
-    await sceneMedia.animate(
-      [{ opacity: 0 }, { opacity: 1 }],
-      { duration: 180, easing: "ease", fill: "forwards" },
-    ).finished.catch(() => undefined);
+    await sceneMedia
+      .animate([{ opacity: 0 }, { opacity: 1 }], {
+        duration: 180,
+        easing: "ease",
+        fill: "forwards",
+      })
+      .finished.catch(() => undefined);
   } else {
     await Promise.all([
-      outgoing.animate(
-        [{ opacity: 1 }, { opacity: 0 }],
-        { duration: 320, easing: "ease", fill: "forwards" },
-      ).finished.catch(() => undefined),
-      sceneMedia.animate(
-        [{ opacity: 0 }, { opacity: 1 }],
-        { duration: 320, easing: "ease", fill: "forwards" },
-      ).finished.catch(() => undefined),
+      outgoing
+        .animate([{ opacity: 1 }, { opacity: 0 }], {
+          duration: 320,
+          easing: "ease",
+          fill: "forwards",
+        })
+        .finished.catch(() => undefined),
+      sceneMedia
+        .animate([{ opacity: 0 }, { opacity: 1 }], {
+          duration: 320,
+          easing: "ease",
+          fill: "forwards",
+        })
+        .finished.catch(() => undefined),
     ]);
     outgoing.remove();
   }
@@ -884,15 +930,15 @@ function syncOverlayChromeMode(): void {
   player.dataset.compactTimers = compactTimers ? "true" : "false";
   rightRailLayout.sync(compactTimers);
   const preferredMediaHeight = Number.parseFloat(
-    usableViewportLength(overlayChrome ? "--media-height-overlay" : "--media-height-normal", usableHeight),
+    usableViewportLength(
+      overlayChrome ? "--media-height-overlay" : "--media-height-normal",
+      usableHeight,
+    ),
   );
   const mediaHeight = keyboardLayout.open
     ? constrainedKeyboardMediaHeight(preferredMediaHeight, usableHeight, overlayChrome)
     : preferredMediaHeight;
-  player.style.setProperty(
-    "--media-height",
-    `${Math.max(0, mediaHeight)}px`,
-  );
+  player.style.setProperty("--media-height", `${Math.max(0, mediaHeight)}px`);
   player.style.setProperty(
     "--composer-effective-viewport-height",
     usableViewportLength("--composer-max-viewport-height", usableHeight),
@@ -935,17 +981,16 @@ function resolveKeyboardLayout(): KeyboardLayout {
   const baselineReduction = softwareKeyboardExpected
     ? Math.max(0, (viewportHeightBaselines.get(orientation) ?? viewportHeight) - viewportHeight)
     : 0;
-  const visualViewportReduction = softwareKeyboardExpected && visualViewport !== null
-    ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
-    : 0;
-  const virtualKeyboardRect = softwareKeyboardExpected
-    && document.fullscreenElement === player
-    && virtualKeyboard !== null
-    ? virtualKeyboard.boundingRect
-    : null;
-  const virtualKeyboardVisible = virtualKeyboardRect !== null
-    && virtualKeyboardRect.width > 0
-    && virtualKeyboardRect.height > 0;
+  const visualViewportReduction =
+    softwareKeyboardExpected && visualViewport !== null
+      ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
+      : 0;
+  const virtualKeyboardRect =
+    softwareKeyboardExpected && document.fullscreenElement === player && virtualKeyboard !== null
+      ? virtualKeyboard.boundingRect
+      : null;
+  const virtualKeyboardVisible =
+    virtualKeyboardRect !== null && virtualKeyboardRect.width > 0 && virtualKeyboardRect.height > 0;
   const viewportBaselineHeight = Math.max(
     viewportHeightBaselines.get(orientation) ?? viewportHeight,
     viewportHeight,
@@ -961,18 +1006,13 @@ function resolveKeyboardLayout(): KeyboardLayout {
   const usableHeight = virtualKeyboardVisible
     ? Math.max(0, viewportBaselineHeight - virtualKeyboardHeight)
     : viewportHeight;
-  const fullscreenInset = document.fullscreenElement === player && measuredKeyboard
-    ? measuredKeyboardHeight
-    : 0;
+  const fullscreenInset =
+    document.fullscreenElement === player && measuredKeyboard ? measuredKeyboardHeight : 0;
 
   return {
     fullscreenHeight: virtualKeyboardVisible ? viewportBaselineHeight : null,
     fullscreenInset,
-    geometry: virtualKeyboardVisible
-      ? "virtual-keyboard"
-      : measuredKeyboard
-        ? "viewport"
-        : "none",
+    geometry: virtualKeyboardVisible ? "virtual-keyboard" : measuredKeyboard ? "viewport" : "none",
     open: measuredKeyboard,
     usableHeight,
   };
@@ -1002,34 +1042,31 @@ function constrainedKeyboardMediaHeight(
 
 function requiredComposerHeight(): number {
   const style = getComputedStyle(composer);
-  return composerForm.getBoundingClientRect().height
-    + cssPixelValue(style, "padding-block-start")
-    + cssPixelValue(style, "padding-block-end");
+  return (
+    composerForm.getBoundingClientRect().height +
+    cssPixelValue(style, "padding-block-start") +
+    cssPixelValue(style, "padding-block-end")
+  );
 }
 
 function usableViewportLength(property: string, usableHeight: number): string {
   const raw = getComputedStyle(player).getPropertyValue(property).trim();
   if (raw.endsWith("dvh")) {
     const percent = Number.parseFloat(raw);
-    if (Number.isFinite(percent)) return `${Math.max(0, usableHeight * percent / 100)}px`;
+    if (Number.isFinite(percent)) return `${Math.max(0, (usableHeight * percent) / 100)}px`;
   }
   return raw.length > 0 ? raw : "0px";
 }
 
 function rememberViewportHeightBaseline(): void {
-  viewportHeightBaselines.set(
-    viewportOrientation(),
-    currentUsableViewportHeight(),
-  );
+  viewportHeightBaselines.set(viewportOrientation(), currentUsableViewportHeight());
 }
 
 function currentUsableViewportHeight(): number {
   const visualViewport = window.visualViewport;
   return Math.max(
     0,
-    visualViewport === null
-      ? window.innerHeight
-      : visualViewport.height + visualViewport.offsetTop,
+    visualViewport === null ? window.innerHeight : visualViewport.height + visualViewport.offsetTop,
   );
 }
 
@@ -1040,7 +1077,10 @@ function viewportOrientation(): string {
 }
 
 function browserVirtualKeyboard(): BrowserVirtualKeyboard | null {
-  const extendedNavigator = navigator as Navigator & { readonly virtualKeyboard?: BrowserVirtualKeyboard };
+  // EVIDENCE: external contract: VirtualKeyboard is an optional browser extension of Navigator, and the optional property is feature-detected before use.
+  const extendedNavigator = navigator as Navigator & {
+    readonly virtualKeyboard?: BrowserVirtualKeyboard;
+  };
   return extendedNavigator.virtualKeyboard ?? null;
 }
 
@@ -1054,7 +1094,11 @@ function syncLayoutDebugActivation(): void {
 function appendToolColumn(): void {
   const id = `tool-column-${nextToolColumnNumber}`;
   nextToolColumnNumber += 1;
-  toolColumns = addToolColumn(toolColumns, id, DEMO_TOOL_DEFINITIONS.map((tool) => tool.id));
+  toolColumns = addToolColumn(
+    toolColumns,
+    id,
+    DEMO_TOOL_DEFINITIONS.map((tool) => tool.id),
+  );
   renderTools("end");
 }
 
@@ -1093,8 +1137,13 @@ async function loadDemoPresentation(): Promise<typeof DEMO_PRESENTATION> {
   try {
     const response = await fetch("/player/demo-media/random", { cache: "no-store" });
     if (!response.ok) return DEMO_PRESENTATION;
-    const media = await response.json() as DemoMediaResponse;
-    if (typeof media.id !== "string" || typeof media.src !== "string" || typeof media.title !== "string") {
+    // EVIDENCE: external capture: the parsed demo-media body is field-checked immediately below before use.
+    const media = (await response.json()) as DemoMediaResponse;
+    if (
+      typeof media.id !== "string" ||
+      typeof media.src !== "string" ||
+      typeof media.title !== "string"
+    ) {
       return DEMO_PRESENTATION;
     }
     return {
@@ -1134,7 +1183,10 @@ function syncPanelAccessibility(): void {
 
   const rightDocked = player.dataset.rightBacking === "docked";
   rightToggle.setAttribute("aria-pressed", String(rightDocked));
-  rightToggle.setAttribute("aria-label", rightDocked ? "Use overlay right panel background" : "Dock right panel background");
+  rightToggle.setAttribute(
+    "aria-label",
+    rightDocked ? "Use overlay right panel background" : "Dock right panel background",
+  );
   layoutDebug.queueSync();
 }
 
@@ -1152,9 +1204,10 @@ function syncRightComposition(): void {
   const rightWidth = cssPixelValue(style, "--right-controls-width");
   const conversationMinimum = cssPixelValue(style, "--conversation-min-width");
   const stageMinimum = cssPixelValue(style, "--media-height");
-  const desiredLeftWidth = usesWideDefaultLayout() && currentLeftMode() !== "closed"
-    ? cssPixelValue(style, "--left-preferred")
-    : 0;
+  const desiredLeftWidth =
+    usesWideDefaultLayout() && currentLeftMode() !== "closed"
+      ? cssPixelValue(style, "--left-preferred")
+      : 0;
   const minimumMiddleWidth = Math.max(conversationMinimum, stageMinimum);
   const railFits = canDockRightRail(
     player.clientWidth,
@@ -1194,7 +1247,10 @@ function queueLeftReserveSync(): void {
 
 function syncLeftPreferredWidth(): void {
   const stripWidth = Math.ceil(toolStrip.getBoundingClientRect().width);
-  const panelChromeWidth = Math.max(0, Math.ceil(leftPanel.getBoundingClientRect().width - toolStripScroll.clientWidth));
+  const panelChromeWidth = Math.max(
+    0,
+    Math.ceil(leftPanel.getBoundingClientRect().width - toolStripScroll.clientWidth),
+  );
   player.style.setProperty("--left-preferred", `${stripWidth + panelChromeWidth}px`);
 }
 
@@ -1209,7 +1265,9 @@ function queueCarouselPresentationSync(): void {
 
 function syncCarouselPresentation(): void {
   setHorizontalOverflowState(toolStripScroll);
-  const foregroundCarousel = foregroundControls.querySelector<HTMLElement>("[data-foreground-choice-buttons]");
+  const foregroundCarousel = foregroundControls.querySelector<HTMLElement>(
+    "[data-foreground-choice-buttons]",
+  );
   if (foregroundCarousel !== null) setHorizontalOverflowState(foregroundCarousel);
 }
 
@@ -1229,7 +1287,9 @@ function toggleLabOptionInfo(trigger: HTMLButtonElement): void {
 
 function closeLabOptionInfo(except?: HTMLElement): boolean {
   let closed = false;
-  for (const info of toolStrip.querySelectorAll<HTMLElement>('.lab-option-info[data-open="true"]')) {
+  for (const info of toolStrip.querySelectorAll<HTMLElement>(
+    '.lab-option-info[data-open="true"]',
+  )) {
     if (info === except) continue;
     delete info.dataset.open;
     const trigger = info.querySelector<HTMLButtonElement>("[data-lab-option-info-trigger]");
@@ -1241,7 +1301,10 @@ function closeLabOptionInfo(except?: HTMLElement): boolean {
 
 function syncLeftReserve(): void {
   const reservesGridSpace = usesWideDefaultLayout() && currentLeftMode() !== "closed";
-  player.style.setProperty("--left-reserve", `${reservesGridSpace ? leftPanel.getBoundingClientRect().width : 0}px`);
+  player.style.setProperty(
+    "--left-reserve",
+    `${reservesGridSpace ? leftPanel.getBoundingClientRect().width : 0}px`,
+  );
 }
 
 function applyAccentColour(value: string): void {
@@ -1252,9 +1315,14 @@ function applyAccentColour(value: string): void {
 
 function setVisualOption(effect: string, enabled: boolean): void {
   switch (effect) {
-    case "fx-ambient": ambientEnabled = enabled; break;
-    case "fx-vignette": vignetteEnabled = enabled; break;
-    default: throw new Error(`Unknown visual option: ${effect}`);
+    case "fx-ambient":
+      ambientEnabled = enabled;
+      break;
+    case "fx-vignette":
+      vignetteEnabled = enabled;
+      break;
+    default:
+      throw new Error(`Unknown visual option: ${effect}`);
   }
   player.classList.toggle(effect, enabled);
   syncVisualControls();
@@ -1301,59 +1369,82 @@ function resetVisualLab(): void {
 function setPresentationDemoSelection(key: string, value: string): void {
   switch (key) {
     case "busy-style":
-      if (!["off", "pulse", "sweep", "dots", "corner-dot", "spinner", "wash"].includes(value)) throw new Error(`Unknown busy Action style: ${value}`);
+      if (!["off", "pulse", "sweep", "dots", "corner-dot", "spinner", "wash"].includes(value))
+        throw new Error(`Unknown busy Action style: ${value}`);
       busyActionDemoStyle = value;
       break;
     case "busy-target":
-      if (!["action", "toggle", "select"].includes(value)) throw new Error(`Unknown busy control target: ${value}`);
+      if (!["action", "toggle", "select"].includes(value))
+        throw new Error(`Unknown busy control target: ${value}`);
+      // EVIDENCE: validation: the preceding includes check rejected every value outside this union.
       busyControlDemoTarget = value as "action" | "toggle" | "select";
       break;
     case "timer-label":
-      if (!["off", "above", "below"].includes(value)) throw new Error(`Unknown timer label placement: ${value}`);
+      if (!["off", "above", "below"].includes(value))
+        throw new Error(`Unknown timer label placement: ${value}`);
       timerLabelDemoPlacement = value;
       break;
     case "timer-label-content":
-      if (!["generic", "authored"].includes(value)) throw new Error(`Unknown timer label content: ${value}`);
+      if (!["generic", "authored"].includes(value))
+        throw new Error(`Unknown timer label content: ${value}`);
+      // EVIDENCE: validation: the preceding includes check rejected every value outside this union.
       timerLabelContentDemo = value as "generic" | "authored";
       break;
     case "media-transition":
-      if (!["direct", "fade", "crossfade"].includes(value)) throw new Error(`Unknown media transition fixture: ${value}`);
+      if (!["direct", "fade", "crossfade"].includes(value))
+        throw new Error(`Unknown media transition fixture: ${value}`);
+      // EVIDENCE: validation: the preceding includes check rejected every value outside this union.
       mediaTransitionDemo = value as PlayerMediaTransitionFixture;
       break;
     case "media-content":
-      if (!["present", "empty"].includes(value)) throw new Error(`Unknown media content fixture: ${value}`);
+      if (!["present", "empty"].includes(value))
+        throw new Error(`Unknown media content fixture: ${value}`);
+      // EVIDENCE: validation: the preceding includes check rejected every value outside this union.
       mediaContentDemo = value as "present" | "empty";
       renderCorePresentation();
       break;
     case "foreground-fixture":
-      if (!["none", "show-button", "choose", "ask-text", "ask-number"].includes(value)) throw new Error(`Unknown foreground fixture: ${value}`);
+      if (!["none", "show-button", "choose", "ask-text", "ask-number"].includes(value))
+        throw new Error(`Unknown foreground fixture: ${value}`);
+      // EVIDENCE: validation: the preceding includes check rejected every value outside this union.
       foregroundDemoKind = value as PlayerForegroundFixtureKind;
       syncForegroundPresentation();
       break;
     case "timer-kind":
-      if (!["visible", "mystery", "hidden"].includes(value)) throw new Error(`Unknown timer presentation: ${value}`);
+      if (!["visible", "mystery", "hidden"].includes(value))
+        throw new Error(`Unknown timer presentation: ${value}`);
+      // EVIDENCE: validation: the preceding includes check rejected every value outside this union.
       timerKindDemo = value as PlayerTimerKind;
       break;
     case "pacing-gate":
-      if (!["off", "skippable", "unskippable"].includes(value)) throw new Error(`Unknown pacing fixture: ${value}`);
+      if (!["off", "skippable", "unskippable"].includes(value))
+        throw new Error(`Unknown pacing fixture: ${value}`);
+      // EVIDENCE: validation: the preceding includes check rejected every value outside this union.
       pacingGateDemo = value as PlayerPacingFixture;
       startPacingDemo();
       break;
     case "control-availability":
-      if (!["enabled", "disabled"].includes(value)) throw new Error(`Unknown control availability: ${value}`);
+      if (!["enabled", "disabled"].includes(value))
+        throw new Error(`Unknown control availability: ${value}`);
+      // EVIDENCE: validation: the preceding includes check rejected every value outside this union.
       controlAvailabilityDemo = value as PlayerControlAvailability;
       break;
     case "script-update-target":
-      if (!["toggle", "select"].includes(value)) throw new Error(`Unknown script-update target: ${value}`);
+      if (!["toggle", "select"].includes(value))
+        throw new Error(`Unknown script-update target: ${value}`);
+      // EVIDENCE: validation: the preceding includes check rejected every value outside this union.
       scriptUpdateDemoTarget = value as "toggle" | "select";
       break;
     case "script-update-feedback":
-      if (!["toast", "highlight", "toast-highlight"].includes(value)) throw new Error(`Unknown script-update feedback: ${value}`);
+      if (!["toast", "highlight", "toast-highlight"].includes(value))
+        throw new Error(`Unknown script-update feedback: ${value}`);
+      // EVIDENCE: validation: the preceding includes check rejected every value outside this union.
       scriptUpdateFeedbackDemo = value as ScriptUpdateFeedbackDemo;
       clearScriptUpdateFeedback();
       break;
     case "right-controls-visibility":
-      if (!["visible", "none"].includes(value)) throw new Error(`Unknown right-control visibility fixture: ${value}`);
+      if (!["visible", "none"].includes(value))
+        throw new Error(`Unknown right-control visibility fixture: ${value}`);
       rightControlsVisibleDemo = value === "visible";
       renderRightControls();
       break;
@@ -1385,12 +1476,16 @@ function applyDemoNumber(input: HTMLInputElement): void {
 
 function applyTuningValue(input: HTMLInputElement): void {
   if (!Number.isFinite(input.valueAsNumber)) return;
-  player.style.setProperty(requiredDatasetValue(input, "tuningProperty"), `${input.valueAsNumber}${requiredDatasetValue(input, "tuningUnit")}`);
+  player.style.setProperty(
+    requiredDatasetValue(input, "tuningProperty"),
+    `${input.valueAsNumber}${requiredDatasetValue(input, "tuningUnit")}`,
+  );
   syncVisualControls();
 }
 
 function syncVisualControls(): void {
-  for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-theme-color]")) input.value = accentColor;
+  for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-theme-color]"))
+    input.value = accentColor;
   for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-effect]")) {
     if (input.dataset.effect === "fx-ambient") input.checked = ambientEnabled;
     else if (input.dataset.effect === "fx-vignette") input.checked = vignetteEnabled;
@@ -1399,20 +1494,49 @@ function syncVisualControls(): void {
 
   for (const select of toolStrip.querySelectorAll<HTMLSelectElement>("[data-demo-select]")) {
     switch (select.dataset.demoSelect) {
-      case "busy-style": select.value = busyActionDemoStyle; break;
-      case "busy-target": select.value = busyControlDemoTarget; break;
-      case "timer-label": select.value = timerLabelDemoPlacement; break;
-      case "timer-label-content": select.value = timerLabelContentDemo; break;
-      case "media-transition": select.value = mediaTransitionDemo; break;
-      case "media-content": select.value = mediaContentDemo; break;
-      case "foreground-fixture": select.value = foregroundDemoKind; break;
-      case "timer-kind": select.value = timerKindDemo; break;
-      case "pacing-gate": select.value = pacingGateDemo; break;
-      case "control-availability": select.value = controlAvailabilityDemo; break;
-      case "script-update-target": select.value = scriptUpdateDemoTarget; break;
-      case "script-update-feedback": select.value = scriptUpdateFeedbackDemo; break;
-      case "right-controls-visibility": select.value = rightControlsVisibleDemo ? "visible" : "none"; break;
-      default: throw new Error(`Unknown presentation demo selection: ${String(select.dataset.demoSelect)}`);
+      case "busy-style":
+        select.value = busyActionDemoStyle;
+        break;
+      case "busy-target":
+        select.value = busyControlDemoTarget;
+        break;
+      case "timer-label":
+        select.value = timerLabelDemoPlacement;
+        break;
+      case "timer-label-content":
+        select.value = timerLabelContentDemo;
+        break;
+      case "media-transition":
+        select.value = mediaTransitionDemo;
+        break;
+      case "media-content":
+        select.value = mediaContentDemo;
+        break;
+      case "foreground-fixture":
+        select.value = foregroundDemoKind;
+        break;
+      case "timer-kind":
+        select.value = timerKindDemo;
+        break;
+      case "pacing-gate":
+        select.value = pacingGateDemo;
+        break;
+      case "control-availability":
+        select.value = controlAvailabilityDemo;
+        break;
+      case "script-update-target":
+        select.value = scriptUpdateDemoTarget;
+        break;
+      case "script-update-feedback":
+        select.value = scriptUpdateFeedbackDemo;
+        break;
+      case "right-controls-visibility":
+        select.value = rightControlsVisibleDemo ? "visible" : "none";
+        break;
+      default:
+        throw new Error(
+          `Unknown presentation demo selection: ${String(select.dataset.demoSelect)}`,
+        );
     }
   }
 
@@ -1429,7 +1553,9 @@ function syncVisualControls(): void {
 
   const computed = getComputedStyle(player);
   for (const input of toolStrip.querySelectorAll<HTMLInputElement>("[data-tuning-property]")) {
-    const value = Number.parseFloat(computed.getPropertyValue(requiredDatasetValue(input, "tuningProperty")));
+    const value = Number.parseFloat(
+      computed.getPropertyValue(requiredDatasetValue(input, "tuningProperty")),
+    );
     if (Number.isFinite(value)) input.value = String(value);
   }
   layoutDebug.queueSync();
@@ -1445,11 +1571,12 @@ function syncBusyAction(): void {
   }
   if (busyActionDemoStyle === "off") return;
 
-  const selector = busyControlDemoTarget === "action"
-    ? ".action-button"
-    : busyControlDemoTarget === "toggle"
-      ? ".right-toggle-control"
-      : ".right-select-control";
+  const selector =
+    busyControlDemoTarget === "action"
+      ? ".action-button"
+      : busyControlDemoTarget === "toggle"
+        ? ".right-toggle-control"
+        : ".right-select-control";
   const target = actions.querySelector<HTMLElement>(selector);
   target?.setAttribute("aria-busy", "true");
   if (target !== null) target.dataset.busyStyle = busyActionDemoStyle;
@@ -1476,12 +1603,13 @@ function createDemoTimer(index: number): HTMLElement {
   element.className = "timer";
   element.dataset.demoTimer = "";
   element.dataset.timerKind = timerKindDemo;
-  const visibleLabel = timerLabelContentDemo === "authored" && index === 1 ? "Hold position" : `Timer ${index}`;
+  const visibleLabel =
+    timerLabelContentDemo === "authored" && index === 1 ? "Hold position" : `Timer ${index}`;
   element.setAttribute(
     "aria-label",
     timerKindDemo === "mystery" ? `Mystery timer · ${visibleLabel}` : visibleLabel,
   );
-  element.style.setProperty("--timer-progress", `${Math.min(84, 22 + (index * 17))}%`);
+  element.style.setProperty("--timer-progress", `${Math.min(84, 22 + index * 17)}%`);
 
   const label = document.createElement("span");
   label.className = "timer-label";
@@ -1502,19 +1630,24 @@ function isPlayerToolId(value: string): value is PlayerToolId {
 
 function requiredDatasetValue(element: HTMLElement, key: string): string {
   const value = element.dataset[key];
-  if (value === undefined || value.length === 0) throw new Error(`Player element is missing data-${key}.`);
+  if (value === undefined || value.length === 0)
+    throw new Error(`Player element is missing data-${key}.`);
   return value;
 }
 
 function demoTimerText(index: number): string {
   const fixtures = [161, 97, 54, 21];
-  const seconds = fixtures[index - 1] ?? (35 + ((index * 29) % 145));
+  const seconds = fixtures[index - 1] ?? 35 + ((index * 29) % 145);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-function requiredElement<T extends Element>(id: string, constructor: { new (...args: never[]): T }): T {
+function requiredElement<T extends Element>(
+  id: string,
+  constructor: { new (...args: never[]): T },
+): T {
   const element = document.getElementById(id);
-  if (!(element instanceof constructor)) throw new Error(`Missing or invalid Player element #${id}.`);
+  if (!(element instanceof constructor))
+    throw new Error(`Missing or invalid Player element #${id}.`);
   return element;
 }
 

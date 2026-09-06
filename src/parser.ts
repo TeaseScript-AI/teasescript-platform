@@ -43,17 +43,9 @@ import type {
   UnaryExpression,
   WhileStatement,
 } from "./ast.js";
-import {
-  createDiagnostic,
-  DiagnosticSeverity,
-  type Diagnostic,
-} from "./diagnostics.js";
+import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
-import {
-  createSourcePosition,
-  createSourceSpan,
-  type SourceSpan,
-} from "./source.js";
+import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { TokenKind, type Token } from "./token.js";
 
 export interface ParseResult {
@@ -103,10 +95,7 @@ export function parse(source: string): ParseResult {
 
   return Object.freeze({
     program,
-    diagnostics: Object.freeze([
-      ...lexResult.diagnostics,
-      ...parser.diagnostics,
-    ]),
+    diagnostics: Object.freeze([...lexResult.diagnostics, ...parser.diagnostics]),
   });
 }
 
@@ -141,10 +130,7 @@ class Parser {
     return Object.freeze({
       kind: "program",
       statements: Object.freeze(statements),
-      span: createSourceSpan(
-        createSourcePosition(0, 0, 0),
-        this.#peek().span.end,
-      ),
+      span: createSourceSpan(createSourcePosition(0, 0, 0), this.#peek().span.end),
     });
   }
 
@@ -268,10 +254,7 @@ class Parser {
     });
   }
 
-  #parseSpeakerStatement():
-    | SpeakerDeclaration
-    | SpeakerSetterStatement
-    | null {
+  #parseSpeakerStatement(): SpeakerDeclaration | SpeakerSetterStatement | null {
     const keyword = this.#advance();
     if (!this.#check(TokenKind.Identifier)) {
       this.#reportInsertion(
@@ -294,10 +277,7 @@ class Parser {
     });
   }
 
-  #parseSpeakerDeclaration(
-    keyword: Token,
-    name: Identifier,
-  ): SpeakerDeclaration {
+  #parseSpeakerDeclaration(keyword: Token, name: Identifier): SpeakerDeclaration {
     const leftBrace = this.#previous();
     const properties: SpeakerProperty[] = [];
     let lastSpan = leftBrace.span;
@@ -305,12 +285,7 @@ class Parser {
     while (!this.#check(TokenKind.EndOfFile)) {
       this.#skipNewlines();
       if (this.#match(TokenKind.RightBrace)) {
-        return this.#speakerDeclaration(
-          keyword,
-          name,
-          properties,
-          this.#previous().span,
-        );
+        return this.#speakerDeclaration(keyword, name, properties, this.#previous().span);
       }
       if (this.#isRecoveredTopLevelStatement()) {
         this.#reportInsertion(
@@ -492,10 +467,7 @@ class Parser {
 
   #parseExitStatement(): Statement {
     const keyword = this.#advance();
-    return Object.freeze({
-      kind: "exitStatement",
-      span: copySpan(keyword.span),
-    });
+    return Object.freeze({ kind: "exitStatement", span: copySpan(keyword.span) });
   }
 
   #parseWaitStatement(): WaitStatement | null {
@@ -514,20 +486,37 @@ class Parser {
     }
     const duration = this.#parseExpression();
     if (duration === null) {
-      this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected a duration after 'wait'.");
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected a duration after 'wait'.",
+      );
       this.#synchronizeStatement();
       return null;
     }
     let unit: WaitStatement["unit"] = null;
     if (this.#check(TokenKind.Identifier)) {
       const token = this.#advance();
-      if (token.lexeme === "ms" || token.lexeme === "s" || token.lexeme === "min" || token.lexeme === "h") {
+      if (
+        token.lexeme === "ms" ||
+        token.lexeme === "s" ||
+        token.lexeme === "min" ||
+        token.lexeme === "h"
+      ) {
         unit = token.lexeme;
       } else {
-        this.#reportToken(parserDiagnosticCode.expectedStatementEnd, "Expected wait unit 'ms', 's', 'min', or 'h'.", token);
+        this.#reportToken(
+          parserDiagnosticCode.expectedStatementEnd,
+          "Expected wait unit 'ms', 's', 'min', or 'h'.",
+          token,
+        );
       }
     }
-    return Object.freeze({ kind: "waitStatement", duration, unit, span: spanFrom(keyword.span, duration.span) });
+    return Object.freeze({
+      kind: "waitStatement",
+      duration,
+      unit,
+      span: spanFrom(keyword.span, duration.span),
+    });
   }
 
   #parseLetStatement(): LetStatement | null {
@@ -606,7 +595,7 @@ class Parser {
     }
     return Object.freeze({
       kind: "typeAnnotation",
-      name: token.lexeme as ScalarTypeName,
+      name: token.lexeme,
       collection,
       optional,
       span: spanFrom(token.span, end),
@@ -629,9 +618,7 @@ class Parser {
     let elseBlock: Block | IfStatement | null = null;
     if (this.#match(TokenKind.KeywordElse)) {
       this.#skipContinuationNewlines();
-      elseBlock = this.#check(TokenKind.KeywordIf)
-        ? this.#parseIfStatement()
-        : this.#parseBlock();
+      elseBlock = this.#check(TokenKind.KeywordIf) ? this.#parseIfStatement() : this.#parseBlock();
       if (elseBlock === null) return null;
     } else {
       this.#current = beforePotentialElse;
@@ -745,10 +732,7 @@ class Parser {
           this.#peek(),
         );
       }
-      while (
-        !this.#check(TokenKind.RightParenthesis) &&
-        !this.#check(TokenKind.EndOfFile)
-      ) {
+      while (!this.#check(TokenKind.RightParenthesis) && !this.#check(TokenKind.EndOfFile)) {
         const parameter = this.#parseFunctionParameter();
         if (parameter !== null) parameters.push(parameter);
         this.#skipNewlines();
@@ -839,11 +823,7 @@ class Parser {
       this.#check(TokenKind.RightBrace) ||
       this.#check(TokenKind.EndOfFile)
     ) {
-      return Object.freeze({
-        kind: "returnStatement",
-        value: null,
-        span: copySpan(keyword.span),
-      });
+      return Object.freeze({ kind: "returnStatement", value: null, span: copySpan(keyword.span) });
     }
     const value = this.#parseRequiredExpression();
     if (value === null) {
@@ -859,19 +839,13 @@ class Parser {
 
   #parseBlock(): Block | null {
     if (!this.#match(TokenKind.LeftBrace)) {
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedBlock,
-        "Expected '{' to start the block.",
-      );
+      this.#reportInsertion(parserDiagnosticCode.expectedBlock, "Expected '{' to start the block.");
       return null;
     }
     const leftBrace = this.#previous();
     const statements: Statement[] = [];
     this.#skipNewlines();
-    while (
-      !this.#check(TokenKind.RightBrace) &&
-      !this.#check(TokenKind.EndOfFile)
-    ) {
+    while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
       const statement = this.#parseStatement();
       if (statement !== null) statements.push(statement);
@@ -897,10 +871,7 @@ class Parser {
     });
   }
 
-  #parseAssignmentOrExpressionStatement():
-    | AssignmentStatement
-    | ExpressionStatement
-    | null {
+  #parseAssignmentOrExpressionStatement(): AssignmentStatement | ExpressionStatement | null {
     const expression = this.#parseExpression();
     if (expression === null) {
       this.#synchronizeStatement();
@@ -955,10 +926,7 @@ class Parser {
   #parseRequiredExpression(): Expression | null {
     const expression = this.#parseExpression();
     if (expression === null) {
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedExpression,
-        "Expected an expression.",
-      );
+      this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
     }
     return expression;
   }
@@ -1038,12 +1006,7 @@ class Parser {
       );
       return null;
     }
-    const expression = this.#binary(
-      left,
-      operator,
-      right,
-      binaryOperator(operator),
-    );
+    const expression = this.#binary(left, operator, right, binaryOperator(operator));
     if (isComparisonKind(this.#peek().kind)) {
       this.#reportToken(
         parserDiagnosticCode.chainedComparison,
@@ -1063,8 +1026,7 @@ class Parser {
     const left = this.#parseAdditive();
     if (
       left === null ||
-      (!this.#check(TokenKind.RangeExclusive) &&
-        !this.#check(TokenKind.RangeInclusive))
+      (!this.#check(TokenKind.RangeExclusive) && !this.#check(TokenKind.RangeInclusive))
     ) {
       return left;
     }
@@ -1085,19 +1047,13 @@ class Parser {
       inclusive: operator.kind === TokenKind.RangeInclusive,
       span: spanFrom(left.span, right.span),
     });
-    if (
-      this.#check(TokenKind.RangeExclusive) ||
-      this.#check(TokenKind.RangeInclusive)
-    ) {
+    if (this.#check(TokenKind.RangeExclusive) || this.#check(TokenKind.RangeInclusive)) {
       this.#reportToken(
         parserDiagnosticCode.chainedRange,
         "Ranges may not be chained.",
         this.#peek(),
       );
-      while (
-        this.#check(TokenKind.RangeExclusive) ||
-        this.#check(TokenKind.RangeInclusive)
-      ) {
+      while (this.#check(TokenKind.RangeExclusive) || this.#check(TokenKind.RangeInclusive)) {
         this.#advance();
         this.#skipContinuationNewlines();
         this.#parseAdditive();
@@ -1108,10 +1064,7 @@ class Parser {
 
   #parseAdditive(): Expression | null {
     let expression = this.#parseMultiplicative();
-    while (
-      expression !== null &&
-      (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus))
-    ) {
+    while (expression !== null && (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus))) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
       const right = this.#parseMultiplicative();
@@ -1122,12 +1075,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(
-        expression,
-        operator,
-        right,
-        binaryOperator(operator),
-      );
+      expression = this.#binary(expression, operator, right, binaryOperator(operator));
     }
     return expression;
   }
@@ -1150,12 +1098,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(
-        expression,
-        operator,
-        right,
-        binaryOperator(operator),
-      );
+      expression = this.#binary(expression, operator, right, binaryOperator(operator));
     }
     return expression;
   }
@@ -1178,6 +1121,7 @@ class Parser {
     }
     for (let index = operators.length - 1; index >= 0; index -= 1) {
       const operator = operators[index]!;
+      // EVIDENCE: invariant: operators contains only the plus/minus tokens collected by the loop above.
       expression = this.#unary(operator, expression, operator.lexeme as "+" | "-");
     }
     return expression;
@@ -1238,10 +1182,7 @@ class Parser {
     const argumentsList: CallArgument[] = [];
     let style: "none" | "positional" | "named" = "none";
     this.#skipNewlines();
-    while (
-      !this.#check(TokenKind.RightParenthesis) &&
-      !this.#check(TokenKind.EndOfFile)
-    ) {
+    while (!this.#check(TokenKind.RightParenthesis) && !this.#check(TokenKind.EndOfFile)) {
       let argument: CallArgument | null = null;
       if (isPropertyName(this.#peek()) && this.#peek(1).kind === TokenKind.Colon) {
         const name = this.#identifier(this.#advance());
@@ -1323,25 +1264,13 @@ class Parser {
     }
     if (this.#match(TokenKind.StringLiteral)) return this.#stringLiteral(token);
     if (this.#match(TokenKind.KeywordTrue)) {
-      return Object.freeze({
-        kind: "booleanLiteral",
-        value: true,
-        span: copySpan(token.span),
-      });
+      return Object.freeze({ kind: "booleanLiteral", value: true, span: copySpan(token.span) });
     }
     if (this.#match(TokenKind.KeywordFalse)) {
-      return Object.freeze({
-        kind: "booleanLiteral",
-        value: false,
-        span: copySpan(token.span),
-      });
+      return Object.freeze({ kind: "booleanLiteral", value: false, span: copySpan(token.span) });
     }
     if (this.#match(TokenKind.KeywordNull)) {
-      return Object.freeze({
-        kind: "nullLiteral",
-        value: null,
-        span: copySpan(token.span),
-      });
+      return Object.freeze({ kind: "nullLiteral", value: null, span: copySpan(token.span) });
     }
     if (
       this.#match(TokenKind.Identifier) ||
@@ -1364,10 +1293,7 @@ class Parser {
     }
     if (this.#match(TokenKind.KeywordSet)) {
       if (!this.#match(TokenKind.LeftBracket)) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedDelimiter,
-          "Expected '[' after 'set'.",
-        );
+        this.#reportInsertion(parserDiagnosticCode.expectedDelimiter, "Expected '[' after 'set'.");
         return null;
       }
       return this.#parseSetLiteral(token);
@@ -1386,11 +1312,8 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const interactionKind = command.lexeme === "askText"
-      ? "text"
-      : command.lexeme === "askNumber"
-        ? "number"
-        : "choice";
+    const interactionKind =
+      command.lexeme === "askText" ? "text" : command.lexeme === "askNumber" ? "number" : "choice";
     let asSpan: SourceSpan | null = null;
     let speaker: Identifier | null = null;
     if (this.#match(TokenKind.KeywordAs)) {
@@ -1439,12 +1362,11 @@ class Parser {
 
     const options: InteractionChoiceOption[] = [];
     while (!this.#isInteractionChoiceTerminator()) {
-      const label = (
+      const label =
         (this.#check(TokenKind.Identifier) || this.#check(TokenKind.NumberLiteral)) &&
         this.#peek(1).kind === TokenKind.Colon
-      )
-        ? this.#interactionChoiceLabel(this.#advance())
-        : null;
+          ? this.#interactionChoiceLabel(this.#advance())
+          : null;
       let colonSpan: SourceSpan | null = null;
       if (label !== null) {
         this.#advance();
@@ -1467,14 +1389,16 @@ class Parser {
       if (this.#match(TokenKind.Comma)) {
         separatorSpan = copySpan(this.#previous().span);
       }
-      options.push(Object.freeze({
-        kind: "interactionChoiceOption",
-        label,
-        colonSpan,
-        value,
-        separatorSpan,
-        span: spanFrom(label?.span ?? value.span, value.span),
-      }));
+      options.push(
+        Object.freeze({
+          kind: "interactionChoiceOption",
+          label,
+          colonSpan,
+          value,
+          separatorSpan,
+          span: spanFrom(label?.span ?? value.span, value.span),
+        }),
+      );
       if (separatorSpan === null) {
         if (!this.#isInteractionChoiceTerminator()) {
           if (this.#check(TokenKind.KeywordAs)) {
@@ -1622,10 +1546,7 @@ class Parser {
   #parseObjectLiteral(start: Token): ObjectLiteral {
     const properties: ObjectProperty[] = [];
     this.#skipNewlines();
-    while (
-      !this.#check(TokenKind.RightBrace) &&
-      !this.#check(TokenKind.EndOfFile)
-    ) {
+    while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
       if (!isPropertyName(this.#peek())) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedPropertyName,
@@ -1679,10 +1600,7 @@ class Parser {
   #parseTemplateLiteral(start: Token): TemplateLiteral | null {
     const parts: TemplatePart[] = [];
     let valid = true;
-    while (
-      !this.#check(TokenKind.TemplateEnd) &&
-      !this.#check(TokenKind.EndOfFile)
-    ) {
+    while (!this.#check(TokenKind.TemplateEnd) && !this.#check(TokenKind.EndOfFile)) {
       if (this.#match(TokenKind.TemplateText)) {
         parts.push(this.#templateText(this.#previous()));
         continue;
@@ -1719,10 +1637,7 @@ class Parser {
       this.#advance();
       return null;
     }
-    if (
-      this.#check(TokenKind.TemplateEnd) ||
-      this.#check(TokenKind.EndOfFile)
-    ) {
+    if (this.#check(TokenKind.TemplateEnd) || this.#check(TokenKind.EndOfFile)) {
       return null;
     }
     const diagnosticCount = this.#diagnostics.length;
@@ -1743,10 +1658,7 @@ class Parser {
       return null;
     }
     if (!this.#match(TokenKind.InterpolationEnd)) {
-      if (
-        !this.#check(TokenKind.TemplateEnd) &&
-        !this.#check(TokenKind.EndOfFile)
-      ) {
+      if (!this.#check(TokenKind.TemplateEnd) && !this.#check(TokenKind.EndOfFile)) {
         const message = this.#check(TokenKind.Colon)
           ? "Only identifiers and chained property access are supported in template interpolation."
           : "Only one complete expression is allowed in template interpolation.";
@@ -1810,11 +1722,7 @@ class Parser {
   }
 
   #identifier(token: Token): Identifier {
-    return Object.freeze({
-      kind: "identifier",
-      name: token.lexeme,
-      span: copySpan(token.span),
-    });
+    return Object.freeze({ kind: "identifier", name: token.lexeme, span: copySpan(token.span) });
   }
 
   #stringLiteral(token: Token): Expression {
@@ -1847,10 +1755,7 @@ class Parser {
       this.#skipNewlines();
       return;
     }
-    if (
-      this.#check(TokenKind.EndOfFile) ||
-      (inBlock && this.#check(TokenKind.RightBrace))
-    ) {
+    if (this.#check(TokenKind.EndOfFile) || (inBlock && this.#check(TokenKind.RightBrace))) {
       return;
     }
     this.#reportInsertion(
@@ -1922,10 +1827,7 @@ class Parser {
   }
 
   #isRecoveredTopLevelStatement(): boolean {
-    return (
-      isStatementStart(this.#peek().kind) &&
-      this.#peek(1).kind !== TokenKind.Colon
-    );
+    return isStatementStart(this.#peek().kind) && this.#peek(1).kind !== TokenKind.Colon;
   }
 
   #skipNewlines(): void {
@@ -1974,9 +1876,7 @@ class Parser {
     message: string,
     span: SourceSpan,
   ): void {
-    this.#diagnostics.push(
-      createDiagnostic(DiagnosticSeverity.Error, code, message, span),
-    );
+    this.#diagnostics.push(createDiagnostic(DiagnosticSeverity.Error, code, message, span));
   }
 
   #match(kind: TokenKind): boolean {
@@ -2000,9 +1900,7 @@ class Parser {
   }
 
   #peek(distance = 0): Token {
-    return this.tokens[
-      Math.min(this.#current + distance, this.tokens.length - 1)
-    ]!;
+    return this.tokens[Math.min(this.#current + distance, this.tokens.length - 1)]!;
   }
 
   #previous(): Token {
@@ -2022,6 +1920,7 @@ const scalarTypes = new Set<ScalarTypeName>([
 ]);
 
 function isScalarType(value: string): value is ScalarTypeName {
+  // EVIDENCE: invariant: Set.has accepts arbitrary lookup strings; membership, not this cast, proves the scalar name.
   return scalarTypes.has(value as ScalarTypeName);
 }
 
@@ -2056,14 +1955,14 @@ function isStatementStart(kind: TokenKind): boolean {
     kind === TokenKind.KeywordSay ||
     kind === TokenKind.KeywordExit ||
     kind === TokenKind.KeywordLet ||
-    kind === TokenKind.KeywordIf
-    || kind === TokenKind.KeywordRepeat
-    || kind === TokenKind.KeywordFor
-    || kind === TokenKind.KeywordWhile
-    || kind === TokenKind.KeywordBreak
-    || kind === TokenKind.KeywordContinue
-    || kind === TokenKind.KeywordFunction
-    || kind === TokenKind.KeywordReturn
+    kind === TokenKind.KeywordIf ||
+    kind === TokenKind.KeywordRepeat ||
+    kind === TokenKind.KeywordFor ||
+    kind === TokenKind.KeywordWhile ||
+    kind === TokenKind.KeywordBreak ||
+    kind === TokenKind.KeywordContinue ||
+    kind === TokenKind.KeywordFunction ||
+    kind === TokenKind.KeywordReturn
   );
 }
 
@@ -2087,6 +1986,7 @@ function isComparisonKind(kind: TokenKind): boolean {
 }
 
 function binaryOperator(token: Token): BinaryExpression["operator"] {
+  // EVIDENCE: invariant: precedence parsers call this only after matching a binary-operator token kind.
   return token.lexeme as BinaryExpression["operator"];
 }
 

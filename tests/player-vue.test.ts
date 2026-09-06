@@ -4,10 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import { DEMO_PRESENTATION } from "../player/demo-session.js";
-import {
-  createPlayerCoreState,
-  reducePlayerCoreState,
-} from "../player/vue/src/state.js";
+import { createPlayerCoreState, reducePlayerCoreState } from "../player/vue/src/state.js";
 
 test("Vue Player core keeps foreground submission deterministic", () => {
   const initial = createPlayerCoreState(DEMO_PRESENTATION);
@@ -50,11 +47,10 @@ test("Vue Player core records only controls that request user history", () => {
 });
 
 test("Vue Player core appends action and ordinary composer responses", () => {
-  let state = createPlayerCoreState({ ...DEMO_PRESENTATION, foreground: {
-    kind: "ask-text",
-    accessibleName: "Text answer",
-    hint: "Type your answer…",
-  } });
+  let state = createPlayerCoreState({
+    ...DEMO_PRESENTATION,
+    foreground: { kind: "ask-text", accessibleName: "Text answer", hint: "Type your answer…" },
+  });
   state = reducePlayerCoreState(state, { type: "set-composer", value: "A considered answer" });
   state = reducePlayerCoreState(state, { type: "submit-composer" });
   state = reducePlayerCoreState(state, { type: "activate-right-action", controlId: "continue" });

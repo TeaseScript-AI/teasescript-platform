@@ -1,7 +1,4 @@
-import type {
-  InteractionResultDomain,
-  InteractionUiPayload,
-} from "../../plan/model.js";
+import type { InteractionResultDomain, InteractionUiPayload } from "../../plan/model.js";
 
 /** Shared serializable pending-action and settlement contracts. */
 export interface RuntimeDelayActionSnapshot {
@@ -59,12 +56,13 @@ export interface RuntimeChatPacingGateActionSnapshot {
   readonly preparedOutput: RuntimePreparedSayOutputSnapshot | null;
 }
 
-export type RuntimePendingActionSnapshot = RuntimeDelayActionSnapshot | RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot;
+export type RuntimePendingActionSnapshot =
+  | RuntimeDelayActionSnapshot
+  | RuntimeInteractionActionSnapshot
+  | RuntimeChatPacingGateActionSnapshot;
 
 /** Completion events that an active action must still be able to publish. */
-export function requiredActionCompletionEvents(
-  action: RuntimePendingActionSnapshot | null,
-): number {
+export function requiredActionCompletionEvents(action: { readonly kind?: unknown } | null): number {
   if (action?.kind === "interaction") return 2;
   if (action?.kind === "delay" || action?.kind === "chatPacingGate") return 1;
   return 0;
@@ -101,7 +99,8 @@ export interface RuntimeInteractionActionSettlementSnapshot {
 export interface RuntimeChatPacingGateSettlementSnapshot {
   readonly actionId: number;
   readonly actionKind: "chatPacingGate";
-  readonly settlementKind: "completed" | "skipped" | "consumedByForegroundInteraction" | "supersededByInstantOutput";
+  readonly settlementKind:
+    "completed" | "skipped" | "consumedByForegroundInteraction" | "supersededByInstantOutput";
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly requestEventSequence: number;
@@ -112,4 +111,7 @@ export interface RuntimeChatPacingGateSettlementSnapshot {
   readonly releasedPreparedOutputInstruction: number | null;
 }
 
-export type RuntimeActionSettlementSnapshot = RuntimeDelayActionSettlementSnapshot | RuntimeInteractionActionSettlementSnapshot | RuntimeChatPacingGateSettlementSnapshot;
+export type RuntimeActionSettlementSnapshot =
+  | RuntimeDelayActionSettlementSnapshot
+  | RuntimeInteractionActionSettlementSnapshot
+  | RuntimeChatPacingGateSettlementSnapshot;

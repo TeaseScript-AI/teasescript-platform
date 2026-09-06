@@ -1,7 +1,4 @@
-import type {
-  PlayerSpeakerPresentation,
-  PlayerTranscriptEntryPresentation,
-} from "./model.js";
+import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "./model.js";
 import { createTranscriptEntryElement } from "./render.js";
 
 const WINDOW_SIZE = 120;
@@ -37,14 +34,18 @@ export function createTranscriptController(
   let scrollSettleTimer: ReturnType<typeof setTimeout> | null = null;
   let programmaticScroll = false;
 
-  transcript.addEventListener("scroll", () => {
-    if (programmaticScroll) return;
-    scrollSettled = false;
-    followingLatest = distanceFromBottom() <= FOLLOW_DISTANCE_PX;
-    scheduleScrollSettled();
-    syncWindowForScroll();
-    syncReturnControl();
-  }, { passive: true });
+  transcript.addEventListener(
+    "scroll",
+    () => {
+      if (programmaticScroll) return;
+      scrollSettled = false;
+      followingLatest = distanceFromBottom() <= FOLLOW_DISTANCE_PX;
+      scheduleScrollSettled();
+      syncWindowForScroll();
+      syncReturnControl();
+    },
+    { passive: true },
+  );
 
   transcript.addEventListener("touchstart", markInteractionActive, { passive: true });
   transcript.addEventListener("pointerdown", markInteractionActive, { passive: true });
@@ -136,13 +137,9 @@ export function createTranscriptController(
 
   function syncWindowForScroll(): void {
     if (entries.length <= WINDOW_SIZE) return;
-    const estimatedAbsoluteOffset = transcript.scrollTop + (renderedStart * averageMessageExtent);
+    const estimatedAbsoluteOffset = transcript.scrollTop + renderedStart * averageMessageExtent;
     const visibleIndex = Math.max(0, Math.floor(estimatedAbsoluteOffset / averageMessageExtent));
-    const desiredStart = clamp(
-      visibleIndex - WINDOW_BUFFER,
-      0,
-      latestWindowStart(),
-    );
+    const desiredStart = clamp(visibleIndex - WINDOW_BUFFER, 0, latestWindowStart());
     if (Math.abs(desiredStart - windowStart) < WINDOW_BUFFER) return;
 
     const anchor = captureAnchor();
@@ -182,7 +179,9 @@ export function createTranscriptController(
   }
 
   function updateAverageExtent(): void {
-    const renderedEntries = [...transcript.querySelectorAll<HTMLElement>(".message, .session-event")];
+    const renderedEntries = [
+      ...transcript.querySelectorAll<HTMLElement>(".message, .session-event"),
+    ];
     if (renderedEntries.length === 0) return;
     const first = renderedEntries[0];
     const last = renderedEntries.at(-1);
@@ -196,7 +195,8 @@ export function createTranscriptController(
     const before = transcript.querySelector<HTMLElement>('[data-window-spacer="before"]');
     if (before !== null) before.style.blockSize = `${renderedStart * averageMessageExtent}px`;
     const after = transcript.querySelector<HTMLElement>('[data-window-spacer="after"]');
-    if (after !== null) after.style.blockSize = `${(entries.length - renderedEnd) * averageMessageExtent}px`;
+    if (after !== null)
+      after.style.blockSize = `${(entries.length - renderedEnd) * averageMessageExtent}px`;
   }
 
   function captureAnchor(): { readonly id: string; readonly offset: number } | null {
@@ -212,11 +212,12 @@ export function createTranscriptController(
 
   function restoreAnchor(anchor: { readonly id: string; readonly offset: number } | null): void {
     if (anchor === null) return;
-    const element = [...transcript.querySelectorAll<HTMLElement>(".message, .session-event")]
-      .find((candidate) => candidate.dataset.transcriptEntryId === anchor.id);
+    const element = [...transcript.querySelectorAll<HTMLElement>(".message, .session-event")].find(
+      (candidate) => candidate.dataset.transcriptEntryId === anchor.id,
+    );
     if (element === undefined) return;
     const transcriptTop = transcript.getBoundingClientRect().top;
-    const delta = (element.getBoundingClientRect().top - transcriptTop) - anchor.offset;
+    const delta = element.getBoundingClientRect().top - transcriptTop - anchor.offset;
     if (Math.abs(delta) < 0.5) return;
     setScrollTop(transcript.scrollTop + delta);
   }

@@ -33,7 +33,10 @@ test("browser playground exposes the bounded editable workspace controls", async
   assert.match(browser, /sourceEdited/u);
   assert.match(browser, /renderSourceLines/u);
   assert.match(browser, /new ResizeObserver/u);
-  assert.match(browser, /replaceSource\(await response\.text\(\), "Repository example loaded\."[^\n]*false\)/u);
+  assert.match(
+    browser,
+    /replaceSource\(\s*await response\.text\(\),\s*"Repository example loaded\.",\s*PLAYGROUND_EXAMPLES\[currentExample\]\.label,\s*false,\s*\)/u,
+  );
   assert.match(browser, /decodeWorkspaceSourceBytes\(await file\.arrayBuffer\(\)\)/u);
   assert.match(browser, /applyResult\(data\.result, true\)/u);
   assert.match(browser, /compiledRevision = null/u);
@@ -43,6 +46,9 @@ test("browser playground exposes the bounded editable workspace controls", async
   assert.match(styles, /\.future-timer-slot[^}]*top: \.85rem/u);
   assert.match(styles, /\.player-panel > h2 \{ min-height: 3\.75rem/u);
   assert.match(styles, /\.source-panel \{ align-self: start; \}/u);
-  const helper = await readFile(resolve(process.cwd(), "playground/workspace/controller.ts"), "utf8");
+  const helper = await readFile(
+    resolve(process.cwd(), "playground/workspace/controller.ts"),
+    "utf8",
+  );
   assert.doesNotMatch(helper, /Buffer\.byteLength/u);
 });

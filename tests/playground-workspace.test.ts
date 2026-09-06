@@ -14,7 +14,10 @@ test("workspace helper exposes production say pacing and returns JSON-safe data"
   assert.ok(compiled.plan);
   const result = executeWorkspaceSource('say "Hello"');
   assert.equal(result.status, "halted");
-  assert.deepEqual(result.events.map((event) => event.kind), ["say", "actionRequested", "complete"]);
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["say", "actionRequested", "complete"],
+  );
   assert.doesNotThrow(() => JSON.stringify(result));
 });
 
@@ -25,11 +28,17 @@ test("workspace helper reports parser and semantic diagnostics", () => {
 
 test("workspace compilation reuses the compiler-validated plan", () => {
   const statistics = withValidationTestStatistics((finish) => {
-    assert.ok(compileWorkspaceSource(Array.from({ length: 100 }, () => 'say "Hello"').join("\n")).plan);
+    assert.ok(
+      compileWorkspaceSource(Array.from({ length: 100 }, () => 'say "Hello"').join("\n")).plan,
+    );
     return finish();
   }).counts;
 
-  assert.equal(statistics.externalCaptureVisits, 1, "only the empty fresh-runtime options object is captured");
+  assert.equal(
+    statistics.externalCaptureVisits,
+    1,
+    "only the empty fresh-runtime options object is captured",
+  );
 
   const executionStatistics = withValidationTestStatistics((finish) => {
     assert.equal(executeWorkspaceSource('say "Hello"').status, "halted");
@@ -41,7 +50,10 @@ test("workspace compilation reuses the compiler-validated plan", () => {
 test("workspace helper stops blocking waits in waiting with action events", () => {
   const result = executeWorkspaceSource("wait 1");
   assert.equal(result.status, "waiting");
-  assert.deepEqual(result.events.map((event) => event.kind), ["actionRequested"]);
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["actionRequested"],
+  );
 });
 
 test("validated workspace execution clones state without hostile-data recapture", () => {
@@ -50,11 +62,7 @@ test("validated workspace execution clones state without hostile-data recapture"
   assert.ok(compiled.snapshot);
   const before = JSON.stringify(compiled.snapshot);
   const statistics = withValidationTestStatistics((finish) => {
-    const result = executeValidatedWorkspaceSnapshot(
-      compiled.plan!,
-      compiled.snapshot!,
-      "run",
-    );
+    const result = executeValidatedWorkspaceSnapshot(compiled.plan!, compiled.snapshot!, "run");
     assert.equal(result.status, "halted");
     return finish();
   }).counts;
@@ -73,18 +81,17 @@ test("workspace helper accepts source beyond the former local byte limit", () =>
 });
 
 test("workspace helper is deterministic and returns runtime instruction-budget failures", () => {
-  const source = 'say random(1, 10)';
+  const source = "say random(1, 10)";
   assert.deepEqual(executeWorkspaceSource(source), executeWorkspaceSource(source));
   const result = executeWorkspaceSource("while true {} ");
   assert.equal(result.status, "failed");
-  assert.ok(result.events.some((event) => event.kind === "runtimeFailure" && event.code === "TSR037"));
+  assert.ok(
+    result.events.some((event) => event.kind === "runtimeFailure" && event.code === "TSR037"),
+  );
 });
 
 test("workspace import decoding accepts large UTF-8 source and rejects malformed UTF-8", () => {
   const source = `say "${"🙂".repeat(20_000)}"`;
   assert.equal(decodeWorkspaceSourceBytes(new TextEncoder().encode(source).buffer), source);
-  assert.throws(
-    () => decodeWorkspaceSourceBytes(new Uint8Array([0xc3, 0x28]).buffer),
-    TypeError,
-  );
+  assert.throws(() => decodeWorkspaceSourceBytes(new Uint8Array([0xc3, 0x28]).buffer), TypeError);
 });

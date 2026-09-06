@@ -9,7 +9,9 @@ export function addToolColumn(
     throw new Error(`Duplicate Player tool column id: ${id}`);
   }
 
-  const openTools = new Set(columns.flatMap((column) => column.toolId === null ? [] : [column.toolId]));
+  const openTools = new Set(
+    columns.flatMap((column) => (column.toolId === null ? [] : [column.toolId])),
+  );
   const toolId = toolOrder.find((candidate) => !openTools.has(candidate)) ?? null;
   return [...columns, { id, toolId }];
 }

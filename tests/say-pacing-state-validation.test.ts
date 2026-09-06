@@ -14,7 +14,16 @@ import { observeTime } from "../src/runtime/operations/observe-time.js";
 import {
   createFreshRuntimeSnapshot,
   validateRuntimeSnapshot,
+  type RuntimeSnapshot,
+  type RuntimeTemporarySnapshot,
 } from "../src/runtime/state.js";
+import type { SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
+
+type Mutable<T> = T extends readonly (infer Item)[]
+  ? Array<Mutable<Item>>
+  : T extends object
+    ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
+    : T;
 
 function plan(source: string) {
   const compiled = compileSource(source);
@@ -26,16 +35,29 @@ function plan(source: string) {
 function checkpointSnapshot(
   compiled: ReturnType<typeof plan>,
   snapshot: ReturnType<typeof createFreshRuntimeSnapshot>,
-): any {
-  return JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot))).snapshot;
+): Mutable<RuntimeSnapshot> {
+  // EVIDENCE: the serialized checkpoint was created from this validated plan and runtime-produced snapshot.
+  return (
+    JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot))) as {
+      snapshot: Mutable<RuntimeSnapshot>;
+    }
+  ).snapshot;
+}
+
+interface CheckpointFixture {
+  snapshot: unknown;
 }
 
 function mutateCheckpoint(
   compiled: ReturnType<typeof plan>,
   snapshot: ReturnType<typeof createFreshRuntimeSnapshot>,
+  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: mutation callbacks alter concrete pacing fields to wrong types and obsolete shapes that RuntimeSnapshot intentionally cannot express.
   mutate: (snapshot: any) => void,
-): unknown {
-  const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot))) as { snapshot: any };
+): CheckpointFixture {
+  // EVIDENCE: serialization created the canonical checkpoint before the callback corrupts selected snapshot fields.
+  const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot))) as {
+    snapshot: RuntimeSnapshot;
+  };
   mutate(checkpoint.snapshot);
   return checkpoint;
 }
@@ -47,7 +69,9 @@ function expectInvalidSnapshot(
 ): void {
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false, label);
   const checkpoint = JSON.stringify({
-    ...JSON.parse(serializeCheckpoint(createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)))),
+    ...JSON.parse(
+      serializeCheckpoint(createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled))),
+    ),
     snapshot,
   });
   assert.throws(() => deserializeCheckpoint(checkpoint), label);
@@ -68,9 +92,9 @@ function expectCheckpointJsonRoundTrip(
 }
 
 function checkpointWithSnapshot(
-  baseline: { snapshot: any },
+  baseline: { snapshot: unknown },
   snapshot: unknown,
-): unknown {
+): CheckpointFixture {
   const checkpoint = structuredClone(baseline);
   checkpoint.snapshot = snapshot;
   return checkpoint;
@@ -98,7 +122,9 @@ test("older pacing gate promotes after a newer delay settlement and resumes prep
   assert.equal(promoted.events.filter((event) => event.kind === "actionRequested").length, 0);
   assert.equal(validateRuntimeSnapshot(promoted.snapshot, compiled).valid, true);
 
-  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, promoted.snapshot)));
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(compiled, promoted.snapshot)),
+  );
   assert.deepEqual(restored.snapshot, promoted.snapshot);
   const released = completeAction(restored.plan, restored.snapshot, {
     actionId: gate!.actionId,
@@ -106,7 +132,10 @@ test("older pacing gate promotes after a newer delay settlement and resumes prep
     payload: { kind: "skip" },
   });
   const resumed = run(restored.plan, released.snapshot);
-  assert.equal(resumed.events.filter((event) => event.kind === "say" && event.text === "second").length, 1);
+  assert.equal(
+    resumed.events.filter((event) => event.kind === "say" && event.text === "second").length,
+    1,
+  );
 });
 
 test("explicit exit cleans released pacing lineage without admitting forged pacing work", () => {
@@ -126,7 +155,11 @@ test("explicit exit cleans released pacing lineage without admitting forged paci
 
   assert.equal(exited.snapshot.status, "halted");
   assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);
-  expectCheckpointJsonRoundTrip("explicit exit after released pacing output", compiled, exited.snapshot);
+  expectCheckpointJsonRoundTrip(
+    "explicit exit after released pacing output",
+    compiled,
+    exited.snapshot,
+  );
 
   const forgedPacing = checkpointSnapshot(compiled, exited.snapshot);
   forgedPacing.backgroundActions.push(structuredClone(replacement));
@@ -134,13 +167,21 @@ test("explicit exit cleans released pacing lineage without admitting forged paci
 
   const forgedPreparedOutput = checkpointSnapshot(compiled, exited.snapshot);
   forgedPreparedOutput.preparedSayOutput = structuredClone(released.snapshot.preparedSayOutput);
-  expectInvalidSnapshot("explicit exit cannot retain prepared pacing output", compiled, forgedPreparedOutput);
+  expectInvalidSnapshot(
+    "explicit exit cannot retain prepared pacing output",
+    compiled,
+    forgedPreparedOutput,
+  );
 
   const naturalRoot = plan('say "first", 5');
   const naturallyHalted = run(naturalRoot, createFreshRuntimeSnapshot(naturalRoot));
   assert.equal(naturallyHalted.snapshot.status, "halted");
   assert.equal(naturallyHalted.snapshot.backgroundActions.length, 1);
-  expectCheckpointJsonRoundTrip("natural root may retain background pacing", naturalRoot, naturallyHalted.snapshot);
+  expectCheckpointJsonRoundTrip(
+    "natural root may retain background pacing",
+    naturalRoot,
+    naturallyHalted.snapshot,
+  );
 });
 
 test("branch-local and nested explicit exits reject forged retained pacing work", () => {
@@ -206,9 +247,12 @@ test("terminal continuation handoffs reject malformed external state and preserv
     },
   ];
   for (const corruption of corruptions) {
-    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
+    const snapshot = corruption.checkpoint.snapshot;
     assert.equal(validateRuntimeSnapshot(snapshot, delayPlan).valid, false, corruption.name);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+    assert.throws(
+      () => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)),
+      corruption.name,
+    );
   }
 
   const buttonPlan = plan('showButton "Continue"');
@@ -223,7 +267,10 @@ test("terminal continuation handoffs reject malformed external state and preserv
   });
   assert.equal(buttonSettled.snapshot.terminalContinuationHandoff?.actionKind, "interaction");
   assert.equal(validateRuntimeSnapshot(buttonSettled.snapshot, buttonPlan).valid, true);
-  assert.deepEqual(run(buttonPlan, buttonSettled.snapshot).events.map((event) => event.kind), ["complete"]);
+  assert.deepEqual(
+    run(buttonPlan, buttonSettled.snapshot).events.map((event) => event.kind),
+    ["complete"],
+  );
 });
 
 test("active-action and retained-settlement relations admit only canonical cross-kind timing", () => {
@@ -231,25 +278,46 @@ test("active-action and retained-settlement relations admit only canonical cross
   const initial = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
   const delay = initial.snapshot.foregroundAction;
   assert.equal(delay?.kind, "delay");
-  const promoted = run(promotionPlan, observeTime(promotionPlan, initial.snapshot, delay!.deadlineMs).snapshot);
-  assert.equal(validateRuntimeSnapshot(promoted.snapshot, promotionPlan).valid, true, "older pacing with newer delay");
+  const promoted = run(
+    promotionPlan,
+    observeTime(promotionPlan, initial.snapshot, delay!.deadlineMs).snapshot,
+  );
+  assert.equal(
+    validateRuntimeSnapshot(promoted.snapshot, promotionPlan).valid,
+    true,
+    "older pacing with newer delay",
+  );
 
   const longWaitPlan = plan('say "first"\nwait 10 s\nexit');
   const longWait = run(longWaitPlan, createFreshRuntimeSnapshot(longWaitPlan));
   const pacingSettled = observeTime(longWaitPlan, longWait.snapshot, 1_800);
   assert.equal(pacingSettled.snapshot.foregroundAction?.kind, "delay");
   assert.equal(pacingSettled.snapshot.lastSettlement?.actionKind, "chatPacingGate");
-  assert.equal(validateRuntimeSnapshot(pacingSettled.snapshot, longWaitPlan).valid, true, "active delay after older pacing");
+  assert.equal(
+    validateRuntimeSnapshot(pacingSettled.snapshot, longWaitPlan).valid,
+    true,
+    "active delay after older pacing",
+  );
 
   const newerPlan = plan('say "first"\nsay "second", instant\nwait 10 s\nexit');
   const newer = run(newerPlan, createFreshRuntimeSnapshot(newerPlan));
   assert.equal(newer.snapshot.foregroundAction?.kind, "delay");
   assert.equal(newer.snapshot.lastSettlement?.actionKind, "chatPacingGate");
-  assert.equal(validateRuntimeSnapshot(newer.snapshot, newerPlan).valid, true, "new active delay after settlement");
+  assert.equal(
+    validateRuntimeSnapshot(newer.snapshot, newerPlan).valid,
+    true,
+    "new active delay after settlement",
+  );
 
   const duplicateId = checkpointSnapshot(promotionPlan, promoted.snapshot);
+  assert.ok(duplicateId.foregroundAction?.kind === "chatPacingGate");
+  assert.ok(duplicateId.lastSettlement?.actionKind === "delay");
   duplicateId.foregroundAction.actionId = duplicateId.lastSettlement.actionId;
-  expectInvalidSnapshot("active and retained action identities collide", promotionPlan, duplicateId);
+  expectInvalidSnapshot(
+    "active and retained action identities collide",
+    promotionPlan,
+    duplicateId,
+  );
 
   const newerPacingSettlement = checkpointSnapshot(promotionPlan, promoted.snapshot);
   newerPacingSettlement.lastSettlement = {
@@ -264,15 +332,31 @@ test("active-action and retained-settlement relations admit only canonical cross
     completedAtMs: 1_000,
     releasedPreparedOutputInstruction: null,
   };
-  expectInvalidSnapshot("older foreground pacing cannot coexist with newer pacing settlement", promotionPlan, newerPacingSettlement);
+  expectInvalidSnapshot(
+    "older foreground pacing cannot coexist with newer pacing settlement",
+    promotionPlan,
+    newerPacingSettlement,
+  );
 
   const invalidOrdering = checkpointSnapshot(promotionPlan, promoted.snapshot);
-  invalidOrdering.foregroundAction.requestEventSequence = invalidOrdering.lastSettlement.requestEventSequence;
-  expectInvalidSnapshot("older pacing must predate the retained delay request", promotionPlan, invalidOrdering);
+  assert.ok(invalidOrdering.foregroundAction?.kind === "chatPacingGate");
+  assert.ok(invalidOrdering.lastSettlement?.actionKind === "delay");
+  invalidOrdering.foregroundAction.requestEventSequence =
+    invalidOrdering.lastSettlement.requestEventSequence;
+  expectInvalidSnapshot(
+    "older pacing must predate the retained delay request",
+    promotionPlan,
+    invalidOrdering,
+  );
 
   const invalidCausalOrdering = checkpointSnapshot(promotionPlan, promoted.snapshot);
+  assert.ok(invalidCausalOrdering.lastSettlement?.actionKind === "delay");
   invalidCausalOrdering.lastSettlement.requestEventSequence = 1;
-  expectInvalidSnapshot("request ordering remains relational when action IDs look plausible", promotionPlan, invalidCausalOrdering);
+  expectInvalidSnapshot(
+    "request ordering remains relational when action IDs look plausible",
+    promotionPlan,
+    invalidCausalOrdering,
+  );
 
   const interactionPlan = plan('say "first"\nwait 1 s\nsay "second"\nshowButton "Continue"\nexit');
   const interactionInitial = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
@@ -280,7 +364,8 @@ test("active-action and retained-settlement relations admit only canonical cross
   assert.equal(interactionDelay?.kind, "delay");
   const interactionPromoted = run(
     interactionPlan,
-    observeTime(interactionPlan, interactionInitial.snapshot, interactionDelay!.deadlineMs).snapshot,
+    observeTime(interactionPlan, interactionInitial.snapshot, interactionDelay!.deadlineMs)
+      .snapshot,
   );
   const firstGate = interactionPromoted.snapshot.foregroundAction;
   assert.equal(firstGate?.kind, "chatPacingGate");
@@ -299,11 +384,20 @@ test("active-action and retained-settlement relations admit only canonical cross
     payload: { kind: "activate" },
   });
 
-  const newerInteractionSettlement = checkpointSnapshot(interactionPlan, interactionPromoted.snapshot);
-  newerInteractionSettlement.lastSettlement = structuredClone(interactionSettled.snapshot.lastSettlement);
+  const newerInteractionSettlement = checkpointSnapshot(
+    interactionPlan,
+    interactionPromoted.snapshot,
+  );
+  newerInteractionSettlement.lastSettlement = structuredClone(
+    interactionSettled.snapshot.lastSettlement,
+  );
   newerInteractionSettlement.nextActionId = interactionSettled.snapshot.nextActionId;
   newerInteractionSettlement.nextEventSequence = interactionSettled.snapshot.nextEventSequence;
-  expectInvalidSnapshot("older foreground pacing cannot coexist with a newer interaction settlement", interactionPlan, newerInteractionSettlement);
+  expectInvalidSnapshot(
+    "older foreground pacing cannot coexist with a newer interaction settlement",
+    interactionPlan,
+    newerInteractionSettlement,
+  );
 });
 
 test("retained replay remains bounded across the legal cross-kind relations", () => {
@@ -315,23 +409,32 @@ test("retained replay remains bounded across the legal cross-kind relations", ()
   assert.equal(delay?.kind, "delay");
 
   const pacingSettled = observeTime(compiled, initial.snapshot, pacing!.deadlineMs);
-  assert.equal(completeAction(compiled, pacingSettled.snapshot, {
-    actionId: pacing!.actionId,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  }).outcome.kind, "alreadySettled");
+  assert.equal(
+    completeAction(compiled, pacingSettled.snapshot, {
+      actionId: pacing!.actionId,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    }).outcome.kind,
+    "alreadySettled",
+  );
 
   const delaySettled = observeTime(compiled, pacingSettled.snapshot, delay!.deadlineMs);
-  assert.equal(completeAction(compiled, delaySettled.snapshot, {
-    actionId: pacing!.actionId,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  }).outcome.kind, "staleAction");
-  assert.equal(completeAction(compiled, delaySettled.snapshot, {
-    actionId: 999,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  }).outcome.kind, "unknownAction");
+  assert.equal(
+    completeAction(compiled, delaySettled.snapshot, {
+      actionId: pacing!.actionId,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    }).outcome.kind,
+    "staleAction",
+  );
+  assert.equal(
+    completeAction(compiled, delaySettled.snapshot, {
+      actionId: 999,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    }).outcome.kind,
+    "unknownAction",
+  );
 
   const baseline = JSON.stringify(initial.snapshot);
   const wrongKind = completeAction(compiled, initial.snapshot, {
@@ -352,11 +455,13 @@ test("current pacing serialization versions accept only their exact schemas", ()
   assert.equal(checkpoint.version, 27);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
-  const oldSnapshot = structuredClone(snapshot) as any;
-  oldSnapshot.version = 18;
+  const oldSnapshot = structuredClone(snapshot);
+  // EVIDENCE: fixture changes only the snapshot version to the immediately preceding unsupported schema.
+  (oldSnapshot as { version: number }).version = 18;
   assert.equal(validateRuntimeSnapshot(oldSnapshot, compiled).valid, false);
-  const oldPlan = structuredClone(compiled) as any;
-  oldPlan.version = 18;
+  const oldPlan = structuredClone(compiled);
+  // EVIDENCE: fixture changes only the plan version to the immediately preceding unsupported schema.
+  (oldPlan as { version: number }).version = 18;
   assert.equal(validateInstructionPlan(oldPlan).valid, false);
   const oldCheckpoint = structuredClone(checkpoint);
   oldCheckpoint.version = 26;
@@ -364,16 +469,18 @@ test("current pacing serialization versions accept only their exact schemas", ()
 });
 
 test("prepared say text retains caller temporaries through a suspended text call", () => {
-  const compiled = plan([
-    "let paceCalls = 0",
-    'function prefix { return "prefix " }',
-    "function textValue {",
-    "  wait 1 ms",
-    '  return "hello"',
-    "}",
-    "function pace { paceCalls = paceCalls + 1\nreturn 1 }",
-    "say `${prefix()}${textValue()}`, pace()",
-  ].join("\n"));
+  const compiled = plan(
+    [
+      "let paceCalls = 0",
+      'function prefix { return "prefix " }',
+      "function textValue {",
+      "  wait 1 ms",
+      '  return "hello"',
+      "}",
+      "function pace { paceCalls = paceCalls + 1\nreturn 1 }",
+      "say `${prefix()}${textValue()}`, pace()",
+    ].join("\n"),
+  );
   const textPreparation = compiled.instructions.find(
     (instruction) => instruction.kind === "prepareSayText",
   );
@@ -387,8 +494,8 @@ test("prepared say text retains caller temporaries through a suspended text call
   assert.equal(validateRuntimeSnapshot(waiting, compiled).valid, true);
 
   const activeCall = waiting.callFrames.at(-1)!;
-  const preparedTextTemporaryIds = textPreparation.value.parts.flatMap(
-    (part) => part.kind === "expression" && part.expression.kind === "temporary"
+  const preparedTextTemporaryIds = textPreparation.value.parts.flatMap((part) =>
+    part.kind === "expression" && part.expression.kind === "temporary"
       ? [part.expression.temporaryId]
       : [],
   );
@@ -396,19 +503,14 @@ test("prepared say text retains caller temporaries through a suspended text call
     (temporaryId) => temporaryId !== activeCall.destinationTemporary,
   );
   assert.notEqual(retainedTemporaryId, undefined);
-  assert.ok(activeCall.callerTemporaries.some(
-    (temporary) => temporary.id === retainedTemporaryId,
-  ));
+  assert.ok(activeCall.callerTemporaries.some((temporary) => temporary.id === retainedTemporaryId));
 
   const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, waiting)));
   assert.deepEqual(restored.snapshot, waiting);
 
   const delay = waiting.foregroundAction;
   assert.equal(delay?.kind, "delay");
-  const uninterrupted = run(
-    compiled,
-    observeTime(compiled, waiting, delay!.deadlineMs).snapshot,
-  );
+  const uninterrupted = run(compiled, observeTime(compiled, waiting, delay!.deadlineMs).snapshot);
   const resumed = run(
     restored.plan,
     observeTime(restored.plan, restored.snapshot, delay!.deadlineMs).snapshot,
@@ -424,14 +526,13 @@ test("prepared say text retains caller temporaries through a suspended text call
     1,
   );
 
-  const malformed = structuredClone(waiting) as any;
-  malformed.callFrames.at(-1).callerTemporaries = malformed.callFrames.at(-1).callerTemporaries
-    .filter((temporary: { id: number }) => temporary.id !== retainedTemporaryId);
-  expectInvalidSnapshot(
-    "missing a prepared say text continuation temporary",
-    compiled,
-    malformed,
-  );
+  const malformed = structuredClone(waiting);
+  const malformedFrame = malformed.callFrames.at(-1);
+  assert.ok(malformedFrame !== undefined);
+  // EVIDENCE: fixture removes the retained prepared-text temporary from the suspended caller frame.
+  (malformedFrame as { callerTemporaries: RuntimeTemporarySnapshot[] }).callerTemporaries =
+    malformedFrame.callerTemporaries.filter((temporary) => temporary.id !== retainedTemporaryId);
+  expectInvalidSnapshot("missing a prepared say text continuation temporary", compiled, malformed);
 });
 
 test("prepared say temporary values reject malformed top-level and caller state", () => {
@@ -440,7 +541,7 @@ test("prepared say temporary values reject malformed top-level and caller state"
     "speaker other {}",
     'function textValue { return "hello" }',
     "function pace { return 1 }",
-    'say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()',
+    "say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()",
   ].join("\n");
   const compiled = plan(source);
   const say = compiled.instructions.find((instruction) => instruction.kind === "say");
@@ -450,41 +551,73 @@ test("prepared say temporary values reject malformed top-level and caller state"
     typeof say.speakerTemporary !== "number" ||
     typeof say.textTemporary !== "number" ||
     typeof say.contextualSpeakerTemporary !== "number"
-  ) throw new Error("Expected a fully prepared say.");
+  )
+    throw new Error("Expected a fully prepared say.");
 
   let atSay = createFreshRuntimeSnapshot(compiled);
   while (atSay.nextInstruction !== compiled.instructions.indexOf(say)) {
     atSay = executeInstruction(compiled, atSay).snapshot;
   }
   assert.equal(validateRuntimeSnapshot(atSay, compiled).valid, true);
-  const replaceTopLevel = (temporaryId: number, value: unknown): any => {
-    const malformed = structuredClone(atSay) as any;
-    const temporary = malformed.temporaries.find((entry: { id: number }) => entry.id === temporaryId);
-    assert.notEqual(temporary, undefined);
-    temporary.value = value;
+  const replaceTopLevel = (temporaryId: number, value: unknown): RuntimeSnapshot => {
+    const malformed = structuredClone(atSay);
+    const temporary = malformed.temporaries.find((entry) => entry.id === temporaryId);
+    assert.ok(temporary !== undefined);
+    // EVIDENCE: this helper intentionally replaces a prepared temporary with unvalidated boundary data.
+    (temporary as { value: unknown }).value = value;
     return malformed;
   };
-  const preparedSpeaker = atSay.temporaries.find((temporary) => temporary.id === say.speakerTemporary)!;
-  const speakerProperties = (preparedSpeaker.value as { properties: Array<{ name: string; value: unknown }> }).properties;
-  const mutateSpeaker = (mutate: (properties: Array<{ name: string; value: unknown }>) => void): any => {
-    const malformed = structuredClone(atSay) as any;
-    const temporary = malformed.temporaries.find((entry: { id: number }) => entry.id === say.speakerTemporary);
+  const preparedSpeaker = atSay.temporaries.find(
+    (temporary) => temporary.id === say.speakerTemporary,
+  )!;
+  assert.ok(
+    typeof preparedSpeaker.value === "object" &&
+      preparedSpeaker.value !== null &&
+      preparedSpeaker.value.kind === "object",
+  );
+  const speakerProperties = preparedSpeaker.value.properties;
+  const mutateSpeaker = (
+    mutate: (properties: SerializableRuntimeObject["properties"]) => void,
+  ): RuntimeSnapshot => {
+    const malformed = structuredClone(atSay);
+    const temporary = malformed.temporaries.find((entry) => entry.id === say.speakerTemporary);
+    assert.ok(
+      typeof temporary?.value === "object" &&
+        temporary.value !== null &&
+        temporary.value.kind === "object",
+    );
     mutate(temporary.value.properties);
     return malformed;
   };
 
-  expectInvalidSnapshot("prepared speaker with a non-numeric ID", compiled, mutateSpeaker((properties) => {
-    properties.find((property) => property.name === "speakerId")!.value = "bad";
-  }));
-  expectInvalidSnapshot("prepared speaker with an unknown ID", compiled, mutateSpeaker((properties) => {
-    properties.find((property) => property.name === "speakerId")!.value = 999;
-  }));
-  expectInvalidSnapshot("prepared speaker with the wrong immutable identifier", compiled, mutateSpeaker((properties) => {
-    properties.find((property) => property.name === "identifier")!.value = "other";
-  }));
-  expectInvalidSnapshot("prepared speaker with extra fields", compiled, mutateSpeaker((properties) => {
-    properties.push({ name: "extra", value: true });
-  }));
+  expectInvalidSnapshot(
+    "prepared speaker with a non-numeric ID",
+    compiled,
+    mutateSpeaker((properties) => {
+      properties.find((property) => property.name === "speakerId")!.value = "bad";
+    }),
+  );
+  expectInvalidSnapshot(
+    "prepared speaker with an unknown ID",
+    compiled,
+    mutateSpeaker((properties) => {
+      properties.find((property) => property.name === "speakerId")!.value = 999;
+    }),
+  );
+  expectInvalidSnapshot(
+    "prepared speaker with the wrong immutable identifier",
+    compiled,
+    mutateSpeaker((properties) => {
+      properties.find((property) => property.name === "identifier")!.value = "other";
+    }),
+  );
+  expectInvalidSnapshot(
+    "prepared speaker with extra fields",
+    compiled,
+    mutateSpeaker((properties) => {
+      properties.push({ name: "extra", value: true });
+    }),
+  );
   expectInvalidSnapshot(
     "explicit prepared speaker replaced with null",
     compiled,
@@ -498,21 +631,37 @@ test("prepared say temporary values reject malformed top-level and caller state"
   expectInvalidSnapshot(
     "prepared contextual speaker with malformed reference state",
     compiled,
-    replaceTopLevel(say.contextualSpeakerTemporary, { kind: "speakerReference", speakerId: 1, identifier: "other" }),
+    replaceTopLevel(say.contextualSpeakerTemporary, {
+      kind: "speakerReference",
+      speakerId: 1,
+      identifier: "other",
+    }),
   );
   expectInvalidSnapshot(
     "prepared contextual speaker for a different captured speaker",
     compiled,
-    replaceTopLevel(say.contextualSpeakerTemporary, { kind: "speakerReference", speakerId: 2, identifier: "other" }),
+    replaceTopLevel(say.contextualSpeakerTemporary, {
+      kind: "speakerReference",
+      speakerId: 2,
+      identifier: "other",
+    }),
   );
   assert.equal(speakerProperties.find((property) => property.name === "identifier")?.value, "vera");
 
-  const presentationDrift = structuredClone(atSay) as any;
-  presentationDrift.temporaries.find(
-    (temporary: { id: number }) => temporary.id === say.speakerTemporary,
-  ).value.properties.find(
-    (property: { name: string }) => property.name === "displayName",
-  ).value = "Captured before a later mutation";
+  const presentationDrift = structuredClone(atSay);
+  const presentationSpeaker = presentationDrift.temporaries.find(
+    (temporary) => temporary.id === say.speakerTemporary,
+  );
+  assert.ok(
+    typeof presentationSpeaker?.value === "object" &&
+      presentationSpeaker.value !== null &&
+      presentationSpeaker.value.kind === "object",
+  );
+  const displayName = presentationSpeaker.value.properties.find(
+    (property) => property.name === "displayName",
+  );
+  assert.ok(displayName !== undefined);
+  displayName.value = "Captured before a later mutation";
   expectCheckpointJsonRoundTrip(
     "prepared explicit speaker retains captured mutable presentation fields",
     compiled,
@@ -520,39 +669,47 @@ test("prepared say temporary values reject malformed top-level and caller state"
   );
 
   const forgeExplicitSpeaker = (
-    temporaries: any[],
+    temporaries: Array<Mutable<RuntimeTemporarySnapshot>>,
     speakerTemporary: number,
     contextualSpeakerTemporary: number,
   ): void => {
     const output = temporaries.find((temporary) => temporary.id === speakerTemporary);
-    output.value.properties.find((property: { name: string }) => property.name === "speakerId").value = 2;
-    output.value.properties.find((property: { name: string }) => property.name === "identifier").value = "other";
-    temporaries.find((temporary) => temporary.id === contextualSpeakerTemporary).value = {
-      kind: "speakerReference",
-      speakerId: 2,
-      identifier: "other",
-    };
+    assert.ok(
+      typeof output?.value === "object" && output.value !== null && output.value.kind === "object",
+    );
+    const speakerId = output.value.properties.find((property) => property.name === "speakerId");
+    const identifier = output.value.properties.find((property) => property.name === "identifier");
+    assert.ok(speakerId !== undefined);
+    assert.ok(identifier !== undefined);
+    speakerId.value = 2;
+    identifier.value = "other";
+    const contextual = temporaries.find((temporary) => temporary.id === contextualSpeakerTemporary);
+    assert.ok(contextual !== undefined);
+    contextual.value = { kind: "speakerReference", speakerId: 2, identifier: "other" };
   };
-  const forgedTopLevel = structuredClone(atSay) as any;
+  const forgedTopLevel = structuredClone(atSay);
   forgeExplicitSpeaker(
     forgedTopLevel.temporaries,
     say.speakerTemporary,
     say.contextualSpeakerTemporary,
   );
-  expectInvalidSnapshot("explicit prepared speaker replaced with another valid speaker", compiled, forgedTopLevel);
+  expectInvalidSnapshot(
+    "explicit prepared speaker replaced with another valid speaker",
+    compiled,
+    forgedTopLevel,
+  );
   assert.throws(() => createCheckpoint(compiled, forgedTopLevel));
-  assert.throws(() => run(compiled, forgedTopLevel), {
-    name: "RuntimeDataError",
-    code: "TSR101",
-  });
+  assert.throws(() => run(compiled, forgedTopLevel), { name: "RuntimeDataError", code: "TSR101" });
 
-  const suspended = plan([
-    'speaker vera { title: "Captain"\ndelay: 1 }',
-    "speaker other {}",
-    'function textValue { return "hello" }',
-    "function pace { wait 1 ms\nreturn 1 }",
-    'say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()',
-  ].join("\n"));
+  const suspended = plan(
+    [
+      'speaker vera { title: "Captain"\ndelay: 1 }',
+      "speaker other {}",
+      'function textValue { return "hello" }',
+      "function pace { wait 1 ms\nreturn 1 }",
+      "say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()",
+    ].join("\n"),
+  );
   const suspendedSay = suspended.instructions.find((instruction) => instruction.kind === "say");
   assert.equal(suspendedSay?.kind, "say");
   if (
@@ -560,28 +717,48 @@ test("prepared say temporary values reject malformed top-level and caller state"
     typeof suspendedSay.speakerTemporary !== "number" ||
     typeof suspendedSay.textTemporary !== "number" ||
     typeof suspendedSay.contextualSpeakerTemporary !== "number"
-  ) throw new Error("Expected prepared say temporaries.");
+  )
+    throw new Error("Expected prepared say temporaries.");
   const waiting = run(suspended, createFreshRuntimeSnapshot(suspended)).snapshot;
   assert.equal(waiting.status, "waiting");
   const callerTemporaries = waiting.callFrames.at(-1)?.callerTemporaries;
   assert.ok(callerTemporaries?.some((temporary) => temporary.id === suspendedSay.speakerTemporary));
   assert.ok(callerTemporaries?.some((temporary) => temporary.id === suspendedSay.textTemporary));
-  assert.ok(callerTemporaries?.some((temporary) => temporary.id === suspendedSay.contextualSpeakerTemporary));
-  const malformedCaller = structuredClone(waiting) as any;
-  malformedCaller.callFrames.at(-1).callerTemporaries.find(
-    (temporary: { id: number }) => temporary.id === suspendedSay.textTemporary,
-  ).value = 123;
-  expectInvalidSnapshot("malformed prepared text in caller state", suspended, malformedCaller);
-  const malformedCallerSpeaker = structuredClone(waiting) as any;
-  const callerSpeaker = malformedCallerSpeaker.callFrames.at(-1).callerTemporaries.find(
-    (temporary: { id: number }) => temporary.id === suspendedSay.speakerTemporary,
+  assert.ok(
+    callerTemporaries?.some(
+      (temporary) => temporary.id === suspendedSay.contextualSpeakerTemporary,
+    ),
   );
-  callerSpeaker.value.properties.find(
-    (property: { name: string }) => property.name === "speakerId",
-  ).value = "bad";
-  expectInvalidSnapshot("malformed prepared speaker in caller state", suspended, malformedCallerSpeaker);
-  const forgedCaller = structuredClone(waiting) as any;
-  const forgedCallerTemporaries = forgedCaller.callFrames.at(-1).callerTemporaries;
+  const malformedCaller = structuredClone(waiting);
+  const callerText = malformedCaller.callFrames
+    .at(-1)
+    ?.callerTemporaries.find((temporary) => temporary.id === suspendedSay.textTemporary);
+  assert.ok(callerText !== undefined);
+  callerText.value = 123;
+  expectInvalidSnapshot("malformed prepared text in caller state", suspended, malformedCaller);
+  const malformedCallerSpeaker = structuredClone(waiting);
+  const callerSpeaker = malformedCallerSpeaker.callFrames
+    .at(-1)
+    ?.callerTemporaries.find((temporary) => temporary.id === suspendedSay.speakerTemporary);
+  assert.ok(
+    typeof callerSpeaker?.value === "object" &&
+      callerSpeaker.value !== null &&
+      callerSpeaker.value.kind === "object",
+  );
+  const callerSpeakerId = callerSpeaker.value.properties.find(
+    (property) => property.name === "speakerId",
+  );
+  assert.ok(callerSpeakerId !== undefined);
+  callerSpeakerId.value = "bad";
+  expectInvalidSnapshot(
+    "malformed prepared speaker in caller state",
+    suspended,
+    malformedCallerSpeaker,
+  );
+  const forgedCaller = structuredClone(waiting);
+  const forgedCallerFrame = forgedCaller.callFrames.at(-1);
+  assert.ok(forgedCallerFrame !== undefined);
+  const forgedCallerTemporaries = forgedCallerFrame.callerTemporaries;
   forgeExplicitSpeaker(
     forgedCallerTemporaries,
     suspendedSay.speakerTemporary,
@@ -593,18 +770,13 @@ test("prepared say temporary values reject malformed top-level and caller state"
     forgedCaller,
   );
   assert.throws(() => createCheckpoint(suspended, forgedCaller));
-  assert.throws(() => run(suspended, forgedCaller), {
-    name: "RuntimeDataError",
-    code: "TSR101",
-  });
+  assert.throws(() => run(suspended, forgedCaller), { name: "RuntimeDataError", code: "TSR101" });
 });
 
 test("say pacing expression temporaries are required before checkpoint restore", () => {
-  const compiled = plan([
-    "function pace(value) { return value }",
-    'say "first", 5',
-    'say "second", pace(5)',
-  ].join("\n"));
+  const compiled = plan(
+    ["function pace(value) { return value }", 'say "first", 5', 'say "second", pace(5)'].join("\n"),
+  );
   const say = compiled.instructions.find(
     (instruction) =>
       instruction.kind === "say" &&
@@ -629,37 +801,44 @@ test("say pacing expression temporaries are required before checkpoint restore",
   const promoted = executeInstruction(restored.plan, restored.snapshot);
   assert.equal(promoted.snapshot.foregroundAction?.kind, "chatPacingGate");
 
-  const missingPacingTemporary = structuredClone(pending) as any;
-  missingPacingTemporary.temporaries = missingPacingTemporary.temporaries.filter(
-    (temporary: { id: number }) => temporary.id !== pacingTemporary,
-  );
+  const missingPacingTemporary = structuredClone(pending);
+  // EVIDENCE: fixture removes the required pacing temporary before snapshot validation.
+  (missingPacingTemporary as { temporaries: RuntimeTemporarySnapshot[] }).temporaries =
+    missingPacingTemporary.temporaries.filter((temporary) => temporary.id !== pacingTemporary);
   assert.equal(validateRuntimeSnapshot(missingPacingTemporary, compiled).valid, false);
   assert.throws(() => createCheckpoint(compiled, missingPacingTemporary));
 
   for (const temporaryId of [say.speakerTemporary, say.textTemporary]) {
     assert.equal(typeof temporaryId, "number");
-    const missingPreparedTemporary = structuredClone(pending) as any;
-    missingPreparedTemporary.temporaries = missingPreparedTemporary.temporaries.filter(
-      (temporary: { id: number }) => temporary.id !== temporaryId,
-    );
+    const missingPreparedTemporary = structuredClone(pending);
+    // EVIDENCE: fixture removes one required prepared say temporary before snapshot validation.
+    (missingPreparedTemporary as { temporaries: RuntimeTemporarySnapshot[] }).temporaries =
+      missingPreparedTemporary.temporaries.filter((temporary) => temporary.id !== temporaryId);
     assert.equal(validateRuntimeSnapshot(missingPreparedTemporary, compiled).valid, false);
   }
 });
 
 test("prepared say text is live instead of its already-consumed source expression", () => {
-  const compiled = plan([
-    'function textValue { return "hello" }',
-    "function pace { return 1 }",
-    "say textValue(), pace()",
-  ].join("\n"));
+  const compiled = plan(
+    [
+      'function textValue { return "hello" }',
+      "function pace { return 1 }",
+      "say textValue(), pace()",
+    ].join("\n"),
+  );
   const say = compiled.instructions.find((instruction) => instruction.kind === "say");
   assert.equal(say?.kind, "say");
-  if (say?.kind !== "say" || typeof say.textTemporary !== "number" || typeof say.speakerTemporary !== "number") {
+  if (
+    say?.kind !== "say" ||
+    typeof say.textTemporary !== "number" ||
+    typeof say.speakerTemporary !== "number"
+  ) {
     throw new Error("Expected a fully prepared say.");
   }
-  const pacingTemporary = typeof say.pacing === "object" && say.pacing.kind === "temporary"
-    ? say.pacing.temporaryId
-    : null;
+  const pacingTemporary =
+    typeof say.pacing === "object" && say.pacing.kind === "temporary"
+      ? say.pacing.temporaryId
+      : null;
   assert.equal(typeof pacingTemporary, "number");
 
   let pending = createFreshRuntimeSnapshot(compiled);
@@ -682,8 +861,10 @@ test("prepared say text is live instead of its already-consumed source expressio
   }
 
   for (const temporaryId of [pacingTemporary, say.textTemporary, say.speakerTemporary]) {
-    const missing = structuredClone(pending) as any;
-    missing.temporaries = missing.temporaries.filter((temporary: { id: number }) => temporary.id !== temporaryId);
+    const missing = structuredClone(pending);
+    // EVIDENCE: fixture removes one live prepared or pacing temporary before snapshot validation.
+    (missing as { temporaries: RuntimeTemporarySnapshot[] }).temporaries =
+      missing.temporaries.filter((temporary) => temporary.id !== temporaryId);
     assert.equal(validateRuntimeSnapshot(missing, compiled).valid, false);
   }
 });
@@ -696,8 +877,11 @@ test("pacing creation provenance requires a positive historical scope depth", ()
   assert.equal(validateRuntimeSnapshot(root, rootPlan).valid, true);
   assert.doesNotThrow(() => createCheckpoint(rootPlan, root));
 
-  const zeroDepth = structuredClone(root) as any;
-  zeroDepth.backgroundActions[0].scopeDepth = 0;
+  const zeroDepth = structuredClone(root);
+  const zeroDepthGate = zeroDepth.backgroundActions[0];
+  assert.ok(zeroDepthGate?.kind === "chatPacingGate");
+  // EVIDENCE: fixture changes only pacing provenance depth to the invalid zero value.
+  (zeroDepthGate as { scopeDepth: number }).scopeDepth = 0;
   assert.equal(validateRuntimeSnapshot(zeroDepth, rootPlan).valid, false);
   assert.throws(() => createCheckpoint(rootPlan, zeroDepth));
 
@@ -712,11 +896,14 @@ test("pacing creation provenance requires a positive historical scope depth", ()
 });
 
 test("snapshot and checkpoint reject malformed pacing prepared output", () => {
-  const compiled = plan('speaker vera { displayName: "Vera" }\nsay as vera "first"\nsay as vera "second"');
+  const compiled = plan(
+    'speaker vera { displayName: "Vera" }\nsay as vera "first"\nsay as vera "second"',
+  );
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const corrupted = JSON.parse(serializeCheckpoint(
-    createCheckpoint(compiled, waiting.snapshot),
-  )) as {
+  // EVIDENCE: serialization produces this active pacing action and prepared-output shape before corruption.
+  const corrupted = JSON.parse(
+    serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot)),
+  ) as {
     snapshot: {
       foregroundAction: {
         preparedOutput: { speaker: Record<string, unknown>; durationMs: number };
@@ -734,7 +921,10 @@ test("snapshot and checkpoint reject malformed pacing prepared output", () => {
   assert.throws(() => deserializeCheckpoint(JSON.stringify(corrupted)));
 
   corrupted.snapshot.foregroundAction.preparedOutput.durationMs = 1;
-  (corrupted.snapshot.foregroundAction as unknown as { skippable: unknown }).skippable = "yes";
+  // EVIDENCE: fixture adds the removed `skippable` action field to verify exact-schema rejection.
+  const corruptedAction = corrupted.snapshot
+    .foregroundAction as typeof corrupted.snapshot.foregroundAction & { skippable?: unknown };
+  corruptedAction.skippable = "yes";
   assert.equal(validateRuntimeSnapshot(corrupted.snapshot, compiled).valid, false);
   assert.throws(() => deserializeCheckpoint(JSON.stringify(corrupted)));
 });
@@ -746,7 +936,8 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
   const foreground = run(foregroundPlan, createFreshRuntimeSnapshot(foregroundPlan));
   const foregroundGate = foreground.snapshot.foregroundAction;
   assert.equal(foregroundGate?.kind, "chatPacingGate");
-  if (foregroundGate?.kind !== "chatPacingGate") throw new Error("Expected a promoted pacing gate.");
+  if (foregroundGate?.kind !== "chatPacingGate")
+    throw new Error("Expected a promoted pacing gate.");
   const functionPlan = plan('function f { say "first" }\nf()');
   const functionBackground = run(functionPlan, createFreshRuntimeSnapshot(functionPlan));
   const settled = completeAction(backgroundPlan, background.snapshot, {
@@ -802,7 +993,9 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
       name: "background prepared output",
       plan: backgroundPlan,
       checkpoint: mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => {
-        snapshot.backgroundActions[0].preparedOutput = structuredClone(foregroundGate.preparedOutput);
+        snapshot.backgroundActions[0].preparedOutput = structuredClone(
+          foregroundGate.preparedOutput,
+        );
       }),
     },
     {
@@ -850,18 +1043,22 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
   ];
 
   for (const corruption of corruptions) {
-    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
+    const snapshot = corruption.checkpoint.snapshot;
     assert.equal(validateRuntimeSnapshot(snapshot, corruption.plan).valid, false, corruption.name);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+    assert.throws(
+      () => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)),
+      corruption.name,
+    );
   }
 });
 
 test("background pacing actions require dense JSON-safe array entries", () => {
   const compiled = plan('say "first"');
   const background = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const baselineCheckpoint = JSON.parse(serializeCheckpoint(
-    createCheckpoint(compiled, background.snapshot),
-  )) as { snapshot: any };
+  // EVIDENCE: serialization creates the canonical checkpoint before array-shape corruptions are applied.
+  const baselineCheckpoint = JSON.parse(
+    serializeCheckpoint(createCheckpoint(compiled, background.snapshot)),
+  ) as { snapshot: Mutable<RuntimeSnapshot> };
 
   const sparseSnapshot = structuredClone(baselineCheckpoint.snapshot);
   sparseSnapshot.backgroundActions = new Array(1);
@@ -869,46 +1066,58 @@ test("background pacing actions require dense JSON-safe array entries", () => {
   assert.throws(() => createCheckpoint(compiled, sparseSnapshot));
 
   const jsonSparseCheckpoint = structuredClone(baselineCheckpoint);
-  jsonSparseCheckpoint.snapshot.backgroundActions = [null];
+  // EVIDENCE: fixture widens only backgroundActions to inject a null checkpoint entry.
+  (jsonSparseCheckpoint.snapshot as { backgroundActions: unknown }).backgroundActions = [null];
   assert.throws(() => deserializeCheckpoint(JSON.stringify(jsonSparseCheckpoint)));
 
   const foregroundPlan = plan('say "first"\nsay "second"');
   const foreground = run(foregroundPlan, createFreshRuntimeSnapshot(foregroundPlan));
-  const foregroundCheckpoint = JSON.parse(serializeCheckpoint(
-    createCheckpoint(foregroundPlan, foreground.snapshot),
-  )) as { snapshot: any };
+  // EVIDENCE: serialization creates the canonical foreground checkpoint used as an envelope baseline below.
+  const foregroundCheckpoint = JSON.parse(
+    serializeCheckpoint(createCheckpoint(foregroundPlan, foreground.snapshot)),
+  ) as { snapshot: RuntimeSnapshot };
 
   const undefinedEntrySnapshot = structuredClone(baselineCheckpoint.snapshot);
-  undefinedEntrySnapshot.backgroundActions = [undefined];
+  // EVIDENCE: fixture widens only backgroundActions to inject an undefined direct-state entry.
+  (undefinedEntrySnapshot as { backgroundActions: unknown }).backgroundActions = [undefined];
 
   const nullEntrySnapshot = structuredClone(baselineCheckpoint.snapshot);
-  nullEntrySnapshot.backgroundActions = [null];
+  // EVIDENCE: fixture widens only backgroundActions to inject a null direct-state entry.
+  (nullEntrySnapshot as { backgroundActions: unknown }).backgroundActions = [null];
 
   const nonObjectEntrySnapshot = structuredClone(baselineCheckpoint.snapshot);
-  nonObjectEntrySnapshot.backgroundActions = [42];
+  // EVIDENCE: fixture widens only backgroundActions to inject a numeric direct-state entry.
+  (nonObjectEntrySnapshot as { backgroundActions: unknown }).backgroundActions = [42];
 
   const duplicateGateSnapshot = structuredClone(baselineCheckpoint.snapshot);
-  duplicateGateSnapshot.backgroundActions.push(
-    structuredClone(duplicateGateSnapshot.backgroundActions[0]),
-  );
+  const duplicateGate = duplicateGateSnapshot.backgroundActions[0];
+  assert.ok(duplicateGate !== undefined);
+  duplicateGateSnapshot.backgroundActions.push(structuredClone(duplicateGate));
 
-  const preparedOutputArraySnapshot = checkpointSnapshot(
-    foregroundPlan,
-    foreground.snapshot,
-  );
-  preparedOutputArraySnapshot.foregroundAction.preparedOutput = [];
+  const preparedOutputArraySnapshot = checkpointSnapshot(foregroundPlan, foreground.snapshot);
+  assert.notEqual(preparedOutputArraySnapshot.foregroundAction, null);
+  // EVIDENCE: fixture widens only preparedOutput to inject an array where an output object is required.
+  (preparedOutputArraySnapshot.foregroundAction as { preparedOutput: unknown }).preparedOutput = [];
 
   const skipped = completeAction(compiled, background.snapshot, {
     actionId: 1,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  const skippedCheckpoint = JSON.parse(serializeCheckpoint(
-    createCheckpoint(compiled, skipped.snapshot),
-  )) as { snapshot: any };
+  // EVIDENCE: serialization creates the canonical skipped checkpoint used as an envelope baseline below.
+  const skippedCheckpoint = JSON.parse(
+    serializeCheckpoint(createCheckpoint(compiled, skipped.snapshot)),
+  ) as { snapshot: RuntimeSnapshot };
   const obsoleteLineageSnapshot = checkpointSnapshot(compiled, skipped.snapshot);
-  delete obsoleteLineageSnapshot.lastSettlement.releasedPreparedOutputInstruction;
-  obsoleteLineageSnapshot.lastSettlement.releasedPreparedOutput = true;
+  assert.notEqual(obsoleteLineageSnapshot.lastSettlement, null);
+  // EVIDENCE: fixture replaces the current lineage field with the removed boolean field on a pacing settlement.
+  const obsoleteSettlement =
+    obsoleteLineageSnapshot.lastSettlement as typeof obsoleteLineageSnapshot.lastSettlement & {
+      releasedPreparedOutput?: boolean;
+      releasedPreparedOutputInstruction?: number | null;
+    };
+  delete obsoleteSettlement.releasedPreparedOutputInstruction;
+  obsoleteSettlement.releasedPreparedOutput = true;
 
   const corruptions = [
     {
@@ -939,19 +1148,13 @@ test("background pacing actions require dense JSON-safe array entries", () => {
       name: "array prepared output",
       compiled: foregroundPlan,
       snapshot: preparedOutputArraySnapshot,
-      checkpoint: checkpointWithSnapshot(
-        foregroundCheckpoint,
-        preparedOutputArraySnapshot,
-      ),
+      checkpoint: checkpointWithSnapshot(foregroundCheckpoint, preparedOutputArraySnapshot),
     },
     {
       name: "obsolete settlement lineage field",
       compiled,
       snapshot: obsoleteLineageSnapshot,
-      checkpoint: checkpointWithSnapshot(
-        skippedCheckpoint,
-        obsoleteLineageSnapshot,
-      ),
+      checkpoint: checkpointWithSnapshot(skippedCheckpoint, obsoleteLineageSnapshot),
     },
   ];
 
@@ -970,41 +1173,33 @@ test("background pacing actions require dense JSON-safe array entries", () => {
 
 test("#112 persisted arrays reject custom own keys that JSON would omit", () => {
   const backgroundPlan = plan('say "first"');
-  const background = run(
-    backgroundPlan,
-    createFreshRuntimeSnapshot(backgroundPlan),
-  );
+  const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
   const speakerPlan = plan('speaker vera { custom: "kept" }\nexit');
-  const speakerState = run(
-    speakerPlan,
-    createFreshRuntimeSnapshot(speakerPlan),
-  );
+  const speakerState = run(speakerPlan, createFreshRuntimeSnapshot(speakerPlan));
 
-  const backgroundExtra = structuredClone(background.snapshot) as any;
-  backgroundExtra.backgroundActions.extra = "lost";
+  const backgroundExtra = structuredClone(background.snapshot);
+  // EVIDENCE: fixture adds an own key to the persisted background-action array for canonical-array rejection.
+  (
+    backgroundExtra.backgroundActions as typeof backgroundExtra.backgroundActions &
+      Record<string, unknown>
+  ).extra = "lost";
 
-  const speakersExtra = structuredClone(speakerState.snapshot) as any;
-  speakersExtra.speakers.extra = "lost";
+  const speakersExtra = structuredClone(speakerState.snapshot);
+  // EVIDENCE: fixture adds an own key to the persisted speakers array for canonical-array rejection.
+  (speakersExtra.speakers as typeof speakersExtra.speakers & Record<string, unknown>).extra =
+    "lost";
 
-  const propertiesExtra = structuredClone(speakerState.snapshot) as any;
-  propertiesExtra.speakers[0].properties.extra = "lost";
+  const propertiesExtra = structuredClone(speakerState.snapshot);
+  // EVIDENCE: fixture adds an own key to the persisted speaker-properties array for canonical-array rejection.
+  (
+    propertiesExtra.speakers[0]!.properties as (typeof propertiesExtra.speakers)[0]["properties"] &
+      Record<string, unknown>
+  ).extra = "lost";
 
   const corruptions = [
-    {
-      name: "backgroundActions custom key",
-      compiled: backgroundPlan,
-      snapshot: backgroundExtra,
-    },
-    {
-      name: "speakers custom key",
-      compiled: speakerPlan,
-      snapshot: speakersExtra,
-    },
-    {
-      name: "speaker properties custom key",
-      compiled: speakerPlan,
-      snapshot: propertiesExtra,
-    },
+    { name: "backgroundActions custom key", compiled: backgroundPlan, snapshot: backgroundExtra },
+    { name: "speakers custom key", compiled: speakerPlan, snapshot: speakersExtra },
+    { name: "speaker properties custom key", compiled: speakerPlan, snapshot: propertiesExtra },
   ];
 
   for (const corruption of corruptions) {
@@ -1077,12 +1272,16 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
     snapshot: run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot,
   }));
 
-  const states: Array<[string, ReturnType<typeof plan>, unknown]> = [
+  const states: Array<[string, ReturnType<typeof plan>, RuntimeSnapshot]> = [
     ["initial background gate", positive, background.snapshot],
     ["background gate with foreground wait", waitPlan, withWait.snapshot],
     ["background skip while wait remains", waitPlan, backgroundSkipped.snapshot],
     ["background time settlement while wait remains", waitPlan, backgroundTimed.snapshot],
-    ["foreground delay settlement with older background gate", shortWaitPlan, delaySettled.snapshot],
+    [
+      "foreground delay settlement with older background gate",
+      shortWaitPlan,
+      delaySettled.snapshot,
+    ],
     ["interaction consumption", interactionPlan, interaction.snapshot],
     ["instant supersession", instantPlan, instant.snapshot],
     ["later say promotion", promotionPlan, promoted.snapshot],
@@ -1096,11 +1295,7 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
   ];
 
   for (const [label, compiled, snapshot] of states) {
-    expectCheckpointJsonRoundTrip(
-      label,
-      compiled,
-      snapshot as ReturnType<typeof createFreshRuntimeSnapshot>,
-    );
+    expectCheckpointJsonRoundTrip(label, compiled, snapshot);
   }
 });
 
@@ -1118,10 +1313,14 @@ test("pacing state validation rejects relational identity, property, duration, a
   const speakerPlan = plan('speaker vera { defaultSaySkippable: true\ncustom: "kept" }\nexit');
   const speakerState = run(speakerPlan, createFreshRuntimeSnapshot(speakerPlan));
   assert.equal(validateRuntimeSnapshot(speakerState.snapshot, speakerPlan).valid, true);
-  const falseSpeakerCheckpoint = mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
-    snapshot.speakers[0].properties[0].value = false;
-  });
-  assert.equal(validateRuntimeSnapshot((falseSpeakerCheckpoint as { snapshot: unknown }).snapshot, speakerPlan).valid, true);
+  const falseSpeakerCheckpoint = mutateCheckpoint(
+    speakerPlan,
+    speakerState.snapshot,
+    (snapshot) => {
+      snapshot.speakers[0].properties[0].value = false;
+    },
+  );
+  assert.equal(validateRuntimeSnapshot(falseSpeakerCheckpoint.snapshot, speakerPlan).valid, true);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(falseSpeakerCheckpoint)));
 
   const preparedPlan = plan('say "first"\nsay "second"');
@@ -1138,12 +1337,12 @@ test("pacing state validation rejects relational identity, property, duration, a
   const validMaximumDuration = mutateCheckpoint(preparedPlan, promoted.snapshot, (snapshot) => {
     snapshot.foregroundAction.preparedOutput.durationMs = Number.MAX_SAFE_INTEGER;
   });
-  assert.equal(validateRuntimeSnapshot((validMaximumDuration as { snapshot: unknown }).snapshot, preparedPlan).valid, true);
+  assert.equal(validateRuntimeSnapshot(validMaximumDuration.snapshot, preparedPlan).valid, true);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(validMaximumDuration)));
   const nonFiniteDuration = mutateCheckpoint(preparedPlan, promoted.snapshot, (snapshot) => {
     snapshot.foregroundAction.preparedOutput.durationMs = Number.POSITIVE_INFINITY;
   });
-  assert.equal(validateRuntimeSnapshot((nonFiniteDuration as { snapshot: unknown }).snapshot, preparedPlan).valid, false);
+  assert.equal(validateRuntimeSnapshot(nonFiniteDuration.snapshot, preparedPlan).valid, false);
 
   const corruptions = [
     {
@@ -1157,7 +1356,8 @@ test("pacing state validation rejects relational identity, property, duration, a
       name: "duplicate active request sequence",
       compiled: waitPlan,
       checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-        snapshot.backgroundActions[0].requestEventSequence = snapshot.foregroundAction.requestEventSequence;
+        snapshot.backgroundActions[0].requestEventSequence =
+          snapshot.foregroundAction.requestEventSequence;
       }),
     },
     {
@@ -1171,21 +1371,24 @@ test("pacing state validation rejects relational identity, property, duration, a
       name: "active request equals settlement request",
       compiled: waitPlan,
       checkpoint: mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => {
-        snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.requestEventSequence;
+        snapshot.foregroundAction.requestEventSequence =
+          snapshot.lastSettlement.requestEventSequence;
       }),
     },
     {
       name: "active request equals settlement completion",
       compiled: waitPlan,
       checkpoint: mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => {
-        snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.completionEventSequence;
+        snapshot.foregroundAction.requestEventSequence =
+          snapshot.lastSettlement.completionEventSequence;
       }),
     },
     {
       name: "malformed settlement events",
       compiled: waitPlan,
       checkpoint: mutateCheckpoint(waitPlan, retained.snapshot, (snapshot) => {
-        snapshot.lastSettlement.requestEventSequence = snapshot.lastSettlement.completionEventSequence;
+        snapshot.lastSettlement.requestEventSequence =
+          snapshot.lastSettlement.completionEventSequence;
       }),
     },
     {
@@ -1254,9 +1457,16 @@ test("pacing state validation rejects relational identity, property, duration, a
   ];
 
   for (const corruption of corruptions) {
-    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
-    assert.equal(validateRuntimeSnapshot(snapshot, corruption.compiled).valid, false, corruption.name);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+    const snapshot = corruption.checkpoint.snapshot;
+    assert.equal(
+      validateRuntimeSnapshot(snapshot, corruption.compiled).valid,
+      false,
+      corruption.name,
+    );
+    assert.throws(
+      () => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)),
+      corruption.name,
+    );
   }
 });
 
@@ -1267,7 +1477,7 @@ test("cross-field pacing snapshot corruption rejects at direct and checkpoint bo
   const promoted = run(promotedPlan, createFreshRuntimeSnapshot(promotedPlan));
   const promotedGate = promoted.snapshot.foregroundAction;
   assert.equal(promotedGate?.kind, "chatPacingGate");
-  const speakerPlan = plan('speaker vera { defaultSaySkippable: true }\nexit');
+  const speakerPlan = plan("speaker vera { defaultSaySkippable: true }\nexit");
   const speakerState = run(speakerPlan, createFreshRuntimeSnapshot(speakerPlan));
   const interactionPlan = plan('say "first"\nshowButton "Continue"\nwait 10 s\nexit');
   const interactionWaiting = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
@@ -1331,7 +1541,9 @@ test("cross-field pacing snapshot corruption rejects at direct and checkpoint bo
       name: "background gate carries prepared output",
       plan: waitPlan,
       checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-        snapshot.backgroundActions[0].preparedOutput = structuredClone(promotedGate?.preparedOutput);
+        snapshot.backgroundActions[0].preparedOutput = structuredClone(
+          promotedGate?.preparedOutput,
+        );
       }),
     },
     {
@@ -1366,15 +1578,19 @@ test("cross-field pacing snapshot corruption rejects at direct and checkpoint bo
       name: "active request collides with interaction transcript",
       plan: interactionPlan,
       checkpoint: mutateCheckpoint(interactionPlan, laterWait.snapshot, (snapshot) => {
-        snapshot.foregroundAction.requestEventSequence = snapshot.lastSettlement.transcriptEventSequence;
+        snapshot.foregroundAction.requestEventSequence =
+          snapshot.lastSettlement.transcriptEventSequence;
       }),
     },
   ];
 
   for (const corruption of corruptions) {
-    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
+    const snapshot = corruption.checkpoint.snapshot;
     assert.equal(validateRuntimeSnapshot(snapshot, corruption.plan).valid, false, corruption.name);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+    assert.throws(
+      () => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)),
+      corruption.name,
+    );
   }
 });
 
@@ -1386,9 +1602,9 @@ test("active pacing locations allow only runtime-produced foreground and backgro
   assert.equal(backgroundPacing?.kind, "chatPacingGate");
   assert.equal(foregroundDelay?.kind, "delay");
   assert.equal(validateRuntimeSnapshot(waitState.snapshot, waitPlan).valid, true);
-  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(
-    createCheckpoint(waitPlan, waitState.snapshot),
-  )));
+  assert.doesNotThrow(() =>
+    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(waitPlan, waitState.snapshot))),
+  );
 
   const promotionPlan = plan('say "first"\nsay "second"');
   const promoted = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
@@ -1411,9 +1627,11 @@ test("active pacing locations allow only runtime-produced foreground and backgro
     "consumedByForegroundInteraction",
   );
   assert.equal(validateRuntimeSnapshot(interactionState.snapshot, interactionPlan).valid, true);
-  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(
-    createCheckpoint(interactionPlan, interactionState.snapshot),
-  )));
+  assert.doesNotThrow(() =>
+    deserializeCheckpoint(
+      serializeCheckpoint(createCheckpoint(interactionPlan, interactionState.snapshot)),
+    ),
+  );
 
   const corruptions = [
     {
@@ -1433,9 +1651,10 @@ test("active pacing locations allow only runtime-produced foreground and backgro
       name: "foreground interaction cannot retain a background pacing gate",
       compiled: interactionPlan,
       checkpoint: mutateCheckpoint(interactionPlan, interactionState.snapshot, (snapshot) => {
-        const replacement = structuredClone(
-          afterFirst.snapshot.backgroundActions[0],
-        ) as any;
+        const sourceGate = afterFirst.snapshot.backgroundActions[0];
+        assert.ok(sourceGate?.kind === "chatPacingGate");
+        // EVIDENCE: structuredClone preserves the runtime-produced pacing gate while this fixture changes its identity fields.
+        const replacement = structuredClone(sourceGate) as Mutable<typeof sourceGate>;
         replacement.actionId = snapshot.nextActionId;
         replacement.requestEventSequence = snapshot.nextEventSequence;
         snapshot.nextActionId += 1;
@@ -1465,9 +1684,16 @@ test("active pacing locations allow only runtime-produced foreground and backgro
   ];
 
   for (const corruption of corruptions) {
-    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
-    assert.equal(validateRuntimeSnapshot(snapshot, corruption.compiled).valid, false, corruption.name);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+    const snapshot = corruption.checkpoint.snapshot;
+    assert.equal(
+      validateRuntimeSnapshot(snapshot, corruption.compiled).valid,
+      false,
+      corruption.name,
+    );
+    assert.throws(
+      () => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)),
+      corruption.name,
+    );
   }
 });
 
@@ -1476,7 +1702,11 @@ test("pacing settlement release provenance and chronology accept only canonical 
   const background = executeInstruction(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
   const backgroundGate = background.snapshot.backgroundActions[0];
   assert.equal(backgroundGate?.kind, "chatPacingGate");
-  const backgroundCompleted = observeTime(backgroundPlan, background.snapshot, backgroundGate!.deadlineMs);
+  const backgroundCompleted = observeTime(
+    backgroundPlan,
+    background.snapshot,
+    backgroundGate!.deadlineMs,
+  );
   const backgroundSkipped = completeAction(backgroundPlan, background.snapshot, {
     actionId: backgroundGate!.actionId,
     actionKind: "chatPacingGate",
@@ -1492,7 +1722,11 @@ test("pacing settlement release provenance and chronology accept only canonical 
   const promoted = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
   const foregroundGate = promoted.snapshot.foregroundAction;
   assert.equal(foregroundGate?.kind, "chatPacingGate");
-  const foregroundCompleted = observeTime(promotionPlan, promoted.snapshot, foregroundGate!.deadlineMs);
+  const foregroundCompleted = observeTime(
+    promotionPlan,
+    promoted.snapshot,
+    foregroundGate!.deadlineMs,
+  );
   const foregroundSkipped = completeAction(promotionPlan, promoted.snapshot, {
     actionId: foregroundGate!.actionId,
     actionKind: "chatPacingGate",
@@ -1560,9 +1794,19 @@ test("pacing settlement release provenance and chronology accept only canonical 
       scenario.releasedPreparedOutputInstruction,
       scenario.name,
     );
-    assert.equal(scenario.snapshot.preparedSayOutput !== null, scenario.hasPreparedOutput, scenario.name);
-    assert.equal(validateRuntimeSnapshot(scenario.snapshot, scenario.compiled).valid, true, scenario.name);
-    const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(scenario.compiled, scenario.snapshot)));
+    assert.equal(
+      scenario.snapshot.preparedSayOutput !== null,
+      scenario.hasPreparedOutput,
+      scenario.name,
+    );
+    assert.equal(
+      validateRuntimeSnapshot(scenario.snapshot, scenario.compiled).valid,
+      true,
+      scenario.name,
+    );
+    const restored = deserializeCheckpoint(
+      serializeCheckpoint(createCheckpoint(scenario.compiled, scenario.snapshot)),
+    );
     assert.deepEqual(restored.snapshot, scenario.snapshot, scenario.name);
   }
 
@@ -1586,9 +1830,7 @@ test("pacing settlement release provenance and chronology accept only canonical 
       name: "background skip cannot release injected prepared output",
       compiled: backgroundPlan,
       checkpoint: mutateCheckpoint(backgroundPlan, backgroundSkipped.snapshot, (snapshot) => {
-        snapshot.preparedSayOutput = structuredClone(
-          foregroundSkipped.snapshot.preparedSayOutput,
-        );
+        snapshot.preparedSayOutput = structuredClone(foregroundSkipped.snapshot.preparedSayOutput);
       }),
     },
     {
@@ -1643,26 +1885,39 @@ test("pacing settlement release provenance and chronology accept only canonical 
   ];
 
   for (const corruption of corruptions) {
-    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
-    assert.equal(validateRuntimeSnapshot(snapshot, corruption.compiled).valid, false, corruption.name);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+    const snapshot = corruption.checkpoint.snapshot;
+    assert.equal(
+      validateRuntimeSnapshot(snapshot, corruption.compiled).valid,
+      false,
+      corruption.name,
+    );
+    assert.throws(
+      () => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)),
+      corruption.name,
+    );
   }
 });
 
 test("instruction boundaries preserve pacing release provenance before and after promotion", () => {
   const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]');
-  const afterFirst = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
+  const afterFirst = executeInstruction(
+    compiled,
+    createFreshRuntimeSnapshot(compiled, { seed: 77 }),
+  );
   const backgroundGate = afterFirst.snapshot.backgroundActions[0];
   assert.equal(backgroundGate?.kind, "chatPacingGate");
 
-  const restoredBackground = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, afterFirst.snapshot)));
+  const restoredBackground = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(compiled, afterFirst.snapshot)),
+  );
   const backgroundSkip = completeAction(restoredBackground.plan, restoredBackground.snapshot, {
     actionId: backgroundGate!.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
   assert.equal(backgroundSkip.snapshot.lastSettlement?.actionKind, "chatPacingGate");
-  if (backgroundSkip.snapshot.lastSettlement?.actionKind !== "chatPacingGate") throw new Error("Expected pacing settlement.");
+  if (backgroundSkip.snapshot.lastSettlement?.actionKind !== "chatPacingGate")
+    throw new Error("Expected pacing settlement.");
   assert.equal(backgroundSkip.snapshot.lastSettlement.releasedPreparedOutputInstruction, null);
   assert.equal(backgroundSkip.snapshot.preparedSayOutput, null);
 
@@ -1683,11 +1938,14 @@ test("instruction boundaries preserve pacing release provenance before and after
     payload: { kind: "skip" },
   });
   assert.equal(released.snapshot.lastSettlement?.actionKind, "chatPacingGate");
-  if (released.snapshot.lastSettlement?.actionKind !== "chatPacingGate") throw new Error("Expected pacing settlement.");
+  if (released.snapshot.lastSettlement?.actionKind !== "chatPacingGate")
+    throw new Error("Expected pacing settlement.");
   assert.equal(released.snapshot.lastSettlement.releasedPreparedOutputInstruction, 1);
   assert.notEqual(released.snapshot.preparedSayOutput, null);
 
-  const restoredRelease = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, released.snapshot)));
+  const restoredRelease = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(compiled, released.snapshot)),
+  );
   const resumed = executeInstruction(restoredRelease.plan, restoredRelease.snapshot);
   assert.equal(resumed.events.filter((event) => event.kind === "say").length, 1);
   assert.equal(resumed.snapshot.backgroundActions[0]?.actionId, 2);
@@ -1712,14 +1970,21 @@ test("pacing settlements retain exact prepared-output lineage through release an
   );
   assert.equal(released.snapshot.preparedSayOutput?.owningInstruction, 1);
   assert.equal(validateRuntimeSnapshot(released.snapshot, threeSays).valid, true);
-  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(threeSays, released.snapshot))));
+  assert.doesNotThrow(() =>
+    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(threeSays, released.snapshot))),
+  );
 
   const forgedThird = checkpointSnapshot(threeSays, released.snapshot);
+  assert.ok(forgedThird.preparedSayOutput !== null);
   forgedThird.preparedSayOutput.owningInstruction = 2;
   forgedThird.preparedSayOutput.continuationInstruction = 3;
   forgedThird.preparedSayOutput.text = "forged third";
   forgedThird.nextInstruction = 2;
-  expectInvalidSnapshot("settlement lineage must match the released prepared say", threeSays, forgedThird);
+  expectInvalidSnapshot(
+    "settlement lineage must match the released prepared say",
+    threeSays,
+    forgedThird,
+  );
 
   const consumed = executeInstruction(threeSays, released.snapshot);
   const replacement = consumed.snapshot.backgroundActions[0];
@@ -1727,7 +1992,9 @@ test("pacing settlements retain exact prepared-output lineage through release an
   assert.equal(replacement?.owningInstruction, 1);
   assert.equal(replacement?.actionId, 2);
   assert.equal(validateRuntimeSnapshot(consumed.snapshot, threeSays).valid, true);
-  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(threeSays, consumed.snapshot))));
+  assert.doesNotThrow(() =>
+    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(threeSays, consumed.snapshot))),
+  );
 
   const promotedReplacement = run(threeSays, consumed.snapshot);
   assert.equal(promotedReplacement.snapshot.foregroundAction?.kind, "chatPacingGate");
@@ -1747,7 +2014,11 @@ test("pacing settlements retain exact prepared-output lineage through release an
   assert.equal(replacementWithWait.snapshot.backgroundActions[0]?.owningInstruction, 1);
   assert.equal(replacementWithWait.snapshot.foregroundAction?.kind, "delay");
   assert.equal(validateRuntimeSnapshot(replacementWithWait.snapshot, waitPlan).valid, true);
-  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(waitPlan, replacementWithWait.snapshot))));
+  assert.doesNotThrow(() =>
+    deserializeCheckpoint(
+      serializeCheckpoint(createCheckpoint(waitPlan, replacementWithWait.snapshot)),
+    ),
+  );
 
   const corruptions = [
     {
@@ -1833,8 +2104,15 @@ test("pacing settlements retain exact prepared-output lineage through release an
   ];
 
   for (const corruption of corruptions) {
-    const snapshot = (corruption.checkpoint as { snapshot: unknown }).snapshot;
-    assert.equal(validateRuntimeSnapshot(snapshot, corruption.compiled).valid, false, corruption.name);
-    assert.throws(() => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)), corruption.name);
+    const snapshot = corruption.checkpoint.snapshot;
+    assert.equal(
+      validateRuntimeSnapshot(snapshot, corruption.compiled).valid,
+      false,
+      corruption.name,
+    );
+    assert.throws(
+      () => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)),
+      corruption.name,
+    );
   }
 });

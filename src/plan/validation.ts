@@ -5,10 +5,7 @@ import {
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../interaction-limits.js";
 import { recordValidationTestWork } from "../validation-testing.js";
-import {
-  INSTRUCTION_PLAN_FORMAT,
-  INSTRUCTION_PLAN_VERSION,
-} from "./model.js";
+import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION } from "./model.js";
 import {
   captureFailureValidation,
   capturePlanData,
@@ -33,9 +30,7 @@ export function validateInstructionPlan(value: unknown): PlanValidationResult {
     : validateCapturedInstructionPlan(capture.value);
 }
 
-export function validateCapturedInstructionPlan(
-  value: unknown,
-): PlanValidationResult {
+export function validateCapturedInstructionPlan(value: unknown): PlanValidationResult {
   const errors: PlanValidationError[] = [];
   if (!isRecord(value)) {
     return invalidPlan("TSC002", "Instruction plan must be an object.", "$.");
@@ -47,11 +42,15 @@ export function validateCapturedInstructionPlan(
     errors.push(planError("TSC001", "Unsupported instruction-plan version.", "$.version"));
   }
   validateSpan(value.sourceSpan, "$.sourceSpan", errors);
-  const temporaryCount = nonNegativeSafeInteger(value.temporaryCount)
-    ? value.temporaryCount
-    : -1;
+  const temporaryCount = nonNegativeSafeInteger(value.temporaryCount) ? value.temporaryCount : -1;
   if (temporaryCount < 0) {
-    errors.push(planError("TSC002", "temporaryCount must be a non-negative safe integer.", "$.temporaryCount"));
+    errors.push(
+      planError(
+        "TSC002",
+        "temporaryCount must be a non-negative safe integer.",
+        "$.temporaryCount",
+      ),
+    );
   }
   if (!Array.isArray(value.instructions)) {
     errors.push(planError("TSC002", "Instructions must be an array.", "$.instructions"));
@@ -63,11 +62,9 @@ export function validateCapturedInstructionPlan(
       ? value.rootEndInstruction
       : null;
     if (rootEndInstruction === null) {
-      errors.push(planError(
-        "TSC002",
-        "Root execution boundary is invalid.",
-        "$.rootEndInstruction",
-      ));
+      errors.push(
+        planError("TSC002", "Root execution boundary is invalid.", "$.rootEndInstruction"),
+      );
     }
     const functionIds = collectFunctionIds(value.functions);
     for (let index = 0; index < value.instructions.length; index += 1) {
@@ -89,16 +86,9 @@ export function validateCapturedInstructionPlan(
       rootEndInstruction,
       errors,
     );
-    validateInstructionControlFlowRegions(
-      value.instructions,
-      validationIndex,
-      errors,
-    );
+    validateInstructionControlFlowRegions(value.instructions, validationIndex, errors);
   }
-  return Object.freeze({
-    valid: errors.length === 0,
-    errors: Object.freeze(errors),
-  });
+  return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }
 
 function validatePreparedReferenceStructure(
@@ -113,13 +103,16 @@ function validatePreparedReferenceStructure(
       instruction.kind === "prepareReference" &&
       Number.isInteger(instruction.destinationTemporary)
     ) {
+      // EVIDENCE: validation: Number.isInteger accepted destinationTemporary above.
       const temporaryId = instruction.destinationTemporary as number;
       if (producers.has(temporaryId)) {
-        errors.push(planError(
-          "TSC002",
-          "Prepared-reference temporary is produced more than once.",
-          `$.instructions[${index}].destinationTemporary`,
-        ));
+        errors.push(
+          planError(
+            "TSC002",
+            "Prepared-reference temporary is produced more than once.",
+            `$.instructions[${index}].destinationTemporary`,
+          ),
+        );
       }
       producers.set(temporaryId, index);
     }
@@ -130,34 +123,36 @@ function validatePreparedReferenceStructure(
     for (const temporaryId of referenced) {
       const producer = producers.get(temporaryId);
       if (producer === undefined) {
-        errors.push(planError(
-          "TSC002",
-          "Prepared-reference expression has no matching producer.",
-          `$.instructions[${index}]`,
-        ));
+        errors.push(
+          planError(
+            "TSC002",
+            "Prepared-reference expression has no matching producer.",
+            `$.instructions[${index}]`,
+          ),
+        );
         continue;
       }
       if (producer >= index) {
-        errors.push(planError(
-          "TSC002",
-          "Prepared-reference producer must precede its use.",
-          `$.instructions[${index}]`,
-        ));
+        errors.push(
+          planError(
+            "TSC002",
+            "Prepared-reference producer must precede its use.",
+            `$.instructions[${index}]`,
+          ),
+        );
       }
     }
   }
 }
 
-function collectPreparedReferenceIds(
-  value: unknown,
-  output: Set<number>,
-): void {
+function collectPreparedReferenceIds(value: unknown, output: Set<number>): void {
   if (Array.isArray(value)) {
     for (const item of value) collectPreparedReferenceIds(item, output);
     return;
   }
   if (!isRecord(value)) return;
   if (value.kind === "preparedReference" && Number.isInteger(value.temporaryId)) {
+    // EVIDENCE: validation: the prepared-reference temporary ID passed Number.isInteger.
     output.add(value.temporaryId as number);
     return;
   }
@@ -170,12 +165,10 @@ function validateLoopStructure(
   instructions: readonly unknown[],
   errors: PlanValidationError[],
 ): void {
-  const starts = new Map<number, {
-    index: number;
-    target: number;
-    breakTarget: number;
-    continueTarget: number;
-  }>();
+  const starts = new Map<
+    number,
+    { index: number; target: number; breakTarget: number; continueTarget: number }
+  >();
   for (let index = 0; index < instructions.length; index += 1) {
     const instruction = instructions[index];
     if (!isRecord(instruction) || instruction.kind !== "loopStart") continue;
@@ -183,42 +176,71 @@ function validateLoopStructure(
       !positiveSafeInteger(instruction.loopId) ||
       !Number.isInteger(instruction.target) ||
       !Number.isInteger(instruction.continueTarget)
-    ) continue;
-    const loopId = instruction.loopId as number;
+    )
+      continue;
+    const loopId = instruction.loopId;
     if (starts.has(loopId)) {
-      errors.push(planError("TSC002", "Loop IDs must be unique.", `$.instructions[${index}].loopId`));
+      errors.push(
+        planError("TSC002", "Loop IDs must be unique.", `$.instructions[${index}].loopId`),
+      );
     } else {
       starts.set(loopId, {
         index,
+        // EVIDENCE: validation: the loop target passed Number.isInteger before insertion.
         target: instruction.target as number,
         breakTarget: loopBreakTarget(instructions, index, instruction),
+        // EVIDENCE: validation: the continue target passed Number.isInteger before insertion.
         continueTarget: instruction.continueTarget as number,
       });
     }
+    // EVIDENCE: validation: the loop target passed Number.isInteger above.
     if ((instruction.target as number) <= index) {
-      errors.push(planError("TSC002", "Loop exit target must follow its start.", `$.instructions[${index}].target`));
+      errors.push(
+        planError(
+          "TSC002",
+          "Loop exit target must follow its start.",
+          `$.instructions[${index}].target`,
+        ),
+      );
     }
+    // EVIDENCE: validation: the loop continue target passed Number.isInteger above.
     if (
       (instruction.loopKind === "while" && (instruction.continueTarget as number) > index) ||
       (instruction.loopKind !== "while" && instruction.continueTarget !== index)
     ) {
-      errors.push(planError("TSC002", "Loop continue target is invalid.", `$.instructions[${index}].continueTarget`));
+      errors.push(
+        planError(
+          "TSC002",
+          "Loop continue target is invalid.",
+          `$.instructions[${index}].continueTarget`,
+        ),
+      );
     }
   }
   for (let index = 0; index < instructions.length; index += 1) {
     const instruction = instructions[index];
     if (!isRecord(instruction) || instruction.kind !== "loopControl") continue;
     if (!positiveSafeInteger(instruction.loopId) || !Number.isInteger(instruction.target)) continue;
-    const start = starts.get(instruction.loopId as number);
+    const start = starts.get(instruction.loopId);
     if (start === undefined) {
-      errors.push(planError("TSC002", "Loop control refers to an unknown loop.", `$.instructions[${index}].loopId`));
+      errors.push(
+        planError(
+          "TSC002",
+          "Loop control refers to an unknown loop.",
+          `$.instructions[${index}].loopId`,
+        ),
+      );
       continue;
     }
-    const expected = instruction.action === "continue"
-      ? start.continueTarget
-      : start.breakTarget;
+    const expected = instruction.action === "continue" ? start.continueTarget : start.breakTarget;
     if (instruction.target !== expected || index <= start.index || index >= start.target) {
-      errors.push(planError("TSC002", "Loop-control target does not match its loop.", `$.instructions[${index}].target`));
+      errors.push(
+        planError(
+          "TSC002",
+          "Loop-control target does not match its loop.",
+          `$.instructions[${index}].target`,
+        ),
+      );
     }
   }
 }
@@ -228,6 +250,7 @@ function loopBreakTarget(
   loopStartIndex: number,
   loopStart: Record<string, unknown>,
 ): number {
+  // EVIDENCE: validation: the sole caller checked the loop-start target with Number.isInteger.
   let target = loopStart.target as number;
   let trueCleanup = loopStartIndex + 1;
   while (true) {
@@ -240,7 +263,8 @@ function loopBreakTarget(
       !isRecord(falseInstruction) ||
       falseInstruction.kind !== "clearTemporary" ||
       falseInstruction.temporaryId !== trueInstruction.temporaryId
-    ) break;
+    )
+      break;
     trueCleanup += 1;
     target += 1;
   }
@@ -283,13 +307,7 @@ function validateInstruction(
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       return;
     case "prepareReference":
-      validateExpression(
-        value.expression,
-        `${path}.expression`,
-        errors,
-        false,
-        temporaryCount,
-      );
+      validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
       validateTemporaryId(
         value.destinationTemporary,
         `${path}.destinationTemporary`,
@@ -341,39 +359,96 @@ function validateInstruction(
       validateTemporaryId(value.temporaryId, `${path}.temporaryId`, temporaryCount, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       if (typeof value.expectBoolean !== "boolean") {
-        errors.push(planError("TSC002", "Temporary boolean expectation must be boolean.", `${path}.expectBoolean`));
+        errors.push(
+          planError(
+            "TSC002",
+            "Temporary boolean expectation must be boolean.",
+            `${path}.expectBoolean`,
+          ),
+        );
       }
       return;
     case "prepareSaySpeaker":
       if (!hasExactKeys(value, ["kind", "speaker", "destinationTemporary", "span"])) {
-        errors.push(planError("TSC002", "Prepared say speaker instruction contains unsupported fields.", path));
+        errors.push(
+          planError(
+            "TSC002",
+            "Prepared say speaker instruction contains unsupported fields.",
+            path,
+          ),
+        );
       }
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
-      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      validateTemporaryId(
+        value.destinationTemporary,
+        `${path}.destinationTemporary`,
+        temporaryCount,
+        errors,
+      );
       return;
     case "prepareSayContextualSpeaker":
       if (!hasExactKeys(value, ["kind", "speakerTemporary", "destinationTemporary", "span"])) {
-        errors.push(planError("TSC002", "Prepared say contextual speaker instruction contains unsupported fields.", path));
+        errors.push(
+          planError(
+            "TSC002",
+            "Prepared say contextual speaker instruction contains unsupported fields.",
+            path,
+          ),
+        );
       }
-      validateTemporaryId(value.speakerTemporary, `${path}.speakerTemporary`, temporaryCount, errors);
-      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      validateTemporaryId(
+        value.speakerTemporary,
+        `${path}.speakerTemporary`,
+        temporaryCount,
+        errors,
+      );
+      validateTemporaryId(
+        value.destinationTemporary,
+        `${path}.destinationTemporary`,
+        temporaryCount,
+        errors,
+      );
       if (value.speakerTemporary === value.destinationTemporary) {
-        errors.push(planError("TSC002", "Prepared say contextual speaker must not alias its output speaker.", `${path}.destinationTemporary`));
+        errors.push(
+          planError(
+            "TSC002",
+            "Prepared say contextual speaker must not alias its output speaker.",
+            `${path}.destinationTemporary`,
+          ),
+        );
       }
       return;
     case "prepareSayText":
       if (!hasExactKeys(value, ["kind", "value", "destinationTemporary", "span"])) {
-        errors.push(planError("TSC002", "Prepared say text instruction contains unsupported fields.", path));
+        errors.push(
+          planError("TSC002", "Prepared say text instruction contains unsupported fields.", path),
+        );
       }
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
-      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      validateTemporaryId(
+        value.destinationTemporary,
+        `${path}.destinationTemporary`,
+        temporaryCount,
+        errors,
+      );
       return;
     case "prepareInteractionSpeaker":
       if (!hasExactKeys(value, ["kind", "speaker", "destinationTemporary", "span"])) {
-        errors.push(planError("TSC002", "Prepared interaction speaker instruction contains unsupported fields.", path));
+        errors.push(
+          planError(
+            "TSC002",
+            "Prepared interaction speaker instruction contains unsupported fields.",
+            path,
+          ),
+        );
       }
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
-      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      validateTemporaryId(
+        value.destinationTemporary,
+        `${path}.destinationTemporary`,
+        temporaryCount,
+        errors,
+      );
       return;
     case "clearTemporary":
       validateTemporaryId(value.temporaryId, `${path}.temporaryId`, temporaryCount, errors);
@@ -384,7 +459,12 @@ function validateInstruction(
     case "callFunction":
       validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
       validateCallArguments(value.arguments, `${path}.arguments`, temporaryCount, errors);
-      validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+      validateTemporaryId(
+        value.destinationTemporary,
+        `${path}.destinationTemporary`,
+        temporaryCount,
+        errors,
+      );
       if (
         Number.isInteger(value.destinationTemporary) &&
         Array.isArray(value.arguments) &&
@@ -393,19 +473,33 @@ function validateInstruction(
             isRecord(argument) &&
             expressionMayReferenceTemporary(
               argument.value,
+              // EVIDENCE: validation: the enclosing condition checked destinationTemporary before this callback.
               value.destinationTemporary as number,
             ),
         )
       ) {
-        errors.push(planError(
-          "TSC002",
-          "Function result destination must not alias an argument temporary.",
-          `${path}.destinationTemporary`,
-        ));
+        errors.push(
+          planError(
+            "TSC002",
+            "Function result destination must not alias an argument temporary.",
+            `${path}.destinationTemporary`,
+          ),
+        );
       }
-      validateJumpTarget(value.returnInstruction, `${path}.returnInstruction`, instructionCount, errors);
+      validateJumpTarget(
+        value.returnInstruction,
+        `${path}.returnInstruction`,
+        instructionCount,
+        errors,
+      );
       if (value.returnInstruction !== instructionIndex + 1) {
-        errors.push(planError("TSC002", "Function return target must be the instruction after the call.", `${path}.returnInstruction`));
+        errors.push(
+          planError(
+            "TSC002",
+            "Function return target must be the instruction after the call.",
+            `${path}.returnInstruction`,
+          ),
+        );
       }
       return;
     case "bindSuppliedParameter":
@@ -421,7 +515,9 @@ function validateInstruction(
       requireNonNegativeInteger(value.parameterIndex, `${path}.parameterIndex`, errors);
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
       if (typeof value.target === "number" && value.target <= instructionIndex) {
-        errors.push(planError("TSC002", "Parameter-default target must move forward.", `${path}.target`));
+        errors.push(
+          planError("TSC002", "Parameter-default target must move forward.", `${path}.target`),
+        );
       }
       return;
     case "bindDefaultParameter":
@@ -437,10 +533,27 @@ function validateInstruction(
     case "say":
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
-      if (value.speakerTemporary !== undefined) validateTemporaryId(value.speakerTemporary, `${path}.speakerTemporary`, temporaryCount, errors);
-      if (value.contextualSpeakerTemporary !== undefined) validateTemporaryId(value.contextualSpeakerTemporary, `${path}.contextualSpeakerTemporary`, temporaryCount, errors);
-      if (value.textTemporary !== undefined) validateTemporaryId(value.textTemporary, `${path}.textTemporary`, temporaryCount, errors);
-      if (value.skipPolicy !== null && value.skipPolicy !== "skippable" && value.skipPolicy !== "unskippable") {
+      if (value.speakerTemporary !== undefined)
+        validateTemporaryId(
+          value.speakerTemporary,
+          `${path}.speakerTemporary`,
+          temporaryCount,
+          errors,
+        );
+      if (value.contextualSpeakerTemporary !== undefined)
+        validateTemporaryId(
+          value.contextualSpeakerTemporary,
+          `${path}.contextualSpeakerTemporary`,
+          temporaryCount,
+          errors,
+        );
+      if (value.textTemporary !== undefined)
+        validateTemporaryId(value.textTemporary, `${path}.textTemporary`, temporaryCount, errors);
+      if (
+        value.skipPolicy !== null &&
+        value.skipPolicy !== "skippable" &&
+        value.skipPolicy !== "unskippable"
+      ) {
         errors.push(planError("TSC002", "Say skip policy is invalid.", `${path}.skipPolicy`));
       }
       if (value.pacing !== "smart" && value.pacing !== "instant") {
@@ -469,8 +582,26 @@ function validateInteractionInstruction(
 ): void {
   const prepared = Object.hasOwn(value, "preparedUi") || Object.hasOwn(value, "speakerTemporary");
   const expectedKeys = prepared
-    ? ["kind", "interactionKind", "target", "speakerTemporary", "destinationTemporary", "expectedResult", "preparedUi", "span"]
-    : ["kind", "interactionKind", "target", "speaker", "destinationTemporary", "expectedResult", "ui", "span"];
+    ? [
+        "kind",
+        "interactionKind",
+        "target",
+        "speakerTemporary",
+        "destinationTemporary",
+        "expectedResult",
+        "preparedUi",
+        "span",
+      ]
+    : [
+        "kind",
+        "interactionKind",
+        "target",
+        "speaker",
+        "destinationTemporary",
+        "expectedResult",
+        "ui",
+        "span",
+      ];
   if (!hasExactKeys(value, expectedKeys)) {
     errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
   }
@@ -478,44 +609,65 @@ function validateInteractionInstruction(
   if (!["button", "text", "number", "choice"].includes(String(kind))) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
-  if (value.target !== "standardChat") errors.push(planError("TSC002", "Interaction target is invalid.", `${path}.target`));
+  if (value.target !== "standardChat")
+    errors.push(planError("TSC002", "Interaction target is invalid.", `${path}.target`));
 
   const ui = prepared ? value.preparedUi : value.ui;
   const labelType = isRecord(ui) && ui.kind === "choice" ? ui.labelType : undefined;
-  const expected = kind === "button"
-    ? "none"
-    : kind === "number" || (kind === "choice" && labelType === "number")
-      ? "number"
-      : "string";
+  const expected =
+    kind === "button"
+      ? "none"
+      : kind === "number" || (kind === "choice" && labelType === "number")
+        ? "number"
+        : "string";
   if (value.expectedResult !== expected) {
-    errors.push(planError(
-      "TSC002",
-      "Interaction result domain does not match its kind.",
-      `${path}.expectedResult`,
-    ));
+    errors.push(
+      planError(
+        "TSC002",
+        "Interaction result domain does not match its kind.",
+        `${path}.expectedResult`,
+      ),
+    );
   }
   if (kind === "button") {
     if (value.destinationTemporary !== null) {
-      errors.push(planError(
-        "TSC002",
-        "Button interaction must not have a result destination.",
-        `${path}.destinationTemporary`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Button interaction must not have a result destination.",
+          `${path}.destinationTemporary`,
+        ),
+      );
     }
   } else {
-    validateTemporaryId(value.destinationTemporary, `${path}.destinationTemporary`, temporaryCount, errors);
+    validateTemporaryId(
+      value.destinationTemporary,
+      `${path}.destinationTemporary`,
+      temporaryCount,
+      errors,
+    );
   }
 
   if (prepared) {
     validateTemporaryId(value.speakerTemporary, `${path}.speakerTemporary`, temporaryCount, errors);
     if (value.destinationTemporary === value.speakerTemporary) {
-      errors.push(planError(
-        "TSC002",
-        "Interaction result destination must not alias its prepared speaker temporary.",
-        `${path}.destinationTemporary`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Interaction result destination must not alias its prepared speaker temporary.",
+          `${path}.destinationTemporary`,
+        ),
+      );
     }
-    validatePreparedInteractionUi(kind, ui, `${path}.preparedUi`, temporaryCount, value.speakerTemporary, value.destinationTemporary, errors);
+    validatePreparedInteractionUi(
+      kind,
+      ui,
+      `${path}.preparedUi`,
+      temporaryCount,
+      value.speakerTemporary,
+      value.destinationTemporary,
+      errors,
+    );
     return;
   }
 
@@ -533,11 +685,12 @@ function validateStaticInteractionUi(
     errors.push(planError("TSC002", "Interaction UI payload does not match its kind.", path));
     return;
   }
-  const uiKeys = kind === "button"
-    ? ["kind", "buttonLabel", "accessibleName"]
-    : kind === "text" || kind === "number"
-      ? ["kind", "hint", "accessibleName"]
-      : ["kind", "labelType", "options", "accessibleName"];
+  const uiKeys =
+    kind === "button"
+      ? ["kind", "buttonLabel", "accessibleName"]
+      : kind === "text" || kind === "number"
+        ? ["kind", "hint", "accessibleName"]
+        : ["kind", "labelType", "options", "accessibleName"];
   if (!hasExactKeys(ui, uiKeys)) {
     errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", path));
   }
@@ -550,7 +703,13 @@ function validateStaticInteractionUi(
     }
     if (measurementExhausted) {
       if (candidate.length > Math.max(0, MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate)) {
-        errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
+        errors.push(
+          planError(
+            "TSC002",
+            "Interaction text exceeds the remaining aggregate UTF-8 byte limit.",
+            fieldPath,
+          ),
+        );
         return false;
       }
       return true;
@@ -562,7 +721,13 @@ function validateStaticInteractionUi(
     );
     if (bytes === null) {
       measurementExhausted = true;
-      errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
+      errors.push(
+        planError(
+          "TSC002",
+          "Interaction text exceeds the remaining aggregate UTF-8 byte limit.",
+          fieldPath,
+        ),
+      );
       return false;
     }
     aggregate += bytes;
@@ -585,8 +750,18 @@ function validateStaticInteractionUi(
     if (!["none", "identifier", "number"].includes(String(labelType))) {
       errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
     }
-    if (!Array.isArray(ui.options) || ui.options.length === 0 || ui.options.length > MAX_INTERACTION_OPTION_ENTRIES) {
-      errors.push(planError("TSC002", "Choice options exceed the shared collection boundary or are empty.", `${path}.options`));
+    if (
+      !Array.isArray(ui.options) ||
+      ui.options.length === 0 ||
+      ui.options.length > MAX_INTERACTION_OPTION_ENTRIES
+    ) {
+      errors.push(
+        planError(
+          "TSC002",
+          "Choice options exceed the shared collection boundary or are empty.",
+          `${path}.options`,
+        ),
+      );
     } else {
       const labels = new Set<string | number>();
       const visible = new Set<string>();
@@ -598,40 +773,49 @@ function validateStaticInteractionUi(
           continue;
         }
         if (!hasExactKeys(option, ["text", "label"])) {
-          errors.push(planError(
-            "TSC002",
-            "Choice option contains unsupported fields.",
-            optionPath,
-          ));
+          errors.push(
+            planError("TSC002", "Choice option contains unsupported fields.", optionPath),
+          );
         }
         const textValid = countString(option.text, `${optionPath}.text`);
         const label = option.label;
-        const validLabel = labelType === "none"
-          ? label === null
-          : labelType === "identifier"
-            ? typeof label === "string" &&
-              countString(label, `${optionPath}.label`) &&
-              (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
-            : typeof label === "number" &&
-              Number.isFinite(label) &&
-              !Object.is(label, -0);
+        const validLabel =
+          labelType === "none"
+            ? label === null
+            : labelType === "identifier"
+              ? typeof label === "string" &&
+                countString(label, `${optionPath}.label`) &&
+                (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
+              : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
         if (!validLabel) {
-          errors.push(planError(
-            "TSC002",
-            "Choice option label does not match the choice label type.",
-            `${optionPath}.label`,
-          ));
+          errors.push(
+            planError(
+              "TSC002",
+              "Choice option label does not match the choice label type.",
+              `${optionPath}.label`,
+            ),
+          );
         }
-        if (!measurementExhausted && validLabel && (typeof label === "string" || typeof label === "number")) {
+        if (
+          !measurementExhausted &&
+          validLabel &&
+          (typeof label === "string" || typeof label === "number")
+        ) {
           if (labels.has(label)) {
-            errors.push(planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`));
+            errors.push(
+              planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`),
+            );
           }
           labels.add(label);
         }
         if (!measurementExhausted && textValid && labelType === "none") {
+          // EVIDENCE: validation: textValid records the option text string check above.
           if (visible.has(option.text as string)) {
-            errors.push(planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`));
+            errors.push(
+              planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`),
+            );
           }
+          // EVIDENCE: validation: textValid records the option text string check above.
           visible.add(option.text as string);
         }
       }
@@ -649,16 +833,21 @@ function validatePreparedInteractionUi(
   errors: PlanValidationError[],
 ): void {
   if (!isRecord(ui) || ui.kind !== kind) {
-    errors.push(planError("TSC002", "Prepared interaction UI payload does not match its kind.", path));
+    errors.push(
+      planError("TSC002", "Prepared interaction UI payload does not match its kind.", path),
+    );
     return;
   }
-  const keys = kind === "button"
-    ? ["kind", "buttonLabelTemporary", "accessibleName"]
-    : kind === "text" || kind === "number"
-      ? ["kind", "hintTemporary", "accessibleName"]
-      : ["kind", "labelType", "optionsTemporary", "optionCount", "labels", "accessibleName"];
+  const keys =
+    kind === "button"
+      ? ["kind", "buttonLabelTemporary", "accessibleName"]
+      : kind === "text" || kind === "number"
+        ? ["kind", "hintTemporary", "accessibleName"]
+        : ["kind", "labelType", "optionsTemporary", "optionCount", "labels", "accessibleName"];
   if (!hasExactKeys(ui, keys)) {
-    errors.push(planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path));
+    errors.push(
+      planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path),
+    );
   }
   let aggregate = 0;
   let measurementExhausted = false;
@@ -669,7 +858,13 @@ function validatePreparedInteractionUi(
     }
     if (measurementExhausted) {
       if (candidate.length > Math.max(0, MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate)) {
-        errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
+        errors.push(
+          planError(
+            "TSC002",
+            "Interaction text exceeds the remaining aggregate UTF-8 byte limit.",
+            fieldPath,
+          ),
+        );
         return false;
       }
       return true;
@@ -681,7 +876,13 @@ function validatePreparedInteractionUi(
     );
     if (bytes === null) {
       measurementExhausted = true;
-      errors.push(planError("TSC002", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", fieldPath));
+      errors.push(
+        planError(
+          "TSC002",
+          "Interaction text exceeds the remaining aggregate UTF-8 byte limit.",
+          fieldPath,
+        ),
+      );
       return false;
     }
     aggregate += bytes;
@@ -700,11 +901,13 @@ function validatePreparedInteractionUi(
     validateTemporaryId(value, fieldPath, temporaryCount, errors);
     if (typeof value === "number") {
       if (value === speakerTemporary || value === destinationTemporary || used.has(value)) {
-        errors.push(planError(
-          "TSC002",
-          "Prepared interaction temporaries must be pairwise distinct.",
-          fieldPath,
-        ));
+        errors.push(
+          planError(
+            "TSC002",
+            "Prepared interaction temporaries must be pairwise distinct.",
+            fieldPath,
+          ),
+        );
       }
       used.add(value);
     }
@@ -722,44 +925,49 @@ function validatePreparedInteractionUi(
     errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
   }
   addTemporary(ui.optionsTemporary, `${path}.optionsTemporary`);
+  // EVIDENCE: validation: the first condition checks optionCount with Number.isSafeInteger before the lower-bound comparison.
+  // EVIDENCE: validation: the first condition checks optionCount with Number.isSafeInteger before the upper-bound comparison.
   if (
     !Number.isSafeInteger(ui.optionCount) ||
     (ui.optionCount as number) < 1 ||
     (ui.optionCount as number) > MAX_INTERACTION_OPTION_ENTRIES
   ) {
-    errors.push(planError("TSC002", "Prepared choice option count exceeds the shared collection boundary or is empty.", `${path}.optionCount`));
+    errors.push(
+      planError(
+        "TSC002",
+        "Prepared choice option count exceeds the shared collection boundary or is empty.",
+        `${path}.optionCount`,
+      ),
+    );
   }
   if (ui.labelType === "none") {
     if (ui.labels !== null) {
-      errors.push(planError(
-        "TSC002",
-        "Unlabelled prepared choice must not carry labels.",
-        `${path}.labels`,
-      ));
+      errors.push(
+        planError("TSC002", "Unlabelled prepared choice must not carry labels.", `${path}.labels`),
+      );
     }
     return;
   }
   if (!Array.isArray(ui.labels) || ui.labels.length !== ui.optionCount) {
-    errors.push(planError("TSC002", "Prepared choice labels must match the option count.", `${path}.labels`));
+    errors.push(
+      planError("TSC002", "Prepared choice labels must match the option count.", `${path}.labels`),
+    );
     return;
   }
   const labels = new Set<string | number>();
   for (let index = 0; index < ui.labels.length; index += 1) {
     const label = ui.labels[index];
     const labelPath = `${path}.labels[${index}]`;
-    const valid = ui.labelType === "identifier"
-      ? countString(label, labelPath) &&
-        /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
-      : typeof label === "number" &&
-        Number.isFinite(label) &&
-        !Object.is(label, -0);
+    const valid =
+      ui.labelType === "identifier"
+        ? countString(label, labelPath) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
+        : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
     if (!valid) {
-      errors.push(planError("TSC002", "Prepared choice label does not match the label type.", labelPath));
+      errors.push(
+        planError("TSC002", "Prepared choice label does not match the label type.", labelPath),
+      );
     }
-    if (
-      (typeof label === "string" || typeof label === "number") &&
-      labels.has(label)
-    ) {
+    if ((typeof label === "string" || typeof label === "number") && labels.has(label)) {
       errors.push(planError("TSC002", "Prepared choice labels must be unique.", labelPath));
     }
     if (typeof label === "string" || typeof label === "number") labels.add(label);
@@ -774,39 +982,55 @@ function validateInteractionAccessibleName(
   measurementExhausted: boolean,
   errors: PlanValidationError[],
 ): void {
-  if (!isRecord(accessible) || (accessible.kind !== "text" && accessible.kind !== "localizedDefault")) {
+  if (
+    !isRecord(accessible) ||
+    (accessible.kind !== "text" && accessible.kind !== "localizedDefault")
+  ) {
     errors.push(planError("TSC002", "Interaction accessible name is invalid.", path));
     return;
   }
   if (accessible.kind === "text") {
     if (!hasExactKeys(accessible, ["kind", "text"])) {
-      errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", path));
+      errors.push(
+        planError("TSC002", "Interaction accessible name contains unsupported fields.", path),
+      );
     }
     if (
       countString(accessible.text, `${path}.text`) &&
       !measurementExhausted &&
       !interactionStringHasNonWhitespace(accessible.text)
     ) {
-      errors.push(planError("TSC002", "Explicit interaction accessible name must contain a non-whitespace character.", `${path}.text`));
+      errors.push(
+        planError(
+          "TSC002",
+          "Explicit interaction accessible name must contain a non-whitespace character.",
+          `${path}.text`,
+        ),
+      );
     }
     return;
   }
   if (!hasExactKeys(accessible, ["kind", "key"])) {
-    errors.push(planError("TSC002", "Interaction accessible name contains unsupported fields.", path));
+    errors.push(
+      planError("TSC002", "Interaction accessible name contains unsupported fields.", path),
+    );
   }
-  const expectedKey = kind === "button"
-    ? "continue"
-    : kind === "number"
-      ? "number"
-      : kind === "choice"
-        ? "chooseOption"
-        : "answer";
+  const expectedKey =
+    kind === "button"
+      ? "continue"
+      : kind === "number"
+        ? "number"
+        : kind === "choice"
+          ? "chooseOption"
+          : "answer";
   if (accessible.key !== expectedKey) {
-    errors.push(planError(
-      "TSC002",
-      "Interaction localized accessible-name key does not match its kind.",
-      `${path}.key`,
-    ));
+    errors.push(
+      planError(
+        "TSC002",
+        "Interaction localized accessible-name key does not match its kind.",
+        `${path}.key`,
+      ),
+    );
   }
 }
 
@@ -828,7 +1052,9 @@ function validateExpression(
   switch (value.kind) {
     case "literal":
       if (!isScalar(value.value)) {
-        errors.push(planError("TSC002", "Literal value must be a finite JSON scalar.", `${path}.value`));
+        errors.push(
+          planError("TSC002", "Literal value must be a finite JSON scalar.", `${path}.value`),
+        );
       }
       return;
     case "identifier":
@@ -897,28 +1123,34 @@ function validatePreparedAssignmentTarget(
   if (value.kind === "identifier") return;
   if (value.kind === "property") {
     if (!isRecord(value.object) || value.object.kind !== "preparedReference") {
-      errors.push(planError(
-        "TSC002",
-        "Assignment receivers must be captured before the right-hand value.",
-        `${path}.object`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Assignment receivers must be captured before the right-hand value.",
+          `${path}.object`,
+        ),
+      );
     }
     return;
   }
   if (value.kind === "index") {
     if (!isRecord(value.index) || value.index.kind !== "temporary") {
-      errors.push(planError(
-        "TSC002",
-        "Assignment indexes must be prepared in a temporary before the right-hand value.",
-        `${path}.index`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Assignment indexes must be prepared in a temporary before the right-hand value.",
+          `${path}.index`,
+        ),
+      );
     }
     if (!isRecord(value.object) || value.object.kind !== "preparedReference") {
-      errors.push(planError(
-        "TSC002",
-        "Assignment receivers must be captured before the right-hand value.",
-        `${path}.object`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Assignment receivers must be captured before the right-hand value.",
+          `${path}.object`,
+        ),
+      );
     }
   }
 }
@@ -957,7 +1189,7 @@ function validateExpressionArray(
     return;
   }
   value.forEach((item, index) =>
-    validateExpression(item, `${path}[${index}]`, errors, false, temporaryCount)
+    validateExpression(item, `${path}[${index}]`, errors, false, temporaryCount),
   );
 }
 
@@ -1018,16 +1250,15 @@ function collectFunctionIds(value: unknown): ReadonlySet<number> {
     value
       .filter(isRecord)
       .map((item) => item.id)
-      .filter((id): id is number => Number.isInteger(id) && (id as number) > 0),
+      .filter((id): id is number => {
+        // EVIDENCE: validation: Number.isInteger establishes the numeric ID before comparison.
+        return Number.isInteger(id) && (id as number) > 0;
+      }),
   );
 }
 
 type InstructionExecutionRegion =
-  | {
-      readonly kind: "root";
-      readonly startInstruction: 0;
-      readonly endInstruction: number;
-    }
+  | { readonly kind: "root"; readonly startInstruction: 0; readonly endInstruction: number }
   | {
       readonly kind: "function";
       readonly functionId: number;
@@ -1177,35 +1408,48 @@ function validateCanonicalPreparedSays(
     const contextualSpeakerTemporary = instruction.contextualSpeakerTemporary;
     const textTemporary = instruction.textTemporary;
     if (speakerTemporary !== undefined && contextualSpeakerTemporary === undefined) {
-      errors.push(planError(
-        "TSC002",
-        "Prepared say speaker requires its contextual speaker capture.",
-        `${path}.contextualSpeakerTemporary`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Prepared say speaker requires its contextual speaker capture.",
+          `${path}.contextualSpeakerTemporary`,
+        ),
+      );
     }
     if (contextualSpeakerTemporary !== undefined && speakerTemporary === undefined) {
-      errors.push(planError(
-        "TSC002",
-        "Prepared say contextual speaker requires its output speaker capture.",
-        `${path}.speakerTemporary`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Prepared say contextual speaker requires its output speaker capture.",
+          `${path}.speakerTemporary`,
+        ),
+      );
     }
-    if (speakerTemporary !== undefined && textTemporary !== undefined && speakerTemporary === textTemporary) {
-      errors.push(planError(
-        "TSC002",
-        "Prepared say speaker and text temporaries must not alias.",
-        `${path}.textTemporary`,
-      ));
+    if (
+      speakerTemporary !== undefined &&
+      textTemporary !== undefined &&
+      speakerTemporary === textTemporary
+    ) {
+      errors.push(
+        planError(
+          "TSC002",
+          "Prepared say speaker and text temporaries must not alias.",
+          `${path}.textTemporary`,
+        ),
+      );
     }
     if (
       contextualSpeakerTemporary !== undefined &&
-      (contextualSpeakerTemporary === speakerTemporary || contextualSpeakerTemporary === textTemporary)
+      (contextualSpeakerTemporary === speakerTemporary ||
+        contextualSpeakerTemporary === textTemporary)
     ) {
-      errors.push(planError(
-        "TSC002",
-        "Prepared say contextual speaker temporary must not alias another prepared say temporary.",
-        `${path}.contextualSpeakerTemporary`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Prepared say contextual speaker temporary must not alias another prepared say temporary.",
+          `${path}.contextualSpeakerTemporary`,
+        ),
+      );
     }
     validatePreparedSayProducer(
       "prepareSaySpeaker",
@@ -1258,11 +1502,13 @@ function validateCanonicalPreparedSays(
         instruction.kind === "prepareSayContextualSpeaker") &&
       !consumed.has(instructionIndex)
     ) {
-      errors.push(planError(
-        "TSC002",
-        "Prepared say instruction must have one matching consuming say instruction.",
-        `$.instructions[${instructionIndex}]`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Prepared say instruction must have one matching consuming say instruction.",
+          `$.instructions[${instructionIndex}]`,
+        ),
+      );
     }
   });
 }
@@ -1282,6 +1528,7 @@ function validatePreparedSayProducer(
   errors: PlanValidationError[],
 ): void {
   if (!Number.isSafeInteger(temporaryId)) return;
+  // EVIDENCE: validation: temporaryId passed Number.isSafeInteger above.
   const preparedTemporaryId = temporaryId as number;
   const candidates = producers.get(preparedTemporaryId) ?? [];
   const producerIndex = candidates.length === 1 ? candidates[0] : undefined;
@@ -1298,46 +1545,43 @@ function validatePreparedSayProducer(
       expectedValue,
     )
   ) {
-    errors.push(planError(
-      "TSC002",
-      `Prepared say ${expectedKind === "prepareSaySpeaker" ? "speaker" : "text"} temporary lacks its canonical producer.`,
-      producerPath,
-    ));
+    errors.push(
+      planError(
+        "TSC002",
+        `Prepared say ${expectedKind === "prepareSaySpeaker" ? "speaker" : "text"} temporary lacks its canonical producer.`,
+        producerPath,
+      ),
+    );
     return;
   }
   if (consumed.has(producerIndex)) {
-    errors.push(planError(
-      "TSC002",
-      "Prepared say producer must not be reused by another say instruction.",
-      producerPath,
-    ));
+    errors.push(
+      planError(
+        "TSC002",
+        "Prepared say producer must not be reused by another say instruction.",
+        producerPath,
+      ),
+    );
     return;
   }
   consumed.add(producerIndex);
-  if (preparedSayTemporaryIsCleared(
-    instructions,
-    producerIndex,
-    sayIndex,
-    preparedTemporaryId,
-  )) {
-    errors.push(planError(
-      "TSC002",
-      `Prepared say ${expectedKind === "prepareSaySpeaker" ? "speaker" : "text"} temporary is cleared before its consuming say instruction.`,
-      producerPath,
-    ));
+  if (preparedSayTemporaryIsCleared(instructions, producerIndex, sayIndex, preparedTemporaryId)) {
+    errors.push(
+      planError(
+        "TSC002",
+        `Prepared say ${expectedKind === "prepareSaySpeaker" ? "speaker" : "text"} temporary is cleared before its consuming say instruction.`,
+        producerPath,
+      ),
+    );
   }
-  if (preparedSayCanBeBypassed(
-    index,
-    explicitIncomingSources,
-    region,
-    producerIndex,
-    sayIndex,
-  )) {
-    errors.push(planError(
-      "TSC002",
-      "Prepared say instruction can be reached while bypassing its required preparation.",
-      sayPath,
-    ));
+  if (preparedSayCanBeBypassed(index, explicitIncomingSources, region, producerIndex, sayIndex)) {
+    errors.push(
+      planError(
+        "TSC002",
+        "Prepared say instruction can be reached while bypassing its required preparation.",
+        sayPath,
+      ),
+    );
   }
 }
 
@@ -1355,15 +1599,16 @@ function validatePreparedSayContextualSpeaker(
   errors: PlanValidationError[],
 ): void {
   if (!Number.isSafeInteger(temporaryId)) return;
+  // EVIDENCE: validation: temporaryId passed Number.isSafeInteger above.
   const candidates = producers.get(temporaryId as number) ?? [];
   const producerIndex = candidates.length === 1 ? candidates[0] : undefined;
   const producer = producerIndex === undefined ? undefined : instructions[producerIndex];
   const speakerCandidates = Number.isSafeInteger(speakerTemporary)
-    ? producers.get(speakerTemporary as number) ?? []
+    ? (producers.get(
+        /* EVIDENCE: validation: the conditional checks speakerTemporary with Number.isSafeInteger. */ speakerTemporary as number,
+      ) ?? [])
     : [];
-  const speakerProducerIndex = speakerCandidates.length === 1
-    ? speakerCandidates[0]
-    : undefined;
+  const speakerProducerIndex = speakerCandidates.length === 1 ? speakerCandidates[0] : undefined;
   const path = `${sayPath}.contextualSpeakerTemporary`;
   if (
     producerIndex === undefined ||
@@ -1375,38 +1620,58 @@ function validatePreparedSayContextualSpeaker(
     producerIndex >= sayIndex ||
     index.owners[producerIndex] !== region
   ) {
-    errors.push(planError("TSC002", "Prepared say contextual speaker lacks its canonical producer.", path));
+    errors.push(
+      planError("TSC002", "Prepared say contextual speaker lacks its canonical producer.", path),
+    );
     return;
   }
   if (consumed.has(producerIndex)) {
-    errors.push(planError("TSC002", "Prepared say producer must not be reused by another say instruction.", path));
+    errors.push(
+      planError(
+        "TSC002",
+        "Prepared say producer must not be reused by another say instruction.",
+        path,
+      ),
+    );
     return;
   }
   consumed.add(producerIndex);
+  // EVIDENCE: validation: temporaryId passed Number.isSafeInteger before this analysis.
   if (preparedSayTemporaryIsCleared(instructions, producerIndex, sayIndex, temporaryId as number)) {
-    errors.push(planError("TSC002", "Prepared say contextual speaker is cleared before its consuming say instruction.", path));
+    errors.push(
+      planError(
+        "TSC002",
+        "Prepared say contextual speaker is cleared before its consuming say instruction.",
+        path,
+      ),
+    );
   }
-  if (preparedSayContextualSpeakerIsUsedBeforeCapture(
-    instructions,
-    index,
-    region,
-    producerIndex,
-    temporaryId as number,
-  )) {
-    errors.push(planError(
-      "TSC002",
-      "Prepared say contextual speaker must be captured before its payload is lowered.",
-      path,
-    ));
+  if (
+    preparedSayContextualSpeakerIsUsedBeforeCapture(
+      instructions,
+      index,
+      region,
+      producerIndex,
+      // EVIDENCE: validation: temporaryId passed Number.isSafeInteger before this analysis.
+      temporaryId as number,
+    )
+  ) {
+    errors.push(
+      planError(
+        "TSC002",
+        "Prepared say contextual speaker must be captured before its payload is lowered.",
+        path,
+      ),
+    );
   }
-  if (preparedSayCanBeBypassed(
-    index,
-    explicitIncomingSources,
-    region,
-    producerIndex,
-    sayIndex,
-  )) {
-    errors.push(planError("TSC002", "Prepared say instruction can be reached while bypassing its required preparation.", sayPath));
+  if (preparedSayCanBeBypassed(index, explicitIncomingSources, region, producerIndex, sayIndex)) {
+    errors.push(
+      planError(
+        "TSC002",
+        "Prepared say instruction can be reached while bypassing its required preparation.",
+        sayPath,
+      ),
+    );
   }
 }
 
@@ -1417,13 +1682,18 @@ function preparedSayContextualSpeakerIsUsedBeforeCapture(
   producerIndex: number,
   temporaryId: number,
 ): boolean {
-  for (let instructionIndex = region.startInstruction; instructionIndex < producerIndex; instructionIndex += 1) {
+  for (
+    let instructionIndex = region.startInstruction;
+    instructionIndex < producerIndex;
+    instructionIndex += 1
+  ) {
     const instruction = instructions[instructionIndex];
     if (
       isRecord(instruction) &&
       index.owners[instructionIndex] === region &&
       preparedSayPayloadMayReferenceTemporary(instruction, temporaryId)
-    ) return true;
+    )
+      return true;
   }
   return false;
 }
@@ -1460,44 +1730,62 @@ function expressionMayReferenceTemporary(value: unknown, temporaryId: number): b
       return value.temporaryId === temporaryId;
     case "list":
     case "set":
-      return Array.isArray(value.elements) && value.elements.some((item) =>
-        expressionMayReferenceTemporary(item, temporaryId)
+      return (
+        Array.isArray(value.elements) &&
+        value.elements.some((item) => expressionMayReferenceTemporary(item, temporaryId))
       );
     case "object":
-      return Array.isArray(value.properties) && value.properties.some((property) =>
-        isRecord(property) && expressionMayReferenceTemporary(property.value, temporaryId)
+      return (
+        Array.isArray(value.properties) &&
+        value.properties.some(
+          (property) =>
+            isRecord(property) && expressionMayReferenceTemporary(property.value, temporaryId),
+        )
       );
     case "group":
       return expressionMayReferenceTemporary(value.expression, temporaryId);
     case "template":
-      return Array.isArray(value.parts) && value.parts.some((part) =>
-        isRecord(part) &&
-        part.kind === "expression" &&
-        expressionMayReferenceTemporary(part.expression, temporaryId)
+      return (
+        Array.isArray(value.parts) &&
+        value.parts.some(
+          (part) =>
+            isRecord(part) &&
+            part.kind === "expression" &&
+            expressionMayReferenceTemporary(part.expression, temporaryId),
+        )
       );
     case "property":
       return expressionMayReferenceTemporary(value.object, temporaryId);
     case "index":
-      return expressionMayReferenceTemporary(value.object, temporaryId) ||
-        expressionMayReferenceTemporary(value.index, temporaryId);
+      return (
+        expressionMayReferenceTemporary(value.object, temporaryId) ||
+        expressionMayReferenceTemporary(value.index, temporaryId)
+      );
     case "call": {
       const calleeReferences =
         isRecord(value.callee) &&
         value.callee.kind === "property" &&
         expressionMayReferenceTemporary(value.callee.object, temporaryId);
-      const argumentReferences = Array.isArray(value.arguments) && value.arguments.some((argument) =>
-        isRecord(argument) && expressionMayReferenceTemporary(argument.value, temporaryId)
-      );
+      const argumentReferences =
+        Array.isArray(value.arguments) &&
+        value.arguments.some(
+          (argument) =>
+            isRecord(argument) && expressionMayReferenceTemporary(argument.value, temporaryId),
+        );
       return calleeReferences || argumentReferences;
     }
     case "unary":
       return expressionMayReferenceTemporary(value.operand, temporaryId);
     case "binary":
-      return expressionMayReferenceTemporary(value.left, temporaryId) ||
-        expressionMayReferenceTemporary(value.right, temporaryId);
+      return (
+        expressionMayReferenceTemporary(value.left, temporaryId) ||
+        expressionMayReferenceTemporary(value.right, temporaryId)
+      );
     case "range":
-      return expressionMayReferenceTemporary(value.start, temporaryId) ||
-        expressionMayReferenceTemporary(value.end, temporaryId);
+      return (
+        expressionMayReferenceTemporary(value.start, temporaryId) ||
+        expressionMayReferenceTemporary(value.end, temporaryId)
+      );
     default:
       return false;
   }
@@ -1521,7 +1809,8 @@ function preparedSayTemporaryIsCleared(
         (instruction.kind === "clearTemporaries" &&
           Array.isArray(instruction.temporaryIds) &&
           instruction.temporaryIds.includes(temporaryId)))
-    ) return true;
+    )
+      return true;
   }
   return false;
 }
@@ -1566,14 +1855,21 @@ function preparedSayCanBeBypassed(
 function samePreparedSayValue(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
   if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) &&
-      left.length === right.length && left.every((value, index) => samePreparedSayValue(value, right[index]));
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => samePreparedSayValue(value, right[index]))
+    );
   }
   if (!isRecord(left) || !isRecord(right)) return false;
   const leftKeys = Object.keys(left);
   const rightKeys = Object.keys(right);
-  return leftKeys.length === rightKeys.length && leftKeys.every((key) =>
-    Object.hasOwn(right, key) && samePreparedSayValue(left[key], right[key])
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) => Object.hasOwn(right, key) && samePreparedSayValue(left[key], right[key]),
+    )
   );
 }
 
@@ -1593,7 +1889,10 @@ function validateCanonicalInteractionResultHandoffs(
       producers.set(produced, indices);
     }
     for (const target of explicitInstructionTargets(instruction)) {
-      if (Number.isSafeInteger(target)) explicitTargets.add(target as number);
+      if (Number.isSafeInteger(target))
+        explicitTargets.add(
+          /* EVIDENCE: validation: only safe-integer instruction targets enter this set. */ target as number,
+        );
     }
   });
 
@@ -1603,72 +1902,80 @@ function validateCanonicalInteractionResultHandoffs(
       instruction.kind !== "interaction" ||
       instruction.interactionKind === "button" ||
       !Number.isSafeInteger(instruction.destinationTemporary)
-    ) return;
+    )
+      return;
+    // EVIDENCE: validation: destinationTemporary passed the safe-integer guard above.
     const destinationTemporary = instruction.destinationTemporary as number;
     const path = `$.instructions[${instructionIndex}]`;
     const region = index.owners[instructionIndex];
     if (region === undefined) return;
 
     const destinationProducers = producers.get(destinationTemporary) ?? [];
-    if (
-      destinationProducers.length !== 1 ||
-      destinationProducers[0] !== instructionIndex
-    ) {
-      errors.push(planError(
-        "TSC002",
-        "Canonical interaction result destinations must be produced only by their owning interaction.",
-        `${path}.destinationTemporary`,
-      ));
+    if (destinationProducers.length !== 1 || destinationProducers[0] !== instructionIndex) {
+      errors.push(
+        planError(
+          "TSC002",
+          "Canonical interaction result destinations must be produced only by their owning interaction.",
+          `${path}.destinationTemporary`,
+        ),
+      );
     }
 
     const continuation = instructionIndex + 1;
     if (continuation >= region.endInstruction) {
-      errors.push(planError(
-        "TSC002",
-        "Result-bearing interaction requires a local in-region result handoff.",
-        path,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Result-bearing interaction requires a local in-region result handoff.",
+          path,
+        ),
+      );
       return;
     }
     if (explicitTargets.has(continuation)) {
-      errors.push(planError(
-        "TSC002",
-        "Interaction result handoff entry must be reachable only from its owning interaction.",
-        `$.instructions[${continuation}]`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Interaction result handoff entry must be reachable only from its owning interaction.",
+          `$.instructions[${continuation}]`,
+        ),
+      );
     }
 
     const handoff = instructions[continuation];
     if (!isRecord(handoff)) return;
-    if (
-      handoff.kind === "clearTemporary" &&
-      handoff.temporaryId === destinationTemporary
-    ) return;
+    if (handoff.kind === "clearTemporary" && handoff.temporaryId === destinationTemporary) return;
     if (handoff.kind === "exit" || handoff.kind === "returnVoid") return;
 
     if (!canonicalHandoffConsumesTemporary(handoff, destinationTemporary)) {
-      errors.push(planError(
-        "TSC002",
-        "Interaction result handoff must consume the destination immediately.",
-        `$.instructions[${continuation}]`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Interaction result handoff must consume the destination immediately.",
+          `$.instructions[${continuation}]`,
+        ),
+      );
       return;
     }
     if (handoff.kind === "returnValue") return;
-    if (![
-      "declareBinding",
-      "assign",
-      "evaluate",
-      "storeTemporary",
-      "say",
-      "setDeclaredSpeakerProperty",
-      "prepareReference",
-    ].includes(String(handoff.kind))) {
-      errors.push(planError(
-        "TSC002",
-        "Interaction result handoff contains a non-canonical intervening instruction.",
-        `$.instructions[${continuation}]`,
-      ));
+    if (
+      ![
+        "declareBinding",
+        "assign",
+        "evaluate",
+        "storeTemporary",
+        "say",
+        "setDeclaredSpeakerProperty",
+        "prepareReference",
+      ].includes(String(handoff.kind))
+    ) {
+      errors.push(
+        planError(
+          "TSC002",
+          "Interaction result handoff contains a non-canonical intervening instruction.",
+          `$.instructions[${continuation}]`,
+        ),
+      );
       return;
     }
 
@@ -1680,19 +1987,23 @@ function validateCanonicalInteractionResultHandoffs(
       clear.kind !== "clearTemporary" ||
       clear.temporaryId !== destinationTemporary
     ) {
-      errors.push(planError(
-        "TSC002",
-        "Interaction result handoff must clear its transient destination immediately after transfer.",
-        `$.instructions[${clearIndex}]`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Interaction result handoff must clear its transient destination immediately after transfer.",
+          `$.instructions[${clearIndex}]`,
+        ),
+      );
       return;
     }
     if (explicitTargets.has(clearIndex)) {
-      errors.push(planError(
-        "TSC002",
-        "Interaction result handoff cleanup must not be an independent control-flow target.",
-        `$.instructions[${clearIndex}]`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Interaction result handoff cleanup must not be an independent control-flow target.",
+          `$.instructions[${clearIndex}]`,
+        ),
+      );
     }
   });
 }
@@ -1715,7 +2026,8 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
   ) {
     value = instruction.destinationTemporary;
   }
-  return Number.isSafeInteger(value) ? value as number : null;
+  // EVIDENCE: validation: Number.isSafeInteger proves the returned numeric value.
+  return Number.isSafeInteger(value) ? (value as number) : null;
 }
 
 function explicitInstructionTargets(instruction: Record<string, unknown>): readonly unknown[] {
@@ -1759,46 +2071,57 @@ function canonicalHandoffConsumesTemporary(
   return expressionGuaranteesTemporaryEvaluation(expression, temporaryId);
 }
 
-function expressionGuaranteesTemporaryEvaluation(
-  value: unknown,
-  temporaryId: number,
-): boolean {
+function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: number): boolean {
   if (!isRecord(value)) return false;
   switch (value.kind) {
     case "temporary":
       return value.temporaryId === temporaryId;
     case "list":
     case "set":
-      return Array.isArray(value.elements) && value.elements.some((item) =>
-        expressionGuaranteesTemporaryEvaluation(item, temporaryId)
+      return (
+        Array.isArray(value.elements) &&
+        value.elements.some((item) => expressionGuaranteesTemporaryEvaluation(item, temporaryId))
       );
     case "object":
-      return Array.isArray(value.properties) && value.properties.some((property) =>
-        isRecord(property) &&
-        expressionGuaranteesTemporaryEvaluation(property.value, temporaryId)
+      return (
+        Array.isArray(value.properties) &&
+        value.properties.some(
+          (property) =>
+            isRecord(property) &&
+            expressionGuaranteesTemporaryEvaluation(property.value, temporaryId),
+        )
       );
     case "group":
       return expressionGuaranteesTemporaryEvaluation(value.expression, temporaryId);
     case "template":
-      return Array.isArray(value.parts) && value.parts.some((part) =>
-        isRecord(part) &&
-        part.kind === "expression" &&
-        expressionGuaranteesTemporaryEvaluation(part.expression, temporaryId)
+      return (
+        Array.isArray(value.parts) &&
+        value.parts.some(
+          (part) =>
+            isRecord(part) &&
+            part.kind === "expression" &&
+            expressionGuaranteesTemporaryEvaluation(part.expression, temporaryId),
+        )
       );
     case "property":
       return expressionGuaranteesTemporaryEvaluation(value.object, temporaryId);
     case "index":
-      return expressionGuaranteesTemporaryEvaluation(value.object, temporaryId) ||
-        expressionGuaranteesTemporaryEvaluation(value.index, temporaryId);
+      return (
+        expressionGuaranteesTemporaryEvaluation(value.object, temporaryId) ||
+        expressionGuaranteesTemporaryEvaluation(value.index, temporaryId)
+      );
     case "call": {
       const calleeConsumes =
         isRecord(value.callee) &&
         value.callee.kind === "property" &&
         expressionGuaranteesTemporaryEvaluation(value.callee.object, temporaryId);
-      const argumentConsumes = Array.isArray(value.arguments) && value.arguments.some((argument) =>
-        isRecord(argument) &&
-        expressionGuaranteesTemporaryEvaluation(argument.value, temporaryId)
-      );
+      const argumentConsumes =
+        Array.isArray(value.arguments) &&
+        value.arguments.some(
+          (argument) =>
+            isRecord(argument) &&
+            expressionGuaranteesTemporaryEvaluation(argument.value, temporaryId),
+        );
       return calleeConsumes || argumentConsumes;
     }
     case "unary":
@@ -1807,11 +2130,15 @@ function expressionGuaranteesTemporaryEvaluation(
       if (value.operator === "and" || value.operator === "or") {
         return expressionGuaranteesTemporaryEvaluation(value.left, temporaryId);
       }
-      return expressionGuaranteesTemporaryEvaluation(value.left, temporaryId) ||
-        expressionGuaranteesTemporaryEvaluation(value.right, temporaryId);
+      return (
+        expressionGuaranteesTemporaryEvaluation(value.left, temporaryId) ||
+        expressionGuaranteesTemporaryEvaluation(value.right, temporaryId)
+      );
     case "range":
-      return expressionGuaranteesTemporaryEvaluation(value.start, temporaryId) ||
-        expressionGuaranteesTemporaryEvaluation(value.end, temporaryId);
+      return (
+        expressionGuaranteesTemporaryEvaluation(value.start, temporaryId) ||
+        expressionGuaranteesTemporaryEvaluation(value.end, temporaryId)
+      );
     default:
       return false;
   }
@@ -1826,15 +2153,14 @@ function validateInstructionRegionTarget(
 ): void {
   if (!validInstructionBoundary(value, instructionCount)) return;
   const target = value;
-  const remainsInRegion = region.kind === "root"
-    ? target >= region.startInstruction && target <= region.endInstruction
-    : target >= region.startInstruction && target < region.endInstruction;
+  const remainsInRegion =
+    region.kind === "root"
+      ? target >= region.startInstruction && target <= region.endInstruction
+      : target >= region.startInstruction && target < region.endInstruction;
   if (!remainsInRegion) {
-    errors.push(planError(
-      "TSC002",
-      "Control-flow target leaves the instruction's execution region.",
-      path,
-    ));
+    errors.push(
+      planError("TSC002", "Control-flow target leaves the instruction's execution region.", path),
+    );
   }
 }
 
@@ -1867,11 +2193,9 @@ function validateFunctionDefinitions(
         errors.push(planError("TSC002", "Function IDs must be unique.", `${path}.id`));
       }
       if (definition.id !== definitionIndex + 1) {
-        errors.push(planError(
-          "TSC002",
-          "Function IDs must follow deterministic source order.",
-          `${path}.id`,
-        ));
+        errors.push(
+          planError("TSC002", "Function IDs must follow deterministic source order.", `${path}.id`),
+        );
       }
       ids.add(definition.id);
     }
@@ -1889,19 +2213,13 @@ function validateFunctionDefinitions(
       definition.endInstruction,
     ];
     if (points.some((point) => !nonNegativeSafeInteger(point))) {
-      errors.push(planError(
-        "TSC002",
-        "Function instruction boundaries must be non-negative integers.",
-        path,
-      ));
+      errors.push(
+        planError("TSC002", "Function instruction boundaries must be non-negative integers.", path),
+      );
       return;
     }
-    const [entry, bodyEntry, implicitReturn, end] = points as [
-      number,
-      number,
-      number,
-      number,
-    ];
+    // EVIDENCE: validation: all four fixed instruction boundaries passed nonNegativeSafeInteger above.
+    const [entry, bodyEntry, implicitReturn, end] = points as [number, number, number, number];
     if (
       expectedEntry === null ||
       entry !== expectedEntry ||
@@ -1910,19 +2228,19 @@ function validateFunctionDefinitions(
       implicitReturn !== end - 1 ||
       end > instructions.length
     ) {
-      errors.push(planError(
-        "TSC002",
-        "Function instruction range is overlapping or impossible.",
-        path,
-      ));
+      errors.push(
+        planError("TSC002", "Function instruction range is overlapping or impossible.", path),
+      );
       return;
     }
     const functionId = definition.id;
+    // EVIDENCE: validation: Number.isSafeInteger establishes the numeric function ID.
     if (!Number.isSafeInteger(functionId) || (functionId as number) < 1) return;
 
     const validatedRange: ValidatedFunctionRange = {
       definition,
       path,
+      // EVIDENCE: validation: functionId passed the positive safe-integer check above.
       id: functionId as number,
       entryInstruction: entry,
       bodyEntryInstruction: bodyEntry,
@@ -1933,38 +2251,45 @@ function validateFunctionDefinitions(
 
     const bodyEntryMarker = instructions[bodyEntry - 1];
     if (!isRecord(bodyEntryMarker) || bodyEntryMarker.kind !== "enterFunctionBody") {
-      errors.push(planError(
-        "TSC002",
-        "Function body entry point is invalid.",
-        `${path}.bodyEntryInstruction`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Function body entry point is invalid.",
+          `${path}.bodyEntryInstruction`,
+        ),
+      );
     }
     const implicitReturnInstruction = instructions[implicitReturn];
     if (!isRecord(implicitReturnInstruction) || implicitReturnInstruction.kind !== "returnVoid") {
-      errors.push(planError(
-        "TSC002",
-        "Function implicit-return boundary is invalid.",
-        `${path}.implicitReturnInstruction`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Function implicit-return boundary is invalid.",
+          `${path}.implicitReturnInstruction`,
+        ),
+      );
     }
     validateFunctionPrologue(validatedRange, instructions, errors);
     expectedEntry = end;
   });
   if (expectedEntry !== null && expectedEntry !== instructions.length) {
-    errors.push(planError(
-      "TSC002",
-      "Function ranges do not cover the non-root instruction region.",
-      "$.functions",
-    ));
+    errors.push(
+      planError(
+        "TSC002",
+        "Function ranges do not cover the non-root instruction region.",
+        "$.functions",
+      ),
+    );
   }
 
   const index = createPlanValidationIndex(instructions, rootEndInstruction, validatedRanges);
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
     const ownerRegion = index?.owners[instructionIndex];
-    const owner = ownerRegion?.kind === "function"
-      ? index?.functionsById.get(ownerRegion.functionId)
-      : undefined;
+    const owner =
+      ownerRegion?.kind === "function"
+        ? index?.functionsById.get(ownerRegion.functionId)
+        : undefined;
     const functionOnly = [
       "bindSuppliedParameter",
       "beginFunctionDefaults",
@@ -1975,11 +2300,13 @@ function validateFunctionDefinitions(
       "returnVoid",
     ].includes(String(instruction.kind));
     if (functionOnly && owner === undefined) {
-      errors.push(planError(
-        "TSC002",
-        "Function-only instruction appears in root execution.",
-        `$.instructions[${instructionIndex}]`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Function-only instruction appears in root execution.",
+          `$.instructions[${instructionIndex}]`,
+        ),
+      );
     }
     if (
       owner !== undefined &&
@@ -1987,11 +2314,13 @@ function validateFunctionDefinitions(
       "functionId" in instruction &&
       instruction.functionId !== owner.id
     ) {
-      errors.push(planError(
-        "TSC002",
-        "Function prologue instruction has the wrong function ID.",
-        `$.instructions[${instructionIndex}].functionId`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Function prologue instruction has the wrong function ID.",
+          `$.instructions[${instructionIndex}].functionId`,
+        ),
+      );
     }
     if (instruction.kind === "callFunction" && typeof instruction.functionId === "number") {
       const target = index?.functionsById.get(instruction.functionId)?.definition;
@@ -2010,18 +2339,22 @@ function validateFunctionDefinitions(
         instruction.arguments.forEach((argument, argumentIndex) => {
           if (!isRecord(argument) || typeof argument.parameterName !== "string") return;
           if (!parameterNames.has(argument.parameterName)) {
-            errors.push(planError(
-              "TSC002",
-              "Call refers to an unknown function parameter.",
-              `$.instructions[${instructionIndex}].arguments[${argumentIndex}].parameterName`,
-            ));
+            errors.push(
+              planError(
+                "TSC002",
+                "Call refers to an unknown function parameter.",
+                `$.instructions[${instructionIndex}].arguments[${argumentIndex}].parameterName`,
+              ),
+            );
           }
           if (supplied.has(argument.parameterName)) {
-            errors.push(planError(
-              "TSC002",
-              "Call supplies a function parameter more than once.",
-              `$.instructions[${instructionIndex}].arguments[${argumentIndex}].parameterName`,
-            ));
+            errors.push(
+              planError(
+                "TSC002",
+                "Call supplies a function parameter more than once.",
+                `$.instructions[${instructionIndex}].arguments[${argumentIndex}].parameterName`,
+              ),
+            );
           }
           supplied.add(argument.parameterName);
         });
@@ -2032,11 +2365,13 @@ function validateFunctionDefinitions(
             typeof parameter.name === "string" &&
             !supplied.has(parameter.name)
           ) {
-            errors.push(planError(
-              "TSC002",
-              "Call omits a required function parameter.",
-              `$.instructions[${instructionIndex}].arguments[${parameterIndex}]`,
-            ));
+            errors.push(
+              planError(
+                "TSC002",
+                "Call omits a required function parameter.",
+                `$.instructions[${instructionIndex}].arguments[${parameterIndex}]`,
+              ),
+            );
           }
         });
       }
@@ -2062,11 +2397,13 @@ function validateFunctionPrologue(
       instruction.functionId !== range.id ||
       instruction.parameterIndex !== index
     ) {
-      errors.push(planError(
-        "TSC002",
-        "Function supplied-parameter prologue is malformed.",
-        `${path}.entryInstruction`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Function supplied-parameter prologue is malformed.",
+          `${path}.entryInstruction`,
+        ),
+      );
       return;
     }
     cursor += 1;
@@ -2077,11 +2414,13 @@ function validateFunctionPrologue(
     beginDefaults.kind !== "beginFunctionDefaults" ||
     beginDefaults.functionId !== range.id
   ) {
-    errors.push(planError(
-      "TSC002",
-      "Function default-parameter prologue is missing.",
-      `${path}.entryInstruction`,
-    ));
+    errors.push(
+      planError(
+        "TSC002",
+        "Function default-parameter prologue is missing.",
+        `${path}.entryInstruction`,
+      ),
+    );
     return;
   }
   cursor += 1;
@@ -2098,11 +2437,13 @@ function validateFunctionPrologue(
       prepare.target <= cursor ||
       prepare.target >= range.bodyEntryInstruction
     ) {
-      errors.push(planError(
-        "TSC002",
-        "Function parameter-default sequence is malformed.",
-        `${path}.parameters[${index}]`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Function parameter-default sequence is malformed.",
+          `${path}.parameters[${index}]`,
+        ),
+      );
       return;
     }
     const regionStart = cursor + 1;
@@ -2116,15 +2457,14 @@ function validateFunctionPrologue(
       const nested = instructions[instructionIndex];
       if (!isRecord(nested)) continue;
       if (nested.kind === "bindDefaultParameter") {
-        if (
-          nested.functionId !== range.id ||
-          nested.parameterIndex !== index
-        ) {
-          errors.push(planError(
-            "TSC002",
-            "Default binding does not match its parameter segment.",
-            `$.instructions[${instructionIndex}]`,
-          ));
+        if (nested.functionId !== range.id || nested.parameterIndex !== index) {
+          errors.push(
+            planError(
+              "TSC002",
+              "Default binding does not match its parameter segment.",
+              `$.instructions[${instructionIndex}]`,
+            ),
+          );
         }
         defaultBindings.push(nested);
         continue;
@@ -2141,11 +2481,13 @@ function validateFunctionPrologue(
           "jump",
         ].includes(String(nested.kind))
       ) {
-        errors.push(planError(
-          "TSC002",
-          "Function default-expression region contains an invalid instruction.",
-          `$.instructions[${instructionIndex}]`,
-        ));
+        errors.push(
+          planError(
+            "TSC002",
+            "Function default-expression region contains an invalid instruction.",
+            `$.instructions[${instructionIndex}]`,
+          ),
+        );
       }
       if (
         (nested.kind === "jump" || nested.kind === "jumpIfFalse") &&
@@ -2153,22 +2495,26 @@ function validateFunctionPrologue(
           nested.target <= instructionIndex ||
           nested.target > regionEnd)
       ) {
-        errors.push(planError(
-          "TSC002",
-          "Default-expression jump escapes its parameter segment.",
-          `$.instructions[${instructionIndex}].target`,
-        ));
+        errors.push(
+          planError(
+            "TSC002",
+            "Default-expression jump escapes its parameter segment.",
+            `$.instructions[${instructionIndex}].target`,
+          ),
+        );
       }
     }
     if (
       (parameter.hasDefault === true && defaultBindings.length !== 1) ||
       (parameter.hasDefault === false && regionEnd !== regionStart)
     ) {
-      errors.push(planError(
-        "TSC002",
-        "Function parameter default does not match its metadata.",
-        `${path}.parameters[${index}]`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Function parameter default does not match its metadata.",
+          `${path}.parameters[${index}]`,
+        ),
+      );
     }
     if (parameter.hasDefault === true && defaultBindings.length === 1) {
       const bindingIndex = instructions.indexOf(defaultBindings[0]);
@@ -2184,22 +2530,26 @@ function validateFunctionPrologue(
           nested.kind !== "clearTemporary" &&
           nested.kind !== "clearTemporaries"
         ) {
-          errors.push(planError(
-            "TSC002",
-            "Only temporary cleanup may follow a default binding.",
-            `$.instructions[${instructionIndex}]`,
-          ));
+          errors.push(
+            planError(
+              "TSC002",
+              "Only temporary cleanup may follow a default binding.",
+              `$.instructions[${instructionIndex}]`,
+            ),
+          );
         }
         if (
           (nested.kind === "jump" || nested.kind === "jumpIfFalse") &&
           validInstructionBoundary(nested.target, instructions.length) &&
           nested.target > bindingIndex
         ) {
-          errors.push(planError(
-            "TSC002",
-            "Default-expression control flow may not bypass its binding.",
-            `$.instructions[${instructionIndex}].target`,
-          ));
+          errors.push(
+            planError(
+              "TSC002",
+              "Default-expression control flow may not bypass its binding.",
+              `$.instructions[${instructionIndex}].target`,
+            ),
+          );
         }
       }
     }
@@ -2212,11 +2562,13 @@ function validateFunctionPrologue(
     bodyMarker.functionId !== range.id ||
     cursor + 1 !== range.bodyEntryInstruction
   ) {
-    errors.push(planError(
-      "TSC002",
-      "Function body-entry prologue marker is malformed.",
-      `${path}.bodyEntryInstruction`,
-    ));
+    errors.push(
+      planError(
+        "TSC002",
+        "Function body-entry prologue marker is malformed.",
+        `${path}.bodyEntryInstruction`,
+      ),
+    );
   }
   const prologueOnly = new Set([
     "bindSuppliedParameter",
@@ -2232,11 +2584,13 @@ function validateFunctionPrologue(
   ) {
     const instruction = instructions[instructionIndex];
     if (isRecord(instruction) && prologueOnly.has(String(instruction.kind))) {
-      errors.push(planError(
-        "TSC002",
-        "Function prologue instruction appears inside the function body.",
-        `$.instructions[${instructionIndex}]`,
-      ));
+      errors.push(
+        planError(
+          "TSC002",
+          "Function prologue instruction appears inside the function body.",
+          `$.instructions[${instructionIndex}]`,
+        ),
+      );
     }
   }
 }
@@ -2261,18 +2615,34 @@ function validateFunctionParameters(
     requireString(parameter.name, `${parameterPath}.name`, errors);
     if (typeof parameter.name === "string") {
       if (names.has(parameter.name)) {
-        errors.push(planError("TSC002", "Function parameter names must be unique.", `${parameterPath}.name`));
+        errors.push(
+          planError("TSC002", "Function parameter names must be unique.", `${parameterPath}.name`),
+        );
       }
       names.add(parameter.name);
     }
     if (parameter.index !== index) {
-      errors.push(planError("TSC002", "Function parameter indexes must be contiguous.", `${parameterPath}.index`));
+      errors.push(
+        planError(
+          "TSC002",
+          "Function parameter indexes must be contiguous.",
+          `${parameterPath}.index`,
+        ),
+      );
     }
     if (typeof parameter.hasDefault !== "boolean") {
-      errors.push(planError("TSC002", "Function parameter default metadata is malformed.", `${parameterPath}.hasDefault`));
+      errors.push(
+        planError(
+          "TSC002",
+          "Function parameter default metadata is malformed.",
+          `${parameterPath}.hasDefault`,
+        ),
+      );
     } else {
       if (!parameter.hasDefault && sawDefault) {
-        errors.push(planError("TSC002", "Required parameter follows a defaulted parameter.", parameterPath));
+        errors.push(
+          planError("TSC002", "Required parameter follows a defaulted parameter.", parameterPath),
+        );
       }
       sawDefault ||= parameter.hasDefault;
     }
@@ -2280,7 +2650,13 @@ function validateFunctionParameters(
     if (parameter.hasDefault === true) {
       validateSpan(parameter.defaultSpan, `${parameterPath}.defaultSpan`, errors);
     } else if (parameter.defaultSpan !== null) {
-      errors.push(planError("TSC002", "Required parameter must not have a default span.", `${parameterPath}.defaultSpan`));
+      errors.push(
+        planError(
+          "TSC002",
+          "Required parameter must not have a default span.",
+          `${parameterPath}.defaultSpan`,
+        ),
+      );
     }
   });
 }
@@ -2302,7 +2678,9 @@ function validateCallArguments(
       return;
     }
     if (!hasExactKeys(argument, ["parameterName", "value", "span"])) {
-      errors.push(planError("TSC002", "Function argument contains unsupported fields.", argumentPath));
+      errors.push(
+        planError("TSC002", "Function argument contains unsupported fields.", argumentPath),
+      );
     }
     requireString(argument.parameterName, `${argumentPath}.parameterName`, errors);
     validateExpression(argument.value, `${argumentPath}.value`, errors, false, temporaryCount);
@@ -2317,7 +2695,9 @@ function validateTemporaryId(
   errors: PlanValidationError[],
 ): void {
   if (!positiveSafeInteger(value) || value > temporaryCount) {
-    errors.push(planError("TSC002", "Temporary reference is outside the plan's temporary range.", path));
+    errors.push(
+      planError("TSC002", "Temporary reference is outside the plan's temporary range.", path),
+    );
   }
 }
 
@@ -2336,7 +2716,9 @@ function validateTemporaryIds(
     validateTemporaryId(temporaryId, `${path}[${index}]`, temporaryCount, errors);
     if (typeof temporaryId !== "number") return;
     if (seen.has(temporaryId)) {
-      errors.push(planError("TSC002", "Temporary ID list must not contain duplicates.", `${path}[${index}]`));
+      errors.push(
+        planError("TSC002", "Temporary ID list must not contain duplicates.", `${path}[${index}]`),
+      );
     }
     seen.add(temporaryId);
   });
@@ -2348,6 +2730,7 @@ function validateFunctionId(
   functionIds: ReadonlySet<number>,
   errors: PlanValidationError[],
 ): void {
+  // EVIDENCE: validation: Number.isInteger establishes the numeric function ID before lookup.
   if (!Number.isInteger(value) || !functionIds.has(value as number)) {
     errors.push(planError("TSC002", "Instruction refers to an unknown function ID.", path));
   }
@@ -2359,9 +2742,12 @@ function validateSpan(value: unknown, path: string, errors: PlanValidationError[
     return;
   }
   if (!PLAN_LOCATION_KEYS.every((key) => nonNegativeSafeInteger(value[key]))) {
-    errors.push(planError("TSC002", "Plan source location values must be non-negative safe integers.", path));
+    errors.push(
+      planError("TSC002", "Plan source location values must be non-negative safe integers.", path),
+    );
     return;
   }
+  // EVIDENCE: validation: every source-location field passed nonNegativeSafeInteger above.
   if ((value.eo as number) < (value.so as number)) {
     errors.push(planError("TSC002", "Plan source location ends before it starts.", path));
   }
@@ -2386,11 +2772,8 @@ function requireString(value: unknown, path: string, errors: PlanValidationError
   }
 }
 
-function requirePositiveInteger(
-  value: unknown,
-  path: string,
-  errors: PlanValidationError[],
-): void {
+function requirePositiveInteger(value: unknown, path: string, errors: PlanValidationError[]): void {
+  // EVIDENCE: validation: Number.isInteger establishes the numeric value before comparison.
   if (!Number.isInteger(value) || (value as number) < 1) {
     errors.push(planError("TSC002", "Expected a positive integer.", path));
   }
@@ -2425,26 +2808,26 @@ function isScalar(value: unknown): boolean {
   );
 }
 
-function validInstructionBoundary(
-  value: unknown,
-  instructionCount: number,
-): value is number {
+function validInstructionBoundary(value: unknown, instructionCount: number): value is number {
+  // EVIDENCE: validation: Number.isSafeInteger establishes the numeric target before the lower-bound comparison.
+  // EVIDENCE: validation: Number.isSafeInteger establishes the numeric target before the upper-bound comparison.
   return (
-    Number.isSafeInteger(value) &&
-    (value as number) >= 0 &&
-    (value as number) <= instructionCount
+    Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= instructionCount
   );
 }
 
 function nonNegativeSafeInteger(value: unknown): value is number {
+  // EVIDENCE: validation: Number.isSafeInteger establishes the numeric value before comparison.
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 function positiveSafeInteger(value: unknown): value is number {
+  // EVIDENCE: validation: Number.isSafeInteger establishes the numeric value before comparison.
   return Number.isSafeInteger(value) && (value as number) >= 1;
 }
 
 function nonNegativeInteger(value: unknown): value is number {
+  // EVIDENCE: validation: Number.isInteger establishes the numeric value before comparison.
   return Number.isInteger(value) && (value as number) >= 0;
 }
 
@@ -2457,7 +2840,19 @@ function hasExactKeys(value: Record<string, unknown>, expected: readonly string[
   return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 const binaryOperators = new Set([
-  "*", "/", "%", "+", "-", "==", "!=", "<", "<=", ">", ">=", "and", "or",
+  "*",
+  "/",
+  "%",
+  "+",
+  "-",
+  "==",
+  "!=",
+  "<",
+  "<=",
+  ">",
+  ">=",
+  "and",
+  "or",
 ]);
 
 function planError(

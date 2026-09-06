@@ -10,10 +10,7 @@ import {
 import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import {
-  createFreshRuntimeSnapshot,
-  validateRuntimeSnapshot,
-} from "../src/runtime/state.js";
+import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 
 function plan(source: string) {
   const compiled = compileSource(source);
@@ -23,13 +20,15 @@ function plan(source: string) {
 }
 
 test("multiple pacing cycles preserve prepared output, identities, replay, and checkpoint equivalence", () => {
-  const compiled = plan([
-    'say "one"',
-    'say `two ${["alpha", "beta"]}`',
-    'say ["three", "three-alt"]',
-    'say "four"',
-    "exit",
-  ].join("\n"));
+  const compiled = plan(
+    [
+      'say "one"',
+      'say `two ${["alpha", "beta"]}`',
+      'say ["three", "three-alt"]',
+      'say "four"',
+      "exit",
+    ].join("\n"),
+  );
   const initial = createFreshRuntimeSnapshot(compiled, { seed: 77 });
   const first = run(compiled, initial);
   const firstGate = first.snapshot.foregroundAction;
@@ -46,11 +45,14 @@ test("multiple pacing cycles preserve prepared output, identities, replay, and c
   });
   assert.equal(releasedFirst.outcome.kind, "completed");
   assert.equal(releasedFirst.snapshot.lastSettlement?.actionId, 1);
-  assert.equal(completeAction(compiled, releasedFirst.snapshot, {
-    actionId: 1,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  }).outcome.kind, "alreadySettled");
+  assert.equal(
+    completeAction(compiled, releasedFirst.snapshot, {
+      actionId: 1,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    }).outcome.kind,
+    "alreadySettled",
+  );
 
   const second = run(compiled, releasedFirst.snapshot);
   const secondGate = second.snapshot.foregroundAction;
@@ -88,32 +90,49 @@ test("multiple pacing cycles preserve prepared output, identities, replay, and c
   assert.equal(finalRun.snapshot.status, "halted");
   assert.equal(finalRun.snapshot.backgroundActions.length, 0);
 
-  const cuts = [first.snapshot, second.snapshot, releasedSecond.snapshot, third.snapshot, releasedThird.snapshot];
+  const cuts = [
+    first.snapshot,
+    second.snapshot,
+    releasedSecond.snapshot,
+    third.snapshot,
+    releasedThird.snapshot,
+  ];
   for (const cut of cuts) {
     const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, cut)));
-    assert.deepEqual(finishPacingChain(restored.plan, restored.snapshot), finishPacingChain(compiled, cut));
+    assert.deepEqual(
+      finishPacingChain(restored.plan, restored.snapshot),
+      finishPacingChain(compiled, cut),
+    );
   }
 });
 
 test("mixed wait, interaction, instant, and pacing composition keeps event ordering canonical", () => {
-  const compiled = plan([
-    'say "one"',
-    "wait 1 s",
-    'say "two"',
-    'showButton "Continue"',
-    'say "now", instant',
-    'say "four"',
-    "exit",
-  ].join("\n"));
+  const compiled = plan(
+    [
+      'say "one"',
+      "wait 1 s",
+      'say "two"',
+      'showButton "Continue"',
+      'say "now", instant',
+      'say "four"',
+      "exit",
+    ].join("\n"),
+  );
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const delay = waiting.snapshot.foregroundAction;
   const background = waiting.snapshot.backgroundActions[0];
   assert.equal(delay?.kind, "delay");
   assert.equal(background?.kind, "chatPacingGate");
-  assert.deepEqual(waiting.events.map((event) => event.kind), ["say", "actionRequested", "actionRequested"]);
+  assert.deepEqual(
+    waiting.events.map((event) => event.kind),
+    ["say", "actionRequested", "actionRequested"],
+  );
 
   const delayCompleted = observeTime(compiled, waiting.snapshot, 1_000);
-  assert.deepEqual(delayCompleted.events.map((event) => event.kind), ["actionCompleted"]);
+  assert.deepEqual(
+    delayCompleted.events.map((event) => event.kind),
+    ["actionCompleted"],
+  );
   assert.equal(delayCompleted.snapshot.backgroundActions[0]?.actionId, background?.actionId);
   assert.equal(delayCompleted.snapshot.foregroundAction, null);
 
@@ -125,7 +144,10 @@ test("mixed wait, interaction, instant, and pacing composition keeps event order
 
   const released = observeTime(compiled, promoted.snapshot, pacing!.deadlineMs);
   const interactionWaiting = run(compiled, released.snapshot);
-  assert.deepEqual(interactionWaiting.events.map((event) => event.kind), ["say", "actionRequested", "actionCompleted", "actionRequested"]);
+  assert.deepEqual(
+    interactionWaiting.events.map((event) => event.kind),
+    ["say", "actionRequested", "actionCompleted", "actionRequested"],
+  );
   assert.equal(
     interactionWaiting.events[2]?.kind === "actionCompleted" &&
       interactionWaiting.events[2].settlement.settlementKind,
@@ -140,12 +162,20 @@ test("mixed wait, interaction, instant, and pacing composition keeps event order
     interactionKind: "button",
     payload: { kind: "activate" },
   });
-  assert.deepEqual(interactionCompleted.events.map((event) => event.kind), ["playerTranscript", "actionCompleted"]);
+  assert.deepEqual(
+    interactionCompleted.events.map((event) => event.kind),
+    ["playerTranscript", "actionCompleted"],
+  );
   const finalRun = run(compiled, interactionCompleted.snapshot);
-  assert.deepEqual(finalRun.events.map((event) => event.kind), ["say", "say", "actionRequested", "exit"]);
+  assert.deepEqual(
+    finalRun.events.map((event) => event.kind),
+    ["say", "say", "actionRequested", "exit"],
+  );
   assert.equal(finalRun.snapshot.backgroundActions.length, 0);
   assert.equal(validateRuntimeSnapshot(finalRun.snapshot, compiled).valid, true);
-  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, finalRun.snapshot))));
+  assert.doesNotThrow(() =>
+    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, finalRun.snapshot))),
+  );
 });
 
 function finishPacingChain(

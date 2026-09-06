@@ -11,8 +11,6 @@ import {
   validateInstructionPlan,
   validateRuntimeSnapshot,
   type InstructionPlan,
-  type RuntimeCheckpoint,
-  type RuntimeSnapshot,
 } from "../src/index.js";
 import { captureExternalData } from "../src/external-data-capture.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
@@ -25,13 +23,11 @@ function compiledPlan(): InstructionPlan {
 }
 
 function mutable<T>(value: T): T {
+  // EVIDENCE: fixture: JSON round-trip preserves the supplied serializable plan, snapshot, or checkpoint shape.
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function withArrayPrototypeIndex(
-  descriptor: PropertyDescriptor,
-  operation: () => void,
-): void {
+function withArrayPrototypeIndex(descriptor: PropertyDescriptor, operation: () => void): void {
   const previous = Reflect.getOwnPropertyDescriptor(Array.prototype, "0");
   Reflect.defineProperty(Array.prototype, "0", {
     configurable: true,
@@ -48,37 +44,29 @@ function withArrayPrototypeIndex(
 
 test("sparse arrays are rejected without reading inherited numeric values", () => {
   const sparse = new Array<unknown>(1);
-  withArrayPrototypeIndex(
-    { value: "inherited", writable: true },
-    () => {
-      const captured = captureExternalData(sparse);
-      assert.deepEqual(captured, {
-        ok: false,
-        failure: { kind: "nonJsonSafeValue", path: "$" },
-      });
-    },
-  );
+  withArrayPrototypeIndex({ value: "inherited", writable: true }, () => {
+    const captured = captureExternalData(sparse);
+    assert.deepEqual(captured, { ok: false, failure: { kind: "nonJsonSafeValue", path: "$" } });
+  });
 });
 
 test("inherited numeric getters are never invoked across captured-data boundaries", () => {
   const plan = compiledPlan();
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: expose the cloned plan root as a property dictionary to install a sparse instruction array.
   const malformedPlan = mutable(plan) as unknown as Record<string, unknown>;
   malformedPlan.instructions = new Array(1);
 
   const malformedSnapshot = mutable(createFreshRuntimeSnapshot(plan));
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: expose the cloned snapshot frames to replace them with a sparse array.
   (malformedSnapshot as unknown as { frames: unknown[] }).frames = new Array(1);
 
-  const malformedCheckpoint = mutable(
-    createCheckpoint(plan, createFreshRuntimeSnapshot(plan)),
-  ) as RuntimeCheckpoint;
+  const malformedCheckpoint = mutable(createCheckpoint(plan, createFreshRuntimeSnapshot(plan)));
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: expose the cloned checkpoint frames to replace them with a sparse array.
   (malformedCheckpoint.snapshot as unknown as { frames: unknown[] }).frames = new Array(1);
 
-  const serializable = {
-    kind: "list",
-    items: new Array(1),
-  };
+  const serializable = { kind: "list", items: new Array(1) };
   let getterCalls = 0;
-  const setter = function(this: unknown[], value: unknown): void {
+  const setter = function (this: unknown[], value: unknown): void {
     Reflect.defineProperty(this, "0", {
       value,
       writable: true,
@@ -96,13 +84,13 @@ test("inherited numeric getters are never invoked across captured-data boundarie
     },
     () => {
       assert.equal(validateInstructionPlan(malformedPlan).valid, false);
-      assert.equal(
-        validateRuntimeSnapshot(malformedSnapshot as RuntimeSnapshot, plan).valid,
-        false,
-      );
+      assert.equal(validateRuntimeSnapshot(malformedSnapshot, plan).valid, false);
       assert.throws(() => restoreCheckpoint(malformedCheckpoint), CheckpointError);
       assert.throws(
-        () => cloneSerializableValue(serializable as never),
+        () =>
+          cloneSerializableValue(
+            /* EVIDENCE: fixture: the intentionally sparse list object violates SerializableRuntimeValue before clone validation. */ serializable as never,
+          ),
         SerializableValueError,
       );
     },
@@ -129,8 +117,9 @@ test("dense captured arrays install ordinary own elements without inherited sett
     },
     () => {
       const result = captureExternalData(["captured"]);
-      assert.equal(result.ok, true);
-      const captured = result.value as unknown[];
+      assert.ok(result.ok);
+      const captured = result.value;
+      assert.ok(Array.isArray(captured));
       assert.equal(captured[0], "captured");
       assert.deepEqual(Reflect.getOwnPropertyDescriptor(captured, "0"), {
         value: "captured",

@@ -85,8 +85,9 @@ shared-workflow failures.
 
 Before substantive work, state the expected files, acceptance criteria, and
 major risks or unresolved decisions, then continue in small verifiable steps.
-Use targeted reads and edits. Use precise task-domain wording; avoid unnecessary
-security framing for ordinary repository-local QA. Keep successful output
+Use targeted reads and edits. For ordinary repository-local QA, prefer precise validation terms such as `invalid`,
+`malformed`, `external`, or `negative`; reserve explicit security terminology for actual security or trust-boundary
+work. Keep successful output
 compact; do not print or quote complete large files, diffs, or logs without a
 concrete need, but preserve actionable warnings, failures, and diagnostics. Keep long editable drafts out of
 chat and repository scratch files; use a temporary file unless it is a

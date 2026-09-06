@@ -2,7 +2,8 @@ export type MediaFit = "contain" | "cover";
 export type PlayerMediaTransitionFixture = "direct" | "fade" | "crossfade";
 export type PlayerToolId = "visuals" | "scene" | "layout-debug";
 export type PlayerTimerKind = "visible" | "mystery" | "hidden";
-export type PlayerForegroundFixtureKind = "none" | "show-button" | "choose" | "ask-text" | "ask-number";
+export type PlayerForegroundFixtureKind =
+  "none" | "show-button" | "choose" | "ask-text" | "ask-number";
 export type PlayerPacingFixture = "off" | "skippable" | "unskippable";
 export type PlayerControlAvailability = "enabled" | "disabled";
 
@@ -54,8 +55,7 @@ export interface PlayerSessionEventPresentation {
 }
 
 export type PlayerTranscriptEntryPresentation =
-  | PlayerMessagePresentation
-  | PlayerSessionEventPresentation;
+  PlayerMessagePresentation | PlayerSessionEventPresentation;
 
 export interface PlayerForegroundOptionPresentation {
   readonly id: string;
@@ -75,16 +75,8 @@ export type PlayerForegroundPresentation =
       readonly accessibleName: string;
       readonly options: readonly PlayerForegroundOptionPresentation[];
     }
-  | {
-      readonly kind: "ask-text";
-      readonly accessibleName: string;
-      readonly hint: string;
-    }
-  | {
-      readonly kind: "ask-number";
-      readonly accessibleName: string;
-      readonly hint: string;
-    };
+  | { readonly kind: "ask-text"; readonly accessibleName: string; readonly hint: string }
+  | { readonly kind: "ask-number"; readonly accessibleName: string; readonly hint: string };
 
 interface PlayerRightControlBase {
   readonly id: string;

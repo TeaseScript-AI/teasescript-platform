@@ -392,7 +392,7 @@
     </wish>
     <wish id="W-030" status="active">
       <title>Continuous personality runtime</title>
-      <description>Support CyberDom/VirMst-style personalities that remain active across a day or longer, with persistent events, schedules, statuses, jobs, deadlines, reminders, notifications, reports, permission requests, calendars and deterministic restart/resume behavior.</description>
+      <description>Support VirMst-style and successor-style personalities that remain active across a day or longer, with persistent events, schedules, statuses, jobs, deadlines, reminders, notifications, reports, permission requests, calendars and deterministic restart/resume behavior.</description>
       <tags>
         <tag>runtime</tag>
         <tag>scheduler</tag>
@@ -434,7 +434,7 @@
     </wish>
     <wish id="W-033" status="active">
       <title>Capability parity from reference systems</title>
-      <description>Use Milovana EOS, classic Tease AI, SexScripts/Groovy, Toy, Tease AI Java/Spicy and VirMst/CyberDom as capability references. The new engine should be able to recreate their useful behaviors through TeaseScript, libraries and capabilities without running their original languages or copying their architectures.</description>
+      <description>Use Milovana EOS, classic Tease AI, SexScripts/Groovy, Toy, Tease AI Java/Spicy, VirMst and its modern successor as capability references. The new engine should be able to recreate their useful behaviors through TeaseScript, libraries and capabilities without running their original languages or copying their architectures.</description>
       <tags>
         <tag>research</tag>
         <tag>compatibility</tag>
@@ -454,7 +454,7 @@
         <tag>continuous</tag>
       </tags>
       <history>
-        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and its modern successor capabilities.</event>
       </history>
     </wish>
     <wish id="W-035" status="active">
@@ -466,7 +466,7 @@
         <tag>lifecycle</tag>
       </tags>
       <history>
-        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and its modern successor capabilities.</event>
       </history>
     </wish>
     <wish id="W-036" status="active">
@@ -479,7 +479,7 @@
         <tag>reports</tag>
       </tags>
       <history>
-        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and its modern successor capabilities.</event>
       </history>
     </wish>
     <wish id="W-037" status="active">
@@ -491,7 +491,7 @@
         <tag>developer-experience</tag>
       </tags>
       <history>
-        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and its modern successor capabilities.</event>
         <event date="2026-07-21" type="clarified">Removed unnecessary granular permissions; core engine APIs are standard and only genuine external boundaries require one-time enablement.</event>
       </history>
     </wish>
@@ -504,7 +504,7 @@
         <tag>continuous</tag>
       </tags>
       <history>
-        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and its modern successor capabilities.</event>
       </history>
     </wish>
     <wish id="W-039" status="active">
@@ -516,7 +516,7 @@
         <tag>resource-limits</tag>
       </tags>
       <history>
-        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and CyberDom capabilities.</event>
+        <event date="2026-07-21" type="created">Added after detailed analysis of Toy Groovy, VirMst and its modern successor capabilities.</event>
       </history>
     </wish>
     <wish id="W-040" status="active">

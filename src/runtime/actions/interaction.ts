@@ -3,25 +3,15 @@ import { recordValidationTestWork } from "../../validation-testing.js";
 import type { RuntimeInteractionActionSnapshot } from "./model.js";
 
 export type ResolvedInteraction =
-  | {
-      readonly ok: true;
-      readonly result: string | number | null;
-      readonly transcriptText: string;
-    }
-  | {
-      readonly ok: false;
-      readonly message: string;
-    };
+  | { readonly ok: true; readonly result: string | number | null; readonly transcriptText: string }
+  | { readonly ok: false; readonly message: string };
 
 export function resolveInteractionCompletion(
   action: RuntimeInteractionActionSnapshot,
   payload: unknown,
 ): ResolvedInteraction {
   if (!isPlainRecord(payload)) {
-    return {
-      ok: false,
-      message: "Interaction completion payload must be an object.",
-    };
+    return { ok: false, message: "Interaction completion payload must be an object." };
   }
   if (action.interactionKind === "button") {
     return payload.kind === "activate" && action.ui.kind === "button"
@@ -41,10 +31,7 @@ export function resolveInteractionCompletion(
     }
     const normalized = payload.submittedText.replace(/\r\n?/gu, "\n");
     if (/^\s*$/u.test(normalized)) {
-      return {
-        ok: false,
-        message: "Text completion must contain a non-whitespace character.",
-      };
+      return { ok: false, message: "Text completion must contain a non-whitespace character." };
     }
     return { ok: true, result: normalized, transcriptText: normalized };
   }
@@ -86,9 +73,10 @@ export function resolveInteractionCompletion(
     if (matches.length !== 1) {
       return {
         ok: false,
-        message: matches.length === 0
-          ? "Choice text is not available."
-          : "Choice text is ambiguous; select a labelled control.",
+        message:
+          matches.length === 0
+            ? "Choice text is not available."
+            : "Choice text is ambiguous; select a labelled control.",
       };
     }
   } else if (
@@ -96,14 +84,8 @@ export function resolveInteractionCompletion(
     action.ui.labelType !== "none" &&
     (typeof payload.selectedLabel === "string" || typeof payload.selectedLabel === "number")
   ) {
-    if (
-      typeof payload.selectedLabel === "string" &&
-      !completionStringFits(payload.selectedLabel)
-    ) {
-      return {
-        ok: false,
-        message: "Choice label exceeds the shared UTF-8 byte limit.",
-      };
+    if (typeof payload.selectedLabel === "string" && !completionStringFits(payload.selectedLabel)) {
+      return { ok: false, message: "Choice label exceeds the shared UTF-8 byte limit." };
     }
     matches = action.ui.options.filter((option) => option.label === payload.selectedLabel);
   } else if (
