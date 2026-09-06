@@ -20,7 +20,6 @@ selects this route.
 **Conditional**
 
 - `PUBLICATION-CONSTRAINED.md` only when permitted connector writes cannot safely publish the tested result;
-- `ORCHESTRATOR.md` only for explicitly coordinated multi-agent work;
 - `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` for the maintained environment boundary or explicitly
   assigned environment setup and distribution work.
 

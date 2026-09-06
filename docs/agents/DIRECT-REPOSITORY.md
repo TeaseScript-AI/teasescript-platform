@@ -16,7 +16,6 @@ capabilities work.
 
 **Conditional**
 
-- `ORCHESTRATOR.md` only for explicitly coordinated multi-agent work;
 - `PUBLICATION-CONSTRAINED.md` only after a concrete normal-publication failure or restriction is verified;
 - `CURRENT-DESIGN.md`, `PHASE-STATUS.md`, security documents, and other topic sources when the task requires them.
 

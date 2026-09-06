@@ -368,8 +368,7 @@ Use `Refs #123` only when the pull request is related to the issue but intention
 This document is canonical only for rules that apply regardless of agent capability. Before source acquisition or a
 repository write, select the applicable route in [`agents/README.md`](agents/README.md). That router and its
 focused capability guides are canonical for capability-specific source acquisition, permitted writes, verification, and
-publication constraints. Explicitly coordinated work may add the focused orchestrator task guide after
-capability selection. Do not copy those procedures into this document.
+publication constraints. Do not copy capability-specific procedures into this document.
 
 ## Documentation ownership
 
@@ -380,8 +379,7 @@ task requires one.
 
 The agent implementing a change updates documentation affected by the implemented behavior in the same pull
 request unless the task explicitly assigns that documentation update elsewhere. Every pull request states its
-documentation impact, including when no edit is needed. For explicitly coordinated work, use the assignment and
-integration rules in [`agents/ORCHESTRATOR.md`](agents/ORCHESTRATOR.md).
+documentation impact, including when no edit is needed.
 
 Canonical documentation records actual implemented behavior and explicit deferred work, not an obsolete plan.
 

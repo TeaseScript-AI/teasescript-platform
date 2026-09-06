@@ -39,8 +39,7 @@ them here.
 
 Read `docs/agents/PUBLICATION-CONSTRAINED.md` and then
 `docs/PATCH-PUBLICATION.md` only when a concrete publication constraint exists.
-Add `docs/agents/ORCHESTRATOR.md` only for explicitly coordinated multi-agent
-work. Re-select the capability route when technical capabilities, branch/head,
+Re-select the capability route when technical capabilities, branch/head,
 or permitted publication writes change; use `README-FIRST.md` for task changes.
 
 ## Ownership
