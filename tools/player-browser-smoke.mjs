@@ -67,10 +67,12 @@ async function main() {
     scenarioError = error;
   } finally {
     try {
-      if (browser.exitCode === null && browser.signalCode === null) browser.kill("SIGTERM");
-      await browserClosed;
+      await terminateBrowser(browser, browserClosed);
       await new Promise((resolve) => server.close(resolve));
-      await rm(profile, { recursive: true, force: true });
+      // Chromium helper processes can finish profile writes just after the
+      // main browser process closes. Node's bounded recursive retry handles
+      // that transient ENOTEMPTY window without hiding persistent cleanup failures.
+      await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     } catch (error) {
       cleanupError = error;
     }
@@ -96,6 +98,17 @@ function waitForBrowserClose(browser) {
     browser.on("error", finish);
     if (browser.exitCode !== null || browser.signalCode !== null) finish();
   });
+}
+
+async function terminateBrowser(browser, browserClosed) {
+  if (browser.exitCode === null && browser.signalCode === null) browser.kill("SIGTERM");
+  try {
+    await withTimeout(browserClosed, 5_000, "Chromium did not exit after SIGTERM");
+    return;
+  } catch {
+    if (browser.exitCode === null && browser.signalCode === null) browser.kill("SIGKILL");
+  }
+  await withTimeout(browserClosed, 5_000, "Chromium did not exit after SIGKILL");
 }
 
 async function desktopScenario(cdp) {
@@ -755,14 +768,19 @@ async function waitForTarget(port) {
   throw new Error("Chromium DevTools endpoint did not become available.");
 }
 
+// Keep DevTools waits bounded so a stalled browser still reaches main's cleanup path.
 async function connectCdp(url) {
   const socket = new WebSocket(url);
   const pending = new Map();
   let nextId = 1;
-  await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", reject, { once: true });
-  });
+  await withTimeout(
+    new Promise((resolve, reject) => {
+      socket.addEventListener("open", resolve, { once: true });
+      socket.addEventListener("error", reject, { once: true });
+    }),
+    30_000,
+    "Chromium DevTools socket did not open",
+  );
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data));
     const waiter = pending.get(message.id);
@@ -771,18 +789,43 @@ async function connectCdp(url) {
       waiter.resolve(message);
     }
   });
+  socket.addEventListener("close", () => {
+    for (const waiter of pending.values())
+      waiter.reject(new Error("Chromium DevTools socket closed"));
+    pending.clear();
+  });
   return {
     call(method, params = {}) {
       const id = nextId++;
-      return new Promise((resolve) => {
-        pending.set(id, { resolve });
-        socket.send(JSON.stringify({ id, method, params }));
-      });
+      return withTimeout(
+        new Promise((resolve, reject) => {
+          pending.set(id, { resolve, reject });
+          socket.send(JSON.stringify({ id, method, params }));
+        }),
+        30_000,
+        `Chromium DevTools ${method} did not respond`,
+      ).finally(() => pending.delete(id));
     },
     close() {
       socket.close();
     },
   };
+}
+
+function withTimeout(promise, milliseconds, message) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(message)), milliseconds);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
 }
 
 function delay(milliseconds) {
