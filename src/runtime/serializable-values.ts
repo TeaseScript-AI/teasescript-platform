@@ -233,17 +233,6 @@ export function getSerializableProperty(
   return object.properties.find((property) => property.name === name)?.value;
 }
 
-export function setSerializableProperty(
-  object: SerializableRuntimeObject,
-  name: string,
-  value: SerializableRuntimeValue,
-): void {
-  const existing = object.properties.find((property) => property.name === name);
-  const copied = cloneSerializableValue(value);
-  if (existing === undefined) object.properties.push({ name, value: copied });
-  else existing.value = copied;
-}
-
 /** Stores an independent value that is already captured and validated by the engine. */
 export function setCapturedSerializableProperty(
   object: SerializableRuntimeObject,
