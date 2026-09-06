@@ -18,5 +18,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "playground/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "playground/**/*.ts", "player/**/*.ts"],
+  "exclude": ["player/vue/**/*.ts"]
 }

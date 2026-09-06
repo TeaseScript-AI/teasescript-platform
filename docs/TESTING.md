@@ -21,6 +21,9 @@ The current repository uses:
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
 
+The accepted Player direction is a separate local Playwright suite with axe-core checks. It does not join `npm run check`
+or normal GitHub CI without an explicit owner decision based on measured cost and stability.
+
 ## Normal and diagnostic verification
 
 `npm run check` runs formatting verification, lint, lint-rule/exception fixtures, Knip, and the build with compiled
@@ -96,6 +99,18 @@ source route retain focused public or trusted-boundary coverage until one
 exists.
 
 End-to-end testing does not replace focused unit, validator, and invariant tests.
+
+## Player browser and visual verification
+
+Use focused unit tests for deterministic presentation logic and local Playwright tests for changed browser behavior,
+including layout, focus, input, scrolling, overlays, and accessibility across the relevant supported engines. Keep the
+full browser matrix outside normal CI by default.
+
+After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
+(computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This
+is a scoped visual check, not a full UI audit; it catches clipping, overlap, unreadable wrapping, misplaced popovers,
+and other failures that source assertions or DOM semantics do not prove. Use a real device when the behavior depends on
+mobile browser chrome, a software keyboard, safe areas, or input hardware that emulation cannot reproduce.
 
 ## Regression-test rule
 
@@ -467,7 +482,7 @@ exhaustion and terminal transition atomicity. The dependency-free browser smoke 
 eligible Space input, interactive-input priority, rejection feedback, canonical transcript rendering, checkpoint
 control reconstruction, and desktop/button versus narrow/dropdown presentation.
 
-## Browser E2E gate
+## Host browser E2E gate
 
 The local Standard Player POC has a reproducible Chromium smoke route after `npm run build`:
 
@@ -475,8 +490,11 @@ The local Standard Player POC has a reproducible Chromium smoke route after `npm
 node tools/player-browser-smoke.mjs
 ```
 
-It drives the real playground at desktop and 390 × 844 CSS-pixel viewports. An unavailable Chromium executable is an
-explicit skip; an available browser must pass the interaction, pacing, accessibility-state, restore, and responsive
+It drives the real playground at desktop and 390 × 844 CSS-pixel viewports, then visits the development-only Vue stress
+route `/player-vue/?fixture=transcript-stress`. That route retains 2,000 entries while asserting bounded rendered DOM,
+variable-height measurement, stable keyed prepend/append anchoring, pinned and scroll-away resize behavior, and
+follow-latest/scroll-away return-to-latest behavior. An unavailable Chromium executable is an explicit skip; an
+available browser must pass the interaction, pacing, accessibility-state, restore, responsive, and Vue transcript
 checks.
 
 Real browser automation becomes required after the cross-origin host shell and player exist. Coverage should then include:
@@ -491,7 +509,8 @@ Real browser automation becomes required after the cross-origin host shell and p
 - fullscreen and navigation;
 - invalid host/player messages.
 
-No browser framework is selected yet. Playwright or another dependency should be chosen only when a concrete browser surface and its maintenance requirements can be evaluated.
+The host gate should reuse the local Playwright stack selected for the Player unless evidence from the implemented host
+surface shows that it cannot prove the required boundary.
 
 ## Coverage and performance boundaries
 

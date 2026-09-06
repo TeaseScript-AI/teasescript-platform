@@ -1,0 +1,254 @@
+@layer components {
+      .tool-column-add,
+      .tool-column-close {
+        display: grid;
+        place-items: center;
+
+        padding: 0;
+        border: 1px solid var(--color-border-default);
+        border-radius: 6px;
+
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
+
+        cursor: pointer;
+      }
+
+      .tool-column-add {
+        flex: none;
+        inline-size: 30px;
+        block-size: 30px;
+        font-size: 20px;
+        font-weight: 500;
+        line-height: 1;
+      }
+
+      .tool-strip-scroll {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-inline: contain;
+        scroll-snap-type: x proximity;
+        touch-action: pan-x pan-y pinch-zoom;
+
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
+      }
+
+      .tool-strip {
+        min-inline-size: 0;
+        block-size: 100%;
+        inline-size: max-content;
+
+        display: flex;
+        align-items: stretch;
+        gap: 8px;
+
+        padding-top: 8px;
+        padding-right: 0;
+        padding-bottom: calc(8px + var(--safe-bottom-reserve));
+        padding-left: 0;
+      }
+
+      .tool-empty-state {
+        inline-size: max(180px, var(--left-open));
+        align-self: start;
+
+        padding: 12px;
+        color: var(--color-text-muted);
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      .tool-column {
+        --tool-column-effective-width: var(--tool-column-width);
+
+        flex: 0 0 auto;
+
+        inline-size: var(--tool-column-effective-width);
+        min-inline-size: var(--tool-column-effective-width);
+        max-inline-size: var(--tool-column-effective-width);
+        scroll-snap-align: start;
+        scroll-snap-stop: always;
+        min-block-size: 0;
+
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+
+        overflow: hidden;
+        border: 1px solid var(--color-border-default);
+        border-radius: 8px;
+
+        background: var(--color-surface-component);
+      }
+
+      .tool-column-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 6px;
+        align-items: center;
+
+        min-block-size: 44px;
+        padding: 6px;
+        border-bottom: 1px solid var(--color-border-default);
+        background: transparent;
+      }
+
+      .tool-selector {
+        min-inline-size: 0;
+        block-size: 30px;
+
+        padding-inline: 8px 26px;
+        padding-block: 0;
+
+        border: 1px solid var(--color-border-default);
+        border-radius: 6px;
+
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .tool-column-close {
+        inline-size: 30px;
+        block-size: 30px;
+        font-size: 18px;
+        font-weight: 500;
+        line-height: 1;
+      }
+
+      .tool-column-body {
+        min-width: 0;
+        min-height: 0;
+
+        overflow-y: auto;
+        overflow-x: clip;
+        overscroll-behavior-block: contain;
+
+        background: var(--color-surface-component);
+
+        scrollbar-width: thin;
+        scrollbar-gutter: stable;
+        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
+      }
+
+      .tool-placeholder {
+        max-inline-size: 24ch;
+        padding: 12px;
+        color: var(--color-text-muted);
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      .tool-section {
+        min-inline-size: 0;
+        padding: 10px;
+      }
+
+      .tool-kv {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
+
+        margin: 0;
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      .tool-kv dt {
+        margin: 0;
+        color: var(--color-text-muted);
+        font-size: 10px;
+      }
+
+      .tool-kv dd {
+        min-width: 0;
+        margin: 4px 0 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--color-border-default);
+        color: var(--color-text-primary);
+        overflow-wrap: anywhere;
+      }
+
+      @supports selector(::scroll-button(left)) and selector(::scroll-marker) {
+        .tool-strip-scroll[data-overflow="true"] {
+          scroll-marker-group: after;
+        }
+
+        .tool-strip-scroll[data-overflow="true"] .tool-column-body {
+          padding-bottom: calc(46px + var(--safe-bottom-reserve));
+          scroll-padding-bottom: calc(46px + var(--safe-bottom-reserve));
+        }
+
+        .tool-strip-scroll::scroll-button(left),
+        .tool-strip-scroll::scroll-button(right) {
+          position: absolute;
+          z-index: 5;
+          bottom: calc(8px + var(--safe-bottom-reserve));
+          width: 34px;
+          height: 34px;
+          border: 1px solid var(--color-border-default);
+          border-radius: 50%;
+          background: color-mix(in srgb, var(--color-surface-component) 92%, transparent);
+          color: var(--color-text-primary);
+          box-shadow: 0 2px 8px var(--color-structural-shadow);
+          cursor: pointer;
+        }
+
+        .tool-strip-scroll::scroll-button(left) {
+          left: 0;
+          content: "‹" / "Previous tool column";
+        }
+
+        .tool-strip-scroll::scroll-button(right) {
+          right: 0;
+          content: "›" / "Next tool column";
+        }
+
+        .tool-strip-scroll:not([data-overflow="true"])::scroll-button(left),
+        .tool-strip-scroll:not([data-overflow="true"])::scroll-button(right) {
+          display: none;
+          content: none;
+        }
+
+        .tool-strip-scroll::scroll-button(left):disabled,
+        .tool-strip-scroll::scroll-button(right):disabled {
+          opacity: 0;
+          pointer-events: none;
+        }
+
+        .tool-strip-scroll::scroll-marker-group {
+          position: absolute;
+          z-index: 5;
+          right: 44px;
+          bottom: calc(20px + var(--safe-bottom-reserve));
+          left: 44px;
+          display: flex;
+          justify-content: center;
+          gap: 6px;
+          pointer-events: auto;
+        }
+
+        .tool-column::scroll-marker {
+          content: "";
+          width: 9px;
+          height: 9px;
+          border: 1px solid var(--color-border-hover);
+          border-radius: 50%;
+          background: var(--color-surface-component);
+        }
+
+        .tool-column::scroll-marker:target-current {
+          background: var(--package-accent);
+        }
+
+        .tool-strip-scroll:not([data-overflow="true"])::scroll-marker-group {
+          display: none;
+        }
+      }
+}

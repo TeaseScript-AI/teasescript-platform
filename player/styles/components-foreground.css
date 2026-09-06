@@ -1,0 +1,169 @@
+@layer components {
+      .foreground-controls {
+        grid-column: 2;
+        grid-row: 4;
+
+        min-width: 0;
+        padding:
+          4px
+          calc(12px + var(--safe-right))
+          4px
+          calc(12px + var(--safe-left));
+
+        background: var(--color-surface-canvas);
+      }
+
+      .foreground-controls[hidden] {
+        display: none;
+      }
+
+      .foreground-shell {
+        position: relative;
+        width: 100%;
+        min-width: 0;
+        margin-inline: auto;
+      }
+
+      .foreground-choice-buttons {
+        position: relative;
+
+        display: flex;
+        flex-wrap: nowrap;
+        justify-content: safe center;
+        gap: 8px;
+
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        padding: 4px 2px 8px;
+        scroll-padding-inline: 2px;
+        scroll-snap-type: inline mandatory;
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
+      }
+
+      .foreground-button {
+        min-block-size: 42px;
+
+        border: 1px solid var(--color-border-default);
+        border-radius: 6px;
+
+        background: var(--color-surface-component);
+        color: var(--color-text-primary);
+
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.2;
+      }
+
+      .foreground-button {
+        inline-size: 100%;
+
+        min-inline-size: min(112px, 100%);
+        max-inline-size: min(85vw, 420px);
+
+        padding: 9px 14px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        cursor: pointer;
+      }
+
+      .foreground-choice-item {
+        flex: 0 0 auto;
+        min-inline-size: min(112px, 100%);
+        max-inline-size: min(85vw, 420px);
+        scroll-snap-align: center;
+        scroll-snap-stop: always;
+      }
+
+      .foreground-button:disabled {
+        border-color: var(--color-border-disabled);
+        background: var(--color-surface-disabled);
+        color: var(--color-text-disabled);
+        cursor: not-allowed;
+      }
+
+      @supports selector(::scroll-button(left)) and selector(::scroll-marker) {
+        .foreground-controls:has(.foreground-choice-buttons[data-overflow="true"]) {
+          padding-bottom: 0;
+        }
+
+        .foreground-choice-buttons[data-overflow="true"] {
+          --foreground-marker-strip: 18px;
+
+          scroll-marker-group: after;
+          padding-right: 38px;
+          padding-bottom: var(--foreground-marker-strip);
+          padding-left: 38px;
+          scroll-padding-inline: 38px;
+          scrollbar-width: none;
+        }
+
+        .foreground-choice-buttons::-webkit-scrollbar {
+          display: none;
+        }
+
+        .foreground-choice-buttons::scroll-button(left),
+        .foreground-choice-buttons::scroll-button(right) {
+          position: absolute;
+          z-index: 2;
+          top: calc((100% - var(--foreground-marker-strip)) / 2);
+          transform: translateY(-50%);
+          width: 30px;
+          height: 30px;
+          border: 1px solid var(--color-border-default);
+          border-radius: 50%;
+          background: var(--color-surface-component);
+          color: var(--color-text-primary);
+          cursor: pointer;
+        }
+
+        .foreground-choice-buttons::scroll-button(left):disabled,
+        .foreground-choice-buttons::scroll-button(right):disabled {
+          opacity: 0;
+          pointer-events: none;
+        }
+
+        .foreground-choice-buttons::scroll-button(left) {
+          left: 2px;
+          content: "‹" / "Previous choice";
+        }
+
+        .foreground-choice-buttons::scroll-button(right) {
+          right: 2px;
+          content: "›" / "Next choice";
+        }
+
+        .foreground-choice-buttons:not([data-overflow="true"])::scroll-button(left),
+        .foreground-choice-buttons:not([data-overflow="true"])::scroll-button(right) {
+          display: none;
+          content: none;
+        }
+
+        .foreground-choice-buttons::scroll-marker-group {
+          position: absolute;
+          right: 38px;
+          bottom: 3px;
+          left: 38px;
+          display: flex;
+          justify-content: center;
+          gap: 6px;
+        }
+
+        .foreground-choice-item::scroll-marker {
+          content: "";
+          width: 8px;
+          height: 8px;
+          border: 1px solid var(--color-border-hover);
+          border-radius: 50%;
+          background: transparent;
+        }
+
+        .foreground-choice-item::scroll-marker:target-current {
+          background: var(--package-accent);
+        }
+
+        .foreground-choice-buttons:not([data-overflow="true"])::scroll-marker-group {
+          display: none;
+        }
+      }
+}

@@ -10,6 +10,7 @@
 - One engine, state model, and save/checkpoint format support sessions and persistent personalities.
 - The final player and package code run inside a sandboxed cross-origin iframe.
 - Package code has no unrestricted external network access.
+- Production browser UI uses Vue 3; deterministic engine and shared domain code remain framework-independent.
 
 ## Accepted composition layers
 
@@ -113,8 +114,13 @@ No `src/standard-library/` shell exists yet because the implemented ADR 0018 POC
 parser/compiler/runtime; linked reusable Standard Library modules remain future work.
 
 The technical playground workspace controller lives at
-`playground/workspace/controller.ts`. No speculative Player or shared browser
-folders were added.
+`playground/workspace/controller.ts`. The production-oriented Player presentation
+POC lives under `player/`. The manual implementation remains available at `/player/` as a development
+comparison/fixture route; the usable production-direction/common Vue reference is built from `player/vue/` and served
+at `/player-vue/`. The Vue reference uses the accepted Phase 1 foundation, with TanStack Vue Virtual as the single
+transcript windowing and scroll-anchoring owner. Both use the same framework-independent presentation types and
+browser-native CSS geometry. The Vue choice and migration boundary are accepted in ADR 0020. Current presentation
+models and demo data remain internal POC seams, not an accepted engine/Player protocol or cross-origin host contract.
 
 `src/index.ts` is the intentional public package/root API. Canonical internal
 paths may change before a published compatibility policy exists; old repository
