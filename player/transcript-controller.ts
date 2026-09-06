@@ -5,6 +5,7 @@ const WINDOW_SIZE = 120;
 const WINDOW_BUFFER = 32;
 const FOLLOW_DISTANCE_PX = 36;
 const SCROLL_SETTLE_MS = 140;
+const TOP_FADE_DISTANCE_PX = 2;
 const DEFAULT_MESSAGE_EXTENT_PX = 78;
 
 export interface TranscriptController {
@@ -129,6 +130,17 @@ export function createTranscriptController(
   function syncReturnControl(): void {
     const awayFromLatest = !followingLatest && distanceFromBottom() > FOLLOW_DISTANCE_PX;
     returnToLatest.hidden = !(awayFromLatest && scrollSettled);
+    syncTopFade();
+  }
+
+  /*
+    The top fade hides content passing under the stage. It exists only while
+    content is actually scrolled above the visible top edge; an unscrolled
+    transcript keeps its first line at full opacity.
+  */
+  function syncTopFade(): void {
+    transcript.dataset.scrolledFromTop =
+      transcript.scrollTop > TOP_FADE_DISTANCE_PX ? "true" : "false";
   }
 
   function latestWindowStart(): number {

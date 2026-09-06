@@ -13,6 +13,7 @@ const props = defineProps<{
 const transcript = ref<HTMLElement | null>(null);
 const followingLatest = ref(true);
 const returnVisible = ref(false);
+const scrolledFromTop = ref(false);
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
 watch(
@@ -45,6 +46,7 @@ function handleScroll(): void {
   const element = transcript.value;
   if (element === null) return;
   const distance = Math.max(0, element.scrollHeight - element.clientHeight - element.scrollTop);
+  scrolledFromTop.value = element.scrollTop > 2;
   followingLatest.value = distance <= 36;
   returnVisible.value = false;
   if (settleTimer !== null) clearTimeout(settleTimer);
@@ -70,6 +72,7 @@ function scrollToLatest(behavior: ScrollBehavior): void {
   <section
     ref="transcript"
     class="transcript"
+    :data-scrolled-from-top="scrolledFromTop ? 'true' : 'false'"
     role="log"
     aria-live="polite"
     aria-relevant="additions text"
