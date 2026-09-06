@@ -92,17 +92,8 @@ export function createToken(token: Token): Token {
   const span = createSourceSpan(token.span.start, token.span.end);
 
   if ("value" in token) {
-    return Object.freeze({
-      kind: token.kind,
-      lexeme: token.lexeme,
-      value: token.value,
-      span,
-    });
+    return Object.freeze({ kind: token.kind, lexeme: token.lexeme, value: token.value, span });
   }
 
-  return Object.freeze({
-    kind: token.kind,
-    lexeme: token.lexeme,
-    span,
-  });
+  return Object.freeze({ kind: token.kind, lexeme: token.lexeme, span });
 }

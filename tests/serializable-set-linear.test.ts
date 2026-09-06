@@ -51,17 +51,11 @@ test("serializable-set validation does not impose the removed capture-work thres
   const acceptedSize = 100_001;
   const accepted = Array.from({ length: acceptedSize }, (_, index) => index);
 
-  assert.equal(
-    validateSerializableValue({ kind: "set", items: accepted }),
-    null,
-  );
+  assert.equal(validateSerializableValue({ kind: "set", items: accepted }), null);
   assert.equal(createSerializableSet(accepted).items.length, acceptedSize);
 
   const extended = [...accepted, acceptedSize];
-  assert.equal(
-    validateSerializableValue({ kind: "set", items: extended }),
-    null,
-  );
+  assert.equal(validateSerializableValue({ kind: "set", items: extended }), null);
   assert.equal(createSerializableSet(extended).items.length, extended.length);
 });
 
@@ -80,27 +74,9 @@ test("serializable-set validation rejects early and late duplicates consistently
 });
 
 test("serializable-set construction preserves scalar equality and insertion order", () => {
-  const values: SerializableRuntimeScalar[] = [
-    1,
-    "1",
-    true,
-    false,
-    null,
-    0,
-    -0,
-    1,
-    "1",
-    true,
-  ];
+  const values: SerializableRuntimeScalar[] = [1, "1", true, false, null, 0, -0, 1, "1", true];
 
-  assert.deepEqual(createSerializableSet(values).items, [
-    1,
-    "1",
-    true,
-    false,
-    null,
-    0,
-  ]);
+  assert.deepEqual(createSerializableSet(values).items, [1, "1", true, false, null, 0]);
 });
 
 test("serializable set mutation uses native membership without changing array order", () => {

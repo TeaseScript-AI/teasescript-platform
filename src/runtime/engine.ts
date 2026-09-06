@@ -12,11 +12,7 @@ import {
   boundedInteractionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
 } from "../interaction-limits.js";
-import {
-  createSourcePosition,
-  createSourceSpan,
-  SourceSpan as RichSourceSpan,
-} from "../source.js";
+import { createSourcePosition, createSourceSpan, SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
 import {
   assertCounterCanAdvance,
@@ -98,9 +94,7 @@ export interface RuntimeCapabilityCall {
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
-export type RuntimeBuiltinFunction = (
-  call: RuntimeCapabilityCall,
-) => SerializableRuntimeValue;
+export type RuntimeBuiltinFunction = (call: RuntimeCapabilityCall) => SerializableRuntimeValue;
 
 export interface RuntimeCapabilities {
   readonly builtins?: Readonly<Record<string, RuntimeBuiltinFunction>>;
@@ -136,23 +130,14 @@ function executeCapturedInstruction(
     return 0;
   }
   if (snapshot.status === "waiting") return 0;
-  if (
-    snapshot.nextInstruction === plan.rootEndInstruction &&
-    snapshot.callFrames.length === 0
-  ) {
+  if (snapshot.nextInstruction === plan.rootEndInstruction && snapshot.callFrames.length === 0) {
     const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
-    assertEventSequenceCapacity(
-      snapshot,
-      completeEventAndFutureCompletions,
-    );
+    assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
     snapshot.terminalContinuationHandoff = null;
     snapshot.status = "halted";
     const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
     context.events.push(
-      createCompleteEvent(
-        snapshot,
-        terminalInstruction?.span ?? plan.sourceSpan,
-      ),
+      createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan),
     );
     return 1;
   }
@@ -166,17 +151,8 @@ function executeCapturedInstruction(
   snapshot.status = "running";
   const evaluator = context.evaluator();
   try {
-    executePlannedInstruction(
-      plan,
-      instruction,
-      snapshot,
-      evaluator,
-      context.events,
-    );
-    if (
-      snapshot.interactionResultHandoff?.continuationInstruction ===
-      instructionIndex
-    ) {
+    executePlannedInstruction(plan, instruction, snapshot, evaluator, context.events);
+    if (snapshot.interactionResultHandoff?.continuationInstruction === instructionIndex) {
       snapshot.interactionResultHandoff = null;
     }
     if (
@@ -186,10 +162,7 @@ function executeCapturedInstruction(
     ) {
       snapshot.status = "halted";
       const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
-      assertEventSequenceCapacity(
-        snapshot,
-        completeEventAndFutureCompletions,
-      );
+      assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
       context.events.push(createCompleteEvent(snapshot, instruction.span));
     }
   } catch (error) {
@@ -208,12 +181,7 @@ export function stepToEvent(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
-  return stepValidatedStateToEvent(
-    captured.plan,
-    captured.snapshot,
-    capabilities,
-    options,
-  );
+  return stepValidatedStateToEvent(captured.plan, captured.snapshot, capabilities, options);
 }
 
 /** Steps engine-owned plan/state that already passed complete validation. */
@@ -236,11 +204,7 @@ export function stepValidatedStateToEvent(
       failForBudget(plan, snapshot, context.events);
       break;
     }
-    instructionsExecuted += executeCapturedInstruction(
-      plan,
-      snapshot,
-      context,
-    );
+    instructionsExecuted += executeCapturedInstruction(plan, snapshot, context);
   }
   return result(snapshot, context.events, instructionsExecuted);
 }
@@ -252,12 +216,7 @@ export function run(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
-  return runValidatedState(
-    captured.plan,
-    captured.snapshot,
-    capabilities,
-    options,
-  );
+  return runValidatedState(captured.plan, captured.snapshot, capabilities, options);
 }
 
 /** Runs engine-owned plan/state that already passed complete validation. */
@@ -270,16 +229,16 @@ export function runValidatedState(
   const budget = instructionBudget(options.instructionBudget);
   const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
-  while (snapshot.status !== "waiting" && snapshot.status !== "halted" && snapshot.status !== "failed") {
+  while (
+    snapshot.status !== "waiting" &&
+    snapshot.status !== "halted" &&
+    snapshot.status !== "failed"
+  ) {
     if (instructionsExecuted >= budget) {
       failForBudget(plan, snapshot, context.events);
       break;
     }
-    instructionsExecuted += executeCapturedInstruction(
-      plan,
-      snapshot,
-      context,
-    );
+    instructionsExecuted += executeCapturedInstruction(plan, snapshot, context);
   }
   return result(snapshot, context.events, instructionsExecuted);
 }
@@ -295,7 +254,11 @@ function executePlannedInstruction(
     case "declareSpeaker": {
       executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
         if (findBinding(stagedSnapshot, instruction.name) !== undefined) {
-          throw fault("TSR001", `Speaker '${instruction.name}' is already visible in this scope.`, instruction.span);
+          throw fault(
+            "TSR001",
+            `Speaker '${instruction.name}' is already visible in this scope.`,
+            instruction.span,
+          );
         }
         assertCounterCanAdvance(stagedSnapshot.nextSpeakerId, "nextSpeakerId");
         const speaker: RuntimeSpeakerSnapshot = {
@@ -307,25 +270,24 @@ function executePlannedInstruction(
         stagedSnapshot.speakers.push(speaker);
         currentFrame(stagedSnapshot).bindings.push({
           name: instruction.name,
-          value: {
-            kind: "speakerReference",
-            speakerId: speaker.id,
-            identifier: instruction.name,
-          },
+          value: { kind: "speakerReference", speakerId: speaker.id, identifier: instruction.name },
         });
         stagedSnapshot.contextualSpeaker = speaker.id;
         for (const property of instruction.properties) {
           if (speaker.properties.some((item) => item.name === property.name)) {
             throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
           }
-          const propertyValue = cloneCapturedSerializableValue(stagedEvaluator.evaluate(property.value));
+          const propertyValue = cloneCapturedSerializableValue(
+            stagedEvaluator.evaluate(property.value),
+          );
           if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
-            throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", property.span);
+            throw fault(
+              "TSR050",
+              "Speaker property 'defaultSaySkippable' must be a boolean.",
+              property.span,
+            );
           }
-          speaker.properties.push({
-            name: property.name,
-            value: propertyValue,
-          });
+          speaker.properties.push({ name: property.name, value: propertyValue });
         }
         advance(stagedSnapshot);
       });
@@ -335,17 +297,24 @@ function executePlannedInstruction(
       executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
         const speaker = stagedEvaluator.speakerByName(instruction.speaker, instruction.span);
         if (speaker.properties.some((property) => property.name === instruction.name)) {
-          throw fault("TSR007", `Duplicate speaker property '${instruction.name}'.`, instruction.span);
+          throw fault(
+            "TSR007",
+            `Duplicate speaker property '${instruction.name}'.`,
+            instruction.span,
+          );
         }
         stagedSnapshot.contextualSpeaker = speaker.id;
-        const propertyValue = cloneCapturedSerializableValue(stagedEvaluator.evaluate(instruction.value));
+        const propertyValue = cloneCapturedSerializableValue(
+          stagedEvaluator.evaluate(instruction.value),
+        );
         if (instruction.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
-          throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", instruction.span);
+          throw fault(
+            "TSR050",
+            "Speaker property 'defaultSaySkippable' must be a boolean.",
+            instruction.span,
+          );
         }
-        speaker.properties.push({
-          name: instruction.name,
-          value: propertyValue,
-        });
+        speaker.properties.push({ name: instruction.name, value: propertyValue });
         advance(stagedSnapshot);
       });
       return;
@@ -371,7 +340,11 @@ function executePlannedInstruction(
       return;
     case "declareBinding": {
       if (findBinding(snapshot, instruction.name) !== undefined) {
-        throw fault("TSR001", `Variable '${instruction.name}' is already visible in this scope.`, instruction.span);
+        throw fault(
+          "TSR001",
+          `Variable '${instruction.name}' is already visible in this scope.`,
+          instruction.span,
+        );
       }
       currentFrame(snapshot).bindings.push({
         name: instruction.name,
@@ -413,9 +386,7 @@ function executePlannedInstruction(
       if (typeof condition !== "boolean") {
         throw fault("TSR026", "Expected a boolean value.", instruction.condition.span);
       }
-      snapshot.nextInstruction = condition
-        ? snapshot.nextInstruction + 1
-        : instruction.target;
+      snapshot.nextInstruction = condition ? snapshot.nextInstruction + 1 : instruction.target;
       return;
     }
     case "jump":
@@ -437,12 +408,14 @@ function executePlannedInstruction(
       return;
     }
     case "prepareSaySpeaker": {
-      const speaker = instruction.speaker === null
-        ? snapshot.defaultSpeaker === null
-          ? null
-          : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
-        : evaluator.speakerByName(instruction.speaker, instruction.span);
-      const output = speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
+      const speaker =
+        instruction.speaker === null
+          ? snapshot.defaultSpeaker === null
+            ? null
+            : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
+          : evaluator.speakerByName(instruction.speaker, instruction.span);
+      const output =
+        speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events);
       setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
@@ -482,20 +455,25 @@ function executePlannedInstruction(
           ? null
           : (() => {
               const speaker = evaluator.speakerById(prepared.speakerId, instruction.span);
-              return { kind: "speakerReference", speakerId: speaker.id, identifier: speaker.identifier };
+              return {
+                kind: "speakerReference",
+                speakerId: speaker.id,
+                identifier: speaker.identifier,
+              };
             })(),
       );
       advance(snapshot);
       return;
     }
     case "prepareInteractionSpeaker": {
-      const speaker = instruction.speaker !== null
-        ? evaluator.speakerByName(instruction.speaker, instruction.span)
-        : snapshot.contextualSpeaker !== null
-          ? evaluator.speakerById(snapshot.contextualSpeaker, instruction.span)
-          : snapshot.defaultSpeaker !== null
-            ? evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
-            : null;
+      const speaker =
+        instruction.speaker !== null
+          ? evaluator.speakerByName(instruction.speaker, instruction.span)
+          : snapshot.contextualSpeaker !== null
+            ? evaluator.speakerById(snapshot.contextualSpeaker, instruction.span)
+            : snapshot.defaultSpeaker !== null
+              ? evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
+              : null;
       setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
@@ -561,13 +539,14 @@ function executePlannedInstruction(
           instruction.duration.span,
         );
       }
-      const multiplier = instruction.unit === "ms"
-        ? 1
-        : instruction.unit === "min"
-          ? 60_000
-          : instruction.unit === "h"
-            ? 3_600_000
-            : 1_000;
+      const multiplier =
+        instruction.unit === "ms"
+          ? 1
+          : instruction.unit === "min"
+            ? 60_000
+            : instruction.unit === "h"
+              ? 3_600_000
+              : 1_000;
       const durationMs = value * multiplier;
       const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
       if (!Number.isFinite(durationMs) || !isValidSessionTime(deadlineMs)) {
@@ -578,7 +557,11 @@ function executePlannedInstruction(
         );
       }
       if (value > 0 && (durationMs <= 0 || deadlineMs <= snapshot.currentSessionTimeMs)) {
-        throw fault("TSR050", "Wait duration cannot produce a representable future deadline.", instruction.duration.span);
+        throw fault(
+          "TSR050",
+          "Wait duration cannot produce a representable future deadline.",
+          instruction.duration.span,
+        );
       }
       if (durationMs === 0) {
         advance(snapshot);
@@ -590,7 +573,11 @@ function executePlannedInstruction(
       ) {
         throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
       }
-      assertEventSequenceCapacity(snapshot, requiredEventSequencesForNewDelay(snapshot), instruction.span);
+      assertEventSequenceCapacity(
+        snapshot,
+        requiredEventSequencesForNewDelay(snapshot),
+        instruction.span,
+      );
       const sequence = takeSequence(snapshot);
       const action = Object.freeze({
         kind: "delay" as const,
@@ -608,20 +595,20 @@ function executePlannedInstruction(
       snapshot.nextActionId += 1;
       snapshot.foregroundAction = action;
       snapshot.status = "waiting";
-      events.push(Object.freeze({
-        kind: "actionRequested",
-        sequence,
-        action: { ...action },
-        span: copySpan(instruction.span),
-      } satisfies ActionRequestedEvent));
+      events.push(
+        Object.freeze({
+          kind: "actionRequested",
+          sequence,
+          action: { ...action },
+          span: copySpan(instruction.span),
+        } satisfies ActionRequestedEvent),
+      );
       return;
     }
     case "interaction": {
       if (
         instruction.destinationTemporary !== null &&
-        snapshot.temporaries.some((temporary) =>
-          temporary.id === instruction.destinationTemporary
-        )
+        snapshot.temporaries.some((temporary) => temporary.id === instruction.destinationTemporary)
       ) {
         throw fault(
           "TSR050",
@@ -642,7 +629,12 @@ function executePlannedInstruction(
       assertEventSequenceCapacity(snapshot, requiredEventSequences, instruction.span);
       const prepared = "preparedUi" in instruction;
       const speaker = prepared
-        ? preparedInteractionSpeaker(instruction.speakerTemporary, snapshot.temporaries, evaluator, instruction.span)
+        ? preparedInteractionSpeaker(
+            instruction.speakerTemporary,
+            snapshot.temporaries,
+            evaluator,
+            instruction.span,
+          )
         : instruction.speaker !== null
           ? evaluator.speakerByName(instruction.speaker, instruction.span)
           : snapshot.defaultSpeaker === null
@@ -656,16 +648,18 @@ function executePlannedInstruction(
             evaluator,
             instruction.span,
           )
-        : {
-            ui: instruction.ui,
-            stagedWrites: [] as const,
-            rngState: snapshot.rng.state,
-          };
+        : { ui: instruction.ui, stagedWrites: [] as const, rngState: snapshot.rng.state };
       const backgroundGate = snapshot.backgroundActions.find(
         (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
       );
       if (backgroundGate !== undefined) {
-        settleBackgroundPacingGate(plan, snapshot, backgroundGate, "consumedByForegroundInteraction", events);
+        settleBackgroundPacingGate(
+          plan,
+          snapshot,
+          backgroundGate,
+          "consumedByForegroundInteraction",
+          events,
+        );
       }
       const sequence = snapshot.nextEventSequence;
       const action: RuntimeInteractionActionSnapshot = Object.freeze({
@@ -692,12 +686,14 @@ function executePlannedInstruction(
       snapshot.nextActionId += 1;
       snapshot.foregroundAction = action;
       snapshot.status = "waiting";
-      events.push(Object.freeze({
-        kind: "actionRequested",
-        sequence,
-        action: cloneInteractionAction(action),
-        span: copySpan(instruction.span),
-      } satisfies ActionRequestedEvent));
+      events.push(
+        Object.freeze({
+          kind: "actionRequested",
+          sequence,
+          action: cloneInteractionAction(action),
+          span: copySpan(instruction.span),
+        } satisfies ActionRequestedEvent),
+      );
       return;
     }
     case "exit":
@@ -749,7 +745,10 @@ function preparedInteractionSpeaker(
 
 interface MaterializedInteractionUi {
   readonly ui: InteractionUiPayload;
-  readonly stagedWrites: readonly { readonly temporaryId: number; readonly value: SerializableRuntimeValue }[];
+  readonly stagedWrites: readonly {
+    readonly temporaryId: number;
+    readonly value: SerializableRuntimeValue;
+  }[];
   readonly rngState: number;
 }
 
@@ -764,10 +763,14 @@ function materializeInteractionUi(
     algorithm: canonicalRng.algorithm,
     state: canonicalRng.state,
   };
-  const stagedWrites: Array<{ readonly temporaryId: number; readonly value: SerializableRuntimeValue }> = [];
+  const stagedWrites: Array<{
+    readonly temporaryId: number;
+    readonly value: SerializableRuntimeValue;
+  }> = [];
   const read = (temporaryId: number): RuntimeTemporarySnapshot => {
     const temporary = temporaries.find((item) => item.id === temporaryId);
-    if (temporary === undefined) throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
+    if (temporary === undefined)
+      throw fault("TSR046", `Temporary '${temporaryId}' is not available.`, span);
     return temporary;
   };
   const readText = (temporaryId: number): string => {
@@ -793,12 +796,22 @@ function materializeInteractionUi(
   } else {
     const source = read(prepared.optionsTemporary);
     if (!isList(source.value) || source.value.items.length !== prepared.optionCount) {
-      throw fault("TSR052", "Prepared choice options do not match the canonical option count.", span);
+      throw fault(
+        "TSR052",
+        "Prepared choice options do not match the canonical option count.",
+        span,
+      );
     }
-    const texts = source.value.items.map((value) => evaluator.visibleTextWithRng(value, span, stagedRng));
+    const texts = source.value.items.map((value) =>
+      evaluator.visibleTextWithRng(value, span, stagedRng),
+    );
     const labels = prepared.labelType === "none" ? null : prepared.labels;
     if (prepared.labelType !== "none" && (labels === null || labels.length !== texts.length)) {
-      throw fault("TSR052", "Prepared choice labels do not match the canonical option count.", span);
+      throw fault(
+        "TSR052",
+        "Prepared choice labels do not match the canonical option count.",
+        span,
+      );
     }
     ui = {
       kind: "choice",
@@ -813,29 +826,39 @@ function materializeInteractionUi(
   if (ui.kind === "choice" && ui.labelType === "none") {
     const visible = new Set<string>();
     for (const option of ui.options) {
-      if (visible.has(option.text)) throw fault("TSR052", "Unlabelled choice text must evaluate to unique strings.", span);
+      if (visible.has(option.text))
+        throw fault("TSR052", "Unlabelled choice text must evaluate to unique strings.", span);
       visible.add(option.text);
     }
   }
   return Object.freeze({
     ui,
-    stagedWrites: Object.freeze(stagedWrites.map((staged) => Object.freeze({
-      temporaryId: staged.temporaryId,
-      value: cloneCapturedSerializableValue(staged.value),
-    }))),
+    stagedWrites: Object.freeze(
+      stagedWrites.map((staged) =>
+        Object.freeze({
+          temporaryId: staged.temporaryId,
+          value: cloneCapturedSerializableValue(staged.value),
+        }),
+      ),
+    ),
     rngState: stagedRng.state,
   });
 }
 
 function commitInteractionMaterialization(
   snapshot: RuntimeSnapshot,
-  stagedWrites: readonly { readonly temporaryId: number; readonly value: SerializableRuntimeValue }[],
+  stagedWrites: readonly {
+    readonly temporaryId: number;
+    readonly value: SerializableRuntimeValue;
+  }[],
   rngState: number,
 ): void {
   for (const staged of stagedWrites) {
     const temporary = snapshot.temporaries.find((item) => item.id === staged.temporaryId);
     if (temporary === undefined) {
-      throw new Error(`Prepared interaction temporary '${staged.temporaryId}' disappeared before commit.`);
+      throw new Error(
+        `Prepared interaction temporary '${staged.temporaryId}' disappeared before commit.`,
+      );
     }
     temporary.value = cloneCapturedSerializableValue(staged.value);
   }
@@ -860,7 +883,12 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
       value,
       MAX_INTERACTION_AGGREGATE_UTF8_BYTES - aggregate,
     );
-    if (bytes === null) throw fault("TSR052", "Interaction text exceeds the remaining aggregate UTF-8 byte limit.", span);
+    if (bytes === null)
+      throw fault(
+        "TSR052",
+        "Interaction text exceeds the remaining aggregate UTF-8 byte limit.",
+        span,
+      );
     aggregate += bytes;
   }
 }
@@ -901,11 +929,7 @@ function enterFunction(
       const value = supplied.get(parameter.name);
       return value === undefined
         ? { parameterName: parameter.name, supplied: false as const }
-        : {
-            parameterName: parameter.name,
-            supplied: true as const,
-            value,
-          };
+        : { parameterName: parameter.name, supplied: true as const, value };
     }),
     parameterState: { phase: "supplied", parameterIndex: 0 },
   };
@@ -1035,10 +1059,7 @@ function enterFunctionBody(
   ) {
     throw fault("TSR048", "Function body entry has incomplete parameters.", span);
   }
-  frame.parameterState = {
-    phase: "body",
-    parameterIndex: definition.parameters.length,
-  };
+  frame.parameterState = { phase: "body", parameterIndex: definition.parameters.length };
   advance(snapshot);
 }
 
@@ -1058,17 +1079,10 @@ function returnFromFunction(
     snapshot.temporaries.length,
     ...frame.callerTemporaries.map(cloneTemporary),
   );
-  if (
-    snapshot.temporaries.some(
-      (temporary) => temporary.id === frame.destinationTemporary,
-    )
-  ) {
+  if (snapshot.temporaries.some((temporary) => temporary.id === frame.destinationTemporary)) {
     throw fault("TSR050", "Function result destination is already occupied.", span);
   }
-  snapshot.temporaries.push({
-    id: frame.destinationTemporary,
-    value: returned,
-  });
+  snapshot.temporaries.push({ id: frame.destinationTemporary, value: returned });
   snapshot.nextInstruction = frame.returnInstruction;
 }
 
@@ -1084,10 +1098,7 @@ function activeFunction(
   if (frame === undefined) {
     throw fault("TSR051", "Function-only instruction executed without a call frame.", span);
   }
-  return {
-    frame,
-    definition: functionDefinition(plan, frame.functionId, span),
-  };
+  return { frame, definition: functionDefinition(plan, frame.functionId, span) };
 }
 
 function functionDefinition(
@@ -1111,10 +1122,7 @@ function declareFunctionBinding(
   if (findBinding(snapshot, name) !== undefined) {
     throw fault("TSR001", `Parameter '${name}' duplicates a visible binding.`, span);
   }
-  currentFrame(snapshot).bindings.push({
-    name,
-    value: cloneCapturedSerializableValue(value),
-  });
+  currentFrame(snapshot).bindings.push({ name, value: cloneCapturedSerializableValue(value) });
 }
 
 function executeLoopStart(
@@ -1125,17 +1133,21 @@ function executeLoopStart(
   let frame = snapshot.loopFrames.at(-1);
   if (frame?.loopId !== instruction.loopId) {
     if (snapshot.loopFrames.some((item) => item.loopId === instruction.loopId)) {
-      throw fault("TSR042", "Loop-frame nesting does not match the instruction plan.", instruction.span);
+      throw fault(
+        "TSR042",
+        "Loop-frame nesting does not match the instruction plan.",
+        instruction.span,
+      );
     }
     const scopeDepth = snapshot.frames.length;
     if (instruction.loopKind === "repeat") {
       const value = evaluator.evaluate(instruction.expression);
-      if (
-        typeof value !== "number" ||
-        !Number.isSafeInteger(value) ||
-        value < 0
-      ) {
-        throw fault("TSR043", "repeat requires a non-negative integer count.", instruction.expression.span);
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw fault(
+          "TSR043",
+          "repeat requires a non-negative integer count.",
+          instruction.expression.span,
+        );
       }
       frame = {
         kind: "repeat",
@@ -1154,7 +1166,11 @@ function executeLoopStart(
     } else {
       const source = evaluator.evaluate(instruction.expression);
       if (!isList(source) && !isSet(source) && !isRange(source)) {
-        throw fault("TSR044", "for requires a list, set, or range source.", instruction.expression.span);
+        throw fault(
+          "TSR044",
+          "for requires a list, set, or range source.",
+          instruction.expression.span,
+        );
       }
       if (isRange(source)) assertIntegerRange(source, instruction.expression.span);
       frame = {
@@ -1163,7 +1179,10 @@ function executeLoopStart(
         scopeDepth,
         variable: instruction.variable,
         // EVIDENCE: the guards above narrow source to the three iterable runtime collection variants.
-        source: cloneCapturedSerializableValue(source) as Extract<RuntimeLoopFrameSnapshot, { kind: "for" }>["source"],
+        source: cloneCapturedSerializableValue(source) as Extract<
+          RuntimeLoopFrameSnapshot,
+          { kind: "for" }
+        >["source"],
         position: 0,
         callFrameId: currentCallFrameId(snapshot),
       };
@@ -1175,7 +1194,11 @@ function executeLoopStart(
     throw fault("TSR042", "Loop-frame kind does not match the instruction plan.", instruction.span);
   }
   if (snapshot.frames.length !== frame.scopeDepth) {
-    throw fault("TSR042", "Loop scope state does not match the next instruction.", instruction.span);
+    throw fault(
+      "TSR042",
+      "Loop scope state does not match the next instruction.",
+      instruction.span,
+    );
   }
 
   if (frame.kind === "repeat") {
@@ -1224,7 +1247,11 @@ function executeLoopControl(
 ): void {
   const frame = snapshot.loopFrames.at(-1);
   if (frame === undefined || frame.loopId !== instruction.loopId) {
-    throw fault("TSR042", "Loop control does not match the active innermost loop.", instruction.span);
+    throw fault(
+      "TSR042",
+      "Loop control does not match the active innermost loop.",
+      instruction.span,
+    );
   }
   if (frame.callFrameId !== currentCallFrameId(snapshot)) {
     throw fault("TSR042", "Loop control cannot cross a function boundary.", instruction.span);
@@ -1237,10 +1264,7 @@ function executeLoopControl(
   snapshot.nextInstruction = instruction.target;
 }
 
-function pushIterationScope(
-  snapshot: RuntimeSnapshot,
-  bindings: RuntimeBindingSnapshot[],
-): void {
+function pushIterationScope(snapshot: RuntimeSnapshot, bindings: RuntimeBindingSnapshot[]): void {
   assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
   snapshot.frames.push({ id: snapshot.nextScopeId, bindings });
   snapshot.nextScopeId += 1;
@@ -1309,10 +1333,7 @@ class Evaluator {
     Object.assign(this.#builtins, this.capabilities.builtins ?? {});
   }
 
-  public forSnapshot(
-    snapshot: RuntimeSnapshot,
-    events: InterpreterEvent[],
-  ): Evaluator {
+  public forSnapshot(snapshot: RuntimeSnapshot, events: InterpreterEvent[]): Evaluator {
     return new Evaluator(snapshot, this.capabilities, events);
   }
 
@@ -1322,10 +1343,7 @@ class Evaluator {
         return expression.value;
       case "identifier": {
         if (expression.name === "speaker" && this.snapshot.contextualSpeaker !== null) {
-          const speaker = this.speakerById(
-            this.snapshot.contextualSpeaker,
-            expression.span,
-          );
+          const speaker = this.speakerById(this.snapshot.contextualSpeaker, expression.span);
           return {
             kind: "speakerReference",
             speakerId: speaker.id,
@@ -1339,32 +1357,22 @@ class Evaluator {
         return binding.value;
       }
       case "temporary":
-        return readTemporary(
-          this.snapshot.temporaries,
-          expression.temporaryId,
-          expression.span,
-        );
+        return readTemporary(this.snapshot.temporaries, expression.temporaryId, expression.span);
       case "preparedReference":
         return this.#resolvePreparedReference(
-          readTemporary(
-            this.snapshot.temporaries,
-            expression.temporaryId,
-            expression.span,
-          ),
+          readTemporary(this.snapshot.temporaries, expression.temporaryId, expression.span),
           expression.span,
         );
       case "list":
-        return createCapturedSerializableList(expression.elements.map((item) => this.evaluate(item)));
+        return createCapturedSerializableList(
+          expression.elements.map((item) => this.evaluate(item)),
+        );
       case "set": {
         const set = createCapturedSerializableSet([]);
         const membership = new Set<SerializableRuntimeScalar>();
         for (const element of expression.elements) {
           try {
-            addSerializableSetValue(
-              set,
-              this.evaluate(element),
-              membership,
-            );
+            addSerializableSetValue(set, this.evaluate(element), membership);
           } catch (error) {
             throw this.#translateValueError(error, element.span);
           }
@@ -1399,7 +1407,11 @@ class Evaluator {
         return text;
       }
       case "property":
-        return this.#getProperty(this.evaluate(expression.object), expression.name, expression.span);
+        return this.#getProperty(
+          this.evaluate(expression.object),
+          expression.name,
+          expression.span,
+        );
       case "index": {
         const object = this.evaluate(expression.object);
         if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", expression.span);
@@ -1415,7 +1427,8 @@ class Evaluator {
       case "unary": {
         const operand = this.evaluate(expression.operand);
         if (expression.operator === "not") {
-          if (typeof operand !== "boolean") throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
+          if (typeof operand !== "boolean")
+            throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
           return !operand;
         }
         const number = this.#number(operand, expression.operand.span);
@@ -1440,14 +1453,11 @@ class Evaluator {
       if (isSpeakerReference(location.binding.value)) {
         throw fault("TSR034", `Cannot replace speaker '${target.name}'.`, target.span);
       }
-      detachPreparedReferencesForMutation(
-        this.snapshot,
-        {
-          rootFrameId: location.frame.id,
-          rootName: target.name,
-          path: [],
-        },
-      );
+      detachPreparedReferencesForMutation(this.snapshot, {
+        rootFrameId: location.frame.id,
+        rootName: target.name,
+        path: [],
+      });
       location.binding.value = cloneCapturedSerializableValue(value);
       return;
     }
@@ -1455,29 +1465,20 @@ class Evaluator {
     const receiverDescriptor =
       target.object.kind === "preparedReference"
         ? readPreparedReference(
-            readTemporary(
-              this.snapshot.temporaries,
-              target.object.temporaryId,
-              target.object.span,
-            ),
+            readTemporary(this.snapshot.temporaries, target.object.temporaryId, target.object.span),
             target.object.span,
           )
         : null;
     if (target.kind === "property") {
       if (receiverDescriptor !== null && !receiverDescriptor.detached) {
-        const mutationStep: PreparedReferenceStep = {
-          kind: "property",
-          name: target.name,
-        };
+        const mutationStep: PreparedReferenceStep = { kind: "property", name: target.name };
         detachPreparedReferencesForMutation(this.snapshot, {
           rootFrameId: receiverDescriptor.rootFrameId,
           rootName: receiverDescriptor.rootName,
           path: [...receiverDescriptor.path, mutationStep],
-          speakerPath: preparedReferenceSpeakerPath(
-            this.snapshot,
-            receiverDescriptor,
-            [mutationStep],
-          ),
+          speakerPath: preparedReferenceSpeakerPath(this.snapshot, receiverDescriptor, [
+            mutationStep,
+          ]),
         });
       }
       if (isObject(object)) {
@@ -1485,13 +1486,19 @@ class Evaluator {
         return;
       }
       if (isSpeakerReference(object)) {
-        setSpeakerProperty(this.speakerById(object.speakerId, target.span), target.name, value, target.span);
+        setSpeakerProperty(
+          this.speakerById(object.speakerId, target.span),
+          target.name,
+          value,
+          target.span,
+        );
         return;
       }
       throw fault("TSR003", "Only objects and speakers have assignable properties.", target.span);
     }
     if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
-    if (!isList(object)) throw fault("TSR005", "Only lists have assignable numeric indexes.", target.span);
+    if (!isList(object))
+      throw fault("TSR005", "Only lists have assignable numeric indexes.", target.span);
     const index = this.#index(this.evaluate(target.index), target.index.span);
     this.#assertIndex(object, index, target.index.span);
     if (receiverDescriptor !== null && !receiverDescriptor.detached) {
@@ -1500,11 +1507,9 @@ class Evaluator {
         rootFrameId: receiverDescriptor.rootFrameId,
         rootName: receiverDescriptor.rootName,
         path: [...receiverDescriptor.path, mutationStep],
-        speakerPath: preparedReferenceSpeakerPath(
-          this.snapshot,
-          receiverDescriptor,
-          [mutationStep],
-        ),
+        speakerPath: preparedReferenceSpeakerPath(this.snapshot, receiverDescriptor, [
+          mutationStep,
+        ]),
       });
     }
     object.items[index] = cloneCapturedSerializableValue(value);
@@ -1542,15 +1547,7 @@ class Evaluator {
     }
     const supported = isSet(receiver)
       ? new Set(["add", "remove", "clear", "contains", "toList"])
-      : new Set([
-          "add",
-          "remove",
-          "removeFirst",
-          "removeLast",
-          "clear",
-          "contains",
-          "toSet",
-        ]);
+      : new Set(["add", "remove", "removeFirst", "removeLast", "clear", "contains", "toSet"]);
     if (!supported.has(method)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
     }
@@ -1584,11 +1581,12 @@ class Evaluator {
             expression.span,
           );
         }
-        const index = expression.name === "first"
-          ? 0
-          : expression.name === "last"
-            ? base.items.length - 1
-            : Math.floor(this.#findRandom(expression.span) * base.items.length);
+        const index =
+          expression.name === "first"
+            ? 0
+            : expression.name === "last"
+              ? base.items.length - 1
+              : Math.floor(this.#findRandom(expression.span) * base.items.length);
         descriptor.path.push({ kind: "index", index });
       } else {
         descriptor.path.push({ kind: "property", name: expression.name });
@@ -1644,17 +1642,11 @@ class Evaluator {
     span: SourceSpan,
   ): SerializableRuntimeValue {
     let value: SerializableRuntimeValue;
-    if (
-      !descriptor.detached &&
-      descriptor.rootFrameId !== null &&
-      descriptor.rootName !== null
-    ) {
+    if (!descriptor.detached && descriptor.rootFrameId !== null && descriptor.rootName !== null) {
       const frame = this.snapshot.frames.find(
         (candidate) => candidate.id === descriptor.rootFrameId,
       );
-      const binding = frame?.bindings.find(
-        (candidate) => candidate.name === descriptor.rootName,
-      );
+      const binding = frame?.bindings.find((candidate) => candidate.name === descriptor.rootName);
       if (binding === undefined) {
         throw fault("TSR053", "Prepared reference root is no longer available.", span);
       }
@@ -1703,7 +1695,11 @@ class Evaluator {
     let fallback = false;
     if (explicit !== null) {
       if (explicit.length === 0) {
-        throw fault("TSR022", `Speaker '${speaker.identifier}' has no resolvable display name.`, span);
+        throw fault(
+          "TSR022",
+          `Speaker '${speaker.identifier}' has no resolvable display name.`,
+          span,
+        );
       }
       displayName = explicit;
     } else {
@@ -1753,11 +1749,13 @@ class Evaluator {
     if (isList(value)) {
       const selected = this.#randomItem(value.items, span, rng);
       if (typeof selected === "string") return selected;
-      if (typeof selected === "number" && Number.isFinite(selected)) return String(Object.is(selected, -0) ? 0 : selected);
+      if (typeof selected === "number" && Number.isFinite(selected))
+        return String(Object.is(selected, -0) ? 0 : selected);
       throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
     }
     if (typeof value === "string") return value;
-    if (typeof value === "number" && Number.isFinite(value)) return String(Object.is(value, -0) ? 0 : value);
+    if (typeof value === "number" && Number.isFinite(value))
+      return String(Object.is(value, -0) ? 0 : value);
     if (typeof value === "boolean") return value ? "true" : "false";
     if (value === null) return "null";
     throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
@@ -1766,17 +1764,21 @@ class Evaluator {
   #binary(expression: BinaryExpressionPlan): SerializableRuntimeValue {
     const left = this.evaluate(expression.left);
     if (expression.operator === "and") {
-      if (typeof left !== "boolean") throw fault("TSR026", "Expected a boolean value.", expression.left.span);
+      if (typeof left !== "boolean")
+        throw fault("TSR026", "Expected a boolean value.", expression.left.span);
       if (!left) return false;
       const right = this.evaluate(expression.right);
-      if (typeof right !== "boolean") throw fault("TSR026", "Expected a boolean value.", expression.right.span);
+      if (typeof right !== "boolean")
+        throw fault("TSR026", "Expected a boolean value.", expression.right.span);
       return right;
     }
     if (expression.operator === "or") {
-      if (typeof left !== "boolean") throw fault("TSR026", "Expected a boolean value.", expression.left.span);
+      if (typeof left !== "boolean")
+        throw fault("TSR026", "Expected a boolean value.", expression.left.span);
       if (left) return true;
       const right = this.evaluate(expression.right);
-      if (typeof right !== "boolean") throw fault("TSR026", "Expected a boolean value.", expression.right.span);
+      if (typeof right !== "boolean")
+        throw fault("TSR026", "Expected a boolean value.", expression.right.span);
       return right;
     }
     const right = this.evaluate(expression.right);
@@ -1794,7 +1796,11 @@ class Evaluator {
         (typeof left !== "number" || typeof right !== "number") &&
         (typeof left !== "string" || typeof right !== "string")
       ) {
-        throw fault("TSR009", "Comparison operands must both be numbers or both be strings.", expression.span);
+        throw fault(
+          "TSR009",
+          "Comparison operands must both be numbers or both be strings.",
+          expression.span,
+        );
       }
       if (expression.operator === "<") return left < right;
       if (expression.operator === "<=") return left <= right;
@@ -1804,25 +1810,29 @@ class Evaluator {
     const leftNumber = this.#number(left, expression.left.span);
     const rightNumber = this.#number(right, expression.right.span);
     switch (expression.operator) {
-      case "+": return this.#finite(leftNumber + rightNumber, expression.span);
-      case "-": return this.#finite(leftNumber - rightNumber, expression.span);
-      case "*": return this.#finite(leftNumber * rightNumber, expression.span);
-      case "/": return this.#finite(leftNumber / rightNumber, expression.span);
-      case "%": return this.#finite(leftNumber % rightNumber, expression.span);
-      default: throw fault("TSR035", "Unsupported binary operation.", expression.span);
+      case "+":
+        return this.#finite(leftNumber + rightNumber, expression.span);
+      case "-":
+        return this.#finite(leftNumber - rightNumber, expression.span);
+      case "*":
+        return this.#finite(leftNumber * rightNumber, expression.span);
+      case "/":
+        return this.#finite(leftNumber / rightNumber, expression.span);
+      case "%":
+        return this.#finite(leftNumber % rightNumber, expression.span);
+      default:
+        throw fault("TSR035", "Unsupported binary operation.", expression.span);
     }
   }
 
   #call(expression: Extract<ExpressionPlan, { kind: "call" }>): SerializableRuntimeValue {
-    const propertyCallee = expression.callee.kind === "property"
-      ? expression.callee
-      : null;
-    const receiverDescriptor = propertyCallee === null
-      ? null
-      : this.#buildPreparedReference(propertyCallee.object);
-    const receiver = receiverDescriptor === null || propertyCallee === null
-      ? null
-      : this.#resolveDescriptor(receiverDescriptor, propertyCallee.object.span);
+    const propertyCallee = expression.callee.kind === "property" ? expression.callee : null;
+    const receiverDescriptor =
+      propertyCallee === null ? null : this.#buildPreparedReference(propertyCallee.object);
+    const receiver =
+      receiverDescriptor === null || propertyCallee === null
+        ? null
+        : this.#resolveDescriptor(receiverDescriptor, propertyCallee.object.span);
     const positional: SerializableRuntimeValue[] = [];
     const named: Record<string, SerializableRuntimeValue> = Object.create(null);
     for (const argument of expression.arguments) {
@@ -1837,13 +1847,14 @@ class Evaluator {
     }
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
-      const coreBuiltin =
-        name === "random" || name === "chance" || name === "randomInteger";
-      const builtin = Object.hasOwn(this.#builtins, name)
-        ? this.#builtins[name]
-        : undefined;
+      const coreBuiltin = name === "random" || name === "chance" || name === "randomInteger";
+      const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
       if (!coreBuiltin && builtin === undefined) {
-        throw fault("TSR011", `Unknown built-in function '${expression.callee.name}'.`, expression.callee.span);
+        throw fault(
+          "TSR011",
+          `Unknown built-in function '${expression.callee.name}'.`,
+          expression.callee.span,
+        );
       }
       const call = Object.freeze({
         positional: Object.freeze(positional),
@@ -1868,15 +1879,15 @@ class Evaluator {
       } catch (error) {
         if (error instanceof SerializableValueError) {
           const code =
-            error.code === "cyclic"
-              ? "TSR031"
-              : error.code === "setElement"
-                ? "TSR032"
-                : "TSR013";
+            error.code === "cyclic" ? "TSR031" : error.code === "setElement" ? "TSR032" : "TSR013";
           throw fault(code, error.message, expression.span);
         }
         const message = error instanceof Error ? error.message : String(error);
-        throw fault("TSR012", `Built-in '${expression.callee.name}' failed: ${message}`, expression.span);
+        throw fault(
+          "TSR012",
+          `Built-in '${expression.callee.name}' failed: ${message}`,
+          expression.span,
+        );
       }
       try {
         return cloneSerializableValue(returned);
@@ -1900,7 +1911,11 @@ class Evaluator {
         expression.span,
       );
     }
-    throw fault("TSR014", "Only injected built-ins and supported collection methods are callable.", expression.callee.span);
+    throw fault(
+      "TSR014",
+      "Only injected built-ins and supported collection methods are callable.",
+      expression.callee.span,
+    );
   }
 
   #callCollection(
@@ -1910,33 +1925,53 @@ class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): SerializableRuntimeValue {
-    if (!isList(receiver) && !isSet(receiver)) throw fault("TSR016", `Unsupported method '${name}'.`, span);
-    if (Object.keys(named).length !== 0) throw fault("TSR015", "Collection methods accept positional arguments only.", span);
+    if (!isList(receiver) && !isSet(receiver))
+      throw fault("TSR016", `Unsupported method '${name}'.`, span);
+    if (Object.keys(named).length !== 0)
+      throw fault("TSR015", "Collection methods accept positional arguments only.", span);
     const expect = (count: number): void => {
-      if (positional.length !== count) throw fault("TSR028", `Expected ${count} positional argument(s), received ${positional.length}.`, span);
+      if (positional.length !== count)
+        throw fault(
+          "TSR028",
+          `Expected ${count} positional argument(s), received ${positional.length}.`,
+          span,
+        );
     };
     try {
       if (isSet(receiver)) {
         switch (name) {
-          case "add": expect(1); addSerializableSetValue(receiver, positional[0]!); return null;
-          case "remove": expect(1); removeSerializableSetValue(receiver, positional[0]!); return null;
-          case "clear": expect(0); receiver.items.length = 0; return null;
-          case "contains": expect(1); return serializableSetContains(receiver, positional[0]!);
-          case "toList": expect(0); return createCapturedSerializableList(receiver.items);
-          default: throw fault("TSR016", `Unsupported method '${name}'.`, span);
+          case "add":
+            expect(1);
+            addSerializableSetValue(receiver, positional[0]!);
+            return null;
+          case "remove":
+            expect(1);
+            removeSerializableSetValue(receiver, positional[0]!);
+            return null;
+          case "clear":
+            expect(0);
+            receiver.items.length = 0;
+            return null;
+          case "contains":
+            expect(1);
+            return serializableSetContains(receiver, positional[0]!);
+          case "toList":
+            expect(0);
+            return createCapturedSerializableList(receiver.items);
+          default:
+            throw fault("TSR016", `Unsupported method '${name}'.`, span);
         }
       }
       switch (name) {
-        case "add": expect(1); receiver.items.push(cloneCapturedSerializableValue(positional[0]!)); return null;
+        case "add":
+          expect(1);
+          receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
+          return null;
         case "remove": {
           expect(1);
           const index = this.#findValue(receiver.items, positional[0]!, span);
           if (index >= 0) {
-            const rebased = preparePreparedReferencesForListRemoval(
-              this.snapshot,
-              receiver,
-              index,
-            );
+            const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, index);
             receiver.items.splice(index, 1);
             refreshPreparedReferenceFallbacks(this.snapshot, rebased);
           } else {
@@ -1951,11 +1986,7 @@ class Evaluator {
         case "removeFirst":
           expect(0);
           if (receiver.items.length > 0) {
-            const rebased = preparePreparedReferencesForListRemoval(
-              this.snapshot,
-              receiver,
-              0,
-            );
+            const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, 0);
             receiver.items.shift();
             refreshPreparedReferenceFallbacks(this.snapshot, rebased);
           }
@@ -1980,9 +2011,14 @@ class Evaluator {
             receiver.items.length = 0;
           }
           return null;
-        case "contains": expect(1); return this.#findValue(receiver.items, positional[0]!, span) >= 0;
-        case "toSet": expect(0); return createCapturedSerializableSet(receiver.items);
-        default: throw fault("TSR016", `Unsupported method '${name}'.`, span);
+        case "contains":
+          expect(1);
+          return this.#findValue(receiver.items, positional[0]!, span) >= 0;
+        case "toSet":
+          expect(0);
+          return createCapturedSerializableSet(receiver.items);
+        default:
+          throw fault("TSR016", `Unsupported method '${name}'.`, span);
       }
     } catch (error) {
       if (error instanceof RuntimeFault) throw error;
@@ -2010,7 +2046,8 @@ class Evaluator {
   ): SerializableRuntimeValue {
     if (name === "length") return value.items.length;
     if (name === "first" || name === "last") {
-      if (value.items.length === 0) throw fault("TSR018", `Cannot read '.${name}' from an empty collection.`, span);
+      if (value.items.length === 0)
+        throw fault("TSR018", `Cannot read '.${name}' from an empty collection.`, span);
       return value.items[name === "first" ? 0 : value.items.length - 1]!;
     }
     if (name === "random") return this.#randomItem(value.items, span);
@@ -2043,9 +2080,10 @@ class Evaluator {
   }
 
   #findRandom(span: SourceSpan, rng = this.snapshot.rng): number {
-    const random = this.capabilities.random === undefined
-      ? nextXorShift32(rng)
-      : this.capabilities.random.next();
+    const random =
+      this.capabilities.random === undefined
+        ? nextXorShift32(rng)
+        : this.capabilities.random.next();
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
       throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
     }
@@ -2074,11 +2112,7 @@ class Evaluator {
     this.#expectBuiltinArguments("randomInteger", call, 1);
     const range = call.positional[0]!;
     if (!isRange(range)) {
-      throw fault(
-        "TSR040",
-        "randomInteger(range) requires a range value.",
-        call.span,
-      );
+      throw fault("TSR040", "randomInteger(range) requires a range value.", call.span);
     }
     assertIntegerRange(range, call.span);
     const length = rangeLength(range);
@@ -2088,15 +2122,8 @@ class Evaluator {
     return range.start + Math.floor(this.#findRandom(call.span) * length);
   }
 
-  #expectBuiltinArguments(
-    name: string,
-    call: RuntimeCapabilityCall,
-    count: number,
-  ): void {
-    if (
-      call.positional.length !== count ||
-      Object.keys(call.named).length !== 0
-    ) {
+  #expectBuiltinArguments(name: string, call: RuntimeCapabilityCall, count: number): void {
+    if (call.positional.length !== count || Object.keys(call.named).length !== 0) {
       throw fault(
         "TSR028",
         `${name} expects ${count} positional argument(s) and no named arguments.`,
@@ -2125,30 +2152,33 @@ class Evaluator {
     span: SourceSpan,
     rng = this.snapshot.rng,
   ): SerializableRuntimeValue {
-    if (items.length === 0) throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
+    if (items.length === 0)
+      throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
     return items[Math.floor(this.#findRandom(span, rng) * items.length)]!;
   }
 
-  #getProperty(value: SerializableRuntimeValue, name: string, span: SourceSpan): SerializableRuntimeValue {
+  #getProperty(
+    value: SerializableRuntimeValue,
+    name: string,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
     if (isObject(value)) return this.#getObjectProperty(value, name, span);
     if (isSpeakerReference(value)) {
-      return this.#getSpeakerProperty(
-        this.speakerById(value.speakerId, span),
-        name,
-        span,
-      );
+      return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }
     if (isList(value) || isSet(value)) return this.#getCollectionProperty(value, name, span);
     throw fault("TSR017", `Value has no property '${name}'.`, span);
   }
 
   #index(value: SerializableRuntimeValue, span: SourceSpan): number {
-    if (typeof value !== "number" || !Number.isInteger(value)) throw fault("TSR024", "A list index must be an integer.", span);
+    if (typeof value !== "number" || !Number.isInteger(value))
+      throw fault("TSR024", "A list index must be an integer.", span);
     return value;
   }
 
   #assertIndex(list: SerializableRuntimeList, index: number, span: SourceSpan): void {
-    if (index < 0 || index >= list.items.length) throw fault("TSR025", `List index ${index} is outside the valid range.`, span);
+    if (index < 0 || index >= list.items.length)
+      throw fault("TSR025", `List index ${index} is outside the valid range.`, span);
   }
 
   #number(value: SerializableRuntimeValue, span: SourceSpan): number {
@@ -2157,13 +2187,15 @@ class Evaluator {
   }
 
   #finite(value: number, span: SourceSpan): number {
-    if (!Number.isFinite(value)) throw fault("TSR036", "Numeric operation produced a non-finite result.", span);
+    if (!Number.isFinite(value))
+      throw fault("TSR036", "Numeric operation produced a non-finite result.", span);
     return value;
   }
 
   #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
     if (error instanceof SerializableValueError) {
-      const code = error.code === "setElement" ? "TSR032" : error.code === "equality" ? "TSR029" : "TSR031";
+      const code =
+        error.code === "setElement" ? "TSR032" : error.code === "equality" ? "TSR029" : "TSR031";
       return fault(code, error.message, span);
     }
     throw error;
@@ -2177,7 +2209,8 @@ function optionalSpeakerString(
 ): string | null {
   const value = speaker.properties.find((property) => property.name === name)?.value;
   if (value === undefined || value === null) return null;
-  if (typeof value !== "string") throw fault("TSR030", `Speaker property '${name}' must be a string for output.`, span);
+  if (typeof value !== "string")
+    throw fault("TSR030", `Speaker property '${name}' must be a string for output.`, span);
   return value;
 }
 
@@ -2191,7 +2224,8 @@ function setSpeakerProperty(
     throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
   }
   const property = speaker.properties.find((item) => item.name === name);
-  if (property === undefined) speaker.properties.push({ name, value: cloneCapturedSerializableValue(value) });
+  if (property === undefined)
+    speaker.properties.push({ name, value: cloneCapturedSerializableValue(value) });
   else property.value = cloneCapturedSerializableValue(value);
 }
 
@@ -2202,10 +2236,9 @@ function findBinding(snapshot: RuntimeSnapshot, name: string): RuntimeBindingSna
 function findBindingLocation(
   snapshot: RuntimeSnapshot,
   name: string,
-): {
-  readonly frame: RuntimeSnapshot["frames"][number];
-  readonly binding: RuntimeBindingSnapshot;
-} | undefined {
+):
+  | { readonly frame: RuntimeSnapshot["frames"][number]; readonly binding: RuntimeBindingSnapshot }
+  | undefined {
   const functionBase = snapshot.callFrames.at(-1)?.scopeBaseDepth;
   const minimum = functionBase ?? 0;
   for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
@@ -2258,10 +2291,7 @@ function serializePreparedReference(
     { name: "marker", value: "preparedReference" },
     { name: "rootFrameId", value: descriptor.rootFrameId },
     { name: "rootName", value: descriptor.rootName },
-    {
-      name: "path",
-      value: serializePreparedReferencePath(descriptor.path),
-    },
+    { name: "path", value: serializePreparedReferencePath(descriptor.path) },
     { name: "capturedRoot", value: descriptor.capturedRoot },
     { name: "detached", value: descriptor.detached },
   ]);
@@ -2300,8 +2330,7 @@ function readPreparedReference(
   const detached = getSerializableProperty(value, "detached");
   if (
     marker !== "preparedReference" ||
-    (rootFrameId !== null &&
-      (typeof rootFrameId !== "number" || !Number.isInteger(rootFrameId))) ||
+    (rootFrameId !== null && (typeof rootFrameId !== "number" || !Number.isInteger(rootFrameId))) ||
     (rootName !== null && (typeof rootName !== "string" || rootName.length === 0)) ||
     (rootFrameId === null) !== (rootName === null) ||
     pathValue === undefined ||
@@ -2335,13 +2364,7 @@ function readPreparedReference(
     }
     throw fault("TSR053", "Prepared reference path kind is malformed.", span);
   }
-  return {
-    rootFrameId,
-    rootName,
-    path,
-    capturedRoot,
-    detached,
-  };
+  return { rootFrameId, rootName, path, capturedRoot, detached };
 }
 
 function detachPreparedReferencesForMutation(
@@ -2360,12 +2383,7 @@ function detachPreparedReferencesForMutation(
       }
       if (
         descriptor.detached ||
-        !preparedReferenceMutationMatches(
-          snapshot,
-          descriptor,
-          mutation,
-          false,
-        )
+        !preparedReferenceMutationMatches(snapshot, descriptor, mutation, false)
       ) {
         continue;
       }
@@ -2390,11 +2408,7 @@ function preparePreparedReferencesForListRemoval(
         continue;
       }
       if (descriptor.detached) continue;
-      const pathIndex = preparedReferenceListIndexPosition(
-        snapshot,
-        descriptor,
-        receiver,
-      );
+      const pathIndex = preparedReferenceListIndexPosition(snapshot, descriptor, receiver);
       if (pathIndex === null) continue;
       const step = descriptor.path[pathIndex];
       if (step?.kind !== "index") continue;
@@ -2495,11 +2509,12 @@ function preparedReferenceMutationMatches(
     return false;
   }
   const descriptorSpeakerPath = preparedReferenceSpeakerPath(snapshot, descriptor);
-  return descriptorSpeakerPath !== null &&
+  return (
+    descriptorSpeakerPath !== null &&
     descriptorSpeakerPath.speakerId === mutation.speakerPath.speakerId &&
-    (!descendantsOnly ||
-      descriptorSpeakerPath.path.length > mutation.speakerPath.path.length) &&
-    pathStartsWith(descriptorSpeakerPath.path, mutation.speakerPath.path);
+    (!descendantsOnly || descriptorSpeakerPath.path.length > mutation.speakerPath.path.length) &&
+    pathStartsWith(descriptorSpeakerPath.path, mutation.speakerPath.path)
+  );
 }
 
 function freezePreparedReference(
@@ -2562,17 +2577,9 @@ function preparedReferenceRoot(
   snapshot: RuntimeSnapshot,
   descriptor: PreparedReferenceDescriptor,
 ): { readonly found: boolean; readonly value: SerializableRuntimeValue } {
-  if (
-    !descriptor.detached &&
-    descriptor.rootFrameId !== null &&
-    descriptor.rootName !== null
-  ) {
-    const frame = snapshot.frames.find(
-      (candidate) => candidate.id === descriptor.rootFrameId,
-    );
-    const binding = frame?.bindings.find(
-      (candidate) => candidate.name === descriptor.rootName,
-    );
+  if (!descriptor.detached && descriptor.rootFrameId !== null && descriptor.rootName !== null) {
+    const frame = snapshot.frames.find((candidate) => candidate.id === descriptor.rootFrameId);
+    const binding = frame?.bindings.find((candidate) => candidate.name === descriptor.rootName);
     return binding === undefined
       ? { found: false, value: null }
       : { found: true, value: binding.value };
@@ -2586,11 +2593,7 @@ function resolvePreparedReferenceStep(
   step: PreparedReferenceStep,
 ): { readonly found: boolean; readonly value: SerializableRuntimeValue } {
   if (step.kind === "index") {
-    if (
-      (!isList(value) && !isSet(value)) ||
-      step.index < 0 ||
-      step.index >= value.items.length
-    ) {
+    if ((!isList(value) && !isSet(value)) || step.index < 0 || step.index >= value.items.length) {
       return { found: false, value: null };
     }
     return { found: true, value: value.items[step.index]! };
@@ -2602,21 +2605,13 @@ function resolvePreparedReferenceStep(
       : { found: true, value: property };
   }
   if (isSpeakerReference(value)) {
-    const speaker = snapshot.speakers.find(
-      (candidate) => candidate.id === value.speakerId,
-    );
+    const speaker = snapshot.speakers.find((candidate) => candidate.id === value.speakerId);
     if (speaker === undefined) return { found: false, value: null };
-    let property = speaker.properties.find(
-      (candidate) => candidate.name === step.name,
-    )?.value;
+    let property = speaker.properties.find((candidate) => candidate.name === step.name)?.value;
     if (property === undefined && step.name === "title") {
-      property = speaker.properties.find(
-        (candidate) => candidate.name === "shortTitle",
-      )?.value;
+      property = speaker.properties.find((candidate) => candidate.name === "shortTitle")?.value;
     } else if (property === undefined && step.name === "shortTitle") {
-      property = speaker.properties.find(
-        (candidate) => candidate.name === "title",
-      )?.value;
+      property = speaker.properties.find((candidate) => candidate.name === "title")?.value;
     }
     return property === undefined
       ? { found: false, value: null }
@@ -2635,20 +2630,17 @@ function pathStartsWith(
   if (prefix.length > path.length) return false;
   return prefix.every((step, index) => {
     const candidate = path[index];
-    return candidate?.kind === step.kind &&
+    return (
+      candidate?.kind === step.kind &&
       (step.kind === "property"
         ? candidate.kind === "property" && candidate.name === step.name
-        : candidate.kind === "index" && candidate.index === step.index);
+        : candidate.kind === "index" && candidate.index === step.index)
+    );
   });
 }
 
-function allTemporaryCollections(
-  snapshot: RuntimeSnapshot,
-): RuntimeTemporarySnapshot[][] {
-  return [
-    snapshot.temporaries,
-    ...snapshot.callFrames.map((frame) => frame.callerTemporaries),
-  ];
+function allTemporaryCollections(snapshot: RuntimeSnapshot): RuntimeTemporarySnapshot[][] {
+  return [snapshot.temporaries, ...snapshot.callFrames.map((frame) => frame.callerTemporaries)];
 }
 
 function readTemporary(
@@ -2663,38 +2655,28 @@ function readTemporary(
   return temporary.value;
 }
 
-
-
-function cloneTemporary(
-  temporary: RuntimeTemporarySnapshot,
-): RuntimeTemporarySnapshot {
-  return {
-    id: temporary.id,
-    value: cloneCapturedSerializableValue(temporary.value),
-  };
+function cloneTemporary(temporary: RuntimeTemporarySnapshot): RuntimeTemporarySnapshot {
+  return { id: temporary.id, value: cloneCapturedSerializableValue(temporary.value) };
 }
 
-function cloneInteractionUi(ui: RuntimeInteractionActionSnapshot["ui"]): RuntimeInteractionActionSnapshot["ui"] {
-  const accessibleName = ui.accessibleName.kind === "text"
-    ? { kind: "text" as const, text: ui.accessibleName.text }
-    : { kind: "localizedDefault" as const, key: ui.accessibleName.key };
+function cloneInteractionUi(
+  ui: RuntimeInteractionActionSnapshot["ui"],
+): RuntimeInteractionActionSnapshot["ui"] {
+  const accessibleName =
+    ui.accessibleName.kind === "text"
+      ? { kind: "text" as const, text: ui.accessibleName.text }
+      : { kind: "localizedDefault" as const, key: ui.accessibleName.key };
   if (ui.kind === "choice") {
-    const options = ui.options.map((option) => ({
-      text: option.text,
-      label: option.label,
-    }));
-    return {
-      kind: "choice",
-      labelType: ui.labelType,
-      options,
-      accessibleName,
-    };
+    const options = ui.options.map((option) => ({ text: option.text, label: option.label }));
+    return { kind: "choice", labelType: ui.labelType, options, accessibleName };
   }
   if (ui.kind === "button") return { kind: "button", buttonLabel: ui.buttonLabel, accessibleName };
   return { kind: ui.kind, hint: ui.hint, accessibleName };
 }
 
-function cloneInteractionAction(action: RuntimeInteractionActionSnapshot): RuntimeInteractionActionSnapshot {
+function cloneInteractionAction(
+  action: RuntimeInteractionActionSnapshot,
+): RuntimeInteractionActionSnapshot {
   return {
     kind: "interaction",
     interactionKind: action.interactionKind,
@@ -2712,9 +2694,6 @@ function cloneInteractionAction(action: RuntimeInteractionActionSnapshot): Runti
     requestEventSequence: action.requestEventSequence,
   };
 }
-
-
-
 
 function currentCallFrameId(snapshot: RuntimeSnapshot): number | null {
   return snapshot.callFrames.at(-1)?.id ?? null;
@@ -2764,12 +2743,9 @@ function validateTerminalCompletionCapacityAfterSay(
     snapshot.status !== "running" ||
     snapshot.callFrames.length !== 0 ||
     snapshot.nextInstruction !== plan.rootEndInstruction
-  ) return;
-  assertEventSequenceCapacity(
-    snapshot,
-    requiredEventSequencesForRootCompletion(snapshot),
-    span,
-  );
+  )
+    return;
+  assertEventSequenceCapacity(snapshot, requiredEventSequencesForRootCompletion(snapshot), span);
 }
 
 function executeSpeakerAtomically(
@@ -2810,28 +2786,36 @@ function executeSay(
     return;
   }
 
-  const preparedSpeaker = instruction.speakerTemporary === undefined
-    ? (() => {
-        const speaker = instruction.speaker === null
-          ? snapshot.defaultSpeaker === null ? null : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
-          : evaluator.speakerByName(instruction.speaker, instruction.span);
-        snapshot.contextualSpeaker = speaker?.id ?? null;
-        return {
-          output: speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events),
-          speakerId: speaker?.id ?? null,
-        };
-      })()
-    : preparedOutputSpeaker(snapshot.temporaries, instruction.speakerTemporary, instruction.span);
+  const preparedSpeaker =
+    instruction.speakerTemporary === undefined
+      ? (() => {
+          const speaker =
+            instruction.speaker === null
+              ? snapshot.defaultSpeaker === null
+                ? null
+                : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span)
+              : evaluator.speakerByName(instruction.speaker, instruction.span);
+          snapshot.contextualSpeaker = speaker?.id ?? null;
+          return {
+            output:
+              speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events),
+            speakerId: speaker?.id ?? null,
+          };
+        })()
+      : preparedOutputSpeaker(snapshot.temporaries, instruction.speakerTemporary, instruction.span);
   const output = preparedSpeaker.output;
-  const speaker = preparedSpeaker.speakerId === null
-    ? null
-    : evaluator.speakerById(preparedSpeaker.speakerId, instruction.span);
-  const text = instruction.textTemporary === undefined
-    ? evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span)
-    : preparedSayText(snapshot.temporaries, instruction.textTemporary, instruction.span);
-  const pacingValue = typeof instruction.pacing === "object"
-    ? evaluator.evaluate(instruction.pacing)
-    : instruction.pacing;
+  const speaker =
+    preparedSpeaker.speakerId === null
+      ? null
+      : evaluator.speakerById(preparedSpeaker.speakerId, instruction.span);
+  const text =
+    instruction.textTemporary === undefined
+      ? evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span)
+      : preparedSayText(snapshot.temporaries, instruction.textTemporary, instruction.span);
+  const pacingValue =
+    typeof instruction.pacing === "object"
+      ? evaluator.evaluate(instruction.pacing)
+      : instruction.pacing;
   const durationMs = sayDurationMs(instruction, text, pacingValue, snapshot);
   const skippable = effectiveSaySkippable(instruction.skipPolicy, speaker, instruction.span);
   const activeGate = snapshot.backgroundActions.find(
@@ -2861,7 +2845,8 @@ function executeSay(
   }
   if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs);
   emitSay(snapshot, events, instruction.span, output, text);
-  if (durationMs > 0) establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
+  if (durationMs > 0)
+    establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
   advance(snapshot);
 }
 
@@ -2887,11 +2872,9 @@ function preparedOutputSpeaker(
     (typeof avatar !== "string" && avatar !== null) ||
     typeof speakerId !== "number" ||
     !Number.isSafeInteger(speakerId)
-  ) throw fault("TSR052", "Prepared say speaker is invalid.", span);
-  return {
-    output: Object.freeze({ identifier, displayName, color, font, avatar }),
-    speakerId,
-  };
+  )
+    throw fault("TSR052", "Prepared say speaker is invalid.", span);
+  return { output: Object.freeze({ identifier, displayName, color, font, avatar }), speakerId };
 }
 
 function preparedSayText(
@@ -2918,7 +2901,11 @@ function sayDurationMs(
     return secondsToPacingMilliseconds(pacingValue);
   } catch (error) {
     if (error instanceof RuntimeFault) throw error;
-    throw fault("TSR050", error instanceof Error ? error.message : "Say pacing is invalid.", instruction.span);
+    throw fault(
+      "TSR050",
+      error instanceof Error ? error.message : "Say pacing is invalid.",
+      instruction.span,
+    );
   }
 }
 
@@ -2929,7 +2916,9 @@ function effectiveSaySkippable(
 ): boolean {
   if (explicit === "skippable") return true;
   if (explicit === "unskippable") return false;
-  const configured = speaker?.properties.find((property) => property.name === "defaultSaySkippable");
+  const configured = speaker?.properties.find(
+    (property) => property.name === "defaultSaySkippable",
+  );
   if (configured === undefined) return true;
   if (typeof configured.value !== "boolean") {
     throw fault("TSR050", "Speaker property 'defaultSaySkippable' must be a boolean.", span);
@@ -2944,13 +2933,15 @@ function emitSay(
   speaker: OutputSpeaker | null,
   text: string,
 ): void {
-  events.push(Object.freeze({
-    kind: "say",
-    sequence: takeSequence(snapshot),
-    speaker,
-    text,
-    span: copySpan(span),
-  } satisfies SayEvent));
+  events.push(
+    Object.freeze({
+      kind: "say",
+      sequence: takeSequence(snapshot),
+      speaker,
+      text,
+      span: copySpan(span),
+    } satisfies SayEvent),
+  );
 }
 
 function establishPacingAfterSay(
@@ -2964,7 +2955,11 @@ function establishPacingAfterSay(
   try {
     deadlineMs = calculatePacingDeadlineMs(snapshot.currentSessionTimeMs, durationMs);
   } catch (error) {
-    throw fault("TSR050", error instanceof Error ? error.message : "Say pacing deadline is invalid.", span);
+    throw fault(
+      "TSR050",
+      error instanceof Error ? error.message : "Say pacing deadline is invalid.",
+      span,
+    );
   }
   const requestEventSequence = takeSequence(snapshot);
   const action: RuntimeChatPacingGateActionSnapshot = Object.freeze({
@@ -2997,14 +2992,21 @@ function validatePacingCreation(
   span: SourceSpan,
   durationMs: number,
 ): void {
-  if (!Number.isSafeInteger(snapshot.nextActionId) || snapshot.nextActionId >= Number.MAX_SAFE_INTEGER) {
+  if (
+    !Number.isSafeInteger(snapshot.nextActionId) ||
+    snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+  ) {
     throw fault("TSR051", "Runtime action ID space is exhausted.", span);
   }
   assertEventSequenceCapacity(snapshot, requiredEventSequencesForNewPacingGate(), span);
   try {
     calculatePacingDeadlineMs(snapshot.currentSessionTimeMs, durationMs);
   } catch (error) {
-    throw fault("TSR050", error instanceof Error ? error.message : "Say pacing deadline is invalid.", span);
+    throw fault(
+      "TSR050",
+      error instanceof Error ? error.message : "Say pacing deadline is invalid.",
+      span,
+    );
   }
 }
 
@@ -3021,7 +3023,9 @@ function requiredEventSequencesForNewDelay(snapshot: RuntimeSnapshot): number {
   const delayRequestAndCompletion = 2;
   const backgroundPacingCompletion = snapshot.backgroundActions.some(
     (action) => action.kind === "chatPacingGate",
-  ) ? 1 : 0;
+  )
+    ? 1
+    : 0;
   return delayRequestAndCompletion + backgroundPacingCompletion;
 }
 
@@ -3029,12 +3033,6 @@ function requiredEventSequencesForRootCompletion(snapshot: RuntimeSnapshot): num
   const rootCompleteEvent = 1;
   return rootCompleteEvent + requiredFutureActionCompletionEvents(snapshot);
 }
-
-
-
-
-
-
 
 function createCompleteEvent(snapshot: RuntimeSnapshot, span: SourceSpan): CompleteEvent {
   return Object.freeze({
@@ -3051,11 +3049,7 @@ function failSnapshot(
 ): void {
   const failureSequence = takeSequence(snapshot);
   snapshot.status = "failed";
-  snapshot.failure = {
-    code: failure.code,
-    message: failure.message,
-    span: copySpan(failure.span),
-  };
+  snapshot.failure = { code: failure.code, message: failure.message, span: copySpan(failure.span) };
   events.push(
     Object.freeze({
       kind: "runtimeFailure",
@@ -3073,11 +3067,11 @@ function failForBudget(
   events: InterpreterEvent[],
 ): void {
   const span = plan.instructions[snapshot.nextInstruction]?.span ?? plan.sourceSpan;
-  failSnapshot(snapshot, {
-    code: "TSR037",
-    message: "Runtime instruction budget exceeded.",
-    span: copySpan(span),
-  }, events);
+  failSnapshot(
+    snapshot,
+    { code: "TSR037", message: "Runtime instruction budget exceeded.", span: copySpan(span) },
+    events,
+  );
 }
 
 function instructionBudget(value: number | undefined): number {
@@ -3088,19 +3082,9 @@ function instructionBudget(value: number | undefined): number {
   return budget;
 }
 
-
-
-
-
-
-
-
-
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }
-
-
 
 function isList(value: SerializableRuntimeValue): value is SerializableRuntimeList {
   return typeof value === "object" && value !== null && value.kind === "list";
@@ -3118,6 +3102,8 @@ function isRange(value: SerializableRuntimeValue): value is SerializableRuntimeR
   return typeof value === "object" && value !== null && value.kind === "range";
 }
 
-function isSpeakerReference(value: SerializableRuntimeValue): value is SerializableSpeakerReference {
+function isSpeakerReference(
+  value: SerializableRuntimeValue,
+): value is SerializableSpeakerReference {
   return typeof value === "object" && value !== null && value.kind === "speakerReference";
 }

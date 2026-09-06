@@ -309,7 +309,10 @@ export type InteractionKind = "button" | "text" | "number" | "choice";
 export type InteractionResultDomain = "none" | "string" | "number";
 export type InteractionAccessibleName =
   | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "localizedDefault"; readonly key: "answer" | "number" | "chooseOption" | "continue" };
+  | {
+      readonly kind: "localizedDefault";
+      readonly key: "answer" | "number" | "chooseOption" | "continue";
+    };
 export type InteractionChoiceOption =
   | { readonly text: string; readonly label: null }
   | { readonly text: string; readonly label: string }
@@ -398,9 +401,7 @@ export interface PlannedProperty {
 }
 
 export type AssignmentTargetPlan =
-  | IdentifierExpressionPlan
-  | PropertyExpressionPlan
-  | IndexExpressionPlan;
+  IdentifierExpressionPlan | PropertyExpressionPlan | IndexExpressionPlan;
 
 export type ExpressionPlan =
   | LiteralExpressionPlan
@@ -464,11 +465,7 @@ export interface GroupExpressionPlan extends ExpressionPlanBase {
 }
 
 export type TemplatePartPlan =
-  | {
-      readonly kind: "text";
-      readonly value: string;
-      readonly span: PlanSourceLocation;
-    }
+  | { readonly kind: "text"; readonly value: string; readonly span: PlanSourceLocation }
   | {
       readonly kind: "expression";
       readonly expression: ExpressionPlan;
@@ -520,19 +517,7 @@ export interface UnaryExpressionPlan extends ExpressionPlanBase {
 export interface BinaryExpressionPlan extends ExpressionPlanBase {
   readonly kind: "binary";
   readonly operator:
-    | "*"
-    | "/"
-    | "%"
-    | "+"
-    | "-"
-    | "=="
-    | "!="
-    | "<"
-    | "<="
-    | ">"
-    | ">="
-    | "and"
-    | "or";
+    "*" | "/" | "%" | "+" | "-" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "and" | "or";
   readonly left: ExpressionPlan;
   readonly right: ExpressionPlan;
 }

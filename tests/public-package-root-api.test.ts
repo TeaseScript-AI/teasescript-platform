@@ -15,7 +15,8 @@ test("the package root exposes supported runtime and checkpoint capabilities", (
     "restoreCheckpoint",
     "completeAction",
     "observeTime",
-  ]) assert.equal(capability in root, true, `${capability} is public`);
+  ])
+    assert.equal(capability in root, true, `${capability} is public`);
 });
 
 test("the package root excludes internal compiler and test seams", () => {
@@ -26,7 +27,8 @@ test("the package root excludes internal compiler and test seams", () => {
     "execute",
     "captureInstructionPlan",
     "validateCapturedInstructionPlan",
-  ]) assert.equal(internal in root, false, `${internal} is internal`);
+  ])
+    assert.equal(internal in root, false, `${internal} is internal`);
 
   for (const runtimeExport of Object.keys(validationTesting)) {
     assert.equal(runtimeExport in root, false, `${runtimeExport} is test-only`);

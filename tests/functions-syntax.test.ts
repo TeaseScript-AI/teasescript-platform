@@ -17,10 +17,10 @@ test("parses functions without parameters and value or bare returns", () => {
   const result = parse(source);
 
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.program.statements.map((statement) => statement.kind), [
-    "functionDeclaration",
-    "functionDeclaration",
-  ]);
+  assert.deepEqual(
+    result.program.statements.map((statement) => statement.kind),
+    ["functionDeclaration", "functionDeclaration"],
+  );
   const kneel = result.program.statements[0];
   const add = result.program.statements[1];
   assert.equal(kneel?.kind, "functionDeclaration");
@@ -59,7 +59,7 @@ test("parses multiline defaults, named calls, and exact declaration spans", () =
   assert.equal(call.expression.argumentStyle, "named");
   assert.deepEqual(
     call.expression.arguments.map((argument) =>
-      argument.kind === "namedArgument" ? argument.name.name : null
+      argument.kind === "namedArgument" ? argument.name.name : null,
     ),
     ["name", "title"],
   );
@@ -82,7 +82,7 @@ test("preserves return and call spans", () => {
     returned?.kind === "returnStatement"
       ? {
           start: { offset: source.indexOf("return"), line: 1, column: 2 },
-          end: { offset: source.indexOf("right\n" ) + 5, line: 1, column: 21 },
+          end: { offset: source.indexOf("right\n") + 5, line: 1, column: 21 },
         }
       : null,
   );
@@ -102,7 +102,10 @@ test("reports malformed parameter lists and missing function blocks precisely", 
   ] as const;
   for (const [source, code] of cases) {
     const result = parse(source);
-    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === code), source);
+    assert.ok(
+      result.diagnostics.some((diagnostic) => diagnostic.code === code),
+      source,
+    );
   }
 });
 

@@ -96,9 +96,7 @@ function collectionsSource(choices: SourceChoices): ValidSourceCase {
   const second = choices.integer(5, 8);
   const replacement = choices.integer(9, 12);
   const label = choices.pick(["kept", "saved", "copied"] as const);
-  const setValues = choices.pick([
-    '"a", "b", "a"', '"b", "a", "b"', '"c", "a", "c"',
-  ] as const);
+  const setValues = choices.pick(['"a", "b", "a"', '"b", "a", "b"', '"c", "a", "c"'] as const);
   return valid(
     "variables-scope-and-collections",
     `list=${first},${second} label=${label} set=${setValues}`,
@@ -180,15 +178,11 @@ function randomSource(choices: SourceChoices): ValidSourceCase {
   const inclusive = choices.pick([true, false] as const);
   const chance = choices.pick([20, 50, 80] as const);
   const range = inclusive ? `${lower}..=${lower + width}` : `${lower}..${lower + width}`;
-  return valid(
-    "deterministic-random-builtins",
-    `range=${range} chance=${chance}`,
-    [
-      `let roll = randomInteger(${range})`,
-      `let lucky = chance(${chance})`,
-      "say `${roll}:${lucky}:${random()}`",
-    ],
-  );
+  return valid("deterministic-random-builtins", `range=${range} chance=${chance}`, [
+    `let roll = randomInteger(${range})`,
+    `let lucky = chance(${chance})`,
+    "say `${roll}:${lucky}:${random()}`",
+  ]);
 }
 
 function missingIdentifierCase(
@@ -207,18 +201,12 @@ function missingTemplateExpressionCase(
   return nearValid(family, `text=${text}`, `say \`${text} \${}\``, "TSP008");
 }
 
-function outsideLoopCase(
-  choices: SourceChoices,
-  family: "loop-control",
-): NearValidSourceCase {
+function outsideLoopCase(choices: SourceChoices, family: "loop-control"): NearValidSourceCase {
   const keyword = choices.pick(["break", "continue"] as const);
   return nearValid(family, `outside-loop=${keyword}`, keyword, "TSV008");
 }
 
-function unknownNameCase(
-  choices: SourceChoices,
-  family: "semantic-name",
-): NearValidSourceCase {
+function unknownNameCase(choices: SourceChoices, family: "semantic-name"): NearValidSourceCase {
   const identifier = `unknownValue${choices.integer(1, 9)}`;
   return nearValid(family, `identifier=${identifier}`, `say ${identifier}`, "TSV002");
 }
@@ -241,7 +229,12 @@ function compositeSetElementCase(
   family: "set-elements",
 ): NearValidSourceCase {
   const value = choices.integer(1, 9);
-  return nearValid(family, `composite-list-value=${value}`, `let values = set[[${value}]]`, "TSV006");
+  return nearValid(
+    family,
+    `composite-list-value=${value}`,
+    `let values = set[[${value}]]`,
+    "TSV006",
+  );
 }
 
 function valid(
@@ -282,11 +275,7 @@ function countCall(
   }
 }
 
-export function selectSourceFamily<T>(
-  families: readonly T[],
-  seed: number,
-  index: number,
-): T {
+export function selectSourceFamily<T>(families: readonly T[], seed: number, index: number): T {
   return families[(seed + index) % families.length]!;
 }
 

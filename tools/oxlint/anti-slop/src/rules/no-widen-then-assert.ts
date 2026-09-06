@@ -9,9 +9,7 @@ import {
 
 type BroadTypeKind = "top" | "object" | "record";
 
-type KnownValueEvidence = {
-  readonly type: ESTree.TSType | null;
-};
+type KnownValueEvidence = { readonly type: ESTree.TSType | null };
 
 const functionBoundaryTypes = new Set([
   "ArrowFunctionExpression",
@@ -50,10 +48,7 @@ function isBuiltInTypeReference(
   return typeReferenceName(type) === name && !hasVisibleTypeBinding(name, type, environment);
 }
 
-function isBroadRecordKeyType(
-  type: ESTree.TSType,
-  environment: TypeAliasEnvironment,
-): boolean {
+function isBroadRecordKeyType(type: ESTree.TSType, environment: TypeAliasEnvironment): boolean {
   const unwrapped = unwrapTypeParentheses(type);
   if (
     unwrapped.type === "TSStringKeyword" ||
@@ -71,10 +66,7 @@ function isBroadRecordKeyType(
   );
 }
 
-function isBroadRecordType(
-  type: ESTree.TSType,
-  environment: TypeAliasEnvironment,
-): boolean {
+function isBroadRecordType(type: ESTree.TSType, environment: TypeAliasEnvironment): boolean {
   const unwrapped = unwrapTypeParentheses(type);
 
   if (unwrapped.type === "TSTypeReference") {
@@ -398,11 +390,7 @@ export const noWidenThenAssertRule = defineRule({
         return;
       }
 
-      context.report({
-        node,
-        messageId: "widenThenAssert",
-        data: { name: expression.name },
-      });
+      context.report({ node, messageId: "widenThenAssert", data: { name: expression.name } });
     };
 
     return {

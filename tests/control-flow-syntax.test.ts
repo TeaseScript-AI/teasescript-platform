@@ -15,10 +15,10 @@ test("comments are whitespace across tokens, statements, blocks, LF, and CRLF", 
   const result = parse(source);
 
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.program.statements.map((statement) => statement.kind), [
-    "letStatement",
-    "ifStatement",
-  ]);
+  assert.deepEqual(
+    result.program.statements.map((statement) => statement.kind),
+    ["letStatement", "ifStatement"],
+  );
 });
 
 test("comment markers remain ordinary string and template text", () => {
@@ -93,25 +93,28 @@ test("lexes both range operators without consuming decimal dots", () => {
 test("rejects chained ranges distinctly from comparisons", () => {
   const result = parse("let bad = 1..2..3");
 
-  assert.deepEqual(result.diagnostics.map((item) => item.code), ["TSP022"]);
+  assert.deepEqual(
+    result.diagnostics.map((item) => item.code),
+    ["TSP022"],
+  );
   assert.equal(compileSource("let bad = 1..2..3").plan, null);
 });
 
 test("parses two-word else-if chains and every loop statement", () => {
-  const result = parse([
-    "if false { say \"first\" } else if true { say \"second\" } else { say \"last\" }",
-    "repeat 2 { continue }",
-    "for item in [1] { break }",
-    "while false { break }",
-  ].join("\n"));
+  const result = parse(
+    [
+      'if false { say "first" } else if true { say "second" } else { say "last" }',
+      "repeat 2 { continue }",
+      "for item in [1] { break }",
+      "while false { break }",
+    ].join("\n"),
+  );
 
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.program.statements.map((statement) => statement.kind), [
-    "ifStatement",
-    "repeatStatement",
-    "forStatement",
-    "whileStatement",
-  ]);
+  assert.deepEqual(
+    result.program.statements.map((statement) => statement.kind),
+    ["ifStatement", "repeatStatement", "forStatement", "whileStatement"],
+  );
   const conditional = result.program.statements[0];
   assert.equal(
     conditional?.kind === "ifStatement" ? conditional.elseBlock?.kind : null,
@@ -120,7 +123,7 @@ test("parses two-word else-if chains and every loop statement", () => {
 });
 
 test("recovers malformed loop headers at the following statement", () => {
-  const result = parse("for item [1] { say item }\nsay \"after\"");
+  const result = parse('for item [1] { say item }\nsay "after"');
 
   assert.equal(result.diagnostics[0]?.code, "TSP023");
   assert.equal(result.program.statements.at(-1)?.kind, "sayStatement");

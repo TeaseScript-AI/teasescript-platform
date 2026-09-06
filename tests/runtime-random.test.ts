@@ -3,11 +3,7 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
-import {
-  CheckpointError,
-  createCheckpoint,
-  restoreCheckpoint,
-} from "../src/runtime/checkpoint.js";
+import { CheckpointError, createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
 import {
   createXorShift32State,
   nextXorShift32,
@@ -118,10 +114,12 @@ test("distinguishes an absent random hook from invalid and valid hook results", 
   const overriddenSnapshot = createFreshRuntimeSnapshot(compiled, { seed });
   let overrideCalls = 0;
   const overridden = run(compiled, overriddenSnapshot, {
-    random: { next: () => {
-      overrideCalls += 1;
-      return 0.25;
-    } },
+    random: {
+      next: () => {
+        overrideCalls += 1;
+        return 0.25;
+      },
+    },
   });
 
   assert.equal(overrideCalls, 1);

@@ -1,21 +1,8 @@
 import type { Program } from "./ast.js";
-import {
-  createDiagnostic,
-  DiagnosticSeverity,
-  type Diagnostic,
-} from "./diagnostics.js";
-import {
-  createCapturedArray,
-} from "./external-data-capture.js";
-import {
-  createSourcePosition,
-  createSourceSpan,
-  type SourceSpan,
-} from "./source.js";
-import {
-  recordValidationTestMaximum,
-  recordValidationTestWork,
-} from "./validation-testing.js";
+import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
+import { createCapturedArray } from "./external-data-capture.js";
+import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
+import { recordValidationTestMaximum, recordValidationTestWork } from "./validation-testing.js";
 
 export const AST_VALIDATION_CODES = {
   nonFiniteNumericLiteral: "TSC001",
@@ -28,14 +15,8 @@ export interface CapturedProgramAstResult {
 }
 
 type AssignmentTarget =
-  | {
-      readonly container: Record<string, unknown>;
-      readonly key: string;
-    }
-  | {
-      readonly container: unknown[];
-      readonly index: number;
-    };
+  | { readonly container: Record<string, unknown>; readonly key: string }
+  | { readonly container: unknown[]; readonly index: number };
 
 interface ObjectPropertyStage {
   readonly key: string;
@@ -56,11 +37,7 @@ type WorkItem =
       readonly depth: number;
       readonly target: AssignmentTarget | null;
     }
-  | {
-      readonly kind: "leave";
-      readonly source: object;
-      readonly captured: object;
-    };
+  | { readonly kind: "leave"; readonly source: object; readonly captured: object };
 
 const FALLBACK_SPAN = createSourceSpan(
   createSourcePosition(0, 0, 0),
@@ -163,11 +140,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
       } catch {
         return captureFailure("Direct AST input contains an unstable object.");
       }
-      if (
-        descriptor === undefined ||
-        !descriptor.enumerable ||
-        !("value" in descriptor)
-      ) {
+      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
         return captureFailure("Direct AST input may contain only enumerable data properties.");
       }
       values = { key, value: descriptor.value, previous: values };
@@ -178,11 +151,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
     });
     active.add(current);
     work.push({ kind: "leave", source: current, captured });
-    for (
-      let currentValue = values;
-      currentValue !== null;
-      currentValue = currentValue.previous
-    ) {
+    for (let currentValue = values; currentValue !== null; currentValue = currentValue.previous) {
       work.push({
         kind: "visit",
         value: currentValue.value,
@@ -195,10 +164,7 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
   if (!isProgramRoot(capturedRoot)) {
     return captureFailure("Direct AST input must be a valid program-shaped object.");
   }
-  return Object.freeze({
-    program: capturedRoot,
-    diagnostic: null,
-  });
+  return Object.freeze({ program: capturedRoot, diagnostic: null });
 }
 
 /** Internal traversal for parser-owned or already captured AST data. */
@@ -282,11 +248,7 @@ function captureArrayHeader(value: object): CapturedArrayHeader | null {
     } catch {
       return null;
     }
-    if (
-      descriptor === undefined ||
-      !descriptor.enumerable ||
-      !("value" in descriptor)
-    ) {
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
       return null;
     }
     seen.add(index);
@@ -330,10 +292,12 @@ function captureFailure(message: string): CapturedProgramAstResult {
 }
 
 function isProgramRoot(value: unknown): value is Program {
-  return isPlainRecord(value) &&
+  return (
+    isPlainRecord(value) &&
     value.kind === "program" &&
     Array.isArray(value.statements) &&
-    isSourceSpan(value.span);
+    isSourceSpan(value.span)
+  );
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -348,7 +312,8 @@ function isSourceSpan(value: unknown): value is SourceSpan {
 }
 
 function isSourcePosition(value: unknown): boolean {
-  return isPlainRecord(value) &&
+  return (
+    isPlainRecord(value) &&
     Number.isSafeInteger(value.offset) &&
     typeof value.offset === "number" &&
     value.offset >= 0 &&
@@ -357,5 +322,6 @@ function isSourcePosition(value: unknown): boolean {
     value.line >= 0 &&
     Number.isSafeInteger(value.column) &&
     typeof value.column === "number" &&
-    value.column >= 0;
+    value.column >= 0
+  );
 }

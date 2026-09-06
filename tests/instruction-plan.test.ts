@@ -8,19 +8,13 @@ import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { run } from "../src/runtime/engine.js";
 
 test("compiles deterministically to the same instruction plan", () => {
-  const source = 'let score = 1\nscore = score + 1\nsay `${score}`\nexit';
+  const source = "let score = 1\nscore = score + 1\nsay `${score}`\nexit";
 
   assert.deepEqual(plan(source), plan(source));
 });
 
 test("compiles if and else to explicit validated jump targets", () => {
-  const compiled = plan([
-    "if true {",
-    '  say "yes"',
-    "} else {",
-    '  say "no"',
-    "}",
-  ].join("\n"));
+  const compiled = plan(["if true {", '  say "yes"', "} else {", '  say "no"', "}"].join("\n"));
 
   assert.deepEqual(
     compiled.instructions.map((instruction) =>
@@ -49,10 +43,7 @@ test("preserves relevant statement and nested expression source spans", () => {
 
   assert.equal(instruction?.kind, "declareBinding");
   if (instruction?.kind !== "declareBinding") return;
-  assert.deepEqual(
-    [instruction.span.so, instruction.span.eo],
-    [0, source.length],
-  );
+  assert.deepEqual([instruction.span.so, instruction.span.eo], [0, source.length]);
   assert.deepEqual(
     [instruction.value.span.so, instruction.value.span.eo],
     [source.indexOf("1"), source.length],
@@ -60,17 +51,14 @@ test("preserves relevant statement and nested expression source spans", () => {
 });
 
 test("survives JSON stringify and parse as an equivalent executable plan", () => {
-  const original = plan('let value = [1, 2]\nsay `${value.first}`\nexit');
+  const original = plan("let value = [1, 2]\nsay `${value.first}`\nexit");
   const restored: unknown = JSON.parse(JSON.stringify(original));
 
   assert.equal(validateInstructionPlan(restored).valid, true);
   assert.deepEqual(restored, original);
   // EVIDENCE: validation above established that the JSON-round-tripped value is an InstructionPlan.
   const restoredPlan = restored as InstructionPlan;
-  const result = run(
-    restoredPlan,
-    createFreshRuntimeSnapshot(restoredPlan),
-  );
+  const result = run(restoredPlan, createFreshRuntimeSnapshot(restoredPlan));
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["1"],
@@ -104,9 +92,8 @@ test("contains no non-JSON-safe values and rejects them when supplied", () => {
   assert.equal(validateInstructionPlan(malformed).valid, false);
 });
 
-
 test("compiler-produced plans remain deeply frozen", () => {
-  const compiled = plan('let value = { nested: [1, { deeper: 2 }] }\nexit');
+  const compiled = plan("let value = { nested: [1, { deeper: 2 }] }\nexit");
   const instruction = compiled.instructions[0];
   assert.equal(Object.isFrozen(compiled), true);
   assert.equal(Object.isFrozen(compiled.instructions), true);

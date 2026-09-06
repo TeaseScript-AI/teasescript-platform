@@ -24,10 +24,7 @@ import {
 } from "../src/runtime/serializable-values.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
-function plan(
-  source = "exit",
-  builtins: readonly string[] = [],
-): InstructionPlan {
+function plan(source = "exit", builtins: readonly string[] = []): InstructionPlan {
   const compiled = compileSource(source, { builtins });
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
@@ -111,30 +108,23 @@ test("fresh globals consume one captured proxy observation and never call get", 
   const compiled = plan();
   const counts = zeroCounts();
   const target = { kind: "list" as const, items: [0] };
-  const payload = stableProxy(target, counts, (key) =>
-    key === "items" ? [deepList(20_000)] : Reflect.get(target, key), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
+  const payload = stableProxy(
+    target,
+    counts,
+    (key) => (key === "items" ? [deepList(20_000)] : Reflect.get(target, key)), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
   );
 
-  const snapshot = createFreshRuntimeSnapshot(compiled, {
-    globals: { payload },
-  });
+  const snapshot = createFreshRuntimeSnapshot(compiled, { globals: { payload } });
 
   assert.deepEqual(snapshot.frames[0]!.bindings, [
     { name: "payload", value: { kind: "list", items: [0] } },
   ]);
-  assert.deepEqual(counts, {
-    ownKeys: 1,
-    descriptors: 2,
-    gets: 0,
-    prototypes: 1,
-  });
+  assert.deepEqual(counts, { ownKeys: 1, descriptors: 2, gets: 0, prototypes: 1 });
 });
 
 test("instruction plans reject accessors before validation or execution", () => {
   // EVIDENCE: JSON preserves the compiler-produced plan before an accessor is installed on optional padding.
-  const valid = JSON.parse(JSON.stringify(plan("exit"))) as InstructionPlan & {
-    padding?: unknown;
-  };
+  const valid = JSON.parse(JSON.stringify(plan("exit"))) as InstructionPlan & { padding?: unknown };
   let reads = 0;
   Object.defineProperty(valid, "padding", {
     enumerable: true,
@@ -157,12 +147,16 @@ test("instruction plans reject accessors before validation or execution", () => 
   const before = structuredClone(snapshot);
   let randomCalls = 0;
   assert.throws(
-    () => run(valid, snapshot, { random: { next: () => {
-      randomCalls += 1;
-      return 0.5;
-    } } }),
-    (error: unknown) =>
-      error instanceof RuntimeDataError && error.code === "TSR100",
+    () =>
+      run(valid, snapshot, {
+        random: {
+          next: () => {
+            randomCalls += 1;
+            return 0.5;
+          },
+        },
+      }),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
   );
   assert.equal(reads, 0);
   assert.equal(randomCalls, 0);
@@ -172,14 +166,19 @@ test("instruction plans reject accessors before validation or execution", () => 
 test("runtime execution uses the captured proxy plan rather than proxy get results", () => {
   const target = structuredClone(plan("exit"));
   const counts = zeroCounts();
-  const proxied = stableProxy(target, counts, (key) =>
-    key === "instructions" ? [] : Reflect.get(target, key), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
+  const proxied = stableProxy(
+    target,
+    counts,
+    (key) => (key === "instructions" ? [] : Reflect.get(target, key)), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
   );
   const snapshot = createFreshRuntimeSnapshot(target);
 
   const result = run(proxied, snapshot);
 
-  assert.deepEqual(result.events.map((event) => event.kind), ["exit"]);
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["exit"],
+  );
   assert.equal(result.snapshot.status, "halted");
   assert.equal(counts.gets, 0);
   assert.equal(counts.ownKeys, 1);
@@ -205,12 +204,16 @@ test("runtime snapshots reject accessors before clone, execution, events, or RNG
   const beforeRng = snapshot.rng.state;
   let randomCalls = 0;
   assert.throws(
-    () => run(compiled, snapshot, { random: { next: () => {
-      randomCalls += 1;
-      return 0.5;
-    } } }),
-    (error: unknown) =>
-      error instanceof RuntimeDataError && error.code === "TSR101",
+    () =>
+      run(compiled, snapshot, {
+        random: {
+          next: () => {
+            randomCalls += 1;
+            return 0.5;
+          },
+        },
+      }),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
   );
   assert.equal(reads, 0);
   assert.equal(randomCalls, 0);
@@ -222,13 +225,18 @@ test("runtime execution consumes a stable captured proxy snapshot", () => {
   const compiled = plan("exit");
   const target = createFreshRuntimeSnapshot(compiled);
   const counts = zeroCounts();
-  const proxied = stableProxy(target, counts, (key) =>
-    key === "status" ? "halted" : Reflect.get(target, key), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
+  const proxied = stableProxy(
+    target,
+    counts,
+    (key) => (key === "status" ? "halted" : Reflect.get(target, key)), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
   );
 
   const result = run(compiled, proxied);
 
-  assert.deepEqual(result.events.map((event) => event.kind), ["exit"]);
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["exit"],
+  );
   assert.equal(result.snapshot.status, "halted");
   assert.equal(counts.gets, 0);
   assert.equal(counts.ownKeys, 1);
@@ -236,10 +244,7 @@ test("runtime execution consumes a stable captured proxy snapshot", () => {
 
 test("checkpoint restoration converts accessor and proxy trap failures to TSK002", () => {
   const compiled = plan();
-  const valid = createCheckpoint(
-    compiled,
-    createFreshRuntimeSnapshot(compiled),
-  );
+  const valid = createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled));
 
   let reads = 0;
   const accessorCheckpoint = {
@@ -270,8 +275,7 @@ test("checkpoint restoration converts accessor and proxy trap failures to TSK002
   });
   assert.throws(
     () => restoreCheckpoint(trapCheckpoint),
-    (error: unknown) =>
-      error instanceof CheckpointError && error.info.code === "TSK002",
+    (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002",
   );
 });
 
@@ -286,10 +290,7 @@ test("serializable-value APIs reject accessors and consume stable proxy arrays",
     },
   });
 
-  assert.equal(
-    validateSerializableValue(unstable),
-    "$.items is not a JSON-safe runtime value.",
-  );
+  assert.equal(validateSerializableValue(unstable), "$.items is not a JSON-safe runtime value.");
   assert.throws(
     () => {
       // EVIDENCE: the accessor-bearing list deliberately violates the serializable-value input contract.
@@ -302,14 +303,10 @@ test("serializable-value APIs reject accessors and consume stable proxy arrays",
   const counts = zeroCounts();
   const source = [0];
   const proxied = stableProxy(source, counts, () => deepList(20_000));
-  assert.deepEqual(createSerializableList(proxied), {
-    kind: "list",
-    items: [0],
-  });
+  assert.deepEqual(createSerializableList(proxied), { kind: "list", items: [0] });
   assert.equal(counts.gets, 0);
   assert.equal(counts.ownKeys, 1);
 });
-
 
 test("low-level builtin results are captured once and invalid accessors fail as TSR013", () => {
   const compiled = plan("let value = unstable()\nexit", ["unstable"]);
@@ -326,14 +323,19 @@ test("low-level builtin results are captured once and invalid accessors fail as 
   });
 
   const result = run(compiled, initial, {
-    builtins: { unstable: () => {
-      // EVIDENCE: the builtin deliberately returns an accessor-bearing list for runtime capture rejection.
-      return returned as never;
-    } },
+    builtins: {
+      unstable: () => {
+        // EVIDENCE: the builtin deliberately returns an accessor-bearing list for runtime capture rejection.
+        return returned as never;
+      },
+    },
   });
 
   assert.equal(reads, 0);
-  assert.deepEqual(result.events.map((event) => event.kind), ["runtimeFailure"]);
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["runtimeFailure"],
+  );
   assert.equal(result.snapshot.failure?.code, "TSR013");
   assert.deepEqual(initial, before);
 });
@@ -342,8 +344,10 @@ test("low-level builtin proxy results execute only the captured descriptor graph
   const compiled = plan("say unstable().first\nexit", ["unstable"]);
   const counts = zeroCounts();
   const target: SerializableRuntimeList = { kind: "list", items: [0] };
-  const returned = stableProxy(target, counts, (key) =>
-    key === "items" ? [999] : Reflect.get(target, key), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
+  const returned = stableProxy(
+    target,
+    counts,
+    (key) => (key === "items" ? [999] : Reflect.get(target, key)), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
   );
 
   const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled), {

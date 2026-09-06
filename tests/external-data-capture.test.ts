@@ -39,14 +39,13 @@ function compiledPlan(source = "exit"): InstructionPlan {
 
 function mutablePlan(source = "exit"): InstructionPlan & Record<string, unknown> {
   // EVIDENCE: JSON round-trips a compiler-produced plan before fixtures add or replace external fields.
-  return JSON.parse(JSON.stringify(compiledPlan(source))) as InstructionPlan & Record<string, unknown>;
+  return JSON.parse(JSON.stringify(compiledPlan(source))) as InstructionPlan &
+    Record<string, unknown>;
 }
 
 function mutableSnapshot(plan: InstructionPlan): RuntimeSnapshot {
   // EVIDENCE: JSON round-trips the runtime-produced snapshot before boundary-focused fixture mutations.
-  return JSON.parse(
-    JSON.stringify(createFreshRuntimeSnapshot(plan)),
-  ) as RuntimeSnapshot;
+  return JSON.parse(JSON.stringify(createFreshRuntimeSnapshot(plan))) as RuntimeSnapshot;
 }
 
 // oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: fixture helper returns deliberately unvalidated external data for the validation boundary under test.
@@ -72,7 +71,7 @@ function deepSerializableObject(depth: number): SerializableRuntimeValue {
   // EVIDENCE: this JSON template constructs nested canonical object properties with a string leaf.
   return JSON.parse(
     `${'{"kind":"object","properties":[{"name":"value","value":'.repeat(depth)}` +
-      `"leaf"${'}]}'.repeat(depth)}`,
+      `"leaf"${"}]}".repeat(depth)}`,
   ) as SerializableRuntimeValue;
 }
 
@@ -86,16 +85,10 @@ function addBinding(snapshot: RuntimeSnapshot, value: unknown): void {
 
 function checkpoint(plan: InstructionPlan, snapshot: RuntimeSnapshot): RuntimeCheckpoint {
   // EVIDENCE: JSON round-trips a checkpoint created from the supplied validated plan and snapshot.
-  return JSON.parse(
-    JSON.stringify(createCheckpoint(plan, snapshot)),
-  ) as RuntimeCheckpoint;
+  return JSON.parse(JSON.stringify(createCheckpoint(plan, snapshot))) as RuntimeCheckpoint;
 }
 
-function assertCheckpointError(
-  operation: () => void,
-  message: string,
-  path?: string,
-): void {
+function assertCheckpointError(operation: () => void, message: string, path?: string): void {
   assert.throws(operation, (error: unknown) => {
     assert.ok(error instanceof CheckpointError);
     assert.equal(error.info.code, "TSK002");
@@ -116,20 +109,10 @@ function proxyArray(
     },
     getOwnPropertyDescriptor(_target, key) {
       if (key === "length") {
-        return {
-          value: length,
-          writable: true,
-          enumerable: false,
-          configurable: false,
-        };
+        return { value: length, writable: true, enumerable: false, configurable: false };
       }
       if (typeof key === "string" && key in values) {
-        return {
-          value: values[key],
-          writable: true,
-          enumerable: true,
-          configurable: true,
-        };
+        return { value: values[key], writable: true, enumerable: true, configurable: true };
       }
       return undefined;
     },
@@ -237,13 +220,11 @@ test("external plan capture freezes the detached graph without freezing generic 
 });
 
 test("validation-only plan capture remains mutable while returned plan capture freezes", () => {
-  const plan = mutablePlan("say \"ready\"");
+  const plan = mutablePlan('say "ready"');
   const validationCapture = capturePlanData(plan);
   assert.ok("value" in validationCapture);
   // EVIDENCE: capturePlanData succeeded for the compiler-produced plan and retains instruction spans.
-  const validationPlan = validationCapture.value as {
-    instructions: Array<{ span: object }>;
-  };
+  const validationPlan = validationCapture.value as { instructions: Array<{ span: object }> };
   assert.notEqual(validationPlan, plan);
   assert.equal(Object.isFrozen(validationPlan), false);
   assert.equal(Object.isFrozen(validationPlan.instructions), false);
@@ -261,10 +242,7 @@ test("validation-only plan capture remains mutable while returned plan capture f
 
 test("runtime snapshot capture remains mutable after plan capture freezes on leave", () => {
   const plan = compiledPlan();
-  const snapshot = captureRuntimeSnapshotWithValidatedPlan(
-    mutableSnapshot(plan),
-    plan,
-  );
+  const snapshot = captureRuntimeSnapshotWithValidatedPlan(mutableSnapshot(plan), plan);
   assert.notEqual(snapshot.snapshot, null);
   assert.equal(Object.isFrozen(snapshot.snapshot), false);
   assert.equal(Object.isFrozen(snapshot.snapshot!.frames), false);
@@ -273,10 +251,10 @@ test("runtime snapshot capture remains mutable after plan capture freezes on lea
 });
 
 test("parsed checkpoint plans retain the independent freeze path", () => {
-  const plan = compiledPlan("say \"ready\"");
-  const restored = deserializeCheckpoint(JSON.stringify(
-    createCheckpoint(plan, createFreshRuntimeSnapshot(plan)),
-  ));
+  const plan = compiledPlan('say "ready"');
+  const restored = deserializeCheckpoint(
+    JSON.stringify(createCheckpoint(plan, createFreshRuntimeSnapshot(plan))),
+  );
   assert.equal(Object.isFrozen(restored.plan), true);
   assert.equal(Object.isFrozen(restored.plan.instructions), true);
   assert.equal(Object.isFrozen(restored.plan.instructions[0]!), true);
@@ -401,7 +379,10 @@ test("external capture rejects non-canonical proxy arrays before indexed travers
 });
 
 test("external capture rejects proxy indexes that conflict with validated array length", () => {
-  for (const keys of [["length", "4294967294"], ["4294967294", "length"]]) {
+  for (const keys of [
+    ["length", "4294967294"],
+    ["4294967294", "length"],
+  ]) {
     assert.deepEqual(captureExternalData(proxyArray(0, keys, { "4294967294": 1 })), {
       ok: false,
       failure: { kind: "nonJsonSafeValue", path: "$" },
@@ -416,17 +397,16 @@ test("external capture rejects proxy indexes that conflict with validated array 
     );
   }
 
-  assert.equal(
-    captureExternalData(proxyArray(2, ["1", "length"], { "1": "present" })).ok,
-    false,
-  );
+  assert.equal(captureExternalData(proxyArray(2, ["1", "length"], { "1": "present" })).ok, false);
 });
 
 test("external capture rejects malformed proxy length descriptors without invoking getters", () => {
   for (const getOwnPropertyDescriptor of [
     () => undefined,
     () => ({ get: () => 0, enumerable: false, configurable: false }),
-    () => { throw new Error("raw descriptor failure"); },
+    () => {
+      throw new Error("raw descriptor failure");
+    },
   ]) {
     const hostile = new Proxy([], { getOwnPropertyDescriptor });
     assert.deepEqual(captureExternalData(hostile), {
@@ -444,11 +424,9 @@ test("proxy array length inflation is structured at plan, snapshot, checkpoint, 
   (malformedPlan as { instructions: unknown }).instructions = hostile();
   assert.deepEqual(validateInstructionPlan(malformedPlan), {
     valid: false,
-    errors: [{
-      code: "TSC002",
-      message: "Plan contains a non-JSON-safe value.",
-      path: "$.instructions",
-    }],
+    errors: [
+      { code: "TSC002", message: "Plan contains a non-JSON-safe value.", path: "$.instructions" },
+    ],
   });
 
   const plan = compiledPlan();
@@ -503,17 +481,15 @@ test("serializable cloning accepts broad dense arrays and rejects sparse arrays"
     assert.equal(cloned.items.length, acceptedCount);
   }
 
-  const extended = new Array<SerializableRuntimeValue>(
-    acceptedCount + 1,
-  ).fill(null);
+  const extended = new Array<SerializableRuntimeValue>(acceptedCount + 1).fill(null);
   const extendedClone = cloneSerializableValue({ kind: "list", items: extended });
   assert.ok(typeof extendedClone === "object" && extendedClone?.kind === "list");
   assert.equal(extendedClone.items.length, extended.length);
 
-  assert.deepEqual(
-    cloneSerializableValue({ kind: "list", items: ["a", null, 3] }),
-    { kind: "list", items: ["a", null, 3] },
-  );
+  assert.deepEqual(cloneSerializableValue({ kind: "list", items: ["a", null, 3] }), {
+    kind: "list",
+    items: ["a", null, 3],
+  });
 
   const smallSparse: SerializableRuntimeValue[] = [];
   smallSparse.length = 2;
@@ -536,11 +512,9 @@ test("plan validation rejects sparse instruction length before execution", () =>
 
   assert.deepEqual(validateInstructionPlan(malformedPlan), {
     valid: false,
-    errors: [{
-      code: "TSC002",
-      message: "Plan contains a non-JSON-safe value.",
-      path: "$.instructions",
-    }],
+    errors: [
+      { code: "TSC002", message: "Plan contains a non-JSON-safe value.", path: "$.instructions" },
+    ],
   });
 
   for (const operation of [executeInstruction, stepToEvent, run]) {
@@ -548,9 +522,15 @@ test("plan validation rejects sparse instruction length before execution", () =>
     const before = structuredClone(snapshot);
     let randomCalls = 0;
     assert.throws(
-      () => operation(malformedPlan, snapshot, {
-        random: { next: () => { randomCalls += 1; return 0.5; } },
-      }),
+      () =>
+        operation(malformedPlan, snapshot, {
+          random: {
+            next: () => {
+              randomCalls += 1;
+              return 0.5;
+            },
+          },
+        }),
       (error: unknown) =>
         error instanceof RuntimeDataError &&
         error.code === "TSR100" &&
@@ -578,9 +558,15 @@ test("snapshot and checkpoint paths reject sparse arrays as malformed data", () 
     const eventSequence = snapshot.nextEventSequence;
     let randomCalls = 0;
     assert.throws(
-      () => operation(plan, snapshot, {
-        random: { next: () => { randomCalls += 1; return 0.5; } },
-      }),
+      () =>
+        operation(plan, snapshot, {
+          random: {
+            next: () => {
+              randomCalls += 1;
+              return 0.5;
+            },
+          },
+        }),
       (error: unknown) =>
         error instanceof RuntimeDataError &&
         error.code === "TSR101" &&
@@ -591,10 +577,7 @@ test("snapshot and checkpoint paths reject sparse arrays as malformed data", () 
     assert.equal(snapshot.nextEventSequence, eventSequence);
   }
 
-  const malformedCheckpoint = checkpoint(
-    plan,
-    createFreshRuntimeSnapshot(plan),
-  );
+  const malformedCheckpoint = checkpoint(plan, createFreshRuntimeSnapshot(plan));
   malformedCheckpoint.snapshot.frames.length = 0xffff_ffff;
   assertCheckpointError(
     () => restoreCheckpoint(malformedCheckpoint),
@@ -626,15 +609,14 @@ test("cycles, non-plain objects, non-finite numbers, and malformed kinds remain 
     "Plan contains a non-finite number.",
   );
 
-  const cyclicValue: {
-    kind: "list";
-    items: SerializableRuntimeValue[];
-  } = { kind: "list", items: [] };
+  const cyclicValue: { kind: "list"; items: SerializableRuntimeValue[] } = {
+    kind: "list",
+    items: [],
+  };
   cyclicValue.items.push(cyclicValue);
   assert.throws(
     () => cloneSerializableValue(cyclicValue),
-    (error: unknown) =>
-      error instanceof SerializableValueError && error.code === "cyclic",
+    (error: unknown) => error instanceof SerializableValueError && error.code === "cyclic",
   );
 
   assert.throws(

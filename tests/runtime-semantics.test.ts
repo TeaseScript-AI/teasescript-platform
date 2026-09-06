@@ -29,7 +29,11 @@ test("deep-copies lists for declarations and direct assignments", () => {
   );
 
   assert.deepEqual(result.errors, []);
-  assert.deepEqual(captured, [[1, 2], [10, 2], [1, 20]]);
+  assert.deepEqual(captured, [
+    [1, 2],
+    [10, 2],
+    [1, 20],
+  ]);
 });
 
 test("recursively deep-copies nested lists", () => {
@@ -49,7 +53,10 @@ test("recursively deep-copies nested lists", () => {
   assert.deepEqual(result.errors, []);
   assert.deepEqual(captured, [
     [[1, 2], [3]],
-    [[1, 99], [3, 4]],
+    [
+      [1, 99],
+      [3, 4],
+    ],
   ]);
 });
 
@@ -67,14 +74,10 @@ test("passes builtins deep copies of canonical runtime values", () => {
     nested.items[0] = 9;
     return null;
   };
-  const result = executeSource(
-    [
-      "let original = [[1]]",
-      "mutate(original)",
-      "capture(original)",
-    ],
-    { capture: captureInto(captured), mutate },
-  );
+  const result = executeSource(["let original = [[1]]", "mutate(original)", "capture(original)"], {
+    capture: captureInto(captured),
+    mutate,
+  });
 
   assert.deepEqual(result.errors, []);
   assert.deepEqual(captured, [[[1]]]);
@@ -94,10 +97,7 @@ test("recursively deep-copies ordinary objects", () => {
   );
 
   assert.deepEqual(result.errors, []);
-  assert.deepEqual(captured, [
-    { nested: { value: 1 } },
-    { nested: { value: 2 } },
-  ]);
+  assert.deepEqual(captured, [{ nested: { value: 1 } }, { nested: { value: 2 } }]);
 });
 
 test("deep-copies objects containing lists and sets", () => {
@@ -152,14 +152,10 @@ test("rejects list, object, and set values in set literals at the semantic bound
   for (const [source, elementText] of cases) {
     const start = source.indexOf(elementText);
     const result = compileSource(source);
-    const diagnostic = result.semanticDiagnostics.find(
-      (candidate) => candidate.code === "TSV006",
-    );
+    const diagnostic = result.semanticDiagnostics.find((candidate) => candidate.code === "TSV006");
     assert.notEqual(diagnostic, undefined);
     assert.deepEqual(
-      diagnostic === undefined
-        ? null
-        : [diagnostic.span.start.offset, diagnostic.span.end.offset],
+      diagnostic === undefined ? null : [diagnostic.span.start.offset, diagnostic.span.end.offset],
       [start, start + elementText.length],
     );
   }
@@ -209,11 +205,7 @@ test("errors for first, last, and random on empty lists and sets", () => {
     const result = executeSource(source);
     const start = source.indexOf(`values.${property}`);
     assert.deepEqual(
-      result.errors.map((error) => [
-        error.code,
-        error.span.start.offset,
-        error.span.end.offset,
-      ]),
+      result.errors.map((error) => [error.code, error.span.start.offset, error.span.end.offset]),
       [[code, start, start + `values.${property}`.length]],
     );
   }
@@ -228,13 +220,12 @@ test("does not advance RNG state for empty list or set random", () => {
         return 0;
       },
     };
-    const result = executeSource(
-      `let values = ${literal}\nsay values.random`,
-      undefined,
-      random,
-    );
+    const result = executeSource(`let values = ${literal}\nsay values.random`, undefined, random);
 
-    assert.deepEqual(result.errors.map((error) => error.code), ["TSR019"]);
+    assert.deepEqual(
+      result.errors.map((error) => error.code),
+      ["TSR019"],
+    );
     assert.equal(calls, 0);
   }
 });
@@ -317,7 +308,10 @@ test("warns when list.remove cannot find a matching value", () => {
 
   assert.deepEqual(result.errors, []);
   assert.deepEqual(captured, [[1], null]);
-  assert.deepEqual(result.events.map((event) => event.kind), ["developerWarning", "exit"]);
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["developerWarning", "exit"],
+  );
   assert.deepEqual(
     result.warnings.map((warning) => [
       warning.severity,
@@ -326,31 +320,31 @@ test("warns when list.remove cannot find a matching value", () => {
       warning.span.start.offset,
       warning.span.end.offset,
     ]),
-    [[
-      "warning",
-      "TSW002",
-      "list.remove(value) found no matching value; the list was left unchanged.",
-      start,
-      start + call.length,
-    ]],
+    [
+      [
+        "warning",
+        "TSW002",
+        "list.remove(value) found no matching value; the list was left unchanged.",
+        start,
+        start + call.length,
+      ],
+    ],
   );
 });
 
 test("removes only the first matching list value without a missing-value warning", () => {
   const captured: unknown[] = [];
   const result = executeSource(
-    [
-      "let values = [1, 1, 2]",
-      "values.remove(1)",
-      "capture(values)",
-      "exit",
-    ],
+    ["let values = [1, 1, 2]", "values.remove(1)", "capture(values)", "exit"],
     { capture: captureInto(captured) },
   );
 
   assert.deepEqual(result.errors, []);
   assert.deepEqual(captured, [[1, 2]]);
-  assert.equal(result.warnings.some((warning) => warning.code === "TSW002"), false);
+  assert.equal(
+    result.warnings.some((warning) => warning.code === "TSW002"),
+    false,
+  );
 });
 
 test("does not apply the list.remove warning to sets or other list removals", () => {
@@ -365,7 +359,10 @@ test("does not apply the list.remove warning to sets or other list removals", ()
   ]);
 
   assert.deepEqual(result.errors, []);
-  assert.equal(result.warnings.some((warning) => warning.code === "TSW002"), false);
+  assert.equal(
+    result.warnings.some((warning) => warning.code === "TSW002"),
+    false,
+  );
 });
 
 interface SourceExecutionResult {
@@ -385,11 +382,10 @@ function executeSource(
   });
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
-  const result = run(
-    compiled.plan!,
-    createImmediatePacingRuntimeSnapshot(compiled.plan!),
-    { random, ...(builtins === undefined ? {} : { builtins }) },
-  );
+  const result = run(compiled.plan!, createImmediatePacingRuntimeSnapshot(compiled.plan!), {
+    random,
+    ...(builtins === undefined ? {} : { builtins }),
+  });
   return {
     events: result.events,
     errors: result.events.filter(
@@ -410,7 +406,8 @@ function captureInto(values: unknown[]): RuntimeBuiltinFunction {
   };
 }
 
-type NativeValue = null | boolean | number | string | NativeValue[] | { [key: string]: NativeValue };
+type NativeValue =
+  null | boolean | number | string | NativeValue[] | { [key: string]: NativeValue };
 
 function toNative(value: SerializableRuntimeValue): NativeValue {
   if (value === null || typeof value !== "object") return value;
@@ -419,5 +416,7 @@ function toNative(value: SerializableRuntimeValue): NativeValue {
   }
   if (value.kind === "speakerReference") return value.identifier;
   if (value.kind === "range") return { ...value };
-  return Object.fromEntries(value.properties.map(({ name, value: item }) => [name, toNative(item)]));
+  return Object.fromEntries(
+    value.properties.map(({ name, value: item }) => [name, toNative(item)]),
+  );
 }

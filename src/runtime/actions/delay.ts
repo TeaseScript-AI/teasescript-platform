@@ -1,3 +1,8 @@
 export function isValidSessionTime(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= Number.MAX_SAFE_INTEGER
+  );
 }

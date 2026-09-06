@@ -3,10 +3,7 @@ import test from "node:test";
 
 import type { Program } from "../src/ast.js";
 import { captureProgramAst } from "../src/ast-validation.js";
-import {
-  InstructionCompilationError,
-  compileProgram,
-} from "../src/compiler/compile-program.js";
+import { InstructionCompilationError, compileProgram } from "../src/compiler/compile-program.js";
 import { parse } from "../src/parser.js";
 
 function mutableProgram(source: string): Program & Record<string, unknown> {
@@ -31,8 +28,7 @@ test("captured AST roots ignore inherited Object.prototype data and getters", ()
   try {
     assert.throws(
       () => compileProgram(program),
-      (error: unknown) =>
-        error instanceof InstructionCompilationError && error.code === "TSC005",
+      (error: unknown) => error instanceof InstructionCompilationError && error.code === "TSC005",
     );
     assert.equal(getterCalls, 0);
   } finally {
@@ -110,9 +106,9 @@ test("direct AST source positions reject non-safe integers", () => {
 test("direct AST capture accepts dense input beyond the removed work threshold", () => {
   const program = mutableProgram("exit");
   // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: expose parser-produced statements to install the dense threshold-sized array.
-  (program as unknown as { statements: unknown[] }).statements = new Array(
-    20_000,
-  ).fill(program.statements[0]);
+  (program as unknown as { statements: unknown[] }).statements = new Array(20_000).fill(
+    program.statements[0],
+  );
 
   const captured = captureProgramAst(program);
 

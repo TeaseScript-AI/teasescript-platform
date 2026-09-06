@@ -64,18 +64,21 @@ export function setCapturedTemporary(
   else existing.value = copied;
 }
 
-export function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeActionSettlementSnapshot {
-  if (settlement.actionKind === "delay") return {
-    actionId: settlement.actionId,
-    actionKind: "delay",
-    settlementKind: "completed",
-    owningInstruction: settlement.owningInstruction,
-    continuationInstruction: settlement.continuationInstruction,
-    requestEventSequence: settlement.requestEventSequence,
-    completionEventSequence: settlement.completionEventSequence,
-    deadlineMs: settlement.deadlineMs,
-    completedAtMs: settlement.completedAtMs,
-  };
+export function cloneSettlement(
+  settlement: RuntimeActionSettlementSnapshot,
+): RuntimeActionSettlementSnapshot {
+  if (settlement.actionKind === "delay")
+    return {
+      actionId: settlement.actionId,
+      actionKind: "delay",
+      settlementKind: "completed",
+      owningInstruction: settlement.owningInstruction,
+      continuationInstruction: settlement.continuationInstruction,
+      requestEventSequence: settlement.requestEventSequence,
+      completionEventSequence: settlement.completionEventSequence,
+      deadlineMs: settlement.deadlineMs,
+      completedAtMs: settlement.completedAtMs,
+    };
   if (settlement.actionKind === "chatPacingGate") return { ...settlement };
   return {
     actionId: settlement.actionId,
@@ -96,10 +99,7 @@ export function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): Ru
 
 export function assertCounterCanAdvance(value: number, field: string): void {
   if (value >= Number.MAX_SAFE_INTEGER) {
-    throw new RuntimeDataError(
-      "TSR101",
-      `Runtime ${field} cannot be advanced safely.`,
-    );
+    throw new RuntimeDataError("TSR101", `Runtime ${field} cannot be advanced safely.`);
   }
 }
 
@@ -109,8 +109,12 @@ export function assertEventSequenceCapacity(
   span?: SourceSpan | PlanSourceLocation,
 ): void {
   if (snapshot.nextEventSequence <= Number.MAX_SAFE_INTEGER - count) return;
-  if (span !== undefined) throw new RuntimeFault("TSR051", "Runtime event sequence space is exhausted.", copySpan(span));
-  throw new RuntimeDataError("TSR101", "Runtime nextEventSequence cannot satisfy the pending action atomically.");
+  if (span !== undefined)
+    throw new RuntimeFault("TSR051", "Runtime event sequence space is exhausted.", copySpan(span));
+  throw new RuntimeDataError(
+    "TSR101",
+    "Runtime nextEventSequence cannot satisfy the pending action atomically.",
+  );
 }
 
 /**
@@ -153,20 +157,14 @@ export function captureExecutableData(
       capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
     );
   }
-  const capturedSnapshot = captureRuntimeSnapshotWithValidatedPlan(
-    snapshot,
-    capturedPlan.plan,
-  );
+  const capturedSnapshot = captureRuntimeSnapshotWithValidatedPlan(snapshot, capturedPlan.plan);
   if (!capturedSnapshot.validation.valid || capturedSnapshot.snapshot === null) {
     throw new RuntimeDataError(
       "TSR101",
       capturedSnapshot.validation.errors[0] ?? "Malformed runtime snapshot.",
     );
   }
-  return Object.freeze({
-    plan: capturedPlan.plan,
-    snapshot: capturedSnapshot.snapshot,
-  });
+  return Object.freeze({ plan: capturedPlan.plan, snapshot: capturedSnapshot.snapshot });
 }
 
 export function result(
@@ -174,14 +172,14 @@ export function result(
   events: readonly InterpreterEvent[],
   instructionsExecuted: number,
 ): RuntimeOperationResult {
-  return Object.freeze({
-    snapshot,
-    events: Object.freeze([...events]),
-    instructionsExecuted,
-  });
+  return Object.freeze({ snapshot, events: Object.freeze([...events]), instructionsExecuted });
 }
 
-export function pendingResult<T>(snapshot: RuntimeSnapshot, events: readonly InterpreterEvent[], outcome: T): PendingActionOperationResult<T> {
+export function pendingResult<T>(
+  snapshot: RuntimeSnapshot,
+  events: readonly InterpreterEvent[],
+  outcome: T,
+): PendingActionOperationResult<T> {
   return Object.freeze({ ...result(snapshot, events, 0), outcome });
 }
 

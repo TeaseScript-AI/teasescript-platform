@@ -43,19 +43,14 @@ test("parses and normalizes all accepted milestone numeric literals", () => {
 });
 
 test("parses true, false, and null literals", () => {
-  const result = parse(
-    ["let yes = true", "let no = false", "let missing = null"].join("\n"),
-  );
+  const result = parse(["let yes = true", "let no = false", "let missing = null"].join("\n"));
 
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(
     result.program.statements.map((statement) => {
       if (statement.kind !== "letStatement") return null;
       const initializer = statement.initializer;
-      if (
-        initializer.kind !== "booleanLiteral" &&
-        initializer.kind !== "nullLiteral"
-      ) {
+      if (initializer.kind !== "booleanLiteral" && initializer.kind !== "nullLiteral") {
         return null;
       }
       return [initializer.kind, initializer.value];
@@ -69,9 +64,7 @@ test("parses true, false, and null literals", () => {
 });
 
 test("builds V30 precedence with comparison stronger than not", () => {
-  const expression = initializerOf(
-    "let result = 1 + 2 * 3 == 7 and not false or false",
-  );
+  const expression = initializerOf("let result = 1 + 2 * 3 == 7 and not false or false");
 
   assert.equal(expression.kind, "binaryExpression");
   if (expression.kind !== "binaryExpression") return;
@@ -117,19 +110,11 @@ test("parses left-associated property, index, and call postfix operations", () =
 });
 
 test("parses positional and named arguments and rejects mixing", () => {
-  const result = parse(
-    [
-      "moveTo(10, 20)",
-      "moveTo(x: 10, y: 20)",
-      "moveTo(10, y: 20)",
-    ].join("\n"),
-  );
+  const result = parse(["moveTo(10, 20)", "moveTo(x: 10, y: 20)", "moveTo(10, y: 20)"].join("\n"));
 
   assert.deepEqual(
     result.program.statements.map((statement) =>
-      statement.kind === "expressionStatement"
-        ? statement.expression.argumentStyle
-        : null,
+      statement.kind === "expressionStatement" ? statement.expression.argumentStyle : null,
     ),
     ["positional", "named", "named"],
   );
@@ -140,9 +125,7 @@ test("parses positional and named arguments and rejects mixing", () => {
 });
 
 test("parses list, object, and set literals", () => {
-  const result = parse(
-    'let value = { items: ["key", 2], unique: set[1, 2, 2] }',
-  );
+  const result = parse('let value = { items: ["key", 2], unique: set[1, 2, 2] }');
 
   assert.deepEqual(result.diagnostics, []);
   const initializer = initializerFromResult(result);
@@ -166,8 +149,7 @@ test("preserves scalar, list, optional, and set type annotations", () => {
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(
     result.program.statements.map((statement) => {
-      const annotation =
-        statement.kind === "letStatement" ? statement.typeAnnotation : null;
+      const annotation = statement.kind === "letStatement" ? statement.typeAnnotation : null;
       return annotation === null
         ? null
         : {
@@ -186,13 +168,7 @@ test("preserves scalar, list, optional, and set type annotations", () => {
 });
 
 test("parses direct, property, and index assignments", () => {
-  const result = parse(
-    [
-      "score = 20",
-      "door.locked = false",
-      'items[0] = "key"',
-    ].join("\n"),
-  );
+  const result = parse(["score = 20", "door.locked = false", 'items[0] = "key"'].join("\n"));
 
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(
@@ -290,14 +266,6 @@ function initializerFromResult(result: ReturnType<typeof parse>): Expression {
   return statement.initializer;
 }
 
-function typeShape(
-  name: string,
-  collection: "list" | "set" | null,
-  optional: boolean,
-) {
-  return {
-    name,
-    collection,
-    optional,
-  };
+function typeShape(name: string, collection: "list" | "set" | null, optional: boolean) {
+  return { name, collection, optional };
 }
