@@ -4,12 +4,14 @@ export function calculateSmartPacingDurationMs(
   visibleText: string,
   settings: ChatPacingSettings,
 ): number {
-  const wordDelayMs = settings.delayPerWordMs === 0
-    ? 0
-    : multiplyPacingValues(countWords(visibleText), settings.delayPerWordMs);
-  const characterDelayMs = settings.delayPerCharacterMs === 0
-    ? 0
-    : multiplyPacingValues(countCodePoints(visibleText), settings.delayPerCharacterMs);
+  const wordDelayMs =
+    settings.delayPerWordMs === 0
+      ? 0
+      : multiplyPacingValues(countWords(visibleText), settings.delayPerWordMs);
+  const characterDelayMs =
+    settings.delayPerCharacterMs === 0
+      ? 0
+      : multiplyPacingValues(countCodePoints(visibleText), settings.delayPerCharacterMs);
   return addPacingValues(settings.baseDelayMs, Math.max(wordDelayMs, characterDelayMs));
 }
 
@@ -48,10 +50,7 @@ export function calculatePacingDeadlineMs(
   if (durationMs === 0) return currentSessionTimeMs;
 
   const deadlineMs = currentSessionTimeMs + durationMs;
-  if (
-    !isSessionTime(deadlineMs) ||
-    deadlineMs <= currentSessionTimeMs
-  ) {
+  if (!isSessionTime(deadlineMs) || deadlineMs <= currentSessionTimeMs) {
     throw new RangeError("Pacing duration cannot produce a supported future deadline.");
   }
   return deadlineMs;
@@ -94,8 +93,10 @@ function addPacingValues(left: number, right: number): number {
 }
 
 function isSessionTime(value: unknown): value is number {
-  return typeof value === "number" &&
+  return (
+    typeof value === "number" &&
     Number.isFinite(value) &&
     value >= 0 &&
-    value <= MAX_RUNTIME_SESSION_TIME_MS;
+    value <= MAX_RUNTIME_SESSION_TIME_MS
+  );
 }

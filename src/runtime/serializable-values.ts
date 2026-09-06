@@ -1,7 +1,4 @@
-import {
-  captureExternalData,
-  type ExternalDataFailure,
-} from "../external-data-capture.js";
+import { captureExternalData, type ExternalDataFailure } from "../external-data-capture.js";
 
 export type SerializableRuntimeScalar = string | number | boolean | null;
 
@@ -71,10 +68,7 @@ export function createSerializableList(
 export function createCapturedSerializableList(
   items: readonly SerializableRuntimeValue[],
 ): SerializableRuntimeList {
-  return {
-    kind: "list",
-    items: items.map((item) => cloneCapturedSerializableValue(item)),
-  };
+  return { kind: "list", items: items.map((item) => cloneCapturedSerializableValue(item)) };
 }
 
 export function createSerializableObject(
@@ -147,9 +141,7 @@ export function createCapturedSerializableSet(
   return { kind: "set", items: capturedItems };
 }
 
-export function cloneSerializableValue(
-  value: SerializableRuntimeValue,
-): SerializableRuntimeValue {
+export function cloneSerializableValue(value: SerializableRuntimeValue): SerializableRuntimeValue {
   const captured = captureAndValidateSerializableValue(value);
   if (captured.failure !== null) {
     throw new SerializableValueError(
@@ -169,11 +161,13 @@ export function cloneCapturedSerializableValue(
   if (value.kind !== "list" && value.kind !== "object") return root;
 
   type CompositeValue = SerializableRuntimeList | SerializableRuntimeObject;
-  const work: Array<readonly [CompositeValue, CompositeValue]> = [[
-    value,
-    // EVIDENCE: validation: the non-scalar root clone preserves the list/object kind of the source.
-    root as CompositeValue,
-  ]];
+  const work: Array<readonly [CompositeValue, CompositeValue]> = [
+    [
+      value,
+      // EVIDENCE: validation: the non-scalar root clone preserves the list/object kind of the source.
+      root as CompositeValue,
+    ],
+  ];
   while (work.length > 0) {
     const [source, target] = work.pop()!;
     if (source.kind === "list") {
@@ -183,8 +177,11 @@ export function cloneCapturedSerializableValue(
         const nested = source.items[index]!;
         const cloned = cloneSerializableNode(nested);
         targetItems[index] = cloned;
-        if (typeof nested === "object" && nested !== null &&
-          (nested.kind === "list" || nested.kind === "object")) {
+        if (
+          typeof nested === "object" &&
+          nested !== null &&
+          (nested.kind === "list" || nested.kind === "object")
+        ) {
           // EVIDENCE: validation: cloneSerializableNode preserves the composite kind checked on nested.
           work.push([nested, cloned as CompositeValue]);
         }
@@ -198,8 +195,11 @@ export function cloneCapturedSerializableValue(
       const cloned = cloneSerializableNode(property.value);
       targetProperties[index] = { name: property.name, value: cloned };
       const nested = property.value;
-      if (typeof nested === "object" && nested !== null &&
-        (nested.kind === "list" || nested.kind === "object")) {
+      if (
+        typeof nested === "object" &&
+        nested !== null &&
+        (nested.kind === "list" || nested.kind === "object")
+      ) {
         // EVIDENCE: validation: cloneSerializableNode preserves the composite kind checked on nested.
         work.push([nested, cloned as CompositeValue]);
       }
@@ -208,9 +208,7 @@ export function cloneCapturedSerializableValue(
   return root;
 }
 
-function cloneSerializableNode(
-  value: SerializableRuntimeValue,
-): SerializableRuntimeValue {
+function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRuntimeValue {
   if (isScalar(value)) return value;
   switch (value.kind) {
     case "range":
@@ -293,18 +291,12 @@ export function serializableEquals(
   );
 }
 
-export function validateSerializableValue(
-  value: unknown,
-  path = "$",
-): string | null {
+export function validateSerializableValue(value: unknown, path = "$"): string | null {
   return captureAndValidateSerializableValue(value, path).failure;
 }
 
 /** Validates data that has already passed stable external capture. */
-export function validateCapturedSerializableValue(
-  value: unknown,
-  path = "$",
-): string | null {
+export function validateCapturedSerializableValue(value: unknown, path = "$"): string | null {
   return validateSerializableValueInternal(value, path);
 }
 
@@ -324,21 +316,15 @@ function captureAndValidateSerializableValue(
       failure: serializableExternalDataFailureMessage(capture.failure),
     });
   }
-  const failure = validateSerializableValueInternal(
-    capture.value,
-    path,
-  );
+  const failure = validateSerializableValueInternal(capture.value, path);
   return Object.freeze({
     // EVIDENCE: validation: validateSerializableValueInternal accepted the captured value when failure is null.
-    value: failure === null ? capture.value as SerializableRuntimeValue : null,
+    value: failure === null ? (capture.value as SerializableRuntimeValue) : null,
     failure,
   });
 }
 
-function validateSerializableValueInternal(
-  value: unknown,
-  rootPath: string,
-): string | null {
+function validateSerializableValueInternal(value: unknown, rootPath: string): string | null {
   interface ValuePath {
     readonly parent: ValuePath | null;
     readonly segment: string;
@@ -362,7 +348,10 @@ function validateSerializableValueInternal(
 
   const active = new Set<object>();
   const work: ValidationWork[] = [{ kind: "value", value, path: null }];
-  const nestedPath = (parent: ValuePath | null, segment: string): ValuePath => ({ parent, segment });
+  const nestedPath = (parent: ValuePath | null, segment: string): ValuePath => ({
+    parent,
+    segment,
+  });
   const formatPath = (path: ValuePath | null): string => {
     const segments: string[] = [];
     for (let current = path; current !== null; current = current.parent) {
@@ -391,17 +380,17 @@ function validateSerializableValueInternal(
       if (item.index >= item.properties.length) continue;
       const property = item.properties[item.index];
       const propertyPath = nestedPath(item.path, `.properties[${item.index}]`);
-      if (!isPlainRecord(property) || typeof property.name !== "string" || property.name.length === 0) {
+      if (
+        !isPlainRecord(property) ||
+        typeof property.name !== "string" ||
+        property.name.length === 0
+      ) {
         return `${formatPath(propertyPath)} is malformed.`;
       }
       if (item.names.has(property.name)) return `${formatPath(propertyPath)}.name is duplicated.`;
       item.names.add(property.name);
       work.push({ ...item, index: item.index + 1 });
-      work.push({
-        kind: "value",
-        value: property.value,
-        path: nestedPath(propertyPath, ".value"),
-      });
+      work.push({ kind: "value", value: property.value, path: nestedPath(propertyPath, ".value") });
       continue;
     }
 
@@ -418,12 +407,14 @@ function validateSerializableValueInternal(
     if (active.has(current)) return `${path()} contains a cyclic runtime value.`;
 
     if (current.kind === "speakerReference") {
+      // EVIDENCE: validation: the first condition checks speakerId with Number.isSafeInteger before comparison.
       if (
         !Number.isSafeInteger(current.speakerId) ||
-        (/* EVIDENCE: validation: Number.isSafeInteger checked speakerId in the preceding condition. */ current.speakerId as number) < 0 ||
+        (current.speakerId as number) < 0 ||
         typeof current.identifier !== "string" ||
         current.identifier.length === 0
-      ) return `${path()} contains a malformed speaker reference.`;
+      )
+        return `${path()} contains a malformed speaker reference.`;
       continue;
     }
     if (current.kind === "range") {
@@ -433,7 +424,8 @@ function validateSerializableValueInternal(
         typeof current.end !== "number" ||
         !Number.isFinite(current.end) ||
         typeof current.inclusive !== "boolean"
-      ) return `${path()} contains a malformed range.`;
+      )
+        return `${path()} contains a malformed range.`;
       continue;
     }
     if (current.kind === "set") {
@@ -458,7 +450,13 @@ function validateSerializableValueInternal(
       if (!Array.isArray(current.properties)) return `${path()}.properties must be an array.`;
       active.add(current);
       work.push({ kind: "leave", value: current });
-      work.push({ kind: "object", properties: current.properties, index: 0, names: new Set(), path: item.path });
+      work.push({
+        kind: "object",
+        properties: current.properties,
+        index: 0,
+        names: new Set(),
+        path: item.path,
+      });
       continue;
     }
     return `${path()}.kind is unsupported.`;
@@ -477,19 +475,12 @@ function assertSerializableScalar(
   }
 }
 
-function serializableCaptureError(
-  failure: ExternalDataFailure,
-): SerializableValueError {
+function serializableCaptureError(failure: ExternalDataFailure): SerializableValueError {
   const message = serializableExternalDataFailureMessage(failure);
-  return new SerializableValueError(
-    failure.kind === "cycle" ? "cyclic" : "invalid",
-    message,
-  );
+  return new SerializableValueError(failure.kind === "cycle" ? "cyclic" : "invalid", message);
 }
 
-function serializableExternalDataFailureMessage(
-  failure: ExternalDataFailure,
-): string {
+function serializableExternalDataFailureMessage(failure: ExternalDataFailure): string {
   switch (failure.kind) {
     case "nonFiniteNumber":
       return `${failure.path} must be a finite number.`;

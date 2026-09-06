@@ -13,11 +13,7 @@ test("lexes nested templates and interpolations with exact spans", () => {
 
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(
-    result.tokens.map((token) => [
-      token.kind,
-      token.span.start.offset,
-      token.span.end.offset,
-    ]),
+    result.tokens.map((token) => [token.kind, token.span.start.offset, token.span.end.offset]),
     [
       [TokenKind.KeywordSay, 0, 3],
       [TokenKind.TemplateStart, 4, 5],
@@ -39,9 +35,7 @@ test("lexes nested templates and interpolations with exact spans", () => {
 test("preserves template escapes inside a nested template", () => {
   const result = lex("say `Outer: ${`tick \\` literal \\${name}`}`");
   const textValues = result.tokens.flatMap((token) =>
-    token.kind === TokenKind.TemplateText && "value" in token
-      ? [token.value]
-      : [],
+    token.kind === TokenKind.TemplateText && "value" in token ? [token.value] : [],
   );
 
   assert.deepEqual(result.diagnostics, []);
@@ -54,10 +48,7 @@ test("parses nested template AST levels with exact spans", () => {
 
   assert.deepEqual(result.diagnostics, []);
   assert.equal(statement?.kind, "sayStatement");
-  if (
-    statement?.kind !== "sayStatement" ||
-    statement.value.kind !== "templateLiteral"
-  ) {
+  if (statement?.kind !== "sayStatement" || statement.value.kind !== "templateLiteral") {
     assert.fail("Expected an outer template say statement.");
   }
 
@@ -76,10 +67,7 @@ test("parses nested template AST levels with exact spans", () => {
   if (innerTemplate.kind !== "templateLiteral") {
     assert.fail("Expected a nested template expression.");
   }
-  assert.deepEqual(
-    [innerTemplate.span.start.offset, innerTemplate.span.end.offset],
-    [14, 29],
-  );
+  assert.deepEqual([innerTemplate.span.start.offset, innerTemplate.span.end.offset], [14, 29]);
 
   const innerInterpolation = innerTemplate.parts[1];
   assert.equal(innerInterpolation?.kind, "templateInterpolation");
@@ -93,18 +81,13 @@ test("parses nested template AST levels with exact spans", () => {
 });
 
 test("evaluates interpolation inside a nested template", () => {
-  const source = [
-    'let name = "Vera"',
-    "say `Outer: ${`Hello ${name}`}`",
-  ].join("\n");
+  const source = ['let name = "Vera"', "say `Outer: ${`Hello ${name}`}`"].join("\n");
   const compiled = compileSource(source);
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
   const result = run(compiled.plan!, createFreshRuntimeSnapshot(compiled.plan!));
   assert.deepEqual(
-    result.events
-      .filter((event) => event.kind === "say")
-      .map((event) => event.text),
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["Outer: Hello Vera"],
   );
 });

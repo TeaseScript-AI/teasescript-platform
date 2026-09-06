@@ -4,7 +4,8 @@ import { dirname, resolve } from "node:path";
 import test from "node:test";
 
 const forbiddenToolingSpecifiers = ["typescript", "@typescript/native", "ts-morph"] as const;
-const staticModuleSpecifierPattern = /\b(?:import|export)\s+(?:(?:type\s+)?[\w*${},\s]+?\s+from\s+)?["']([^"']+)["']/g;
+const staticModuleSpecifierPattern =
+  /\b(?:import|export)\s+(?:(?:type\s+)?[\w*${},\s]+?\s+from\s+)?["']([^"']+)["']/g;
 
 function isForbiddenToolingSpecifier(specifier: string): boolean {
   return forbiddenToolingSpecifiers.some(

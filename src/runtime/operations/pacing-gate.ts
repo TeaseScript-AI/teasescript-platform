@@ -11,7 +11,8 @@ export function settleBackgroundPacingGate(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   action: RuntimeChatPacingGateActionSnapshot,
-  settlementKind: "completed" | "skipped" | "consumedByForegroundInteraction" | "supersededByInstantOutput",
+  settlementKind:
+    "completed" | "skipped" | "consumedByForegroundInteraction" | "supersededByInstantOutput",
   events: InterpreterEvent[],
 ): RuntimeActionSettlementSnapshot {
   assertEventSequenceCapacity(snapshot, 1);
@@ -33,11 +34,13 @@ export function settleBackgroundPacingGate(
   });
   snapshot.lastSettlement = settlement;
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
-  events.push(Object.freeze({
-    kind: "actionCompleted",
-    sequence: completionEventSequence,
-    settlement,
-    span: copySpan(span),
-  } satisfies ActionCompletedEvent));
+  events.push(
+    Object.freeze({
+      kind: "actionCompleted",
+      sequence: completionEventSequence,
+      settlement,
+      span: copySpan(span),
+    } satisfies ActionCompletedEvent),
+  );
   return settlement;
 }

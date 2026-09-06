@@ -18,10 +18,18 @@ import {
   takeSequence,
 } from "./support.js";
 
-export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, suppliedNowMs: unknown): PendingActionOperationResult<TimeObservationOutcome> {
+export function observeTime(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  suppliedNowMs: unknown,
+): PendingActionOperationResult<TimeObservationOutcome> {
   const captured = captureExecutableData(plan, snapshot);
   const current = captured.snapshot;
-  if (!isValidSessionTime(suppliedNowMs)) return pendingResult(current, [], { kind: "invalidObservation", message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.` });
+  if (!isValidSessionTime(suppliedNowMs))
+    return pendingResult(current, [], {
+      kind: "invalidObservation",
+      message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.`,
+    });
   const effectiveNow = Math.max(current.currentSessionTimeMs, suppliedNowMs);
   const due = timedActionsDue(current, effectiveNow);
   assertEventSequenceCapacity(current, due.length);
@@ -37,16 +45,20 @@ export function observeTime(plan: InstructionPlan, snapshot: RuntimeSnapshot, su
       completion = settleForegroundTimedAction(captured.plan, current, action, events);
     }
   }
-  return pendingResult(current, events, { kind: "observed", currentSessionTimeMs: current.currentSessionTimeMs, completion });
+  return pendingResult(current, events, {
+    kind: "observed",
+    currentSessionTimeMs: current.currentSessionTimeMs,
+    completion,
+  });
 }
 
-function timedActionsDue(snapshot: RuntimeSnapshot, now: number): Array<RuntimeDelayActionSnapshot | RuntimeChatPacingGateActionSnapshot> {
+function timedActionsDue(
+  snapshot: RuntimeSnapshot,
+  now: number,
+): Array<RuntimeDelayActionSnapshot | RuntimeChatPacingGateActionSnapshot> {
   const actions: Array<RuntimeDelayActionSnapshot | RuntimeChatPacingGateActionSnapshot> = [];
   const foregroundAction = snapshot.foregroundAction;
-  if (
-    foregroundAction?.kind === "delay" ||
-    foregroundAction?.kind === "chatPacingGate"
-  ) {
+  if (foregroundAction?.kind === "delay" || foregroundAction?.kind === "chatPacingGate") {
     actions.push(foregroundAction);
   }
   for (const action of snapshot.backgroundActions) {
@@ -64,15 +76,14 @@ function settleForegroundTimedAction(
   events: InterpreterEvent[],
 ): RuntimeActionSettlementSnapshot {
   const completionEventSequence = takeSequence(snapshot, 1);
-  const settlement = action.kind === "delay"
-    ? createDelaySettlement(action, completionEventSequence, snapshot.currentSessionTimeMs)
-    : createPacingSettlement(action, completionEventSequence, snapshot.currentSessionTimeMs);
+  const settlement =
+    action.kind === "delay"
+      ? createDelaySettlement(action, completionEventSequence, snapshot.currentSessionTimeMs)
+      : createPacingSettlement(action, completionEventSequence, snapshot.currentSessionTimeMs);
   snapshot.foregroundAction = null;
   snapshot.lastSettlement = settlement;
   snapshot.terminalContinuationHandoff =
-    action.kind === "delay"
-      ? terminalContinuationHandoffFor(plan, action)
-      : null;
+    action.kind === "delay" ? terminalContinuationHandoffFor(plan, action) : null;
   snapshot.status = "running";
   if (action.kind === "chatPacingGate" && action.preparedOutput !== null) {
     snapshot.preparedSayOutput = action.preparedOutput;

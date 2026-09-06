@@ -7,60 +7,56 @@ test("reports unknown variables and withholds an executable plan", () => {
   const result = compileSource("let score = missing + 1");
 
   assert.deepEqual(result.parserDiagnostics, []);
-  assert.deepEqual(result.semanticDiagnostics.map((item) => item.code), ["TSV002"]);
+  assert.deepEqual(
+    result.semanticDiagnostics.map((item) => item.code),
+    ["TSV002"],
+  );
   assert.equal(result.plan, null);
 });
 
 test("rejects declarations that duplicate a visible name", () => {
-  const result = compileSource([
-    "let score = 1",
-    "if true {",
-    "  let score = 2",
-    "}",
-  ].join("\n"));
+  const result = compileSource(["let score = 1", "if true {", "  let score = 2", "}"].join("\n"));
 
-  assert.deepEqual(result.semanticDiagnostics.map((item) => item.code), ["TSV001"]);
+  assert.deepEqual(
+    result.semanticDiagnostics.map((item) => item.code),
+    ["TSV001"],
+  );
 });
 
 test("reports assignment to unknown variables and invalid binding replacement", () => {
-  const result = compileSource([
-    "missing = 1",
-    "speaker vera {}",
-    "vera = 2",
-  ].join("\n"));
+  const result = compileSource(["missing = 1", "speaker vera {}", "vera = 2"].join("\n"));
 
-  assert.deepEqual(result.semanticDiagnostics.map((item) => item.code), [
-    "TSV003",
-    "TSV004",
-  ]);
+  assert.deepEqual(
+    result.semanticDiagnostics.map((item) => item.code),
+    ["TSV003", "TSV004"],
+  );
 });
 
 test("reports unknown speaker references", () => {
-  const result = compileSource([
-    "speaker missing",
-    'say as other "Hello"',
-  ].join("\n"));
+  const result = compileSource(["speaker missing", 'say as other "Hello"'].join("\n"));
 
-  assert.deepEqual(result.semanticDiagnostics.map((item) => item.code), [
-    "TSV005",
-    "TSV005",
-  ]);
+  assert.deepEqual(
+    result.semanticDiagnostics.map((item) => item.code),
+    ["TSV005", "TSV005"],
+  );
 });
 
 test("accepts nested lexical access and sibling-local reuse", () => {
-  const result = compileSource([
-    "let score = 1",
-    "if true {",
-    "  let first = score + 1",
-    "  score = first",
-    "}",
-    "if false {",
-    "  let local = score",
-    "} else {",
-    "  let local = score + 1",
-    "}",
-    "exit",
-  ].join("\n"));
+  const result = compileSource(
+    [
+      "let score = 1",
+      "if true {",
+      "  let first = score + 1",
+      "  score = first",
+      "}",
+      "if false {",
+      "  let local = score",
+      "} else {",
+      "  let local = score + 1",
+      "}",
+      "exit",
+    ].join("\n"),
+  );
 
   assert.deepEqual(result.diagnostics, []);
   assert.notEqual(result.plan, null);
@@ -69,11 +65,10 @@ test("accepts nested lexical access and sibling-local reuse", () => {
 test("detects definitely invalid set elements without full type checking", () => {
   const result = compileSource("let values = set[[1], { value: 2 }, set[3]]");
 
-  assert.deepEqual(result.semanticDiagnostics.map((item) => item.code), [
-    "TSV006",
-    "TSV006",
-    "TSV006",
-  ]);
+  assert.deepEqual(
+    result.semanticDiagnostics.map((item) => item.code),
+    ["TSV006", "TSV006", "TSV006"],
+  );
 });
 
 test("keeps parser and semantic diagnostics distinct", () => {
@@ -90,10 +85,7 @@ test("keeps parser and semantic diagnostics distinct", () => {
 });
 
 test("accepts explicitly declared injected built-ins and globals", () => {
-  const result = compileSource("capture(player)", {
-    builtins: ["capture"],
-    globals: ["player"],
-  });
+  const result = compileSource("capture(player)", { builtins: ["capture"], globals: ["player"] });
 
   assert.deepEqual(result.diagnostics, []);
   assert.notEqual(result.plan, null);
@@ -105,17 +97,11 @@ test("rejects core and injected builtin identifiers in ordinary value positions"
     ["list literal", "let values = [BUILTIN]"],
     ["object property value", "let value = { callback: BUILTIN }"],
     ["template interpolation", "say `${BUILTIN}`"],
-    [
-      "function parameter default",
-      "function sample(value = BUILTIN) { return value }",
-    ],
+    ["function parameter default", "function sample(value = BUILTIN) { return value }"],
     ["return expression", "function sample { return BUILTIN }"],
     ["parenthesized expression", "let value = (BUILTIN)"],
     ["parenthesized call callee", "let value = (BUILTIN)()"],
-    [
-      "call argument",
-      "function consume(value) { return value }\nlet result = consume(BUILTIN)",
-    ],
+    ["call argument", "function consume(value) { return value }\nlet result = consume(BUILTIN)"],
     ["binary expression", "let value = BUILTIN + 1"],
     ["property receiver", "let value = BUILTIN.length"],
     ["index receiver", "let value = BUILTIN[0]"],
@@ -138,12 +124,14 @@ test("rejects core and injected builtin identifiers in ordinary value positions"
           diagnostic.span.start.offset,
           diagnostic.span.end.offset,
         ]),
-        [[
-          "TSV028",
-          `Builtin '${builtin}' is not a first-class runtime value.`,
-          start,
-          start + builtin.length,
-        ]],
+        [
+          [
+            "TSV028",
+            `Builtin '${builtin}' is not a first-class runtime value.`,
+            start,
+            start + builtin.length,
+          ],
+        ],
         `${label}: ${source}`,
       );
     }
@@ -180,31 +168,30 @@ test("reports each invalid builtin value once in deterministic source order", ()
 });
 
 test("preserves direct builtin calls in every supported nested context", () => {
-  const result = compileSource([
-    "let values = [random(), chance(50), randomInteger(1..=6), customBuiltin()]",
-    "let objectValue = { core: random(), injected: customBuiltin() }",
-    "say `${random()}:${customBuiltin()}`",
-    "function sample(core = random(), injected = customBuiltin()) {",
-    "  return core",
-    "}",
-    "let result = sample()",
-    "values.remove(1)",
-  ].join("\n"), { builtins: ["customBuiltin"] });
+  const result = compileSource(
+    [
+      "let values = [random(), chance(50), randomInteger(1..=6), customBuiltin()]",
+      "let objectValue = { core: random(), injected: customBuiltin() }",
+      "say `${random()}:${customBuiltin()}`",
+      "function sample(core = random(), injected = customBuiltin()) {",
+      "  return core",
+      "}",
+      "let result = sample()",
+      "values.remove(1)",
+    ].join("\n"),
+    { builtins: ["customBuiltin"] },
+  );
 
   assert.deepEqual(result.diagnostics, []);
   assert.notEqual(result.plan, null);
 });
 
 test("preserves existing function, unknown-name, callable, and protected-name diagnostics", () => {
-  const functionValue = compileSource([
-    "function sample { return 1 }",
-    "let stored = sample",
-  ].join("\n"));
+  const functionValue = compileSource(
+    ["function sample { return 1 }", "let stored = sample"].join("\n"),
+  );
   assert.deepEqual(
-    functionValue.semanticDiagnostics.map((diagnostic) => [
-      diagnostic.code,
-      diagnostic.message,
-    ]),
+    functionValue.semanticDiagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
     [["TSV028", "Function 'sample' is not a first-class runtime value."]],
   );
 
@@ -232,9 +219,7 @@ test("preserves existing function, unknown-name, callable, and protected-name di
     ["TSV001"],
   );
 
-  const protectedInjected = compileSource("let customBuiltin = 1", {
-    builtins: ["customBuiltin"],
-  });
+  const protectedInjected = compileSource("let customBuiltin = 1", { builtins: ["customBuiltin"] });
   assert.deepEqual(
     protectedInjected.semanticDiagnostics.map((diagnostic) => diagnostic.code),
     ["TSV001"],

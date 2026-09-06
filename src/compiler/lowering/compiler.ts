@@ -109,33 +109,35 @@ export class InstructionCompiler {
           span: copySpan(statement.span),
         });
         return;
-      case "sayStatement":
-        {
+      case "sayStatement": {
         const textCanSuspend = this.#containsUserCall(statement.value);
-        const pacingCanSuspend = statement.pacing !== null &&
+        const pacingCanSuspend =
+          statement.pacing !== null &&
           statement.pacing !== "instant" &&
           this.#containsUserCall(statement.pacing);
         if (!textCanSuspend && !pacingCanSuspend) {
           const lowered = this.#lowerExpression(statement.value);
-          const loweredPacing = statement.pacing === null || statement.pacing === "instant"
-            ? null
-            : this.#lowerExpression(statement.pacing);
+          const loweredPacing =
+            statement.pacing === null || statement.pacing === "instant"
+              ? null
+              : this.#lowerExpression(statement.pacing);
           this.instructions.push({
             kind: "say",
             speaker: statement.speaker?.name ?? null,
             value: lowered.plan,
             skipPolicy: statement.skipPolicy,
-            pacing: statement.pacing === null
-              ? "smart"
-              : loweredPacing === null
-                ? "instant"
-                : loweredPacing.plan,
+            pacing:
+              statement.pacing === null
+                ? "smart"
+                : loweredPacing === null
+                  ? "instant"
+                  : loweredPacing.plan,
             span: copySpan(statement.span),
           });
-          this.#emitTemporaryCleanup([
-            ...lowered.temporaryIds,
-            ...(loweredPacing?.temporaryIds ?? []),
-          ], statement.span);
+          this.#emitTemporaryCleanup(
+            [...lowered.temporaryIds, ...(loweredPacing?.temporaryIds ?? [])],
+            statement.span,
+          );
           return;
         }
         const speakerTemporary = this.#allocateTemporary();
@@ -154,9 +156,10 @@ export class InstructionCompiler {
         });
         const lowered = this.#lowerSayPayload(statement.value, contextualSpeakerTemporary);
         if (!pacingCanSuspend) {
-          const loweredPacing = statement.pacing === null || statement.pacing === "instant"
-            ? null
-            : this.#lowerSayPayload(statement.pacing, contextualSpeakerTemporary);
+          const loweredPacing =
+            statement.pacing === null || statement.pacing === "instant"
+              ? null
+              : this.#lowerSayPayload(statement.pacing, contextualSpeakerTemporary);
           this.instructions.push({
             kind: "say",
             speaker: statement.speaker?.name ?? null,
@@ -164,19 +167,23 @@ export class InstructionCompiler {
             speakerTemporary,
             contextualSpeakerTemporary,
             skipPolicy: statement.skipPolicy,
-            pacing: statement.pacing === null
-              ? "smart"
-              : loweredPacing === null
-                ? "instant"
-                : loweredPacing.plan,
+            pacing:
+              statement.pacing === null
+                ? "smart"
+                : loweredPacing === null
+                  ? "instant"
+                  : loweredPacing.plan,
             span: copySpan(statement.span),
           });
-          this.#emitTemporaryCleanup([
-            speakerTemporary,
-            contextualSpeakerTemporary,
-            ...lowered.temporaryIds,
-            ...(loweredPacing?.temporaryIds ?? []),
-          ], statement.span);
+          this.#emitTemporaryCleanup(
+            [
+              speakerTemporary,
+              contextualSpeakerTemporary,
+              ...lowered.temporaryIds,
+              ...(loweredPacing?.temporaryIds ?? []),
+            ],
+            statement.span,
+          );
           return;
         }
         const textTemporary = this.#allocateTemporary();
@@ -203,28 +210,35 @@ export class InstructionCompiler {
           pacing,
           span: copySpan(statement.span),
         });
-        this.#emitTemporaryCleanup([
-          speakerTemporary,
-          contextualSpeakerTemporary,
-          textTemporary,
-          ...(loweredPacing?.temporaryIds ?? []),
-        ], statement.span);
+        this.#emitTemporaryCleanup(
+          [
+            speakerTemporary,
+            contextualSpeakerTemporary,
+            textTemporary,
+            ...(loweredPacing?.temporaryIds ?? []),
+          ],
+          statement.span,
+        );
         return;
-        }
+      }
       case "showButtonStatement":
         this.#compileShowButton(statement);
         return;
       case "waitStatement": {
         const lowered = this.#lowerExpression(statement.duration);
-        this.instructions.push({ kind: "wait", duration: lowered.plan, unit: statement.unit, span: copySpan(statement.span) });
+        this.instructions.push({
+          kind: "wait",
+          duration: lowered.plan,
+          unit: statement.unit,
+          span: copySpan(statement.span),
+        });
         this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
       }
       case "exitStatement":
         this.instructions.push({ kind: "exit", span: copySpan(statement.span) });
         return;
-      case "letStatement":
-        {
+      case "letStatement": {
         const lowered = this.#lowerExpression(statement.initializer);
         this.instructions.push({
           kind: "declareBinding",
@@ -234,9 +248,8 @@ export class InstructionCompiler {
         });
         this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
-        }
-      case "assignmentStatement":
-        {
+      }
+      case "assignmentStatement": {
         const target = this.#lowerAssignmentTarget(statement.target);
         if (target.plan.kind !== "identifier") {
           this.instructions.push({
@@ -252,14 +265,10 @@ export class InstructionCompiler {
           value: value.plan,
           span: copySpan(statement.span),
         });
-        this.#emitTemporaryCleanup(
-          [...target.temporaryIds, ...value.temporaryIds],
-          statement.span,
-        );
+        this.#emitTemporaryCleanup([...target.temporaryIds, ...value.temporaryIds], statement.span);
         return;
-        }
-      case "expressionStatement":
-        {
+      }
+      case "expressionStatement": {
         const lowered = this.#lowerExpression(statement.expression);
         this.instructions.push({
           kind: "evaluate",
@@ -268,7 +277,7 @@ export class InstructionCompiler {
         });
         this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
-        }
+      }
       case "ifStatement":
         this.#compileIf(statement);
         return;
@@ -298,8 +307,7 @@ export class InstructionCompiler {
           kind: "loopControl",
           action: statement.kind === "breakStatement" ? "break" : "continue",
           loopId: loop.loopId,
-          target:
-            statement.kind === "breakStatement" ? -1 : loop.continueTarget,
+          target: statement.kind === "breakStatement" ? -1 : loop.continueTarget,
           span: copySpan(statement.span),
         });
         if (statement.kind === "breakStatement") loop.breaks.push(index);
@@ -338,10 +346,7 @@ export class InstructionCompiler {
     this.#compileBlock(statement.thenBlock);
     if (statement.elseBlock === null) {
       const falseCleanup = this.instructions.length;
-      this.instructions[conditional] = {
-        ...conditionalInstruction,
-        target: falseCleanup,
-      };
+      this.instructions[conditional] = { ...conditionalInstruction, target: falseCleanup };
       this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
       return;
     }
@@ -354,20 +359,14 @@ export class InstructionCompiler {
     };
     this.instructions.push(jumpInstruction);
     const falseCleanup = this.instructions.length;
-    this.instructions[conditional] = {
-      ...conditionalInstruction,
-      target: falseCleanup,
-    };
+    this.instructions[conditional] = { ...conditionalInstruction, target: falseCleanup };
     this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
     if (statement.elseBlock.kind === "ifStatement") {
       this.#compileIf(statement.elseBlock);
     } else {
       this.#compileBlock(statement.elseBlock);
     }
-    this.instructions[jump] = {
-      ...jumpInstruction,
-      target: this.instructions.length,
-    };
+    this.instructions[jump] = { ...jumpInstruction, target: this.instructions.length };
   }
 
   #compileBlock(block: Block): void {
@@ -389,34 +388,31 @@ export class InstructionCompiler {
     const lowered = this.#lowerExpression(expression);
     const start = this.instructions.length;
     const loopContinueTarget = loopKind === "while" ? continueTarget : start;
-    const instruction: LoopStartInstruction = loopKind === "for"
-      ? {
-          kind: "loopStart",
-          loopKind,
-          loopId,
-          variable: variable!,
-          expression: lowered.plan,
-          continueTarget: loopContinueTarget,
-          target: -1,
-          span: copySpan(span),
-        }
-      : {
-          kind: "loopStart",
-          loopKind,
-          loopId,
-          expression: lowered.plan,
-          continueTarget: loopContinueTarget,
-          target: -1,
-          span: copySpan(span),
-        };
+    const instruction: LoopStartInstruction =
+      loopKind === "for"
+        ? {
+            kind: "loopStart",
+            loopKind,
+            loopId,
+            variable: variable!,
+            expression: lowered.plan,
+            continueTarget: loopContinueTarget,
+            target: -1,
+            span: copySpan(span),
+          }
+        : {
+            kind: "loopStart",
+            loopKind,
+            loopId,
+            expression: lowered.plan,
+            continueTarget: loopContinueTarget,
+            target: -1,
+            span: copySpan(span),
+          };
     this.instructions.push(instruction);
     this.#emitTemporaryCleanup(lowered.temporaryIds, expression.span);
     const breaks: number[] = [];
-    const context = {
-      loopId,
-      continueTarget: instruction.continueTarget,
-      breaks,
-    };
+    const context = { loopId, continueTarget: instruction.continueTarget, breaks };
     this.#loops.push(context);
     this.compileStatements(body.statements);
     this.instructions.push({
@@ -480,10 +476,7 @@ export class InstructionCompiler {
         });
         this.#emitTemporaryCleanup(lowered.temporaryIds, parameter.span);
       }
-      this.instructions[prepareIndex] = {
-        ...prepareInstruction,
-        target: this.instructions.length,
-      };
+      this.instructions[prepareIndex] = { ...prepareInstruction, target: this.instructions.length };
     });
     this.instructions.push({
       kind: "enterFunctionBody",
@@ -493,10 +486,7 @@ export class InstructionCompiler {
     const bodyEntryInstruction = this.instructions.length;
     this.compileStatements(declaration.body.statements);
     const implicitReturnInstruction = this.instructions.length;
-    this.instructions.push({
-      kind: "returnVoid",
-      span: copySpan(declaration.body.span),
-    });
+    this.instructions.push({ kind: "returnVoid", span: copySpan(declaration.body.span) });
     const endInstruction = this.instructions.length;
     this.functions.push({
       id: registered.id,
@@ -507,10 +497,7 @@ export class InstructionCompiler {
         index,
         hasDefault: parameter.defaultValue !== null,
         declarationSpan: copySpan(parameter.span),
-        defaultSpan:
-          parameter.defaultValue === null
-            ? null
-            : copySpan(parameter.defaultValue.span),
+        defaultSpan: parameter.defaultValue === null ? null : copySpan(parameter.defaultValue.span),
       })),
       entryInstruction,
       bodyEntryInstruction,
@@ -548,7 +535,11 @@ export class InstructionCompiler {
       case "identifier":
         if (expression.name === "speaker" && this.#contextualSpeakerTemporary !== null) {
           return {
-            plan: { kind: "temporary", temporaryId: this.#contextualSpeakerTemporary, span: copySpan(expression.span) },
+            plan: {
+              kind: "temporary",
+              temporaryId: this.#contextualSpeakerTemporary,
+              span: copySpan(expression.span),
+            },
             temporaryIds: [],
           };
         }
@@ -601,18 +592,22 @@ export class InstructionCompiler {
           }
           const lowered = loweredInterpolations[interpolationIndex++]!;
           for (const temporaryId of lowered.temporaryIds) ids.push(temporaryId);
-          return {
-            kind: "expression",
-            expression: lowered.plan,
-            span: copySpan(part.span),
-          };
+          return { kind: "expression", expression: lowered.plan, span: copySpan(part.span) };
         });
-        return { plan: { kind: "template", parts, span: copySpan(expression.span) }, temporaryIds: ids };
+        return {
+          plan: { kind: "template", parts, span: copySpan(expression.span) },
+          temporaryIds: ids,
+        };
       }
       case "propertyAccessExpression": {
         const object = this.#lowerExpression(expression.object);
         return {
-          plan: { kind: "property", object: object.plan, name: expression.property.name, span: copySpan(expression.span) },
+          plan: {
+            kind: "property",
+            object: object.plan,
+            name: expression.property.name,
+            span: copySpan(expression.span),
+          },
           temporaryIds: object.temporaryIds,
         };
       }
@@ -623,7 +618,12 @@ export class InstructionCompiler {
         }
         const index = this.#lowerExpression(expression.index);
         return {
-          plan: { kind: "index", object: object.plan, index: index.plan, span: copySpan(expression.span) },
+          plan: {
+            kind: "index",
+            object: object.plan,
+            index: index.plan,
+            span: copySpan(expression.span),
+          },
           temporaryIds: [...object.temporaryIds, ...index.temporaryIds],
         };
       }
@@ -632,10 +632,7 @@ export class InstructionCompiler {
         if (expression.callee.kind === "propertyAccessExpression") {
           let receiver = this.#lowerExpression(expression.callee.object);
           if (expression.arguments.some((argument) => this.#containsUserCall(argument.value))) {
-            receiver = this.#prepareReferenceExpression(
-              receiver,
-              expression.callee.object.span,
-            );
+            receiver = this.#prepareReferenceExpression(receiver, expression.callee.object.span);
             this.instructions.push({
               kind: "validateCallReceiver",
               receiver: receiver.plan,
@@ -669,7 +666,12 @@ export class InstructionCompiler {
             arguments: argumentsList.map(({ argument, lowered }) =>
               argument.kind === "positionalArgument"
                 ? { kind: "positional", value: lowered.plan, span: copySpan(argument.span) }
-                : { kind: "named", name: argument.name.name, value: lowered.plan, span: copySpan(argument.span) },
+                : {
+                    kind: "named",
+                    name: argument.name.name,
+                    value: lowered.plan,
+                    span: copySpan(argument.span),
+                  },
             ),
             span: copySpan(expression.span),
           },
@@ -694,22 +696,28 @@ export class InstructionCompiler {
         return { plan, temporaryIds: operand.temporaryIds };
       }
       case "binaryExpression": {
-        const [left, right] = this.#lowerOrderedExpressions([
-          expression.left,
-          expression.right,
-        ]);
+        const [left, right] = this.#lowerOrderedExpressions([expression.left, expression.right]);
         return {
-          plan: { kind: "binary", operator: expression.operator, left: left!.plan, right: right!.plan, span: copySpan(expression.span) },
+          plan: {
+            kind: "binary",
+            operator: expression.operator,
+            left: left!.plan,
+            right: right!.plan,
+            span: copySpan(expression.span),
+          },
           temporaryIds: [...left!.temporaryIds, ...right!.temporaryIds],
         };
       }
       case "rangeExpression": {
-        const [start, end] = this.#lowerOrderedExpressions([
-          expression.start,
-          expression.end,
-        ]);
+        const [start, end] = this.#lowerOrderedExpressions([expression.start, expression.end]);
         return {
-          plan: { kind: "range", start: start!.plan, end: end!.plan, inclusive: expression.inclusive, span: copySpan(expression.span) },
+          plan: {
+            kind: "range",
+            start: start!.plan,
+            end: end!.plan,
+            inclusive: expression.inclusive,
+            span: copySpan(expression.span),
+          },
           temporaryIds: [...start!.temporaryIds, ...end!.temporaryIds],
         };
       }
@@ -762,26 +770,33 @@ export class InstructionCompiler {
   }
 
   #lowerInteraction(expression: InteractionExpression): LoweredExpression {
-    const values = expression.interactionKind === "choice"
-      ? expression.options.map((option) => option.value)
-      : expression.hint === null ? [] : [expression.hint];
+    const values =
+      expression.interactionKind === "choice"
+        ? expression.options.map((option) => option.value)
+        : expression.hint === null
+          ? []
+          : [expression.hint];
     const staticValues = values.map(staticVisibleText);
     const labelType = interactionLabelType(expression);
-    const expectedResult = expression.interactionKind === "number" ||
+    const expectedResult =
+      expression.interactionKind === "number" ||
       (expression.interactionKind === "choice" && labelType === "number")
-      ? "number" as const
-      : "string" as const;
+        ? ("number" as const)
+        : ("string" as const);
 
     if (staticValues.every((value): value is string => value !== undefined)) {
       const ui = staticInteractionUi(expression, staticValues, labelType);
-      return this.#emitResultInteraction({
-        interactionKind: expression.interactionKind,
-        target: "standardChat",
-        speaker: expression.speaker?.name ?? null,
-        expectedResult,
-        ui,
-        span: copySpan(expression.span),
-      }, expression.span);
+      return this.#emitResultInteraction(
+        {
+          interactionKind: expression.interactionKind,
+          target: "standardChat",
+          speaker: expression.speaker?.name ?? null,
+          expectedResult,
+          ui,
+          span: copySpan(expression.span),
+        },
+        expression.span,
+      );
     }
 
     const speakerTemporary = this.#prepareInteractionSpeaker(
@@ -792,12 +807,13 @@ export class InstructionCompiler {
     const preparedTemporaryIds: number[] = [speakerTemporary];
 
     if (expression.interactionKind === "text" || expression.interactionKind === "number") {
-      const hint = expression.hint === null
-        ? null
-        : this.#materializeDedicatedInteractionValue(
-            this.#lowerInteractionPayload(expression.hint, speakerTemporary),
-            expression.hint.span,
-          );
+      const hint =
+        expression.hint === null
+          ? null
+          : this.#materializeDedicatedInteractionValue(
+              this.#lowerInteractionPayload(expression.hint, speakerTemporary),
+              expression.hint.span,
+            );
       if (hint !== null) preparedTemporaryIds.push(hint.temporaryId);
       preparedUi = {
         kind: expression.interactionKind,
@@ -831,9 +847,10 @@ export class InstructionCompiler {
         labelType,
         optionsTemporary,
         optionCount: expression.options.length,
-        labels: labelType === "none"
-          ? null
-          : expression.options.map((option) => interactionLabelValue(option.label!)),
+        labels:
+          labelType === "none"
+            ? null
+            : expression.options.map((option) => interactionLabelValue(option.label!)),
         accessibleName: { kind: "localizedDefault", key: "chooseOption" },
       };
     }
@@ -850,7 +867,13 @@ export class InstructionCompiler {
   }
 
   #emitResultInteraction(
-    instruction: Omit<Extract<import("../../plan/model.js").InteractionInstruction, { readonly ui: InteractionUiPayload }>, "kind" | "destinationTemporary">,
+    instruction: Omit<
+      Extract<
+        import("../../plan/model.js").InteractionInstruction,
+        { readonly ui: InteractionUiPayload }
+      >,
+      "kind" | "destinationTemporary"
+    >,
     span: SourceSpan,
   ): LoweredExpression {
     const transientTemporary = this.#allocateTemporary();
@@ -1003,10 +1026,7 @@ export class InstructionCompiler {
     return this.#prepareReferenceExpression(lowered, expression.span);
   }
 
-  #materializeExpression(
-    lowered: LoweredExpression,
-    span: SourceSpan,
-  ): LoweredExpression {
+  #materializeExpression(lowered: LoweredExpression, span: SourceSpan): LoweredExpression {
     const temporaryId = this.#allocateTemporary();
     this.instructions.push({
       kind: "storeTemporary",
@@ -1021,10 +1041,7 @@ export class InstructionCompiler {
     };
   }
 
-  #prepareReferenceExpression(
-    lowered: LoweredExpression,
-    span: SourceSpan,
-  ): LoweredExpression {
+  #prepareReferenceExpression(lowered: LoweredExpression, span: SourceSpan): LoweredExpression {
     if (lowered.plan.kind === "preparedReference") return lowered;
     const temporaryId = this.#allocateTemporary();
     this.instructions.push({
@@ -1034,11 +1051,7 @@ export class InstructionCompiler {
       span: copySpan(span),
     });
     return {
-      plan: {
-        kind: "preparedReference",
-        temporaryId,
-        span: copySpan(span),
-      },
+      plan: { kind: "preparedReference", temporaryId, span: copySpan(span) },
       temporaryIds: [...lowered.temporaryIds, temporaryId],
     };
   }
@@ -1047,9 +1060,7 @@ export class InstructionCompiler {
     expressions: readonly Expression[],
     materializeInstructionEmitting = false,
   ): LoweredExpression[] {
-    const emitsInstructions = expressions.map((expression) =>
-      this.#containsUserCall(expression)
-    );
+    const emitsInstructions = expressions.map((expression) => this.#containsUserCall(expression));
     const laterEmitsInstructions = new Array<boolean>(expressions.length);
     let suffixEmitsInstructions = false;
     for (let index = expressions.length - 1; index >= 0; index -= 1) {
@@ -1065,9 +1076,10 @@ export class InstructionCompiler {
         laterEmitsInstructions[index] ||
         (materializeInstructionEmitting && emitsInstructions[index])
       ) {
-        item = item.plan.kind === "temporary"
-          ? item
-          : this.#materializeExpression(item, expression.span);
+        item =
+          item.plan.kind === "temporary"
+            ? item
+            : this.#materializeExpression(item, expression.span);
       }
       lowered.push(item);
     }
@@ -1103,11 +1115,7 @@ export class InstructionCompiler {
         }
         parameterName = parameter.name.name;
       }
-      planned.push({
-        parameterName,
-        value: lowered.plan,
-        span: copySpan(argument.span),
-      });
+      planned.push({ parameterName, value: lowered.plan, span: copySpan(argument.span) });
     });
     const destinationTemporary = this.#allocateTemporary();
     const callIndex = this.instructions.length;
@@ -1206,10 +1214,7 @@ export class InstructionCompiler {
       expectBoolean: true,
       span: copySpan(expression.right.span),
     });
-    this.instructions[skipRight] = {
-      ...skipRightInstruction,
-      target: this.instructions.length,
-    };
+    this.instructions[skipRight] = { ...skipRightInstruction, target: this.instructions.length };
     return {
       plan: { ...condition, span: copySpan(expression.span) },
       temporaryIds: [...left.temporaryIds, ...right.temporaryIds, resultTemporary],
@@ -1282,11 +1287,7 @@ export class InstructionCompiler {
 
   #emitTemporaryCleanup(ids: readonly number[], span: SourceSpan): void {
     for (const temporaryId of new Set(ids)) {
-      this.instructions.push({
-        kind: "clearTemporary",
-        temporaryId,
-        span: copySpan(span),
-      });
+      this.instructions.push({ kind: "clearTemporary", temporaryId, span: copySpan(span) });
     }
   }
 }
@@ -1302,9 +1303,7 @@ function unwrapParentheses(expression: Expression): Expression {
   return current;
 }
 
-function normalizeUnaryExpression(
-  expression: Extract<Expression, { kind: "unaryExpression" }>,
-): {
+function normalizeUnaryExpression(expression: Extract<Expression, { kind: "unaryExpression" }>): {
   readonly operand: Expression;
   readonly operators: readonly Extract<Expression, { kind: "unaryExpression" }>["operator"][];
 } {
@@ -1317,10 +1316,7 @@ function normalizeUnaryExpression(
       count += 1;
       current = current.operand;
     }
-    return {
-      operand: current,
-      operators: count % 2 === 0 ? ["not", "not"] : ["not"],
-    };
+    return { operand: current, operators: count % 2 === 0 ? ["not", "not"] : ["not"] };
   }
 
   let negate = false;
@@ -1329,7 +1325,8 @@ function normalizeUnaryExpression(
     if (
       current.kind !== "unaryExpression" ||
       (current.operator !== "+" && current.operator !== "-")
-    ) break;
+    )
+      break;
     if (current.operator === "-") negate = !negate;
     current = current.operand;
   }
@@ -1435,7 +1432,9 @@ function compileExpression(expression: Expression): ExpressionPlan {
         span: copySpan(expression.span),
       };
     case "interactionExpression":
-      throw new TypeError("Blocking interactions must be lowered before expression-plan compilation.");
+      throw new TypeError(
+        "Blocking interactions must be lowered before expression-plan compilation.",
+      );
   }
 }
 
@@ -1454,7 +1453,6 @@ function compileArgument(argument: CallArgument): ArgumentPlan {
       };
 }
 
-
 function interactionLabelType(expression: InteractionExpression): "none" | "identifier" | "number" {
   const label = expression.options[0]?.label;
   return label === undefined || label === null
@@ -1464,10 +1462,10 @@ function interactionLabelType(expression: InteractionExpression): "none" | "iden
       : "number";
 }
 
-function interactionLabelValue(label: NonNullable<InteractionExpression["options"][number]["label"]>): string | number {
-  return label.kind === "identifier"
-    ? label.name
-    : Object.is(label.value, -0) ? 0 : label.value;
+function interactionLabelValue(
+  label: NonNullable<InteractionExpression["options"][number]["label"]>,
+): string | number {
+  return label.kind === "identifier" ? label.name : Object.is(label.value, -0) ? 0 : label.value;
 }
 
 function staticInteractionUi(
@@ -1541,7 +1539,8 @@ function staticNumber(expression: Expression): number | undefined {
     if (
       expression.kind !== "unaryExpression" ||
       (expression.operator !== "+" && expression.operator !== "-")
-    ) break;
+    )
+      break;
     if (expression.operator === "-") negate = !negate;
     expression = expression.operand;
   }
@@ -1553,12 +1552,24 @@ function staticNumber(expression: Expression): number | undefined {
     const right = staticNumber(expression.right);
     if (left === undefined || right === undefined) return undefined;
     switch (expression.operator) {
-      case "+": value = left + right; break;
-      case "-": value = left - right; break;
-      case "*": value = left * right; break;
-      case "/": value = right === 0 ? undefined : left / right; break;
-      case "%": value = right === 0 ? undefined : left % right; break;
-      default: value = undefined; break;
+      case "+":
+        value = left + right;
+        break;
+      case "-":
+        value = left - right;
+        break;
+      case "*":
+        value = left * right;
+        break;
+      case "/":
+        value = right === 0 ? undefined : left / right;
+        break;
+      case "%":
+        value = right === 0 ? undefined : left % right;
+        break;
+      default:
+        value = undefined;
+        break;
     }
   }
   return value === undefined || !negate ? value : -value;

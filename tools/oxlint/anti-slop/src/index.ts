@@ -13,19 +13,19 @@ import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety
 
 /** Repository-selected Oxlint rules derived from anti-slop. */
 const antiSlopPlugin = eslintCompatPlugin({
-	meta: { name: "anti-slop" },
-	rules: {
-		"no-chained-type-assertions": noChainedTypeAssertionsRule,
-		"no-known-value-widening": noKnownValueWideningRule,
-		"no-object-parameters": noObjectParametersRule,
-		"no-reflect-apply": noReflectApplyRule,
-		"no-reflect-get": noReflectGetRule,
-		"no-unknown-returns": noUnknownReturnsRule,
-		"no-unknown-type-aliases": noUnknownTypeAliasesRule,
-		"no-unsafe-dictionary-type": noUnsafeDictionaryTypeRule,
-		"no-widen-then-assert": noWidenThenAssertRule,
-		"require-safety-comment-for-type-assertion": requireSafetyCommentForTypeAssertionRule,
-	},
+  meta: { name: "anti-slop" },
+  rules: {
+    "no-chained-type-assertions": noChainedTypeAssertionsRule,
+    "no-known-value-widening": noKnownValueWideningRule,
+    "no-object-parameters": noObjectParametersRule,
+    "no-reflect-apply": noReflectApplyRule,
+    "no-reflect-get": noReflectGetRule,
+    "no-unknown-returns": noUnknownReturnsRule,
+    "no-unknown-type-aliases": noUnknownTypeAliasesRule,
+    "no-unsafe-dictionary-type": noUnsafeDictionaryTypeRule,
+    "no-widen-then-assert": noWidenThenAssertRule,
+    "require-safety-comment-for-type-assertion": requireSafetyCommentForTypeAssertionRule,
+  },
 });
 
 export default antiSlopPlugin;

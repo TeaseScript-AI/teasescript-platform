@@ -110,11 +110,7 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "getPlayerHistory",
 ] as const);
 
-export const CORE_RUNTIME_BUILTINS = Object.freeze([
-  "random",
-  "chance",
-  "randomInteger",
-] as const);
+export const CORE_RUNTIME_BUILTINS = Object.freeze(["random", "chance", "randomInteger"] as const);
 
 export const TEASESCRIPT_PROTECTED_NAMES = Object.freeze([
   ...TEASESCRIPT_GRAMMAR_KEYWORDS,

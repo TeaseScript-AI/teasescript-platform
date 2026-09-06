@@ -75,10 +75,7 @@ test("valid source determinism independently compiles the prepared source", () =
     },
   });
 
-  assert.throws(
-    () => runPropertyCampaign(config, definitions),
-    PropertyCampaignFailure,
-  );
+  assert.throws(() => runPropertyCampaign(config, definitions), PropertyCampaignFailure);
   assert.equal(compilationCount, 2);
 });
 
@@ -91,16 +88,11 @@ test("near-valid source determinism rejects a plan from either compilation", () 
     compileSource: (source) => {
       compilationCount += 1;
       const rejected = compileSource(source);
-      return compilationCount === 1
-        ? rejected
-        : { ...rejected, plan: executable.plan };
+      return compilationCount === 1 ? rejected : { ...rejected, plan: executable.plan };
     },
   });
 
-  assert.throws(
-    () => runPropertyCampaign(config, definitions),
-    PropertyCampaignFailure,
-  );
+  assert.throws(() => runPropertyCampaign(config, definitions), PropertyCampaignFailure);
   assert.equal(compilationCount, 2);
 });
 
@@ -114,14 +106,12 @@ test("exact generated scenarios include metadata as well as source", () => {
   const scenario = createNearValidSourceCase(config.seed, config.caseIndex!);
   let generationCount = 0;
 
-  assert.throws(() => assertExactGeneratedScenario(
-    config.seed,
-    config.caseIndex!,
-    () => ({
+  assert.throws(() =>
+    assertExactGeneratedScenario(config.seed, config.caseIndex!, () => ({
       ...scenario,
       variant: generationCount++ === 0 ? scenario.variant : "metadata-changed",
-    }),
-  ));
+    })),
+  );
 });
 
 test("source family selection uses the selected family collection", () => {
@@ -131,23 +121,17 @@ test("source family selection uses the selected family collection", () => {
 
 test("required campaign reaches retained variants and varied source-fuzz families", () => {
   const config = defaultPropertyCampaignConfig();
-  const cases = Array.from({ length: config.runs }, (_, index) =>
-    runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
+  const cases = Array.from(
+    { length: config.runs },
+    (_, index) => runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
   );
   const contexts = cases.map((result) => result.context);
 
-  for (const operation of [
-    "run",
-    "executeInstruction",
-    "observeTime",
-    "completeAction",
-  ]) {
+  for (const operation of ["run", "executeInstruction", "observeTime", "completeAction"]) {
     assert.ok(contexts.some((context) => context.includes(`operation=${operation}`)));
   }
   for (const variant of ["not-due", "duplicate-settlement"]) {
-    assert.ok(
-      contexts.some((context) => context.includes(`rejected-completion=${variant}`)),
-    );
+    assert.ok(contexts.some((context) => context.includes(`rejected-completion=${variant}`)));
   }
   for (const malformed of ["plan", "snapshot", "checkpoint"]) {
     assert.ok(contexts.some((context) => context.includes(`malformed=${malformed}`)));
@@ -162,74 +146,62 @@ test("required campaign reaches retained variants and varied source-fuzz familie
   const changedValidSeed = createValidSourceCase(config.seed + 1, 5);
   const changedNearValidSeed = createNearValidSourceCase(config.seed + 1, 6);
   assert.notEqual(changedValidSeed.source, createValidSourceCase(config.seed, 5).source);
-  assert.notEqual(
-    changedNearValidSeed.source,
-    createNearValidSourceCase(config.seed, 6).source,
-  );
+  assert.notEqual(changedNearValidSeed.source, createNearValidSourceCase(config.seed, 6).source);
 
-  const functionsCase = Array.from(
-    { length: VALID_SOURCE_FAMILIES.length },
-    (_, index) => createValidSourceCase(1, index),
+  const functionsCase = Array.from({ length: VALID_SOURCE_FAMILIES.length }, (_, index) =>
+    createValidSourceCase(1, index),
   ).find(({ family }) => family === "functions-defaults-calls-and-recursion");
   assert.ok(functionsCase);
   assert.match(functionsCase.source, /return `\$\{prefix\}:\$\{value\}`/);
 });
 
 function assertSourceFamilyCoverage(
-  cases: readonly {
-    readonly index: number;
-    readonly context: string;
-    readonly source?: string;
-  }[],
+  cases: readonly { readonly index: number; readonly context: string; readonly source?: string }[],
   classification: "valid" | "near-valid",
   families: readonly string[],
 ): void {
   for (const family of families) {
     const sources = cases
-      .filter((result) => (
-        result.context.includes(`classification=${classification}`)
-        && result.context.includes(`family=${family}`)
-      ))
+      .filter(
+        (result) =>
+          result.context.includes(`classification=${classification}`) &&
+          result.context.includes(`family=${family}`),
+      )
       .map((result) => result.source);
 
     assert.ok(sources.length >= 2, `${classification}/${family} must be reached twice`);
-    assert.equal(
-      new Set(sources).size >= 2,
-      true,
-      `${classification}/${family} must vary source`,
-    );
+    assert.equal(new Set(sources).size >= 2, true, `${classification}/${family} must vary source`);
 
-    const result = cases.find((caseResult) => (
-      caseResult.context.includes(`classification=${classification}`)
-      && caseResult.context.includes(`family=${family}`)
-    ));
+    const result = cases.find(
+      (caseResult) =>
+        caseResult.context.includes(`classification=${classification}`) &&
+        caseResult.context.includes(`family=${family}`),
+    );
     assert.ok(result);
     assertExactSourceReplay(result, classification);
   }
 }
 
-function assertSinglePreparedScenario(
-  classification: "valid" | "near-valid",
-): void {
+function assertSinglePreparedScenario(classification: "valid" | "near-valid"): void {
   const config = sourceCaseConfig(classification);
   const expected = createSourceCase(config.seed, config.caseIndex!, classification);
   let preparedCount = 0;
   const definitions = createPropertyDefinitions({
     ...(classification === "valid"
       ? {
-        createValidSourceCase: (seed, index) => {
-          preparedCount += 1;
-          assert.equal(preparedCount, 1, "valid source must not be generated twice");
-          return createValidSourceCase(seed, index);
-        },
-      }
+          createValidSourceCase: (seed, index) => {
+            preparedCount += 1;
+            assert.equal(preparedCount, 1, "valid source must not be generated twice");
+            return createValidSourceCase(seed, index);
+          },
+        }
       : {
-        createNearValidSourceCase: (seed, index) => {
-          preparedCount += 1;
-          assert.equal(preparedCount, 1, "near-valid source must not be generated twice");
-          return createNearValidSourceCase(seed, index);
-        },
-      }),
+          createNearValidSourceCase: (seed, index) => {
+            preparedCount += 1;
+            assert.equal(preparedCount, 1, "near-valid source must not be generated twice");
+            return createNearValidSourceCase(seed, index);
+          },
+        }),
   });
 
   const replay = runPropertyCampaign(config, definitions);
@@ -243,10 +215,8 @@ function assertExactSourceReplay(
 ): void {
   const config = defaultPropertyCampaignConfig();
   const replayConfig = { ...config, caseIndex: result.index };
-  const expected = assertExactGeneratedScenario(
-    config.seed,
-    result.index,
-    (seed, index) => createSourceCase(seed, index, classification),
+  const expected = assertExactGeneratedScenario(config.seed, result.index, (seed, index) =>
+    createSourceCase(seed, index, classification),
   );
   let preparedCount = 0;
   const replay = runPropertyCampaign(
@@ -254,19 +224,19 @@ function assertExactSourceReplay(
     createPropertyDefinitions(
       classification === "valid"
         ? {
-          createValidSourceCase: (seed, index) => {
-            preparedCount += 1;
-            assert.equal(preparedCount, 1, "valid replay must reuse its prepared source");
-            return createValidSourceCase(seed, index);
-          },
-        }
+            createValidSourceCase: (seed, index) => {
+              preparedCount += 1;
+              assert.equal(preparedCount, 1, "valid replay must reuse its prepared source");
+              return createValidSourceCase(seed, index);
+            },
+          }
         : {
-          createNearValidSourceCase: (seed, index) => {
-            preparedCount += 1;
-            assert.equal(preparedCount, 1, "near-valid replay must reuse its prepared source");
-            return createNearValidSourceCase(seed, index);
+            createNearValidSourceCase: (seed, index) => {
+              preparedCount += 1;
+              assert.equal(preparedCount, 1, "near-valid replay must reuse its prepared source");
+              return createNearValidSourceCase(seed, index);
+            },
           },
-        },
     ),
   );
 
@@ -286,25 +256,18 @@ function assertExactGeneratedScenario<T>(
   return first;
 }
 
-function createSourceCase(
-  seed: number,
-  index: number,
-  classification: "valid" | "near-valid",
-) {
+function createSourceCase(seed: number, index: number, classification: "valid" | "near-valid") {
   return classification === "valid"
     ? createValidSourceCase(seed, index)
     : createNearValidSourceCase(seed, index);
 }
 
-function sourceCaseConfig(
-  classification: "valid" | "near-valid",
-) {
+function sourceCaseConfig(classification: "valid" | "near-valid") {
   const config = defaultPropertyCampaignConfig();
-  const result = Array.from({ length: config.runs }, (_, index) =>
-    runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
-  ).find((caseResult) =>
-    caseResult.context.includes(`classification=${classification}`),
-  );
+  const result = Array.from(
+    { length: config.runs },
+    (_, index) => runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
+  ).find((caseResult) => caseResult.context.includes(`classification=${classification}`));
   assert.ok(result, `expected a ${classification} source case`);
   return { ...config, caseIndex: result.index };
 }

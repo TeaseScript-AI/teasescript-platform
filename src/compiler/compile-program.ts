@@ -39,8 +39,7 @@ export function compileProgram(program: Program): InstructionPlan {
  * caller-constructed AST data.
  */
 export function compileStableProgram(program: Program): InstructionPlan {
-  const nonFiniteDiagnostic =
-    findNonFiniteNumericLiteralDiagnosticsInStableProgram(program)[0];
+  const nonFiniteDiagnostic = findNonFiniteNumericLiteralDiagnosticsInStableProgram(program)[0];
   if (nonFiniteDiagnostic !== undefined) {
     throw new InstructionCompilationError(
       AST_VALIDATION_CODES.nonFiniteNumericLiteral,
@@ -49,14 +48,11 @@ export function compileStableProgram(program: Program): InstructionPlan {
     );
   }
   const declarations = program.statements.filter(
-    (statement): statement is FunctionDeclaration =>
-      statement.kind === "functionDeclaration",
+    (statement): statement is FunctionDeclaration => statement.kind === "functionDeclaration",
   );
   const compiler = new InstructionCompiler(declarations);
   compiler.compileStatements(
-    program.statements.filter(
-      (statement) => statement.kind !== "functionDeclaration",
-    ),
+    program.statements.filter((statement) => statement.kind !== "functionDeclaration"),
   );
   const rootEndInstruction = compiler.instructions.length;
   compiler.compileFunctions();

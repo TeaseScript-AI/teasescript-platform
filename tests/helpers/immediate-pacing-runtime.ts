@@ -1,8 +1,5 @@
 import type { InstructionPlan } from "../../src/plan/model.js";
-import {
-  createFreshRuntimeSnapshot,
-  type FreshRuntimeOptions,
-} from "../../src/runtime/state.js";
+import { createFreshRuntimeSnapshot, type FreshRuntimeOptions } from "../../src/runtime/state.js";
 
 export type ImmediatePacingRuntimeOptions = Omit<
   FreshRuntimeOptions,

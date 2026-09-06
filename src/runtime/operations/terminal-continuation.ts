@@ -17,17 +17,16 @@ export function terminalContinuationHandoffFor(
   if (
     action.ownerCallFrameId !== null ||
     action.continuationInstruction !== plan.rootEndInstruction
-  ) return null;
+  )
+    return null;
 
   const instruction = plan.instructions[action.owningInstruction];
   const matchesTerminalInstruction =
     (action.kind === "delay" && instruction?.kind === "wait") ||
-    (
-      action.kind === "interaction" &&
+    (action.kind === "interaction" &&
       instruction?.kind === "interaction" &&
       instruction.interactionKind === "button" &&
-      instruction.destinationTemporary === null
-    );
+      instruction.destinationTemporary === null);
   if (!matchesTerminalInstruction) return null;
 
   return Object.freeze({

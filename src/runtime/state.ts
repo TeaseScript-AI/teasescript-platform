@@ -12,10 +12,7 @@ import type {
   InteractionUiPayload,
 } from "../plan/model.js";
 import { captureInstructionPlan } from "../plan/capture.js";
-import {
-  captureExternalData,
-  type ExternalDataFailureKind,
-} from "../external-data-capture.js";
+import { captureExternalData, type ExternalDataFailureKind } from "../external-data-capture.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -120,10 +117,7 @@ export interface RuntimeRepeatLoopFrameSnapshot extends RuntimeLoopFrameBase {
 export interface RuntimeForLoopFrameSnapshot extends RuntimeLoopFrameBase {
   readonly kind: "for";
   readonly variable: string;
-  readonly source:
-    | SerializableRuntimeList
-    | SerializableRuntimeSet
-    | SerializableRuntimeRange;
+  readonly source: SerializableRuntimeList | SerializableRuntimeSet | SerializableRuntimeRange;
   position: number;
 }
 
@@ -132,9 +126,7 @@ export interface RuntimeWhileLoopFrameSnapshot extends RuntimeLoopFrameBase {
 }
 
 export type RuntimeLoopFrameSnapshot =
-  | RuntimeRepeatLoopFrameSnapshot
-  | RuntimeForLoopFrameSnapshot
-  | RuntimeWhileLoopFrameSnapshot;
+  RuntimeRepeatLoopFrameSnapshot | RuntimeForLoopFrameSnapshot | RuntimeWhileLoopFrameSnapshot;
 
 export interface RuntimeTemporarySnapshot {
   readonly id: number;
@@ -142,10 +134,7 @@ export interface RuntimeTemporarySnapshot {
 }
 
 export type RuntimeCallArgumentSnapshot =
-  | {
-      readonly parameterName: string;
-      readonly supplied: false;
-    }
+  | { readonly parameterName: string; readonly supplied: false }
   | {
       readonly parameterName: string;
       readonly supplied: true;
@@ -264,10 +253,9 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
 ): RuntimeSnapshot {
   const optionsCapture = captureExternalData(options);
   if (!optionsCapture.ok) {
-    throw new TypeError(runtimeInputDataFailureMessage(
-      optionsCapture.failure.kind,
-      optionsCapture.failure.path,
-    ));
+    throw new TypeError(
+      runtimeInputDataFailureMessage(optionsCapture.failure.kind, optionsCapture.failure.path),
+    );
   }
   if (!isPlainRecord(optionsCapture.value)) {
     throw new TypeError("Fresh runtime options must be an object.");
@@ -282,11 +270,11 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   const initialSessionTimeMs = capturedOptions.initialSessionTimeMs ?? 0;
   const chatPacingSettings = captureChatPacingSettings(capturedOptions);
   if (!validSessionTime(initialSessionTimeMs)) {
-    throw new RangeError(`initialSessionTimeMs must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.`);
+    throw new RangeError(
+      `initialSessionTimeMs must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.`,
+    );
   }
-  const maxCallDepth = maxCallDepthValue === undefined
-    ? DEFAULT_MAX_CALL_DEPTH
-    : maxCallDepthValue;
+  const maxCallDepth = maxCallDepthValue === undefined ? DEFAULT_MAX_CALL_DEPTH : maxCallDepthValue;
   if (
     typeof maxCallDepth !== "number" ||
     !Number.isInteger(maxCallDepth) ||
@@ -348,9 +336,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
 export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
   const captured = captureRuntimeSnapshot(snapshot);
   if (!captured.validation.valid || captured.snapshot === null) {
-    throw new TypeError(
-      captured.validation.errors[0] ?? "Malformed runtime snapshot.",
-    );
+    throw new TypeError(captured.validation.errors[0] ?? "Malformed runtime snapshot.");
   }
   return captured.snapshot;
 }
@@ -388,7 +374,9 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       return {
         ...frame,
         // EVIDENCE: validation: cloning preserves the validated for-loop source collection kind.
-        source: cloneCapturedSerializableValue(frame.source) as RuntimeForLoopFrameSnapshot["source"],
+        source: cloneCapturedSerializableValue(
+          frame.source,
+        ) as RuntimeForLoopFrameSnapshot["source"],
       };
     }),
     temporaries: snapshot.temporaries.map(cloneTemporary),
@@ -419,10 +407,12 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextCallFrameId: snapshot.nextCallFrameId,
     currentSessionTimeMs: snapshot.currentSessionTimeMs,
     chatPacingSettings: cloneChatPacingSettings(snapshot.chatPacingSettings),
-    foregroundAction: snapshot.foregroundAction === null ? null : clonePendingAction(snapshot.foregroundAction),
+    foregroundAction:
+      snapshot.foregroundAction === null ? null : clonePendingAction(snapshot.foregroundAction),
     backgroundActions: snapshot.backgroundActions.map(clonePendingAction),
     nextActionId: snapshot.nextActionId,
-    lastSettlement: snapshot.lastSettlement === null ? null : cloneSettlement(snapshot.lastSettlement),
+    lastSettlement:
+      snapshot.lastSettlement === null ? null : cloneSettlement(snapshot.lastSettlement),
     interactionResultHandoff:
       snapshot.interactionResultHandoff === null
         ? null
@@ -431,7 +421,10 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       snapshot.terminalContinuationHandoff === null
         ? null
         : cloneTerminalContinuationHandoff(snapshot.terminalContinuationHandoff),
-    preparedSayOutput: snapshot.preparedSayOutput === null ? null : clonePreparedSayOutput(snapshot.preparedSayOutput),
+    preparedSayOutput:
+      snapshot.preparedSayOutput === null
+        ? null
+        : clonePreparedSayOutput(snapshot.preparedSayOutput),
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -469,7 +462,9 @@ function cloneTerminalContinuationHandoff(
   };
 }
 
-function clonePreparedSayOutput(output: RuntimePreparedSayOutputSnapshot): RuntimePreparedSayOutputSnapshot {
+function clonePreparedSayOutput(
+  output: RuntimePreparedSayOutputSnapshot,
+): RuntimePreparedSayOutputSnapshot {
   return {
     owningInstruction: output.owningInstruction,
     continuationInstruction: output.continuationInstruction,
@@ -481,29 +476,36 @@ function clonePreparedSayOutput(output: RuntimePreparedSayOutputSnapshot): Runti
 }
 
 function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendingActionSnapshot {
-  if (action.kind === "delay") return {
-    kind: "delay",
-    actionId: action.actionId,
-    owningInstruction: action.owningInstruction,
-    continuationInstruction: action.continuationInstruction,
-    ownerCallFrameId: action.ownerCallFrameId,
-    scopeDepth: action.scopeDepth,
-    loopDepth: action.loopDepth,
-    createdAtMs: action.createdAtMs,
-    deadlineMs: action.deadlineMs,
-    expectedCompletion: "time",
-    requestEventSequence: action.requestEventSequence,
-  };
-  if (action.kind === "chatPacingGate") return {
-    kind: "chatPacingGate", actionId: action.actionId,
-    owningInstruction: action.owningInstruction,
-    continuationInstruction: action.continuationInstruction,
-    ownerCallFrameId: action.ownerCallFrameId,
-    scopeDepth: action.scopeDepth, loopDepth: action.loopDepth,
-    createdAtMs: action.createdAtMs, deadlineMs: action.deadlineMs,
-    skippable: action.skippable, requestEventSequence: action.requestEventSequence,
-    preparedOutput: action.preparedOutput === null ? null : clonePreparedSayOutput(action.preparedOutput),
-  };
+  if (action.kind === "delay")
+    return {
+      kind: "delay",
+      actionId: action.actionId,
+      owningInstruction: action.owningInstruction,
+      continuationInstruction: action.continuationInstruction,
+      ownerCallFrameId: action.ownerCallFrameId,
+      scopeDepth: action.scopeDepth,
+      loopDepth: action.loopDepth,
+      createdAtMs: action.createdAtMs,
+      deadlineMs: action.deadlineMs,
+      expectedCompletion: "time",
+      requestEventSequence: action.requestEventSequence,
+    };
+  if (action.kind === "chatPacingGate")
+    return {
+      kind: "chatPacingGate",
+      actionId: action.actionId,
+      owningInstruction: action.owningInstruction,
+      continuationInstruction: action.continuationInstruction,
+      ownerCallFrameId: action.ownerCallFrameId,
+      scopeDepth: action.scopeDepth,
+      loopDepth: action.loopDepth,
+      createdAtMs: action.createdAtMs,
+      deadlineMs: action.deadlineMs,
+      skippable: action.skippable,
+      requestEventSequence: action.requestEventSequence,
+      preparedOutput:
+        action.preparedOutput === null ? null : clonePreparedSayOutput(action.preparedOutput),
+    };
   return {
     kind: "interaction",
     interactionKind: action.interactionKind,
@@ -523,31 +525,36 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
 }
 
 function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPayload {
-  const accessibleName = ui.accessibleName.kind === "text"
-    ? { kind: "text" as const, text: ui.accessibleName.text }
-    : { kind: "localizedDefault" as const, key: ui.accessibleName.key };
-  if (ui.kind === "choice") return {
-    kind: "choice",
-    labelType: ui.labelType,
-    options: ui.options.map((option) => ({ text: option.text, label: option.label })),
-    accessibleName,
-  };
+  const accessibleName =
+    ui.accessibleName.kind === "text"
+      ? { kind: "text" as const, text: ui.accessibleName.text }
+      : { kind: "localizedDefault" as const, key: ui.accessibleName.key };
+  if (ui.kind === "choice")
+    return {
+      kind: "choice",
+      labelType: ui.labelType,
+      options: ui.options.map((option) => ({ text: option.text, label: option.label })),
+      accessibleName,
+    };
   if (ui.kind === "button") return { kind: "button", buttonLabel: ui.buttonLabel, accessibleName };
   return { kind: ui.kind, hint: ui.hint, accessibleName };
 }
 
-function cloneSettlement(settlement: RuntimeActionSettlementSnapshot): RuntimeActionSettlementSnapshot {
-  if (settlement.actionKind === "delay") return {
-    actionId: settlement.actionId,
-    actionKind: "delay",
-    settlementKind: "completed",
-    owningInstruction: settlement.owningInstruction,
-    continuationInstruction: settlement.continuationInstruction,
-    requestEventSequence: settlement.requestEventSequence,
-    completionEventSequence: settlement.completionEventSequence,
-    deadlineMs: settlement.deadlineMs,
-    completedAtMs: settlement.completedAtMs,
-  };
+function cloneSettlement(
+  settlement: RuntimeActionSettlementSnapshot,
+): RuntimeActionSettlementSnapshot {
+  if (settlement.actionKind === "delay")
+    return {
+      actionId: settlement.actionId,
+      actionKind: "delay",
+      settlementKind: "completed",
+      owningInstruction: settlement.owningInstruction,
+      continuationInstruction: settlement.continuationInstruction,
+      requestEventSequence: settlement.requestEventSequence,
+      completionEventSequence: settlement.completionEventSequence,
+      deadlineMs: settlement.deadlineMs,
+      completedAtMs: settlement.completedAtMs,
+    };
   if (settlement.actionKind === "chatPacingGate") return { ...settlement };
   return {
     actionId: settlement.actionId,
@@ -601,23 +608,17 @@ export function captureRuntimeSnapshotWithValidatedPlan(
     return Object.freeze({
       validation: Object.freeze({
         valid: false,
-        errors: Object.freeze([
-          snapshotExternalDataFailureMessage(snapshotCapture.failure.kind),
-        ]),
+        errors: Object.freeze([snapshotExternalDataFailureMessage(snapshotCapture.failure.kind)]),
       }),
       snapshot: null,
     });
   }
 
-  const validation = validateCapturedRuntimeSnapshot(
-    snapshotCapture.value,
-    plan,
-  );
+  const validation = validateCapturedRuntimeSnapshot(snapshotCapture.value, plan);
   return Object.freeze({
     validation,
-    snapshot: validation.valid
-      ? /* EVIDENCE: validation: the preceding snapshot validation accepted this captured graph. */ snapshotCapture.value as RuntimeSnapshot
-      : null,
+    // EVIDENCE: validation: the preceding snapshot validation accepts this captured graph before it is returned.
+    snapshot: validation.valid ? (snapshotCapture.value as RuntimeSnapshot) : null,
   });
 }
 
@@ -634,13 +635,17 @@ export function validateCapturedRuntimeSnapshot(
 ): SnapshotValidationResult {
   const errors: string[] = [];
   if (!isPlainRecord(value)) {
-    return Object.freeze({ valid: false, errors: Object.freeze(["Runtime snapshot must be an object."]) });
+    return Object.freeze({
+      valid: false,
+      errors: Object.freeze(["Runtime snapshot must be an object."]),
+    });
   }
   if (!hasExactKeys(value, RUNTIME_SNAPSHOT_KEYS)) {
     errors.push("Runtime snapshot contains unsupported fields or omits required fields.");
   }
   if (value.format !== RUNTIME_SNAPSHOT_FORMAT) errors.push("Unsupported runtime-snapshot format.");
-  if (value.version !== RUNTIME_SNAPSHOT_VERSION) errors.push("Unsupported runtime-snapshot version.");
+  if (value.version !== RUNTIME_SNAPSHOT_VERSION)
+    errors.push("Unsupported runtime-snapshot version.");
   if (!validChatPacingSettings(value.chatPacingSettings)) {
     errors.push("Runtime chatPacingSettings is malformed.");
   }
@@ -696,10 +701,7 @@ export function validateCapturedRuntimeSnapshot(
   );
   if (value.defaultSpeaker !== null && !nonNegativeSafeInteger(value.defaultSpeaker)) {
     errors.push("Runtime defaultSpeaker must be a speaker ID or null.");
-  } else if (
-    typeof value.defaultSpeaker === "number" &&
-    !speakerIds.has(value.defaultSpeaker)
-  ) {
+  } else if (typeof value.defaultSpeaker === "number" && !speakerIds.has(value.defaultSpeaker)) {
     errors.push("Runtime defaultSpeaker refers to an unknown speaker.");
   }
   if (value.contextualSpeaker !== null && !nonNegativeSafeInteger(value.contextualSpeaker)) {
@@ -756,21 +758,30 @@ export function validateCapturedRuntimeSnapshot(
   if (
     !nonNegativeSafeInteger(value.nextScopeId) ||
     value.nextScopeId < 1 ||
-    frameIds.some((id) => id >= (/* EVIDENCE: validation: nextScopeId passed the integer/range guard before this callback. */ value.nextScopeId as number))
+    frameIds.some((id) => {
+      // EVIDENCE: validation: nextScopeId passed the integer/range guard before this callback.
+      return id >= (value.nextScopeId as number);
+    })
   ) {
     errors.push("Runtime nextScopeId must be a positive unused safe integer ID.");
   }
   if (
     !nonNegativeSafeInteger(value.nextSpeakerId) ||
     value.nextSpeakerId < 1 ||
-    [...speakerIds].some((id) => id >= (/* EVIDENCE: validation: nextSpeakerId passed the integer/range guard before this callback. */ value.nextSpeakerId as number))
+    [...speakerIds].some((id) => {
+      // EVIDENCE: validation: nextSpeakerId passed the integer/range guard before this callback.
+      return id >= (value.nextSpeakerId as number);
+    })
   ) {
     errors.push("Runtime nextSpeakerId must be a positive unused safe integer ID.");
   }
   if (
     !nonNegativeSafeInteger(value.nextCallFrameId) ||
     value.nextCallFrameId < 1 ||
-    [...callFrameIds].some((id) => id >= (/* EVIDENCE: validation: nextCallFrameId passed the integer/range guard before this callback. */ value.nextCallFrameId as number))
+    [...callFrameIds].some((id) => {
+      // EVIDENCE: validation: nextCallFrameId passed the integer/range guard before this callback.
+      return id >= (value.nextCallFrameId as number);
+    })
   ) {
     errors.push("Runtime nextCallFrameId must be a positive unused safe integer ID.");
   }
@@ -810,14 +821,17 @@ function validateLoopFrames(
   const frameCount = Array.isArray(frames) ? frames.length : 0;
   const loopIds = new Set<number>();
   let previousDepth = 0;
-  const plannedLoops = new Map<number, {
-    kind: "repeat" | "for" | "while";
-    variable?: string;
-    start: number;
-    continueStart: number;
-    target: number;
-    functionId: number | null;
-  }>();
+  const plannedLoops = new Map<
+    number,
+    {
+      kind: "repeat" | "for" | "while";
+      variable?: string;
+      start: number;
+      continueStart: number;
+      target: number;
+      functionId: number | null;
+    }
+  >();
   const callFramesById = new Map<number, Record<string, unknown>>();
   if (Array.isArray(callFrames)) {
     for (const frame of callFrames) {
@@ -866,9 +880,12 @@ function validateLoopFrames(
     const owner = nonNegativeSafeInteger(frame.callFrameId)
       ? callFramesById.get(frame.callFrameId)
       : undefined;
-    const currentOwner = Array.isArray(callFrames) && callFrames.length > 0
-      ? (isPlainRecord(callFrames.at(-1)) ? callFrames.at(-1)!.id : undefined)
-      : null;
+    const currentOwner =
+      Array.isArray(callFrames) && callFrames.length > 0
+        ? isPlainRecord(callFrames.at(-1))
+          ? callFrames.at(-1)!.id
+          : undefined
+        : null;
     if (
       plan !== undefined &&
       (planned === undefined ||
@@ -920,8 +937,7 @@ function iterationLength(source: Record<string, unknown>): number {
     typeof source.inclusive === "boolean"
   ) {
     // EVIDENCE: validation: both range endpoints passed Number.isSafeInteger above.
-    const size = (source.end as number) - (source.start as number) +
-      (source.inclusive ? 1 : 0);
+    const size = (source.end as number) - (source.start as number) + (source.inclusive ? 1 : 0);
     return Number.isSafeInteger(size) ? Math.max(0, size) : -1;
   }
   return -1;
@@ -986,11 +1002,7 @@ function validatePreparedReferenceTemporaries(
     ) {
       continue;
     }
-    const failure = validatePreparedReferenceDescriptor(
-      temporary.value,
-      frames,
-      speakers,
-    );
+    const failure = validatePreparedReferenceDescriptor(temporary.value, frames, speakers);
     if (failure !== null) {
       errors.push(`${label} contain malformed prepared-reference state: ${failure}`);
     }
@@ -1035,13 +1047,21 @@ function collectPreparedSayTemporaryOwnership(
     for (const instruction of plan.instructions) {
       if (instruction.kind === "prepareSaySpeaker") {
         outputSpeakerIds.add(instruction.destinationTemporary);
-        if (instruction.speaker === null) nullableSaySpeakerSources.add(instruction.destinationTemporary);
-        else explicitOutputSpeakerIdentifiers.set(instruction.destinationTemporary, instruction.speaker);
+        if (instruction.speaker === null)
+          nullableSaySpeakerSources.add(instruction.destinationTemporary);
+        else
+          explicitOutputSpeakerIdentifiers.set(
+            instruction.destinationTemporary,
+            instruction.speaker,
+          );
       } else if (instruction.kind === "prepareSayText") {
         textIds.add(instruction.destinationTemporary);
       } else if (instruction.kind === "prepareSayContextualSpeaker") {
         contextualSpeakerIds.add(instruction.destinationTemporary);
-        contextualSpeakerSources.set(instruction.destinationTemporary, instruction.speakerTemporary);
+        contextualSpeakerSources.set(
+          instruction.destinationTemporary,
+          instruction.speakerTemporary,
+        );
         if (nullableSaySpeakerSources.has(instruction.speakerTemporary)) {
           nullableContextualSpeakerIds.add(instruction.destinationTemporary);
         }
@@ -1068,7 +1088,12 @@ function validatePreparedSayTemporaries(
 ): void {
   if (!Array.isArray(value)) return;
   for (const temporary of value) {
-    if (!isPlainRecord(temporary) || !nonNegativeSafeInteger(temporary.id) || !("value" in temporary)) continue;
+    if (
+      !isPlainRecord(temporary) ||
+      !nonNegativeSafeInteger(temporary.id) ||
+      !("value" in temporary)
+    )
+      continue;
     let valid = true;
     if (ownership.outputSpeakerIds.has(temporary.id)) {
       valid = validPreparedSayTemporarySpeaker(
@@ -1115,8 +1140,10 @@ function preparedSaySpeakerValuesMatch(output: unknown, contextual: unknown): bo
   if (output === null || contextual === null) return output === contextual;
   const outputProperties = serializedObjectPropertyMap(output);
   if (outputProperties === null || !isPlainRecord(contextual)) return false;
-  return outputProperties.get("speakerId") === contextual.speakerId &&
-    outputProperties.get("identifier") === contextual.identifier;
+  return (
+    outputProperties.get("speakerId") === contextual.speakerId &&
+    outputProperties.get("identifier") === contextual.identifier
+  );
 }
 
 function validPreparedSayTemporarySpeaker(
@@ -1130,8 +1157,11 @@ function validPreparedSayTemporarySpeaker(
   if (
     properties === null ||
     properties.size !== 6 ||
-    !["identifier", "displayName", "color", "font", "avatar", "speakerId"].every((name) => properties.has(name))
-  ) return false;
+    !["identifier", "displayName", "color", "font", "avatar", "speakerId"].every((name) =>
+      properties.has(name),
+    )
+  )
+    return false;
   const identifier = properties.get("identifier");
   const displayName = properties.get("displayName");
   const color = properties.get("color");
@@ -1145,10 +1175,15 @@ function validPreparedSayTemporarySpeaker(
     (typeof font !== "string" && font !== null) ||
     (typeof avatar !== "string" && avatar !== null) ||
     !positiveSafeInteger(speakerId)
-  ) return false;
-  return (expectedIdentifier === undefined || identifier === expectedIdentifier) &&
-    Array.isArray(speakers) && speakers.some((speaker) =>
-    isPlainRecord(speaker) && speaker.id === speakerId && speaker.identifier === identifier
+  )
+    return false;
+  return (
+    (expectedIdentifier === undefined || identifier === expectedIdentifier) &&
+    Array.isArray(speakers) &&
+    speakers.some(
+      (speaker) =>
+        isPlainRecord(speaker) && speaker.id === speakerId && speaker.identifier === identifier,
+    )
   );
 }
 
@@ -1164,9 +1199,16 @@ function validPreparedSayContextualSpeaker(
     value.kind !== "speakerReference" ||
     !positiveSafeInteger(value.speakerId) ||
     typeof value.identifier !== "string"
-  ) return false;
-  return Array.isArray(speakers) && speakers.some((speaker) =>
-    isPlainRecord(speaker) && speaker.id === value.speakerId && speaker.identifier === value.identifier
+  )
+    return false;
+  return (
+    Array.isArray(speakers) &&
+    speakers.some(
+      (speaker) =>
+        isPlainRecord(speaker) &&
+        speaker.id === value.speakerId &&
+        speaker.identifier === value.identifier,
+    )
   );
 }
 
@@ -1193,16 +1235,10 @@ function validatePreparedReferenceDescriptor(
   if (marker !== "preparedReference") {
     return "the descriptor marker is invalid.";
   }
-  if (
-    rootFrameId !== null &&
-    (!nonNegativeSafeInteger(rootFrameId))
-  ) {
+  if (rootFrameId !== null && !nonNegativeSafeInteger(rootFrameId)) {
     return "the root frame ID must be a non-negative integer or null.";
   }
-  if (
-    rootName !== null &&
-    (typeof rootName !== "string" || rootName.length === 0)
-  ) {
+  if (rootName !== null && (typeof rootName !== "string" || rootName.length === 0)) {
     return "the root name must be a non-empty string or null.";
   }
   if ((rootFrameId === null) !== (rootName === null)) {
@@ -1237,14 +1273,8 @@ function validatePreparedReferenceDescriptor(
   return null;
 }
 
-function serializedObjectPropertyMap(
-  value: unknown,
-): ReadonlyMap<string, unknown> | null {
-  if (
-    !isPlainRecord(value) ||
-    value.kind !== "object" ||
-    !Array.isArray(value.properties)
-  ) {
+function serializedObjectPropertyMap(value: unknown): ReadonlyMap<string, unknown> | null {
+  if (!isPlainRecord(value) || value.kind !== "object" || !Array.isArray(value.properties)) {
     return null;
   }
   const output = new Map<string, unknown>();
@@ -1262,9 +1292,7 @@ function serializedObjectPropertyMap(
   return output;
 }
 
-function parsePreparedReferencePath(
-  value: unknown,
-): readonly PreparedReferencePathStep[] | null {
+function parsePreparedReferencePath(value: unknown): readonly PreparedReferencePathStep[] | null {
   if (!isPlainRecord(value) || value.kind !== "list" || !Array.isArray(value.items)) {
     return null;
   }
@@ -1273,21 +1301,13 @@ function parsePreparedReferencePath(
     const properties = serializedObjectPropertyMap(item);
     if (properties === null) return null;
     const kind = properties.get("kind");
-    if (
-      kind === "property" &&
-      properties.size === 2 &&
-      properties.has("name")
-    ) {
+    if (kind === "property" && properties.size === 2 && properties.has("name")) {
       const name = properties.get("name");
       if (typeof name !== "string" || name.length === 0) return null;
       output.push({ kind, name });
       continue;
     }
-    if (
-      kind === "index" &&
-      properties.size === 2 &&
-      properties.has("index")
-    ) {
+    if (kind === "index" && properties.size === 2 && properties.has("index")) {
       const index = properties.get("index");
       if (!nonNegativeSafeInteger(index)) return null;
       output.push({ kind, index });
@@ -1304,17 +1324,12 @@ function serializedFrameBinding(
   name: string,
 ): { readonly found: boolean; readonly value: unknown } {
   if (!Array.isArray(frames)) return { found: false, value: null };
-  const frame = frames.find(
-    (candidate) => isPlainRecord(candidate) && candidate.id === frameId,
-  );
+  const frame = frames.find((candidate) => isPlainRecord(candidate) && candidate.id === frameId);
   if (!isPlainRecord(frame) || !Array.isArray(frame.bindings)) {
     return { found: false, value: null };
   }
   const binding = frame.bindings.find(
-    (candidate) =>
-      isPlainRecord(candidate) &&
-      candidate.name === name &&
-      "value" in candidate,
+    (candidate) => isPlainRecord(candidate) && candidate.name === name && "value" in candidate,
   );
   return isPlainRecord(binding)
     ? { found: true, value: binding.value }
@@ -1361,11 +1376,7 @@ function preparedReferencePathResolves(
       current.kind === "speakerReference" &&
       nonNegativeSafeInteger(current.speakerId)
     ) {
-      const property = serializedSpeakerProperty(
-        speakers,
-        current.speakerId,
-        step.name,
-      );
+      const property = serializedSpeakerProperty(speakers, current.speakerId, step.name);
       if (!property.found) return false;
       current = property.value;
       continue;
@@ -1387,17 +1398,16 @@ function serializedSpeakerProperty(
   if (!isPlainRecord(speaker) || !Array.isArray(speaker.properties)) {
     return { found: false, value: null };
   }
-  const names = name === "title"
-    ? ["title", "shortTitle"]
-    : name === "shortTitle"
-      ? ["shortTitle", "title"]
-      : [name];
+  const names =
+    name === "title"
+      ? ["title", "shortTitle"]
+      : name === "shortTitle"
+        ? ["shortTitle", "title"]
+        : [name];
   for (const candidateName of names) {
     const property = speaker.properties.find(
       (candidate) =>
-        isPlainRecord(candidate) &&
-        candidate.name === candidateName &&
-        "value" in candidate,
+        isPlainRecord(candidate) && candidate.name === candidateName && "value" in candidate,
     );
     if (isPlainRecord(property)) {
       return { found: true, value: property.value };
@@ -1485,12 +1495,7 @@ function validateCallFrames(
     ) {
       errors.push("Runtime call frame has an invalid result destination.");
     }
-    validateTemporaries(
-      frame.callerTemporaries,
-      plan,
-      "Runtime caller temporaries",
-      errors,
-    );
+    validateTemporaries(frame.callerTemporaries, plan, "Runtime caller temporaries", errors);
     validatePreparedReferenceTemporaries(
       frame.callerTemporaries,
       frames,
@@ -1531,19 +1536,9 @@ function validateCallFrames(
     }
     if (nonNegativeSafeInteger(frame.loopBaseDepth)) previousLoopBase = frame.loopBaseDepth;
     validateCallArguments(frame.arguments, definition, errors);
-    validateCallArgumentSupply(
-      frame.arguments,
-      callInstruction,
-      errors,
-    );
+    validateCallArgumentSupply(frame.arguments, callInstruction, errors);
     validateParameterState(frame.parameterState, definition, errors);
-    validateParameterBindings(
-      frame,
-      frames,
-      definition,
-      analysis,
-      errors,
-    );
+    validateParameterBindings(frame, frames, definition, analysis, errors);
 
     if (
       plan !== undefined &&
@@ -1566,9 +1561,10 @@ function validateCallFrames(
     if (plan !== undefined && nonNegativeSafeInteger(frame.returnInstruction)) {
       const callIndex = frame.returnInstruction - 1;
       const caller = frameIndex === 0 ? undefined : value[frameIndex - 1];
-      const callerDefinition = isPlainRecord(caller) && nonNegativeSafeInteger(caller.functionId)
-        ? analysis?.functionsById.get(caller.functionId)
-        : undefined;
+      const callerDefinition =
+        isPlainRecord(caller) && nonNegativeSafeInteger(caller.functionId)
+          ? analysis?.functionsById.get(caller.functionId)
+          : undefined;
       if (
         (frameIndex === 0 && callIndex >= plan.rootEndInstruction) ||
         (frameIndex > 0 &&
@@ -1581,9 +1577,7 @@ function validateCallFrames(
     }
 
     if (definition !== undefined) {
-      const child = frameIndex < value.length - 1
-        ? value[frameIndex + 1]
-        : undefined;
+      const child = frameIndex < value.length - 1 ? value[frameIndex + 1] : undefined;
       if (
         frameIndex === value.length - 1 &&
         (!nonNegativeSafeInteger(nextInstruction) ||
@@ -1625,10 +1619,7 @@ function validateCallArgumentSupply(
   callInstruction: InstructionPlan["instructions"][number] | undefined,
   errors: string[],
 ): void {
-  if (
-    !Array.isArray(argumentsValue) ||
-    callInstruction?.kind !== "callFunction"
-  ) {
+  if (!Array.isArray(argumentsValue) || callInstruction?.kind !== "callFunction") {
     return;
   }
   const suppliedParameters = new Set(
@@ -1639,14 +1630,17 @@ function validateCallArgumentSupply(
       !isPlainRecord(argument) ||
       typeof argument.parameterName !== "string" ||
       typeof argument.supplied !== "boolean"
-    ) continue;
+    )
+      continue;
     if (argument.supplied !== suppliedParameters.has(argument.parameterName)) {
       errors.push("Runtime supplied arguments do not match the call instruction.");
     }
   }
 }
 
-function createTemporaryMap(temporaries: readonly unknown[]): ReadonlyMap<number, Record<string, unknown>> {
+function createTemporaryMap(
+  temporaries: readonly unknown[],
+): ReadonlyMap<number, Record<string, unknown>> {
   recordValidationTestWork("temporaryMapBuilds");
   const result = new Map<number, Record<string, unknown>>();
   for (const temporary of temporaries) {
@@ -1789,10 +1783,7 @@ function expectedParameterProgress(
     instructionPosition >= definition.entryInstruction &&
     instructionPosition < definition.entryInstruction + parameterCount
   ) {
-    return {
-      phase: "supplied",
-      parameterIndex: instructionPosition - definition.entryInstruction,
-    };
+    return { phase: "supplied", parameterIndex: instructionPosition - definition.entryInstruction };
   }
   let cursor = definition.entryInstruction + parameterCount;
   if (instructionPosition === cursor) {
@@ -1805,16 +1796,13 @@ function expectedParameterProgress(
     if (instructionPosition === cursor) {
       return { phase: "defaults", parameterIndex };
     }
-    const bindIndex = analysis.defaultBindingPositions.get(
-      `${definition.id}:${parameterIndex}`,
-    ) ?? -1;
+    const bindIndex =
+      analysis.defaultBindingPositions.get(`${definition.id}:${parameterIndex}`) ?? -1;
     if (instructionPosition > cursor && instructionPosition < prepare.target) {
       return {
         phase: "defaults",
         parameterIndex:
-          bindIndex >= 0 && instructionPosition > bindIndex
-            ? parameterIndex + 1
-            : parameterIndex,
+          bindIndex >= 0 && instructionPosition > bindIndex ? parameterIndex + 1 : parameterIndex,
       };
     }
     cursor = prepare.target;
@@ -1889,11 +1877,7 @@ function validateSuspendedContinuationTemporaries(
 ): void {
   const present = new Set(createTemporaryMap(callerTemporaries).keys());
   present.add(destinationTemporary);
-  const required = requiredContinuationTemporaries(
-    analysis,
-    returnInstruction,
-    callerLoopFrames,
-  );
+  const required = requiredContinuationTemporaries(analysis, returnInstruction, callerLoopFrames);
   if ([...required].some((temporaryId) => !present.has(temporaryId))) {
     errors.push("Runtime caller temporaries cannot resume the suspended continuation.");
   }
@@ -1905,9 +1889,10 @@ function requiredContinuationTemporaries(
   loopFrames: unknown,
 ): ReadonlySet<number> {
   const activeLoop = Array.isArray(loopFrames) ? loopFrames.at(-1) : undefined;
-  const loopSignature = isPlainRecord(activeLoop) && nonNegativeSafeInteger(activeLoop.loopId)
-    ? `loop:${activeLoop.loopId}`
-    : "none";
+  const loopSignature =
+    isPlainRecord(activeLoop) && nonNegativeSafeInteger(activeLoop.loopId)
+      ? `loop:${activeLoop.loopId}`
+      : "none";
   let liveIn = analysis.continuationLiveness.get(loopSignature);
   if (liveIn === undefined) {
     recordDetailedValidationWork(analysis.plan.instructions.length);
@@ -1985,17 +1970,13 @@ function instructionSuccessors(
     case "exit":
       return [];
     case "callFunction":
-      return instruction.returnInstruction < regionEnd
-        ? [instruction.returnInstruction]
-        : [];
+      return instruction.returnInstruction < regionEnd ? [instruction.returnInstruction] : [];
     default:
       return next === null ? [] : [next];
   }
 }
 
-function instructionKilledTemporaries(
-  instruction: Instruction,
-): ReadonlySet<number> {
+function instructionKilledTemporaries(instruction: Instruction): ReadonlySet<number> {
   switch (instruction.kind) {
     case "storeTemporary":
       return new Set([instruction.temporaryId]);
@@ -2041,7 +2022,8 @@ function validateStatusConsistency(
   const action = value.foregroundAction;
   if (value.status === "waiting") {
     const hasForegroundAction = isPlainRecord(action);
-    const hasAllowedActionKind = hasForegroundAction &&
+    const hasAllowedActionKind =
+      hasForegroundAction &&
       ["delay", "interaction", "chatPacingGate"].includes(String(action.kind));
     if (!hasAllowedActionKind) {
       errors.push("Waiting runtime state requires one foreground action.");
@@ -2049,7 +2031,10 @@ function validateStatusConsistency(
   } else if (action !== null) {
     errors.push("Non-waiting runtime state must not contain a foreground action.");
   }
-  if (value.preparedSayOutput !== null && !validPreparedSayOutput(value.preparedSayOutput, value, plan)) {
+  if (
+    value.preparedSayOutput !== null &&
+    !validPreparedSayOutput(value.preparedSayOutput, value, plan)
+  ) {
     errors.push("Runtime prepared say output is malformed.");
   }
   if (!validTopLevelPreparedSayOutputRelationship(value, plan)) {
@@ -2088,7 +2073,8 @@ function validateStatusConsistency(
     if (
       plan !== undefined &&
       calls === 0 &&
-      (!nonNegativeSafeInteger(value.nextInstruction) || value.nextInstruction > plan.rootEndInstruction)
+      (!nonNegativeSafeInteger(value.nextInstruction) ||
+        value.nextInstruction > plan.rootEndInstruction)
     ) {
       errors.push("Root execution position is outside the root instruction range.");
     }
@@ -2112,7 +2098,8 @@ function validateRootEndTransition(
     value.nextInstruction !== plan.rootEndInstruction ||
     !Array.isArray(value.callFrames) ||
     value.callFrames.length !== 0
-  ) return;
+  )
+    return;
 
   const common =
     Array.isArray(value.frames) &&
@@ -2129,19 +2116,38 @@ function validateRootEndTransition(
     value.failure === null &&
     value.contextualSpeaker === null;
   if (!common || value.terminalContinuationHandoff === null) {
-    errors.push("Running root-end state is not a canonical settled terminal foreground transition.");
+    errors.push(
+      "Running root-end state is not a canonical settled terminal foreground transition.",
+    );
   }
 }
 
 function validSessionTime(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_RUNTIME_SESSION_TIME_MS;
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= MAX_RUNTIME_SESSION_TIME_MS
+  );
 }
 
 function captureChatPacingSettings(options: Record<string, unknown>): ChatPacingSettings {
   return Object.freeze({
-    baseDelayMs: capturePacingSetting(options.baseDelayMs, "baseDelayMs", DEFAULT_CHAT_PACING_SETTINGS.baseDelayMs),
-    delayPerWordMs: capturePacingSetting(options.delayPerWordMs, "delayPerWordMs", DEFAULT_CHAT_PACING_SETTINGS.delayPerWordMs),
-    delayPerCharacterMs: capturePacingSetting(options.delayPerCharacterMs, "delayPerCharacterMs", DEFAULT_CHAT_PACING_SETTINGS.delayPerCharacterMs),
+    baseDelayMs: capturePacingSetting(
+      options.baseDelayMs,
+      "baseDelayMs",
+      DEFAULT_CHAT_PACING_SETTINGS.baseDelayMs,
+    ),
+    delayPerWordMs: capturePacingSetting(
+      options.delayPerWordMs,
+      "delayPerWordMs",
+      DEFAULT_CHAT_PACING_SETTINGS.delayPerWordMs,
+    ),
+    delayPerCharacterMs: capturePacingSetting(
+      options.delayPerCharacterMs,
+      "delayPerCharacterMs",
+      DEFAULT_CHAT_PACING_SETTINGS.delayPerCharacterMs,
+    ),
   });
 }
 
@@ -2162,11 +2168,13 @@ function cloneChatPacingSettings(settings: ChatPacingSettings): ChatPacingSettin
 }
 
 function validChatPacingSettings(value: unknown): value is ChatPacingSettings {
-  return isPlainRecord(value) &&
+  return (
+    isPlainRecord(value) &&
     hasExactKeys(value, ["baseDelayMs", "delayPerWordMs", "delayPerCharacterMs"]) &&
     validPacingSetting(value.baseDelayMs) &&
     validPacingSetting(value.delayPerWordMs) &&
-    validPacingSetting(value.delayPerCharacterMs);
+    validPacingSetting(value.delayPerCharacterMs)
+  );
 }
 
 function validPacingSetting(value: unknown): value is number {
@@ -2187,22 +2195,34 @@ function validatePendingActionState(
   analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
-  if (!validSessionTime(value.currentSessionTimeMs)) errors.push("Runtime currentSessionTimeMs is outside the supported range.");
+  if (!validSessionTime(value.currentSessionTimeMs))
+    errors.push("Runtime currentSessionTimeMs is outside the supported range.");
   if (!validBackgroundPacingActions(value, plan)) {
     errors.push("Runtime backgroundActions are malformed.");
   }
-  if (!positiveSafeInteger(value.nextActionId)) errors.push("Runtime nextActionId must be a positive safe integer.");
+  if (!positiveSafeInteger(value.nextActionId))
+    errors.push("Runtime nextActionId must be a positive safe integer.");
   const action = value.foregroundAction;
   if (action !== null) {
-    const callIds = Array.isArray(value.callFrames) ? new Set(value.callFrames.filter(isPlainRecord).map((frame) => frame.id)) : new Set<unknown>();
+    const callIds = Array.isArray(value.callFrames)
+      ? new Set(value.callFrames.filter(isPlainRecord).map((frame) => frame.id))
+      : new Set<unknown>();
     const currentSessionTimeMs = value.currentSessionTimeMs;
     const delayTimesAreValid =
       isPlainRecord(action) &&
       action.kind === "delay" &&
       hasExactKeys(action, [
-        "kind", "actionId", "owningInstruction", "continuationInstruction",
-        "ownerCallFrameId", "scopeDepth", "loopDepth", "createdAtMs",
-        "deadlineMs", "expectedCompletion", "requestEventSequence",
+        "kind",
+        "actionId",
+        "owningInstruction",
+        "continuationInstruction",
+        "ownerCallFrameId",
+        "scopeDepth",
+        "loopDepth",
+        "createdAtMs",
+        "deadlineMs",
+        "expectedCompletion",
+        "requestEventSequence",
       ]) &&
       validSessionTime(action.createdAtMs) &&
       validSessionTime(action.deadlineMs) &&
@@ -2210,13 +2230,14 @@ function validatePendingActionState(
       action.createdAtMs <= currentSessionTimeMs &&
       action.deadlineMs > currentSessionTimeMs;
     const baseValid = validForegroundActionBase(action, value, callIds);
-    const kindValid = validForegroundActionKind(
-      action,
-      value,
-      plan,
-      delayTimesAreValid,
-    );
-    if (!baseValid || !kindValid || (plan !== undefined && isPlainRecord(action) && !validForegroundActionOwnership(action, value, plan))) {
+    const kindValid = validForegroundActionKind(action, value, plan, delayTimesAreValid);
+    if (
+      !baseValid ||
+      !kindValid ||
+      (plan !== undefined &&
+        isPlainRecord(action) &&
+        !validForegroundActionOwnership(action, value, plan))
+    ) {
       errors.push("Runtime foreground action is malformed.");
     }
   }
@@ -2225,7 +2246,9 @@ function validatePendingActionState(
     errors.push("Runtime lastSettlement is malformed.");
   }
   if (!validActiveActionIdentityCoherence(value)) {
-    errors.push("Runtime active action identities are inconsistent with each other or the retained settlement.");
+    errors.push(
+      "Runtime active action identities are inconsistent with each other or the retained settlement.",
+    );
   }
   if (!validActiveActionLocationCoherence(value)) {
     errors.push("Runtime foreground and background action locations are incoherent.");
@@ -2246,9 +2269,7 @@ function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>):
     : [];
   const actions = [snapshot.foregroundAction, ...backgroundActions];
   const requiredCompletionEvents = actions.reduce(
-    (count, action) => count + (isPlainRecord(action)
-      ? requiredActionCompletionEvents(action)
-      : 0),
+    (count, action) => count + (isPlainRecord(action) ? requiredActionCompletionEvents(action) : 0),
     0,
   );
   return hasEventSequenceCapacity(snapshot.nextEventSequence, requiredCompletionEvents);
@@ -2275,17 +2296,23 @@ function validForegroundActionKind(
 ): boolean {
   if (!isPlainRecord(action)) return false;
   if (action.kind === "delay") {
-    return delayTimesAreValid &&
+    return (
+      delayTimesAreValid &&
       action.expectedCompletion === "time" &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 1);
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
+    );
   }
   if (action.kind === "interaction") {
-    return validInteractionAction(action, snapshot, plan) &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 2);
+    return (
+      validInteractionAction(action, snapshot, plan) &&
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
+    );
   }
   if (action.kind === "chatPacingGate") {
-    return validPacingGateAction(action, snapshot, plan, true) &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 1);
+    return (
+      validPacingGateAction(action, snapshot, plan, true) &&
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
+    );
   }
   return false;
 }
@@ -2307,11 +2334,13 @@ function validSettlementShapeAndKind(
   plan: InstructionPlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
 ): boolean {
-  return ["delay", "interaction", "chatPacingGate"].includes(String(settlement.actionKind)) &&
+  return (
+    ["delay", "interaction", "chatPacingGate"].includes(String(settlement.actionKind)) &&
     (settlement.actionKind === "chatPacingGate" || settlement.settlementKind === "completed") &&
     positiveSafeInteger(settlement.actionId) &&
     validSettlementProvenance(settlement, plan) &&
-    validSettlementKindData(settlement, snapshot, plan, analysis);
+    validSettlementKindData(settlement, snapshot, plan, analysis)
+  );
 }
 
 function validSettlementIdentityAndEventSequences(
@@ -2327,25 +2356,33 @@ function validSettlementIdentityAndEventSequences(
     settlement.actionId >= snapshot.nextActionId ||
     settlement.requestEventSequence >= settlement.completionEventSequence ||
     settlement.completionEventSequence >= snapshot.nextEventSequence
-  ) return false;
+  )
+    return false;
 
   if (settlement.actionKind !== "interaction") return true;
-  return positiveSafeInteger(settlement.transcriptEventSequence) &&
+  return (
+    positiveSafeInteger(settlement.transcriptEventSequence) &&
     settlement.requestEventSequence < settlement.transcriptEventSequence &&
-    settlement.transcriptEventSequence < settlement.completionEventSequence;
+    settlement.transcriptEventSequence < settlement.completionEventSequence
+  );
 }
 
 function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): boolean {
-  const actions = [snapshot.foregroundAction, ...(Array.isArray(snapshot.backgroundActions) ? snapshot.backgroundActions : [])]
-    .filter(isPlainRecord);
+  const actions = [
+    snapshot.foregroundAction,
+    ...(Array.isArray(snapshot.backgroundActions) ? snapshot.backgroundActions : []),
+  ].filter(isPlainRecord);
   const actionIds = new Set<number>();
   const requestSequences = new Set<number>();
   const settlement = isPlainRecord(snapshot.lastSettlement) ? snapshot.lastSettlement : null;
 
   for (const action of actions) {
-    if (!positiveSafeInteger(action.actionId) || !positiveSafeInteger(action.requestEventSequence)) return false;
-    if (actionIds.has(action.actionId) || requestSequences.has(action.requestEventSequence)) return false;
-    if (settlement !== null && !validActiveActionAgainstSettlement(action, settlement)) return false;
+    if (!positiveSafeInteger(action.actionId) || !positiveSafeInteger(action.requestEventSequence))
+      return false;
+    if (actionIds.has(action.actionId) || requestSequences.has(action.requestEventSequence))
+      return false;
+    if (settlement !== null && !validActiveActionAgainstSettlement(action, settlement))
+      return false;
     actionIds.add(action.actionId);
     requestSequences.add(action.requestEventSequence);
   }
@@ -2367,9 +2404,7 @@ function validActiveActionLocationCoherence(snapshot: Record<string, unknown>): 
   const foregroundAction = isPlainRecord(snapshot.foregroundAction)
     ? snapshot.foregroundAction
     : null;
-  const foregroundPacingGateCount = foregroundAction?.kind === "chatPacingGate"
-    ? 1
-    : 0;
+  const foregroundPacingGateCount = foregroundAction?.kind === "chatPacingGate" ? 1 : 0;
   const activePacingGateCount = backgroundPacingActions.length + foregroundPacingGateCount;
 
   if (activePacingGateCount > 1) {
@@ -2384,22 +2419,21 @@ function validActiveActionLocationCoherence(snapshot: Record<string, unknown>): 
   const backgroundPacingAction = backgroundPacingActions[0];
   if (backgroundPacingAction === undefined) return false;
 
-  return validPacingGateCreatedBeforeForegroundDelay(
-    backgroundPacingAction,
-    foregroundAction,
-  );
+  return validPacingGateCreatedBeforeForegroundDelay(backgroundPacingAction, foregroundAction);
 }
 
 function validPacingGateCreatedBeforeForegroundDelay(
   pacingGate: Record<string, unknown>,
   delay: Record<string, unknown>,
 ): boolean {
-  return positiveSafeInteger(pacingGate.actionId) &&
+  return (
+    positiveSafeInteger(pacingGate.actionId) &&
     positiveSafeInteger(pacingGate.requestEventSequence) &&
     positiveSafeInteger(delay.actionId) &&
     positiveSafeInteger(delay.requestEventSequence) &&
     pacingGate.actionId < delay.actionId &&
-    pacingGate.requestEventSequence < delay.requestEventSequence;
+    pacingGate.requestEventSequence < delay.requestEventSequence
+  );
 }
 
 function validActiveActionAgainstSettlement(
@@ -2412,7 +2446,8 @@ function validActiveActionAgainstSettlement(
     !positiveSafeInteger(settlement.actionId) ||
     !positiveSafeInteger(settlement.requestEventSequence) ||
     !positiveSafeInteger(settlement.completionEventSequence)
-  ) return false;
+  )
+    return false;
 
   if (!validActiveActionEventIdentity(action, settlement)) return false;
   if (validActionCreatedAfterSettlement(action, settlement)) return true;
@@ -2435,13 +2470,16 @@ function validActiveActionEventIdentity(
     !positiveSafeInteger(settlementActionId) ||
     !positiveSafeInteger(settlementRequestEventSequence) ||
     !positiveSafeInteger(settlementCompletionEventSequence)
-  ) return false;
+  )
+    return false;
   if (actionId === settlementActionId) return false;
-  const retainedEventSequences = new Set<number>([
-    settlementRequestEventSequence,
-    settlementCompletionEventSequence,
-  ].filter(positiveSafeInteger));
-  if (settlement.actionKind === "interaction" && positiveSafeInteger(settlement.transcriptEventSequence)) {
+  const retainedEventSequences = new Set<number>(
+    [settlementRequestEventSequence, settlementCompletionEventSequence].filter(positiveSafeInteger),
+  );
+  if (
+    settlement.actionKind === "interaction" &&
+    positiveSafeInteger(settlement.transcriptEventSequence)
+  ) {
     retainedEventSequences.add(settlement.transcriptEventSequence);
   }
   return !retainedEventSequences.has(requestEventSequence);
@@ -2455,12 +2493,14 @@ function validActionCreatedAfterSettlement(
   const requestEventSequence = action.requestEventSequence;
   const settlementActionId = settlement.actionId;
   const settlementCompletionEventSequence = settlement.completionEventSequence;
-  return positiveSafeInteger(actionId) &&
+  return (
+    positiveSafeInteger(actionId) &&
     positiveSafeInteger(requestEventSequence) &&
     positiveSafeInteger(settlementActionId) &&
     positiveSafeInteger(settlementCompletionEventSequence) &&
     actionId > settlementActionId &&
-    requestEventSequence > settlementCompletionEventSequence;
+    requestEventSequence > settlementCompletionEventSequence
+  );
 }
 
 function validOlderPacingGateWithNewerDelaySettlement(
@@ -2476,7 +2516,8 @@ function validOlderPacingGateWithNewerDelaySettlement(
   const settlementActionId = settlement.actionId;
   const settlementRequestEventSequence = settlement.requestEventSequence;
   const settlementCompletionEventSequence = settlement.completionEventSequence;
-  return action.kind === "chatPacingGate" &&
+  return (
+    action.kind === "chatPacingGate" &&
     settlement.actionKind === "delay" &&
     positiveSafeInteger(actionId) &&
     positiveSafeInteger(requestEventSequence) &&
@@ -2485,7 +2526,8 @@ function validOlderPacingGateWithNewerDelaySettlement(
     positiveSafeInteger(settlementCompletionEventSequence) &&
     actionId < settlementActionId &&
     requestEventSequence < settlementRequestEventSequence &&
-    settlementRequestEventSequence < settlementCompletionEventSequence;
+    settlementRequestEventSequence < settlementCompletionEventSequence
+  );
 }
 
 function validForegroundDelayWithOlderPacingSettlement(
@@ -2500,7 +2542,8 @@ function validForegroundDelayWithOlderPacingSettlement(
   const settlementActionId = settlement.actionId;
   const settlementRequestEventSequence = settlement.requestEventSequence;
   const settlementCompletionEventSequence = settlement.completionEventSequence;
-  return action.kind === "delay" &&
+  return (
+    action.kind === "delay" &&
     settlement.actionKind === "chatPacingGate" &&
     positiveSafeInteger(actionId) &&
     positiveSafeInteger(requestEventSequence) &&
@@ -2509,7 +2552,8 @@ function validForegroundDelayWithOlderPacingSettlement(
     positiveSafeInteger(settlementCompletionEventSequence) &&
     actionId > settlementActionId &&
     requestEventSequence > settlementRequestEventSequence &&
-    requestEventSequence < settlementCompletionEventSequence;
+    requestEventSequence < settlementCompletionEventSequence
+  );
 }
 
 function validForegroundActionBase(
@@ -2528,12 +2572,14 @@ function validForegroundActionBase(
     (typeof snapshot.nextEventSequence === "number" &&
       action.requestEventSequence >= snapshot.nextEventSequence) ||
     action.actionId >= (typeof snapshot.nextActionId === "number" ? snapshot.nextActionId : 0)
-  ) return false;
+  )
+    return false;
 
   if (action.kind === "chatPacingGate") return true;
   return (
     (action.ownerCallFrameId === null ||
-      (positiveSafeInteger(action.ownerCallFrameId) && activeCallFrameIds.has(action.ownerCallFrameId))) &&
+      (positiveSafeInteger(action.ownerCallFrameId) &&
+        activeCallFrameIds.has(action.ownerCallFrameId))) &&
     action.scopeDepth === (Array.isArray(snapshot.frames) ? snapshot.frames.length : -1) &&
     action.loopDepth === (Array.isArray(snapshot.loopFrames) ? snapshot.loopFrames.length : -1)
   );
@@ -2554,39 +2600,55 @@ function validPacingGateAction(
 }
 
 function isPacingGateShape(action: unknown): action is Record<string, unknown> {
-  return isPlainRecord(action) &&
+  return (
+    isPlainRecord(action) &&
     hasExactKeys(action, [
-      "kind", "actionId", "owningInstruction", "continuationInstruction", "ownerCallFrameId",
-      "scopeDepth", "loopDepth", "createdAtMs", "deadlineMs", "skippable", "requestEventSequence", "preparedOutput",
+      "kind",
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "scopeDepth",
+      "loopDepth",
+      "createdAtMs",
+      "deadlineMs",
+      "skippable",
+      "requestEventSequence",
+      "preparedOutput",
     ]) &&
     action.kind === "chatPacingGate" &&
     nonNegativeSafeInteger(action.owningInstruction) &&
     nonNegativeSafeInteger(action.continuationInstruction) &&
     action.continuationInstruction === action.owningInstruction + 1 &&
-    typeof action.skippable === "boolean";
+    typeof action.skippable === "boolean"
+  );
 }
 
 function validPacingGateIdentity(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
 ): boolean {
-  return positiveSafeInteger(action.actionId) &&
+  return (
+    positiveSafeInteger(action.actionId) &&
     positiveSafeInteger(action.requestEventSequence) &&
     positiveSafeInteger(snapshot.nextActionId) &&
     positiveSafeInteger(snapshot.nextEventSequence) &&
     action.actionId < snapshot.nextActionId &&
-    action.requestEventSequence < snapshot.nextEventSequence;
+    action.requestEventSequence < snapshot.nextEventSequence
+  );
 }
 
 function validPacingGateTiming(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
 ): boolean {
-  return validSessionTime(action.createdAtMs) &&
+  return (
+    validSessionTime(action.createdAtMs) &&
     validSessionTime(action.deadlineMs) &&
     validSessionTime(snapshot.currentSessionTimeMs) &&
     action.createdAtMs <= snapshot.currentSessionTimeMs &&
-    action.deadlineMs > snapshot.currentSessionTimeMs;
+    action.deadlineMs > snapshot.currentSessionTimeMs
+  );
 }
 
 function validPacingGateCreationProvenance(
@@ -2604,11 +2666,16 @@ function validPacingGateCreationProvenance(
       (!positiveSafeInteger(action.ownerCallFrameId) ||
         !positiveSafeInteger(snapshot.nextCallFrameId) ||
         action.ownerCallFrameId >= snapshot.nextCallFrameId))
-  ) return false;
+  )
+    return false;
   if (plan === undefined) return true;
 
   const owningInstruction = action.owningInstruction;
-  if (!nonNegativeSafeInteger(owningInstruction) || plan.instructions[owningInstruction]?.kind !== "say") return false;
+  if (
+    !nonNegativeSafeInteger(owningInstruction) ||
+    plan.instructions[owningInstruction]?.kind !== "say"
+  )
+    return false;
   const owningFunction = plan.functions.find(
     (definition) =>
       owningInstruction >= definition.entryInstruction &&
@@ -2619,13 +2686,17 @@ function validPacingGateCreationProvenance(
 
   const liveOwner = Array.isArray(snapshot.callFrames)
     ? snapshot.callFrames.find(
-      (frame) => isPlainRecord(frame) && frame.id === action.ownerCallFrameId,
-    )
+        (frame) => isPlainRecord(frame) && frame.id === action.ownerCallFrameId,
+      )
     : undefined;
   return liveOwner === undefined || liveOwner.functionId === owningFunction.id;
 }
 
-function validPreparedSayOutput(value: unknown, snapshot: Record<string, unknown>, plan: InstructionPlan | undefined): boolean {
+function validPreparedSayOutput(
+  value: unknown,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
   if (!isPreparedSayOutputShape(value)) return false;
   if (!validPreparedSayOutputDomain(value)) return false;
   if (!validPreparedSaySpeaker(value.speaker)) return false;
@@ -2636,41 +2707,49 @@ function validPreparedSayOutput(value: unknown, snapshot: Record<string, unknown
 }
 
 function isPreparedSayOutputShape(value: unknown): value is Record<string, unknown> {
-  return isPlainRecord(value) && hasExactKeys(value, [
-    "owningInstruction",
-    "continuationInstruction",
-    "speaker",
-    "text",
-    "durationMs",
-    "skippable",
-  ]);
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, [
+      "owningInstruction",
+      "continuationInstruction",
+      "speaker",
+      "text",
+      "durationMs",
+      "skippable",
+    ])
+  );
 }
 
 function validPreparedSayOutputDomain(value: Record<string, unknown>): boolean {
-  return nonNegativeSafeInteger(value.owningInstruction) &&
+  return (
+    nonNegativeSafeInteger(value.owningInstruction) &&
     nonNegativeSafeInteger(value.continuationInstruction) &&
     value.continuationInstruction === value.owningInstruction + 1 &&
     typeof value.text === "string" &&
     validPreparedSayDuration(value.durationMs) &&
-    typeof value.skippable === "boolean";
+    typeof value.skippable === "boolean"
+  );
 }
 
 function validPreparedSayDuration(value: unknown): value is number {
-  return typeof value === "number" &&
+  return (
+    typeof value === "number" &&
     Number.isFinite(value) &&
     value > 0 &&
-    value <= MAX_RUNTIME_SESSION_TIME_MS;
+    value <= MAX_RUNTIME_SESSION_TIME_MS
+  );
 }
 
 function validPreparedSaySpeaker(value: unknown): boolean {
-  return value === null || (
-    isPlainRecord(value) &&
-    hasExactKeys(value, ["identifier", "displayName", "color", "font", "avatar"]) &&
-    typeof value.identifier === "string" &&
-    typeof value.displayName === "string" &&
-    (value.color === null || typeof value.color === "string") &&
-    (value.font === null || typeof value.font === "string") &&
-    (value.avatar === null || typeof value.avatar === "string")
+  return (
+    value === null ||
+    (isPlainRecord(value) &&
+      hasExactKeys(value, ["identifier", "displayName", "color", "font", "avatar"]) &&
+      typeof value.identifier === "string" &&
+      typeof value.displayName === "string" &&
+      (value.color === null || typeof value.color === "string") &&
+      (value.font === null || typeof value.font === "string") &&
+      (value.avatar === null || typeof value.avatar === "string"))
   );
 }
 
@@ -2682,19 +2761,22 @@ function validTopLevelPreparedSayOutputRelationship(
   if (snapshot.preparedSayOutput === null) {
     return validReleasedPacingSettlementAfterPreparedOutputConsumption(snapshot, settlement, plan);
   }
-  return isPreparedSayOutputShape(snapshot.preparedSayOutput) &&
+  return (
+    isPreparedSayOutputShape(snapshot.preparedSayOutput) &&
     (snapshot.status === "running" || snapshot.status === "failed") &&
     snapshot.foregroundAction === null &&
     Array.isArray(snapshot.backgroundActions) &&
-    !snapshot.backgroundActions.some((action) => isPlainRecord(action) && action.kind === "chatPacingGate") &&
+    !snapshot.backgroundActions.some(
+      (action) => isPlainRecord(action) && action.kind === "chatPacingGate",
+    ) &&
     validPacingSettlementReleaseLineage(settlement, plan) &&
-    settlement.releasedPreparedOutputInstruction === snapshot.preparedSayOutput.owningInstruction;
+    settlement.releasedPreparedOutputInstruction === snapshot.preparedSayOutput.owningInstruction
+  );
 }
 
 function hasActivePacingGate(snapshot: Record<string, unknown>): boolean {
   const foregroundIsPacingGate =
-    isPlainRecord(snapshot.foregroundAction) &&
-    snapshot.foregroundAction.kind === "chatPacingGate";
+    isPlainRecord(snapshot.foregroundAction) && snapshot.foregroundAction.kind === "chatPacingGate";
   const backgroundHasPacingGate =
     Array.isArray(snapshot.backgroundActions) &&
     snapshot.backgroundActions.some(
@@ -2735,14 +2817,19 @@ function isExplicitExitHaltState(
     snapshot.status !== "halted" ||
     !nonNegativeSafeInteger(snapshot.nextInstruction) ||
     snapshot.nextInstruction === 0
-  ) return false;
+  )
+    return false;
   return plan.instructions[snapshot.nextInstruction - 1]?.kind === "exit";
 }
 
 function activePacingActions(snapshot: Record<string, unknown>): Record<string, unknown>[] {
-  const actions = [snapshot.foregroundAction, ...(Array.isArray(snapshot.backgroundActions) ? snapshot.backgroundActions : [])];
+  const actions = [
+    snapshot.foregroundAction,
+    ...(Array.isArray(snapshot.backgroundActions) ? snapshot.backgroundActions : []),
+  ];
   return actions.filter(
-    (action): action is Record<string, unknown> => isPlainRecord(action) && action.kind === "chatPacingGate",
+    (action): action is Record<string, unknown> =>
+      isPlainRecord(action) && action.kind === "chatPacingGate",
   );
 }
 
@@ -2764,7 +2851,9 @@ function validateInteractionResultHandoffState(
 
   if (handoff === null) {
     if (requiresHandoff) {
-      errors.push("Runtime interaction result handoff is missing at its canonical commit boundary.");
+      errors.push(
+        "Runtime interaction result handoff is missing at its canonical commit boundary.",
+      );
     }
     return;
   }
@@ -2782,8 +2871,7 @@ function validateInteractionResultHandoffState(
     !nonNegativeSafeInteger(handoff.owningInstruction) ||
     !nonNegativeSafeInteger(handoff.continuationInstruction) ||
     !positiveSafeInteger(handoff.destinationTemporary) ||
-    (handoff.ownerCallFrameId !== null &&
-      !positiveSafeInteger(handoff.ownerCallFrameId)) ||
+    (handoff.ownerCallFrameId !== null && !positiveSafeInteger(handoff.ownerCallFrameId)) ||
     !(
       (typeof handoff.result === "string" && interactionStringFits(handoff.result)) ||
       (typeof handoff.result === "number" &&
@@ -2807,14 +2895,16 @@ function validateInteractionResultHandoffState(
     errors.push("Runtime interaction result handoff has invalid ownership or state.");
     return;
   }
-  const destination = snapshot.temporaries.find((temporary) =>
-    isPlainRecord(temporary) && temporary.id === handoff.destinationTemporary
+  const destination = snapshot.temporaries.find(
+    (temporary) => isPlainRecord(temporary) && temporary.id === handoff.destinationTemporary,
   );
   if (
     !isPlainRecord(destination) ||
     !sameCanonicalSettlementResult(destination.value, handoff.result)
   ) {
-    errors.push("Runtime interaction result handoff destination does not match its canonical result.");
+    errors.push(
+      "Runtime interaction result handoff destination does not match its canonical result.",
+    );
   }
 
   const settlement = snapshot.lastSettlement;
@@ -2823,17 +2913,17 @@ function validateInteractionResultHandoffState(
     !positiveSafeInteger(settlement.actionId) ||
     settlement.actionId < handoff.actionId
   ) {
-    errors.push("Runtime interaction result handoff requires its settlement or a newer retained settlement.");
+    errors.push(
+      "Runtime interaction result handoff requires its settlement or a newer retained settlement.",
+    );
   } else if (
     settlement.actionId === handoff.actionId &&
-    (
-      settlement.actionKind !== "interaction" ||
+    (settlement.actionKind !== "interaction" ||
       settlement.owningInstruction !== handoff.owningInstruction ||
       settlement.continuationInstruction !== handoff.continuationInstruction ||
       settlement.ownerCallFrameId !== handoff.ownerCallFrameId ||
       settlement.destinationTemporary !== handoff.destinationTemporary ||
-      !sameCanonicalSettlementResult(settlement.result, handoff.result)
-    )
+      !sameCanonicalSettlementResult(settlement.result, handoff.result))
   ) {
     errors.push("Runtime interaction result handoff disagrees with its retained settlement.");
   }
@@ -2848,7 +2938,9 @@ function validateInteractionResultHandoffState(
     precedingInstruction !== instruction ||
     !validInteractionResultForInstruction(instruction, handoff.result, snapshot)
   ) {
-    errors.push("Runtime interaction result handoff does not match its canonical plan instruction.");
+    errors.push(
+      "Runtime interaction result handoff does not match its canonical plan instruction.",
+    );
   }
 }
 
@@ -2862,15 +2954,18 @@ function validInteractionResultHandoffOwner(
   const ownerCallFrameId = handoff.ownerCallFrameId;
   if (ownerCallFrameId === null) {
     if (callFrames.length !== 0) return false;
-    return analysis === undefined ||
+    return (
+      analysis === undefined ||
       (nonNegativeSafeInteger(handoff.owningInstruction) &&
-        analysis.functionIdsByInstruction[handoff.owningInstruction] === null);
+        analysis.functionIdsByInstruction[handoff.owningInstruction] === null)
+    );
   }
   if (
     !positiveSafeInteger(ownerCallFrameId) ||
     !isPlainRecord(activeOwner) ||
     activeOwner.id !== ownerCallFrameId
-  ) return false;
+  )
+    return false;
   if (analysis === undefined || !nonNegativeSafeInteger(handoff.owningInstruction)) {
     return true;
   }
@@ -2913,17 +3008,15 @@ function validateTerminalContinuationHandoffState(
     handoff.continuationInstruction === plan.rootEndInstruction &&
     snapshot.nextInstruction === plan.rootEndInstruction &&
     handoff.owningInstruction + 1 === handoff.continuationInstruction &&
-    (
-      (handoff.actionKind === "delay" && instruction?.kind === "wait") ||
-      (
-        handoff.actionKind === "interaction" &&
+    ((handoff.actionKind === "delay" && instruction?.kind === "wait") ||
+      (handoff.actionKind === "interaction" &&
         instruction?.kind === "interaction" &&
         instruction.interactionKind === "button" &&
-        instruction.destinationTemporary === null
-      )
-    );
+        instruction.destinationTemporary === null));
   if (!terminalHandoffMatchesPlan) {
-    errors.push("Runtime terminal continuation handoff does not match its canonical terminal instruction.");
+    errors.push(
+      "Runtime terminal continuation handoff does not match its canonical terminal instruction.",
+    );
   }
 }
 
@@ -2933,17 +3026,21 @@ function validTerminalContinuationHandoffSettlement(
 ): boolean {
   if (!positiveSafeInteger(handoff.actionId) || !isPlainRecord(settlement)) return false;
   if (settlement.actionId === handoff.actionId) {
-    return settlement.actionKind === handoff.actionKind &&
+    return (
+      settlement.actionKind === handoff.actionKind &&
       settlement.owningInstruction === handoff.owningInstruction &&
-      settlement.continuationInstruction === handoff.continuationInstruction;
+      settlement.continuationInstruction === handoff.continuationInstruction
+    );
   }
 
   // Only the older background pacing gate can settle after a terminal delay
   // and replace bounded replay before root completion is entered.
-  return handoff.actionKind === "delay" &&
+  return (
+    handoff.actionKind === "delay" &&
     settlement.actionKind === "chatPacingGate" &&
     positiveSafeInteger(settlement.actionId) &&
-    settlement.actionId < handoff.actionId;
+    settlement.actionId < handoff.actionId
+  );
 }
 
 function validInteractionResultForInstruction(
@@ -2952,21 +3049,27 @@ function validInteractionResultForInstruction(
   snapshot: Record<string, unknown>,
 ): boolean {
   if (instruction.expectedResult === "number") {
-    if (typeof result !== "number" || !Number.isFinite(result) || Object.is(result, -0)) return false;
+    if (typeof result !== "number" || !Number.isFinite(result) || Object.is(result, -0))
+      return false;
     if (instruction.interactionKind !== "choice") return true;
     if ("preparedUi" in instruction) {
-      return instruction.preparedUi.kind === "choice" &&
+      return (
+        instruction.preparedUi.kind === "choice" &&
         instruction.preparedUi.labelType === "number" &&
-        instruction.preparedUi.labels?.includes(result) === true;
+        instruction.preparedUi.labels?.includes(result) === true
+      );
     }
-    return instruction.ui.kind === "choice" &&
-      instruction.ui.options.some((option) => option.label === result);
+    return (
+      instruction.ui.kind === "choice" &&
+      instruction.ui.options.some((option) => option.label === result)
+    );
   }
   if (
     instruction.expectedResult !== "string" ||
     typeof result !== "string" ||
     !interactionStringFits(result)
-  ) return false;
+  )
+    return false;
   if (instruction.interactionKind === "text") {
     return !result.includes("\r") && interactionStringHasNonWhitespace(result);
   }
@@ -2976,40 +3079,96 @@ function validInteractionResultForInstruction(
     if (instruction.preparedUi.labelType === "identifier") {
       return instruction.preparedUi.labels?.includes(result) === true;
     }
-    if (instruction.preparedUi.labelType !== "none" || !Array.isArray(snapshot.temporaries)) return false;
-    const raw = runtimeTemporaryValue(snapshot.temporaries, instruction.preparedUi.optionsTemporary);
-    return isPlainRecord(raw) && raw.kind === "list" && Array.isArray(raw.items) &&
-      raw.items.some((text) => text === result);
+    if (instruction.preparedUi.labelType !== "none" || !Array.isArray(snapshot.temporaries))
+      return false;
+    const raw = runtimeTemporaryValue(
+      snapshot.temporaries,
+      instruction.preparedUi.optionsTemporary,
+    );
+    return (
+      isPlainRecord(raw) &&
+      raw.kind === "list" &&
+      Array.isArray(raw.items) &&
+      raw.items.some((text) => text === result)
+    );
   }
-  return instruction.ui.kind === "choice" && instruction.ui.options.some((option) =>
-    (option.label ?? option.text) === result
+  return (
+    instruction.ui.kind === "choice" &&
+    instruction.ui.options.some((option) => (option.label ?? option.text) === result)
   );
 }
 
-function validInteractionAction(action: Record<string, unknown>, snapshot: Record<string, unknown>, plan: InstructionPlan | undefined): boolean {
-  if (!hasExactKeys(action, [
-    "kind", "interactionKind", "actionId", "owningInstruction",
-    "continuationInstruction", "ownerCallFrameId", "scopeDepth", "loopDepth",
-    "destinationTemporary", "expectedResult", "target", "speakerId", "ui",
-    "requestEventSequence",
-  ])) return false;
-  if (!["button", "text", "number", "choice"].includes(String(action.interactionKind)) || action.target !== "standardChat") return false;
-  const expected = action.interactionKind === "button"
-    ? "none"
-    : action.interactionKind === "number" || (action.interactionKind === "choice" && isPlainRecord(action.ui) && action.ui.labelType === "number")
-      ? "number"
-      : "string";
-  if (action.expectedResult !== expected || (action.speakerId !== null && !positiveSafeInteger(action.speakerId))) return false;
+function validInteractionAction(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  if (
+    !hasExactKeys(action, [
+      "kind",
+      "interactionKind",
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "scopeDepth",
+      "loopDepth",
+      "destinationTemporary",
+      "expectedResult",
+      "target",
+      "speakerId",
+      "ui",
+      "requestEventSequence",
+    ])
+  )
+    return false;
+  if (
+    !["button", "text", "number", "choice"].includes(String(action.interactionKind)) ||
+    action.target !== "standardChat"
+  )
+    return false;
+  const expected =
+    action.interactionKind === "button"
+      ? "none"
+      : action.interactionKind === "number" ||
+          (action.interactionKind === "choice" &&
+            isPlainRecord(action.ui) &&
+            action.ui.labelType === "number")
+        ? "number"
+        : "string";
+  if (
+    action.expectedResult !== expected ||
+    (action.speakerId !== null && !positiveSafeInteger(action.speakerId))
+  )
+    return false;
   const speakers = Array.isArray(snapshot.speakers) ? snapshot.speakers : [];
-  if (action.speakerId !== null && !speakers.some((speaker) => isPlainRecord(speaker) && speaker.id === action.speakerId)) return false;
-  if (action.interactionKind === "button" ? action.destinationTemporary !== null : !positiveSafeInteger(action.destinationTemporary)) return false;
+  if (
+    action.speakerId !== null &&
+    !speakers.some((speaker) => isPlainRecord(speaker) && speaker.id === action.speakerId)
+  )
+    return false;
+  if (
+    action.interactionKind === "button"
+      ? action.destinationTemporary !== null
+      : !positiveSafeInteger(action.destinationTemporary)
+  )
+    return false;
   if (
     action.destinationTemporary !== null &&
     Array.isArray(snapshot.temporaries) &&
-    snapshot.temporaries.some((temporary) => isPlainRecord(temporary) && temporary.id === action.destinationTemporary)
-  ) return false;
+    snapshot.temporaries.some(
+      (temporary) => isPlainRecord(temporary) && temporary.id === action.destinationTemporary,
+    )
+  )
+    return false;
   // EVIDENCE: validation: the preceding discriminator check restricts interactionKind to the four UI variants.
-  if (!validInteractionUiShape(action.interactionKind as "button" | "text" | "number" | "choice", action.ui)) return false;
+  if (
+    !validInteractionUiShape(
+      action.interactionKind as "button" | "text" | "number" | "choice",
+      action.ui,
+    )
+  )
+    return false;
   if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
   const instruction = plan.instructions[action.owningInstruction];
   if (
@@ -3018,7 +3177,8 @@ function validInteractionAction(action: Record<string, unknown>, snapshot: Recor
     instruction.expectedResult !== action.expectedResult ||
     instruction.destinationTemporary !== action.destinationTemporary ||
     instruction.target !== action.target
-  ) return false;
+  )
+    return false;
 
   if ("preparedUi" in instruction) {
     return validPreparedInteractionAction(instruction, action, snapshot, speakers);
@@ -3033,7 +3193,8 @@ function validInteractionAction(action: Record<string, unknown>, snapshot: Recor
     typeof explicitSpeaker.identifier !== "string" ||
     explicitSpeaker.identifier.length === 0 ||
     !speakers.some((speaker) => isPlainRecord(speaker) && speaker.id === explicitSpeaker.speakerId)
-  ) return false;
+  )
+    return false;
   return action.speakerId === explicitSpeaker.speakerId;
 }
 
@@ -3054,16 +3215,25 @@ function validPreparedInteractionAction(
       preparedSpeaker.kind !== "speakerReference" ||
       !positiveSafeInteger(preparedSpeaker.speakerId) ||
       typeof preparedSpeaker.identifier !== "string" ||
-      !speakers.some((speaker) => isPlainRecord(speaker) && speaker.id === preparedSpeaker.speakerId) ||
+      !speakers.some(
+        (speaker) => isPlainRecord(speaker) && speaker.id === preparedSpeaker.speakerId,
+      ) ||
       action.speakerId !== preparedSpeaker.speakerId
-    ) return false;
+    )
+      return false;
   }
-  return preparedInteractionUiMatchesAction(instruction.preparedUi, action.ui, snapshot.temporaries);
+  return preparedInteractionUiMatchesAction(
+    instruction.preparedUi,
+    action.ui,
+    snapshot.temporaries,
+  );
 }
 
 // oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: boundary: a temporary payload remains unvalidated while snapshot consistency is checked.
 function runtimeTemporaryValue(temporaries: readonly unknown[], id: number): unknown {
-  const temporary = temporaries.find((candidate) => isPlainRecord(candidate) && candidate.id === id);
+  const temporary = temporaries.find(
+    (candidate) => isPlainRecord(candidate) && candidate.id === id,
+  );
   return isPlainRecord(temporary) ? temporary.value : undefined;
 }
 
@@ -3076,22 +3246,42 @@ function preparedInteractionUiMatchesAction(
     !isPlainRecord(actual) ||
     actual.kind !== prepared.kind ||
     !accessibleNameEqual(prepared.accessibleName, actual.accessibleName)
-  ) return false;
+  )
+    return false;
   if (prepared.kind === "button") {
     return runtimeTemporaryValue(temporaries, prepared.buttonLabelTemporary) === actual.buttonLabel;
   }
   if (prepared.kind === "text" || prepared.kind === "number") {
-    const hint = prepared.hintTemporary === null ? null : runtimeTemporaryValue(temporaries, prepared.hintTemporary);
+    const hint =
+      prepared.hintTemporary === null
+        ? null
+        : runtimeTemporaryValue(temporaries, prepared.hintTemporary);
     return hint === actual.hint;
   }
   const raw = runtimeTemporaryValue(temporaries, prepared.optionsTemporary);
-  if (!isPlainRecord(raw) || raw.kind !== "list" || !Array.isArray(raw.items) || raw.items.length !== prepared.optionCount) return false;
-  if (!Array.isArray(actual.options) || actual.options.length !== prepared.optionCount || actual.labelType !== prepared.labelType) return false;
+  if (
+    !isPlainRecord(raw) ||
+    raw.kind !== "list" ||
+    !Array.isArray(raw.items) ||
+    raw.items.length !== prepared.optionCount
+  )
+    return false;
+  if (
+    !Array.isArray(actual.options) ||
+    actual.options.length !== prepared.optionCount ||
+    actual.labelType !== prepared.labelType
+  )
+    return false;
   const options = actual.options;
   const labels = prepared.labelType === "none" ? null : prepared.labels;
   return raw.items.every((text, index) => {
     const option = options[index];
-    return typeof text === "string" && isPlainRecord(option) && option.text === text && option.label === (labels?.[index] ?? null);
+    return (
+      typeof text === "string" &&
+      isPlainRecord(option) &&
+      option.text === text &&
+      option.label === (labels?.[index] ?? null)
+    );
   });
 }
 
@@ -3109,32 +3299,42 @@ function accessibleNameEqual(
 function visibleRuntimeBindingValue(snapshot: Record<string, unknown>, name: string): unknown {
   if (!Array.isArray(snapshot.frames)) return undefined;
   const lastCall = Array.isArray(snapshot.callFrames) ? snapshot.callFrames.at(-1) : undefined;
-  const functionBase = isPlainRecord(lastCall) && nonNegativeSafeInteger(lastCall.scopeBaseDepth)
-    ? lastCall.scopeBaseDepth
-    : undefined;
+  const functionBase =
+    isPlainRecord(lastCall) && nonNegativeSafeInteger(lastCall.scopeBaseDepth)
+      ? lastCall.scopeBaseDepth
+      : undefined;
   const minimum = functionBase ?? 0;
   for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
     const frame = snapshot.frames[index];
     if (!isPlainRecord(frame) || !Array.isArray(frame.bindings)) continue;
-    const binding = frame.bindings.find((candidate) => isPlainRecord(candidate) && candidate.name === name);
+    const binding = frame.bindings.find(
+      (candidate) => isPlainRecord(candidate) && candidate.name === name,
+    );
     if (isPlainRecord(binding)) return binding.value;
   }
   if (functionBase !== undefined) {
     const root = snapshot.frames[0];
     if (!isPlainRecord(root) || !Array.isArray(root.bindings)) return undefined;
-    const binding = root.bindings.find((candidate) => isPlainRecord(candidate) && candidate.name === name);
+    const binding = root.bindings.find(
+      (candidate) => isPlainRecord(candidate) && candidate.name === name,
+    );
     if (isPlainRecord(binding)) return binding.value;
   }
   return undefined;
 }
 
-function validInteractionUiShape(kind: "button" | "text" | "number" | "choice", value: unknown): boolean {
-  if (!isPlainRecord(value) || value.kind !== kind || !isPlainRecord(value.accessibleName)) return false;
-  const expectedUiKeys = kind === "button"
-    ? ["kind", "buttonLabel", "accessibleName"]
-    : kind === "text" || kind === "number"
-      ? ["kind", "hint", "accessibleName"]
-      : ["kind", "labelType", "options", "accessibleName"];
+function validInteractionUiShape(
+  kind: "button" | "text" | "number" | "choice",
+  value: unknown,
+): boolean {
+  if (!isPlainRecord(value) || value.kind !== kind || !isPlainRecord(value.accessibleName))
+    return false;
+  const expectedUiKeys =
+    kind === "button"
+      ? ["kind", "buttonLabel", "accessibleName"]
+      : kind === "text" || kind === "number"
+        ? ["kind", "hint", "accessibleName"]
+        : ["kind", "labelType", "options", "accessibleName"];
   if (!hasExactKeys(value, expectedUiKeys)) return false;
   let aggregate = 0;
   let measurementExhausted = false;
@@ -3155,25 +3355,28 @@ function validInteractionUiShape(kind: "button" | "text" | "number" | "choice", 
     aggregate += bytes;
     return true;
   };
-  const expectedKey = kind === "button"
-    ? "continue"
-    : kind === "number"
-      ? "number"
-      : kind === "choice"
-        ? "chooseOption"
-        : "answer";
+  const expectedKey =
+    kind === "button"
+      ? "continue"
+      : kind === "number"
+        ? "number"
+        : kind === "choice"
+          ? "chooseOption"
+          : "answer";
   if (value.accessibleName.kind === "text") {
     if (
       !hasExactKeys(value.accessibleName, ["kind", "text"]) ||
       !count(value.accessibleName.text) ||
       measurementExhausted ||
       !interactionStringHasNonWhitespace(value.accessibleName.text)
-    ) return false;
+    )
+      return false;
   } else if (
     !hasExactKeys(value.accessibleName, ["kind", "key"]) ||
     value.accessibleName.kind !== "localizedDefault" ||
     value.accessibleName.key !== expectedKey
-  ) return false;
+  )
+    return false;
   if (kind === "button") {
     return count(value.buttonLabel) && !measurementExhausted;
   }
@@ -3185,7 +3388,8 @@ function validInteractionUiShape(kind: "button" | "text" | "number" | "choice", 
     value.options.length === 0 ||
     value.options.length > MAX_INTERACTION_OPTION_ENTRIES ||
     !["none", "identifier", "number"].includes(String(value.labelType))
-  ) return false;
+  )
+    return false;
   const labels = new Set<string | number>();
   const texts = new Set<string>();
   for (const option of value.options) {
@@ -3196,17 +3400,20 @@ function validInteractionUiShape(kind: "button" | "text" | "number" | "choice", 
     const textValid = count(optionText);
     if (!textValid && !measurementExhausted) return false;
     const label = option.label;
-    const validLabel = value.labelType === "none"
-      ? label === null
-      : value.labelType === "identifier"
-        ? typeof label === "string" &&
-          count(label) &&
-          (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
-        : typeof label === "number" &&
-          Number.isFinite(label) &&
-          !Object.is(label, -0);
+    const validLabel =
+      value.labelType === "none"
+        ? label === null
+        : value.labelType === "identifier"
+          ? typeof label === "string" &&
+            count(label) &&
+            (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
+          : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
     if (!validLabel) return false;
-    if (!measurementExhausted && label !== null && (typeof label === "string" || typeof label === "number")) {
+    if (
+      !measurementExhausted &&
+      label !== null &&
+      (typeof label === "string" || typeof label === "number")
+    ) {
       if (labels.has(label)) return false;
       labels.add(label);
     }
@@ -3236,7 +3443,9 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   const options = actual.options;
   return expected.options.every((option, index) => {
     const candidate = options[index];
-    return isPlainRecord(candidate) && candidate.text === option.text && candidate.label === option.label;
+    return (
+      isPlainRecord(candidate) && candidate.text === option.text && candidate.label === option.label
+    );
   });
 }
 
@@ -3246,21 +3455,41 @@ function validSettlementKindData(
   plan: InstructionPlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
 ): boolean {
-  if (settlement.actionKind === "chatPacingGate") return validPacingGateSettlement(settlement, snapshot, plan);
+  if (settlement.actionKind === "chatPacingGate")
+    return validPacingGateSettlement(settlement, snapshot, plan);
   if (settlement.actionKind === "delay") {
-    return hasExactKeys(settlement, [
-      "actionId", "actionKind", "settlementKind", "owningInstruction",
-      "continuationInstruction", "requestEventSequence", "completionEventSequence",
-      "deadlineMs", "completedAtMs",
-    ]) && validSettlementChronology(settlement, snapshot);
+    return (
+      hasExactKeys(settlement, [
+        "actionId",
+        "actionKind",
+        "settlementKind",
+        "owningInstruction",
+        "continuationInstruction",
+        "requestEventSequence",
+        "completionEventSequence",
+        "deadlineMs",
+        "completedAtMs",
+      ]) && validSettlementChronology(settlement, snapshot)
+    );
   }
-  if (!hasExactKeys(settlement, [
-    "actionId", "actionKind", "interactionKind", "settlementKind",
-    "owningInstruction", "continuationInstruction", "ownerCallFrameId",
-    "destinationTemporary", "requestEventSequence",
-    "transcriptEventSequence", "completionEventSequence", "result",
-    "transcriptText",
-  ])) return false;
+  if (
+    !hasExactKeys(settlement, [
+      "actionId",
+      "actionKind",
+      "interactionKind",
+      "settlementKind",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "destinationTemporary",
+      "requestEventSequence",
+      "transcriptEventSequence",
+      "completionEventSequence",
+      "result",
+      "transcriptText",
+    ])
+  )
+    return false;
   if (
     !["button", "text", "number", "choice"].includes(String(settlement.interactionKind)) ||
     typeof settlement.transcriptText !== "string" ||
@@ -3270,28 +3499,36 @@ function validSettlementKindData(
     !positiveSafeInteger(settlement.completionEventSequence) ||
     settlement.requestEventSequence >= settlement.transcriptEventSequence ||
     settlement.transcriptEventSequence >= settlement.completionEventSequence
-  ) return false;
-  const settlementInstruction = plan !== undefined && nonNegativeSafeInteger(settlement.owningInstruction)
-    ? plan.instructions[settlement.owningInstruction]
-    : undefined;
-  const numericChoice = settlementInstruction?.kind === "interaction" &&
+  )
+    return false;
+  const settlementInstruction =
+    plan !== undefined && nonNegativeSafeInteger(settlement.owningInstruction)
+      ? plan.instructions[settlement.owningInstruction]
+      : undefined;
+  const numericChoice =
+    settlementInstruction?.kind === "interaction" &&
     settlementInstruction.interactionKind === "choice" &&
     ("preparedUi" in settlementInstruction
-      ? settlementInstruction.preparedUi.kind === "choice" && settlementInstruction.preparedUi.labelType === "number"
-      : settlementInstruction.ui.kind === "choice" && settlementInstruction.ui.labelType === "number");
-  const validNumberResult = typeof settlement.result === "number" &&
+      ? settlementInstruction.preparedUi.kind === "choice" &&
+        settlementInstruction.preparedUi.labelType === "number"
+      : settlementInstruction.ui.kind === "choice" &&
+        settlementInstruction.ui.labelType === "number");
+  const validNumberResult =
+    typeof settlement.result === "number" &&
     Number.isFinite(settlement.result) &&
     !Object.is(settlement.result, -0);
   let resultValid: boolean;
   if (settlement.interactionKind === "button") {
     resultValid = settlement.result === null;
   } else if (settlement.interactionKind === "text") {
-    resultValid = typeof settlement.result === "string" &&
-      settlement.result === settlement.transcriptText;
+    resultValid =
+      typeof settlement.result === "string" && settlement.result === settlement.transcriptText;
   } else if (settlement.interactionKind === "number" || numericChoice) {
     resultValid = validNumberResult;
   } else if (settlement.interactionKind === "choice" && plan === undefined) {
-    resultValid = (typeof settlement.result === "string" && interactionStringFits(settlement.result)) || validNumberResult;
+    resultValid =
+      (typeof settlement.result === "string" && interactionStringFits(settlement.result)) ||
+      validNumberResult;
   } else {
     resultValid = typeof settlement.result === "string" && interactionStringFits(settlement.result);
   }
@@ -3306,32 +3543,39 @@ function validSettlementKindData(
     (!positiveSafeInteger(settlement.ownerCallFrameId) ||
       !positiveSafeInteger(snapshot.nextCallFrameId) ||
       settlement.ownerCallFrameId >= snapshot.nextCallFrameId)
-  ) return false;
+  )
+    return false;
   if (
     settlement.interactionKind === "text" &&
-    (
-      settlement.result !== settlement.transcriptText ||
+    (settlement.result !== settlement.transcriptText ||
       settlement.transcriptText.includes("\r") ||
-      !interactionStringHasNonWhitespace(settlement.transcriptText)
-    )
-  ) return false;
+      !interactionStringHasNonWhitespace(settlement.transcriptText))
+  )
+    return false;
   if (settlement.interactionKind === "number") {
     if (
       typeof settlement.result !== "number" ||
       /[\r\n\u2028\u2029]/u.test(settlement.transcriptText) ||
       !/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/u.test(settlement.transcriptText)
-    ) return false;
+    )
+      return false;
     const parsed = Number(settlement.transcriptText);
-    if (!Number.isFinite(parsed) || (Object.is(parsed, -0) ? 0 : parsed) !== settlement.result) return false;
+    if (!Number.isFinite(parsed) || (Object.is(parsed, -0) ? 0 : parsed) !== settlement.result)
+      return false;
   }
 
   if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const instruction = plan.instructions[settlement.owningInstruction];
-  if (instruction?.kind !== "interaction" || instruction.interactionKind !== settlement.interactionKind) return false;
+  if (
+    instruction?.kind !== "interaction" ||
+    instruction.interactionKind !== settlement.interactionKind
+  )
+    return false;
   if (
     settlement.destinationTemporary !== instruction.destinationTemporary ||
     !validInteractionSettlementOwner(settlement, snapshot, analysis)
-  ) return false;
+  )
+    return false;
   if ("preparedUi" in instruction) {
     return preparedInteractionSettlementMatches(
       instruction.preparedUi,
@@ -3340,11 +3584,16 @@ function validSettlementKindData(
       Array.isArray(snapshot.temporaries) ? snapshot.temporaries : [],
     );
   }
-  if (instruction.ui.kind === "button") return settlement.transcriptText === instruction.ui.buttonLabel;
+  if (instruction.ui.kind === "button")
+    return settlement.transcriptText === instruction.ui.buttonLabel;
   if (instruction.ui.kind === "text") return settlement.result === settlement.transcriptText;
   if (instruction.ui.kind === "number") return true;
   if (instruction.ui.kind !== "choice") return false;
-  return instruction.ui.options.some((option) => option.text === settlement.transcriptText && (option.label ?? option.text) === settlement.result);
+  return instruction.ui.options.some(
+    (option) =>
+      option.text === settlement.transcriptText &&
+      (option.label ?? option.text) === settlement.result,
+  );
 }
 
 function validPacingGateSettlement(
@@ -3352,11 +3601,21 @@ function validPacingGateSettlement(
   snapshot: Record<string, unknown>,
   plan?: InstructionPlan,
 ): boolean {
-  if (!hasExactKeys(settlement, [
-    "actionId", "actionKind", "settlementKind", "owningInstruction",
-    "continuationInstruction", "requestEventSequence", "completionEventSequence",
-    "deadlineMs", "completedAtMs", "releasedPreparedOutputInstruction",
-  ])) return false;
+  if (
+    !hasExactKeys(settlement, [
+      "actionId",
+      "actionKind",
+      "settlementKind",
+      "owningInstruction",
+      "continuationInstruction",
+      "requestEventSequence",
+      "completionEventSequence",
+      "deadlineMs",
+      "completedAtMs",
+      "releasedPreparedOutputInstruction",
+    ])
+  )
+    return false;
   if (!validPacingSettlementKind(settlement.settlementKind)) return false;
   if (!validPacingSettlementReleaseLineage(settlement, plan)) return false;
   if (settlement.settlementKind === "completed") {
@@ -3365,11 +3624,15 @@ function validPacingGateSettlement(
   return validNonTimePacingSettlementChronology(settlement, snapshot);
 }
 
-function validPacingSettlementKind(value: unknown): value is RuntimeChatPacingGateSettlementSnapshot["settlementKind"] {
-  return value === "completed" ||
+function validPacingSettlementKind(
+  value: unknown,
+): value is RuntimeChatPacingGateSettlementSnapshot["settlementKind"] {
+  return (
+    value === "completed" ||
     value === "skipped" ||
     value === "consumedByForegroundInteraction" ||
-    value === "supersededByInstantOutput";
+    value === "supersededByInstantOutput"
+  );
 }
 
 function pacingSettlementCanReleasePreparedOutput(
@@ -3381,27 +3644,33 @@ function pacingSettlementCanReleasePreparedOutput(
 function validPacingSettlementReleaseLineage(
   settlement: unknown,
   plan: InstructionPlan | undefined,
-): settlement is Record<string, unknown> & { readonly releasedPreparedOutputInstruction: number | null } {
+): settlement is Record<string, unknown> & {
+  readonly releasedPreparedOutputInstruction: number | null;
+} {
   if (!isPlainRecord(settlement)) return false;
   const releasedInstruction = settlement.releasedPreparedOutputInstruction;
   if (releasedInstruction === null) return true;
-  return pacingSettlementCanReleasePreparedOutput(
-    // EVIDENCE: validation: this helper only compares completed/skipped strings; other values return false.
-    settlement.settlementKind as RuntimeChatPacingGateSettlementSnapshot["settlementKind"],
-  ) &&
+  return (
+    pacingSettlementCanReleasePreparedOutput(
+      // EVIDENCE: validation: this helper only compares completed/skipped strings; other values return false.
+      settlement.settlementKind as RuntimeChatPacingGateSettlementSnapshot["settlementKind"],
+    ) &&
     nonNegativeSafeInteger(releasedInstruction) &&
-    (plan === undefined || plan.instructions[releasedInstruction]?.kind === "say");
+    (plan === undefined || plan.instructions[releasedInstruction]?.kind === "say")
+  );
 }
 
 function validNonTimePacingSettlementChronology(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
 ): boolean {
-  return validSessionTime(settlement.deadlineMs) &&
+  return (
+    validSessionTime(settlement.deadlineMs) &&
     validSessionTime(settlement.completedAtMs) &&
     validSessionTime(snapshot.currentSessionTimeMs) &&
     settlement.completedAtMs < settlement.deadlineMs &&
-    settlement.completedAtMs <= snapshot.currentSessionTimeMs;
+    settlement.completedAtMs <= snapshot.currentSessionTimeMs
+  );
 }
 
 function preparedInteractionSettlementMatches(
@@ -3428,9 +3697,15 @@ function preparedInteractionSettlementMatches(
 
   const raw = runtimeTemporaryValue(temporaries, prepared.optionsTemporary);
   if (raw === undefined) return true;
-  if (!isPlainRecord(raw) || raw.kind !== "list" || !Array.isArray(raw.items) || raw.items.length !== prepared.optionCount) return false;
-  return raw.items.some((text, index) =>
-    text === transcriptText && (labels?.[index] ?? text) === result
+  if (
+    !isPlainRecord(raw) ||
+    raw.kind !== "list" ||
+    !Array.isArray(raw.items) ||
+    raw.items.length !== prepared.optionCount
+  )
+    return false;
+  return raw.items.some(
+    (text, index) => text === transcriptText && (labels?.[index] ?? text) === result,
   );
 }
 
@@ -3439,20 +3714,18 @@ function validInteractionSettlementOwner(
   snapshot: Record<string, unknown>,
   analysis: SnapshotValidationAnalysis | undefined,
 ): boolean {
-  if (
-    analysis === undefined ||
-    !nonNegativeSafeInteger(settlement.owningInstruction)
-  ) return true;
-  const ownerFunctionId =
-    analysis.functionIdsByInstruction[settlement.owningInstruction] ?? null;
+  if (analysis === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  const ownerFunctionId = analysis.functionIdsByInstruction[settlement.owningInstruction] ?? null;
   if (ownerFunctionId === null) return settlement.ownerCallFrameId === null;
   if (!positiveSafeInteger(settlement.ownerCallFrameId)) return false;
   const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
-  const activeOwner = callFrames.find((frame) =>
-    isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId
+  const activeOwner = callFrames.find(
+    (frame) => isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId,
   );
-  return activeOwner === undefined ||
-    (isPlainRecord(activeOwner) && activeOwner.functionId === ownerFunctionId);
+  return (
+    activeOwner === undefined ||
+    (isPlainRecord(activeOwner) && activeOwner.functionId === ownerFunctionId)
+  );
 }
 
 function validSettlementChronology(
@@ -3471,7 +3744,11 @@ function validSettlementChronology(
 
 function sameCanonicalSettlementResult(destination: unknown, result: unknown): boolean {
   if (typeof destination === "number" || typeof result === "number") {
-    return typeof destination === "number" && typeof result === "number" && Object.is(destination, result);
+    return (
+      typeof destination === "number" &&
+      typeof result === "number" &&
+      Object.is(destination, result)
+    );
   }
   return destination === result;
 }
@@ -3486,10 +3763,16 @@ function validSettlementProvenance(
     !nonNegativeSafeInteger(owningInstruction) ||
     !nonNegativeSafeInteger(continuationInstruction) ||
     continuationInstruction !== owningInstruction + 1
-  ) return false;
+  )
+    return false;
   if (plan === undefined) return true;
   if (owningInstruction >= plan.instructions.length) return false;
-  const expectedKind = settlement.actionKind === "delay" ? "wait" : settlement.actionKind === "interaction" ? "interaction" : "say";
+  const expectedKind =
+    settlement.actionKind === "delay"
+      ? "wait"
+      : settlement.actionKind === "interaction"
+        ? "interaction"
+        : "say";
   if (plan.instructions[owningInstruction]?.kind !== expectedKind) return false;
   const definition = plan.functions.find(
     (candidate) =>
@@ -3509,10 +3792,12 @@ function validForegroundActionOwnership(
   const owningInstruction = action.owningInstruction;
   const continuationInstruction = action.continuationInstruction;
   if (action.kind === "chatPacingGate") {
-    return nonNegativeSafeInteger(owningInstruction) &&
+    return (
+      nonNegativeSafeInteger(owningInstruction) &&
       nonNegativeSafeInteger(continuationInstruction) &&
       owningInstruction < plan.instructions.length &&
-      plan.instructions[owningInstruction]?.kind === "say";
+      plan.instructions[owningInstruction]?.kind === "say"
+    );
   }
   if (
     !nonNegativeSafeInteger(owningInstruction) ||
@@ -3521,7 +3806,8 @@ function validForegroundActionOwnership(
     owningInstruction >= plan.instructions.length ||
     continuationInstruction !== owningInstruction + 1 ||
     !["wait", "interaction", "say"].includes(plan.instructions[owningInstruction]?.kind ?? "")
-  ) return false;
+  )
+    return false;
 
   const definition = plan.functions.find(
     (candidate) =>
@@ -3545,10 +3831,7 @@ function validForegroundActionOwnership(
   );
 }
 
-function isLegalHaltPosition(
-  nextInstruction: unknown,
-  plan: InstructionPlan,
-): boolean {
+function isLegalHaltPosition(nextInstruction: unknown, plan: InstructionPlan): boolean {
   if (!nonNegativeSafeInteger(nextInstruction)) return false;
   if (nextInstruction === plan.rootEndInstruction) return true;
   return nextInstruction > 0 && plan.instructions[nextInstruction - 1]?.kind === "exit";
@@ -3589,10 +3872,7 @@ function validateCurrentTemporaryRequirements(
   ) {
     errors.push("Runtime interaction result destination is already occupied.");
   }
-  if (
-    instruction.kind === "callFunction" &&
-    present.has(instruction.destinationTemporary)
-  ) {
+  if (instruction.kind === "callFunction" && present.has(instruction.destinationTemporary)) {
     errors.push("Runtime function result destination is already occupied.");
   }
 }
@@ -3633,9 +3913,7 @@ function requiredInstructionTemporaries(
       collect(instruction.condition);
       break;
     case "loopStart": {
-      const active = Array.isArray(loopFrames)
-        ? loopFrames.at(-1)
-        : undefined;
+      const active = Array.isArray(loopFrames) ? loopFrames.at(-1) : undefined;
       if (
         instruction.loopKind === "while" ||
         !isPlainRecord(active) ||
@@ -3656,7 +3934,7 @@ function requiredInstructionTemporaries(
       break;
     case "callFunction":
       instruction.arguments.forEach((argument) =>
-        collectExpressionTemporaries(argument.value, output)
+        collectExpressionTemporaries(argument.value, output),
       );
       break;
     case "setDefaultSpeaker":
@@ -3677,7 +3955,8 @@ function requiredInstructionTemporaries(
     case "say":
       if (typeof instruction.textTemporary === "number") output.add(instruction.textTemporary);
       else collect(instruction.value);
-      if (typeof instruction.speakerTemporary === "number") output.add(instruction.speakerTemporary);
+      if (typeof instruction.speakerTemporary === "number")
+        output.add(instruction.speakerTemporary);
       if (typeof instruction.pacing === "object") collect(instruction.pacing);
       break;
     case "wait":
@@ -3686,9 +3965,14 @@ function requiredInstructionTemporaries(
     case "interaction":
       if ("preparedUi" in instruction) {
         output.add(instruction.speakerTemporary);
-        if (instruction.preparedUi.kind === "button") output.add(instruction.preparedUi.buttonLabelTemporary);
-        else if (instruction.preparedUi.kind === "text" || instruction.preparedUi.kind === "number") {
-          if (instruction.preparedUi.hintTemporary !== null) output.add(instruction.preparedUi.hintTemporary);
+        if (instruction.preparedUi.kind === "button")
+          output.add(instruction.preparedUi.buttonLabelTemporary);
+        else if (
+          instruction.preparedUi.kind === "text" ||
+          instruction.preparedUi.kind === "number"
+        ) {
+          if (instruction.preparedUi.hintTemporary !== null)
+            output.add(instruction.preparedUi.hintTemporary);
         } else output.add(instruction.preparedUi.optionsTemporary);
       }
       break;
@@ -3696,10 +3980,7 @@ function requiredInstructionTemporaries(
   return output;
 }
 
-function collectExpressionTemporaries(
-  expression: ExpressionPlan,
-  output: Set<number>,
-): void {
+function collectExpressionTemporaries(expression: ExpressionPlan, output: Set<number>): void {
   switch (expression.kind) {
     case "temporary":
     case "preparedReference":
@@ -3714,7 +3995,7 @@ function collectExpressionTemporaries(
       return;
     case "object":
       expression.properties.forEach((property) =>
-        collectExpressionTemporaries(property.value, output)
+        collectExpressionTemporaries(property.value, output),
       );
       return;
     case "group":
@@ -3737,7 +4018,7 @@ function collectExpressionTemporaries(
     case "call":
       collectExpressionTemporaries(expression.callee, output);
       expression.arguments.forEach((argument) =>
-        collectExpressionTemporaries(argument.value, output)
+        collectExpressionTemporaries(argument.value, output),
       );
       return;
     case "unary":
@@ -3761,7 +4042,11 @@ function validateFrames(value: unknown, errors: string[]): void {
   }
   const frameIds = new Set<number>();
   for (const frame of value) {
-    if (!isPlainRecord(frame) || !nonNegativeSafeInteger(frame.id) || !Array.isArray(frame.bindings)) {
+    if (
+      !isPlainRecord(frame) ||
+      !nonNegativeSafeInteger(frame.id) ||
+      !Array.isArray(frame.bindings)
+    ) {
       errors.push("Runtime scope frame is malformed.");
       continue;
     }
@@ -3821,10 +4106,7 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
       names.add(property.name);
       const failure = validateCapturedSerializableValue(property.value);
       if (failure !== null) errors.push(failure);
-      if (
-        property.name === "defaultSaySkippable" &&
-        typeof property.value !== "boolean"
-      ) {
+      if (property.name === "defaultSaySkippable" && typeof property.value !== "boolean") {
         errors.push("Runtime speaker property defaultSaySkippable must be a boolean.");
       }
     }
@@ -3955,13 +4237,8 @@ function copySpan(span: SourceSpan): SourceSpan {
   return createSourceSpan(span.start, span.end);
 }
 
-function cloneTemporary(
-  temporary: RuntimeTemporarySnapshot,
-): RuntimeTemporarySnapshot {
-  return {
-    id: temporary.id,
-    value: cloneCapturedSerializableValue(temporary.value),
-  };
+function cloneTemporary(temporary: RuntimeTemporarySnapshot): RuntimeTemporarySnapshot {
+  return { id: temporary.id, value: cloneCapturedSerializableValue(temporary.value) };
 }
 
 function nonNegativeSafeInteger(value: unknown): value is number {
@@ -4007,16 +4284,10 @@ function isCanonicalJsonArray(value: unknown): value is unknown[] {
 
 function isCanonicalArrayIndexKey(key: string, length: number): boolean {
   const index = Number(key);
-  return Number.isSafeInteger(index) &&
-    index >= 0 &&
-    index < length &&
-    String(index) === key;
+  return Number.isSafeInteger(index) && index >= 0 && index < length && String(index) === key;
 }
 
-function runtimeInputDataFailureMessage(
-  kind: ExternalDataFailureKind,
-  path: string,
-): string {
+function runtimeInputDataFailureMessage(kind: ExternalDataFailureKind, path: string): string {
   switch (kind) {
     case "nonFiniteNumber":
       return `${path} must be a finite number.`;
@@ -4028,9 +4299,7 @@ function runtimeInputDataFailureMessage(
   }
 }
 
-function snapshotExternalDataFailureMessage(
-  kind: ExternalDataFailureKind,
-): string {
+function snapshotExternalDataFailureMessage(kind: ExternalDataFailureKind): string {
   switch (kind) {
     case "nonFiniteNumber":
       return "Runtime snapshot contains a non-finite number.";

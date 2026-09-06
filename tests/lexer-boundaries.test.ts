@@ -76,20 +76,12 @@ for (const nestedCase of multilineNestedCases) {
     );
     assert.equal(innerText?.lexeme, nestedCase.textLexeme);
     assert.equal(tokenValue(innerText), nestedCase.textValue);
-    assert.deepEqual(
-      innerText === undefined ? null : compactSpan(innerText),
-      nestedCase.textSpan,
-    );
+    assert.deepEqual(innerText === undefined ? null : compactSpan(innerText), nestedCase.textSpan);
   });
 }
 
 test("parses, compiles, and executes multiline nested interpolation", () => {
-  const source = [
-    "let value = 1",
-    "say `Outer: ${`",
-    "  Inner ${value + 2}",
-    "`}`",
-  ].join("\n");
+  const source = ["let value = 1", "say `Outer: ${`", "  Inner ${value + 2}", "`}`"].join("\n");
   const parsed = parse(source);
   const compiled = compileSource(source);
   const statement = parsed.program.statements[1];
@@ -98,10 +90,7 @@ test("parses, compiles, and executes multiline nested interpolation", () => {
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
   assert.equal(statement?.kind, "sayStatement");
-  if (
-    statement?.kind !== "sayStatement" ||
-    statement.value.kind !== "templateLiteral"
-  ) {
+  if (statement?.kind !== "sayStatement" || statement.value.kind !== "templateLiteral") {
     assert.fail("Expected an outer template say statement.");
   }
   const outerInterpolation = statement.value.parts[1];
@@ -114,16 +103,12 @@ test("parses, compiles, and executes multiline nested interpolation", () => {
     assert.fail("Expected a nested multiline template expression.");
   }
   assert.ok(
-    outerInterpolation.expression.parts.some(
-      (part) => part.kind === "templateInterpolation",
-    ),
+    outerInterpolation.expression.parts.some((part) => part.kind === "templateInterpolation"),
   );
 
   const execution = executeSource(source);
   assert.deepEqual(
-    execution.events
-      .filter((event) => event.kind === "say")
-      .map((event) => event.text),
+    execution.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["Outer:  Inner 3 "],
   );
 });
@@ -150,9 +135,7 @@ test("preserves source order and escapes in a deeper multiline nested template",
   const execution = executeSource(source, { next });
   assert.equal(nextValue, 2);
   assert.deepEqual(
-    execution.events
-      .filter((event) => event.kind === "say")
-      .map((event) => event.text),
+    execution.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["A B 1  C ` ${literal} 2  "],
   );
 });
@@ -319,42 +302,32 @@ test("parses, compiles, and executes prototype-sensitive declarations and proper
 
   const execution = executeSource(source);
   assert.deepEqual(
-    execution.events
-      .filter((event) => event.kind === "say")
-      .map((event) => event.text),
+    execution.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["5"],
   );
 });
 
 test("accepts prototype-sensitive configured globals and builtins", () => {
   const globalSource = "say constructor";
-  const globalCompilation = compileSource(globalSource, {
-    globals: ["constructor"],
-  });
+  const globalCompilation = compileSource(globalSource, { globals: ["constructor"] });
 
   assert.deepEqual(globalCompilation.diagnostics, []);
   assert.notEqual(globalCompilation.plan, null);
   const globalExecution = executeSource(globalSource, undefined, { constructor: "global value" });
   assert.deepEqual(
-    globalExecution.events
-      .filter((event) => event.kind === "say")
-      .map((event) => event.text),
+    globalExecution.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["global value"],
   );
 
   const builtinSource = "say valueOf()";
-  const builtinCompilation = compileSource(builtinSource, {
-    builtins: ["valueOf"],
-  });
+  const builtinCompilation = compileSource(builtinSource, { builtins: ["valueOf"] });
   const valueOf: RuntimeBuiltinFunction = () => "builtin value";
 
   assert.deepEqual(builtinCompilation.diagnostics, []);
   assert.notEqual(builtinCompilation.plan, null);
   const builtinExecution = executeSource(builtinSource, { valueOf });
   assert.deepEqual(
-    builtinExecution.events
-      .filter((event) => event.kind === "say")
-      .map((event) => event.text),
+    builtinExecution.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["builtin value"],
   );
 });
@@ -392,17 +365,12 @@ function executeSource(
   assert.notEqual(compiled.plan, null);
   return run(
     compiled.plan!,
-    createFreshRuntimeSnapshot(
-      compiled.plan!,
-      globals === undefined ? {} : { globals },
-    ),
+    createFreshRuntimeSnapshot(compiled.plan!, globals === undefined ? {} : { globals }),
     { random, ...(builtins === undefined ? {} : { builtins }) },
   );
 }
 
-function compactSpan(
-  token: Token,
-): [number, number, number, number, number, number] {
+function compactSpan(token: Token): [number, number, number, number, number, number] {
   return [
     token.span.start.offset,
     token.span.end.offset,

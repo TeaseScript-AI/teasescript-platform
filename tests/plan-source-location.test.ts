@@ -2,18 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import {
-  planLocationToSourceSpan,
-  sourceSpanToPlanLocation,
-} from "../src/plan/source-location.js";
+import { planLocationToSourceSpan, sourceSpanToPlanLocation } from "../src/plan/source-location.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createSourcePosition, createSourceSpan } from "../src/source.js";
 
 test("converts rich spans to the exact compact plan location and back", () => {
-  const span = createSourceSpan(
-    createSourcePosition(2, 0, 2),
-    createSourcePosition(9, 1, 3),
-  );
+  const span = createSourceSpan(createSourcePosition(2, 0, 2), createSourcePosition(9, 1, 3));
   const location = sourceSpanToPlanLocation(span);
 
   assert.deepEqual(location, { so: 2, sl: 0, sc: 2, eo: 9, el: 1, ec: 3 });
@@ -21,7 +15,7 @@ test("converts rich spans to the exact compact plan location and back", () => {
 });
 
 test("compiler stores compact locations and validator requires their exact shape", () => {
-  const compiled = compileSource("say \"😀\"\r\nexit");
+  const compiled = compileSource('say "😀"\r\nexit');
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
   const plan = compiled.plan!;

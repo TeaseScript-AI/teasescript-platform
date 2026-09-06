@@ -1,10 +1,11 @@
 import type { InstructionPlan } from "../../plan/model.js";
 import { captureExternalData } from "../../external-data-capture.js";
-import {
-  type RuntimeInteractionResultHandoffSnapshot,
-  type RuntimeSnapshot,
-} from "../state.js";
-import type { RuntimeActionSettlementSnapshot, RuntimeChatPacingGateActionSnapshot, RuntimeInteractionActionSnapshot } from "../actions/model.js";
+import { type RuntimeInteractionResultHandoffSnapshot, type RuntimeSnapshot } from "../state.js";
+import type {
+  RuntimeActionSettlementSnapshot,
+  RuntimeChatPacingGateActionSnapshot,
+  RuntimeInteractionActionSnapshot,
+} from "../actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent, PlayerTranscriptEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
@@ -47,12 +48,13 @@ export function completeAction(
     });
   }
   const actionId = value.actionId;
-  const active = current.foregroundAction?.actionId === actionId
-    ? current.foregroundAction
-    : current.backgroundActions.find(
-      (action): action is RuntimeChatPacingGateActionSnapshot =>
-        action.kind === "chatPacingGate" && action.actionId === actionId,
-    ) ?? null;
+  const active =
+    current.foregroundAction?.actionId === actionId
+      ? current.foregroundAction
+      : (current.backgroundActions.find(
+          (action): action is RuntimeChatPacingGateActionSnapshot =>
+            action.kind === "chatPacingGate" && action.actionId === actionId,
+        ) ?? null);
   if (active === null) {
     if (current.lastSettlement?.actionId === actionId) {
       return pendingResult(current, [], {
@@ -60,9 +62,10 @@ export function completeAction(
         settlement: cloneSettlement(current.lastSettlement),
       });
     }
-    const outcome = actionId < current.nextActionId
-      ? { kind: "staleAction" as const, actionId }
-      : { kind: "unknownAction" as const, actionId };
+    const outcome =
+      actionId < current.nextActionId
+        ? { kind: "staleAction" as const, actionId }
+        : { kind: "unknownAction" as const, actionId };
     return pendingResult(current, [], outcome);
   }
   if (value.actionKind !== active.kind) {
@@ -102,10 +105,7 @@ export function completeAction(
     });
   }
   const observed = observeTime(captured.plan, current, effectiveNow);
-  if (
-    observed.outcome.kind !== "observed" ||
-    observed.outcome.completion === null
-  ) {
+  if (observed.outcome.kind !== "observed" || observed.outcome.completion === null) {
     throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
   }
   const requestedCompletion = observed.events.find(
@@ -113,14 +113,14 @@ export function completeAction(
       event.kind === "actionCompleted" && event.settlement.actionId === actionId,
   );
   if (requestedCompletion === undefined) {
-    throw new RuntimeDataError("TSR101", "Due delay completion did not settle the requested action.");
+    throw new RuntimeDataError(
+      "TSR101",
+      "Due delay completion did not settle the requested action.",
+    );
   }
   return Object.freeze({
     ...observed,
-    outcome: {
-      kind: "completed" as const,
-      settlement: requestedCompletion.settlement,
-    },
+    outcome: { kind: "completed" as const, settlement: requestedCompletion.settlement },
   });
 }
 
@@ -131,10 +131,16 @@ function completePacingGate(
   request: Record<string, unknown>,
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   if (!isPlainRecord(request.payload) || request.payload.kind !== "skip") {
-    return pendingResult(current, [], { kind: "invalidPayload", message: "Pacing completion payload must be a skip request." });
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "Pacing completion payload must be a skip request.",
+    });
   }
   if (!action.skippable) {
-    return pendingResult(current, [], { kind: "invalidPayload", message: "This pacing gate is not skippable." });
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "This pacing gate is not skippable.",
+    });
   }
   if (current.backgroundActions.includes(action)) {
     const events: InterpreterEvent[] = [];
@@ -189,12 +195,13 @@ function completeInteraction(
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   if (request.interactionKind !== action.interactionKind) {
     const receivedInteractionKind = request.interactionKind;
-    const receivedActionKind = receivedInteractionKind === "button" ||
+    const receivedActionKind =
+      receivedInteractionKind === "button" ||
       receivedInteractionKind === "text" ||
       receivedInteractionKind === "number" ||
       receivedInteractionKind === "choice"
-      ? `interaction:${receivedInteractionKind}`
-      : "<invalid>";
+        ? `interaction:${receivedInteractionKind}`
+        : "<invalid>";
     return pendingResult(current, [], {
       kind: "wrongActionKind",
       actionId: action.actionId,
@@ -204,10 +211,7 @@ function completeInteraction(
   }
   const resolved = resolveInteractionCompletion(action, request.payload);
   if (!resolved.ok) {
-    return pendingResult(current, [], {
-      kind: "invalidPayload",
-      message: resolved.message,
-    });
+    return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
   }
   assertEventSequenceCapacity(current, 2);
   if (action.destinationTemporary !== null && resolved.result !== null) {

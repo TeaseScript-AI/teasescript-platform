@@ -6,7 +6,13 @@ import {
   type RuntimeSnapshot,
 } from "../src/index.js";
 import { createCheckpoint } from "../src/runtime/checkpoint.js";
-import { checkpointStorageKey, exampleUrl, isPlaygroundExampleName, PLAYGROUND_EXAMPLES, type PlaygroundExampleName } from "./examples.js";
+import {
+  checkpointStorageKey,
+  exampleUrl,
+  isPlaygroundExampleName,
+  PLAYGROUND_EXAMPLES,
+  type PlaygroundExampleName,
+} from "./examples.js";
 import {
   compileWorkspaceSource,
   decodeWorkspaceSourceBytes,
@@ -214,14 +220,8 @@ function saveCheckpoint(): void {
   }
   try {
     // EVIDENCE: invariant: runtimeIsCurrent checked the retained plan and snapshot before this synchronous save.
-    const checkpoint = createCheckpoint(
-      plan as InstructionPlan,
-      snapshot as RuntimeSnapshot,
-    );
-    localStorage.setItem(
-      checkpointStorageKey(currentExample),
-      JSON.stringify(checkpoint),
-    );
+    const checkpoint = createCheckpoint(plan as InstructionPlan, snapshot as RuntimeSnapshot);
+    localStorage.setItem(checkpointStorageKey(currentExample), JSON.stringify(checkpoint));
     setActionStatus("Checkpoint saved locally.");
   } catch (error) {
     setActionStatus(errorMessage(error));
@@ -242,7 +242,9 @@ function restoreSavedCheckpoint(): void {
 
     const checkpoint = deserializeCheckpoint(serialized);
     if (JSON.stringify(plan) !== JSON.stringify(checkpoint.plan)) {
-      setActionStatus("Checkpoint restore refused: its self-contained plan is incompatible with the current source runtime.");
+      setActionStatus(
+        "Checkpoint restore refused: its self-contained plan is incompatible with the current source runtime.",
+      );
       return;
     }
 
@@ -252,7 +254,11 @@ function restoreSavedCheckpoint(): void {
     renderState();
     setActionStatus("Checkpoint restored; waiting state and pending action are retained.");
   } catch (error) {
-    setActionStatus(error instanceof CheckpointError ? `${error.info.code}: ${error.info.message}` : errorMessage(error));
+    setActionStatus(
+      error instanceof CheckpointError
+        ? `${error.info.code}: ${error.info.message}`
+        : errorMessage(error),
+    );
   }
 }
 
@@ -277,11 +283,7 @@ async function importSource(): Promise<void> {
   }
   try {
     const text = decodeWorkspaceSourceBytes(await file.arrayBuffer());
-    replaceSource(
-      text,
-      "Local file loaded; compile it to create a runtime.",
-      file.name,
-    );
+    replaceSource(text, "Local file loaded; compile it to create a runtime.", file.name);
   } catch (error) {
     setActionStatus(`Import failed: ${errorMessage(error)}`);
   }
@@ -305,7 +307,7 @@ async function refreshAutomationWorkspace(): Promise<void> {
     }
 
     /* EVIDENCE: boundary: this same-origin development server returns workspaceView; results are display-only until recompilation. */
-    const data = await response.json() as {
+    const data = (await response.json()) as {
       source: string;
       resultRevision: number | null;
       result: WorkspaceResult | null;
@@ -319,7 +321,9 @@ async function refreshAutomationWorkspace(): Promise<void> {
       applyResult(data.result, true);
       compiledRevision = null;
       renderState();
-      setActionStatus(`Automation result revision ${data.resultRevision ?? "unknown"} is displayed as view-only; compile before local execution.`);
+      setActionStatus(
+        `Automation result revision ${data.resultRevision ?? "unknown"} is displayed as view-only; compile before local execution.`,
+      );
     }
   } catch (error) {
     setActionStatus(errorMessage(error));
@@ -347,8 +351,7 @@ function renderDiagnostics(
   for (const diagnostic of diagnostics) {
     const button = document.createElement("button");
     button.className = "diagnostic-button";
-    button.textContent =
-      `${diagnostic.code} (${diagnostic.line}:${diagnostic.column}) ${diagnostic.message}`;
+    button.textContent = `${diagnostic.code} (${diagnostic.line}:${diagnostic.column}) ${diagnostic.message}`;
     button.addEventListener("click", () => {
       const start = offsetAt(elements.source.value, diagnostic.line, diagnostic.column);
       elements.source.focus();
@@ -370,12 +373,7 @@ function renderTranscriptEvent(event: InterpreterEvent): void {
     const speaker = document.createElement("span");
     speaker.className = "event-speaker";
     speaker.textContent = event.speaker?.displayName ?? "Narrator";
-    item.append(
-      speaker,
-      document.createTextNode(event.text),
-      document.createElement("br"),
-      meta,
-    );
+    item.append(speaker, document.createTextNode(event.text), document.createElement("br"), meta);
   } else if (event.kind === "developerWarning" || event.kind === "runtimeFailure") {
     item.classList.add(event.kind === "developerWarning" ? "event-warning" : "event-failure");
     item.append(
@@ -421,7 +419,8 @@ function renderState(): void {
     plan === null || snapshot === null
       ? "—"
       : `${snapshot.nextInstruction} / ${plan.instructions.length}`;
-  elements.runtimeStatus.textContent = snapshot?.status ?? (plan === null ? "compile/stale" : "uninitialized");
+  elements.runtimeStatus.textContent =
+    snapshot?.status ?? (plan === null ? "compile/stale" : "uninitialized");
 
   const current = runtimeIsCurrent();
   elements.sourceRevision.textContent = `Source revision ${sourceRevision}; ${
@@ -435,16 +434,17 @@ function renderState(): void {
 
 function renderSourceLines(): void {
   const lineCount = elements.source.value.split("\n").length;
-  elements.sourceLines.textContent = Array.from({ length: lineCount }, (_, index) => String(index + 1)).join("\n");
+  elements.sourceLines.textContent = Array.from({ length: lineCount }, (_, index) =>
+    String(index + 1),
+  ).join("\n");
   elements.sourceLines.scrollTop = elements.source.scrollTop;
 }
 
 function offsetAt(source: string, line: number, column: number): number {
   const lines = source.split("\n");
-  const prefixLength = lines.slice(0, line - 1).reduce(
-    (total, value) => total + value.length + 1,
-    0,
-  );
+  const prefixLength = lines
+    .slice(0, line - 1)
+    .reduce((total, value) => total + value.length + 1, 0);
   return prefixLength + column - 1;
 }
 function safeStorageGet(key: string): string | null {

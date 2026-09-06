@@ -4,7 +4,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLAYGROUND_EXAMPLES } from "./examples.js";
-import { compileWorkspaceSource, executeWorkspaceSource, type WorkspaceResult } from "./workspace/controller.js";
+import {
+  compileWorkspaceSource,
+  executeWorkspaceSource,
+  type WorkspaceResult,
+} from "./workspace/controller.js";
 
 export interface PlaygroundServerOptions {
   readonly projectRoot?: string;
@@ -15,18 +19,28 @@ export interface StartPlaygroundServerOptions extends PlaygroundServerOptions {
   readonly port?: number;
 }
 
-export function createPlaygroundServer(
-  options: PlaygroundServerOptions = {},
-): Server {
+export function createPlaygroundServer(options: PlaygroundServerOptions = {}): Server {
   const projectRoot = resolve(options.projectRoot ?? defaultProjectRoot());
   const playgroundRoot = resolve(projectRoot, "playground");
   const distRoot = resolve(projectRoot, "dist");
   const examplesRoot = resolve(projectRoot, "examples");
-  const workspace: AutomationWorkspace = { source: "", sourceRevision: 0, lastCompileResult: null, lastRunResult: null, resultRevision: null };
+  const workspace: AutomationWorkspace = {
+    source: "",
+    sourceRevision: 0,
+    lastCompileResult: null,
+    lastRunResult: null,
+    resultRevision: null,
+  };
 
   return createServer((request, response) => {
-    void serveRequest(request, { projectRoot, playgroundRoot, distRoot, examplesRoot }, workspace, response).catch(() => {
-      if (!response.headersSent) sendJson(response, 500, { error: { code: "internalError", message: "Server error." } });
+    void serveRequest(
+      request,
+      { projectRoot, playgroundRoot, distRoot, examplesRoot },
+      workspace,
+      response,
+    ).catch(() => {
+      if (!response.headersSent)
+        sendJson(response, 500, { error: { code: "internalError", message: "Server error." } });
       else response.destroy();
     });
   });
@@ -144,9 +158,19 @@ async function serveRequest(
   }
 }
 
-async function serveWorkspaceApi(request: IncomingMessage, pathname: string, workspace: AutomationWorkspace, response: ServerResponse): Promise<void> {
+async function serveWorkspaceApi(
+  request: IncomingMessage,
+  pathname: string,
+  workspace: AutomationWorkspace,
+  response: ServerResponse,
+): Promise<void> {
   if (!isLoopback(request.socket.remoteAddress)) {
-    sendJson(response, 403, { error: { code: "loopbackOnly", message: "Workspace automation is available only to loopback clients." } });
+    sendJson(response, 403, {
+      error: {
+        code: "loopbackOnly",
+        message: "Workspace automation is available only to loopback clients.",
+      },
+    });
     return;
   }
   const method = request.method ?? "GET";
@@ -156,16 +180,29 @@ async function serveWorkspaceApi(request: IncomingMessage, pathname: string, wor
   }
   if (pathname === "/api/workspace/result" && method === "GET") {
     const result = workspace.lastRunResult ?? workspace.lastCompileResult;
-    sendJson(response, 200, { sourceRevision: workspace.sourceRevision, resultRevision: workspace.resultRevision, stale: workspace.resultRevision !== workspace.sourceRevision, result });
+    sendJson(response, 200, {
+      sourceRevision: workspace.sourceRevision,
+      resultRevision: workspace.resultRevision,
+      stale: workspace.resultRevision !== workspace.sourceRevision,
+      result,
+    });
     return;
   }
   if (pathname === "/api/workspace/source" && method === "PUT") {
     if (!isUtf8Text(request.headers["content-type"])) {
-      sendJson(response, 415, { error: { code: "unsupportedContentType", message: "Source uploads require Content-Type: text/plain; charset=utf-8." } });
+      sendJson(response, 415, {
+        error: {
+          code: "unsupportedContentType",
+          message: "Source uploads require Content-Type: text/plain; charset=utf-8.",
+        },
+      });
       return;
     }
     const body = await readUtf8Body(request);
-    if (!body.ok) { sendJson(response, body.status, { error: body.error }); return; }
+    if (!body.ok) {
+      sendJson(response, body.status, { error: body.error });
+      return;
+    }
     workspace.source = body.text;
     workspace.sourceRevision += 1;
     workspace.lastCompileResult = null;
@@ -174,22 +211,48 @@ async function serveWorkspaceApi(request: IncomingMessage, pathname: string, wor
     sendJson(response, 200, workspaceView(workspace));
     return;
   }
-  if ((pathname === "/api/workspace/compile" || pathname === "/api/workspace/run") && method === "POST") {
+  if (
+    (pathname === "/api/workspace/compile" || pathname === "/api/workspace/run") &&
+    method === "POST"
+  ) {
     if (await hasUnexpectedBody(request)) {
-      sendJson(response, 400, { error: { code: "unexpectedBody", message: "This operation does not accept a request body." } }); return;
+      sendJson(response, 400, {
+        error: {
+          code: "unexpectedBody",
+          message: "This operation does not accept a request body.",
+        },
+      });
+      return;
     }
-    const result = pathname.endsWith("/compile") ? compileWorkspaceSource(workspace.source) : executeWorkspaceSource(workspace.source);
-    workspace.lastCompileResult = pathname.endsWith("/compile") ? result : workspace.lastCompileResult;
+    const result = pathname.endsWith("/compile")
+      ? compileWorkspaceSource(workspace.source)
+      : executeWorkspaceSource(workspace.source);
+    workspace.lastCompileResult = pathname.endsWith("/compile")
+      ? result
+      : workspace.lastCompileResult;
     workspace.lastRunResult = pathname.endsWith("/run") ? result : workspace.lastRunResult;
     workspace.resultRevision = workspace.sourceRevision;
-    sendJson(response, 200, { sourceRevision: workspace.sourceRevision, resultRevision: workspace.resultRevision, stale: false, result });
+    sendJson(response, 200, {
+      sourceRevision: workspace.sourceRevision,
+      resultRevision: workspace.resultRevision,
+      stale: false,
+      result,
+    });
     return;
   }
-  sendJson(response, 405, { error: { code: "methodNotAllowed", message: "Unsupported workspace route or method." } });
+  sendJson(response, 405, {
+    error: { code: "methodNotAllowed", message: "Unsupported workspace route or method." },
+  });
 }
 
 function workspaceView(workspace: AutomationWorkspace) {
-  return { source: workspace.source, sourceRevision: workspace.sourceRevision, resultRevision: workspace.resultRevision, stale: workspace.resultRevision !== workspace.sourceRevision, result: workspace.lastRunResult ?? workspace.lastCompileResult };
+  return {
+    source: workspace.source,
+    sourceRevision: workspace.sourceRevision,
+    resultRevision: workspace.resultRevision,
+    stale: workspace.resultRevision !== workspace.sourceRevision,
+    result: workspace.lastRunResult ?? workspace.lastCompileResult,
+  };
 }
 
 function isLoopback(address: string | undefined): boolean {
@@ -201,13 +264,30 @@ function isUtf8Text(value: string | string[] | undefined): boolean {
   return /^text\/plain(?:\s*;\s*charset=utf-8)?\s*$/iu.test(value);
 }
 
-async function readUtf8Body(request: IncomingMessage): Promise<{ readonly ok: true; readonly text: string } | { readonly ok: false; readonly status: number; readonly error: { readonly code: string; readonly message: string } }> {
+async function readUtf8Body(
+  request: IncomingMessage,
+): Promise<
+  | { readonly ok: true; readonly text: string }
+  | {
+      readonly ok: false;
+      readonly status: number;
+      readonly error: { readonly code: string; readonly message: string };
+    }
+> {
   const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  for await (const chunk of request)
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   try {
-    return { ok: true, text: new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)) };
+    return {
+      ok: true,
+      text: new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)),
+    };
   } catch {
-    return { ok: false, status: 400, error: { code: "malformedUtf8", message: "Source must be valid UTF-8 text." } };
+    return {
+      ok: false,
+      status: 400,
+      error: { code: "malformedUtf8", message: "Source must be valid UTF-8 text." },
+    };
   }
 }
 
@@ -272,14 +352,20 @@ function unsafePath(pathname: string): boolean {
 
 function contentType(path: string): string {
   switch (extname(path)) {
-    case ".html": return "text/html; charset=utf-8";
-    case ".css": return "text/css; charset=utf-8";
-    case ".js": return "text/javascript; charset=utf-8";
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+      return "text/javascript; charset=utf-8";
     case ".json":
-    case ".map": return "application/json; charset=utf-8";
+    case ".map":
+      return "application/json; charset=utf-8";
     case ".tease":
-    case ".txt": return "text/plain; charset=utf-8";
-    default: return "application/octet-stream";
+    case ".txt":
+      return "text/plain; charset=utf-8";
+    default:
+      return "application/octet-stream";
   }
 }
 
@@ -319,9 +405,6 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 const invokedPath = process.argv[1];
-if (
-  invokedPath !== undefined &&
-  import.meta.url === pathToFileURL(resolve(invokedPath)).href
-) {
+if (invokedPath !== undefined && import.meta.url === pathToFileURL(resolve(invokedPath)).href) {
   await startPlaygroundServer();
 }

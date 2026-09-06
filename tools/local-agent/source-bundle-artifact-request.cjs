@@ -1,9 +1,9 @@
-'use strict';
+"use strict";
 
-const crypto = require('node:crypto');
+const crypto = require("node:crypto");
 
-const ARTIFACT_KIND = 'source';
-const STATUS_CONTEXT = 'source-bundle/artifact-v1';
+const ARTIFACT_KIND = "source";
+const STATUS_CONTEXT = "source-bundle/artifact-v1";
 const MAILBOX_ISSUE_NUMBER = 235;
 const REGISTRY_VERSION = 1;
 const REGISTRY_LIMIT = 10;
@@ -14,79 +14,72 @@ const COMMAND_PATTERN = /^\/artifact source (main|pr:[1-9][0-9]*|sha:[0-9a-f]{40
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const ARTIFACT_ID_PATTERN = /^[1-9][0-9]*$/;
-const ALLOWED_PERMISSIONS = new Set(['write', 'admin']);
-const RESULT_BOT_LOGIN = 'github-actions[bot]';
+const ALLOWED_PERMISSIONS = new Set(["write", "admin"]);
+const RESULT_BOT_LOGIN = "github-actions[bot]";
 const RESULT_BOT_ID = 41898282;
-const PREPARATION_HELPER =
-  '/mnt/data/chatgpt-project-agent/bin/prepare-agent-workspace.sh';
+const PREPARATION_HELPER = "/mnt/data/chatgpt-project-agent/bin/prepare-agent-workspace.sh";
 const TRUSTED_PRODUCER_PATHS = new Set([
-  '.github/workflows/source-bundle.yml',
-  '.github/workflows/artifact-mailbox-worker.yml',
-  '.github/workflows/patch-publication.yml',
+  ".github/workflows/source-bundle.yml",
+  ".github/workflows/artifact-mailbox-worker.yml",
+  ".github/workflows/patch-publication.yml",
 ]);
 
 class ArtifactRequestError extends Error {
   constructor(message) {
     super(message);
-    this.name = 'ArtifactRequestError';
+    this.name = "ArtifactRequestError";
   }
 }
 
 function requireFullSha(value, label) {
-  if (!FULL_SHA_PATTERN.test(value || '')) {
+  if (!FULL_SHA_PATTERN.test(value || "")) {
     throw new ArtifactRequestError(`${label} did not resolve to a full lowercase commit SHA.`);
   }
   return value;
 }
 
 function parseCommand(body) {
-  const normalized = typeof body === 'string' ? body : '';
+  const normalized = typeof body === "string" ? body : "";
   const match = COMMAND_PATTERN.exec(normalized);
   if (!match) {
     throw new ArtifactRequestError(
-      'Invalid command. Use exactly `/artifact source main`, `/artifact source pr:<number>`, or `/artifact source sha:<full-40-character-sha>`.',
+      "Invalid command. Use exactly `/artifact source main`, `/artifact source pr:<number>`, or `/artifact source sha:<full-40-character-sha>`.",
     );
   }
 
   const selector = match[1];
-  if (selector === 'main') {
-    return { selector, selectorType: 'main' };
+  if (selector === "main") {
+    return { selector, selectorType: "main" };
   }
-  if (selector.startsWith('pr:')) {
+  if (selector.startsWith("pr:")) {
     const pullNumber = Number.parseInt(selector.slice(3), 10);
     if (!Number.isSafeInteger(pullNumber)) {
-      throw new ArtifactRequestError('The pull-request number is outside the supported integer range.');
+      throw new ArtifactRequestError(
+        "The pull-request number is outside the supported integer range.",
+      );
     }
-    return {
-      selector,
-      selectorType: 'pr',
-      pullNumber,
-    };
+    return { selector, selectorType: "pr", pullNumber };
   }
-  return {
-    selector,
-    selectorType: 'sha',
-    sourceSha: selector.slice(4),
-  };
+  return { selector, selectorType: "sha", sourceSha: selector.slice(4) };
 }
 
 function normalizeDigest(value) {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (DIGEST_PATTERN.test(normalized)) {
     return normalized;
   }
-  if (normalized.startsWith('sha256:') && DIGEST_PATTERN.test(normalized.slice(7))) {
+  if (normalized.startsWith("sha256:") && DIGEST_PATTERN.test(normalized.slice(7))) {
     return normalized.slice(7);
   }
-  throw new ArtifactRequestError('Artifact metadata did not contain a valid SHA-256 digest.');
+  throw new ArtifactRequestError("Artifact metadata did not contain a valid SHA-256 digest.");
 }
 
 function hashRequestBody(body) {
-  return crypto.createHash('sha256').update(body, 'utf8').digest('hex');
+  return crypto.createHash("sha256").update(body, "utf8").digest("hex");
 }
 
 function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function parseArtifactTargetUrl(targetUrl, context) {
@@ -94,30 +87,33 @@ function parseArtifactTargetUrl(targetUrl, context) {
   const pattern = new RegExp(
     `^${escapeRegExp(expectedPrefix)}/actions/runs/([1-9][0-9]*)/artifacts/([1-9][0-9]*)$`,
   );
-  const match = pattern.exec(targetUrl || '');
+  const match = pattern.exec(targetUrl || "");
   if (!match) {
-    throw new ArtifactRequestError('The fixed source-bundle status did not point to an exact repository artifact URL.');
+    throw new ArtifactRequestError(
+      "The fixed source-bundle status did not point to an exact repository artifact URL.",
+    );
   }
   const runId = Number.parseInt(match[1], 10);
   const artifactId = Number.parseInt(match[2], 10);
   if (!Number.isSafeInteger(runId) || !Number.isSafeInteger(artifactId)) {
-    throw new ArtifactRequestError('The indexed artifact URL contains an unsupported numeric identity.');
+    throw new ArtifactRequestError(
+      "The indexed artifact URL contains an unsupported numeric identity.",
+    );
   }
   return { runId, artifactId };
 }
 
 function verifyAutomaticProducerSource(run, repositoryId, sourceSha) {
-  if (run.event === 'push') {
-    if (
-      run.head_repository?.id !== repositoryId ||
-      run.head_sha !== sourceSha
-    ) {
-      throw new ArtifactRequestError('The automatic push producer did not match the indexed source SHA.');
+  if (run.event === "push") {
+    if (run.head_repository?.id !== repositoryId || run.head_sha !== sourceSha) {
+      throw new ArtifactRequestError(
+        "The automatic push producer did not match the indexed source SHA.",
+      );
     }
     return;
   }
 
-  if (run.event === 'pull_request') {
+  if (run.event === "pull_request") {
     const matchingPulls = (run.pull_requests || []).filter(
       (pull) =>
         pull.base?.repo?.id === repositoryId &&
@@ -126,17 +122,19 @@ function verifyAutomaticProducerSource(run, repositoryId, sourceSha) {
         pull.head?.sha === sourceSha,
     );
     if (matchingPulls.length === 0) {
-      throw new ArtifactRequestError('The automatic pull-request producer did not match the indexed source SHA.');
+      throw new ArtifactRequestError(
+        "The automatic pull-request producer did not match the indexed source SHA.",
+      );
     }
     return;
   }
 
-  throw new ArtifactRequestError('The automatic Source-bundle producer event was not supported.');
+  throw new ArtifactRequestError("The automatic Source-bundle producer event was not supported.");
 }
 
 function requestSuffix(requestCommentId) {
   if (!Number.isSafeInteger(requestCommentId) || requestCommentId <= 0) {
-    throw new ArtifactRequestError('The result request-comment identity is invalid.');
+    throw new ArtifactRequestError("The result request-comment identity is invalid.");
   }
   return `request-${requestCommentId}`;
 }
@@ -170,11 +168,11 @@ function formatPreparationCommand(result) {
     lines.push(`  --expected-merge-base ${result.mergeBaseSha} \\`);
   }
   lines.push(`  --output /mnt/data/${workspaceName(result.sourceSha, requestCommentId)}`);
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 function normalizeTimestamp(value, label) {
-  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
     throw new ArtifactRequestError(`${label} did not contain a valid UTC timestamp.`);
   }
   return new Date(value).toISOString();
@@ -182,14 +180,16 @@ function normalizeTimestamp(value, label) {
 
 function normalizeRequestIds(value) {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new ArtifactRequestError('A registry entry did not contain a request-comment identity.');
+    throw new ArtifactRequestError("A registry entry did not contain a request-comment identity.");
   }
   const ids = [];
   const seen = new Set();
   for (const item of value) {
     const id = Number(item);
     if (!Number.isSafeInteger(id) || id <= 0) {
-      throw new ArtifactRequestError('A registry entry contained an invalid request-comment identity.');
+      throw new ArtifactRequestError(
+        "A registry entry contained an invalid request-comment identity.",
+      );
     }
     if (!seen.has(id)) {
       seen.add(id);
@@ -200,37 +200,39 @@ function normalizeRequestIds(value) {
 }
 
 function normalizeRegistryEntry(entry) {
-  if (!entry || typeof entry !== 'object' || !['ready', 'failed'].includes(entry.state)) {
-    throw new ArtifactRequestError('The Artifact mailbox registry contained an invalid entry state.');
+  if (!entry || typeof entry !== "object" || !["ready", "failed"].includes(entry.state)) {
+    throw new ArtifactRequestError(
+      "The Artifact mailbox registry contained an invalid entry state.",
+    );
   }
   const normalized = {
     state: entry.state,
     requestCommentIds: normalizeRequestIds(entry.requestCommentIds),
-    selector: typeof entry.selector === 'string' && entry.selector ? entry.selector : 'unresolved',
+    selector: typeof entry.selector === "string" && entry.selector ? entry.selector : "unresolved",
     sourceSha: entry.sourceSha || null,
-    updatedAt: normalizeTimestamp(entry.updatedAt, 'A registry entry'),
+    updatedAt: normalizeTimestamp(entry.updatedAt, "A registry entry"),
   };
 
   if (entry.sourceSha !== null && entry.sourceSha !== undefined) {
-    normalized.sourceSha = requireFullSha(entry.sourceSha, 'A registry source identity');
+    normalized.sourceSha = requireFullSha(entry.sourceSha, "A registry source identity");
   }
 
-  if (entry.state === 'failed') {
-    normalized.reason = compactFailureReason(entry.reason || 'Artifact request failed.');
-    normalized.runUrl = typeof entry.runUrl === 'string' ? entry.runUrl : '';
+  if (entry.state === "failed") {
+    normalized.reason = compactFailureReason(entry.reason || "Artifact request failed.");
+    normalized.runUrl = typeof entry.runUrl === "string" ? entry.runUrl : "";
     return normalized;
   }
 
   const artifactId = Number(entry.artifactId);
   const producerRunId = Number(entry.producerRunId);
   if (!Number.isSafeInteger(artifactId) || artifactId <= 0) {
-    throw new ArtifactRequestError('A ready registry entry contained an invalid artifact ID.');
+    throw new ArtifactRequestError("A ready registry entry contained an invalid artifact ID.");
   }
   if (!Number.isSafeInteger(producerRunId) || producerRunId <= 0) {
-    throw new ArtifactRequestError('A ready registry entry contained an invalid producer run ID.');
+    throw new ArtifactRequestError("A ready registry entry contained an invalid producer run ID.");
   }
   if (!normalized.sourceSha) {
-    throw new ArtifactRequestError('A ready registry entry did not contain a resolved source SHA.');
+    throw new ArtifactRequestError("A ready registry entry did not contain a resolved source SHA.");
   }
 
   Object.assign(normalized, {
@@ -247,54 +249,69 @@ function normalizeRegistryEntry(entry) {
     artifactDigest: normalizeDigest(entry.artifactDigest),
     producerRunId,
     artifactUrl: entry.artifactUrl,
-    expiresAt: entry.expiresAt ? normalizeTimestamp(entry.expiresAt, 'A registry expiry') : null,
+    expiresAt: entry.expiresAt ? normalizeTimestamp(entry.expiresAt, "A registry expiry") : null,
   });
-  if (!normalized.repository || !normalized.sourceRepository || !normalized.sourceRef || !normalized.artifactUrl) {
-    throw new ArtifactRequestError('A ready registry entry was incomplete.');
+  if (
+    !normalized.repository ||
+    !normalized.sourceRepository ||
+    !normalized.sourceRef ||
+    !normalized.artifactUrl
+  ) {
+    throw new ArtifactRequestError("A ready registry entry was incomplete.");
   }
   if (normalized.pullNumber) {
     normalized.pullNumber = Number(normalized.pullNumber);
     if (!Number.isSafeInteger(normalized.pullNumber) || normalized.pullNumber <= 0) {
-      throw new ArtifactRequestError('A ready registry entry contained an invalid pull-request number.');
+      throw new ArtifactRequestError(
+        "A ready registry entry contained an invalid pull-request number.",
+      );
     }
-    normalized.baseSha = requireFullSha(normalized.baseSha, 'A registry pull-request base');
-    normalized.mergeBaseSha = requireFullSha(normalized.mergeBaseSha, 'A registry pull-request merge base');
+    normalized.baseSha = requireFullSha(normalized.baseSha, "A registry pull-request base");
+    normalized.mergeBaseSha = requireFullSha(
+      normalized.mergeBaseSha,
+      "A registry pull-request merge base",
+    );
     if (!normalized.headRepository || !normalized.headRef) {
-      throw new ArtifactRequestError('A ready registry entry contained an incomplete pull-request head identity.');
+      throw new ArtifactRequestError(
+        "A ready registry entry contained an incomplete pull-request head identity.",
+      );
     }
   }
   return normalized;
 }
 
 function encodeRegistryState(entries) {
-  return Buffer.from(JSON.stringify({ entries }), 'utf8').toString('base64url');
+  return Buffer.from(JSON.stringify({ entries }), "utf8").toString("base64url");
 }
 
 function parseRegistryComment(body) {
-  if (typeof body !== 'string' || !body.startsWith(`${REGISTRY_MARKER}\n${REGISTRY_STATE_PREFIX}`)) {
-    throw new ArtifactRequestError('The Artifact mailbox registry marker was invalid.');
+  if (
+    typeof body !== "string" ||
+    !body.startsWith(`${REGISTRY_MARKER}\n${REGISTRY_STATE_PREFIX}`)
+  ) {
+    throw new ArtifactRequestError("The Artifact mailbox registry marker was invalid.");
   }
-  const stateLine = body.split('\n', 3)[1];
-  if (!stateLine.endsWith(' -->')) {
-    throw new ArtifactRequestError('The Artifact mailbox registry state marker was invalid.');
+  const stateLine = body.split("\n", 3)[1];
+  if (!stateLine.endsWith(" -->")) {
+    throw new ArtifactRequestError("The Artifact mailbox registry state marker was invalid.");
   }
   const encoded = stateLine.slice(REGISTRY_STATE_PREFIX.length, -4);
   let decoded;
   try {
-    decoded = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    decoded = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
   } catch {
-    throw new ArtifactRequestError('The Artifact mailbox registry state could not be decoded.');
+    throw new ArtifactRequestError("The Artifact mailbox registry state could not be decoded.");
   }
   if (!decoded || !Array.isArray(decoded.entries)) {
-    throw new ArtifactRequestError('The Artifact mailbox registry state was incomplete.');
+    throw new ArtifactRequestError("The Artifact mailbox registry state was incomplete.");
   }
   return decoded.entries.map(normalizeRegistryEntry);
 }
 
 function compactFailureReason(value) {
-  const compact = String(value || 'Artifact request failed.')
-    .replace(/[\r\n\t]+/g, ' ')
-    .replace(/\s+/g, ' ')
+  const compact = String(value || "Artifact request failed.")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
   if (compact.length <= FAILURE_REASON_LIMIT) return compact;
   return `${compact.slice(0, FAILURE_REASON_LIMIT - 1)}…`;
@@ -304,28 +321,28 @@ function formatInlineCode(value) {
   const text = String(value);
   const runs = text.match(/`+/g) || [];
   const longestRun = runs.reduce((longest, run) => Math.max(longest, run.length), 0);
-  const fence = '`'.repeat(longestRun + 1);
-  const padding = text.startsWith('`') || text.endsWith('`') ? ' ' : '';
+  const fence = "`".repeat(longestRun + 1);
+  const padding = text.startsWith("`") || text.endsWith("`") ? " " : "";
   return `${fence}${padding}${text}${padding}${fence}`;
 }
 
 function formatRegistryEntry(entry) {
-  const resolved = entry.sourceSha || 'unresolved';
+  const resolved = entry.sourceSha || "unresolved";
   const lines = [
     `### \`${entry.selector}\` -> \`${resolved}\` · ${entry.state} · \`${entry.updatedAt}\``,
-    '',
+    "",
   ];
-  if (entry.state === 'failed') {
+  if (entry.state === "failed") {
     lines.push(
-      `\`request ${entry.requestCommentIds[0]}\` · run ${entry.runUrl || 'unavailable'}`,
-      '',
+      `\`request ${entry.requestCommentIds[0]}\` · run ${entry.runUrl || "unavailable"}`,
+      "",
       `Reason: ${entry.reason}`,
     );
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   lines.push(
-    `\`requests ${entry.requestCommentIds.join(', ')}\` · \`artifact ${entry.artifactId}\` · \`run ${entry.producerRunId}\` · \`expires ${entry.expiresAt || 'unavailable'}\``,
+    `\`requests ${entry.requestCommentIds.join(", ")}\` · \`artifact ${entry.artifactId}\` · \`run ${entry.producerRunId}\` · \`expires ${entry.expiresAt || "unavailable"}\``,
   );
   if (entry.pullNumber) {
     lines.push(
@@ -336,18 +353,18 @@ function formatRegistryEntry(entry) {
     );
   }
   lines.push(
-    '',
-    '`GitHub.download_workflow_artifact`',
-    '',
-    '```json',
+    "",
+    "`GitHub.download_workflow_artifact`",
+    "",
+    "```json",
     JSON.stringify(formatDownloadArguments(entry)),
-    '```',
-    '',
-    '```shell',
+    "```",
+    "",
+    "```shell",
     formatPreparationCommand(entry),
-    '```',
+    "```",
   );
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 function formatRegistryComment(entries) {
@@ -355,24 +372,24 @@ function formatRegistryComment(entries) {
   const lines = [
     REGISTRY_MARKER,
     `${REGISTRY_STATE_PREFIX}${encodeRegistryState(normalized)} -->`,
-    '# Artifact mailbox registry',
-    '',
-    'Newest entries first. Match the exact `request <id>` or `requests <id, ...>` value.',
+    "# Artifact mailbox registry",
+    "",
+    "Newest entries first. Match the exact `request <id>` or `requests <id, ...>` value.",
   ];
   for (const entry of normalized) {
-    lines.push('', formatRegistryEntry(entry));
+    lines.push("", formatRegistryEntry(entry));
   }
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 function isExpiredEntry(entry, nowMs) {
-  return entry.state === 'ready' && entry.expiresAt && Date.parse(entry.expiresAt) <= nowMs;
+  return entry.state === "ready" && entry.expiresAt && Date.parse(entry.expiresAt) <= nowMs;
 }
 
 function sameReadyArtifact(left, right) {
   return (
-    left.state === 'ready' &&
-    right.state === 'ready' &&
+    left.state === "ready" &&
+    right.state === "ready" &&
     left.sourceSha === right.sourceSha &&
     left.artifactId === right.artifactId &&
     left.artifactDigest === right.artifactDigest &&
@@ -416,7 +433,7 @@ function mergeRegistryEntries(existingEntries, incomingEntry, now = new Date()) 
     .filter((entry) => !isExpiredEntry(entry, nowMs))
     .filter((entry) => !entry.requestCommentIds.some((id) => incomingIds.has(id)));
 
-  if (incoming.state === 'ready') {
+  if (incoming.state === "ready") {
     const equivalentIndex = retained.findIndex(
       (entry) => sameReadyArtifact(entry, incoming) && sameResolvedIdentity(entry, incoming),
     );
@@ -452,7 +469,7 @@ async function listAllIssueComments(github, context, issueNumber) {
 function hasExpectedResultAuthor(comment) {
   return (
     comment?.user?.login === RESULT_BOT_LOGIN &&
-    comment.user.type === 'Bot' &&
+    comment.user.type === "Bot" &&
     comment.user.id === RESULT_BOT_ID
   );
 }
@@ -471,11 +488,13 @@ async function readRegistry({ github, context, issueNumber = MAILBOX_ISSUE_NUMBE
   const matching = comments.filter(
     (comment) =>
       hasExpectedResultAuthor(comment) &&
-      typeof comment.body === 'string' &&
+      typeof comment.body === "string" &&
       comment.body.startsWith(REGISTRY_MARKER),
   );
   if (matching.length > 1) {
-    throw new ArtifactRequestError('More than one authoritative Artifact mailbox registry comment exists.');
+    throw new ArtifactRequestError(
+      "More than one authoritative Artifact mailbox registry comment exists.",
+    );
   }
   if (matching.length === 0) return { comment: null, entries: [] };
   return { comment: matching[0], entries: parseRegistryComment(matching[0].body) };
@@ -509,12 +528,20 @@ async function upsertRegistryEntry({ github, context, entry }) {
   const persistedEntries = parseRegistryComment(response.data.body);
   const persisted = findRegistryEntry(persistedEntries, entry.requestCommentIds[0]);
   if (!persisted || persisted.state !== entry.state) {
-    throw new ArtifactRequestError('The authoritative registry update did not preserve the request result.');
+    throw new ArtifactRequestError(
+      "The authoritative registry update did not preserve the request result.",
+    );
   }
   return persisted;
 }
 
-async function getLiveRequestComment({ github, context, requestCommentId, expectedAuthor, expectedBodyHash }) {
+async function getLiveRequestComment({
+  github,
+  context,
+  requestCommentId,
+  expectedAuthor,
+  expectedBodyHash,
+}) {
   const response = await github.rest.issues.getComment({
     owner: context.repo.owner,
     repo: context.repo.repo,
@@ -522,17 +549,21 @@ async function getLiveRequestComment({ github, context, requestCommentId, expect
   });
   const comment = response.data;
   if (comment.id !== requestCommentId || comment.user?.login !== expectedAuthor) {
-    throw new ArtifactRequestError('The request comment identity no longer matches the triggering event.');
+    throw new ArtifactRequestError(
+      "The request comment identity no longer matches the triggering event.",
+    );
   }
-  if (hashRequestBody(comment.body || '') !== expectedBodyHash) {
-    throw new ArtifactRequestError('The request comment changed while the artifact request was running.');
+  if (hashRequestBody(comment.body || "") !== expectedBodyHash) {
+    throw new ArtifactRequestError(
+      "The request comment changed while the artifact request was running.",
+    );
   }
   return comment;
 }
 
 async function authorizeRequest({ github, context, author }) {
   if (context.actor !== author) {
-    throw new ArtifactRequestError('The workflow actor does not match the request comment author.');
+    throw new ArtifactRequestError("The workflow actor does not match the request comment author.");
   }
   const response = await github.rest.repos.getCollaboratorPermissionLevel({
     owner: context.repo.owner,
@@ -541,7 +572,9 @@ async function authorizeRequest({ github, context, author }) {
   });
   const permission = response.data.permission;
   if (!ALLOWED_PERMISSIONS.has(permission)) {
-    throw new ArtifactRequestError('Artifact regeneration requires Write, Maintain, or Admin repository access.');
+    throw new ArtifactRequestError(
+      "Artifact regeneration requires Write, Maintain, or Admin repository access.",
+    );
   }
   return permission;
 }
@@ -549,7 +582,7 @@ async function authorizeRequest({ github, context, author }) {
 async function resolveSelector({ github, context, parsed }) {
   const repositoryName = `${context.repo.owner}/${context.repo.repo}`;
 
-  if (parsed.selectorType === 'main') {
+  if (parsed.selectorType === "main") {
     const repository = await github.rest.repos.get({
       owner: context.repo.owner,
       repo: context.repo.repo,
@@ -560,10 +593,10 @@ async function resolveSelector({ github, context, parsed }) {
       repo: context.repo.repo,
       ref: `heads/${defaultBranch}`,
     });
-    if (reference.data.object.type !== 'commit') {
-      throw new ArtifactRequestError('The default branch did not resolve to a commit.');
+    if (reference.data.object.type !== "commit") {
+      throw new ArtifactRequestError("The default branch did not resolve to a commit.");
     }
-    const sourceSha = requireFullSha(reference.data.object.sha, 'The default branch');
+    const sourceSha = requireFullSha(reference.data.object.sha, "The default branch");
     return {
       selector: parsed.selector,
       selectorType: parsed.selectorType,
@@ -578,7 +611,7 @@ async function resolveSelector({ github, context, parsed }) {
     };
   }
 
-  if (parsed.selectorType === 'pr') {
+  if (parsed.selectorType === "pr") {
     let pull;
     try {
       pull = await github.rest.pulls.get({
@@ -593,12 +626,12 @@ async function resolveSelector({ github, context, parsed }) {
       throw error;
     }
 
-    const sourceSha = requireFullSha(pull.data.head.sha, 'The pull-request head');
-    const baseSha = requireFullSha(pull.data.base.sha, 'The pull-request base');
+    const sourceSha = requireFullSha(pull.data.head.sha, "The pull-request head");
+    const baseSha = requireFullSha(pull.data.base.sha, "The pull-request base");
     const headRepository = pull.data.head.repo?.full_name;
     const headRef = pull.data.head.ref;
     if (!headRepository || !headRef) {
-      throw new ArtifactRequestError('The pull-request head repository or ref is unavailable.');
+      throw new ArtifactRequestError("The pull-request head repository or ref is unavailable.");
     }
 
     const comparison = await github.rest.repos.compareCommitsWithBasehead({
@@ -608,7 +641,7 @@ async function resolveSelector({ github, context, parsed }) {
     });
     const mergeBaseSha = requireFullSha(
       comparison.data.merge_base_commit?.sha,
-      'The pull-request merge base',
+      "The pull-request merge base",
     );
 
     return {
@@ -625,7 +658,7 @@ async function resolveSelector({ github, context, parsed }) {
     };
   }
 
-  const sourceSha = requireFullSha(parsed.sourceSha, 'The exact selector');
+  const sourceSha = requireFullSha(parsed.sourceSha, "The exact selector");
   try {
     const commit = await github.rest.git.getCommit({
       owner: context.repo.owner,
@@ -633,7 +666,7 @@ async function resolveSelector({ github, context, parsed }) {
       commit_sha: sourceSha,
     });
     if (commit.data.sha !== sourceSha) {
-      throw new ArtifactRequestError('The exact commit selector did not resolve identically.');
+      throw new ArtifactRequestError("The exact commit selector did not resolve identically.");
     }
   } catch (error) {
     if (error.status === 404) {
@@ -694,7 +727,7 @@ async function verifyArtifactMetadata({
 }) {
   const parsedTarget = parseArtifactTargetUrl(targetUrl, context);
   if (expectedArtifactId !== null && parsedTarget.artifactId !== expectedArtifactId) {
-    throw new ArtifactRequestError('The artifact URL did not contain the expected artifact ID.');
+    throw new ArtifactRequestError("The artifact URL did not contain the expected artifact ID.");
   }
 
   const artifactResponse = await github.rest.actions.getArtifact({
@@ -705,25 +738,31 @@ async function verifyArtifactMetadata({
   const artifact = artifactResponse.data;
   const expectedName = `teasescript-source-${sourceSha}`;
   if (artifact.id !== parsedTarget.artifactId || artifact.name !== expectedName) {
-    throw new ArtifactRequestError('Artifact metadata did not match the requested source identity.');
+    throw new ArtifactRequestError(
+      "Artifact metadata did not match the requested source identity.",
+    );
   }
   if (artifact.expired === true) {
-    throw new ArtifactRequestError('The indexed source artifact has expired.');
+    throw new ArtifactRequestError("The indexed source artifact has expired.");
   }
   const expiresAt = artifact.expires_at || null;
   if (expiresAt) {
     const expiresAtMs = Date.parse(expiresAt);
     if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
-      throw new ArtifactRequestError('The indexed source artifact is no longer within its retention window.');
+      throw new ArtifactRequestError(
+        "The indexed source artifact is no longer within its retention window.",
+      );
     }
   }
 
   const artifactDigest = normalizeDigest(artifact.digest);
   if (expectedDigest !== null && artifactDigest !== normalizeDigest(expectedDigest)) {
-    throw new ArtifactRequestError('Artifact API metadata did not match the upload digest.');
+    throw new ArtifactRequestError("Artifact API metadata did not match the upload digest.");
   }
   if (artifact.workflow_run?.id !== parsedTarget.runId) {
-    throw new ArtifactRequestError('Artifact metadata did not match the producer run in the indexed URL.');
+    throw new ArtifactRequestError(
+      "Artifact metadata did not match the producer run in the indexed URL.",
+    );
   }
 
   const runResponse = await github.rest.actions.getWorkflowRun({
@@ -732,25 +771,32 @@ async function verifyArtifactMetadata({
     run_id: parsedTarget.runId,
   });
   const run = runResponse.data;
-  if (run.id !== parsedTarget.runId || run.repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
-    throw new ArtifactRequestError('The artifact producer run did not belong to this repository.');
+  if (
+    run.id !== parsedTarget.runId ||
+    run.repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`
+  ) {
+    throw new ArtifactRequestError("The artifact producer run did not belong to this repository.");
   }
   if (!TRUSTED_PRODUCER_PATHS.has(run.path)) {
-    throw new ArtifactRequestError('The artifact producer workflow is not a trusted Source-bundle producer.');
+    throw new ArtifactRequestError(
+      "The artifact producer workflow is not a trusted Source-bundle producer.",
+    );
   }
-  if (run.path === '.github/workflows/source-bundle.yml') {
+  if (run.path === ".github/workflows/source-bundle.yml") {
     verifyAutomaticProducerSource(run, run.repository.id, sourceSha);
   }
   const currentRunAllowed =
     allowCurrentRun &&
     run.id === context.runId &&
     [
-      '.github/workflows/artifact-mailbox-worker.yml',
-      '.github/workflows/patch-publication.yml',
+      ".github/workflows/artifact-mailbox-worker.yml",
+      ".github/workflows/patch-publication.yml",
     ].includes(run.path) &&
-    ['queued', 'in_progress'].includes(run.status);
-  if (!currentRunAllowed && !(run.status === 'completed' && run.conclusion === 'success')) {
-    throw new ArtifactRequestError('The artifact producer workflow has not completed successfully.');
+    ["queued", "in_progress"].includes(run.status);
+  if (!currentRunAllowed && !(run.status === "completed" && run.conclusion === "success")) {
+    throw new ArtifactRequestError(
+      "The artifact producer workflow has not completed successfully.",
+    );
   }
 
   return {
@@ -766,7 +812,7 @@ async function verifyArtifactMetadata({
 async function findCachedArtifact({ github, context, sourceSha }) {
   const statuses = await getCombinedStatuses(github, context, sourceSha);
   const candidates = statuses.filter(
-    (status) => status.context === STATUS_CONTEXT && status.state === 'success',
+    (status) => status.context === STATUS_CONTEXT && status.state === "success",
   );
 
   for (const status of candidates) {
@@ -788,26 +834,32 @@ async function findCachedArtifact({ github, context, sourceSha }) {
 }
 
 function setIdentityOutputs(core, identity, request) {
-  core.setOutput('resolved', 'true');
-  core.setOutput('cache_hit', 'false');
-  core.setOutput('request_comment_id', String(request.commentId));
-  core.setOutput('request_author', request.author);
-  core.setOutput('request_body_sha256', request.bodyHash);
-  core.setOutput('selector', identity.selector);
-  core.setOutput('selector_type', identity.selectorType);
-  core.setOutput('source_sha', identity.sourceSha);
-  core.setOutput('source_repository', identity.sourceRepository);
-  core.setOutput('source_ref', identity.sourceRef);
-  core.setOutput('pull_number', identity.pullNumber ? String(identity.pullNumber) : '');
-  core.setOutput('head_repository', identity.headRepository || '');
-  core.setOutput('head_ref', identity.headRef || '');
-  core.setOutput('base_sha', identity.baseSha || '');
-  core.setOutput('merge_base_sha', identity.mergeBaseSha || '');
+  core.setOutput("resolved", "true");
+  core.setOutput("cache_hit", "false");
+  core.setOutput("request_comment_id", String(request.commentId));
+  core.setOutput("request_author", request.author);
+  core.setOutput("request_body_sha256", request.bodyHash);
+  core.setOutput("selector", identity.selector);
+  core.setOutput("selector_type", identity.selectorType);
+  core.setOutput("source_sha", identity.sourceSha);
+  core.setOutput("source_repository", identity.sourceRepository);
+  core.setOutput("source_ref", identity.sourceRef);
+  core.setOutput("pull_number", identity.pullNumber ? String(identity.pullNumber) : "");
+  core.setOutput("head_repository", identity.headRepository || "");
+  core.setOutput("head_ref", identity.headRef || "");
+  core.setOutput("base_sha", identity.baseSha || "");
+  core.setOutput("merge_base_sha", identity.mergeBaseSha || "");
 }
 
-function resultFromIdentity({ context, request, identity, artifact, updatedAt = new Date().toISOString() }) {
+function resultFromIdentity({
+  context,
+  request,
+  identity,
+  artifact,
+  updatedAt = new Date().toISOString(),
+}) {
   return {
-    state: 'ready',
+    state: "ready",
     repository: `${context.repo.owner}/${context.repo.repo}`,
     requestCommentIds: [request.commentId],
     selector: identity.selector,
@@ -826,9 +878,9 @@ function resultFromIdentity({ context, request, identity, artifact, updatedAt = 
 
 function failureEntry({ context, requestCommentId, selector, sourceSha = null, message }) {
   return {
-    state: 'failed',
+    state: "failed",
     requestCommentIds: [requestCommentId],
-    selector: selector || 'unresolved',
+    selector: selector || "unresolved",
     sourceSha,
     updatedAt: new Date().toISOString(),
     reason: compactFailureReason(message),
@@ -863,7 +915,7 @@ async function cleanupRequestComment({ github, context, request }) {
     throw error;
   }
   if (live.id !== request.commentId) {
-    throw new ArtifactRequestError('The cleanup target did not match the exact request comment.');
+    throw new ArtifactRequestError("The cleanup target did not match the exact request comment.");
   }
   try {
     await github.rest.issues.deleteComment({
@@ -907,8 +959,8 @@ async function resolveRequest({ github, context, core }) {
   const request = {
     commentId: Number(eventComment?.id),
     issueNumber: Number(eventIssue?.number),
-    author: eventComment?.user?.login || '',
-    body: eventComment?.body || '',
+    author: eventComment?.user?.login || "",
+    body: eventComment?.body || "",
   };
   request.bodyHash = hashRequestBody(request.body);
   let selector = null;
@@ -920,10 +972,14 @@ async function resolveRequest({ github, context, core }) {
       !Number.isSafeInteger(request.issueNumber) ||
       !request.author
     ) {
-      throw new ArtifactRequestError('The issue-comment event did not contain a complete request identity.');
+      throw new ArtifactRequestError(
+        "The issue-comment event did not contain a complete request identity.",
+      );
     }
     if (request.issueNumber !== MAILBOX_ISSUE_NUMBER) {
-      throw new ArtifactRequestError(`Artifact requests are accepted only in issue #${MAILBOX_ISSUE_NUMBER}.`);
+      throw new ArtifactRequestError(
+        `Artifact requests are accepted only in issue #${MAILBOX_ISSUE_NUMBER}.`,
+      );
     }
 
     let liveComment;
@@ -943,12 +999,12 @@ async function resolveRequest({ github, context, core }) {
           requestCommentId: request.commentId,
         });
         if (persisted) {
-          core.setOutput('resolved', 'false');
-          core.setOutput('cache_hit', persisted.state === 'ready' ? 'true' : 'false');
+          core.setOutput("resolved", "false");
+          core.setOutput("cache_hit", persisted.state === "ready" ? "true" : "false");
           return;
         }
-        core.setOutput('resolved', 'false');
-        core.setOutput('cache_hit', 'false');
+        core.setOutput("resolved", "false");
+        core.setOutput("cache_hit", "false");
         return;
       }
       throw error;
@@ -960,8 +1016,8 @@ async function resolveRequest({ github, context, core }) {
       requestCommentId: request.commentId,
     });
     if (persisted) {
-      core.setOutput('resolved', 'false');
-      core.setOutput('cache_hit', persisted.state === 'ready' ? 'true' : 'false');
+      core.setOutput("resolved", "false");
+      core.setOutput("cache_hit", persisted.state === "ready" ? "true" : "false");
       await cleanupRequestCommentBestEffort({ github, context, request, core });
       return;
     }
@@ -975,7 +1031,7 @@ async function resolveRequest({ github, context, core }) {
 
     const cached = await findCachedArtifact({ github, context, sourceSha: identity.sourceSha });
     if (cached) {
-      core.setOutput('cache_hit', 'true');
+      core.setOutput("cache_hit", "true");
       await upsertRegistryEntry({
         github,
         context,
@@ -985,7 +1041,7 @@ async function resolveRequest({ github, context, core }) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    core.setOutput('resolved', 'false');
+    core.setOutput("resolved", "false");
     if (
       Number.isSafeInteger(request.commentId) &&
       Number.isSafeInteger(request.issueNumber) &&
@@ -998,21 +1054,15 @@ async function resolveRequest({ github, context, core }) {
           requestCommentId: request.commentId,
         });
         if (!existing) {
-          await publishFailure({
-            github,
-            context,
-            request,
-            selector,
-            sourceSha,
-            message,
-          });
+          await publishFailure({ github, context, request, selector, sourceSha, message });
         }
         await cleanupRequestComment({ github, context, request });
       } catch (publicationError) {
-        const publicationMessage = publicationError instanceof Error
-          ? publicationError.message
-          : String(publicationError);
-        core.setFailed(`${message} Result or cleanup publication also failed: ${publicationMessage}`);
+        const publicationMessage =
+          publicationError instanceof Error ? publicationError.message : String(publicationError);
+        core.setFailed(
+          `${message} Result or cleanup publication also failed: ${publicationMessage}`,
+        );
         return;
       }
     }
@@ -1021,21 +1071,21 @@ async function resolveRequest({ github, context, core }) {
 }
 
 function identityFromInput(input) {
-  const parsed = parseCommand(`/artifact source ${input.selector || ''}`);
+  const parsed = parseCommand(`/artifact source ${input.selector || ""}`);
   if (parsed.selectorType !== input.selectorType) {
-    throw new ArtifactRequestError('The resolved selector type is inconsistent.');
+    throw new ArtifactRequestError("The resolved selector type is inconsistent.");
   }
 
-  const sourceSha = requireFullSha(input.sourceSha, 'The resolved source');
+  const sourceSha = requireFullSha(input.sourceSha, "The resolved source");
   if (!input.sourceRepository || !input.sourceRef) {
-    throw new ArtifactRequestError('The resolved source repository or ref is missing.');
+    throw new ArtifactRequestError("The resolved source repository or ref is missing.");
   }
 
-  if (parsed.selectorType === 'sha' && parsed.sourceSha !== sourceSha) {
-    throw new ArtifactRequestError('The exact selector no longer matches the resolved source SHA.');
+  if (parsed.selectorType === "sha" && parsed.sourceSha !== sourceSha) {
+    throw new ArtifactRequestError("The exact selector no longer matches the resolved source SHA.");
   }
 
-  if (parsed.selectorType === 'pr') {
+  if (parsed.selectorType === "pr") {
     const pullNumber = Number.parseInt(input.pullNumber, 10);
     if (
       pullNumber !== parsed.pullNumber ||
@@ -1044,7 +1094,7 @@ function identityFromInput(input) {
       input.sourceRepository !== input.headRepository ||
       input.sourceRef !== input.headRef
     ) {
-      throw new ArtifactRequestError('The resolved pull-request identity is inconsistent.');
+      throw new ArtifactRequestError("The resolved pull-request identity is inconsistent.");
     }
     return {
       selector: parsed.selector,
@@ -1055,8 +1105,8 @@ function identityFromInput(input) {
       pullNumber,
       headRepository: input.headRepository,
       headRef: input.headRef,
-      baseSha: requireFullSha(input.baseSha, 'The resolved pull-request base'),
-      mergeBaseSha: requireFullSha(input.mergeBaseSha, 'The resolved pull-request merge base'),
+      baseSha: requireFullSha(input.baseSha, "The resolved pull-request base"),
+      mergeBaseSha: requireFullSha(input.mergeBaseSha, "The resolved pull-request merge base"),
     };
   }
 
@@ -1067,7 +1117,7 @@ function identityFromInput(input) {
     input.baseSha ||
     input.mergeBaseSha
   ) {
-    throw new ArtifactRequestError('A non-PR selector contained pull-request identity fields.');
+    throw new ArtifactRequestError("A non-PR selector contained pull-request identity fields.");
   }
 
   return {
@@ -1088,20 +1138,17 @@ function requestFromInput(input) {
   const commentId = Number.parseInt(input.requestCommentId, 10);
   const issueNumber = Number.parseInt(input.issueNumber, 10);
   if (!Number.isSafeInteger(commentId) || issueNumber !== MAILBOX_ISSUE_NUMBER) {
-    throw new ArtifactRequestError('The resolved request identity is invalid or outside the Artifact mailbox.');
+    throw new ArtifactRequestError(
+      "The resolved request identity is invalid or outside the Artifact mailbox.",
+    );
   }
-  if (!DIGEST_PATTERN.test(input.requestBodySha256 || '')) {
-    throw new ArtifactRequestError('The request body identity is invalid.');
+  if (!DIGEST_PATTERN.test(input.requestBodySha256 || "")) {
+    throw new ArtifactRequestError("The request body identity is invalid.");
   }
   if (!input.requestAuthor) {
-    throw new ArtifactRequestError('The request author identity is invalid.');
+    throw new ArtifactRequestError("The request author identity is invalid.");
   }
-  return {
-    commentId,
-    issueNumber,
-    author: input.requestAuthor,
-    bodyHash: input.requestBodySha256,
-  };
+  return { commentId, issueNumber, author: input.requestAuthor, bodyHash: input.requestBodySha256 };
 }
 
 async function completeRequest({ github, context, core, input }) {
@@ -1122,17 +1169,22 @@ async function completeRequest({ github, context, core, input }) {
         context,
         requestCommentId: request.commentId,
       });
-      if (persisted?.state === 'ready') return;
+      if (persisted?.state === "ready") return;
     }
     throw error;
   }
   if (context.actor !== request.author) {
-    throw new ArtifactRequestError('The workflow actor no longer matches the request comment author.');
+    throw new ArtifactRequestError(
+      "The workflow actor no longer matches the request comment author.",
+    );
   }
 
   const expectedArtifactId = Number.parseInt(input.artifactId, 10);
-  if (!ARTIFACT_ID_PATTERN.test(input.artifactId || '') || !Number.isSafeInteger(expectedArtifactId)) {
-    throw new ArtifactRequestError('The upload step did not return a valid artifact ID.');
+  if (
+    !ARTIFACT_ID_PATTERN.test(input.artifactId || "") ||
+    !Number.isSafeInteger(expectedArtifactId)
+  ) {
+    throw new ArtifactRequestError("The upload step did not return a valid artifact ID.");
   }
 
   const artifact = await verifyArtifactMetadata({
@@ -1157,12 +1209,11 @@ async function completeRequest({ github, context, core, input }) {
     owner: context.repo.owner,
     repo: context.repo.repo,
     sha: identity.sourceSha,
-    state: 'success',
+    state: "success",
     context: STATUS_CONTEXT,
     description: `artifact ${artifact.artifactId} sha256:${artifact.artifactDigest}`,
     target_url: artifact.artifactUrl,
   });
-
 }
 
 async function reportProductionFailure({ github, context, core, input }) {
@@ -1173,14 +1224,15 @@ async function reportProductionFailure({ github, context, core, input }) {
     requestCommentId: request.commentId,
   });
   if (existing) {
-    if (existing.state === 'ready' && existing.producerRunId === context.runId) {
+    if (existing.state === "ready" && existing.producerRunId === context.runId) {
       await publishFailure({
         github,
         context,
         request,
         selector: input.selector,
         sourceSha: input.sourceSha || null,
-        message: 'Source-bundle production or fixed-index publication failed. Inspect the linked workflow run for the exact failing step.',
+        message:
+          "Source-bundle production or fixed-index publication failed. Inspect the linked workflow run for the exact failing step.",
       });
     }
     await cleanupRequestCommentBestEffort({ github, context, request, core });
@@ -1206,7 +1258,8 @@ async function reportProductionFailure({ github, context, core, input }) {
     request,
     selector: input.selector,
     sourceSha: input.sourceSha || null,
-    message: 'Source-bundle production or result publication failed. Inspect the linked workflow run for the exact failing step.',
+    message:
+      "Source-bundle production or result publication failed. Inspect the linked workflow run for the exact failing step.",
   });
   await cleanupRequestCommentBestEffort({ github, context, request, core });
 }

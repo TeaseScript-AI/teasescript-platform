@@ -4,11 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import {
-  CheckpointError,
-  createCheckpoint,
-  restoreCheckpoint,
-} from "../src/runtime/checkpoint.js";
+import { CheckpointError, createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
 import { run, stepToEvent } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -21,25 +17,29 @@ test("executes exclusive and inclusive integer ranges", () => {
 });
 
 test("iterates lists and sets in order and performs zero iterations", () => {
-  const result = runSource([
-    'for item in ["a", "b"] { say item }',
-    'for item in set["b", "a", "b"] { say item }',
-    "repeat 0 { say \"never\" }",
-  ].join("\n"));
+  const result = runSource(
+    [
+      'for item in ["a", "b"] { say item }',
+      'for item in set["b", "a", "b"] { say item }',
+      'repeat 0 { say "never" }',
+    ].join("\n"),
+  );
 
   assert.deepEqual(sayTexts(result), ["a", "b", "b", "a"]);
 });
 
 test("supports nested loops, repeat, break, continue, and lexical variables", () => {
-  const result = runSource([
-    "repeat 2 {",
-    "  for value in 1..=4 {",
-    "    if value == 2 { continue }",
-    "    if value == 4 { break }",
-    "    say value",
-    "  }",
-    "}",
-  ].join("\n"));
+  const result = runSource(
+    [
+      "repeat 2 {",
+      "  for value in 1..=4 {",
+      "    if value == 2 { continue }",
+      "    if value == 4 { break }",
+      "    say value",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
 
   assert.deepEqual(sayTexts(result), ["1", "3", "1", "3"]);
   assert.deepEqual(result.snapshot.loopFrames, []);
@@ -47,11 +47,13 @@ test("supports nested loops, repeat, break, continue, and lexical variables", ()
 });
 
 test("executes while and else-if deterministically", () => {
-  const result = runSource([
-    "let count = 0",
-    "while count < 2 { count = count + 1 }",
-    'if count == 1 { say "one" } else if count == 2 { say "two" } else { say "other" }',
-  ].join("\n"));
+  const result = runSource(
+    [
+      "let count = 0",
+      "while count < 2 { count = count + 1 }",
+      'if count == 1 { say "one" } else if count == 2 { say "two" } else { say "other" }',
+    ].join("\n"),
+  );
 
   assert.deepEqual(sayTexts(result), ["two"]);
 });
@@ -72,7 +74,11 @@ test("uses one deterministic RNG for random, chance, and randomInteger", () => {
 });
 
 test("invalid random built-in arguments fail with source-associated errors", () => {
-  for (const source of ["say chance(101)", "say randomInteger(1.5..=3)", "say randomInteger(3..3)"]) {
+  for (const source of [
+    "say chance(101)",
+    "say randomInteger(1.5..=3)",
+    "say randomInteger(3..3)",
+  ]) {
     const compiled = compileSource(source);
     if (compiled.plan === null) {
       assert.ok(compiled.diagnostics.length > 0);
@@ -97,24 +103,38 @@ test("runtime instruction budgets use the positive safe-integer domain", () => {
   const maximum = Number.MAX_SAFE_INTEGER;
 
   assert.equal(
-    run(compiled, createImmediatePacingRuntimeSnapshot(compiled), {}, {
-      instructionBudget: maximum,
-    }).snapshot.status,
+    run(
+      compiled,
+      createImmediatePacingRuntimeSnapshot(compiled),
+      {},
+      { instructionBudget: maximum },
+    ).snapshot.status,
     "halted",
   );
   assert.deepEqual(
-    stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled), {}, {
-      instructionBudget: maximum,
-    }).events.map((event) => event.kind),
+    stepToEvent(
+      compiled,
+      createImmediatePacingRuntimeSnapshot(compiled),
+      {},
+      { instructionBudget: maximum },
+    ).events.map((event) => event.kind),
     ["say"],
   );
   for (const operation of [
-    () => run(compiled, createImmediatePacingRuntimeSnapshot(compiled), {}, {
-      instructionBudget: maximum + 1,
-    }),
-    () => stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled), {}, {
-      instructionBudget: maximum + 1,
-    }),
+    () =>
+      run(
+        compiled,
+        createImmediatePacingRuntimeSnapshot(compiled),
+        {},
+        { instructionBudget: maximum + 1 },
+      ),
+    () =>
+      stepToEvent(
+        compiled,
+        createImmediatePacingRuntimeSnapshot(compiled),
+        {},
+        { instructionBudget: maximum + 1 },
+      ),
   ]) {
     assert.throws(operation, /positive safe integer/);
   }
@@ -142,20 +162,20 @@ test("run and stepToEvent do not mutate their caller snapshots", () => {
   );
   assert.deepEqual(budgetInput, budgetBefore);
 
-  const eventPlan = plan('let value = 1\nsay value\nexit');
+  const eventPlan = plan("let value = 1\nsay value\nexit");
   const eventInput = createImmediatePacingRuntimeSnapshot(eventPlan);
   const eventBefore = structuredClone(eventInput);
-  assert.deepEqual(stepToEvent(eventPlan, eventInput).events.map((event) => event.kind), ["say"]);
+  assert.deepEqual(
+    stepToEvent(eventPlan, eventInput).events.map((event) => event.kind),
+    ["say"],
+  );
   assert.deepEqual(eventInput, eventBefore);
 });
 
 test("loop plans are deterministic, JSON-safe, and reject malformed targets", () => {
-  const source = [
-    "for value in 1..=3 {",
-    "  if value == 2 { continue }",
-    "  say value",
-    "}",
-  ].join("\n");
+  const source = ["for value in 1..=3 {", "  if value == 2 { continue }", "  say value", "}"].join(
+    "\n",
+  );
   const first = plan(source);
   const second = plan(source);
   assert.deepEqual(first, second);
@@ -199,7 +219,10 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
 
   assert.deepEqual([...first.events, ...rest.events], uninterrupted.events);
   assert.deepEqual(rest.snapshot.rng, uninterrupted.snapshot.rng);
-  assert.deepEqual(rest.events.map((event) => event.sequence), [2, 3]);
+  assert.deepEqual(
+    rest.events.map((event) => event.sequence),
+    [2, 3],
+  );
 });
 
 test("rejects malformed serialized loop state", () => {
@@ -222,20 +245,20 @@ test("rejects loop frames that do not match the next plan instruction", () => {
   const compiled = plan('repeat 2 { say "again" }');
   const active = stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   // EVIDENCE: fixture: parse the serialized active repeat checkpoint into the narrow mutable shape used below.
-  const checkpoint = JSON.parse(
-    JSON.stringify(createCheckpoint(compiled, active.snapshot)),
-  ) as { snapshot: { loopFrames: Array<{ loopId: number }> } };
+  const checkpoint = JSON.parse(JSON.stringify(createCheckpoint(compiled, active.snapshot))) as {
+    snapshot: { loopFrames: Array<{ loopId: number }> };
+  };
   checkpoint.snapshot.loopFrames[0]!.loopId = 999;
 
   assertCheckpointRejected(checkpoint, "TSK002");
 });
 
 test("loop variables deep-copy composite list elements", () => {
-  const result = runSource([
-    "let source = [[1], [2]]",
-    "for item in source { item[0] = 9 }",
-    "say source[0][0]",
-  ].join("\n"));
+  const result = runSource(
+    ["let source = [[1], [2]]", "for item in source { item[0] = 9 }", "say source[0][0]"].join(
+      "\n",
+    ),
+  );
 
   assert.deepEqual(sayTexts(result), ["1"]);
 });
@@ -257,7 +280,8 @@ function plan(source: string): InstructionPlan {
 }
 
 function assertCheckpointRejected(value: unknown, code: string): void {
-  assert.throws(() => restoreCheckpoint(value), (error: unknown) =>
-    error instanceof CheckpointError && error.info.code === code
+  assert.throws(
+    () => restoreCheckpoint(value),
+    (error: unknown) => error instanceof CheckpointError && error.info.code === code,
   );
 }

@@ -18,11 +18,7 @@ tester.run("anti-slop/no-chained-type-assertions", noChainedTypeAssertionsRule, 
       code: "const value = (input as unknown) as User;",
       errors: [error],
     },
-    {
-      name: "angle-bracket chain",
-      code: "const value = <User>(<unknown>input);",
-      errors: [error],
-    },
+    { name: "angle-bracket chain", code: "const value = <User>(<unknown>input);", errors: [error] },
     {
       name: "mixed const chain",
       code: "const value = ({ id: 1 } as const) as User;",

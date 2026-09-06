@@ -79,10 +79,7 @@ export function assertRuntimeResumeEquivalent(
   let boundarySnapshot = initial;
   let boundary = 0;
 
-  while (
-    boundarySnapshot.status !== "halted" &&
-    boundarySnapshot.status !== "failed"
-  ) {
+  while (boundarySnapshot.status !== "halted" && boundarySnapshot.status !== "failed") {
     assert.ok(
       boundary < instructionGuard,
       `${scenario}: instruction-boundary execution exceeded guard ${instructionGuard}`,
@@ -108,10 +105,7 @@ export function assertRuntimeResumeEquivalent(
       true,
       `${context}: restored plan must validate: ${formatValidationErrors(restoredPlanValidation.errors)}`,
     );
-    const restoredSnapshotValidation = validateRuntimeSnapshot(
-      restored.snapshot,
-      restored.plan,
-    );
+    const restoredSnapshotValidation = validateRuntimeSnapshot(restored.snapshot, restored.plan);
     assert.equal(
       restoredSnapshotValidation.valid,
       true,
@@ -159,10 +153,7 @@ export function assertRuntimeResumeEquivalent(
   });
 }
 
-function assertMonotonicEventSequences(
-  events: readonly InterpreterEvent[],
-  context: string,
-): void {
+function assertMonotonicEventSequences(events: readonly InterpreterEvent[], context: string): void {
   for (let index = 1; index < events.length; index += 1) {
     assert.ok(
       events[index]!.sequence > events[index - 1]!.sequence,

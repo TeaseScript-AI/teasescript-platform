@@ -12,17 +12,16 @@ function isPassingTestLine(line) {
 const arguments_ = process.argv.slice(2);
 const fullOutput = arguments_[0] === "--full-output";
 if (fullOutput) arguments_.shift();
-const testFiles = arguments_.length > 0
-  ? arguments_
-  : readdirSync("dist/tests")
-    .filter((file) => file.endsWith(".test.js"))
-    .map((file) => join("dist/tests", file));
+const testFiles =
+  arguments_.length > 0
+    ? arguments_
+    : readdirSync("dist/tests")
+        .filter((file) => file.endsWith(".test.js"))
+        .map((file) => join("dist/tests", file));
 
-const child = spawn(
-  process.execPath,
-  ["--test", "--test-reporter=spec", ...testFiles],
-  { stdio: fullOutput ? "inherit" : ["inherit", "pipe", "inherit"] },
-);
+const child = spawn(process.execPath, ["--test", "--test-reporter=spec", ...testFiles], {
+  stdio: fullOutput ? "inherit" : ["inherit", "pipe", "inherit"],
+});
 
 let pending = "";
 if (!fullOutput) {

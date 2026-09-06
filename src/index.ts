@@ -1,8 +1,4 @@
-export {
-  createDiagnostic,
-  DiagnosticSeverity,
-  type Diagnostic,
-} from "./diagnostics.js";
+export { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 export {
   INTERACTION_LIMITS_VERSION,
   INTERACTION_WHITESPACE_CLASSIFICATION,

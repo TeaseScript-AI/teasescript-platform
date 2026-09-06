@@ -1,8 +1,4 @@
-import {
-  createSourcePosition,
-  createSourceSpan,
-  type SourceSpan,
-} from "../source.js";
+import { createSourcePosition, createSourceSpan, type SourceSpan } from "../source.js";
 import type { PlanSourceLocation } from "./model.js";
 
 /** Converts a rich compiler source span into compact serialized plan provenance. */

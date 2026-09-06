@@ -69,9 +69,6 @@ export const noChainedTypeAssertionsRule = defineRule({
       context.report({ node, messageId: "chained" });
     };
 
-    return {
-      TSAsExpression: checkTypeAssertion,
-      TSTypeAssertion: checkTypeAssertion,
-    };
+    return { TSAsExpression: checkTypeAssertion, TSTypeAssertion: checkTypeAssertion };
   },
 });

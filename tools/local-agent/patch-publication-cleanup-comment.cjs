@@ -1,12 +1,12 @@
-'use strict';
+"use strict";
 
 module.exports = async function cleanupPatchPublicationComment({ github, context, core, process }) {
   const commentId = Number(process.env.COMMENT_ID);
   const issueNumber = Number(process.env.ISSUE_NUMBER);
   const expectedCommand = `/publish-patch ${process.env.TRANSFER_BRANCH} ${process.env.EXPECTED_MANIFEST_SHA256}`;
   if (!Number.isSafeInteger(commentId) || !Number.isSafeInteger(issueNumber)) {
-    core.setOutput('cleanup_status', 'failed');
-    core.setFailed('Validated publication comment identity is missing.');
+    core.setOutput("cleanup_status", "failed");
+    core.setFailed("Validated publication comment identity is missing.");
     return;
   }
   if (
@@ -15,8 +15,8 @@ module.exports = async function cleanupPatchPublicationComment({ github, context
     context.payload.comment?.body?.trim() !== expectedCommand ||
     !context.payload.issue?.pull_request
   ) {
-    core.setOutput('cleanup_status', 'failed');
-    core.setFailed('Publication command event identity no longer matches the validated request.');
+    core.setOutput("cleanup_status", "failed");
+    core.setFailed("Publication command event identity no longer matches the validated request.");
     return;
   }
 
@@ -29,11 +29,11 @@ module.exports = async function cleanupPatchPublicationComment({ github, context
     });
   } catch (error) {
     if (error.status === 404) {
-      core.setOutput('cleanup_status', 'already_absent');
-      core.notice('Publication command comment was already absent.');
+      core.setOutput("cleanup_status", "already_absent");
+      core.notice("Publication command comment was already absent.");
       return;
     }
-    core.setOutput('cleanup_status', 'failed');
+    core.setOutput("cleanup_status", "failed");
     throw error;
   }
 
@@ -42,8 +42,8 @@ module.exports = async function cleanupPatchPublicationComment({ github, context
     comment.data.issue_url !== context.payload.issue.url ||
     comment.data.body.trim() !== expectedCommand
   ) {
-    core.setOutput('cleanup_status', 'preserved_changed');
-    core.warning('Publication command comment changed after validation and was preserved.');
+    core.setOutput("cleanup_status", "preserved_changed");
+    core.warning("Publication command comment changed after validation and was preserved.");
     return;
   }
 
@@ -56,19 +56,18 @@ module.exports = async function cleanupPatchPublicationComment({ github, context
     });
   } catch (error) {
     if (error.status === 404) {
-      core.setOutput('cleanup_status', 'already_absent');
-      core.notice('Publication command comment became absent before deletion completed.');
+      core.setOutput("cleanup_status", "already_absent");
+      core.notice("Publication command comment became absent before deletion completed.");
       return;
     }
-    core.setOutput('cleanup_status', 'failed');
+    core.setOutput("cleanup_status", "failed");
     throw error;
   }
   if (deletion.status !== 204) {
-    core.setOutput('cleanup_status', 'failed');
+    core.setOutput("cleanup_status", "failed");
     core.setFailed(`Publication command deletion returned HTTP ${deletion.status}.`);
     return;
   }
-  core.setOutput('cleanup_status', 'removed');
-  core.notice('The exact accepted publication command was removed.');
-
+  core.setOutput("cleanup_status", "removed");
+  core.notice("The exact accepted publication command was removed.");
 };

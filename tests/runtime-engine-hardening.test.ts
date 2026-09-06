@@ -17,21 +17,14 @@ test("requires explicit own registration for an inherited builtin name", () => {
   const missing = run(compiled, createFreshRuntimeSnapshot(compiled));
 
   assert.equal(missing.snapshot.failure?.code, "TSR011");
-  assert.match(
-    missing.snapshot.failure?.message ?? "",
-    /Unknown built-in function 'valueOf'/u,
-  );
+  assert.match(missing.snapshot.failure?.message ?? "", /Unknown built-in function 'valueOf'/u);
 
   let calls = 0;
   const valueOf: RuntimeBuiltinFunction = () => {
     calls += 1;
     return "registered";
   };
-  const injected = run(
-    compiled,
-    createFreshRuntimeSnapshot(compiled),
-    { builtins: { valueOf } },
-  );
+  const injected = run(compiled, createFreshRuntimeSnapshot(compiled), { builtins: { valueOf } });
 
   assert.equal(injected.snapshot.status, "halted");
   assert.equal(injected.snapshot.failure, null);
@@ -42,24 +35,20 @@ test("keeps core builtin precedence over injected names", () => {
   const compiled = compile("let output = random()", []);
   let injectedCalls = 0;
   let randomCalls = 0;
-  const result = run(
-    compiled,
-    createFreshRuntimeSnapshot(compiled),
-    {
-      builtins: {
-        random: () => {
-          injectedCalls += 1;
-          return 0.75;
-        },
-      },
-      random: {
-        next: () => {
-          randomCalls += 1;
-          return 0.25;
-        },
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled), {
+    builtins: {
+      random: () => {
+        injectedCalls += 1;
+        return 0.75;
       },
     },
-  );
+    random: {
+      next: () => {
+        randomCalls += 1;
+        return 0.25;
+      },
+    },
+  });
 
   assert.equal(result.snapshot.status, "halted");
   assert.equal(result.snapshot.failure, null);
@@ -75,11 +64,7 @@ test("exposes prototype-sensitive named arguments as own immutable keys", () => 
     captured = call.named;
     return null;
   };
-  const result = run(
-    compiled,
-    createFreshRuntimeSnapshot(compiled),
-    { builtins: { capture } },
-  );
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled), { builtins: { capture } });
 
   assert.equal(result.snapshot.status, "halted");
   assert.equal(result.snapshot.failure, null);
@@ -96,26 +81,17 @@ test("exposes prototype-sensitive named arguments as own immutable keys", () => 
 
 test("detects duplicate prototype-sensitive named arguments", () => {
   const compiled = namedBuiltinPlan(["__proto__", "__proto__"]);
-  const result = run(
-    compiled,
-    createFreshRuntimeSnapshot(compiled),
-    { builtins: { capture: () => null } },
-  );
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled), {
+    builtins: { capture: () => null },
+  });
 
   assert.equal(result.snapshot.failure?.code, "TSR010");
-  assert.match(
-    result.snapshot.failure?.message ?? "",
-    /Duplicate named argument '__proto__'/u,
-  );
+  assert.match(result.snapshot.failure?.message ?? "", /Duplicate named argument '__proto__'/u);
 });
 
 test("refreshes builtin registration between instructions while reusing operation context", () => {
   const compiled = compile(
-    [
-      "let first = probe()",
-      "let second = probe()",
-      "say `${first}:${second}`, instant",
-    ].join("\n"),
+    ["let first = probe()", "let second = probe()", "say `${first}:${second}`, instant"].join("\n"),
     ["probe"],
   );
   const calls: string[] = [];
@@ -130,59 +106,45 @@ test("refreshes builtin registration between instructions while reusing operatio
     return "original";
   };
 
-  const first = stepToEvent(
-    compiled,
-    createFreshRuntimeSnapshot(compiled),
-    { builtins },
-  );
-  const second = run(
-    compiled,
-    createFreshRuntimeSnapshot(compiled),
-    { builtins },
-  );
+  const first = stepToEvent(compiled, createFreshRuntimeSnapshot(compiled), { builtins });
+  const second = run(compiled, createFreshRuntimeSnapshot(compiled), { builtins });
 
-  assert.deepEqual(calls, [
-    "original",
-    "replacement",
-    "replacement",
-    "replacement",
-  ]);
+  assert.deepEqual(calls, ["original", "replacement", "replacement", "replacement"]);
   assert.deepEqual(
-    first.events
-      .filter((event) => event.kind === "say")
-      .map((event) => event.text),
+    first.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["original:replacement"],
   );
   assert.deepEqual(
-    second.events
-      .filter((event) => event.kind === "say")
-      .map((event) => event.text),
+    second.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["replacement:replacement"],
   );
 });
 
 test("keeps public single-instruction event results isolated", () => {
-  const compiled = compile([
-    'say "first", instant',
-    'say "second", instant',
-  ].join("\n"), []);
-  const first = executeInstruction(
-    compiled,
-    createFreshRuntimeSnapshot(compiled),
-  );
+  const compiled = compile(['say "first", instant', 'say "second", instant'].join("\n"), []);
+  const first = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
   const second = executeInstruction(compiled, first.snapshot);
 
-  assert.deepEqual(first.events.map((event) => event.kind), ["say"]);
-  assert.deepEqual(second.events.map((event) => event.kind), ["say", "complete"]);
-  assert.deepEqual(first.events.map((event) => event.sequence), [1]);
-  assert.deepEqual(second.events.map((event) => event.sequence), [2, 3]);
+  assert.deepEqual(
+    first.events.map((event) => event.kind),
+    ["say"],
+  );
+  assert.deepEqual(
+    second.events.map((event) => event.kind),
+    ["say", "complete"],
+  );
+  assert.deepEqual(
+    first.events.map((event) => event.sequence),
+    [1],
+  );
+  assert.deepEqual(
+    second.events.map((event) => event.sequence),
+    [2, 3],
+  );
 });
 
 test("keeps re-entrant runtime operation contexts isolated", () => {
-  const inner = compile([
-    "let value = randomInteger(1..=1)",
-    "say value, instant",
-  ].join("\n"), []);
+  const inner = compile(["let value = randomInteger(1..=1)", "say value, instant"].join("\n"), []);
   const outer = compile("say nested() + nested(), instant", ["nested"]);
   const innerEvents: string[][] = [];
   const capabilities = {
@@ -215,7 +177,7 @@ test("keeps re-entrant runtime operation contexts isolated", () => {
     result.events.map((event) =>
       event.kind === "say"
         ? [event.kind, event.sequence, event.text]
-        : [event.kind, event.sequence]
+        : [event.kind, event.sequence],
     ),
     [
       ["say", 1, "2"],
@@ -237,13 +199,8 @@ function inheritedBuiltinPlan(name: string): InstructionPlan {
 }
 
 function namedBuiltinPlan(names: readonly string[]): InstructionPlan {
-  const argumentsSource = names
-    .map((_, index) => `argument${index}: ${index + 1}`)
-    .join(", ");
-  const compiled = compile(
-    `let output = capture(${argumentsSource})`,
-    ["capture"],
-  );
+  const argumentsSource = names.map((_, index) => `argument${index}: ${index + 1}`).join(", ");
+  const compiled = compile(`let output = capture(${argumentsSource})`, ["capture"]);
   // EVIDENCE: fixture: clone a compiler-produced plan before deliberately changing its named arguments.
   const plan = JSON.parse(JSON.stringify(compiled)) as InstructionPlan;
   const call = bindingCall(plan);
@@ -259,7 +216,9 @@ function namedBuiltinPlan(names: readonly string[]): InstructionPlan {
 
 function bindingCall(
   plan: InstructionPlan,
-): Extract<InstructionPlan["instructions"][number], { kind: "declareBinding" }>["value"] & { kind: "call" } {
+): Extract<InstructionPlan["instructions"][number], { kind: "declareBinding" }>["value"] & {
+  kind: "call";
+} {
   const instruction = plan.instructions[0];
   assert.equal(instruction?.kind, "declareBinding");
   if (instruction?.kind !== "declareBinding") throw new Error("Expected a binding declaration.");

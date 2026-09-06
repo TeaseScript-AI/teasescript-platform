@@ -1,17 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  createDiagnostic,
-  DiagnosticSeverity,
-} from "../src/diagnostics.js";
+import { createDiagnostic, DiagnosticSeverity } from "../src/diagnostics.js";
 import { createSourcePosition, createSourceSpan } from "../src/source.js";
 
 test("creates an immutable structured diagnostic", () => {
-  const span = createSourceSpan(
-    createSourcePosition(4, 0, 4),
-    createSourcePosition(7, 0, 7),
-  );
+  const span = createSourceSpan(createSourcePosition(4, 0, 4), createSourcePosition(7, 0, 7));
   const diagnostic = createDiagnostic(
     DiagnosticSeverity.Error,
     "TS1001",
