@@ -17,11 +17,6 @@ Select exactly one source/workspace route: direct repository or connector-local.
 publication-constrained overlay only after a concrete publication restriction is verified. Do not load every
 capability guide by default.
 
-## Related task guidance
-
-Task guidance remains in the repository start route. Explicitly coordinated multi-agent work also reads
-[`ORCHESTRATOR.md`](ORCHESTRATOR.md) after the orchestrator selects its own capability route.
-
 ## Route summary
 
 | Route | Source acquisition | Normal writes | Verification | Publication or handoff |

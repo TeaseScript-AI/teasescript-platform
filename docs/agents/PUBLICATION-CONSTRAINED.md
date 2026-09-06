@@ -14,10 +14,6 @@ verified patch-publication route must apply to the repository and target pull re
 - [`../PATCH-PUBLICATION.md`](../PATCH-PUBLICATION.md), which is the canonical protocol and security-contract source;
 - the current target PR, exact branch head, and task authorization.
 
-**Conditional**
-
-- `ORCHESTRATOR.md` when publication is one explicitly assigned coordinated workstream.
-
 **Excluded by default**
 
 - this overlay and `docs/PATCH-PUBLICATION.md` when normal Git/`gh` publication works;
