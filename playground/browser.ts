@@ -1,11 +1,9 @@
 import {
   CheckpointError,
-  deserializeCheckpoint,
   type InstructionPlan,
   type InterpreterEvent,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { createCheckpoint } from "../src/runtime/checkpoint.js";
 import {
   checkpointStorageKey,
   exampleUrl,
@@ -14,9 +12,18 @@ import {
   type PlaygroundExampleName,
 } from "./examples.js";
 import {
+  activateWorkspaceButton,
   compileWorkspaceSource,
   decodeWorkspaceSourceBytes,
   executeValidatedWorkspaceSnapshot,
+  inspectWorkspacePlayerPresentation,
+  restoreWorkspaceCheckpoint,
+  selectWorkspaceChoice,
+  serializeWorkspaceCheckpoint,
+  skipWorkspacePacing,
+  submitWorkspaceComposer,
+  type WorkspaceControlResult,
+  type WorkspacePlayerPresentation,
   type WorkspaceResult,
 } from "./workspace/controller.js";
 
@@ -28,6 +35,13 @@ const elements = {
   playerPanel: requiredElement("player-panel"),
   diagnostics: requiredElement("diagnostics"),
   transcript: requiredElement("transcript"),
+  interactionRegion: requiredElement("interaction-region"),
+  interactionControls: requiredElement("interaction-controls"),
+  interactionFeedback: requiredElement("interaction-feedback"),
+  composerForm: requiredForm("composer-form"),
+  composerInput: requiredInput("composer-input"),
+  composerSubmit: requiredButton("composer-submit"),
+  composerHelp: requiredElement("composer-help"),
   instructionPosition: requiredElement("instruction-position"),
   runtimeStatus: requiredElement("runtime-status"),
   eventLog: requiredElement("event-log"),
@@ -57,6 +71,12 @@ let plan: InstructionPlan | null = null;
 let snapshot: RuntimeSnapshot | null = null;
 let eventLog: InterpreterEvent[] = [];
 let currentExample: PlaygroundExampleName = "main";
+let lastFocusedActionId: number | null = null;
+let playerFeedback = "";
+const checkpointEventLogs = new Map<
+  string,
+  Readonly<{ serialized: string; events: readonly InterpreterEvent[] }>
+>();
 
 for (const [name, example] of Object.entries(PLAYGROUND_EXAMPLES)) {
   const option = document.createElement("option");
@@ -101,9 +121,21 @@ elements.source.addEventListener("input", () => {
 elements.source.addEventListener("scroll", () => {
   elements.sourceLines.scrollTop = elements.source.scrollTop;
 });
+elements.composerForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitComposer();
+});
+elements.composerInput.addEventListener("keydown", (event) => {
+  handleComposerKeydown(event);
+});
+elements.playerPanel.addEventListener("pointerup", (event) => {
+  handlePlayerPointer(event);
+});
 new ResizeObserver(() => {
   elements.playerPanel.style.height = `${elements.sourcePanel.offsetHeight}px`;
+  updateChoicePresentation();
 }).observe(elements.sourcePanel);
+new ResizeObserver(updateChoicePresentation).observe(elements.playerPanel);
 void loadInitialSource();
 
 async function loadInitialSource(): Promise<void> {
@@ -152,6 +184,8 @@ function sourceEdited(saveDraft = true): void {
   snapshot = null;
   compiledRevision = null;
   eventLog = [];
+  lastFocusedActionId = null;
+  clearPlayerFeedback();
   elements.transcript.replaceChildren();
   if (saveDraft) {
     safeStorageSet(DRAFT_KEY, elements.source.value);
@@ -163,8 +197,8 @@ function sourceEdited(saveDraft = true): void {
 function compileAndReset(): void {
   try {
     const result = compileWorkspaceSource(elements.source.value);
-    applyResult(result, true);
     compiledRevision = result.plan === null ? null : sourceRevision;
+    applyResult(result, true);
     setActionStatus(
       result.plan === null
         ? "Compilation has errors."
@@ -200,6 +234,8 @@ function applyResult(result: WorkspaceResult, resetEvents: boolean): void {
   renderDiagnostics(result.diagnostics);
   if (resetEvents) {
     eventLog = [];
+    lastFocusedActionId = null;
+    clearPlayerFeedback();
     elements.transcript.replaceChildren();
   }
   for (const event of result.events) {
@@ -220,8 +256,16 @@ function saveCheckpoint(): void {
   }
   try {
     // EVIDENCE: invariant: runtimeIsCurrent checked the retained plan and snapshot before this synchronous save.
-    const checkpoint = createCheckpoint(plan as InstructionPlan, snapshot as RuntimeSnapshot);
-    localStorage.setItem(checkpointStorageKey(currentExample), JSON.stringify(checkpoint));
+    const checkpoint = serializeWorkspaceCheckpoint(
+      plan as InstructionPlan,
+      snapshot as RuntimeSnapshot,
+    );
+    const storageKey = checkpointStorageKey(currentExample);
+    localStorage.setItem(storageKey, checkpoint.outcome.json);
+    checkpointEventLogs.set(
+      storageKey,
+      Object.freeze({ serialized: checkpoint.outcome.json, events: Object.freeze([...eventLog]) }),
+    );
     setActionStatus("Checkpoint saved locally.");
   } catch (error) {
     setActionStatus(errorMessage(error));
@@ -234,23 +278,28 @@ function restoreSavedCheckpoint(): void {
     return;
   }
   try {
-    const serialized = localStorage.getItem(checkpointStorageKey(currentExample));
+    const storageKey = checkpointStorageKey(currentExample);
+    const serialized = localStorage.getItem(storageKey);
     if (serialized === null) {
       setActionStatus("No saved checkpoint exists.");
       return;
     }
 
-    const checkpoint = deserializeCheckpoint(serialized);
-    if (JSON.stringify(plan) !== JSON.stringify(checkpoint.plan)) {
+    const restored = restoreWorkspaceCheckpoint(serialized);
+    if (JSON.stringify(plan) !== JSON.stringify(restored.outcome.plan)) {
       setActionStatus(
         "Checkpoint restore refused: its self-contained plan is incompatible with the current source runtime.",
       );
       return;
     }
 
-    snapshot = checkpoint.snapshot;
-    eventLog = [];
+    snapshot = restored.snapshot;
+    const cached = checkpointEventLogs.get(storageKey);
+    eventLog = cached?.serialized === serialized ? [...cached.events] : [];
+    lastFocusedActionId = null;
+    clearPlayerFeedback();
     elements.transcript.replaceChildren();
+    for (const event of eventLog) renderTranscriptEvent(event);
     renderState();
     setActionStatus("Checkpoint restored; waiting state and pending action are retained.");
   } catch (error) {
@@ -264,7 +313,9 @@ function restoreSavedCheckpoint(): void {
 
 function clearSavedCheckpoint(): void {
   try {
-    localStorage.removeItem(checkpointStorageKey(currentExample));
+    const storageKey = checkpointStorageKey(currentExample);
+    localStorage.removeItem(storageKey);
+    checkpointEventLogs.delete(storageKey);
     setActionStatus("Saved checkpoint cleared.");
   } catch (error) {
     setActionStatus(errorMessage(error));
@@ -330,6 +381,290 @@ async function refreshAutomationWorkspace(): Promise<void> {
   }
 }
 
+function submitComposer(): void {
+  if (!runtimeIsCurrent()) return;
+  const presentation = currentPlayerPresentation();
+  const interaction = presentation.activeInteraction;
+  if (
+    interaction === null ||
+    (interaction.interactionKind !== "text" &&
+      interaction.interactionKind !== "number" &&
+      interaction.interactionKind !== "choice")
+  ) {
+    setPlayerFeedback("Free chat is unavailable while no scripted text answer is active.");
+    renderPlayerControls(presentation);
+    return;
+  }
+  // EVIDENCE: runtimeIsCurrent above synchronously proved both retained values are present and current.
+  applyWorkspaceControl(
+    submitWorkspaceComposer(
+      plan as InstructionPlan,
+      snapshot as RuntimeSnapshot,
+      elements.composerInput.value,
+    ),
+  );
+}
+
+function activateButton(): void {
+  if (!runtimeIsCurrent()) return;
+  // EVIDENCE: runtimeIsCurrent above synchronously proved both retained values are present and current.
+  applyWorkspaceControl(
+    activateWorkspaceButton(plan as InstructionPlan, snapshot as RuntimeSnapshot),
+  );
+}
+
+function selectChoice(
+  selection: { kind: "label"; value: string | number } | { kind: "text"; value: string },
+): void {
+  if (!runtimeIsCurrent()) return;
+  // EVIDENCE: runtimeIsCurrent above synchronously proved both retained values are present and current.
+  applyWorkspaceControl(
+    selectWorkspaceChoice(plan as InstructionPlan, snapshot as RuntimeSnapshot, selection),
+  );
+}
+
+function skipPacing(): void {
+  if (!runtimeIsCurrent()) return;
+  // EVIDENCE: runtimeIsCurrent above synchronously proved both retained values are present and current.
+  applyWorkspaceControl(skipWorkspacePacing(plan as InstructionPlan, snapshot as RuntimeSnapshot));
+}
+
+function applyWorkspaceControl(result: WorkspaceControlResult): void {
+  snapshot = result.snapshot;
+  for (const event of result.events) {
+    eventLog.push(event);
+    renderTranscriptEvent(event);
+  }
+  const outcome = result.outcome;
+  if (outcome.kind === "completed") {
+    elements.composerInput.value = "";
+    clearPlayerFeedback();
+    renderState();
+    execute("run");
+    return;
+  }
+  setPlayerFeedback(controlOutcomeMessage(outcome));
+  renderState();
+}
+
+function controlOutcomeMessage(outcome: WorkspaceControlResult["outcome"]): string {
+  if (outcome.kind === "invalidPayload" || outcome.kind === "localRejection") {
+    return outcome.message;
+  }
+  if (outcome.kind === "wrongActionKind") return "The active Player control changed; try again.";
+  if (outcome.kind === "alreadySettled") return "That Player action was already completed.";
+  if (outcome.kind === "staleAction" || outcome.kind === "unknownAction") {
+    return "That Player action is no longer active.";
+  }
+  if (outcome.kind === "notDue") return "That timed action is not due yet.";
+  if (outcome.kind === "invalidObservation") return outcome.message;
+  return "The Player operation completed.";
+}
+
+function handlePlayerPointer(event: PointerEvent): void {
+  if (
+    event.button !== 0 ||
+    !event.isPrimary ||
+    interactiveEventTarget(event.target) ||
+    relevantPlayerTextSelection()
+  )
+    return;
+  if (currentPlayerPresentation().pacingGate === null) return;
+  skipPacing();
+}
+
+function relevantPlayerTextSelection(): boolean {
+  const selection = document.getSelection();
+  return (
+    selection !== null &&
+    !selection.isCollapsed &&
+    (elements.playerPanel.contains(selection.anchorNode) ||
+      elements.playerPanel.contains(selection.focusNode))
+  );
+}
+
+function handleComposerKeydown(event: KeyboardEvent): void {
+  if (
+    event.key !== " " ||
+    event.isComposing ||
+    elements.composerInput.value !== "" ||
+    elements.composerInput.selectionStart !== elements.composerInput.selectionEnd ||
+    document.activeElement !== elements.composerInput ||
+    currentPlayerPresentation().pacingGate === null
+  ) {
+    return;
+  }
+  event.preventDefault();
+  skipPacing();
+}
+
+function interactiveEventTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest("button, input, select, textarea, a, [role='button']") !== null
+  );
+}
+
+function currentPlayerPresentation(): WorkspacePlayerPresentation {
+  return snapshot === null
+    ? Object.freeze({ activeInteraction: null, pacingGate: null })
+    : inspectWorkspacePlayerPresentation(snapshot);
+}
+
+function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
+  const interaction = presentation.activeInteraction;
+  elements.interactionControls.replaceChildren();
+  elements.interactionRegion.hidden = interaction === null && playerFeedback.length === 0;
+  elements.interactionFeedback.textContent = playerFeedback;
+  elements.composerInput.setAttribute("aria-invalid", playerFeedback.length > 0 ? "true" : "false");
+  elements.composerInput.placeholder = "";
+  elements.composerInput.inputMode = "text";
+
+  const current = runtimeIsCurrent();
+  const acceptsTypedAnswer =
+    interaction !== null &&
+    (interaction.interactionKind === "text" ||
+      interaction.interactionKind === "number" ||
+      interaction.interactionKind === "choice");
+  elements.composerInput.disabled =
+    !current || (interaction === null && presentation.pacingGate === null);
+  elements.composerSubmit.disabled = !current || !acceptsTypedAnswer;
+
+  if (interaction === null) {
+    elements.composerInput.setAttribute("aria-label", "Chat composer");
+    elements.composerHelp.textContent =
+      presentation.pacingGate === null
+        ? "Run the script to start the Player."
+        : "Press Space while this empty composer is focused, or tap the Player background, to skip pacing.";
+    if (presentation.pacingGate !== null) {
+      focusNewInteraction(presentation.pacingGate.actionId, elements.composerInput);
+    }
+    return;
+  }
+
+  const accessibleName = interactionAccessibleName(interaction.ui.accessibleName);
+  if (interaction.ui.kind === "button") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = interaction.ui.buttonLabel;
+    button.setAttribute("aria-label", accessibleName);
+    button.addEventListener("click", activateButton);
+    elements.interactionControls.append(button);
+    elements.composerInput.setAttribute("aria-label", "Chat composer");
+    elements.composerHelp.textContent = "Activate the scripted button above to continue.";
+    focusNewInteraction(interaction.actionId, button);
+    return;
+  }
+
+  elements.composerInput.setAttribute("aria-label", accessibleName);
+  if (interaction.ui.kind === "text" || interaction.ui.kind === "number") {
+    elements.composerInput.placeholder = interaction.ui.hint ?? "";
+    elements.composerInput.inputMode = interaction.ui.kind === "number" ? "decimal" : "text";
+    elements.composerHelp.textContent =
+      interaction.ui.kind === "number"
+        ? "Enter the scripted number answer. Engine validation is shown above."
+        : "Enter the scripted text answer. Engine validation is shown above.";
+    focusNewInteraction(interaction.actionId, elements.composerInput);
+    return;
+  }
+
+  renderChoiceControls(accessibleName, interaction.ui);
+  elements.composerHelp.textContent = "Type one exact visible option or select a rendered control.";
+  focusNewInteraction(interaction.actionId, elements.composerInput);
+}
+
+function renderChoiceControls(
+  accessibleName: string,
+  choice: Extract<
+    NonNullable<WorkspacePlayerPresentation["activeInteraction"]>["ui"],
+    { kind: "choice" }
+  >,
+): void {
+  const group = document.createElement("fieldset");
+  const legend = document.createElement("legend");
+  legend.textContent = accessibleName;
+  const buttons = document.createElement("div");
+  buttons.className = "choice-buttons";
+  const select = document.createElement("select");
+  select.className = "choice-select";
+  select.setAttribute("aria-label", accessibleName);
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = accessibleName;
+  placeholder.disabled = true;
+  placeholder.selected = true;
+  select.append(placeholder);
+
+  choice.options.forEach((option, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = option.text;
+    if (option.text.length === 0)
+      button.setAttribute("aria-label", `${accessibleName} ${index + 1}`);
+    button.addEventListener("click", () => {
+      selectChoice(
+        option.label === null
+          ? { kind: "text", value: option.text }
+          : { kind: "label", value: option.label },
+      );
+    });
+    buttons.append(button);
+    const selectOption = document.createElement("option");
+    selectOption.value = String(index + 1);
+    selectOption.textContent = option.text;
+    if (option.text.length === 0)
+      selectOption.setAttribute("aria-label", `${accessibleName} ${index + 1}`);
+    select.append(selectOption);
+  });
+  select.addEventListener("change", () => {
+    const option = choice.options[Number(select.value) - 1];
+    if (option === undefined) return;
+    selectChoice(
+      option.label === null
+        ? { kind: "text", value: option.text }
+        : { kind: "label", value: option.label },
+    );
+  });
+  group.append(legend, buttons, select);
+  elements.interactionControls.append(group);
+  updateChoicePresentation();
+}
+
+function updateChoicePresentation(): void {
+  const choiceGroup = elements.interactionControls.querySelector("fieldset");
+  if (choiceGroup === null) return;
+  choiceGroup.classList.remove("choice-compact");
+  if (elements.playerPanel.scrollHeight > elements.playerPanel.clientHeight) {
+    choiceGroup.classList.add("choice-compact");
+  }
+}
+
+function interactionAccessibleName(
+  value: NonNullable<WorkspacePlayerPresentation["activeInteraction"]>["ui"]["accessibleName"],
+): string {
+  if (value.kind === "text") return value.text;
+  return {
+    answer: "Answer",
+    number: "Number",
+    chooseOption: "Choose an option",
+    continue: "Continue",
+  }[value.key];
+}
+
+function focusNewInteraction(actionId: number, target: HTMLElement): void {
+  if (lastFocusedActionId === actionId) return;
+  lastFocusedActionId = actionId;
+  target.focus();
+}
+
+function setPlayerFeedback(message: string): void {
+  playerFeedback = message;
+}
+
+function clearPlayerFeedback(): void {
+  playerFeedback = "";
+}
+
 function renderDiagnostics(
   diagnostics: readonly {
     code: string;
@@ -364,6 +699,7 @@ function renderDiagnostics(
 }
 
 function renderTranscriptEvent(event: InterpreterEvent): void {
+  if (event.kind !== "say" && event.kind !== "playerTranscript") return;
   const item = document.createElement("li");
   const meta = document.createElement("span");
   meta.className = "event-meta";
@@ -374,41 +710,16 @@ function renderTranscriptEvent(event: InterpreterEvent): void {
     speaker.className = "event-speaker";
     speaker.textContent = event.speaker?.displayName ?? "Narrator";
     item.append(speaker, document.createTextNode(event.text), document.createElement("br"), meta);
-  } else if (event.kind === "developerWarning" || event.kind === "runtimeFailure") {
-    item.classList.add(event.kind === "developerWarning" ? "event-warning" : "event-failure");
-    item.append(
-      document.createTextNode(`${event.code}: ${event.message}`),
-      document.createElement("br"),
-      meta,
-    );
-  } else if (event.kind === "actionRequested") {
-    item.classList.add("event-action");
-    item.append(
-      document.createTextNode(
-        `Action requested: ${event.action.kind} #${event.action.actionId}; runtime is waiting.`,
-      ),
-      document.createElement("br"),
-      meta,
-    );
-  } else if (event.kind === "actionCompleted") {
-    item.classList.add("event-action");
-    item.append(
-      document.createTextNode(
-        `Action completed: ${event.settlement.actionKind} #${event.settlement.actionId}.`,
-      ),
-      document.createElement("br"),
-      meta,
-    );
   } else {
-    item.classList.add("event-complete");
-    item.append(
-      document.createTextNode(event.kind === "exit" ? "Session exited." : "Plan completed."),
-      document.createElement("br"),
-      meta,
-    );
+    item.classList.add("event-player");
+    const speaker = document.createElement("span");
+    speaker.className = "event-speaker";
+    speaker.textContent = "You";
+    item.append(speaker, document.createTextNode(event.text), document.createElement("br"), meta);
   }
 
   elements.transcript.append(item);
+  elements.transcript.scrollTop = elements.transcript.scrollHeight;
 }
 
 function renderState(): void {
@@ -430,6 +741,7 @@ function renderState(): void {
   elements.step.disabled = !current;
   elements.saveCheckpoint.disabled = !current;
   elements.restoreCheckpoint.disabled = !current;
+  renderPlayerControls(currentPlayerPresentation());
 }
 
 function renderSourceLines(): void {
@@ -498,6 +810,22 @@ function requiredButton(id: string): HTMLButtonElement {
   const element = requiredElement(id);
   if (!(element instanceof HTMLButtonElement)) {
     throw new Error(`Playground element #${id} is not a button.`);
+  }
+  return element;
+}
+
+function requiredForm(id: string): HTMLFormElement {
+  const element = requiredElement(id);
+  if (!(element instanceof HTMLFormElement)) {
+    throw new Error(`Playground element #${id} is not a form.`);
+  }
+  return element;
+}
+
+function requiredInput(id: string): HTMLInputElement {
+  const element = requiredElement(id);
+  if (!(element instanceof HTMLInputElement)) {
+    throw new Error(`Playground element #${id} is not an input.`);
   }
   return element;
 }

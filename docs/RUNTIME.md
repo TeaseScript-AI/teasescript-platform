@@ -2,7 +2,11 @@
 
 ## Playground execution helper
 
-`playground/workspace/controller.ts` is the DOM-free adapter shared by the browser controller and development automation routes. It uses `compileSource(...)` and canonical `run`/`stepToEvent` runtime interfaces to create fresh validated snapshots and return JSON-safe diagnostics, events, plan, snapshot, status, and instruction count. It stops on `halted`, `failed`, `waiting`, or the canonical instruction-budget failure.
+`playground/workspace/controller.ts` is the DOM-free adapter shared by the browser controller and development
+automation routes. It uses canonical runtime operations to create and execute validated snapshots, inspect active
+Player presentation, submit typed interactions and pacing/time observations, and save or restore checkpoints. Its
+structured results retain engine outcomes and events; it does not normalize answers, derive transcript text, run
+continuation inside completion, or retain an independent action lifecycle.
 
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
 
@@ -48,8 +52,8 @@ text/output slice described below; the current compiler/runtime implements that 
 ## Accepted first Standard Library runtime contract
 
 ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`,
-followed by a separate `say` smart-autoplay slice. Both engine/compiler slices are implemented. Standard Player controls
-and browser input wiring remain separate work.
+followed by a separate `say` smart-autoplay slice. The engine/compiler slices and local playground Standard Player POC
+controls are implemented. The production cross-origin player/host integration remains separate work.
 
 ### Generic foreground interactions
 
@@ -223,8 +227,9 @@ A primary click, touch activation, or eligible Space key submits a typed complet
 - a foreground skip makes prepared output eligible only for a later runtime entry.
 
 Skip settles only the pacing gate. It does not skip arbitrary instructions, complete `wait`, cancel an interaction,
-or create a player transcript message. The engine-side typed completion path is implemented; primary-click/touch/Space
-listeners in the Standard Player remain part of the later Player slice.
+or create a player transcript message. The playground Player routes primary pointer/touch input and eligible composer
+Space through this engine completion path. Interactive controls consume their own activation first and therefore cannot
+also trigger pacing skip.
 
 #### Consumption by a foreground interaction
 
@@ -332,7 +337,8 @@ The current implementation contains compiler-owned blocking `wait`, the compact 
 and `choose` forms lowered into one generic foreground `interaction` family, and ADR 0018 `say` pacing lowered into the
 `chatPacingGate` pending-action lifecycle. Runtime state retains persisted session time, at most one foreground action,
 zero or one background pacing gate, monotonic action IDs, bounded settlement replay, prepared `say` output, explicit
-time observation, and typed completion operations. Browser scheduling and Standard Player controls remain out of scope.
+time observation, and typed completion operations. The local playground reconstructs Standard controls from this state;
+browser scheduling and the final cross-origin Player shell remain out of scope.
 
 ## Owner-resolved future runtime semantics
 
@@ -509,8 +515,8 @@ Under ADR 0017, Standard Library and package-library wrappers may call documente
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, and `null` according to the current implemented subset. When the value is a list, the runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects, sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively select or stringify them.
 
 The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 defines the
-accepted deterministic first-POC smart-autoplay and pacing-action contract, and the current engine/compiler implements
-that contract. Standard Player event wiring remains a separate slice.
+accepted deterministic first-POC smart-autoplay and pacing-action contract. The current engine/compiler and playground
+Player POC implement that contract; production host lifecycle and cross-origin wiring remain separate.
 
 ## Runtime defaults and limits
 

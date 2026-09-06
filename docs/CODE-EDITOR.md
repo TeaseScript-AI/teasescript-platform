@@ -4,17 +4,20 @@ The future browser editor owns source authoring: syntax highlighting, diagnostic
 and integration with compiler/runtime tooling. Runtime inspection and diagnostic execution belong to
 [`DEBUGGER.md`](DEBUGGER.md); the editor may embed those controls without owning debugger semantics.
 
-The standalone playground is a local technical workspace, not the production editor. It currently combines an accessible
-native `.tease` textarea with diagnostics and runtime/debug controls such as Run, Step, reset, checkpoint/restore, and
-plan/runtime/event inspection. It has no Monaco integration, package authoring, library-aware completion, or cross-origin
-production-Player UI.
-
-A separate production-oriented Player presentation POC lives under `player/` and is served by the same local development
-server at `/player/`. It remains distinct from the editor/playground workspace and does not define the runtime/Player or
-cross-origin host protocol.
+The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
+textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
+validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC
+through the DOM-free workspace controller. It deliberately has no Monaco integration, package authoring,
+library-aware completion, or cross-origin production-player shell.
 
 The technical workspace/controller implementation lives at `playground/workspace/controller.ts`; browser and server
-entrypoints use that controller directly.
+entrypoints use that controller directly. Player rendering remains in the browser presentation layer and does not create
+a second canonical runtime state model.
+
+A separate production-oriented Player presentation POC lives under `player/` and is served by the same development
+server through the temporary manual comparison route at `/player/` and Vue core route at `/player-vue/`. Its presentation
+fixtures and Vue demo reducer are not connected to the playground's engine controller and do not define a runtime adapter
+or cross-origin Player/host protocol.
 
 The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are
 separate from runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the

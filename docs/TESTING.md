@@ -470,17 +470,29 @@ interaction-result liveness. Current interaction-guard cases remain implementati
 provisional POC policies and structural separation; they are not source-capacity evidence and must move with later
 evidence-based reassessment. Every rejected completion compares
 the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot
-change unnoticed. Standard Player/browser UI coverage remains assigned to its later implementation slice.
+change unnoticed. The local playground Player slice adds deterministic controller coverage for active-presentation
+inspection, all four interaction completions and rejections, pacing skip, explicit time, and checkpoint reconstruction.
 
 The implemented ADR 0018 `say` pacing slice adds source-to-runtime coverage for contextual skip/pacing syntax, captured
 smart-autoplay settings, Unicode code-point and word counting, exact/zero/`instant` pacing, speaker skip defaults,
 background gate creation, same-identity foreground promotion, prepared-output exact-once behavior, typed/time
 settlement, `wait` coexistence, interaction consumption, deterministic event ordering, checkpoint/JSON restore
 equivalence, and negative snapshot/checkpoint validation. Boundary regressions also cover action/event-sequence
-exhaustion and terminal transition atomicity. Standard Player click/touch/Space behavior remains assigned to its later
-browser slice.
+exhaustion and terminal transition atomicity. The dependency-free browser smoke script covers primary pointer/touch and
+eligible Space input, interactive-input priority, rejection feedback, canonical transcript rendering, checkpoint
+control reconstruction, and desktop/button versus narrow/dropdown presentation.
 
 ## Host browser E2E gate
+
+The local Standard Player POC has a reproducible Chromium smoke route after `npm run build`:
+
+```shell
+node tools/player-browser-smoke.mjs
+```
+
+It drives the real playground at desktop and 390 × 844 CSS-pixel viewports. An unavailable Chromium executable is an
+explicit skip; an available browser must pass the interaction, pacing, accessibility-state, restore, and responsive
+checks.
 
 Real browser automation becomes required after the cross-origin host shell and player exist. Coverage should then include:
 
