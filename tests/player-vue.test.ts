@@ -47,7 +47,7 @@ test("Vue Player state keeps fixture transcript behavior separate from runtime s
   );
   assert.equal(activated.fixtureTranscriptEntries[0]?.kind, "message");
   if (activated.fixtureTranscriptEntries[0]?.kind === "message") {
-    assert.equal(activated.fixtureTranscriptEntries[0].speakerId, "fixture-user");
+    assert.equal(activated.fixtureTranscriptEntries[0].speakerId, "user");
   }
   assert.equal(toggled.fixtureTranscriptEntries.at(-1)?.kind, "session-event");
   assert.equal(toggled.fixtureTranscriptEntries.at(-1)?.text, "You changed Strict mode to off.");
@@ -130,7 +130,8 @@ test("Vue reference route has one component owner and excludes development fixtu
   assert.doesNotMatch(main, /components-visual-lab|components-layout-debug/u);
   assert.doesNotMatch(core, /Visual Lab|Layout Debug/u);
   assert.match(core, /createPlayerRuntimeSession/u);
-  assert.match(core, /runtime\.value\.transcriptEntries/u);
+  assert.match(core, /session\.transcriptEntries/u);
+  assert.match(core, /presentationTranscriptEntries/u);
   assert.match(core, /state\.value\.fixtureTranscriptEntries/u);
   assert.doesNotMatch(index, /browser\.js/u);
 });

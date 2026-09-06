@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import type { CSSProperties } from "vue";
-import type { PlayerPresentation, PlayerToolDefinition } from "../../model.js";
+import type {
+  PlayerPresentation,
+  PlayerToolDefinition,
+  PlayerTranscriptEntryPresentation,
+} from "../../model.js";
 import {
   activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
@@ -49,19 +53,10 @@ const state = ref(
 const runtime = shallowRef(createPlayerRuntimeSession(props.runtimeSource));
 const foreground = computed(() => playerRuntimeForeground(runtime.value));
 const pacingGate = computed(() => playerRuntimePacingGate(runtime.value));
-const transcriptEntries = computed(() => [
+const presentationTranscriptEntries = shallowRef<readonly PlayerTranscriptEntryPresentation[]>([
   ...runtime.value.transcriptEntries,
-  ...state.value.fixtureTranscriptEntries,
 ]);
-const transcriptRevision = computed(
-  () => runtime.value.transcriptRevision + state.value.nextActivitySequence - 1,
-);
-const transcriptSpeakers = computed(() => {
-  const fixtureUser = props.presentation.speakers.user ?? runtime.value.speakers.user;
-  return fixtureUser === undefined
-    ? runtime.value.speakers
-    : { ...runtime.value.speakers, "fixture-user": fixtureUser };
-});
+const transcriptRevision = ref(runtime.value.transcriptRevision);
 const layout = usePlayerLayout({ player });
 const toolsAvailable = computed(() => toolDefinitions.value.length > 0);
 const effectiveLeftMode = computed(() => (toolsAvailable.value ? layout.leftMode.value : "closed"));
@@ -88,7 +83,17 @@ const playerStyle = computed(
 );
 
 function dispatch(action: PlayerCoreAction): void {
-  state.value = reducePlayerCoreState(state.value, action);
+  const previousFixtureCount = state.value.fixtureTranscriptEntries.length;
+  const nextState = reducePlayerCoreState(state.value, action);
+  state.value = nextState;
+  const appendedFixtureEntries = nextState.fixtureTranscriptEntries.slice(previousFixtureCount);
+  if (appendedFixtureEntries.length !== 0) {
+    presentationTranscriptEntries.value = [
+      ...presentationTranscriptEntries.value,
+      ...appendedFixtureEntries,
+    ];
+    transcriptRevision.value += 1;
+  }
 }
 
 function setFeedback(message: string): void {
@@ -123,7 +128,7 @@ function skipPacing(): void {
 }
 
 function applyRuntimeControl(result: PlayerRuntimeControlResult, clearComposer: boolean): void {
-  runtime.value = result.session;
+  applyRuntimeSession(result.session, false);
   if (result.outcome.kind === "completed") {
     dispatch({ type: "set-composer-feedback", message: "" });
     if (clearComposer) dispatch({ type: "set-composer", value: "" });
@@ -132,6 +137,42 @@ function applyRuntimeControl(result: PlayerRuntimeControlResult, clearComposer: 
   }
   focusComposerForActiveTypedInteraction(false);
   scheduleTimeObservation();
+}
+
+function applyRuntimeSession(
+  session: PlayerRuntimeControlResult["session"],
+  restoring: boolean,
+): void {
+  runtime.value = session;
+  if (restoring) {
+    const restoredRuntimeIds = new Set(session.transcriptEntries.map((entry) => entry.id));
+    const fixtureIds = new Set(state.value.fixtureTranscriptEntries.map((entry) => entry.id));
+    const retainedTimeline = presentationTranscriptEntries.value.filter(
+      (entry) => fixtureIds.has(entry.id) || restoredRuntimeIds.has(entry.id),
+    );
+    const retainedIds = new Set(retainedTimeline.map((entry) => entry.id));
+    const missingRuntimeEntries = session.transcriptEntries.filter(
+      (entry) => !retainedIds.has(entry.id),
+    );
+    presentationTranscriptEntries.value =
+      missingRuntimeEntries.length === 0
+        ? retainedTimeline
+        : [...session.transcriptEntries, ...state.value.fixtureTranscriptEntries];
+    transcriptRevision.value += 1;
+    return;
+  }
+
+  const presentedIds = new Set(presentationTranscriptEntries.value.map((entry) => entry.id));
+  const appendedRuntimeEntries = session.transcriptEntries.filter(
+    (entry) => !presentedIds.has(entry.id),
+  );
+  if (appendedRuntimeEntries.length !== 0) {
+    presentationTranscriptEntries.value = [
+      ...presentationTranscriptEntries.value,
+      ...appendedRuntimeEntries,
+    ];
+    transcriptRevision.value += 1;
+  }
 }
 
 function focusComposerForActiveTypedInteraction(force: boolean): void {
@@ -230,7 +271,7 @@ function saveCheckpoint(): PlayerRuntimeRestorePoint {
 }
 
 function restoreCheckpoint(restorePoint: PlayerRuntimeRestorePoint): void {
-  runtime.value = restorePlayerRuntimeSession(restorePoint);
+  applyRuntimeSession(restorePlayerRuntimeSession(restorePoint), true);
   sessionTimeOriginMs = performance.now() - runtime.value.snapshot.currentSessionTimeMs;
   dispatch({ type: "set-composer", value: "" });
   focusComposerForActiveTypedInteraction(true);
@@ -243,7 +284,7 @@ function observeCurrentTime(): void {
     Math.floor(performance.now() - sessionTimeOriginMs),
   );
   const result = observePlayerRuntimeTime(runtime.value, currentSessionTimeMs);
-  runtime.value = result.session;
+  applyRuntimeSession(result.session, false);
   if (result.outcome.kind === "invalidObservation") setFeedback(result.outcome.message);
   focusComposerForActiveTypedInteraction(false);
   scheduleTimeObservation();
@@ -346,9 +387,9 @@ function closeToolColumn(id: string): void {
     <PlayerMedia :media="presentation.media" />
 
     <PlayerTranscript
-      :entries="transcriptEntries"
+      :entries="presentationTranscriptEntries"
       :revision="transcriptRevision"
-      :speakers="transcriptSpeakers"
+      :speakers="runtime.speakers"
     />
 
     <PlayerForeground :foreground="foreground" @activate="activateForeground" />

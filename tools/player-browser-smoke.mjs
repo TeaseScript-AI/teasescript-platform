@@ -537,6 +537,22 @@ async function vueRuntimeScenario(cdp, origin) {
     cdp,
     `document.querySelector('[data-foreground-button]')?.textContent === 'Continue'`,
   );
+  assertEqual(
+    JSON.stringify((await vueRuntimeTranscript(cdp)).map((entry) => entry.text.trim())),
+    JSON.stringify(["Long pacing", "You changed Strict mode to off.", "After"]),
+    "runtime and fixture transcript entries must preserve their presentation arrival order",
+  );
+  await physicalClick(cdp, "#save-player-checkpoint");
+  await physicalClick(cdp, "#restore-player-checkpoint");
+  await waitFor(
+    cdp,
+    `document.querySelector('#player-runtime-status')?.textContent.includes('restored')`,
+  );
+  assertEqual(
+    JSON.stringify((await vueRuntimeTranscript(cdp)).map((entry) => entry.text.trim())),
+    JSON.stringify(["Long pacing", "You changed Strict mode to off.", "After"]),
+    "runtime restore must retain the interleaved presentation arrival order",
+  );
 
   await navigate(cdp, `${origin}/player-vue/`);
   await waitFor(
@@ -655,6 +671,28 @@ async function vueRuntimeScenario(cdp, origin) {
     (await vueRuntimeTranscript(cdp)).filter((entry) => entry.text.includes("Thanks Alex")).length,
     1,
     "continuation after restore must emit final output once",
+  );
+  await typeAndSubmitVuePlayer(cdp, "Local follow-up");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-transcript-entry-id^="fixture-activity-"]')?.textContent.includes('Local follow-up')`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => {
+        const message=document.querySelector('[data-transcript-entry-id^="fixture-activity-"]');
+        const container=message?.parentElement;
+        if (!(message instanceof HTMLElement) || !(container instanceof HTMLElement)) return false;
+        const messageRect=message.getBoundingClientRect();
+        const containerRect=container.getBoundingClientRect();
+        return message.classList.contains('user') &&
+          getComputedStyle(message).textAlign === 'right' &&
+          containerRect.right - messageRect.right < messageRect.left - containerRect.left;
+      })()`,
+    ),
+    true,
+    "fixture user messages must retain the existing right-aligned user presentation",
   );
 
   await setViewport(cdp, 390, 844);

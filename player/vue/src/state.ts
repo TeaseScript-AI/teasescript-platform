@@ -142,7 +142,7 @@ function appendUserMessage(state: PlayerCoreState, text: string): PlayerCoreStat
   const message: PlayerMessagePresentation = {
     kind: "message",
     id: `fixture-activity-${state.nextActivitySequence}`,
-    speakerId: "fixture-user",
+    speakerId: "user",
     text,
   };
   return appendFixtureEntry(state, message, true);
