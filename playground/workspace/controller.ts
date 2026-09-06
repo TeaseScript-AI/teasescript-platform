@@ -6,7 +6,6 @@ import {
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { runValidatedState, stepValidatedStateToEvent } from "../../src/runtime/engine.js";
-import { completeAction } from "../../src/runtime/operations/complete-action.js";
 import { observeTime } from "../../src/runtime/operations/observe-time.js";
 import type {
   ActionCompletionOutcome,
@@ -27,6 +26,11 @@ import {
   cloneCapturedRuntimeSnapshot,
   createFreshRuntimeSnapshotWithValidatedPlan,
 } from "../../src/runtime/state.js";
+import {
+  activePlayerRuntimeInteraction,
+  activePlayerRuntimePacingGate,
+  completePlayerRuntimeAction,
+} from "../../player/runtime-adapter.js";
 
 export interface WorkspaceDiagnostic {
   readonly code: string;
@@ -288,12 +292,7 @@ function completeWorkspaceAction(
   action: RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot,
   payload: Record<string, unknown>,
 ): WorkspaceControlResult {
-  const operation = completeAction(plan, snapshot, {
-    actionId: action.actionId,
-    actionKind: action.kind,
-    ...(action.kind === "interaction" ? { interactionKind: action.interactionKind } : {}),
-    payload,
-  });
+  const operation = completePlayerRuntimeAction(plan, snapshot, action, payload);
   return controlResult(operation.snapshot, operation.events, operation.outcome);
 }
 
@@ -301,14 +300,12 @@ function activeInteraction(
   snapshot: RuntimeSnapshot,
   ...kinds: RuntimeInteractionActionSnapshot["interactionKind"][]
 ): RuntimeInteractionActionSnapshot | null {
-  const action = snapshot.foregroundAction;
+  const action = activePlayerRuntimeInteraction(snapshot);
   return action?.kind === "interaction" && kinds.includes(action.interactionKind) ? action : null;
 }
 
 function pacingAction(snapshot: RuntimeSnapshot): RuntimeChatPacingGateActionSnapshot | null {
-  const foreground = snapshot.foregroundAction;
-  if (foreground?.kind === "chatPacingGate") return foreground;
-  return snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate") ?? null;
+  return activePlayerRuntimePacingGate(snapshot);
 }
 
 function cloneForPresentation<T extends object>(value: T): T {

@@ -12,7 +12,11 @@ import {
   boundedInteractionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
 } from "../interaction-limits.js";
-import { createSourcePosition, createSourceSpan, SourceSpan as RichSourceSpan } from "../source.js";
+import {
+  createSourcePosition,
+  createSourceSpan,
+  type SourceSpan as RichSourceSpan,
+} from "../source.js";
 import { RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
 import {
   assertCounterCanAdvance,

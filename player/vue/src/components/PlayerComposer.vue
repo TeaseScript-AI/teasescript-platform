@@ -6,12 +6,14 @@ const props = defineProps<{
   feedback: string;
   foreground: PlayerForegroundPresentation | null;
   modelValue: string;
+  pacingActive: boolean;
 }>();
 
 const emit = defineEmits<{
   "input-blur": [];
   "touch-input": [];
   "update:modelValue": [value: string];
+  "skip-pacing": [];
   submit: [];
 }>();
 
@@ -25,7 +27,10 @@ const accessibleName = computed(() => props.foreground?.accessibleName ?? "User 
 const inputMode = computed(() => (props.foreground?.kind === "ask-number" ? "decimal" : "text"));
 
 watch(() => props.modelValue, resizeInput);
-onMounted(resizeInput);
+onMounted(() => {
+  resizeInput();
+  focusInput();
+});
 
 function resizeInput(): void {
   void nextTick(() => {
@@ -37,11 +42,29 @@ function resizeInput(): void {
   });
 }
 
+function focusInput(): void {
+  void nextTick(() => input.value?.focus());
+}
+
+defineExpose({ focusInput });
+
 function handleKeydown(event: KeyboardEvent): void {
   if (event.isComposing) return;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     emit("submit");
+    return;
+  }
+  const element = input.value;
+  if (
+    event.key === " " &&
+    props.pacingActive &&
+    props.modelValue === "" &&
+    element !== null &&
+    element.selectionStart === element.selectionEnd
+  ) {
+    event.preventDefault();
+    emit("skip-pacing");
   }
 }
 
