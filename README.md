@@ -4,9 +4,13 @@ Browser-first platform and deterministic scripting language for interactive teas
 
 Start with [`README-FIRST.md`](README-FIRST.md).
 
-## Current TypeScript POC
+## Current implementation
 
-The repository contains the parser/core language, semantic validation, a versioned serializable instruction runtime, explicit loop and call frames, checkpoint save/restore, deterministic control flow and random built-ins, user-defined functions, source-order/checkpoint hardening, and a standalone browser playground.
+The repository contains the parser/core language, semantic validation, a versioned serializable instruction runtime,
+explicit loop and call frames, checkpoint save/restore, deterministic control flow and random built-ins, user-defined
+functions, source-order/checkpoint hardening, a standalone browser playground, and the production-direction Vue Player
+foundation. The Player uses Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual while
+keeping engine and shared domain contracts framework-independent.
 
 The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). Non-current revisions are rejected. The wider V30 language and complete static type checking remain out of scope.
 

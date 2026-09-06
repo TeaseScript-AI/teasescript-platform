@@ -1,6 +1,6 @@
 # Runtime
 
-## Playground execution helper
+## Player and playground execution adapters
 
 `player/runtime-adapter.ts` is the framework-independent Player adapter shared by the Vue reference and the
 playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,

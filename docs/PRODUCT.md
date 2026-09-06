@@ -4,7 +4,9 @@ TeaseScript is a browser-first community platform and deterministic scripting sy
 
 The product direction includes accounts, forum, catalog, editor, player, package publishing, moderation, persistent state, media, optional integrations, and deterministic LLM-assisted dialogue. These are staged capabilities, not all current implementation.
 
-The current implementation focus is the TypeScript language/runtime core and a local standalone development playground. Laravel, PostgreSQL, accounts, publishing, and production hosting are later milestones.
+The current implementation focus includes the deterministic TypeScript language/runtime core, the local development
+playground, and the production-direction Vue Player foundation. Laravel, PostgreSQL, accounts, publishing, and
+production hosting are later milestones.
 
 ## Terminology
 

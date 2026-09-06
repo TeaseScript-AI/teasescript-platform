@@ -2,9 +2,10 @@
 
 ## Current phase and gate
 
-The current implementation phase is the deterministic TypeScript language/runtime POC with a local browser
-playground. This file records verified capability state at a high level; it is not the canonical source for source
-identity, live CI state, detailed contracts, or historical execution evidence.
+The current implementation phase combines the deterministic TypeScript language/runtime POC with the
+production-direction Vue Player foundation and local browser development surfaces. This file records verified
+capability state at a high level; it is not the canonical source for source identity, live CI state, detailed
+contracts, or historical execution evidence.
 
 Owner-selected release-stage outcomes, including work that remains open for POC / Foundation or Alpha, are tracked
 in [`docs/planning/RELEASE-ROADMAP.md`](docs/planning/RELEASE-ROADMAP.md). Roadmap placement does not schedule work or
@@ -27,10 +28,9 @@ accept syntax, architecture, or implementation details.
   (Vue/Vite, Tailwind CSS 4, repository-owned local shadcn-vue source/config, the selected Reka primitive foundation,
   and TanStack Vue Virtual as the single bounded, variable-height, stable-anchor transcript owner) connected through a
   framework-independent adapter to the implemented deterministic interaction, transcript, pacing, time-observation,
-  checkpoint, and restore slice; the manual Player route remains explicitly a development comparison/fixture route;
-  source-to-runtime conformance coverage; focused
-  runtime/checkpoint/state-validation tests; reproducible desktop and narrow-screen browser smoke coverage; and a bounded
-  deterministic property campaign.
+  checkpoint, and restore slice; the manual/vanilla Player is transitional legacy pending removal and temporarily hosts
+  development fixtures; source-to-runtime conformance coverage; focused runtime/checkpoint/state-validation tests;
+  reproducible desktop and narrow-screen browser smoke coverage; and a bounded deterministic property campaign.
 
 These summaries are orientation only. The current topic documents below are canonical for the detailed implementation
 contracts and boundaries.

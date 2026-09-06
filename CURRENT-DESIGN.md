@@ -12,10 +12,11 @@ fixed package entry point. Regular executable content uses `.tease`; advanced re
 TypeScript in `.ts`. Finite sessions and long-running personalities share one engine, one state model, and one
 save/checkpoint format.
 
-Production browser UI uses Vue 3 components while browser-native CSS owns layout geometry and responsive composition.
-The engine and shared domain contracts remain framework-independent TypeScript. The exact boundary and deliberately
-minimal frontend toolchain are accepted in
-[`ADR 0020`](docs/decisions/0020-vue-3-production-browser-ui.md).
+Production browser UI uses Vue 3 with Tailwind CSS 4 and repository-owned shadcn-vue/Reka primitives. TanStack Vue
+Virtual owns transcript windowing and scroll anchoring, while browser-native CSS owns layout geometry and responsive
+composition. The engine and shared domain contracts remain framework-independent TypeScript. The manual/vanilla Player
+is transitional legacy pending removal, not a parallel production direction. The exact boundary and deliberately
+minimal frontend toolchain are accepted in [`ADR 0020`](docs/decisions/0020-vue-3-production-browser-ui.md).
 
 The current implemented capability state belongs in [`PHASE-STATUS.md`](PHASE-STATUS.md). Detailed component
 contracts and current implementation surfaces belong in the topic documents linked below, not in this map.
