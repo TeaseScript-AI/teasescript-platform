@@ -19,7 +19,7 @@
     "test:property": "npm run build && node dist/tests/property/replay.js",
     "test:compiled:full-output": "node ./tools/test-output-filter.mjs --full-output",
     "test:full-output": "npm run build && node ./tools/test-output-filter.mjs --full-output",
-    "check:full-output": "npm run lint && npm run test:lint -- --full-output && npm run test:full-output"
+    "check:full-output": "npm run lint && npm run test:lint -- --full-output && npm run knip && npm run test:full-output"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.81.0",
