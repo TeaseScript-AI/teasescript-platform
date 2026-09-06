@@ -4,34 +4,49 @@ import type {
   PlayerPresentation,
   PlayerRightControlPresentation,
   PlayerSessionEventPresentation,
+  PlayerToolColumnState,
+  PlayerToolId,
   PlayerTranscriptEntryPresentation,
 } from "../../model.js";
 import { matchForegroundChoiceByVisibleText } from "../../presentation.js";
+import { addToolColumn, closeToolColumn, selectToolColumn } from "../../tool-columns.js";
 
 export interface PlayerCoreState {
   readonly composerFeedback: string;
   readonly composerValue: string;
   readonly foreground: PlayerForegroundPresentation | null;
   readonly nextActivitySequence: number;
+  readonly nextToolColumnNumber: number;
   readonly rightControls: readonly PlayerRightControlPresentation[];
+  readonly toolColumns: readonly PlayerToolColumnState[];
+  readonly toolOrder: readonly PlayerToolId[];
   readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
 }
 
 export type PlayerCoreAction =
+  | { readonly type: "add-tool-column" }
   | { readonly type: "activate-foreground"; readonly label: string }
   | { readonly type: "activate-right-action"; readonly controlId: string }
   | { readonly type: "change-right-select"; readonly controlId: string; readonly value: string }
   | { readonly type: "change-right-toggle"; readonly checked: boolean; readonly controlId: string }
+  | { readonly type: "close-tool-column"; readonly id: string }
+  | { readonly type: "select-tool-column"; readonly id: string; readonly toolId: PlayerToolId }
   | { readonly type: "set-composer"; readonly value: string }
   | { readonly type: "submit-composer" };
 
-export function createPlayerCoreState(presentation: PlayerPresentation): PlayerCoreState {
+export function createPlayerCoreState(
+  presentation: PlayerPresentation,
+  toolOrder: readonly PlayerToolId[] = [],
+): PlayerCoreState {
   return {
     composerFeedback: "",
     composerValue: "",
     foreground: presentation.foreground,
     nextActivitySequence: 1,
+    nextToolColumnNumber: 2,
     rightControls: presentation.rightControls,
+    toolColumns: addToolColumn([], "tool-column-1", toolOrder),
+    toolOrder,
     transcriptEntries: presentation.messages,
   };
 }
@@ -41,6 +56,14 @@ export function reducePlayerCoreState(
   action: PlayerCoreAction,
 ): PlayerCoreState {
   switch (action.type) {
+    case "add-tool-column": {
+      const id = `tool-column-${state.nextToolColumnNumber}`;
+      return {
+        ...state,
+        nextToolColumnNumber: state.nextToolColumnNumber + 1,
+        toolColumns: addToolColumn(state.toolColumns, id, state.toolOrder),
+      };
+    }
     case "set-composer":
       return { ...state, composerFeedback: "", composerValue: action.value };
     case "submit-composer":
@@ -53,6 +76,15 @@ export function reducePlayerCoreState(
       return changeRightToggle(state, action.controlId, action.checked);
     case "change-right-select":
       return changeRightSelect(state, action.controlId, action.value);
+    case "select-tool-column":
+      return {
+        ...state,
+        toolColumns: selectToolColumn(state.toolColumns, action.id, action.toolId),
+      };
+    case "close-tool-column":
+      return state.toolColumns.length === 1
+        ? state
+        : { ...state, toolColumns: closeToolColumn(state.toolColumns, action.id) };
   }
 }
 

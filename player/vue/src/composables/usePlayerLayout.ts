@@ -10,6 +10,20 @@ interface PlayerLayoutElements {
   readonly player: Ref<HTMLElement | null>;
 }
 
+export function isLeftPanelOpen(mode: LeftPanelMode, narrow: boolean): boolean {
+  return mode === "open" || (mode === "auto" && !narrow);
+}
+
+export function resolveLeftPanelModeOnNarrowTransition(
+  mode: LeftPanelMode,
+  enteringNarrow: boolean,
+  panelOwnsFocus: boolean,
+): LeftPanelMode {
+  if (!enteringNarrow) return mode;
+  if (mode === "auto") return panelOwnsFocus ? "open" : "auto";
+  return mode === "open" && !panelOwnsFocus ? "closed" : mode;
+}
+
 interface BrowserVirtualKeyboard extends EventTarget {
   readonly boundingRect: DOMRectReadOnly;
   overlaysContent: boolean;
@@ -43,9 +57,7 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
   let resizeObserver: ResizeObserver | null = null;
   let narrowScreen: MediaQueryList | null = null;
 
-  const leftOpen = computed(
-    () => leftMode.value === "open" || (leftMode.value === "auto" && !narrow.value),
-  );
+  const leftOpen = computed(() => isLeftPanelOpen(leftMode.value, narrow.value));
   const rightDocked = computed(() => rightBacking.value === "docked");
 
   onMounted(() => {
@@ -103,7 +115,10 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
 
   function closeLeft(): void {
     leftMode.value = "closed";
-    void nextTick(queueRightCompositionSync);
+    void nextTick(() => {
+      queueRightCompositionSync();
+      focusLeftToggle();
+    });
   }
 
   function toggleRight(): void {
@@ -137,7 +152,11 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
   function handleNarrowChange(event: MediaQueryListEvent): void {
     const wasNarrow = narrow.value;
     narrow.value = event.matches;
-    if (!wasNarrow && event.matches && leftMode.value === "auto") leftMode.value = "closed";
+    leftMode.value = resolveLeftPanelModeOnNarrowTransition(
+      leftMode.value,
+      !wasNarrow && event.matches,
+      leftPanelOwnsFocus(),
+    );
     syncLeftPreferredWidth();
     syncOverlayChromeMode();
   }
@@ -151,12 +170,19 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
 
   function handleDocumentKeydown(event: KeyboardEvent): void {
     if (event.key !== "Escape" || !narrow.value || leftMode.value !== "open") return;
+    event.preventDefault();
     closeLeft();
-    void nextTick(() => {
-      elements.player.value
-        ?.querySelector<HTMLButtonElement>('button[aria-controls="leftPanel"]')
-        ?.focus();
-    });
+  }
+
+  function leftPanelOwnsFocus(): boolean {
+    const panel = elements.player.value?.querySelector<HTMLElement>("#leftPanel");
+    return panel !== null && panel !== undefined && panel.contains(document.activeElement);
+  }
+
+  function focusLeftToggle(): void {
+    elements.player.value
+      ?.querySelector<HTMLButtonElement>('button[aria-controls="leftPanel"]')
+      ?.focus();
   }
 
   function syncVirtualKeyboardMode(): void {

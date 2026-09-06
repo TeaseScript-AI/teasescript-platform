@@ -17,13 +17,13 @@ const emit = defineEmits<{
 }>();
 
 const input = ref<HTMLTextAreaElement | null>(null);
-const placeholder = computed(() => (
+const placeholder = computed(() =>
   props.foreground?.kind === "ask-text" || props.foreground?.kind === "ask-number"
     ? props.foreground.hint
-    : "Type your response…"
-));
+    : "Type your response…",
+);
 const accessibleName = computed(() => props.foreground?.accessibleName ?? "User input");
-const inputMode = computed(() => props.foreground?.kind === "ask-number" ? "decimal" : "text");
+const inputMode = computed(() => (props.foreground?.kind === "ask-number" ? "decimal" : "text"));
 
 watch(() => props.modelValue, resizeInput);
 onMounted(resizeInput);
@@ -47,11 +47,11 @@ function handleKeydown(event: KeyboardEvent): void {
   }
   const element = event.currentTarget;
   if (
-    event.key === " "
-    && props.foreground?.kind === "show-button"
-    && props.modelValue.length === 0
-    && element instanceof HTMLTextAreaElement
-    && element.selectionStart === element.selectionEnd
+    event.key === " " &&
+    props.foreground?.kind === "show-button" &&
+    props.modelValue.length === 0 &&
+    element instanceof HTMLTextAreaElement &&
+    element.selectionStart === element.selectionEnd
   ) {
     event.preventDefault();
     emit("activate", props.foreground.label);
@@ -69,6 +69,7 @@ function handlePointerDown(event: PointerEvent): void {
       <textarea
         ref="input"
         rows="1"
+        autofocus
         :aria-label="accessibleName"
         :inputmode="inputMode"
         :placeholder="placeholder"
@@ -82,12 +83,7 @@ function handlePointerDown(event: PointerEvent): void {
       <button class="send-button" type="submit">Send</button>
     </form>
 
-    <div
-      v-if="feedback.length > 0"
-      class="composer-feedback"
-      role="status"
-      aria-live="polite"
-    >
+    <div v-if="feedback.length > 0" class="composer-feedback" role="status" aria-live="polite">
       {{ feedback }}
     </div>
   </footer>

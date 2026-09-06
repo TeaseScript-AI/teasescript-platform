@@ -5,6 +5,10 @@ import test from "node:test";
 
 import { DEMO_PRESENTATION } from "../player/demo-session.js";
 import { createPlayerCoreState, reducePlayerCoreState } from "../player/vue/src/state.js";
+import {
+  isLeftPanelOpen,
+  resolveLeftPanelModeOnNarrowTransition,
+} from "../player/vue/src/composables/usePlayerLayout.js";
 
 test("Vue Player core keeps foreground submission deterministic", () => {
   const initial = createPlayerCoreState(DEMO_PRESENTATION);
@@ -58,6 +62,59 @@ test("Vue Player core appends action and ordinary composer responses", () => {
     state.transcriptEntries.slice(-2).map((entry) => entry.text),
     ["A considered answer", "Continue"],
   );
+});
+
+test("Vue Player tools prefer unused columns, allow duplicates, and retain the final column", () => {
+  const initial = createPlayerCoreState(DEMO_PRESENTATION, ["scene", "visuals"]);
+  assert.deepEqual(initial.toolColumns, [{ id: "tool-column-1", toolId: "scene" }]);
+
+  const withSecond = reducePlayerCoreState(initial, { type: "add-tool-column" });
+  assert.deepEqual(withSecond.toolColumns, [
+    { id: "tool-column-1", toolId: "scene" },
+    { id: "tool-column-2", toolId: "visuals" },
+  ]);
+
+  const withBlank = reducePlayerCoreState(withSecond, { type: "add-tool-column" });
+  assert.deepEqual(withBlank.toolColumns.at(-1), { id: "tool-column-3", toolId: null });
+
+  const duplicated = reducePlayerCoreState(withBlank, {
+    type: "select-tool-column",
+    id: "tool-column-3",
+    toolId: "scene",
+  });
+  const withoutSecond = reducePlayerCoreState(duplicated, {
+    type: "close-tool-column",
+    id: "tool-column-2",
+  });
+  assert.deepEqual(withoutSecond.toolColumns, [
+    { id: "tool-column-1", toolId: "scene" },
+    { id: "tool-column-3", toolId: "scene" },
+  ]);
+
+  const retainedFinal = reducePlayerCoreState(withoutSecond, {
+    type: "close-tool-column",
+    id: "tool-column-1",
+  });
+  assert.deepEqual(retainedFinal.toolColumns, [{ id: "tool-column-3", toolId: "scene" }]);
+
+  const closingLast = reducePlayerCoreState(retainedFinal, {
+    type: "close-tool-column",
+    id: "tool-column-3",
+  });
+  assert.deepEqual(closingLast.toolColumns, retainedFinal.toolColumns);
+});
+
+test("Vue panel mode keeps auto responsive while preserving explicit and focused intent", () => {
+  const initialNarrowMode = resolveLeftPanelModeOnNarrowTransition("auto", true, false);
+  assert.equal(initialNarrowMode, "auto");
+  assert.equal(isLeftPanelOpen(initialNarrowMode, true), false);
+  assert.equal(isLeftPanelOpen(initialNarrowMode, false), true);
+
+  assert.equal(resolveLeftPanelModeOnNarrowTransition("closed", true, false), "closed");
+  assert.equal(resolveLeftPanelModeOnNarrowTransition("closed", false, true), "closed");
+  assert.equal(resolveLeftPanelModeOnNarrowTransition("auto", true, true), "open");
+  assert.equal(resolveLeftPanelModeOnNarrowTransition("open", true, true), "open");
+  assert.equal(resolveLeftPanelModeOnNarrowTransition("open", true, false), "closed");
 });
 
 test("Vue parity route has one component owner and excludes development fixtures", async () => {
