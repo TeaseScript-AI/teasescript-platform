@@ -73,7 +73,10 @@ let eventLog: InterpreterEvent[] = [];
 let currentExample: PlaygroundExampleName = "main";
 let lastFocusedActionId: number | null = null;
 let playerFeedback = "";
-const checkpointEventLogs = new Map<string, readonly InterpreterEvent[]>();
+const checkpointEventLogs = new Map<
+  string,
+  Readonly<{ serialized: string; events: readonly InterpreterEvent[] }>
+>();
 
 for (const [name, example] of Object.entries(PLAYGROUND_EXAMPLES)) {
   const option = document.createElement("option");
@@ -130,7 +133,9 @@ elements.playerPanel.addEventListener("pointerup", (event) => {
 });
 new ResizeObserver(() => {
   elements.playerPanel.style.height = `${elements.sourcePanel.offsetHeight}px`;
+  updateChoicePresentation();
 }).observe(elements.sourcePanel);
+new ResizeObserver(updateChoicePresentation).observe(elements.playerPanel);
 void loadInitialSource();
 
 async function loadInitialSource(): Promise<void> {
@@ -257,7 +262,10 @@ function saveCheckpoint(): void {
     );
     const storageKey = checkpointStorageKey(currentExample);
     localStorage.setItem(storageKey, checkpoint.outcome.json);
-    checkpointEventLogs.set(storageKey, Object.freeze([...eventLog]));
+    checkpointEventLogs.set(
+      storageKey,
+      Object.freeze({ serialized: checkpoint.outcome.json, events: Object.freeze([...eventLog]) }),
+    );
     setActionStatus("Checkpoint saved locally.");
   } catch (error) {
     setActionStatus(errorMessage(error));
@@ -286,7 +294,8 @@ function restoreSavedCheckpoint(): void {
     }
 
     snapshot = restored.snapshot;
-    eventLog = [...(checkpointEventLogs.get(storageKey) ?? [])];
+    const cached = checkpointEventLogs.get(storageKey);
+    eventLog = cached?.serialized === serialized ? [...cached.events] : [];
     lastFocusedActionId = null;
     clearPlayerFeedback();
     elements.transcript.replaceChildren();
@@ -453,9 +462,25 @@ function controlOutcomeMessage(outcome: WorkspaceControlResult["outcome"]): stri
 }
 
 function handlePlayerPointer(event: PointerEvent): void {
-  if (event.button !== 0 || !event.isPrimary || interactiveEventTarget(event.target)) return;
+  if (
+    event.button !== 0 ||
+    !event.isPrimary ||
+    interactiveEventTarget(event.target) ||
+    relevantPlayerTextSelection()
+  )
+    return;
   if (currentPlayerPresentation().pacingGate === null) return;
   skipPacing();
+}
+
+function relevantPlayerTextSelection(): boolean {
+  const selection = document.getSelection();
+  return (
+    selection !== null &&
+    !selection.isCollapsed &&
+    (elements.playerPanel.contains(selection.anchorNode) ||
+      elements.playerPanel.contains(selection.focusNode))
+  );
 }
 
 function handleComposerKeydown(event: KeyboardEvent): void {
@@ -602,6 +627,16 @@ function renderChoiceControls(
   });
   group.append(legend, buttons, select);
   elements.interactionControls.append(group);
+  updateChoicePresentation();
+}
+
+function updateChoicePresentation(): void {
+  const choiceGroup = elements.interactionControls.querySelector("fieldset");
+  if (choiceGroup === null) return;
+  choiceGroup.classList.remove("choice-compact");
+  if (elements.playerPanel.scrollHeight > elements.playerPanel.clientHeight) {
+    choiceGroup.classList.add("choice-compact");
+  }
 }
 
 function interactionAccessibleName(

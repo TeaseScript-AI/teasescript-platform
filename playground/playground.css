@@ -229,6 +229,9 @@ textarea {
   width: 100%;
 }
 
+.choice-compact .choice-buttons { display: none; }
+.choice-compact .choice-select { display: block; }
+
 .interaction-feedback {
   min-height: 1.25rem;
   margin: .55rem 0 0;

@@ -46,6 +46,8 @@ async function main() {
       await pointerScenario(cdp);
       await selectPlayerExample(cdp);
       await desktopScenario(cdp);
+      await constrainedChoicesScenario(cdp);
+      await replacedCheckpointScenario(cdp);
       await setViewport(cdp, 390, 844);
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
@@ -185,6 +187,50 @@ async function desktopScenario(cdp) {
 async function pointerScenario(cdp) {
   await click(cdp, "#run");
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'waiting'`);
+  const firstGate = await activeActionId(cdp);
+  const drag = await value(
+    cdp,
+    `(() => {
+      const item = document.querySelector('#transcript li');
+      const text = [...item.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0);
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const rect = range.getBoundingClientRect();
+      return {startX: rect.left + 2, endX: rect.right - 2, y: rect.top + rect.height / 2};
+    })()`,
+  );
+  await cdp.call("Input.dispatchMouseEvent", { type: "mouseMoved", x: drag.startX, y: drag.y });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: drag.startX,
+    y: drag.y,
+    button: "left",
+    clickCount: 1,
+  });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: drag.endX,
+    y: drag.y,
+    button: "left",
+  });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: drag.endX,
+    y: drag.y,
+    button: "left",
+    clickCount: 1,
+  });
+  assertEqual(
+    await value(cdp, `document.getSelection().toString().trim().length > 0`),
+    true,
+    "mouse drag must select transcript text",
+  );
+  assertEqual(
+    await activeActionId(cdp),
+    firstGate,
+    "selecting transcript text must not skip pacing",
+  );
+  await evaluate(cdp, `document.getSelection().removeAllRanges()`);
   await evaluate(
     cdp,
     `document.querySelector('#player-panel').dispatchEvent(new PointerEvent('pointerup', {bubbles:true, button:0, isPrimary:true, pointerType:'mouse'}))`,
@@ -192,6 +238,72 @@ async function pointerScenario(cdp) {
   await waitFor(
     cdp,
     `document.querySelector('#interaction-controls button')?.textContent === 'Continue'`,
+  );
+}
+
+async function constrainedChoicesScenario(cdp) {
+  const options = Array.from(
+    { length: 12 },
+    (_, index) =>
+      `c${index}: "Option ${index + 1}: select this alternative for the next part of the story"`,
+  ).join(", ");
+  await replaceSourceAndRun(cdp, `let answer = choose ${options}`);
+  await waitFor(cdp, `document.querySelector('.choice-select option:nth-child(13)') !== null`);
+  assertEqual(
+    await value(cdp, `getComputedStyle(document.querySelector('.choice-buttons')).display`),
+    "none",
+    "overflowing desktop choices hide buttons",
+  );
+  assertEqual(
+    await value(cdp, `getComputedStyle(document.querySelector('.choice-select')).display`),
+    "block",
+    "overflowing desktop choices use dropdown",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('#composer-help').getBoundingClientRect().bottom <= document.querySelector('#player-panel').getBoundingClientRect().bottom`,
+    ),
+    true,
+    "choice controls and composer must remain inside the Player panel",
+  );
+}
+
+async function replacedCheckpointScenario(cdp) {
+  await replaceSourceAndRun(
+    cdp,
+    'say "First", instant\nshowButton "A"\nsay "Second", instant\nshowButton "B"',
+  );
+  await waitFor(cdp, `document.querySelector('#interaction-controls button')?.textContent === 'A'`);
+  await click(cdp, "#save-checkpoint");
+  const earlierCheckpoint = await value(
+    cdp,
+    `(() => { const key = Object.keys(localStorage).find((value) => value.includes('checkpoint')); return {key, serialized: localStorage.getItem(key)}; })()`,
+  );
+  await click(cdp, "#interaction-controls button");
+  await waitFor(cdp, `document.querySelector('#interaction-controls button')?.textContent === 'B'`);
+  await click(cdp, "#save-checkpoint");
+  await evaluate(
+    cdp,
+    `localStorage.setItem(${JSON.stringify(earlierCheckpoint.key)}, ${JSON.stringify(earlierCheckpoint.serialized)})`,
+  );
+  await click(cdp, "#restore-checkpoint");
+  assertEqual(
+    await value(cdp, `document.querySelector('#interaction-controls button')?.textContent`),
+    "A",
+    "restore must use the replaced checkpoint snapshot",
+  );
+  assertEqual(
+    JSON.stringify(await transcriptTexts(cdp)),
+    "[]",
+    "restore must discard transcript cached for a different checkpoint value",
+  );
+  await click(cdp, "#interaction-controls button");
+  await waitFor(cdp, `document.querySelector('#interaction-controls button')?.textContent === 'B'`);
+  assertEqual(
+    JSON.stringify(await transcriptTexts(cdp)),
+    JSON.stringify(["A", "Second"]),
+    "continuing a replaced checkpoint must not duplicate stale transcript",
   );
 }
 
@@ -247,6 +359,14 @@ async function selectPlayerExample(cdp) {
     cdp,
     `document.querySelector('#loaded-example-name')?.textContent === 'Player controls' && document.querySelector('#source-revision')?.textContent !== ${JSON.stringify(previousRevision)} && !document.querySelector('#run').disabled`,
   );
+}
+
+async function replaceSourceAndRun(cdp, source) {
+  await evaluate(
+    cdp,
+    `const input=document.querySelector('#source-code'); input.value=${JSON.stringify(source)}; input.dispatchEvent(new Event('input', {bubbles:true})); document.querySelector('#compile').click(); document.querySelector('#run').click()`,
+  );
+  await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'waiting'`);
 }
 
 async function typeAndSubmit(cdp, text) {
