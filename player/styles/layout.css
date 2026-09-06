@@ -46,7 +46,6 @@
 
         /* Package/media values are presentation data, not application palette tokens. */
         --package-accent: var(--color-accent-focus);
-        --media-fallback-color: #f0dcc8;
 
         /*
           Player chrome respects device safe areas while media remains full-bleed.
@@ -257,10 +256,32 @@
         place-items: center;
 
         overflow: hidden;
-        background: var(--media-fallback-color);
+        background: transparent;
+      }
+
+      /*
+        Stage and transcript remain separate regions with separate scrolling and
+        content ownership, but they share one continuous background field. The
+        field is placed here because it participates in the Player Grid; its
+        paint stays in the effects layer.
+      */
+      .player::before {
+        content: "";
+        z-index: 0;
+
+        grid-column: 2;
+        grid-row: 2 / 4;
+
+        pointer-events: none;
+      }
+
+      .player[data-right-layout="rail"][data-right-backing="overlay"]::before {
+        grid-column: 2 / 4;
       }
 
       .transcript {
+        position: relative;
+
         grid-column: 2;
         grid-row: 3;
 
@@ -298,7 +319,8 @@
         flex-direction: column;
         gap: 12px;
 
-        background: var(--color-surface-canvas);
+        /* The shared stage/transcript field paints this region's background. */
+        background: transparent;
 
         scrollbar-width: thin;
         scrollbar-gutter: stable;
@@ -310,7 +332,7 @@
           linear-gradient(
             to bottom,
             transparent 0,
-            #000 28px,
+            #000 56px,
             #000 100%
           );
 
@@ -318,7 +340,7 @@
           linear-gradient(
             to bottom,
             transparent 0,
-            #000 28px,
+            #000 56px,
             #000 100%
           );
       }
