@@ -201,18 +201,6 @@ export function captureProgramAst(value: unknown): CapturedProgramAstResult {
   });
 }
 
-/** Returns compiler diagnostics for numeric literals that cannot enter JSON-safe plans. */
-export function findNonFiniteNumericLiteralDiagnostics(
-  program: Program,
-): readonly Diagnostic[] {
-  const capture = captureProgramAst(program);
-  if (capture.program === null) {
-    return Object.freeze([capture.diagnostic!]);
-  }
-
-  return findNonFiniteNumericLiteralDiagnosticsInStableProgram(capture.program);
-}
-
 /** Internal traversal for parser-owned or already captured AST data. */
 export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
   program: Program,

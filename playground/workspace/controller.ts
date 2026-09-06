@@ -62,7 +62,7 @@ export function executeValidatedWorkspaceSnapshot(
   return freezeResult({ diagnostics: [], plan, snapshot: operation.snapshot, events: operation.events, status: operation.snapshot.status, instructionsExecuted: operation.instructionsExecuted });
 }
 
-export function assertWorkspaceSource(source: unknown): asserts source is string {
+function assertWorkspaceSource(source: unknown): asserts source is string {
   if (typeof source !== "string") throw new TypeError("Workspace source must be UTF-8 text.");
 }
 

@@ -571,7 +571,7 @@ export interface CapturedRuntimeSnapshotResult {
   readonly snapshot: RuntimeSnapshot | null;
 }
 
-export function captureRuntimeSnapshot(
+function captureRuntimeSnapshot(
   value: unknown,
   plan?: InstructionPlan,
 ): CapturedRuntimeSnapshotResult {
