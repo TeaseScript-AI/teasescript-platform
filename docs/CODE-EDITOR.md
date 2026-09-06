@@ -2,12 +2,16 @@
 
 The future browser editor should use parser diagnostics and source spans for syntax highlighting, errors, navigation, autocomplete, simulation, stepping, deterministic replay, state inspection, and breakpoint-like debugging.
 
-The standalone playground is a local technical workspace, not the production editor. It uses an accessible native textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and validated checkpoint save/restore. It deliberately has no Monaco integration, package authoring, library-aware completion, or cross-origin production-player UI.
+The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
+textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
+validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC
+through the DOM-free workspace controller. It deliberately has no Monaco integration, package authoring,
+library-aware completion, or cross-origin production-player shell.
 
 The current technical workspace/controller implementation is canonically at
 `playground/workspace/controller.ts`; browser and server entrypoints use the
-canonical controller directly. This refactor does not create Player modules or
-claim editor functionality that is not implemented.
+canonical controller directly. Player rendering remains in the browser presentation layer and does not create a second
+canonical runtime state model.
 
 The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are separate from runtime checkpoints using the current internal POC format. Storage failures are bounded technical messages; explicit example reload discards the draft and never overwrites repository examples. A local `.tease` file may be imported or exported without repository or server writes.
 

@@ -17,6 +17,12 @@ test("browser playground exposes the bounded editable workspace controls", async
     "run",
     "step",
     "reset",
+    "interaction-region",
+    "interaction-controls",
+    "interaction-feedback",
+    "composer-form",
+    "composer-input",
+    "composer-submit",
     "reload-example",
     "import-source",
     "export-source",
@@ -28,6 +34,9 @@ test("browser playground exposes the bounded editable workspace controls", async
   assert.match(html, /<textarea id="source-code"/u);
   assert.match(html, /Reserved for future timer UI/u);
   assert.match(html, /future-timer-circle/u);
+  assert.match(html, /aria-label="Player viewport"/u);
+  assert.match(html, /role="alert"/u);
+  assert.doesNotMatch(html, />Pause</u);
   assert.match(browser, /teasescript-playground-draft-v1/u);
   assert.match(browser, /compiledRevision === sourceRevision/u);
   assert.match(browser, /sourceEdited/u);
@@ -44,8 +53,11 @@ test("browser playground exposes the bounded editable workspace controls", async
   assert.match(styles, /\.source-editor[^}]*resize: vertical/u);
   assert.match(styles, /\.player-panel \.transcript[^}]*flex: 1 1 auto/u);
   assert.match(styles, /\.future-timer-slot[^}]*top: \.85rem/u);
-  assert.match(styles, /\.player-panel > h2 \{ min-height: 3\.75rem/u);
+  assert.match(styles, /\.player-panel > h2 \{\s*min-height: 3\.75rem/u);
   assert.match(styles, /\.source-panel \{ align-self: start; \}/u);
+  assert.match(styles, /\.composer[^}]*grid-template-columns: minmax\(0, 1fr\) auto/u);
+  assert.match(styles, /@media \(max-width: 520px\)/u);
+  assert.match(styles, /\.choice-select \{ display: block; \}/u);
   const helper = await readFile(
     resolve(process.cwd(), "playground/workspace/controller.ts"),
     "utf8",

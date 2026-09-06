@@ -1,0 +1,16 @@
+speaker guide {
+    title: "Guide"
+    firstName: "Vera"
+    color: "#b784ff"
+}
+
+speaker guide
+
+say as guide "This message can be skipped by clicking the empty Player background."
+say as guide "The same composer handles each typed answer."
+showButton as guide "Continue"
+let name = askText as guide "Your name"
+let amount = askNumber as guide "A number"
+let choice = choose as guide first: "First option", second: "Second option"
+say as guide `Thanks ${name}. You entered ${amount} and selected ${choice}.`, instant
+exit

@@ -2,6 +2,7 @@ import { CHECKPOINT_VERSION } from "../src/runtime/checkpoint.js";
 
 export const PLAYGROUND_EXAMPLES = Object.freeze({
   basic: Object.freeze({ label: "Basic introduction", file: "basic.tease" }),
+  "player-controls": Object.freeze({ label: "Player controls", file: "player-controls.tease" }),
   main: Object.freeze({ label: "Runtime introduction", file: "main.tease" }),
   "control-flow": Object.freeze({
     label: "Control flow and deterministic random",
