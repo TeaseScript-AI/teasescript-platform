@@ -9,15 +9,16 @@ General cross-surface UI engineering/design guidance lives in
 route. Accepted runtime, interaction, security, and custom-view semantics remain in their controlling specifications and
 ADRs.
 
-For local inspection, `npm run playground` serves the manual comparison implementation at `/player/` and the Vue 3
-parity candidate at `/player-vue/` through the existing development server. These development routes are not a public
-Player/host protocol. The manual route remains only until the Vue core has passed explicit visual and interaction
-acceptance; it is not a second production frontend.
+For local inspection, `npm run playground` serves the manual development comparison implementation at `/player/` and
+the usable production-direction/common Vue reference at `/player-vue/` through the existing development server. These
+development routes are not a public Player/host protocol. `/player/` remains a development comparison/fixture route
+for Visual Lab, Layout Debug, and other deliberate fixtures; it is not a second production frontend.
 
 ## Implementation seams
 
 - `index.html` and `browser.ts` are the temporary manual comparison entry point and wiring.
-- `vue/` contains the production-direction Vue 3 component core, its Vite build, and a thin demo adapter.
+- `vue/` contains the usable production-direction/common Vue reference, its Vite build, and a thin demo/reference
+  adapter.
 - `model.ts` contains presentation-only POC data shapes.
 - `presentation.ts` contains framework-independent presentation ordering, formatting, matching, and colour helpers.
 - `render.ts` renders presentation data and demo tool-column content.
@@ -31,8 +32,10 @@ acceptance; it is not a second production frontend.
 - `demo-session.ts` and `demo-media/` are presentation fixtures, not runtime/package APIs.
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
-presentation state in the parity candidate; the engine and shared presentation contracts remain framework-independent
-as required by ADR 0020.
+presentation state in the common reference; Tailwind CSS 4 is integrated through Vite as a foundation layer,
+repository-owned shadcn-vue source/config provides local component seams, Reka covers relevant accessible interactive
+primitives/positioning/focus, and TanStack Vue Virtual is the single transcript windowing/scroll-anchoring owner. The
+engine and shared presentation contracts remain framework-independent as required by ADR 0020.
 
 `styles/layout.css` currently owns the concrete light-theme palette values and semantic token mapping used by the
 source. Those values are also maintained as observable Player contract in `docs/ui/PLAYER-UI.md`; component CSS should
@@ -46,13 +49,20 @@ Lab`, `Layout Debug`, and `Scene` tools, their fixture content, local tuning/ins
 information, and the demo-media endpoint exist to exercise the presentation and are not Standard Library, runtime,
 package, or host APIs.
 
-Visual Lab and Layout Debug intentionally remain on the manual comparison route during the core migration. Their
-absence from the Vue production core is a boundary, not a decision to remove those playtest tools.
+Visual Lab and Layout Debug, along with other deliberate presentation fixtures, intentionally remain on the manual
+development comparison route during the core migration. Their absence from the Vue production core is a boundary,
+not a decision to remove those playtest tools.
 
-The current composer, foreground controls, transcript-history/smart-follow fixtures, timer fixtures, and rendered
-right-rail controls are presentation-only and are not wired to the deterministic runtime. Accepted Standard interaction
-behavior remains controlled by ADR 0018 and the runtime contracts; the maintained placement/presentation boundary is
-described in `docs/ui/PLAYER-UI.md`.
+`/player-vue/?fixture=transcript-stress` is a development-only browser-verification route. It retains 2,000 transcript
+entries in presentation data while TanStack-owned windowing bounds rendered DOM, and exercises variable-height
+measurement, keyed prepend/append anchoring, resize behavior, scroll-away preservation, and return-to-latest follow.
+It is not a runtime, package, or host API.
+
+The current composer, foreground controls, transcript-history/smart-follow fixtures, timer fixtures, stress fixture, and
+rendered right-rail controls are presentation-only and are not wired to the deterministic runtime. The Vue demo reducer
+and future Vue demo/reference runtime adapter remain separate from deterministic runtime data and its host boundary.
+Accepted Standard interaction behavior remains controlled by ADR 0018 and the runtime contracts; the maintained
+placement/presentation boundary is described in `docs/ui/PLAYER-UI.md`.
 
 Current Visual Lab fixtures deliberately exercise several presentation questions without promoting their fixture state
 to runtime or product semantics:

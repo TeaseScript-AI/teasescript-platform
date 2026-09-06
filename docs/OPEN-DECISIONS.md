@@ -99,10 +99,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Player UI preference persistence: which panel/tool/theme/media-fit/text-display preferences survive reload or session
   changes and whether restoration is automatic, explicit, or both.
 - Exact tuned thresholds/measurements for constraint-driven side-region dock/overlay decisions, compact geometry,
-  fixed tool width, stage height, readable conversation bounds, composer growth, and focus-outline thickness.
+  fixed tool width, stage height, readable conversation bounds, and composer growth.
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
-- Vue transcript virtualization mechanism: validate `@tanstack/vue-virtual`'s chat anchoring against the retained local
-  windowing approach and the variable-height, stable-anchor contract in `ui/PLAYER-UI.md` before adding the dependency.
 - Exact developer-facing declaration for a Player-generated Standard tool that combines a title, ordered static
   content, and typed controls such as toggles, numeric/text fields, and selects, including value binding, updates,
   submission, persistence, accessibility metadata, and the boundary with fully custom tools.

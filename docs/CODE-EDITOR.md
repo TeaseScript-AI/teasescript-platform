@@ -15,9 +15,9 @@ entrypoints use that controller directly. Player rendering remains in the browse
 a second canonical runtime state model.
 
 A separate production-oriented Player presentation POC lives under `player/` and is served by the same development
-server through the temporary manual comparison route at `/player/` and Vue core route at `/player-vue/`. Its presentation
-fixtures and Vue demo reducer are not connected to the playground's engine controller and do not define a runtime adapter
-or cross-origin Player/host protocol.
+server through the manual development comparison route at `/player/` and usable production-direction/common Vue
+reference at `/player-vue/`. Its presentation fixtures and Vue demo reducer are not connected to the playground's
+engine controller and do not define a runtime adapter or cross-origin Player/host protocol.
 
 The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are
 separate from runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the

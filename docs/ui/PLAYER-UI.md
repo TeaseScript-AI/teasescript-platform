@@ -386,11 +386,12 @@ The transcript:
 - uses the maintained soft top fade beneath the stage instead of a hard cut;
 - may hide the visible scrollbar on narrow layouts while retaining scroll behavior;
 - must remain performant for histories that can reach extremely large sizes. Do not retain millions of words as active
-  DOM nodes. Use virtualization/windowing or an equivalent technique while preserving stable scroll position and the
-  illusion that the complete retained history is continuously present; loading/rendering older content must not make a
-  user who appeared near the top suddenly jump to a different relative location. The presentation mechanism must use
-  stable entry identities, support variable message heights, bound rendered DOM, and preserve the visible anchor across
-  prepend, append, measurement, and resize; it does not own or truncate canonical history.
+  DOM nodes. In the accepted Vue implementation, TanStack Vue Virtual is the single windowing and scroll-anchoring
+  owner; it must preserve stable scroll position and the illusion that the complete retained history is continuously
+  present. Loading/rendering older content must not make a user who appeared near the top suddenly jump to a different
+  relative location. The presentation mechanism must use stable entry identities, support variable message heights,
+  bound rendered DOM, and preserve the visible anchor across prepend, append, measurement, and resize; it does not own
+  or truncate canonical history.
 
 ### Smart follow and return to latest
 
@@ -577,7 +578,7 @@ control when the explicit progress data is meaningful and does not obscure the c
 Interactive right-rail controls remain in place while their handlers execute and expose a distinct busy state without
 changing the control's committed value or implying that the control was disabled or removed. This target supersedes the
 accepted V30 permanent-button disappear-while-handler-runs presentation once the controlling runtime/Standard-Library
-contract is synchronized. Exact busy animation is a Phase-4 visual-tuning question; it should use a familiar
+contract is synchronized. Exact busy animation remains an unresolved visual-tuning detail; it should use a familiar
 indeterminate-activity cue, must not require control reflow, and must remain distinguishable from keyboard focus and
 disabled/inert presentation. Programmatic updates visibly change the same control state but must remain recognizable as
 script-initiated rather than user input. They add a neutral session event to transcript history rather than a speaker

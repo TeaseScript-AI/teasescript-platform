@@ -490,8 +490,11 @@ The local Standard Player POC has a reproducible Chromium smoke route after `npm
 node tools/player-browser-smoke.mjs
 ```
 
-It drives the real playground at desktop and 390 × 844 CSS-pixel viewports. An unavailable Chromium executable is an
-explicit skip; an available browser must pass the interaction, pacing, accessibility-state, restore, and responsive
+It drives the real playground at desktop and 390 × 844 CSS-pixel viewports, then visits the development-only Vue stress
+route `/player-vue/?fixture=transcript-stress`. That route retains 2,000 entries while asserting bounded rendered DOM,
+variable-height measurement, stable keyed prepend/append anchoring, pinned and scroll-away resize behavior, and
+follow-latest/scroll-away return-to-latest behavior. An unavailable Chromium executable is an explicit skip; an
+available browser must pass the interaction, pacing, accessibility-state, restore, responsive, and Vue transcript
 checks.
 
 Real browser automation becomes required after the cross-origin host shell and player exist. Coverage should then include:

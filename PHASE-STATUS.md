@@ -23,9 +23,12 @@ accept syntax, architecture, or implementation details.
   family; and ADR 0018 `say` smart/exact pacing with one resumable `chatPacingGate`, deterministic checkpoint/restore,
   prepared output, typed skip settlement, and interaction/`wait` composition.
 - **Development and verification:** a standalone browser playground with Standard interaction and pacing controls; a
-  modular production-oriented Player presentation POC with a Vue 3 core and temporary manual comparison route;
-  source-to-runtime conformance coverage; focused runtime/checkpoint/state-validation tests; reproducible desktop and
-  narrow-screen browser smoke coverage; and a bounded deterministic property campaign.
+  modular production-oriented Player presentation POC with a verified, design-neutral Vue 3 Phase 1 foundation
+  (Vue/Vite, Tailwind CSS 4, repository-owned local shadcn-vue source/config, Reka primitives, and TanStack Vue Virtual
+  as the single bounded, variable-height, stable-anchor transcript owner); the manual Player route remains explicitly
+  a development comparison/fixture route; source-to-runtime conformance coverage; focused
+  runtime/checkpoint/state-validation tests; reproducible desktop and narrow-screen browser smoke coverage; and a
+  bounded deterministic property campaign.
 
 These summaries are orientation only. The current topic documents below are canonical for the detailed implementation
 contracts and boundaries.
@@ -33,8 +36,8 @@ contracts and boundaries.
 ## Current major exclusions and blockers
 
 - complete V30 coverage, complete static typing, and units/date/time/duration values;
-- a runtime adapter for the separate Vue Player reference, production cross-origin Player/host integration, richer
-  editor support, and final browser acceptance coverage;
+- the separate Vue demo/reference runtime adapter, production cross-origin Player/host integration, richer editor
+  support, and final browser acceptance coverage;
 - background-action kinds beyond `chatPacingGate`, general timers, media actions, camera lifecycle, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
