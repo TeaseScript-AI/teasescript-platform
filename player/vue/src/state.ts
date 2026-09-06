@@ -1,5 +1,4 @@
 import type {
-  PlayerForegroundPresentation,
   PlayerMessagePresentation,
   PlayerPresentation,
   PlayerRightControlPresentation,
@@ -8,31 +7,29 @@ import type {
   PlayerToolId,
   PlayerTranscriptEntryPresentation,
 } from "../../model.js";
-import { matchForegroundChoiceByVisibleText } from "../../presentation.js";
 import { addToolColumn, closeToolColumn, selectToolColumn } from "../../tool-columns.js";
 
 export interface PlayerCoreState {
   readonly composerFeedback: string;
   readonly composerValue: string;
-  readonly foreground: PlayerForegroundPresentation | null;
+  readonly fixtureTranscriptEntries: readonly PlayerTranscriptEntryPresentation[];
   readonly nextActivitySequence: number;
   readonly nextToolColumnNumber: number;
   readonly rightControls: readonly PlayerRightControlPresentation[];
   readonly toolColumns: readonly PlayerToolColumnState[];
   readonly toolOrder: readonly PlayerToolId[];
-  readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
 }
 
 export type PlayerCoreAction =
   | { readonly type: "add-tool-column" }
-  | { readonly type: "activate-foreground"; readonly label: string }
   | { readonly type: "activate-right-action"; readonly controlId: string }
   | { readonly type: "change-right-select"; readonly controlId: string; readonly value: string }
   | { readonly type: "change-right-toggle"; readonly checked: boolean; readonly controlId: string }
   | { readonly type: "close-tool-column"; readonly id: string }
   | { readonly type: "select-tool-column"; readonly id: string; readonly toolId: PlayerToolId }
   | { readonly type: "set-composer"; readonly value: string }
-  | { readonly type: "submit-composer" };
+  | { readonly type: "set-composer-feedback"; readonly message: string }
+  | { readonly type: "submit-fixture-composer" };
 
 export function createPlayerCoreState(
   presentation: PlayerPresentation,
@@ -41,13 +38,12 @@ export function createPlayerCoreState(
   return {
     composerFeedback: "",
     composerValue: "",
-    foreground: presentation.foreground,
+    fixtureTranscriptEntries: [],
     nextActivitySequence: 1,
     nextToolColumnNumber: 2,
     rightControls: presentation.rightControls,
     toolColumns: addToolColumn([], "tool-column-1", toolOrder),
     toolOrder,
-    transcriptEntries: presentation.messages,
   };
 }
 
@@ -66,10 +62,12 @@ export function reducePlayerCoreState(
     }
     case "set-composer":
       return { ...state, composerFeedback: "", composerValue: action.value };
-    case "submit-composer":
-      return submitComposer(state);
-    case "activate-foreground":
-      return completeForeground(state, action.label);
+    case "set-composer-feedback":
+      return { ...state, composerFeedback: action.message };
+    case "submit-fixture-composer":
+      return state.composerValue.trim().length === 0
+        ? { ...state, composerFeedback: "Enter a response before sending." }
+        : appendUserMessage(state, state.composerValue);
     case "activate-right-action":
       return activateRightAction(state, action.controlId);
     case "change-right-toggle":
@@ -86,47 +84,6 @@ export function reducePlayerCoreState(
         ? state
         : { ...state, toolColumns: closeToolColumn(state.toolColumns, action.id) };
   }
-}
-
-function submitComposer(state: PlayerCoreState): PlayerCoreState {
-  const raw = state.composerValue;
-  const foreground = state.foreground;
-  if (foreground === null) {
-    return raw.trim().length === 0
-      ? withFeedback(state, "Enter a response before sending.")
-      : appendUserMessage(state, raw);
-  }
-
-  switch (foreground.kind) {
-    case "ask-text":
-      return raw.trim().length === 0
-        ? withFeedback(state, "Enter a text answer before sending.")
-        : completeForeground(state, raw);
-    case "ask-number":
-      return isAcceptedNumberText(raw)
-        ? completeForeground(state, raw.trim())
-        : withFeedback(state, "Enter a valid number before sending.");
-    case "show-button":
-      return withFeedback(state, "Use the rendered button to continue.");
-    case "choose": {
-      const option = matchForegroundChoiceByVisibleText(foreground.options, raw);
-      return option === null
-        ? withFeedback(state, "Type one visible option exactly or use a rendered choice control.")
-        : completeForeground(state, option.label);
-    }
-  }
-}
-
-function completeForeground(state: PlayerCoreState, label: string): PlayerCoreState {
-  if (state.foreground === null) return state;
-  return appendUserMessage({ ...state, foreground: null }, label);
-}
-
-function activateRightAction(state: PlayerCoreState, controlId: string): PlayerCoreState {
-  const control = state.rightControls.find(
-    (candidate) => candidate.kind === "action" && candidate.id === controlId,
-  );
-  return control?.kind === "action" ? appendUserMessage(state, control.label) : state;
 }
 
 function changeRightToggle(
@@ -174,46 +131,42 @@ function changeRightSelect(
   return appendSessionEvent(next, `You changed ${current.label} to ${label}.`);
 }
 
+function activateRightAction(state: PlayerCoreState, controlId: string): PlayerCoreState {
+  const control = state.rightControls.find(
+    (candidate) => candidate.kind === "action" && candidate.id === controlId,
+  );
+  return control?.kind === "action" ? appendUserMessage(state, control.label) : state;
+}
+
 function appendUserMessage(state: PlayerCoreState, text: string): PlayerCoreState {
   const message: PlayerMessagePresentation = {
     kind: "message",
-    id: `activity-${state.nextActivitySequence}`,
+    id: `fixture-activity-${state.nextActivitySequence}`,
     speakerId: "user",
     text,
   };
-  return appendEntry(state, message);
+  return appendFixtureEntry(state, message, true);
 }
 
 function appendSessionEvent(state: PlayerCoreState, text: string): PlayerCoreState {
   const event: PlayerSessionEventPresentation = {
     kind: "session-event",
-    id: `activity-${state.nextActivitySequence}`,
+    id: `fixture-activity-${state.nextActivitySequence}`,
     text,
   };
-  return appendEntry(state, event, false);
+  return appendFixtureEntry(state, event, false);
 }
 
-function appendEntry(
+function appendFixtureEntry(
   state: PlayerCoreState,
   entry: PlayerTranscriptEntryPresentation,
-  clearComposer = true,
+  clearComposer: boolean,
 ): PlayerCoreState {
   return {
     ...state,
     composerFeedback: "",
     composerValue: clearComposer ? "" : state.composerValue,
+    fixtureTranscriptEntries: [...state.fixtureTranscriptEntries, entry],
     nextActivitySequence: state.nextActivitySequence + 1,
-    transcriptEntries: [...state.transcriptEntries, entry],
   };
-}
-
-function withFeedback(state: PlayerCoreState, composerFeedback: string): PlayerCoreState {
-  return { ...state, composerFeedback };
-}
-
-function isAcceptedNumberText(value: string): boolean {
-  const trimmed = value.trim();
-  if (trimmed.length === 0 || /[\r\n]/u.test(trimmed)) return false;
-  if (!/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/u.test(trimmed)) return false;
-  return Number.isFinite(Number(trimmed));
 }

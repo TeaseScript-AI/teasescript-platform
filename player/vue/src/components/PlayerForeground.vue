@@ -6,22 +6,22 @@ import type {
 } from "../../../model.js";
 import { readableControlText } from "../../../presentation.js";
 
-const props = defineProps<{
-  foreground: PlayerForegroundPresentation | null;
-}>();
+const props = defineProps<{ foreground: PlayerForegroundPresentation | null }>();
 
-defineEmits<{
-  activate: [label: string];
-}>();
+defineEmits<{ activate: [optionId: string | null] }>();
 
 const choiceScroller = ref<HTMLElement | null>(null);
 const overflow = ref(false);
 let observer: ResizeObserver | null = null;
 
-watch(() => props.foreground, async () => {
-  await nextTick();
-  observeScroller();
-}, { deep: true });
+watch(
+  () => props.foreground,
+  async () => {
+    await nextTick();
+    observeScroller();
+  },
+  { deep: true },
+);
 
 onMounted(observeScroller);
 onBeforeUnmount(() => observer?.disconnect());
@@ -59,7 +59,9 @@ function optionStyle(option: PlayerForegroundOptionPresentation): CSSProperties 
 
 <template>
   <section
-    v-if="foreground !== null && (foreground.kind === 'show-button' || foreground.kind === 'choose')"
+    v-if="
+      foreground !== null && (foreground.kind === 'show-button' || foreground.kind === 'choose')
+    "
     class="foreground-controls"
     aria-label="Foreground interaction"
     :data-foreground-kind="foreground.kind"
@@ -73,7 +75,7 @@ function optionStyle(option: PlayerForegroundOptionPresentation): CSSProperties 
         :data-authored-fill="foreground.authoredFill === undefined ? undefined : ''"
         :aria-label="foreground.accessibleName"
         :style="authoredStyle(foreground.authoredFill)"
-        @click="$emit('activate', foreground.label)"
+        @click="$emit('activate', null)"
       >
         {{ foreground.label }}
       </button>
@@ -86,17 +88,13 @@ function optionStyle(option: PlayerForegroundOptionPresentation): CSSProperties 
         :aria-label="foreground.accessibleName"
         :data-overflow="String(overflow)"
       >
-        <span
-          v-for="option in foreground.options"
-          :key="option.id"
-          class="foreground-choice-item"
-        >
+        <span v-for="option in foreground.options" :key="option.id" class="foreground-choice-item">
           <button
             class="foreground-button"
             type="button"
             :data-authored-fill="option.authoredFill === undefined ? undefined : ''"
             :style="optionStyle(option)"
-            @click="$emit('activate', option.label)"
+            @click="$emit('activate', option.id)"
           >
             {{ option.label }}
           </button>

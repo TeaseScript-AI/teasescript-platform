@@ -17,8 +17,9 @@ for Visual Lab, Layout Debug, and other deliberate fixtures; it is not a second 
 ## Implementation seams
 
 - `index.html` and `browser.ts` are the manual development comparison entry point and wiring.
-- `vue/` contains the usable production-direction/common Vue reference, its Vite build, and a thin demo/reference
-  adapter.
+- `runtime-adapter.ts` contains the framework-independent runtime-to-Player translation and shared action helpers used
+  by the Vue reference and playground workspace controller.
+- `vue/` contains the usable production-direction/common Vue reference and its Vite build.
 - `model.ts` contains presentation-only POC data shapes.
 - `presentation.ts` contains framework-independent presentation ordering, formatting, matching, and colour helpers.
 - `render.ts` renders presentation data and demo tool-column content.
@@ -59,11 +60,16 @@ entries in presentation data while TanStack-owned windowing bounds rendered DOM,
 measurement, keyed prepend/append anchoring, resize behavior, scroll-away preservation, and return-to-latest follow.
 It is not a runtime, package, or host API.
 
-The current composer, foreground controls, transcript-history/smart-follow fixtures, timer fixtures, stress fixture, and
-rendered right-rail controls are presentation-only and are not wired to the deterministic runtime. No Vue
-demo/reference runtime adapter currently connects these fixtures to deterministic runtime data or its host boundary.
-Accepted Standard interaction behavior remains controlled by ADR 0018 and the runtime contracts; the maintained
-placement/presentation boundary is described in `docs/ui/PLAYER-UI.md`.
+The default Vue development route compiles real `player-controls.tease` source and drives `say`, canonical
+`playerTranscript` output, foreground interactions, chat pacing, time observation, checkpoint, and restore through
+`runtime-adapter.ts`. Engine operations remain authoritative for action identity, validation, normalization, choice
+matching, transcript derivation, settlement, and continuation. The checkpoint's companion transcript-event history is
+presentation-owned and retained only for same-session development restore; it does not alter the canonical runtime
+checkpoint or define the deferred production persistence/host payload.
+
+Demo media, timers, rendered right-rail controls, tool content, and the transcript stress route remain explicitly
+fixture-backed. Accepted Standard interaction behavior remains controlled by ADR 0018 and the runtime contracts; the
+maintained placement/presentation boundary is described in `docs/ui/PLAYER-UI.md`.
 
 Current Visual Lab fixtures deliberately exercise several presentation questions without promoting their fixture state
 to runtime or product semantics:

@@ -2,11 +2,12 @@
 
 ## Playground execution helper
 
-`playground/workspace/controller.ts` is the DOM-free adapter shared by the browser controller and development
-automation routes. It uses canonical runtime operations to create and execute validated snapshots, inspect active
-Player presentation, submit typed interactions and pacing/time observations, and save or restore checkpoints. Its
-structured results retain engine outcomes and events; it does not normalize answers, derive transcript text, run
-continuation inside completion, or retain an independent action lifecycle.
+`player/runtime-adapter.ts` is the framework-independent Player adapter shared by the Vue reference and the
+playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,
+submits typed interactions and pacing/time observations, and uses the canonical runtime checkpoint operations.
+`playground/workspace/controller.ts` retains the DOM-free compiler/execution and development-automation workspace
+facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
+independent action lifecycle.
 
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
 
@@ -52,8 +53,8 @@ text/output slice described below; the current compiler/runtime implements that 
 ## Accepted first Standard Library runtime contract
 
 ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `choose`,
-followed by a separate `say` smart-autoplay slice. The engine/compiler slices and local playground Standard Player POC
-controls are implemented. The production cross-origin player/host integration remains separate work.
+followed by a separate `say` smart-autoplay slice. The engine/compiler slices, local playground controls, and Vue
+reference adapter are implemented. The production cross-origin player/host integration remains separate work.
 
 ### Generic foreground interactions
 
@@ -342,8 +343,9 @@ The current implementation contains compiler-owned blocking `wait`, the compact 
 and `choose` forms lowered into one generic foreground `interaction` family, and ADR 0018 `say` pacing lowered into the
 `chatPacingGate` pending-action lifecycle. Runtime state retains persisted session time, at most one foreground action,
 zero or one background pacing gate, monotonic action IDs, bounded settlement replay, prepared `say` output, explicit
-time observation, and typed completion operations. The local playground reconstructs Standard controls from this state;
-browser scheduling and the final cross-origin Player shell remain out of scope.
+time observation, and typed completion operations. The local playground reconstructs Standard controls from this state,
+and the Vue reference schedules local browser wake-ups and submits explicit time observations. Production host
+lifecycle/time integrity and the final cross-origin Player shell remain out of scope.
 
 ## Owner-resolved future runtime semantics
 

@@ -10,89 +10,55 @@ import {
   resolveLeftPanelModeOnNarrowTransition,
 } from "../player/vue/src/composables/usePlayerLayout.js";
 
-test("Vue Player core keeps foreground submission deterministic", () => {
+test("Vue Player state keeps fixture transcript behavior separate from runtime semantics", async () => {
   const initial = createPlayerCoreState(DEMO_PRESENTATION);
-  const invalid = reducePlayerCoreState(
-    reducePlayerCoreState(initial, { type: "set-composer", value: "continue steadily" }),
-    { type: "submit-composer" },
+  const rejected = reducePlayerCoreState(
+    reducePlayerCoreState(initial, { type: "set-composer", value: " \t " }),
+    { type: "submit-fixture-composer" },
   );
-  assert.match(invalid.composerFeedback, /visible option exactly/u);
-  assert.equal(invalid.foreground?.kind, "choose");
+  assert.match(rejected.composerFeedback, /before sending/u);
+  assert.equal(rejected.fixtureTranscriptEntries.length, 0);
 
-  const completed = reducePlayerCoreState(
-    reducePlayerCoreState(invalid, { type: "set-composer", value: "Continue steadily" }),
-    { type: "submit-composer" },
-  );
-  assert.equal(completed.foreground, null);
-  assert.equal(completed.composerValue, "");
-  assert.equal(completed.transcriptEntries.at(-1)?.kind, "message");
-  assert.equal(completed.transcriptEntries.at(-1)?.text, "Continue steadily");
-});
-
-test("Vue showButton completes only through rendered activation", async () => {
-  const initial = createPlayerCoreState({
-    ...DEMO_PRESENTATION,
-    foreground: { kind: "show-button", accessibleName: "Continue", label: "Continue" },
-  });
   const submitted = reducePlayerCoreState(
-    reducePlayerCoreState(initial, { type: "set-composer", value: "Continue" }),
-    { type: "submit-composer" },
+    reducePlayerCoreState(rejected, { type: "set-composer", value: "An ordinary response" }),
+    { type: "submit-fixture-composer" },
   );
-  assert.equal(submitted.foreground?.kind, "show-button");
-  assert.equal(submitted.transcriptEntries.length, initial.transcriptEntries.length);
-  assert.match(submitted.composerFeedback, /rendered button/u);
-
   const activated = reducePlayerCoreState(submitted, {
-    type: "activate-foreground",
-    label: "Continue",
+    type: "activate-right-action",
+    controlId: "continue",
   });
-  assert.equal(activated.foreground, null);
-  assert.equal(activated.transcriptEntries.at(-1)?.text, "Continue");
-
-  const [composer, foreground] = await Promise.all([
-    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerComposer.vue"), "utf8"),
-    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerForeground.vue"), "utf8"),
-  ]);
-  assert.doesNotMatch(composer, /show-button|emit\("activate"/u);
-  assert.match(
-    foreground,
-    /data-foreground-button[\s\S]*@click="\$emit\('activate', foreground\.label\)"/u,
-  );
-});
-
-test("Vue Player core records only controls that request user history", () => {
-  const initial = createPlayerCoreState(DEMO_PRESENTATION);
   const toggled = reducePlayerCoreState(initial, {
     type: "change-right-toggle",
     checked: false,
     controlId: "strict-mode",
   });
-  assert.equal(toggled.transcriptEntries.at(-1)?.kind, "session-event");
-  assert.equal(toggled.transcriptEntries.at(-1)?.text, "You changed Strict mode to off.");
-
   const selected = reducePlayerCoreState(toggled, {
     type: "change-right-select",
     controlId: "intensity",
     value: "gentle",
   });
-  assert.equal(selected.transcriptEntries.length, toggled.transcriptEntries.length);
+  assert.deepEqual(
+    activated.fixtureTranscriptEntries.map((entry) => entry.text),
+    ["An ordinary response", "Continue"],
+  );
+  assert.equal(activated.composerValue, "");
+  assert.ok(
+    activated.fixtureTranscriptEntries.every((entry) => /^fixture-activity-\d+$/u.test(entry.id)),
+  );
+  assert.equal(activated.fixtureTranscriptEntries[0]?.kind, "message");
+  if (activated.fixtureTranscriptEntries[0]?.kind === "message") {
+    assert.equal(activated.fixtureTranscriptEntries[0].speakerId, "user");
+  }
+  assert.equal(toggled.fixtureTranscriptEntries.at(-1)?.kind, "session-event");
+  assert.equal(toggled.fixtureTranscriptEntries.at(-1)?.text, "You changed Strict mode to off.");
+  assert.equal(selected.fixtureTranscriptEntries.length, toggled.fixtureTranscriptEntries.length);
   const intensity = selected.rightControls.find((control) => control.id === "intensity");
   assert.equal(intensity?.kind, "select");
   if (intensity?.kind === "select") assert.equal(intensity.value, "gentle");
-});
 
-test("Vue Player core appends action and ordinary composer responses", () => {
-  let state = createPlayerCoreState({
-    ...DEMO_PRESENTATION,
-    foreground: { kind: "ask-text", accessibleName: "Text answer", hint: "Type your answer…" },
-  });
-  state = reducePlayerCoreState(state, { type: "set-composer", value: "A considered answer" });
-  state = reducePlayerCoreState(state, { type: "submit-composer" });
-  state = reducePlayerCoreState(state, { type: "activate-right-action", controlId: "continue" });
-  assert.deepEqual(
-    state.transcriptEntries.slice(-2).map((entry) => entry.text),
-    ["A considered answer", "Continue"],
-  );
+  const source = await readFile(resolve(process.cwd(), "player/vue/src/state.ts"), "utf8");
+  assert.doesNotMatch(source, /completeForeground|matchForegroundChoice|isAcceptedNumberText/u);
+  assert.doesNotMatch(source, /PlayerForegroundPresentation|runtime-event-/u);
 });
 
 test("Vue Player tools prefer unused columns, allow duplicates, and retain the final column", () => {
@@ -150,8 +116,9 @@ test("Vue panel mode keeps auto responsive while preserving explicit and focused
 
 test("Vue reference route has one component owner and excludes development fixtures", async () => {
   const root = process.cwd();
-  const [core, main, index] = await Promise.all([
+  const [core, layout, main, index] = await Promise.all([
     readFile(resolve(root, "player/vue/src/PlayerCore.vue"), "utf8"),
+    readFile(resolve(root, "player/vue/src/composables/usePlayerLayout.ts"), "utf8"),
     readFile(resolve(root, "player/vue/src/main.ts"), "utf8"),
     readFile(resolve(root, "player/vue/index.html"), "utf8"),
   ]);
@@ -163,6 +130,12 @@ test("Vue reference route has one component owner and excludes development fixtu
   assert.match(main, /createApp\(App\)\.mount\("#app"\)/u);
   assert.doesNotMatch(main, /components-visual-lab|components-layout-debug/u);
   assert.doesNotMatch(core, /Visual Lab|Layout Debug/u);
+  assert.match(core, /createPlayerRuntimeSession/u);
+  assert.match(core, /session\.transcriptEntries/u);
+  assert.match(core, /presentationTranscriptEntries/u);
+  assert.match(core, /state\.value\.fixtureTranscriptEntries/u);
+  assert.match(core, /presentation\.speakers\.user/u);
+  assert.match(layout, /stripWidth \+ panelChromeWidth/u);
   assert.doesNotMatch(index, /browser\.js/u);
 });
 

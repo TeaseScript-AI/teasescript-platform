@@ -355,11 +355,16 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
 
   function syncLeftPreferredWidth(): void {
     const player = elements.player.value;
+    const panel = player?.querySelector<HTMLElement>(".left-panel") ?? null;
     const strip = player?.querySelector<HTMLElement>(".tool-strip") ?? null;
     const scroller = player?.querySelector<HTMLElement>(".tool-strip-scroll") ?? null;
-    if (player === null || strip === null || scroller === null) return;
+    if (player === null || panel === null || strip === null || scroller === null) return;
     const stripWidth = Math.ceil(strip.getBoundingClientRect().width);
-    player.style.setProperty("--left-preferred", `${stripWidth}px`);
+    const panelChromeWidth = Math.max(
+      0,
+      Math.ceil(panel.getBoundingClientRect().width - scroller.clientWidth),
+    );
+    player.style.setProperty("--left-preferred", `${stripWidth + panelChromeWidth}px`);
   }
 
   function usableViewportLength(property: string, usableHeight: number): string {

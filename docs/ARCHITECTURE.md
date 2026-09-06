@@ -114,13 +114,16 @@ No `src/standard-library/` shell exists yet because the implemented ADR 0018 POC
 parser/compiler/runtime; linked reusable Standard Library modules remain future work.
 
 The technical playground workspace controller lives at
-`playground/workspace/controller.ts`. The production-oriented Player presentation
-POC lives under `player/`. The manual implementation remains available at `/player/` as a development
-comparison/fixture route; the usable production-direction/common Vue reference is built from `player/vue/` and served
-at `/player-vue/`. The Vue reference uses the accepted Phase 1 foundation, with TanStack Vue Virtual as the single
-transcript windowing and scroll-anchoring owner. Both use the same framework-independent presentation types and
-browser-native CSS geometry. The Vue choice and migration boundary are accepted in ADR 0020. Current presentation
-models and demo data remain internal POC seams, not an accepted engine/Player protocol or cross-origin host contract.
+`playground/workspace/controller.ts`. The framework-independent runtime-to-Player translation and shared action
+lookup/completion seam lives at `player/runtime-adapter.ts`. The production-oriented Player presentation POC lives
+under `player/`. The manual implementation remains available at `/player/` as a development comparison/fixture route;
+the usable production-direction/common Vue reference is built from `player/vue/` and served at `/player-vue/`. The Vue
+reference uses the accepted Phase 1 foundation, with TanStack Vue Virtual as the single transcript windowing and
+scroll-anchoring owner, and drives the implemented interaction/pacing slice from canonical runtime state and events.
+Both routes use the same framework-independent presentation types, shared Player action helpers, and browser-native CSS
+geometry. The Vue choice and migration boundary are accepted in ADR 0020. Current presentation models, demo data,
+media, timer, and right-rail fixtures remain internal POC seams, not an accepted engine/Player protocol or cross-origin
+host contract.
 
 `src/index.ts` is the intentional public package/root API. Canonical internal
 paths may change before a published compatibility policy exists; old repository

@@ -25,8 +25,10 @@ accept syntax, architecture, or implementation details.
 - **Development and verification:** a standalone browser playground with Standard interaction and pacing controls; a
   modular production-oriented Player presentation POC with a verified, design-neutral Vue 3 Phase 1 foundation
   (Vue/Vite, Tailwind CSS 4, repository-owned local shadcn-vue source/config, the selected Reka primitive foundation,
-  and TanStack Vue Virtual as the single bounded, variable-height, stable-anchor transcript owner); the manual Player
-  route remains explicitly a development comparison/fixture route; source-to-runtime conformance coverage; focused
+  and TanStack Vue Virtual as the single bounded, variable-height, stable-anchor transcript owner) connected through a
+  framework-independent adapter to the implemented deterministic interaction, transcript, pacing, time-observation,
+  checkpoint, and restore slice; the manual Player route remains explicitly a development comparison/fixture route;
+  source-to-runtime conformance coverage; focused
   runtime/checkpoint/state-validation tests; reproducible desktop and narrow-screen browser smoke coverage; and a bounded
   deterministic property campaign.
 
@@ -36,8 +38,7 @@ contracts and boundaries.
 ## Current major exclusions and blockers
 
 - complete V30 coverage, complete static typing, and units/date/time/duration values;
-- the separate Vue demo/reference runtime adapter, production cross-origin Player/host integration, richer editor
-  support, and final browser acceptance coverage;
+- production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
 - background-action kinds beyond `chatPacingGate`, general timers, media actions, camera lifecycle, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
