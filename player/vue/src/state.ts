@@ -107,9 +107,7 @@ function submitComposer(state: PlayerCoreState): PlayerCoreState {
         ? completeForeground(state, raw.trim())
         : withFeedback(state, "Enter a valid number before sending.");
     case "show-button":
-      return raw === foreground.label
-        ? completeForeground(state, foreground.label)
-        : withFeedback(state, `Type “${foreground.label}” exactly or use the button.`);
+      return withFeedback(state, "Use the rendered button to continue.");
     case "choose": {
       const option = matchForegroundChoiceByVisibleText(foreground.options, raw);
       return option === null

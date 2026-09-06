@@ -306,11 +306,6 @@ composerInput.addEventListener("keydown", (event) => {
     composerInput.selectionStart === composerInput.selectionEnd
   ) {
     const foreground = currentForegroundPresentation();
-    if (foreground?.kind === "show-button") {
-      event.preventDefault();
-      completeForeground(foreground.label);
-      return;
-    }
     if (foreground === null && pacingGateDemo === "skippable" && hasPendingPacingMessage()) {
       event.preventDefault();
       settlePacingGate();
@@ -623,11 +618,7 @@ function submitComposerValue(): void {
       completeForeground(raw.trim());
       return;
     case "show-button":
-      if (raw !== foreground.label) {
-        showComposerFeedback(`Type “${foreground.label}” exactly or use the button.`);
-        return;
-      }
-      completeForeground(foreground.label);
+      showComposerFeedback("Use the rendered button to continue.");
       return;
     case "choose": {
       const option = matchForegroundChoiceByVisibleText(foreground.options, raw);

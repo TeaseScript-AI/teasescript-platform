@@ -55,6 +55,7 @@ async function main() {
       await setViewport(cdp, 390, 844);
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
+      await manualPlayerForegroundScenario(cdp, origin);
       await vueTranscriptScenario(cdp, origin);
       console.log(
         "player-browser-smoke: PASS manual Player controls plus Vue transcript virtualization, anchoring, and follow",
@@ -155,6 +156,31 @@ async function desktopScenario(cdp) {
     `document.querySelector('#interaction-controls button')?.textContent === 'Continue'`,
   );
 
+  const showButtonId = await activeActionId(cdp);
+  const transcriptBeforeRejectedButtonText = await transcriptTexts(cdp);
+  await typeAndSubmit(cdp, "Continue");
+  await delay(100);
+  assertEqual(
+    await activeActionId(cdp),
+    showButtonId,
+    "exact showButton composer text must not complete the action",
+  );
+  assertEqual(
+    JSON.stringify(await transcriptTexts(cdp)),
+    JSON.stringify(transcriptBeforeRejectedButtonText),
+    "rejected showButton composer text must not append transcript output",
+  );
+  await evaluate(
+    cdp,
+    `const input=document.querySelector('#composer-input'); input.value=''; input.dispatchEvent(new Event('input', {bubbles:true})); input.focus()`,
+  );
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
+  assertEqual(
+    await activeActionId(cdp),
+    showButtonId,
+    "empty-composer Space must not complete showButton",
+  );
+
   const transcriptBeforeButton = await transcriptTexts(cdp);
   await click(cdp, "#interaction-controls button");
   await waitFor(
@@ -206,7 +232,7 @@ async function desktopScenario(cdp) {
   await click(cdp, "#save-checkpoint");
   const choiceId = await activeActionId(cdp);
   const transcriptBeforeRestore = await transcriptTexts(cdp);
-  await click(cdp, ".choice-buttons button:nth-child(2)");
+  await typeAndSubmit(cdp, "Second option");
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
   await click(cdp, "#restore-checkpoint");
   assertEqual(
@@ -387,6 +413,74 @@ async function narrowScenario(cdp) {
     `const select=document.querySelector('.choice-select'); select.value='1'; select.dispatchEvent(new Event('change', {bubbles:true}))`,
   );
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
+}
+
+async function manualPlayerForegroundScenario(cdp, origin) {
+  await navigate(cdp, `${origin}/player/`);
+  await waitFor(cdp, `document.querySelector('[data-demo-select="foreground-fixture"]') !== null`);
+  await selectDemoFixture(cdp, "foreground-fixture", "show-button");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-foreground-button]')?.textContent === 'I am ready'`,
+  );
+
+  const initialCount = await manualTranscriptCount(cdp);
+  await typeAndSubmitManualPlayer(cdp, "I am ready");
+  await waitFor(
+    cdp,
+    `document.querySelector('#composerFeedback')?.textContent.includes('rendered button')`,
+  );
+  assertEqual(
+    await manualTranscriptCount(cdp),
+    initialCount,
+    "manual exact showButton composer text must not append or complete",
+  );
+  await evaluate(
+    cdp,
+    `const input=document.querySelector('#composerForm textarea'); input.value=''; input.dispatchEvent(new Event('input', {bubbles:true})); input.focus()`,
+  );
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
+  assertEqual(
+    await manualTranscriptCount(cdp),
+    initialCount,
+    "manual empty-composer Space must not complete showButton",
+  );
+  if (!(await value(cdp, `document.querySelector('[data-foreground-button]') !== null`))) {
+    throw new Error("manual empty-composer Space must leave showButton rendered");
+  }
+  await click(cdp, "[data-foreground-button]");
+  await waitFor(cdp, `document.querySelector('[data-foreground-button]') === null`);
+  assertEqual(
+    await manualTranscriptCount(cdp),
+    initialCount + 1,
+    "manual rendered showButton activation must append and complete",
+  );
+
+  await selectDemoFixture(cdp, "foreground-fixture", "choose");
+  await typeAndSubmitManualPlayer(cdp, "Continue steadily");
+  await waitFor(cdp, `document.querySelector('[data-foreground-choice]') === null`);
+  assertEqual(
+    await manualTranscriptCount(cdp),
+    initialCount + 2,
+    "manual exact visible choose text must still complete",
+  );
+
+  await selectDemoFixture(cdp, "pacing-gate", "skippable");
+  await waitFor(cdp, `document.querySelectorAll('[data-transcript-entry-id]').length === 1`);
+  await evaluate(cdp, `document.querySelector('#composerForm textarea').focus()`);
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
+  await waitFor(cdp, `document.querySelectorAll('[data-transcript-entry-id]').length === 2`);
+}
+
+async function selectDemoFixture(cdp, key, selectedValue) {
+  await evaluate(
+    cdp,
+    `const select=document.querySelector(${JSON.stringify(`[data-demo-select="${key}"]`)}); select.value=${JSON.stringify(selectedValue)}; select.dispatchEvent(new Event('change', {bubbles:true}))`,
+  );
+}
+
+async function manualTranscriptCount(cdp) {
+  return value(cdp, `document.querySelectorAll('[data-transcript-entry-id]').length`);
 }
 
 async function vueTranscriptScenario(cdp, origin) {
@@ -649,6 +743,13 @@ async function typeAndSubmit(cdp, text) {
   await evaluate(
     cdp,
     `const input=document.querySelector('#composer-input'); input.value=${JSON.stringify(text)}; input.dispatchEvent(new Event('input', {bubbles:true})); document.querySelector('#composer-form').requestSubmit()`,
+  );
+}
+
+async function typeAndSubmitManualPlayer(cdp, text) {
+  await evaluate(
+    cdp,
+    `const input=document.querySelector('#composerForm textarea'); input.value=${JSON.stringify(text)}; input.dispatchEvent(new Event('input', {bubbles:true})); document.querySelector('#composerForm').requestSubmit()`,
   );
 }
 

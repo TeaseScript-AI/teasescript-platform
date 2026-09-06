@@ -112,7 +112,6 @@ function closeToolColumn(id: string): void {
       :feedback="state.composerFeedback"
       :foreground="state.foreground"
       :model-value="state.composerValue"
-      @activate="dispatch({ type: 'activate-foreground', label: $event })"
       @input-blur="layout.markInputBlurred"
       @submit="dispatch({ type: 'submit-composer' })"
       @touch-input="layout.markTouchInputExpected"

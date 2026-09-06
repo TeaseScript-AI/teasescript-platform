@@ -9,7 +9,6 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  activate: [label: string];
   "input-blur": [];
   "touch-input": [];
   "update:modelValue": [value: string];
@@ -43,18 +42,6 @@ function handleKeydown(event: KeyboardEvent): void {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     emit("submit");
-    return;
-  }
-  const element = event.currentTarget;
-  if (
-    event.key === " " &&
-    props.foreground?.kind === "show-button" &&
-    props.modelValue.length === 0 &&
-    element instanceof HTMLTextAreaElement &&
-    element.selectionStart === element.selectionEnd
-  ) {
-    event.preventDefault();
-    emit("activate", props.foreground.label);
   }
 }
 

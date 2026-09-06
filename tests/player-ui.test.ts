@@ -984,7 +984,8 @@ test("Player foreground interactions render above the composer and keep typed eq
     /case "ask-text"[\s\S]*case "ask-number"[\s\S]*case "show-button"[\s\S]*case "choose"/u,
   );
   assert.match(browser, /event\.key === "Enter" && !event\.shiftKey/u);
-  assert.match(browser, /event\.key === " "[\s\S]*foreground\?\.kind === "show-button"/u);
+  assert.doesNotMatch(browser, /foreground\?\.kind === "show-button"/u);
+  assert.match(browser, /case "show-button":[\s\S]*Use the rendered button to continue/u);
 
   const options = [
     { id: "one", label: "Continue steadily" },

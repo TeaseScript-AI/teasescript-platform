@@ -29,6 +29,37 @@ test("Vue Player core keeps foreground submission deterministic", () => {
   assert.equal(completed.transcriptEntries.at(-1)?.text, "Continue steadily");
 });
 
+test("Vue showButton completes only through rendered activation", async () => {
+  const initial = createPlayerCoreState({
+    ...DEMO_PRESENTATION,
+    foreground: { kind: "show-button", accessibleName: "Continue", label: "Continue" },
+  });
+  const submitted = reducePlayerCoreState(
+    reducePlayerCoreState(initial, { type: "set-composer", value: "Continue" }),
+    { type: "submit-composer" },
+  );
+  assert.equal(submitted.foreground?.kind, "show-button");
+  assert.equal(submitted.transcriptEntries.length, initial.transcriptEntries.length);
+  assert.match(submitted.composerFeedback, /rendered button/u);
+
+  const activated = reducePlayerCoreState(submitted, {
+    type: "activate-foreground",
+    label: "Continue",
+  });
+  assert.equal(activated.foreground, null);
+  assert.equal(activated.transcriptEntries.at(-1)?.text, "Continue");
+
+  const [composer, foreground] = await Promise.all([
+    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerComposer.vue"), "utf8"),
+    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerForeground.vue"), "utf8"),
+  ]);
+  assert.doesNotMatch(composer, /show-button|emit\("activate"/u);
+  assert.match(
+    foreground,
+    /data-foreground-button[\s\S]*@click="\$emit\('activate', foreground\.label\)"/u,
+  );
+});
+
 test("Vue Player core records only controls that request user history", () => {
   const initial = createPlayerCoreState(DEMO_PRESENTATION);
   const toggled = reducePlayerCoreState(initial, {

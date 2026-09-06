@@ -383,7 +383,8 @@ The transcript:
 - is centered within the actual middle content region rather than the full viewport;
 - keeps the maintained ultrawide readability cap pending visual retuning;
 - owns vertical scrolling and contains overscroll;
-- uses the maintained soft top fade beneath the stage instead of a hard cut;
+- uses the maintained soft top fade beneath the stage instead of a hard cut only while the transcript is actually
+  scrolled away from its top; at the top of history, the first visible content remains fully opaque;
 - may hide the visible scrollbar on narrow layouts while retaining scroll behavior;
 - must remain performant for histories that can reach extremely large sizes. Do not retain millions of words as active
   DOM nodes. In the accepted Vue implementation, TanStack Vue Virtual is the single windowing and scroll-anchoring
@@ -490,8 +491,8 @@ explicitly focused tool/input/control naturally owns keyboard input while it is 
 enabled rather than visually disabling it:
 
 - `choose`: selecting a rendered control or typing one exact unambiguous visible option completes the same choice;
-- `showButton`: clicking the rendered button, typing its exact visible label, or pressing Space while the empty composer
-  owns focus activates the one available button;
+- `showButton`: clicking the rendered button activates it; composer submission, including its exact visible label, and
+  Space while the empty composer owns focus do not activate it;
 - a primary click on unrelated/blank Player space does **not** activate `showButton`;
 - while any mandatory foreground interaction is active, other composer text does not advance ordinary canonical script
   execution. In the deterministic first POC it is an invalid attempt and the same interaction remains active with the
