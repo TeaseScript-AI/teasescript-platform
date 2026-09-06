@@ -1,5 +1,6 @@
 import { createApp } from "vue";
 import App from "./App.vue";
+import "./styles/globals.css";
 import "../../styles/cascade.css";
 import "../../styles/reset.css";
 import "../../styles/layout.css";

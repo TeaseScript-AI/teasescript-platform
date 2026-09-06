@@ -8,6 +8,7 @@
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "paths": { "@/*": ["src/*"] },
     "strict": true
   },
   "include": ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "../*.ts"]

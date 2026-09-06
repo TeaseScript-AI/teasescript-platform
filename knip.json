@@ -4,6 +4,8 @@
     "src/index.ts",
     "playground/browser.ts",
     "playground/server.ts",
+    "player/vue/index.html",
+    "player/vue/src/lib/utils.ts",
     "tests/**/*.test.ts",
     "tests/property/replay.ts",
     "tools/oxlint/{run,test}.mjs",
@@ -17,11 +19,12 @@
   "project": [
     "src/**/*.ts",
     "playground/**/*.ts",
+    "player/vue/**/*.{css,ts,vue}",
     "tests/**/*.ts",
     "tools/oxlint/**/*.mjs",
     "tools/oxlint/**/*.ts",
     "tools/local-agent/**/*.{cjs,mjs}"
   ],
-  "ignoreDependencies": ["@vue/tsconfig"],
+  "ignoreDependencies": ["@tanstack/vue-virtual", "@vue/tsconfig", "reka-ui", "shadcn-vue"],
   "include": ["files", "exports", "dependencies", "unlisted", "unresolved"]
 }
