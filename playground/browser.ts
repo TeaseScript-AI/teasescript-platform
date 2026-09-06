@@ -123,10 +123,37 @@ function saveCheckpoint(): void {
 
 function restoreSavedCheckpoint(): void {
   if (!runtimeIsCurrent()) { setActionStatus("Compile the current source before restoring a checkpoint."); return; }
-  try { const serialized = localStorage.getItem(checkpointStorageKey(currentExample)); if (serialized === null) { setActionStatus("No saved checkpoint exists."); return; } const checkpoint = deserializeCheckpoint(serialized); if (JSON.stringify(plan) !== JSON.stringify(checkpoint.plan)) { setActionStatus("Checkpoint restore refused: its self-contained plan is incompatible with the current source runtime."); return; } snapshot = checkpoint.snapshot; eventLog = []; elements.transcript.replaceChildren(); renderState(); setActionStatus("Checkpoint restored; waiting state and pending action are retained."); } catch (error) { setActionStatus(error instanceof CheckpointError ? `${error.info.code}: ${error.info.message}` : errorMessage(error)); }
+  try {
+    const serialized = localStorage.getItem(checkpointStorageKey(currentExample));
+    if (serialized === null) {
+      setActionStatus("No saved checkpoint exists.");
+      return;
+    }
+
+    const checkpoint = deserializeCheckpoint(serialized);
+    if (JSON.stringify(plan) !== JSON.stringify(checkpoint.plan)) {
+      setActionStatus("Checkpoint restore refused: its self-contained plan is incompatible with the current source runtime.");
+      return;
+    }
+
+    snapshot = checkpoint.snapshot;
+    eventLog = [];
+    elements.transcript.replaceChildren();
+    renderState();
+    setActionStatus("Checkpoint restored; waiting state and pending action are retained.");
+  } catch (error) {
+    setActionStatus(error instanceof CheckpointError ? `${error.info.code}: ${error.info.message}` : errorMessage(error));
+  }
 }
 
-function clearSavedCheckpoint(): void { try { localStorage.removeItem(checkpointStorageKey(currentExample)); setActionStatus("Saved checkpoint cleared."); } catch (error) { setActionStatus(errorMessage(error)); } }
+function clearSavedCheckpoint(): void {
+  try {
+    localStorage.removeItem(checkpointStorageKey(currentExample));
+    setActionStatus("Saved checkpoint cleared.");
+  } catch (error) {
+    setActionStatus(errorMessage(error));
+  }
+}
 
 async function importSource(): Promise<void> {
   const file = elements.sourceFile.files?.[0]; elements.sourceFile.value = "";
@@ -138,7 +165,32 @@ async function importSource(): Promise<void> {
 function exportSource(): void { const blob = new Blob([elements.source.value], { type: "text/plain;charset=utf-8" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "teasescript-workspace.tease"; link.click(); URL.revokeObjectURL(link.href); setActionStatus("Source exported as teasescript-workspace.tease."); }
 
 async function refreshAutomationWorkspace(): Promise<void> {
-  try { const response = await fetch("/api/workspace", { cache: "no-store" }); if (!response.ok) throw new Error(`Automation workspace request failed with HTTP ${response.status}.`); /* EVIDENCE: boundary: this same-origin development server returns workspaceView; results are display-only until recompilation. */ const data = await response.json() as { source: string; resultRevision: number | null; result: WorkspaceResult | null }; replaceSource(data.source, "Automation source loaded; local execution is stale until compiled.", "Automation workspace"); if (data.result !== null) { applyResult(data.result, true); compiledRevision = null; renderState(); setActionStatus(`Automation result revision ${data.resultRevision ?? "unknown"} is displayed as view-only; compile before local execution.`); } } catch (error) { setActionStatus(errorMessage(error)); }
+  try {
+    const response = await fetch("/api/workspace", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Automation workspace request failed with HTTP ${response.status}.`);
+    }
+
+    /* EVIDENCE: boundary: this same-origin development server returns workspaceView; results are display-only until recompilation. */
+    const data = await response.json() as {
+      source: string;
+      resultRevision: number | null;
+      result: WorkspaceResult | null;
+    };
+    replaceSource(
+      data.source,
+      "Automation source loaded; local execution is stale until compiled.",
+      "Automation workspace",
+    );
+    if (data.result !== null) {
+      applyResult(data.result, true);
+      compiledRevision = null;
+      renderState();
+      setActionStatus(`Automation result revision ${data.resultRevision ?? "unknown"} is displayed as view-only; compile before local execution.`);
+    }
+  } catch (error) {
+    setActionStatus(errorMessage(error));
+  }
 }
 
 function renderDiagnostics(diagnostics: readonly { code: string; message: string; line: number; column: number; length: number }[]): void { elements.diagnostics.replaceChildren(); if (diagnostics.length === 0) { const item = document.createElement("li"); item.className = "diagnostic-ok"; item.textContent = "No parser or semantic diagnostics."; elements.diagnostics.append(item); return; } for (const diagnostic of diagnostics) { const button = document.createElement("button"); button.className = "diagnostic-button"; button.textContent = `${diagnostic.code} (${diagnostic.line}:${diagnostic.column}) ${diagnostic.message}`; button.addEventListener("click", () => { const start = offsetAt(elements.source.value, diagnostic.line, diagnostic.column); elements.source.focus(); elements.source.setSelectionRange(start, start + Math.max(1, diagnostic.length)); }); const item = document.createElement("li"); item.append(button); elements.diagnostics.append(item); } }
@@ -146,9 +198,30 @@ function renderTranscriptEvent(event: InterpreterEvent): void { const item = doc
 function renderState(): void { elements.instructionPlan.textContent = prettyJson(plan); elements.runtimeState.textContent = prettyJson(snapshot); elements.eventLog.textContent = prettyJson(eventLog); elements.instructionPosition.textContent = plan === null || snapshot === null ? "—" : `${snapshot.nextInstruction} / ${plan.instructions.length}`; elements.runtimeStatus.textContent = snapshot?.status ?? (plan === null ? "compile/stale" : "uninitialized"); const current = runtimeIsCurrent(); elements.sourceRevision.textContent = `Source revision ${sourceRevision}; ${current ? `runtime revision ${compiledRevision} is current` : "runtime is stale or uncompiled"}.`; elements.run.disabled = !current; elements.step.disabled = !current; elements.saveCheckpoint.disabled = !current; elements.restoreCheckpoint.disabled = !current; }
 function renderSourceLines(): void { elements.sourceLines.textContent = Array.from({ length: elements.source.value.split("\n").length }, (_, index) => String(index + 1)).join("\n"); elements.sourceLines.scrollTop = elements.source.scrollTop; }
 function offsetAt(source: string, line: number, column: number): number { const lines = source.split("\n"); return lines.slice(0, line - 1).reduce((total, value) => total + value.length + 1, 0) + column - 1; }
-function safeStorageGet(key: string): string | null { try { return localStorage.getItem(key); } catch { setActionStatus("Local draft persistence is unavailable in this browser."); return null; } }
-function safeStorageSet(key: string, value: string): void { try { localStorage.setItem(key, value); } catch { setActionStatus("Local draft could not be saved in this browser."); } }
-function safeStorageRemove(key: string): void { try { localStorage.removeItem(key); } catch { setActionStatus("Local draft could not be cleared in this browser."); } }
+function safeStorageGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    setActionStatus("Local draft persistence is unavailable in this browser.");
+    return null;
+  }
+}
+
+function safeStorageSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    setActionStatus("Local draft could not be saved in this browser.");
+  }
+}
+
+function safeStorageRemove(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    setActionStatus("Local draft could not be cleared in this browser.");
+  }
+}
 function setActionStatus(message: string): void { elements.actionStatus.textContent = message; }
 function prettyJson(value: unknown): string { return JSON.stringify(value, null, 2) ?? "null"; }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
