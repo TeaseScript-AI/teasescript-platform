@@ -35,14 +35,14 @@ test("executes the repository playground example deterministically", async () =>
   );
 });
 
-test("every fixed repository playground example compiles and completes", async () => {
+test("every fixed repository playground example compiles and reaches its intended boundary", async () => {
   for (const [name, example] of Object.entries(PLAYGROUND_EXAMPLES)) {
     const source = await readFile(`examples/playground/${example.file}`, "utf8");
     const compilation = compileSource(source);
     assert.deepEqual(compilation.diagnostics, [], name);
     assert.notEqual(compilation.plan, null, name);
     const result = run(compilation.plan!, createImmediatePacingRuntimeSnapshot(compilation.plan!));
-    assert.equal(result.snapshot.status, "halted", name);
+    assert.equal(result.snapshot.status, name === "player-controls" ? "waiting" : "halted", name);
   }
 });
 

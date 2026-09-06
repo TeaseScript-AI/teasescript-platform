@@ -96,7 +96,7 @@ button {
 }
 
 button:hover { border-color: var(--accent); background: #3d2952; }
-button:focus-visible, pre:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, pre:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 .control-divider { width: 1px; align-self: stretch; margin: 0 .2rem; background: var(--border); }
 .action-status { margin-left: auto; color: var(--muted); font-size: .88rem; }
@@ -160,7 +160,7 @@ textarea {
 .transcript { display: grid; gap: .65rem; max-height: 31rem; overflow: auto; }
 .player-panel { position: relative; display: flex; flex-direction: column; }
 .player-panel > h2 { min-height: 3.75rem; padding-right: 4.5rem; }
-.player-panel .transcript { flex: 1 1 auto; max-height: none; }
+.player-panel .transcript { flex: 1 1 auto; max-height: none; min-height: 8rem; }
 .future-timer-slot {
   position: absolute;
   top: .85rem;
@@ -197,6 +197,71 @@ textarea {
 .event-complete { border-left-color: var(--success) !important; }
 .event-action { border-left-color: #69c9ff !important; }
 
+.interaction-region {
+  margin-top: .85rem;
+  padding-top: .85rem;
+  border-top: 1px solid var(--border);
+}
+
+.interaction-controls,
+.choice-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.interaction-controls fieldset {
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.interaction-controls legend {
+  margin-bottom: .5rem;
+  color: var(--muted);
+  font-size: .85rem;
+}
+
+.choice-select {
+  display: none;
+  width: 100%;
+}
+
+.interaction-feedback {
+  min-height: 1.25rem;
+  margin: .55rem 0 0;
+  color: var(--danger);
+  font-size: .85rem;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .5rem;
+  margin-top: .85rem;
+}
+
+.composer input,
+.choice-select {
+  min-width: 0;
+  min-height: 2.35rem;
+  padding: .45rem .65rem;
+  border: 1px solid #594170;
+  border-radius: .45rem;
+  color: #fff;
+  background: #0e0b14;
+  font: inherit;
+}
+
+.composer-help {
+  min-height: 1.25rem;
+  margin: .45rem 0 0;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
 .diagnostics { display: grid; gap: .4rem; }
 .diagnostics li { color: var(--danger); font: .86rem/1.45 ui-monospace, monospace; }
 .diagnostics .diagnostic-ok { color: var(--success); }
@@ -212,4 +277,10 @@ textarea {
   .primary-grid { grid-template-columns: 1fr; }
   .action-status { width: 100%; margin-left: 0; }
   .control-divider { display: none; }
+}
+
+@media (max-width: 520px) {
+  .choice-buttons { display: none; }
+  .choice-select { display: block; }
+  .player-panel { min-height: 28rem; }
 }

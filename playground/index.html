@@ -50,9 +50,24 @@
           </div>
         </section>
 
-        <section id="player-panel" class="panel player-panel">
+        <section id="player-panel" class="panel player-panel" aria-label="Player viewport">
           <h2>Player transcript</h2>
           <ol id="transcript" class="transcript" aria-live="polite"></ol>
+          <div id="interaction-region" class="interaction-region" hidden>
+            <div id="interaction-controls" class="interaction-controls"></div>
+            <p id="interaction-feedback" class="interaction-feedback" role="alert"></p>
+          </div>
+          <form id="composer-form" class="composer" novalidate>
+            <label id="composer-label" class="sr-only" for="composer-input">Chat composer</label>
+            <input
+              id="composer-input"
+              type="text"
+              autocomplete="off"
+              aria-describedby="composer-help interaction-feedback"
+            >
+            <button id="composer-submit" type="submit">Send</button>
+          </form>
+          <p id="composer-help" class="composer-help">Run the script to start the Player.</p>
           <section class="future-timer-slot" aria-label="Reserved future timer area">
             <div class="future-timer-circle" aria-label="Future timer placeholder">--:--</div>
             <p>Reserved for future timer UI</p>
