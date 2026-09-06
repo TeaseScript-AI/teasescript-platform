@@ -229,7 +229,10 @@ function saveCheckpoint(): void {
 }
 
 function restoreSavedCheckpoint(): void {
-  if (!runtimeIsCurrent()) { setActionStatus("Compile the current source before restoring a checkpoint."); return; }
+  if (!runtimeIsCurrent()) {
+    setActionStatus("Compile the current source before restoring a checkpoint.");
+    return;
+  }
   try {
     const serialized = localStorage.getItem(checkpointStorageKey(currentExample));
     if (serialized === null) {
