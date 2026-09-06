@@ -17,12 +17,10 @@ The current repository uses:
 - real source-to-runtime tests where public behavior crosses parser, compiler, instruction-plan, and runtime boundaries;
 - deterministic RNG seeds, JSON checkpoint round trips, and runtime resume-equivalence coverage;
 - playground HTTP and static-path security tests;
+- a dependency-free Chromium DevTools smoke script for implemented playground and Player browser behavior; and
 - a small repository-owned deterministic property campaign for runtime and source-pipeline boundaries.
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
-
-The accepted Player direction is a separate local Playwright suite with axe-core checks. It does not join `npm run check`
-or normal GitHub CI without an explicit owner decision based on measured cost and stability.
 
 ## Normal and diagnostic verification
 
@@ -102,9 +100,10 @@ End-to-end testing does not replace focused unit, validator, and invariant tests
 
 ## Player browser and visual verification
 
-Use focused unit tests for deterministic presentation logic and local Playwright tests for changed browser behavior,
-including layout, focus, input, scrolling, overlays, and accessibility across the relevant supported engines. Keep the
-full browser matrix outside normal CI by default.
+Use focused unit tests for deterministic presentation logic and the repository's local Chromium smoke route for changed
+browser behavior, including layout, focus, input, scrolling, overlays, and accessibility state. The current smoke route
+is a dependency-free development check outside `npm run check`; it is not a final cross-browser or production-host E2E
+suite.
 
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
 (computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This
@@ -497,7 +496,8 @@ follow-latest/scroll-away return-to-latest behavior. An unavailable Chromium exe
 available browser must pass the interaction, pacing, accessibility-state, restore, responsive, and Vue transcript
 checks.
 
-Real browser automation becomes required after the cross-origin host shell and player exist. Coverage should then include:
+Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
+include:
 
 - iframe sandboxing;
 - Content Security Policy;
@@ -509,8 +509,9 @@ Real browser automation becomes required after the cross-origin host shell and p
 - fullscreen and navigation;
 - invalid host/player messages.
 
-The host gate should reuse the local Playwright stack selected for the Player unless evidence from the implemented host
-surface shows that it cannot prove the required boundary.
+Select the production host's browser-automation stack when that concrete surface exists, based on the engines,
+accessibility checks, isolation boundaries, cost, and stability it must prove. The current dependency-free Chromium
+smoke does not predetermine that later tooling decision.
 
 ## Coverage and performance boundaries
 

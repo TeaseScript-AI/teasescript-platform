@@ -1,10 +1,7 @@
 # ADR 0020 — Vue 3 for production browser UI
 
 **Status:** Accepted
-**Decision source:** Owner direction during draft PR #318
-**Amendment context:** The Owner decision recorded in issue #335 later amends only this ADR's dependency and
-UI-foundation portion for Phase 1. It does not replace the Vue rendering decision, browser-native CSS geometry and
-styling ownership, or framework-independent engine and domain boundaries below.
+**Decision source:** Owner direction during draft PR #318 and issues #335 and #340
 
 ## Context
 
@@ -16,8 +13,13 @@ would create competing render and state owners at the point where the confirmed 
 production UI.
 
 The Owner confirmed that Vue 3 was the intended production frontend once the Player reached this level of component and
-state complexity. This decision records that direction without moving framework concerns into the deterministic engine
-or prematurely promoting development fixtures into product contracts.
+state complexity. The later Phase 1 foundation selected Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives,
+and TanStack Vue Virtual for the responsibilities described below. The original manual implementation remains useful
+only as transitional legacy while its development fixtures are migrated or retired; it is not a maintained alternative
+frontend direction.
+
+This decision records that current direction without moving framework concerns into the deterministic engine or
+prematurely promoting development fixtures into product contracts.
 
 ## Decision
 
@@ -30,19 +32,19 @@ or prematurely promoting development fixtures into product contracts.
 4. Browser-native CSS remains the owner of layout geometry, responsive composition, safe areas, and visual styling.
    Vue supplies semantic structure and state; it does not replace structural CSS with inline layout calculations.
 5. Vite and the official Vue plugin build the browser bundle, with Tailwind CSS 4 integrated through Vite as the
-   Phase 1 styling foundation. `vue-tsc` checks Vue templates and component TypeScript. The repository's native
+   styling foundation. `vue-tsc` checks Vue templates and component TypeScript. The repository's native
    TypeScript compiler remains the engine/tooling compiler; the Vue checker uses a separately pinned compatible
    TypeScript compiler until the official Vue checker supports that native compiler API.
-6. The Phase 1 UI foundation uses repository-owned local shadcn-vue source/config, selects Reka for relevant accessible
+6. The UI foundation uses repository-owned local shadcn-vue source/config and Reka for relevant accessible
    interactive primitives, positioning, and focus behavior, and uses TanStack Vue Virtual as the single transcript
    windowing and scroll-anchoring owner. No router, general state library, server-side rendering layer, duplicate
    scroller, or separate positioning stack is added. Browser-native CSS remains the owner of layout geometry and
    visual styling.
 7. Visual Lab, Layout Debug, demo media selection, and other deliberately development-only fixtures may remain outside
-   the Vue production core. They must not define runtime or product APIs merely because they are useful during
-   playtesting.
-8. The manual Player route may remain as a development comparison/fixture route while those tools need it. It is not a
-   second production architecture; the accepted production direction and common reference remain Vue-owned.
+   the Vue production core only while they still need migration or retirement. They must not define runtime or product
+   APIs merely because they are useful during playtesting.
+8. The manual/vanilla Player implementation is transitional legacy scheduled for removal. It may temporarily host
+   development fixtures, but it is not a maintained comparison architecture or a second production direction.
 
 ## Dependency and maintenance impact
 
@@ -50,12 +52,12 @@ or prematurely promoting development fixtures into product contracts.
   class utilities. The production bundle is self-hosted; no CDN runtime is used.
 - Tailwind CSS 4, Vite, the Vue Vite plugin, and the shadcn-vue CLI are build/development foundation tooling, as are
   `vue-tsc`, `@vue/tsconfig`, and the compatible TypeScript checker.
-- The later foundation is needed for the current large, variable-height transcript and the two Owner-selected Phase 2
-  design paths that will share UI seams after this foundation is independently approved. Manual local windowing and a
+- The selected foundation supports the current large, variable-height transcript and the two Owner-selected Phase 2
+  design paths that share UI seams. Manual local windowing and a
   competing `MessageScroller` were rejected because they would split ownership and evidence. Local/self-hosted source
   avoids a CDN or host/security-protocol change; the existing dependency audit and update path remains in force.
-- Phase 1 does not prebuild a component catalogue. Reka is the selected primitive layer for locally owned interactive
-  components when they are needed; it avoids adding a separate positioning/focus stack.
+- The foundation does not prebuild a component catalogue. Reka is the selected primitive layer for locally owned
+  interactive components when they are needed; it avoids adding a separate positioning/focus stack.
 - These Vue/foundation packages use their declared upstream licenses. Exact versions and transitive dependency
   identity remain executable facts in `package.json` and `package-lock.json`.
 - Dependency updates follow the existing repository verification path: install from the lockfile, type-check both
@@ -64,17 +66,21 @@ or prematurely promoting development fixtures into product contracts.
 ## Consequences
 
 - Confirmed Player regions can be decomposed into explicit components with testable presentation-state transitions.
-- Runtime integration can later provide typed presentation data without coupling the engine to Vue.
-- Development currently carries two local Player entry points, so the manual route's comparison/fixture status must
-  remain explicit.
-- Development-only tools need a deliberate adapter or later migration; they are not copied into the production core by
-  default.
+- Runtime adapters pass typed presentation data through framework-independent boundaries without coupling the engine
+  to Vue.
+- While both local entry points exist, documentation and development tooling must identify the manual route as legacy
+  pending removal rather than a supported comparison architecture.
+- Development-only tools need a deliberate migration or retirement before the manual route is removed; they are not
+  copied into the production core by default.
 
 ## Alternatives considered
 
 - **Continue manual DOM rendering:** rejected for the production core because state and render ownership are already
   complex enough that further imperative wiring would be harder to reason about and safely modify.
 - **Mount Vue around the existing imperative renderer:** rejected because two systems would own the same DOM and state.
+- **Add a separate Floating UI positioning stack:** rejected because repository-owned shadcn-vue/Reka primitives own
+  the current popover, menu, collision, and focus responsibilities. A later concrete requirement may justify revisiting
+  that dependency choice.
 - **Use a broader frontend stack immediately:** rejected because routing, global state infrastructure, SSR, or an
-  external component suite do not solve a current Player requirement. The later #335 amendment accepts only the
-  narrow, locally owned foundation recorded above.
+  external component suite do not solve a current Player requirement. The selected foundation remains the narrow,
+  locally owned stack recorded above.
