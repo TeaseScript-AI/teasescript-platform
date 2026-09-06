@@ -291,7 +291,15 @@
         overflow-y: auto;
         overscroll-behavior: contain;
 
-        padding-block: 10px 12px;
+        /*
+          The top padding matches the fade distance, so the fade consumes that
+          padding while the transcript rests at the top and only reaches real
+          content once it is actually scrolled under the stage. The right rail
+          uses the same relationship for its own edge fades.
+        */
+        --transcript-edge-fade: 28px;
+
+        padding-block: var(--transcript-edge-fade) 12px;
 
         /*
           Center the readable conversation shell inside the actual middle Grid
@@ -328,11 +336,19 @@
           color-mix(in srgb, var(--color-text-muted) 45%, transparent)
           transparent;
 
+      }
+
+      /*
+        The soft top fade hides content passing under the stage, so it applies
+        only while the transcript is actually scrolled. An unscrolled
+        transcript keeps its first line fully opaque.
+      */
+      .transcript[data-scrolled-from-top="true"] {
         -webkit-mask-image:
           linear-gradient(
             to bottom,
             transparent 0,
-            #000 56px,
+            #000 var(--transcript-edge-fade),
             #000 100%
           );
 
@@ -340,7 +356,7 @@
           linear-gradient(
             to bottom,
             transparent 0,
-            #000 56px,
+            #000 var(--transcript-edge-fade),
             #000 100%
           );
       }
