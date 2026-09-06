@@ -55,8 +55,9 @@ async function main() {
       await setViewport(cdp, 390, 844);
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
+      await vueTranscriptScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS desktop and 390x844 Player controls, pacing, rejection, and restore",
+        "player-browser-smoke: PASS manual Player controls plus Vue transcript virtualization, anchoring, and follow",
       );
     } finally {
       cdp.close();
@@ -375,6 +376,221 @@ async function narrowScenario(cdp) {
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
 }
 
+async function vueTranscriptScenario(cdp, origin) {
+  await navigate(cdp, `${origin}/player-vue/?fixture=transcript-stress`);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-transcript-fixture="stress"]') !== null && document.querySelector('[data-stress-count]')?.textContent === '2000 entries'`,
+  );
+
+  let metrics = await vueTranscriptMetrics(cdp);
+  assertEqual(metrics.count, 2000, "Vue stress fixture must retain its complete initial history");
+  assertAtMost(metrics.rendered, 32, "Vue transcript rendered DOM must stay bounded");
+  assertAtMost(metrics.distanceFromEnd, 36, "initial Vue transcript must land at latest");
+
+  await click(cdp, "[data-stress-append]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-stress-count]')?.textContent === '2001 entries'`,
+  );
+  await delay(220);
+  metrics = await vueTranscriptMetrics(cdp);
+  assertAtMost(metrics.distanceFromEnd, 36, "pinned Vue transcript append must follow latest");
+  assertAtMost(metrics.rendered, 32, "pinned Vue append must keep rendered DOM bounded");
+
+  const pointerProbe = await value(
+    cdp,
+    `(() => {
+      const rect = document.querySelector('.transcript').getBoundingClientRect();
+      return {x: rect.left + 24, y: rect.top + 24, outsideY: Math.max(2, rect.top - 8)};
+    })()`,
+  );
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: pointerProbe.x,
+    y: pointerProbe.y,
+  });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: pointerProbe.x,
+    y: pointerProbe.y,
+    button: "left",
+    clickCount: 1,
+  });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: pointerProbe.x,
+    y: pointerProbe.outsideY,
+    button: "left",
+  });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: pointerProbe.x,
+    y: pointerProbe.outsideY,
+    button: "left",
+    clickCount: 1,
+  });
+  await delay(180);
+
+  await evaluate(
+    cdp,
+    `document.querySelector('.transcript').scrollTo({top: 1_000, behavior: 'auto'})`,
+  );
+  await waitFor(cdp, `document.querySelector('.transcript').scrollTop >= 500`);
+  await delay(300);
+  metrics = await vueTranscriptMetrics(cdp);
+  if (metrics.returnVisible !== true)
+    throw new Error(
+      `Vue return-to-latest control must appear after scrolling settles: ${JSON.stringify(metrics)}`,
+    );
+  assertEqual(metrics.fade, "true", "Vue transcript top fade must follow scroll state");
+
+  const anchorBeforePrepend = await value(
+    cdp,
+    `(() => {
+      const transcript = document.querySelector('.transcript');
+      const transcriptRect = transcript.getBoundingClientRect();
+      const item = [...transcript.querySelectorAll('[data-transcript-entry-id]')].find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.bottom > transcriptRect.top + 2 && rect.top < transcriptRect.bottom - 2;
+      });
+      return item === undefined
+        ? null
+        : {id: item.dataset.transcriptEntryId, offset: item.getBoundingClientRect().top - transcriptRect.top};
+    })()`,
+  );
+  if (anchorBeforePrepend === null)
+    throw new Error("Vue prepend test could not find a visible anchor");
+  await click(cdp, "[data-stress-prepend]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-stress-count]')?.textContent === '2013 entries'`,
+  );
+  await delay(220);
+  const anchorAfterPrepend = await value(
+    cdp,
+    `(() => {
+      const transcript = document.querySelector('.transcript');
+      const item = transcript.querySelector(${JSON.stringify(`[data-transcript-entry-id="${anchorBeforePrepend.id}"]`)});
+      return item === null
+        ? null
+        : {offset: item.getBoundingClientRect().top - transcript.getBoundingClientRect().top};
+    })()`,
+  );
+  if (anchorAfterPrepend === null)
+    throw new Error(`Vue prepend lost anchor entry ${String(anchorBeforePrepend.id)}`);
+  assertAtMost(
+    Math.abs(anchorAfterPrepend.offset - anchorBeforePrepend.offset),
+    2,
+    "Vue prepend must preserve the visible keyed entry offset",
+  );
+  metrics = await vueTranscriptMetrics(cdp);
+  assertAtMost(metrics.rendered, 32, "Vue prepend must keep rendered DOM bounded");
+
+  const awayTop = metrics.scrollTop;
+  await click(cdp, "[data-stress-append]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-stress-count]')?.textContent === '2014 entries'`,
+  );
+  await delay(220);
+  metrics = await vueTranscriptMetrics(cdp);
+  assertAtMost(Math.abs(metrics.scrollTop - awayTop), 2, "away Vue append must not follow latest");
+  if (metrics.returnVisible !== true)
+    throw new Error("Vue return-to-latest control must remain visible after away append");
+
+  const awayGrowTop = metrics.scrollTop;
+  await click(cdp, "[data-stress-grow]");
+  await delay(400);
+  metrics = await vueTranscriptMetrics(cdp);
+  assertAtMost(
+    Math.abs(metrics.scrollTop - awayGrowTop),
+    2,
+    "away Vue measurement growth must not follow latest",
+  );
+
+  const awayResizeTop = metrics.scrollTop;
+  const previousHeight = metrics.clientHeight;
+  await click(cdp, "[data-stress-resize]");
+  await waitFor(cdp, `document.querySelector('.transcript').clientHeight < ${previousHeight}`);
+  await delay(300);
+  metrics = await vueTranscriptMetrics(cdp);
+  assertAtMost(
+    Math.abs(metrics.scrollTop - awayResizeTop),
+    2,
+    "away Vue resize must not follow latest",
+  );
+  if (metrics.returnVisible !== true)
+    throw new Error("Vue return-to-latest control must survive an away resize");
+
+  await click(cdp, ".return-to-latest");
+  await waitFor(
+    cdp,
+    `document.querySelector('.transcript').scrollHeight - document.querySelector('.transcript').clientHeight - document.querySelector('.transcript').scrollTop <= 36`,
+  );
+  await delay(220);
+  metrics = await vueTranscriptMetrics(cdp);
+  if (metrics.returnVisible !== false)
+    throw new Error("Vue return-to-latest control must hide at latest");
+  assertAtMost(metrics.distanceFromEnd, 36, "Vue return-to-latest must restore latest follow");
+
+  const pinnedHeight = metrics.clientHeight;
+  await click(cdp, "[data-stress-resize]");
+  await waitFor(cdp, `document.querySelector('.transcript').clientHeight > ${pinnedHeight}`);
+  await delay(300);
+  metrics = await vueTranscriptMetrics(cdp);
+  assertAtMost(
+    metrics.distanceFromEnd,
+    36,
+    "pinned Vue container resize must preserve latest follow",
+  );
+
+  await click(cdp, "[data-stress-grow]");
+  await delay(400);
+  metrics = await vueTranscriptMetrics(cdp);
+  assertAtMost(
+    metrics.distanceFromEnd,
+    36,
+    "pinned Vue measurement growth must keep latest readable",
+  );
+  await click(cdp, "[data-stress-append]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-stress-count]')?.textContent === '2015 entries'`,
+  );
+  await delay(220);
+  metrics = await vueTranscriptMetrics(cdp);
+  assertAtMost(
+    metrics.distanceFromEnd,
+    36,
+    "restored Vue follow must keep appended latest readable",
+  );
+
+  await evaluate(cdp, `document.querySelector('.transcript').scrollTo({top: 0, behavior: 'auto'})`);
+  await waitFor(cdp, `document.querySelector('.transcript').scrollTop === 0`);
+  await delay(180);
+  metrics = await vueTranscriptMetrics(cdp);
+  assertEqual(metrics.fade, "false", "Vue top fade must be off at true top");
+}
+
+async function vueTranscriptMetrics(cdp) {
+  return value(
+    cdp,
+    `(() => {
+      const transcript = document.querySelector('.transcript');
+      return {
+        count: Number.parseInt(document.querySelector('[data-stress-count]').textContent, 10),
+        rendered: transcript.querySelectorAll('.transcript-virtual-item').length,
+        clientHeight: transcript.clientHeight,
+        scrollTop: transcript.scrollTop,
+        distanceFromEnd: transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop,
+        returnVisible: document.querySelector('.return-to-latest') !== null,
+        fade: transcript.dataset.scrolledFromTop,
+      };
+    })()`,
+  );
+}
+
 async function selectPlayerExample(cdp) {
   await waitFor(
     cdp,
@@ -475,6 +691,10 @@ async function value(cdp, expression) {
 
 function assertEqual(actual, expected, message) {
   if (actual !== expected) throw new Error(`${message}: expected ${expected}, received ${actual}`);
+}
+
+function assertAtMost(actual, maximum, message) {
+  if (actual > maximum) throw new Error(`${message}: expected <= ${maximum}, received ${actual}`);
 }
 
 async function findChromium() {

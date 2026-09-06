@@ -134,3 +134,30 @@ test("Vue parity route has one component owner and excludes development fixtures
   assert.doesNotMatch(core, /Visual Lab|Layout Debug/u);
   assert.doesNotMatch(index, /browser\.js/u);
 });
+
+test("Vue transcript uses TanStack's single virtual scroll and anchor owner", async () => {
+  const root = process.cwd();
+  const [transcript, styles, app, fixture] = await Promise.all([
+    readFile(resolve(root, "player/vue/src/components/PlayerTranscript.vue"), "utf8"),
+    readFile(resolve(root, "player/styles/components-transcript.css"), "utf8"),
+    readFile(resolve(root, "player/vue/src/App.vue"), "utf8"),
+    readFile(resolve(root, "player/vue/src/components/TranscriptStressFixture.vue"), "utf8"),
+  ]);
+
+  assert.match(transcript, /useVirtualizer/u);
+  assert.match(transcript, /anchorTo: "end"/u);
+  assert.match(transcript, /followOnAppend: true/u);
+  assert.match(transcript, /getItemKey/u);
+  assert.match(transcript, /:ref="measureElement"/u);
+  assert.match(transcript, /scrollToEnd/u);
+  assert.match(transcript, /isAtEnd/u);
+  assert.match(transcript, /setPointerCapture/u);
+  assert.match(transcript, /lostpointercapture/u);
+  assert.match(transcript, /role="log"/u);
+  assert.doesNotMatch(transcript, /column-reverse|scrollTop\s*\+=|scrollHeight\s*-/u);
+  assert.match(styles, /\.transcript-virtualizer\s*\{/u);
+  assert.match(styles, /inset-block-start:\s*0/u);
+  assert.match(app, /transcriptStressFixture[\s\S]*transcript-stress/u);
+  assert.match(fixture, /INITIAL_HISTORY_SIZE = 2_000/u);
+  assert.match(fixture, /data-transcript-fixture="stress"/u);
+});

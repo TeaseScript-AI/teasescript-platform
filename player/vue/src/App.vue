@@ -3,10 +3,15 @@ import { onMounted, ref } from "vue";
 import { DEMO_PRESENTATION } from "../../demo-session.js";
 import type { PlayerPresentation } from "../../model.js";
 import PlayerCore from "./PlayerCore.vue";
+import TranscriptStressFixture from "./components/TranscriptStressFixture.vue";
 
 const presentation = ref<PlayerPresentation>(DEMO_PRESENTATION);
+const transcriptStressFixture =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("fixture") === "transcript-stress";
 
 onMounted(async () => {
+  if (transcriptStressFixture) return;
   const media = await loadDemoMedia();
   if (media === null) return;
   presentation.value = {
@@ -45,7 +50,8 @@ function isDemoMedia(value: unknown): value is {
 </script>
 
 <template>
-  <PlayerCore :presentation="presentation" tool-label="Scene">
+  <TranscriptStressFixture v-if="transcriptStressFixture" />
+  <PlayerCore v-else :presentation="presentation" tool-label="Scene">
     <template #tool>
       <p class="tool-placeholder">No scene details are available in this parity fixture.</p>
     </template>
