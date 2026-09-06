@@ -140,8 +140,8 @@ function toggleFixtureSize(): void {
 }
 
 .transcript-stress-fixture :deep(.transcript) {
-  position: absolute;
-  inset: 43px 0 auto;
+  position: relative;
+  inset: auto;
   inline-size: 100%;
   block-size: var(--fixture-transcript-size);
   grid-column: auto;

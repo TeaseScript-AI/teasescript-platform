@@ -24,11 +24,11 @@ accept syntax, architecture, or implementation details.
   prepared output, typed skip settlement, and interaction/`wait` composition.
 - **Development and verification:** a standalone browser playground with Standard interaction and pacing controls; a
   modular production-oriented Player presentation POC with a verified, design-neutral Vue 3 Phase 1 foundation
-  (Vue/Vite, Tailwind CSS 4, repository-owned local shadcn-vue source/config, Reka primitives, and TanStack Vue Virtual
-  as the single bounded, variable-height, stable-anchor transcript owner); the manual Player route remains explicitly
-  a development comparison/fixture route; source-to-runtime conformance coverage; focused
-  runtime/checkpoint/state-validation tests; reproducible desktop and narrow-screen browser smoke coverage; and a
-  bounded deterministic property campaign.
+  (Vue/Vite, Tailwind CSS 4, repository-owned local shadcn-vue source/config, the selected Reka primitive foundation,
+  and TanStack Vue Virtual as the single bounded, variable-height, stable-anchor transcript owner); the manual Player
+  route remains explicitly a development comparison/fixture route; source-to-runtime conformance coverage; focused
+  runtime/checkpoint/state-validation tests; reproducible desktop and narrow-screen browser smoke coverage; and a bounded
+  deterministic property campaign.
 
 These summaries are orientation only. The current topic documents below are canonical for the detailed implementation
 contracts and boundaries.

@@ -33,17 +33,16 @@ or prematurely promoting development fixtures into product contracts.
    Phase 1 styling foundation. `vue-tsc` checks Vue templates and component TypeScript. The repository's native
    TypeScript compiler remains the engine/tooling compiler; the Vue checker uses a separately pinned compatible
    TypeScript compiler until the official Vue checker supports that native compiler API.
-6. The Phase 1 UI foundation uses repository-owned local shadcn-vue source/config, Reka for relevant accessible
-   interactive primitives, positioning, and focus behavior, and TanStack Vue Virtual as the single transcript
+6. The Phase 1 UI foundation uses repository-owned local shadcn-vue source/config, selects Reka for relevant accessible
+   interactive primitives, positioning, and focus behavior, and uses TanStack Vue Virtual as the single transcript
    windowing and scroll-anchoring owner. No router, general state library, server-side rendering layer, duplicate
    scroller, or separate positioning stack is added. Browser-native CSS remains the owner of layout geometry and
    visual styling.
-7. Visual Lab, Layout Debug, demo media selection, and other development fixtures may remain outside the Vue production
-   core while parity is established. They must not define runtime or product APIs merely because they are useful during
+7. Visual Lab, Layout Debug, demo media selection, and other deliberately development-only fixtures may remain outside
+   the Vue production core. They must not define runtime or product APIs merely because they are useful during
    playtesting.
-8. During migration, the manual Player route may remain as a temporary comparison reference. It is not a second
-   production architecture and is removed or reduced only after the Vue core passes explicit visual and interaction
-   acceptance.
+8. The manual Player route may remain as a development comparison/fixture route while those tools need it. It is not a
+   second production architecture; the accepted production direction and common reference remain Vue-owned.
 
 ## Dependency and maintenance impact
 
@@ -51,10 +50,12 @@ or prematurely promoting development fixtures into product contracts.
   class utilities. The production bundle is self-hosted; no CDN runtime is used.
 - Tailwind CSS 4, Vite, the Vue Vite plugin, and the shadcn-vue CLI are build/development foundation tooling, as are
   `vue-tsc`, `@vue/tsconfig`, and the compatible TypeScript checker.
-- The later foundation is needed for the current large, variable-height transcript and the two scheduled Phase 2
-  branches that share UI seams. Manual local windowing and a competing `MessageScroller` were rejected because they
-  would split ownership and evidence. Local/self-hosted source avoids a CDN or host/security-protocol change; the
-  existing dependency audit and update path remains in force.
+- The later foundation is needed for the current large, variable-height transcript and the two Owner-selected Phase 2
+  design paths that will share UI seams after this foundation is independently approved. Manual local windowing and a
+  competing `MessageScroller` were rejected because they would split ownership and evidence. Local/self-hosted source
+  avoids a CDN or host/security-protocol change; the existing dependency audit and update path remains in force.
+- Phase 1 does not prebuild a component catalogue. Reka is the selected primitive layer for locally owned interactive
+  components when they are needed; it avoids adding a separate positioning/focus stack.
 - These Vue/foundation packages use their declared upstream licenses. Exact versions and transitive dependency
   identity remain executable facts in `package.json` and `package-lock.json`.
 - Dependency updates follow the existing repository verification path: install from the lockfile, type-check both
@@ -64,8 +65,8 @@ or prematurely promoting development fixtures into product contracts.
 
 - Confirmed Player regions can be decomposed into explicit components with testable presentation-state transitions.
 - Runtime integration can later provide typed presentation data without coupling the engine to Vue.
-- The migration temporarily carries two local Player entry points, so their comparison/reference status must remain
-  explicit and short-lived.
+- Development currently carries two local Player entry points, so the manual route's comparison/fixture status must
+  remain explicit.
 - Development-only tools need a deliberate adapter or later migration; they are not copied into the production core by
   default.
 

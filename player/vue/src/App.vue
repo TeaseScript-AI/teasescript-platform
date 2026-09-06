@@ -53,7 +53,7 @@ function isDemoMedia(value: unknown): value is {
   <TranscriptStressFixture v-if="transcriptStressFixture" />
   <PlayerCore v-else :presentation="presentation" tool-label="Scene">
     <template #tool>
-      <p class="tool-placeholder">No scene details are available in this parity fixture.</p>
+      <p class="tool-placeholder">No scene details are available in this reference fixture.</p>
     </template>
   </PlayerCore>
 </template>

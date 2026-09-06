@@ -58,12 +58,12 @@ test("serves the modular Player demo and its local assets", async () => {
   assert.match(css.body, /--right-controls-width/u);
 });
 
-test("serves the built Vue Player parity candidate independently from the legacy reference", async () => {
+test("serves the Vue Player reference independently from the manual comparison route", async () => {
   const html = await get("/player-vue/");
 
   assert.equal(html.status, 200);
   assert.match(html.contentType, /^text\/html/u);
-  assert.match(html.body, /Vue parity candidate/u);
+  assert.match(html.body, /Vue reference/u);
   assert.match(html.body, /\/player-vue\/assets\/index-[^"]+\.js/u);
   assert.doesNotMatch(html.body, /\/dist\/player\/browser\.js/u);
 });

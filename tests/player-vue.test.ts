@@ -117,7 +117,7 @@ test("Vue panel mode keeps auto responsive while preserving explicit and focused
   assert.equal(resolveLeftPanelModeOnNarrowTransition("open", true, false), "closed");
 });
 
-test("Vue parity route has one component owner and excludes development fixtures", async () => {
+test("Vue reference route has one component owner and excludes development fixtures", async () => {
   const root = process.cwd();
   const [core, main, index] = await Promise.all([
     readFile(resolve(root, "player/vue/src/PlayerCore.vue"), "utf8"),

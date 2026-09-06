@@ -16,7 +16,7 @@ for Visual Lab, Layout Debug, and other deliberate fixtures; it is not a second 
 
 ## Implementation seams
 
-- `index.html` and `browser.ts` are the temporary manual comparison entry point and wiring.
+- `index.html` and `browser.ts` are the manual development comparison entry point and wiring.
 - `vue/` contains the usable production-direction/common Vue reference, its Vite build, and a thin demo/reference
   adapter.
 - `model.ts` contains presentation-only POC data shapes.
@@ -33,9 +33,10 @@ for Visual Lab, Layout Debug, and other deliberate fixtures; it is not a second 
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
 presentation state in the common reference; Tailwind CSS 4 is integrated through Vite as a foundation layer,
-repository-owned shadcn-vue source/config provides local component seams, Reka covers relevant accessible interactive
-primitives/positioning/focus, and TanStack Vue Virtual is the single transcript windowing/scroll-anchoring owner. The
-engine and shared presentation contracts remain framework-independent as required by ADR 0020.
+repository-owned shadcn-vue source/config provides local component seams, Reka is the selected accessible
+primitive/positioning/focus layer when interactive components need it, and TanStack Vue Virtual is the single
+transcript windowing/scroll-anchoring owner. The engine and shared presentation contracts remain framework-independent
+as required by ADR 0020.
 
 `styles/layout.css` currently owns the concrete light-theme palette values and semantic token mapping used by the
 source. Those values are also maintained as observable Player contract in `docs/ui/PLAYER-UI.md`; component CSS should
@@ -59,8 +60,8 @@ measurement, keyed prepend/append anchoring, resize behavior, scroll-away preser
 It is not a runtime, package, or host API.
 
 The current composer, foreground controls, transcript-history/smart-follow fixtures, timer fixtures, stress fixture, and
-rendered right-rail controls are presentation-only and are not wired to the deterministic runtime. The Vue demo reducer
-and future Vue demo/reference runtime adapter remain separate from deterministic runtime data and its host boundary.
+rendered right-rail controls are presentation-only and are not wired to the deterministic runtime. No Vue
+demo/reference runtime adapter currently connects these fixtures to deterministic runtime data or its host boundary.
 Accepted Standard interaction behavior remains controlled by ADR 0018 and the runtime contracts; the maintained
 placement/presentation boundary is described in `docs/ui/PLAYER-UI.md`.
 

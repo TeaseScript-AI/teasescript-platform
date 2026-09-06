@@ -383,6 +383,20 @@ async function vueTranscriptScenario(cdp, origin) {
     `document.querySelector('[data-transcript-fixture="stress"]') !== null && document.querySelector('[data-stress-count]')?.textContent === '2000 entries'`,
   );
 
+  const fixtureGeometry = await value(
+    cdp,
+    `(() => {
+      const controls = document.querySelector('.transcript-stress-controls').getBoundingClientRect();
+      const transcript = document.querySelector('.transcript').getBoundingClientRect();
+      return {controlsBottom: controls.bottom, transcriptTop: transcript.top};
+    })()`,
+  );
+  if (fixtureGeometry.transcriptTop < fixtureGeometry.controlsBottom) {
+    throw new Error(
+      `Vue stress controls overlap the transcript: ${JSON.stringify(fixtureGeometry)}`,
+    );
+  }
+
   let metrics = await vueTranscriptMetrics(cdp);
   assertEqual(metrics.count, 2000, "Vue stress fixture must retain its complete initial history");
   assertAtMost(metrics.rendered, 32, "Vue transcript rendered DOM must stay bounded");
