@@ -33,7 +33,11 @@ async function main() {
     `--user-data-dir=${profile}`,
     "about:blank",
   ]);
+  const browserClosed = waitForBrowserClose(browser);
 
+  let scenarioError;
+  let scenarioFailed = false;
+  let cleanupError;
   try {
     const target = await waitForTarget(debugPort);
     const cdp = await connectCdp(target.webSocketDebuggerUrl);
@@ -57,11 +61,40 @@ async function main() {
     } finally {
       cdp.close();
     }
+  } catch (error) {
+    scenarioFailed = true;
+    scenarioError = error;
   } finally {
-    browser.kill("SIGTERM");
-    await new Promise((resolve) => server.close(resolve));
-    await rm(profile, { recursive: true, force: true });
+    try {
+      if (browser.exitCode === null && browser.signalCode === null) browser.kill("SIGTERM");
+      await browserClosed;
+      await new Promise((resolve) => server.close(resolve));
+      await rm(profile, { recursive: true, force: true });
+    } catch (error) {
+      cleanupError = error;
+    }
   }
+  if (scenarioFailed) throw scenarioError;
+  if (cleanupError !== undefined) throw cleanupError;
+}
+
+function waitForBrowserClose(browser) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      browser.off("close", finish);
+      browser.off("exit", finish);
+      browser.off("error", finish);
+      resolve();
+    };
+
+    browser.on("close", finish);
+    browser.on("exit", finish);
+    browser.on("error", finish);
+    if (browser.exitCode !== null || browser.signalCode !== null) finish();
+  });
 }
 
 async function desktopScenario(cdp) {
