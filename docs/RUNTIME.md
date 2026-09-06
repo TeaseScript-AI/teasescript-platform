@@ -343,8 +343,9 @@ The current implementation contains compiler-owned blocking `wait`, the compact 
 and `choose` forms lowered into one generic foreground `interaction` family, and ADR 0018 `say` pacing lowered into the
 `chatPacingGate` pending-action lifecycle. Runtime state retains persisted session time, at most one foreground action,
 zero or one background pacing gate, monotonic action IDs, bounded settlement replay, prepared `say` output, explicit
-time observation, and typed completion operations. The local playground reconstructs Standard controls from this state;
-browser scheduling and the final cross-origin Player shell remain out of scope.
+time observation, and typed completion operations. The local playground reconstructs Standard controls from this state,
+and the Vue reference schedules local browser wake-ups and submits explicit time observations. Production host
+lifecycle/time integrity and the final cross-origin Player shell remain out of scope.
 
 ## Owner-resolved future runtime semantics
 

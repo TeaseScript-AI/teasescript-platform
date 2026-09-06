@@ -154,3 +154,19 @@ test("runtime checkpoint restore reconstructs presentation without replay or com
   assert.equal(restored.snapshot.status, "waiting");
   assert.equal(restored.events.length, restorePoint.events.length);
 });
+
+test("runtime checkpoint restore handles retained event histories above the native spread limit", () => {
+  let session = createPlayerRuntimeSession('repeat 42002 { say "x" }');
+  for (let skipCount = 0; skipCount < 41_999; skipCount += 1) {
+    const skipped = skipPlayerRuntimePacing(session);
+    assert.equal(skipped?.outcome.kind, "completed");
+    session = skipped!.session;
+  }
+
+  const restorePoint = createPlayerRuntimeRestorePoint(session);
+  assert.equal(restorePoint.events.length, 125_999);
+  const restored = restorePlayerRuntimeSession(restorePoint);
+  assert.equal(restored.events.length, restorePoint.events.length);
+  assert.equal(restored.transcriptEntries.length, session.transcriptEntries.length);
+  assert.deepEqual(restored.snapshot, session.snapshot);
+});

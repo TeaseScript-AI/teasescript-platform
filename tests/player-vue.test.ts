@@ -10,8 +10,23 @@ import {
   resolveLeftPanelModeOnNarrowTransition,
 } from "../player/vue/src/composables/usePlayerLayout.js";
 
-test("Vue Player state retains only local presentation and fixture controls", async () => {
+test("Vue Player state keeps fixture transcript behavior separate from runtime semantics", async () => {
   const initial = createPlayerCoreState(DEMO_PRESENTATION);
+  const rejected = reducePlayerCoreState(
+    reducePlayerCoreState(initial, { type: "set-composer", value: " \t " }),
+    { type: "submit-fixture-composer" },
+  );
+  assert.match(rejected.composerFeedback, /before sending/u);
+  assert.equal(rejected.fixtureTranscriptEntries.length, 0);
+
+  const submitted = reducePlayerCoreState(
+    reducePlayerCoreState(rejected, { type: "set-composer", value: "An ordinary response" }),
+    { type: "submit-fixture-composer" },
+  );
+  const activated = reducePlayerCoreState(submitted, {
+    type: "activate-right-action",
+    controlId: "continue",
+  });
   const toggled = reducePlayerCoreState(initial, {
     type: "change-right-toggle",
     checked: false,
@@ -22,13 +37,28 @@ test("Vue Player state retains only local presentation and fixture controls", as
     controlId: "intensity",
     value: "gentle",
   });
+  assert.deepEqual(
+    activated.fixtureTranscriptEntries.map((entry) => entry.text),
+    ["An ordinary response", "Continue"],
+  );
+  assert.equal(activated.composerValue, "");
+  assert.ok(
+    activated.fixtureTranscriptEntries.every((entry) => /^fixture-activity-\d+$/u.test(entry.id)),
+  );
+  assert.equal(activated.fixtureTranscriptEntries[0]?.kind, "message");
+  if (activated.fixtureTranscriptEntries[0]?.kind === "message") {
+    assert.equal(activated.fixtureTranscriptEntries[0].speakerId, "fixture-user");
+  }
+  assert.equal(toggled.fixtureTranscriptEntries.at(-1)?.kind, "session-event");
+  assert.equal(toggled.fixtureTranscriptEntries.at(-1)?.text, "You changed Strict mode to off.");
+  assert.equal(selected.fixtureTranscriptEntries.length, toggled.fixtureTranscriptEntries.length);
   const intensity = selected.rightControls.find((control) => control.id === "intensity");
   assert.equal(intensity?.kind, "select");
   if (intensity?.kind === "select") assert.equal(intensity.value, "gentle");
 
   const source = await readFile(resolve(process.cwd(), "player/vue/src/state.ts"), "utf8");
   assert.doesNotMatch(source, /completeForeground|matchForegroundChoice|isAcceptedNumberText/u);
-  assert.doesNotMatch(source, /transcriptEntries|PlayerForegroundPresentation/u);
+  assert.doesNotMatch(source, /PlayerForegroundPresentation|runtime-event-/u);
 });
 
 test("Vue Player tools prefer unused columns, allow duplicates, and retain the final column", () => {
@@ -100,7 +130,8 @@ test("Vue reference route has one component owner and excludes development fixtu
   assert.doesNotMatch(main, /components-visual-lab|components-layout-debug/u);
   assert.doesNotMatch(core, /Visual Lab|Layout Debug/u);
   assert.match(core, /createPlayerRuntimeSession/u);
-  assert.match(core, /runtime\.transcriptEntries/u);
+  assert.match(core, /runtime\.value\.transcriptEntries/u);
+  assert.match(core, /state\.value\.fixtureTranscriptEntries/u);
   assert.doesNotMatch(index, /browser\.js/u);
 });
 

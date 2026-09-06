@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import type { CSSProperties } from "vue";
 import type { PlayerPresentation, PlayerToolDefinition } from "../../model.js";
 import {
+  activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
@@ -34,6 +35,7 @@ const props = defineProps<{
 }>();
 
 const player = ref<HTMLElement | null>(null);
+const composer = ref<InstanceType<typeof PlayerComposer> | null>(null);
 const toolDefinitions = computed<readonly PlayerToolDefinition[]>(() => {
   if (props.tools !== undefined) return props.tools;
   return props.toolLabel === undefined ? [] : [{ id: "scene", label: props.toolLabel }];
@@ -47,11 +49,34 @@ const state = ref(
 const runtime = shallowRef(createPlayerRuntimeSession(props.runtimeSource));
 const foreground = computed(() => playerRuntimeForeground(runtime.value));
 const pacingGate = computed(() => playerRuntimePacingGate(runtime.value));
+const transcriptEntries = computed(() => [
+  ...runtime.value.transcriptEntries,
+  ...state.value.fixtureTranscriptEntries,
+]);
+const transcriptRevision = computed(
+  () => runtime.value.transcriptRevision + state.value.nextActivitySequence - 1,
+);
+const transcriptSpeakers = computed(() => {
+  const fixtureUser = props.presentation.speakers.user ?? runtime.value.speakers.user;
+  return fixtureUser === undefined
+    ? runtime.value.speakers
+    : { ...runtime.value.speakers, "fixture-user": fixtureUser };
+});
 const layout = usePlayerLayout({ player });
 const toolsAvailable = computed(() => toolDefinitions.value.length > 0);
 const effectiveLeftMode = computed(() => (toolsAvailable.value ? layout.leftMode.value : "closed"));
 let sessionTimeOriginMs = performance.now() - runtime.value.snapshot.currentSessionTimeMs;
 let timeTimer: ReturnType<typeof setTimeout> | null = null;
+let activeTypedActionId = typedInteractionActionId();
+const pointerGestures = new Map<
+  number,
+  {
+    readonly startX: number;
+    readonly startY: number;
+    readonly target: EventTarget | null;
+    moved: boolean;
+  }
+>();
 
 const playerStyle = computed(
   () =>
@@ -73,11 +98,11 @@ function setFeedback(message: string): void {
 function submitComposer(): void {
   const result = submitPlayerRuntimeComposer(runtime.value, state.value.composerValue);
   if (result === null) {
-    setFeedback(
-      foreground.value?.kind === "show-button"
-        ? "Use the rendered button to continue."
-        : "Free chat is unavailable while no scripted answer is active.",
-    );
+    if (foreground.value?.kind === "show-button") {
+      setFeedback("Use the rendered button to continue.");
+    } else if (foreground.value === null) {
+      dispatch({ type: "submit-fixture-composer" });
+    }
     return;
   }
   applyRuntimeControl(result, true);
@@ -105,7 +130,24 @@ function applyRuntimeControl(result: PlayerRuntimeControlResult, clearComposer: 
   } else {
     setFeedback(runtimeOutcomeMessage(result.outcome));
   }
+  focusComposerForActiveTypedInteraction(false);
   scheduleTimeObservation();
+}
+
+function focusComposerForActiveTypedInteraction(force: boolean): void {
+  const actionId = typedInteractionActionId();
+  const actionChanged = actionId !== activeTypedActionId;
+  activeTypedActionId = actionId;
+  if (actionId !== null && (force || actionChanged)) {
+    void nextTick(() => composer.value?.focusInput());
+  }
+}
+
+function typedInteractionActionId(): number | null {
+  const action = activePlayerRuntimeInteraction(runtime.value.snapshot);
+  return action?.interactionKind === "text" || action?.interactionKind === "number"
+    ? action.actionId
+    : null;
 }
 
 function runtimeOutcomeMessage(outcome: PlayerRuntimeControlResult["outcome"]): string {
@@ -122,10 +164,14 @@ function runtimeOutcomeMessage(outcome: PlayerRuntimeControlResult["outcome"]): 
 }
 
 function handlePlayerPointer(event: PointerEvent): void {
+  const gesture = pointerGestures.get(event.pointerId);
+  pointerGestures.delete(event.pointerId);
   if (
+    gesture === undefined ||
+    gesture.moved ||
     event.button !== 0 ||
     !event.isPrimary ||
-    interactiveEventTarget(event.target) ||
+    !isPacingBackgroundTarget(gesture.target) ||
     relevantPlayerTextSelection()
   ) {
     return;
@@ -133,11 +179,40 @@ function handlePlayerPointer(event: PointerEvent): void {
   skipPacing();
 }
 
-function interactiveEventTarget(target: EventTarget | null): boolean {
-  return (
-    target instanceof Element &&
-    target.closest("button, input, select, textarea, a, [role='button']") !== null
-  );
+function rememberPlayerPointerTarget(event: PointerEvent): void {
+  pointerGestures.set(event.pointerId, {
+    startX: event.clientX,
+    startY: event.clientY,
+    target: event.target,
+    moved: false,
+  });
+}
+
+function markPlayerPointerMoved(event: PointerEvent): void {
+  const gesture = pointerGestures.get(event.pointerId);
+  if (
+    gesture !== undefined &&
+    (event.clientX !== gesture.startX || event.clientY !== gesture.startY)
+  ) {
+    gesture.moved = true;
+  }
+}
+
+function forgetPlayerPointerTarget(event: PointerEvent): void {
+  pointerGestures.delete(event.pointerId);
+}
+
+function isPacingBackgroundTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (
+    target === player.value ||
+    target.classList.contains("transcript") ||
+    target.classList.contains("title-bg")
+  ) {
+    return true;
+  }
+  const mediaSurface = target.closest(".media-surface");
+  return mediaSurface !== null && target.closest(".media-content") === null;
 }
 
 function relevantPlayerTextSelection(): boolean {
@@ -158,6 +233,7 @@ function restoreCheckpoint(restorePoint: PlayerRuntimeRestorePoint): void {
   runtime.value = restorePlayerRuntimeSession(restorePoint);
   sessionTimeOriginMs = performance.now() - runtime.value.snapshot.currentSessionTimeMs;
   dispatch({ type: "set-composer", value: "" });
+  focusComposerForActiveTypedInteraction(true);
   scheduleTimeObservation();
 }
 
@@ -169,6 +245,7 @@ function observeCurrentTime(): void {
   const result = observePlayerRuntimeTime(runtime.value, currentSessionTimeMs);
   runtime.value = result.session;
   if (result.outcome.kind === "invalidObservation") setFeedback(result.outcome.message);
+  focusComposerForActiveTypedInteraction(false);
   scheduleTimeObservation();
 }
 
@@ -231,6 +308,9 @@ function closeToolColumn(id: string): void {
     :data-right-layout="layout.rightLayout.value"
     data-timer-kind="visible"
     :style="playerStyle"
+    @pointercancel="forgetPlayerPointerTarget"
+    @pointerdown="rememberPlayerPointerTarget"
+    @pointermove="markPlayerPointerMoved"
     @pointerup="handlePlayerPointer"
   >
     <PlayerTitleBar
@@ -266,14 +346,15 @@ function closeToolColumn(id: string): void {
     <PlayerMedia :media="presentation.media" />
 
     <PlayerTranscript
-      :entries="runtime.transcriptEntries"
-      :revision="runtime.transcriptRevision"
-      :speakers="runtime.speakers"
+      :entries="transcriptEntries"
+      :revision="transcriptRevision"
+      :speakers="transcriptSpeakers"
     />
 
     <PlayerForeground :foreground="foreground" @activate="activateForeground" />
 
     <PlayerComposer
+      ref="composer"
       :feedback="state.composerFeedback"
       :foreground="foreground"
       :model-value="state.composerValue"
@@ -289,7 +370,7 @@ function closeToolColumn(id: string): void {
       :compact-timers="layout.compactTimers.value"
       :controls="state.rightControls"
       :timer="presentation.timer"
-      @action="setFeedback('This development control remains fixture-backed.')"
+      @action="dispatch({ type: 'activate-right-action', controlId: $event })"
       @select="(controlId, value) => dispatch({ type: 'change-right-select', controlId, value })"
       @toggle="
         (controlId, checked) => dispatch({ type: 'change-right-toggle', controlId, checked })

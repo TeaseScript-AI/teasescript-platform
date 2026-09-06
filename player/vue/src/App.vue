@@ -47,6 +47,9 @@ async function loadRuntimeSource(): Promise<string | null> {
   if (fixture === "runtime-unskippable") {
     return 'say unskippable "Locked", 60\nsay "After", 60';
   }
+  if (fixture === "runtime-skippable-long") {
+    return 'say "Long pacing", 60\nsay "After", 60\nshowButton "Continue"';
+  }
   try {
     const response = await fetch("/examples/playground/player-controls.tease", {
       cache: "no-store",

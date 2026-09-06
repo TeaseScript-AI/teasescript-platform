@@ -262,7 +262,7 @@ function appendRuntimeEvents(
   const retainedEvents = session.events as InterpreterEvent[];
   // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript accumulator for every session.
   const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
-  retainedEvents.push(...events);
+  for (const event of events) retainedEvents.push(event);
   for (const event of events) {
     if (event.kind === "say") {
       const speakerId = event.speaker === null ? "narrator" : `runtime-speaker-${event.sequence}`;

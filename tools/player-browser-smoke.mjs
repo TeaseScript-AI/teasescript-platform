@@ -486,7 +486,7 @@ async function manualTranscriptCount(cdp) {
 
 async function vueRuntimeScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
-  await navigate(cdp, `${origin}/player-vue/`);
+  await navigate(cdp, `${origin}/player-vue/?fixture=runtime-skippable-long`);
   await waitFor(
     cdp,
     `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
@@ -511,6 +511,37 @@ async function vueRuntimeScenario(cdp, origin) {
     JSON.stringify(await vueRuntimeTranscript(cdp)),
     JSON.stringify(initialTranscript),
     "checkpoint control Space activation must not also skip pacing",
+  );
+
+  await physicalClick(cdp, ".message-body");
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-foreground-button]') === null`),
+    true,
+    "transcript message activation must not skip pacing",
+  );
+  await physicalClick(cdp, ".right-toggle-control .right-control-label");
+  await waitFor(cdp, `document.body.textContent.includes('You changed Strict mode to off.')`);
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-foreground-button]') === null`),
+    true,
+    "nested right-rail control activation must not skip pacing",
+  );
+  await physicalDragTranscriptBackground(cdp);
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-foreground-button]') === null`),
+    true,
+    "a pointer drag across unused transcript space must not skip pacing",
+  );
+  await physicalClickTranscriptBackground(cdp);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-foreground-button]')?.textContent === 'Continue'`,
+  );
+
+  await navigate(cdp, `${origin}/player-vue/`);
+  await waitFor(
+    cdp,
+    `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
   );
 
   await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
@@ -543,15 +574,45 @@ async function vueRuntimeScenario(cdp, origin) {
     "empty showButton composer submission must leave the control active",
   );
 
-  await click(cdp, "[data-foreground-button]");
+  await evaluate(
+    cdp,
+    `const button=document.querySelector('[data-foreground-button]'); button.focus(); button.click()`,
+  );
   await waitFor(
     cdp,
     `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Answer'`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.activeElement === document.querySelector('.composer textarea') ? 'composer' : document.activeElement?.outerHTML`,
+    ),
+    "composer",
+    "a typed interaction after rendered activation must focus the composer",
   );
   await typeAndSubmitVuePlayer(cdp, "   ");
   await waitFor(
     cdp,
     `document.querySelector('.composer-feedback')?.textContent.includes('non-whitespace')`,
+  );
+  await physicalClick(cdp, "#save-player-checkpoint");
+  await typeAndSubmitVuePlayer(cdp, "Alex");
+  await waitFor(
+    cdp,
+    `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Number'`,
+  );
+  await physicalClick(cdp, "#restore-player-checkpoint");
+  await waitFor(
+    cdp,
+    `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Answer'`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.activeElement === document.querySelector('.composer textarea') ? 'composer' : document.activeElement?.outerHTML`,
+    ),
+    "composer",
+    "restoring a typed interaction must focus the composer",
   );
   await typeAndSubmitVuePlayer(cdp, "Alex");
   await waitFor(
@@ -620,7 +681,7 @@ async function vueRuntimeScenario(cdp, origin) {
     cdp,
     `document.querySelector('[data-transcript-entry-id]')?.textContent.includes('Locked')`,
   );
-  await physicalClick(cdp, ".media-surface");
+  await physicalClickTranscriptBackground(cdp);
   await waitFor(
     cdp,
     `document.querySelector('.composer-feedback')?.textContent.includes('not skippable')`,
@@ -670,6 +731,79 @@ async function physicalClick(cdp, selector) {
     type: "mouseReleased",
     x: point.x,
     y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
+}
+
+async function physicalClickTranscriptBackground(cdp) {
+  const point = await value(
+    cdp,
+    `(() => {
+      const rect = document.querySelector('.transcript').getBoundingClientRect();
+      for (let y = rect.top + 4; y < rect.bottom - 4; y += 8) {
+        for (let x = rect.left + 4; x < rect.right - 4; x += 8) {
+          if (document.elementFromPoint(x, y)?.classList.contains('transcript')) return {x, y};
+        }
+      }
+      throw new Error('No unused transcript background point is visible.');
+    })()`,
+  );
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
+}
+
+async function physicalDragTranscriptBackground(cdp) {
+  const points = await value(
+    cdp,
+    `(() => {
+      const rect = document.querySelector('.transcript').getBoundingClientRect();
+      const points = [];
+      for (let y = rect.top + 4; y < rect.bottom - 4; y += 8) {
+        for (let x = rect.left + 4; x < rect.right - 4; x += 8) {
+          if (document.elementFromPoint(x, y)?.classList.contains('transcript')) points.push({x, y});
+        }
+      }
+      const start = points[0];
+      const end = points.find((point) => start !== undefined && Math.hypot(point.x - start.x, point.y - start.y) >= 24);
+      if (start === undefined || end === undefined) throw new Error('No unused transcript drag path is visible.');
+      return {start, end};
+    })()`,
+  );
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: points.start.x,
+    y: points.start.y,
+  });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: points.start.x,
+    y: points.start.y,
+    button: "left",
+    clickCount: 1,
+  });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: points.end.x,
+    y: points.end.y,
+    button: "left",
+  });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: points.end.x,
+    y: points.end.y,
     button: "left",
     clickCount: 1,
   });

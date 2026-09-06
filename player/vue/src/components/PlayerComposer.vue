@@ -27,7 +27,10 @@ const accessibleName = computed(() => props.foreground?.accessibleName ?? "User 
 const inputMode = computed(() => (props.foreground?.kind === "ask-number" ? "decimal" : "text"));
 
 watch(() => props.modelValue, resizeInput);
-onMounted(resizeInput);
+onMounted(() => {
+  resizeInput();
+  focusInput();
+});
 
 function resizeInput(): void {
   void nextTick(() => {
@@ -38,6 +41,12 @@ function resizeInput(): void {
     element.style.blockSize = `${element.scrollHeight + borderSize}px`;
   });
 }
+
+function focusInput(): void {
+  void nextTick(() => input.value?.focus());
+}
+
+defineExpose({ focusInput });
 
 function handleKeydown(event: KeyboardEvent): void {
   if (event.isComposing) return;
