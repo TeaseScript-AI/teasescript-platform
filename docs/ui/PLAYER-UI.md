@@ -355,7 +355,12 @@ Standard image/video-like presentation:
 - centers media within the stage unless an accepted media capability explicitly positions it otherwise;
 - uses a restrained media-derived ambience/vignette in otherwise unused stage area by default where that effect is
   available, while allowing an accepted author/media capability to provide an explicit stage/background presentation;
-- clips ambience/vignette layers to the stage and keeps decorative effects pointer-neutral;
+- shares one continuous background field with the transcript beneath it. The media-derived ambience covers the stage,
+  continues across the stage/transcript boundary, and fades out before the foreground lane and composer, so the scene
+  colour reads as one surface rather than meeting a hard seam. The field stays inside the middle content column, so
+  tool columns, the right rail, and Player chrome keep their own application surfaces. Stage and transcript remain
+  separate regions with separate content and scrolling ownership;
+- clips the vignette to the stage and keeps decorative effects pointer-neutral;
 - uses a direct replacement as the Standard default transition; accepted explicit media transitions such as V30
   `fade`/`crossfade` remain author-requested behavior;
 - does not add duplicate filename, fit, or scene-information captions merely because those values exist elsewhere.
@@ -374,7 +379,7 @@ has been destroyed. Exact retention and LLM context policy remain upstream work.
 
 The transcript:
 
-- uses the canvas surface;
+- uses the canvas surface, continuous with the stage background above it;
 - is centered within the actual middle content region rather than the full viewport;
 - keeps the maintained ultrawide readability cap pending visual retuning;
 - owns vertical scrolling and contains overscroll;
