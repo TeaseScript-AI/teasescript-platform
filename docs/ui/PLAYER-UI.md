@@ -7,8 +7,9 @@
 - **Authority:** Accepted ADRs and accepted specifications remain higher authority for the exact architecture, runtime,
   language, isolation, and persistence scope they decide. The temporary [Upstream contract integration](#upstream-contract-integration)
   section below records Owner-decided Player behavior that still needs synchronization into those upstream contracts.
-- **Implementation state:** The production-oriented Player presentation POC exists under `player/`, but runtime/host
-  integration is incomplete and several visual measurements remain deliberate tuning baselines.
+- **Implementation state:** The production-oriented Player presentation POC exists under `player/`; the implemented
+  interaction/pacing slice is runtime-backed in the Vue reference, while production host integration, unsupported
+  capability families, and several visual measurements remain incomplete or deliberate tuning baselines.
 
 This document may lead the implementation. A missing POC feature or an implementation bug does not redefine the desired
 Player contract. Conversely, behavior found only in current HTML/CSS/JavaScript is evidence rather than contract until it
@@ -52,9 +53,11 @@ ADR 0001 fixes the responsive PWA direction; exact offline, storage, cache, and 
 
 Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.md);
 [`player/README.md`](../../player/README.md) records POC seams and demo-only behavior. This specification may lead the
-implementation. The current `player/` POC is a presentation implementation with incomplete runtime/host wiring;
-`Visual Lab`, `Layout Debug`, `Scene`, placeholder content, and demo media are development fixtures rather than
-Standard Player product content. Values explicitly marked for retesting remain provisional tuning baselines.
+implementation. The current Vue reference connects implemented Standard interactions, transcript output, pacing, time
+observation, checkpoint, and restore to canonical runtime state. Production host wiring remains incomplete; `Visual
+Lab`, `Layout Debug`, `Scene`, placeholder content, demo media, timers, and right-rail controls are development fixtures
+rather than Standard Player product content. Values explicitly marked for retesting remain provisional tuning
+baselines.
 
 A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior here is
 the target unless higher authority conflicts with it.

@@ -56,9 +56,10 @@ async function main() {
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
       await manualPlayerForegroundScenario(cdp, origin);
+      await vueRuntimeScenario(cdp, origin);
       await vueTranscriptScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS manual Player controls plus Vue transcript virtualization, anchoring, and follow",
+        "player-browser-smoke: PASS runtime-backed Vue Player plus transcript virtualization, anchoring, and follow",
       );
     } finally {
       cdp.close();
@@ -481,6 +482,197 @@ async function selectDemoFixture(cdp, key, selectedValue) {
 
 async function manualTranscriptCount(cdp) {
   return value(cdp, `document.querySelectorAll('[data-transcript-entry-id]').length`);
+}
+
+async function vueRuntimeScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  await navigate(cdp, `${origin}/player-vue/`);
+  await waitFor(
+    cdp,
+    `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
+  );
+
+  const initialTranscript = await vueRuntimeTranscript(cdp);
+  await physicalClick(cdp, "#save-player-checkpoint");
+  await waitFor(
+    cdp,
+    `document.querySelector('#player-runtime-status')?.textContent.includes('saved')`,
+  );
+  assertEqual(
+    JSON.stringify(await vueRuntimeTranscript(cdp)),
+    JSON.stringify(initialTranscript),
+    "checkpoint control pointer activation must not also skip pacing",
+  );
+
+  await evaluate(cdp, `document.querySelector('#save-player-checkpoint').focus()`);
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
+  assertEqual(
+    JSON.stringify(await vueRuntimeTranscript(cdp)),
+    JSON.stringify(initialTranscript),
+    "checkpoint control Space activation must not also skip pacing",
+  );
+
+  await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-foreground-button]')?.textContent === 'Continue'`,
+  );
+  assertEqual(
+    (await vueRuntimeTranscript(cdp)).length,
+    2,
+    "eligible composer Space must advance the active pacing gate once",
+  );
+
+  await typeAndSubmitVuePlayer(cdp, "Continue");
+  await waitFor(
+    cdp,
+    `document.querySelector('.composer-feedback')?.textContent.includes('rendered button')`,
+  );
+  assertEqual(
+    (await vueRuntimeTranscript(cdp)).length,
+    2,
+    "showButton composer text must not append transcript output",
+  );
+  await typeAndSubmitVuePlayer(cdp, "");
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-foreground-button]')?.textContent`),
+    "Continue",
+    "empty showButton composer submission must leave the control active",
+  );
+
+  await click(cdp, "[data-foreground-button]");
+  await waitFor(
+    cdp,
+    `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Answer'`,
+  );
+  await typeAndSubmitVuePlayer(cdp, "   ");
+  await waitFor(
+    cdp,
+    `document.querySelector('.composer-feedback')?.textContent.includes('non-whitespace')`,
+  );
+  await typeAndSubmitVuePlayer(cdp, "Alex");
+  await waitFor(
+    cdp,
+    `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Number'`,
+  );
+  await typeAndSubmitVuePlayer(cdp, "not a number");
+  await waitFor(
+    cdp,
+    `document.querySelector('.composer-feedback')?.textContent.includes('decimal')`,
+  );
+  await typeAndSubmitVuePlayer(cdp, "12.5");
+  await waitFor(cdp, `document.querySelectorAll('.foreground-choice-buttons button').length === 2`);
+  assertEqual(
+    JSON.stringify(
+      await value(
+        cdp,
+        `[...document.querySelectorAll('.foreground-choice-buttons button')].map((button) => button.textContent)`,
+      ),
+    ),
+    JSON.stringify(["First option", "Second option"]),
+    "Vue choices must preserve authored runtime order",
+  );
+
+  await physicalClick(cdp, "#save-player-checkpoint");
+  const beforeChoice = await vueRuntimeTranscript(cdp);
+  await click(cdp, ".foreground-choice-item:nth-child(2) button");
+  await waitFor(cdp, `document.querySelector('[data-foreground-kind]') === null`);
+  await waitFor(cdp, `document.body.textContent.includes('Thanks Alex')`);
+  await click(cdp, "#restore-player-checkpoint");
+  await waitFor(cdp, `document.querySelectorAll('.foreground-choice-buttons button').length === 2`);
+  assertEqual(
+    JSON.stringify(await vueRuntimeTranscript(cdp)),
+    JSON.stringify(beforeChoice),
+    "Vue restore must reconstruct transcript exactly without duplicate output",
+  );
+  await click(cdp, ".foreground-choice-item:nth-child(2) button");
+  await waitFor(cdp, `document.body.textContent.includes('Thanks Alex')`);
+  assertEqual(
+    (await vueRuntimeTranscript(cdp)).filter((entry) => entry.text.includes("Thanks Alex")).length,
+    1,
+    "continuation after restore must emit final output once",
+  );
+
+  await setViewport(cdp, 390, 844);
+  await navigate(cdp, `${origin}/player-vue/`);
+  await waitFor(cdp, `document.querySelectorAll('[data-transcript-entry-id]').length === 1`);
+  await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-foreground-button]')?.textContent === 'Continue'`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('.composer').getBoundingClientRect().bottom <= document.querySelector('.player').getBoundingClientRect().bottom`,
+    ),
+    true,
+    "narrow runtime-backed composer must remain inside the Player",
+  );
+
+  await navigate(cdp, `${origin}/player-vue/?fixture=runtime-unskippable`);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-transcript-entry-id]')?.textContent.includes('Locked')`,
+  );
+  await physicalClick(cdp, ".media-surface");
+  await waitFor(
+    cdp,
+    `document.querySelector('.composer-feedback')?.textContent.includes('not skippable')`,
+  );
+  assertEqual(
+    (await vueRuntimeTranscript(cdp)).length,
+    1,
+    "unskippable pointer attempt must leave runtime transcript unchanged",
+  );
+  await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
+  assertEqual(
+    (await vueRuntimeTranscript(cdp)).length,
+    1,
+    "unskippable Space attempt must leave runtime transcript unchanged",
+  );
+}
+
+async function typeAndSubmitVuePlayer(cdp, text) {
+  await evaluate(
+    cdp,
+    `const input=document.querySelector('.composer textarea'); input.value=${JSON.stringify(text)}; input.dispatchEvent(new Event('input', {bubbles:true})); document.querySelector('.composer form').requestSubmit()`,
+  );
+}
+
+async function vueRuntimeTranscript(cdp) {
+  return value(
+    cdp,
+    `[...document.querySelectorAll('[data-transcript-entry-id]')].map((entry) => ({id: entry.dataset.transcriptEntryId, text: entry.querySelector('.message-body')?.textContent ?? entry.textContent}))`,
+  );
+}
+
+async function physicalClick(cdp, selector) {
+  const point = await value(
+    cdp,
+    `(() => { const rect=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
+  );
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
 }
 
 async function vueTranscriptScenario(cdp, origin) {

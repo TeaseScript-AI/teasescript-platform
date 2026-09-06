@@ -10,89 +10,25 @@ import {
   resolveLeftPanelModeOnNarrowTransition,
 } from "../player/vue/src/composables/usePlayerLayout.js";
 
-test("Vue Player core keeps foreground submission deterministic", () => {
-  const initial = createPlayerCoreState(DEMO_PRESENTATION);
-  const invalid = reducePlayerCoreState(
-    reducePlayerCoreState(initial, { type: "set-composer", value: "continue steadily" }),
-    { type: "submit-composer" },
-  );
-  assert.match(invalid.composerFeedback, /visible option exactly/u);
-  assert.equal(invalid.foreground?.kind, "choose");
-
-  const completed = reducePlayerCoreState(
-    reducePlayerCoreState(invalid, { type: "set-composer", value: "Continue steadily" }),
-    { type: "submit-composer" },
-  );
-  assert.equal(completed.foreground, null);
-  assert.equal(completed.composerValue, "");
-  assert.equal(completed.transcriptEntries.at(-1)?.kind, "message");
-  assert.equal(completed.transcriptEntries.at(-1)?.text, "Continue steadily");
-});
-
-test("Vue showButton completes only through rendered activation", async () => {
-  const initial = createPlayerCoreState({
-    ...DEMO_PRESENTATION,
-    foreground: { kind: "show-button", accessibleName: "Continue", label: "Continue" },
-  });
-  const submitted = reducePlayerCoreState(
-    reducePlayerCoreState(initial, { type: "set-composer", value: "Continue" }),
-    { type: "submit-composer" },
-  );
-  assert.equal(submitted.foreground?.kind, "show-button");
-  assert.equal(submitted.transcriptEntries.length, initial.transcriptEntries.length);
-  assert.match(submitted.composerFeedback, /rendered button/u);
-
-  const activated = reducePlayerCoreState(submitted, {
-    type: "activate-foreground",
-    label: "Continue",
-  });
-  assert.equal(activated.foreground, null);
-  assert.equal(activated.transcriptEntries.at(-1)?.text, "Continue");
-
-  const [composer, foreground] = await Promise.all([
-    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerComposer.vue"), "utf8"),
-    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerForeground.vue"), "utf8"),
-  ]);
-  assert.doesNotMatch(composer, /show-button|emit\("activate"/u);
-  assert.match(
-    foreground,
-    /data-foreground-button[\s\S]*@click="\$emit\('activate', foreground\.label\)"/u,
-  );
-});
-
-test("Vue Player core records only controls that request user history", () => {
+test("Vue Player state retains only local presentation and fixture controls", async () => {
   const initial = createPlayerCoreState(DEMO_PRESENTATION);
   const toggled = reducePlayerCoreState(initial, {
     type: "change-right-toggle",
     checked: false,
     controlId: "strict-mode",
   });
-  assert.equal(toggled.transcriptEntries.at(-1)?.kind, "session-event");
-  assert.equal(toggled.transcriptEntries.at(-1)?.text, "You changed Strict mode to off.");
-
   const selected = reducePlayerCoreState(toggled, {
     type: "change-right-select",
     controlId: "intensity",
     value: "gentle",
   });
-  assert.equal(selected.transcriptEntries.length, toggled.transcriptEntries.length);
   const intensity = selected.rightControls.find((control) => control.id === "intensity");
   assert.equal(intensity?.kind, "select");
   if (intensity?.kind === "select") assert.equal(intensity.value, "gentle");
-});
 
-test("Vue Player core appends action and ordinary composer responses", () => {
-  let state = createPlayerCoreState({
-    ...DEMO_PRESENTATION,
-    foreground: { kind: "ask-text", accessibleName: "Text answer", hint: "Type your answer…" },
-  });
-  state = reducePlayerCoreState(state, { type: "set-composer", value: "A considered answer" });
-  state = reducePlayerCoreState(state, { type: "submit-composer" });
-  state = reducePlayerCoreState(state, { type: "activate-right-action", controlId: "continue" });
-  assert.deepEqual(
-    state.transcriptEntries.slice(-2).map((entry) => entry.text),
-    ["A considered answer", "Continue"],
-  );
+  const source = await readFile(resolve(process.cwd(), "player/vue/src/state.ts"), "utf8");
+  assert.doesNotMatch(source, /completeForeground|matchForegroundChoice|isAcceptedNumberText/u);
+  assert.doesNotMatch(source, /transcriptEntries|PlayerForegroundPresentation/u);
 });
 
 test("Vue Player tools prefer unused columns, allow duplicates, and retain the final column", () => {
@@ -163,6 +99,8 @@ test("Vue reference route has one component owner and excludes development fixtu
   assert.match(main, /createApp\(App\)\.mount\("#app"\)/u);
   assert.doesNotMatch(main, /components-visual-lab|components-layout-debug/u);
   assert.doesNotMatch(core, /Visual Lab|Layout Debug/u);
+  assert.match(core, /createPlayerRuntimeSession/u);
+  assert.match(core, /runtime\.transcriptEntries/u);
   assert.doesNotMatch(index, /browser\.js/u);
 });
 

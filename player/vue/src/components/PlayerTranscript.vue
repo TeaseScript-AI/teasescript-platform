@@ -15,6 +15,7 @@ const SESSION_EVENT_ESTIMATE_PX = 32;
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
+  revision?: number;
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
 }>();
 
@@ -27,6 +28,7 @@ const touchActive = ref(false);
 const pointerActive = ref(false);
 const returningLatest = ref(false);
 const virtualizerOptions = computed(() => {
+  void props.revision;
   const entries = props.entries;
   return {
     count: entries.length,

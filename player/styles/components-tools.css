@@ -150,6 +150,28 @@
         padding: 10px;
       }
 
+      .runtime-session-controls {
+        display: grid;
+        gap: 8px;
+      }
+
+      .runtime-session-button {
+        width: 100%;
+        height: auto;
+        min-height: 34px;
+        padding: 7px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.25;
+      }
+
+      .runtime-session-status {
+        margin: 2px 0 0;
+        color: var(--color-text-muted);
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
       .tool-kv {
         display: grid;
         grid-template-columns: minmax(0, 1fr);

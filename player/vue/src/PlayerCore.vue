@@ -1,7 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import type { CSSProperties } from "vue";
 import type { PlayerPresentation, PlayerToolDefinition } from "../../model.js";
+import {
+  activatePlayerRuntimeButton,
+  createPlayerRuntimeRestorePoint,
+  createPlayerRuntimeSession,
+  observePlayerRuntimeTime,
+  playerRuntimeForeground,
+  playerRuntimePacingGate,
+  restorePlayerRuntimeSession,
+  selectPlayerRuntimeChoice,
+  skipPlayerRuntimePacing,
+  submitPlayerRuntimeComposer,
+  type PlayerRuntimeControlResult,
+  type PlayerRuntimeRestorePoint,
+} from "../../runtime-adapter.js";
 import PlayerComposer from "./components/PlayerComposer.vue";
 import PlayerForeground from "./components/PlayerForeground.vue";
 import PlayerMedia from "./components/PlayerMedia.vue";
@@ -14,6 +28,7 @@ import { createPlayerCoreState, reducePlayerCoreState, type PlayerCoreAction } f
 
 const props = defineProps<{
   presentation: PlayerPresentation;
+  runtimeSource: string;
   tools?: readonly PlayerToolDefinition[];
   toolLabel?: string;
 }>();
@@ -29,9 +44,14 @@ const state = ref(
     toolDefinitions.value.map((tool) => tool.id),
   ),
 );
+const runtime = shallowRef(createPlayerRuntimeSession(props.runtimeSource));
+const foreground = computed(() => playerRuntimeForeground(runtime.value));
+const pacingGate = computed(() => playerRuntimePacingGate(runtime.value));
 const layout = usePlayerLayout({ player });
 const toolsAvailable = computed(() => toolDefinitions.value.length > 0);
 const effectiveLeftMode = computed(() => (toolsAvailable.value ? layout.leftMode.value : "closed"));
+let sessionTimeOriginMs = performance.now() - runtime.value.snapshot.currentSessionTimeMs;
+let timeTimer: ReturnType<typeof setTimeout> | null = null;
 
 const playerStyle = computed(
   () =>
@@ -45,6 +65,149 @@ const playerStyle = computed(
 function dispatch(action: PlayerCoreAction): void {
   state.value = reducePlayerCoreState(state.value, action);
 }
+
+function setFeedback(message: string): void {
+  dispatch({ type: "set-composer-feedback", message });
+}
+
+function submitComposer(): void {
+  const result = submitPlayerRuntimeComposer(runtime.value, state.value.composerValue);
+  if (result === null) {
+    setFeedback(
+      foreground.value?.kind === "show-button"
+        ? "Use the rendered button to continue."
+        : "Free chat is unavailable while no scripted answer is active.",
+    );
+    return;
+  }
+  applyRuntimeControl(result, true);
+}
+
+function activateForeground(optionId: string | null): void {
+  const result =
+    optionId === null
+      ? activatePlayerRuntimeButton(runtime.value)
+      : selectPlayerRuntimeChoice(runtime.value, optionId);
+  if (result !== null) applyRuntimeControl(result, false);
+}
+
+function skipPacing(): void {
+  if (relevantPlayerTextSelection()) return;
+  const result = skipPlayerRuntimePacing(runtime.value);
+  if (result !== null) applyRuntimeControl(result, false);
+}
+
+function applyRuntimeControl(result: PlayerRuntimeControlResult, clearComposer: boolean): void {
+  runtime.value = result.session;
+  if (result.outcome.kind === "completed") {
+    dispatch({ type: "set-composer-feedback", message: "" });
+    if (clearComposer) dispatch({ type: "set-composer", value: "" });
+  } else {
+    setFeedback(runtimeOutcomeMessage(result.outcome));
+  }
+  scheduleTimeObservation();
+}
+
+function runtimeOutcomeMessage(outcome: PlayerRuntimeControlResult["outcome"]): string {
+  if (outcome.kind === "invalidPayload" || outcome.kind === "invalidObservation") {
+    return outcome.message;
+  }
+  if (outcome.kind === "wrongActionKind") return "The active Player control changed; try again.";
+  if (outcome.kind === "alreadySettled") return "That Player action was already completed.";
+  if (outcome.kind === "staleAction" || outcome.kind === "unknownAction") {
+    return "That Player action is no longer active.";
+  }
+  if (outcome.kind === "notDue") return "That timed action is not due yet.";
+  return "";
+}
+
+function handlePlayerPointer(event: PointerEvent): void {
+  if (
+    event.button !== 0 ||
+    !event.isPrimary ||
+    interactiveEventTarget(event.target) ||
+    relevantPlayerTextSelection()
+  ) {
+    return;
+  }
+  skipPacing();
+}
+
+function interactiveEventTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest("button, input, select, textarea, a, [role='button']") !== null
+  );
+}
+
+function relevantPlayerTextSelection(): boolean {
+  const selection = document.getSelection();
+  return (
+    selection !== null &&
+    !selection.isCollapsed &&
+    (player.value?.contains(selection.anchorNode) === true ||
+      player.value?.contains(selection.focusNode) === true)
+  );
+}
+
+function saveCheckpoint(): PlayerRuntimeRestorePoint {
+  return createPlayerRuntimeRestorePoint(runtime.value);
+}
+
+function restoreCheckpoint(restorePoint: PlayerRuntimeRestorePoint): void {
+  runtime.value = restorePlayerRuntimeSession(restorePoint);
+  sessionTimeOriginMs = performance.now() - runtime.value.snapshot.currentSessionTimeMs;
+  dispatch({ type: "set-composer", value: "" });
+  scheduleTimeObservation();
+}
+
+function observeCurrentTime(): void {
+  const currentSessionTimeMs = Math.max(
+    runtime.value.snapshot.currentSessionTimeMs,
+    Math.floor(performance.now() - sessionTimeOriginMs),
+  );
+  const result = observePlayerRuntimeTime(runtime.value, currentSessionTimeMs);
+  runtime.value = result.session;
+  if (result.outcome.kind === "invalidObservation") setFeedback(result.outcome.message);
+  scheduleTimeObservation();
+}
+
+function scheduleTimeObservation(): void {
+  if (timeTimer !== null) clearTimeout(timeTimer);
+  const actions = [
+    runtime.value.snapshot.foregroundAction,
+    ...runtime.value.snapshot.backgroundActions,
+  ];
+  const deadlines = actions.flatMap((action) =>
+    action?.kind === "delay" || action?.kind === "chatPacingGate" ? [action.deadlineMs] : [],
+  );
+  if (deadlines.length === 0) {
+    timeTimer = null;
+    return;
+  }
+  const nextDeadline = Math.min(...deadlines);
+  const currentSessionTimeMs = Math.max(
+    runtime.value.snapshot.currentSessionTimeMs,
+    Math.floor(performance.now() - sessionTimeOriginMs),
+  );
+  const delay = Math.max(0, nextDeadline - currentSessionTimeMs);
+  timeTimer = setTimeout(observeCurrentTime, Math.min(delay + 1, 2_147_483_647));
+}
+
+function observeAfterVisibilityChange(): void {
+  if (document.visibilityState === "visible") observeCurrentTime();
+}
+
+onMounted(() => {
+  scheduleTimeObservation();
+  document.addEventListener("visibilitychange", observeAfterVisibilityChange);
+});
+onBeforeUnmount(() => {
+  if (timeTimer !== null) clearTimeout(timeTimer);
+  document.removeEventListener("visibilitychange", observeAfterVisibilityChange);
+});
+
+defineExpose({ restoreCheckpoint, saveCheckpoint });
 
 function closeToolColumn(id: string): void {
   const collapsesPanel = state.value.toolColumns.length === 1;
@@ -68,6 +231,7 @@ function closeToolColumn(id: string): void {
     :data-right-layout="layout.rightLayout.value"
     data-timer-kind="visible"
     :style="playerStyle"
+    @pointerup="handlePlayerPointer"
   >
     <PlayerTitleBar
       :compact-timers="layout.compactTimers.value"
@@ -101,19 +265,22 @@ function closeToolColumn(id: string): void {
 
     <PlayerMedia :media="presentation.media" />
 
-    <PlayerTranscript :entries="state.transcriptEntries" :speakers="presentation.speakers" />
-
-    <PlayerForeground
-      :foreground="state.foreground"
-      @activate="dispatch({ type: 'activate-foreground', label: $event })"
+    <PlayerTranscript
+      :entries="runtime.transcriptEntries"
+      :revision="runtime.transcriptRevision"
+      :speakers="runtime.speakers"
     />
+
+    <PlayerForeground :foreground="foreground" @activate="activateForeground" />
 
     <PlayerComposer
       :feedback="state.composerFeedback"
-      :foreground="state.foreground"
+      :foreground="foreground"
       :model-value="state.composerValue"
+      :pacing-active="pacingGate !== null"
       @input-blur="layout.markInputBlurred"
-      @submit="dispatch({ type: 'submit-composer' })"
+      @skip-pacing="skipPacing"
+      @submit="submitComposer"
       @touch-input="layout.markTouchInputExpected"
       @update:model-value="dispatch({ type: 'set-composer', value: $event })"
     />
@@ -122,7 +289,7 @@ function closeToolColumn(id: string): void {
       :compact-timers="layout.compactTimers.value"
       :controls="state.rightControls"
       :timer="presentation.timer"
-      @action="dispatch({ type: 'activate-right-action', controlId: $event })"
+      @action="setFeedback('This development control remains fixture-backed.')"
       @select="(controlId, value) => dispatch({ type: 'change-right-select', controlId, value })"
       @toggle="
         (controlId, checked) => dispatch({ type: 'change-right-toggle', controlId, checked })

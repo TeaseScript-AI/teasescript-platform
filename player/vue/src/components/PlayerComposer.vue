@@ -6,12 +6,14 @@ const props = defineProps<{
   feedback: string;
   foreground: PlayerForegroundPresentation | null;
   modelValue: string;
+  pacingActive: boolean;
 }>();
 
 const emit = defineEmits<{
   "input-blur": [];
   "touch-input": [];
   "update:modelValue": [value: string];
+  "skip-pacing": [];
   submit: [];
 }>();
 
@@ -42,6 +44,18 @@ function handleKeydown(event: KeyboardEvent): void {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     emit("submit");
+    return;
+  }
+  const element = input.value;
+  if (
+    event.key === " " &&
+    props.pacingActive &&
+    props.modelValue === "" &&
+    element !== null &&
+    element.selectionStart === element.selectionEnd
+  ) {
+    event.preventDefault();
+    emit("skip-pacing");
   }
 }
 
