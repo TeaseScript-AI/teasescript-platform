@@ -92,5 +92,5 @@ test("playground restore gates stale source runtimes and renders source safely",
   assert.match(browserSource, /self-contained plan is incompatible with the current source runtime/u);
   assert.match(browserSource, /elements\.source\.value = value/u);
   assert.doesNotMatch(browserSource, /source\.innerHTML/u);
-  assert.match(browserSource, /plan = null; snapshot = null; compiledRevision = null; eventLog = \[\];/u);
+  assert.match(browserSource, /plan = null;\s*snapshot = null;\s*compiledRevision = null;\s*eventLog = \[\];/u);
 });
