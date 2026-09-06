@@ -116,8 +116,9 @@ test("Vue panel mode keeps auto responsive while preserving explicit and focused
 
 test("Vue reference route has one component owner and excludes development fixtures", async () => {
   const root = process.cwd();
-  const [core, main, index] = await Promise.all([
+  const [core, layout, main, index] = await Promise.all([
     readFile(resolve(root, "player/vue/src/PlayerCore.vue"), "utf8"),
+    readFile(resolve(root, "player/vue/src/composables/usePlayerLayout.ts"), "utf8"),
     readFile(resolve(root, "player/vue/src/main.ts"), "utf8"),
     readFile(resolve(root, "player/vue/index.html"), "utf8"),
   ]);
@@ -133,6 +134,8 @@ test("Vue reference route has one component owner and excludes development fixtu
   assert.match(core, /session\.transcriptEntries/u);
   assert.match(core, /presentationTranscriptEntries/u);
   assert.match(core, /state\.value\.fixtureTranscriptEntries/u);
+  assert.match(core, /presentation\.speakers\.user/u);
+  assert.match(layout, /stripWidth \+ panelChromeWidth/u);
   assert.doesNotMatch(index, /browser\.js/u);
 });
 

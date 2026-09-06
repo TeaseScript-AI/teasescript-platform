@@ -57,6 +57,12 @@ const presentationTranscriptEntries = shallowRef<readonly PlayerTranscriptEntryP
   ...runtime.value.transcriptEntries,
 ]);
 const transcriptRevision = ref(runtime.value.transcriptRevision);
+const transcriptSpeakers = computed(() => {
+  const presentationUser = props.presentation.speakers.user;
+  return presentationUser === undefined
+    ? runtime.value.speakers
+    : { ...runtime.value.speakers, user: presentationUser };
+});
 const layout = usePlayerLayout({ player });
 const toolsAvailable = computed(() => toolDefinitions.value.length > 0);
 const effectiveLeftMode = computed(() => (toolsAvailable.value ? layout.leftMode.value : "closed"));
@@ -389,7 +395,7 @@ function closeToolColumn(id: string): void {
     <PlayerTranscript
       :entries="presentationTranscriptEntries"
       :revision="transcriptRevision"
-      :speakers="runtime.speakers"
+      :speakers="transcriptSpeakers"
     />
 
     <PlayerForeground :foreground="foreground" @activate="activateForeground" />

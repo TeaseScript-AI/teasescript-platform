@@ -688,11 +688,52 @@ async function vueRuntimeScenario(cdp, origin) {
         const containerRect=container.getBoundingClientRect();
         return message.classList.contains('user') &&
           getComputedStyle(message).textAlign === 'right' &&
+          getComputedStyle(message.querySelector('.message-copy')).fontFamily.startsWith('Verdana') &&
           containerRect.right - messageRect.right < messageRect.left - containerRect.left;
       })()`,
     ),
     true,
-    "fixture user messages must retain the existing right-aligned user presentation",
+    "fixture user messages must retain the existing right-aligned Phase 1 user presentation",
+  );
+  await setViewport(cdp, 1200, 700);
+  await physicalClick(cdp, "[data-tool-column-add]");
+  await waitFor(cdp, `document.querySelectorAll('[data-tool-column-id]').length === 2`);
+  await waitFor(
+    cdp,
+    `(() => {
+      const scroller=document.querySelector('.tool-strip-scroll');
+      return scroller instanceof HTMLElement && scroller.scrollWidth <= scroller.clientWidth + 1;
+    })()`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => {
+        const scroller=document.querySelector('.tool-strip-scroll');
+        const columns=[...document.querySelectorAll('[data-tool-column-id]')];
+        const last=columns.at(-1);
+        if (!(scroller instanceof HTMLElement) || !(last instanceof HTMLElement)) return false;
+        return last.getBoundingClientRect().right <= scroller.getBoundingClientRect().right + 1;
+      })()`,
+    ),
+    true,
+    "two tool columns must fit their preferred desktop panel width without clipping",
+  );
+  await setViewport(cdp, 868, 700);
+  await waitFor(
+    cdp,
+    `(() => {
+      const scroller=document.querySelector('.tool-strip-scroll');
+      return scroller instanceof HTMLElement && scroller.scrollWidth > scroller.clientWidth + 1;
+    })()`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1`,
+    ),
+    true,
+    "a genuinely constrained tool strip must not create outer-page horizontal overflow",
   );
 
   await setViewport(cdp, 390, 844);
