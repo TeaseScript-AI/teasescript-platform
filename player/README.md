@@ -9,14 +9,14 @@ General cross-surface UI engineering/design guidance lives in
 route. Accepted runtime, interaction, security, and custom-view semantics remain in their controlling specifications and
 ADRs.
 
-For local inspection, `npm run playground` serves the manual development comparison implementation at `/player/` and
-the usable production-direction/common Vue reference at `/player-vue/` through the existing development server. These
-development routes are not a public Player/host protocol. `/player/` remains a development comparison/fixture route
-for Visual Lab, Layout Debug, and other deliberate fixtures; it is not a second production frontend.
+For local inspection, `npm run playground` serves the production-direction Vue reference at `/player-vue/` and the
+manual/vanilla legacy implementation at `/player/` through the existing development server. These development routes
+are not a public Player/host protocol. `/player/` is pending removal and temporarily hosts Visual Lab, Layout Debug, and
+other deliberate fixtures; it is not a maintained comparison architecture or a second production frontend.
 
 ## Implementation seams
 
-- `index.html` and `browser.ts` are the manual development comparison entry point and wiring.
+- `index.html` and `browser.ts` are the legacy manual development entry point and wiring pending removal.
 - `runtime-adapter.ts` contains the framework-independent runtime-to-Player translation and shared action helpers used
   by the Vue reference and playground workspace controller.
 - `vue/` contains the usable production-direction/common Vue reference and its Vite build.
@@ -51,9 +51,9 @@ Lab`, `Layout Debug`, and `Scene` tools, their fixture content, local tuning/ins
 information, and the demo-media endpoint exist to exercise the presentation and are not Standard Library, runtime,
 package, or host APIs.
 
-Visual Lab and Layout Debug, along with other deliberate presentation fixtures, intentionally remain on the manual
-development comparison route during the core migration. Their absence from the Vue production core is a boundary,
-not a decision to remove those playtest tools.
+Visual Lab and Layout Debug, along with other deliberate presentation fixtures, remain on the legacy manual route until
+they are migrated or retired. Their temporary location does not make that route a supported frontend architecture or
+promote the fixtures into Player product contracts.
 
 `/player-vue/?fixture=transcript-stress` is a development-only browser-verification route. It retains 2,000 transcript
 entries in presentation data while TanStack-owned windowing bounds rendered DOM, and exercises variable-height
