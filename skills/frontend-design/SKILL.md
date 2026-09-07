@@ -45,12 +45,14 @@ defaults, not a reason to override an explicit design request.
 ## Make typography, structure, and words carry meaning
 
 Typography is part of identity and hierarchy, not a neutral wrapper. Choose it deliberately rather than reaching for the
-same fashionable family or pairing. Establish clear text roles and use size, weight, width, spacing, and line length with
-intent.
+same fashionable family or pairing. One family can be enough; if using two, make the contrast and roles meaningful.
+Establish clear text roles and use size, weight, width, spacing, and line length with intent. When display type is a
+visual element, let the type treatment itself carry character rather than decorating it with unrelated effects.
 
-Visual structure should explain relationships. Borders, dividers, numbering, labels, cards, groups, columns, and surface
-changes should encode real information. A number should indicate sequence or rank; a badge should indicate a real
-category or state; a card should represent a meaningful bounded unit.
+Visual structure should explain relationships. Start with alignment, spacing, type hierarchy, and grouping before adding
+containers. Borders, dividers, numbering, labels, cards, groups, columns, and surface changes should encode real
+information. A number should indicate sequence or rank; a badge should indicate a real category or state; a card should
+represent a meaningful bounded unit.
 
 Words are design content. Use plain user-facing language, keep action names consistent through a flow, and make empty and
 failure states instructive. Avoid decorative microcopy or labels that add texture without understanding.
@@ -63,6 +65,7 @@ Treat these recurring patterns as warning signs, not bans:
 - decorative gradients, glows, blur, shadows, or borders with no hierarchy/content role;
 - one radius and surface treatment applied indiscriminately;
 - tracked-out all-caps eyebrow labels above most headings;
+- one emphasized italic/bold/accent-colored word becoming a repeated headline formula;
 - small monospace metadata used mainly to look technical;
 - arbitrary numbered markers where the content is not sequential;
 - pill labels and controls used everywhere;
@@ -90,6 +93,9 @@ Preserve existing functional and accessibility behavior unless the brief explici
 scarce, protect the primary task/content first and deliberately compress, regroup, overlay, defer, or progressively
 disclose secondary chrome. Avoid adding nested surfaces or scroll regions merely to make everything fit; every extra
 layer should have a clear content, interaction, or hierarchy reason.
+
+Density is not a defect by itself. Expert tools may need compact, information-rich layouts; make density intentional and
+scannable rather than automatically replacing it with oversized spacing or controls.
 
 ## Use motion to explain change
 
