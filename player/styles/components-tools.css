@@ -53,16 +53,6 @@
         padding-left: 0;
       }
 
-      .tool-empty-state {
-        inline-size: max(180px, var(--left-open));
-        align-self: start;
-
-        padding: 12px;
-        color: var(--color-text-muted);
-        font-size: 11px;
-        line-height: 1.35;
-      }
-
       .tool-column {
         --tool-column-effective-width: var(--tool-column-width);
 
@@ -170,31 +160,6 @@
         color: var(--color-text-muted);
         font-size: 11px;
         line-height: 1.35;
-      }
-
-      .tool-kv {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: 0;
-
-        margin: 0;
-        font-size: 11px;
-        line-height: 1.35;
-      }
-
-      .tool-kv dt {
-        margin: 0;
-        color: var(--color-text-muted);
-        font-size: 10px;
-      }
-
-      .tool-kv dd {
-        min-width: 0;
-        margin: 4px 0 12px;
-        padding-bottom: 12px;
-        border-bottom: 1px solid var(--color-border-default);
-        color: var(--color-text-primary);
-        overflow-wrap: anywhere;
       }
 
       @supports selector(::scroll-button(left)) and selector(::scroll-marker) {

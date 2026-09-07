@@ -31,36 +31,6 @@
         opacity: 1;
       }
 
-      /*
-        Universal media vignette:
-        this overlays .media-area itself, so it works with demo art,
-        <img>, <video>, canvas, or future package-rendered media.
-      */
-      .media-area::after {
-        content: "";
-
-        position: absolute;
-        z-index: 5;
-        inset: 0;
-
-        pointer-events: none;
-
-        opacity: 0;
-
-        background:
-          radial-gradient(
-            ellipse at center,
-            transparent 46%,
-            rgb(0 0 0 / 9%) 74%,
-            rgb(0 0 0 / 26%) 100%
-          );
-      }
-
-      .player.fx-vignette .media-area::after {
-        opacity: 1;
-      }
-
-
       .composer form,
       .icon-button,
       .tool-column-add,
@@ -331,7 +301,6 @@
       .action-button:focus-visible,
       .send-button:focus-visible,
       .lab-reset:focus-visible,
-      .theme-picker input[type="color"]:focus-visible,
       .lab-tuning-input:focus-visible,
       .lab-select:focus-visible {
         outline: var(--focus-outline-width) solid var(--color-accent-focus);
@@ -344,7 +313,6 @@
       }
 
       @media (any-hover: hover) {
-        .theme-picker input[type="color"]:not(:disabled):hover,
         .lab-tuning-input:not(:disabled):hover,
         .lab-select:not(:disabled):hover {
           border-color: var(--color-border-hover);
@@ -353,10 +321,6 @@
         .switch input:not(:disabled) + .switch-ui:hover {
           background: var(--color-component-hover);
         }
-      }
-
-      .theme-picker input[type="color"]:not(:disabled):active {
-        border-color: var(--color-border-pressed);
       }
 
       .switch input:not(:disabled) + .switch-ui:active {
@@ -372,7 +336,6 @@
       .tool-column-close:disabled,
       .tool-selector:disabled,
       .lab-reset:disabled,
-      .theme-picker input[type="color"]:disabled,
       .lab-select:disabled {
         border-color: var(--color-border-disabled);
         background: var(--color-surface-disabled);
@@ -390,26 +353,6 @@
         background: var(--color-text-disabled);
       }
 
-      @keyframes message-in {
-        from {
-          opacity: 0;
-          translate: 0 5px;
-        }
-
-        to {
-          opacity: 1;
-          translate: 0 0;
-        }
-      }
-
-      .message.is-new {
-        animation:
-          message-in
-          180ms
-          ease-out
-          both;
-      }
-
       @media (prefers-reduced-motion: reduce) {
         .composer form,
         .icon-button,
@@ -420,10 +363,6 @@
         .send-button,
         .lab-reset {
           transition-duration: 0.001ms;
-        }
-
-        .message.is-new {
-          animation-duration: 0.001ms;
         }
 
         .right-control[aria-busy="true"]::after {

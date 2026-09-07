@@ -40,32 +40,19 @@ test("serves the root playground page", async () => {
   assert.match(response.body, /TeaseScript Playground/u);
 });
 
-test("serves the modular Player demo and its local assets", async () => {
-  const [html, javascript, css] = await Promise.all([
-    get("/player/"),
-    get("/dist/player/browser.js"),
-    get("/player/styles/layout.css"),
-  ]);
+test("serves the Vue Player at its maintained route and keeps its build separate", async () => {
+  const html = await get("/player/");
 
   assert.equal(html.status, 200);
   assert.match(html.contentType, /^text\/html/u);
   assert.match(html.body, /TeaseScript Player/u);
+  const assetPath = html.body.match(/(\/player\/assets\/index-[^"]+\.js)/u)?.[1];
+  assert.ok(assetPath);
+  const javascript = await get(assetPath);
   assert.equal(javascript.status, 200);
   assert.match(javascript.contentType, /^text\/javascript/u);
-  assert.match(javascript.body, /toggleLeftPanelMode/u);
-  assert.equal(css.status, 200);
-  assert.match(css.contentType, /^text\/css/u);
-  assert.match(css.body, /--right-controls-width/u);
-});
-
-test("serves the Vue Player reference independently from the manual comparison route", async () => {
-  const html = await get("/player-vue/");
-
-  assert.equal(html.status, 200);
-  assert.match(html.contentType, /^text\/html/u);
-  assert.match(html.body, /Vue reference/u);
-  assert.match(html.body, /\/player-vue\/assets\/index-[^"]+\.js/u);
-  assert.doesNotMatch(html.body, /\/dist\/player\/browser\.js/u);
+  assert.doesNotMatch(javascript.body, /player\/browser/u);
+  assert.equal((await get("/player-vue/")).status, 404);
 });
 
 test("Player demo media endpoint discovers supported image files from the demo-media folder", async (context) => {

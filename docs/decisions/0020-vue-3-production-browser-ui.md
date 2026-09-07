@@ -14,9 +14,8 @@ production UI.
 
 The Owner confirmed that Vue 3 was the intended production frontend once the Player reached this level of component and
 state complexity. The later Phase 1 foundation selected Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives,
-and TanStack Vue Virtual for the responsibilities described below. The original manual implementation remains useful
-only as transitional legacy while its development fixtures are migrated or retired; it is not a maintained alternative
-frontend direction.
+and TanStack Vue Virtual for the responsibilities described below. The original manual implementation was transitional
+legacy while its development fixtures were migrated or retired; it is not a maintained alternative frontend direction.
 
 This decision records that current direction without moving framework concerns into the deterministic engine or
 prematurely promoting development fixtures into product contracts.
@@ -43,8 +42,8 @@ prematurely promoting development fixtures into product contracts.
 7. Visual Lab, Layout Debug, demo media selection, and other deliberately development-only fixtures may remain outside
    the Vue production core only while they still need migration or retirement. They must not define runtime or product
    APIs merely because they are useful during playtesting.
-8. The manual/vanilla Player implementation is transitional legacy scheduled for removal. It may temporarily host
-   development fixtures, but it is not a maintained comparison architecture or a second production direction.
+8. The manual/vanilla Player implementation has been removed after its retained development fixtures moved to Vue. The
+   Vue Player is the sole maintained local rendering path.
 
 ## Dependency and maintenance impact
 
@@ -68,8 +67,8 @@ prematurely promoting development fixtures into product contracts.
 - Confirmed Player regions can be decomposed into explicit components with testable presentation-state transitions.
 - Runtime adapters pass typed presentation data through framework-independent boundaries without coupling the engine
   to Vue.
-- While both local entry points exist, documentation and development tooling must identify the manual route as legacy
-  pending removal rather than a supported comparison architecture.
+- During migration, documentation and development tooling identified the manual route as legacy pending removal rather
+  than a supported comparison architecture.
 - Development-only tools need a deliberate migration or retirement before the manual route is removed; they are not
   copied into the production core by default.
 

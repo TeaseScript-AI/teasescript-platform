@@ -9,25 +9,19 @@ General cross-surface UI engineering/design guidance lives in
 route. Accepted runtime, interaction, security, and custom-view semantics remain in their controlling specifications and
 ADRs.
 
-For local inspection, `npm run playground` serves the production-direction Vue reference at `/player-vue/` and the
-manual/vanilla legacy implementation at `/player/` through the existing development server. These development routes
-are not a public Player/host protocol. `/player/` is pending removal and is not a maintained comparison architecture or
-a second production frontend; `/player-vue/` owns the development-only Visual Lab, Layout Debug, and Runtime Session tools.
+For local inspection, `npm run playground` serves the maintained Vue Player at `/player/` through the existing development
+server. This development route is not a public Player/host protocol and owns the development-only Visual Lab, Layout
+Debug, and Runtime Session tools.
 
 ## Implementation seams
 
-- `index.html` and `browser.ts` are the legacy manual development entry point and wiring pending removal.
 - `runtime-adapter.ts` contains the framework-independent runtime-to-Player translation and shared action helpers used
-  by the Vue reference and playground workspace controller.
-- `vue/` contains the usable production-direction/common Vue reference and its Vite build.
+  by the Vue Player and playground workspace controller.
+- `vue/` contains the maintained Vue Player and its Vite build.
 - `model.ts` contains presentation-only POC data shapes.
 - `presentation.ts` contains framework-independent presentation ordering, formatting, matching, and colour helpers.
-- `render.ts` renders presentation data and demo tool-column content.
 - `panel-state.ts` and `tool-columns.ts` keep the current local UI state transitions separate from rendering.
-- `browser.ts` wires local browser interactions, demo presentation state, responsive state synchronization, and demo
-  media loading.
-- `layout-debug.ts` is the legacy manual-route geometry observer; Vue development diagnostics live under
-  `vue/src/devtools/`.
+- Vue development diagnostics live under `vue/src/devtools/`.
 - `styles/` separates reset, layout/theme ownership, components, effects, and responsive composition through cascade
   layers.
 - `demo-session.ts` and `demo-media/` are presentation fixtures, not runtime/package APIs.
@@ -53,13 +47,13 @@ development-only presentation tools, not Standard Library, runtime, package, or 
 Runtime Session restores canonical runtime/checkpoint state plus same-session runtime-event history; Visual Lab settings,
 tool columns, and fixture-only right-rail/composer history remain local.
 
-`/player-vue/?fixture=transcript-stress` is a development-only browser-verification route. It retains 2,000 transcript
+`/player/?fixture=transcript-stress` is a development-only browser-verification route. It retains 2,000 transcript
 entries in presentation data while TanStack-owned windowing bounds rendered DOM, and exercises variable-height
 measurement, keyed prepend/append anchoring, resize behavior, scroll-away preservation, and return-to-latest follow.
 It is not a runtime, package, or host API.
 
-Browser automation can open `/player-vue/?layout-debug=1` to start the Vue Layout Debug overlay enabled; the ordinary
-`/player-vue/` route starts with diagnostics disabled.
+Browser automation can open `/player/?layout-debug=1` to start the Vue Layout Debug overlay enabled; the ordinary
+`/player/` route starts with diagnostics disabled.
 
 The default Vue development route compiles real `player-controls.tease` source and drives `say`, canonical
 `playerTranscript` output, foreground interactions, chat pacing, time observation, checkpoint, and restore through

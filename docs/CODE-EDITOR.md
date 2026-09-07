@@ -17,12 +17,11 @@ The technical workspace/controller implementation lives at `playground/workspace
 entrypoints use that controller directly. Player rendering remains in the browser presentation layer and does not create
 a second canonical runtime state model.
 
-The Player implementation lives under `player/` and is served by the same development server. The production-direction
-Vue reference at `/player-vue/` uses the framework-independent `player/runtime-adapter.ts` to translate canonical
+The Player implementation lives under `player/` and is served by the same development server. The maintained Vue Player
+at `/player/` uses the framework-independent `player/runtime-adapter.ts` to translate canonical
 runtime state and events into Player presentation and typed Player input into runtime operations. The playground
-controller shares its action lookup/completion path without creating a second canonical runtime state model. The manual
-route at `/player/` is transitional legacy pending removal and temporarily hosts development fixtures. Neither local
-route defines the still-future cross-origin production Player/host protocol.
+controller shares its action lookup/completion path without creating a second canonical runtime state model. The local
+route does not define the still-future cross-origin production Player/host protocol.
 
 The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are
 separate from runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the

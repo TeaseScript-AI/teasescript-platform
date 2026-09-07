@@ -55,7 +55,6 @@ async function main() {
       await setViewport(cdp, 390, 844);
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
-      await manualPlayerForegroundScenario(cdp, origin);
       await vueRuntimeScenario(cdp, origin);
       await vueDevelopmentToolsScenario(cdp, origin);
       await vueTranscriptScenario(cdp, origin);
@@ -86,7 +85,7 @@ async function main() {
 
 async function vueDevelopmentToolsScenario(cdp, origin) {
   await setViewport(cdp, 1200, 760);
-  await navigate(cdp, `${origin}/player-vue/`);
+  await navigate(cdp, `${origin}/player/`);
   await waitFor(cdp, `document.querySelector('.player') !== null`);
   const resetBaselineTranscript = await vueRuntimeTranscript(cdp);
   const resetBaselineToggle = await value(
@@ -124,7 +123,7 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
   );
 
   await setViewport(cdp, 1200, 760);
-  await navigate(cdp, `${origin}/player-vue/?layout-debug=1`);
+  await navigate(cdp, `${origin}/player/?layout-debug=1`);
   await waitFor(
     cdp,
     `document.querySelector('.debug-card')?.textContent.includes('viewport 1200px')`,
@@ -258,7 +257,7 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
   );
 
   await setViewport(cdp, 1200, 760);
-  await navigate(cdp, `${origin}/player-vue/?fixture=runtime-skippable-long`);
+  await navigate(cdp, `${origin}/player/?fixture=runtime-skippable-long`);
   await waitFor(cdp, `document.querySelector('.player') !== null`);
   await selectVueTool(cdp, "runtime-session");
   await physicalClick(cdp, "[data-save-player-checkpoint]");
@@ -631,77 +630,9 @@ async function narrowScenario(cdp) {
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
 }
 
-async function manualPlayerForegroundScenario(cdp, origin) {
-  await navigate(cdp, `${origin}/player/`);
-  await waitFor(cdp, `document.querySelector('[data-demo-select="foreground-fixture"]') !== null`);
-  await selectDemoFixture(cdp, "foreground-fixture", "show-button");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-foreground-button]')?.textContent === 'I am ready'`,
-  );
-
-  const initialCount = await manualTranscriptCount(cdp);
-  await typeAndSubmitManualPlayer(cdp, "I am ready");
-  await waitFor(
-    cdp,
-    `document.querySelector('#composerFeedback')?.textContent.includes('rendered button')`,
-  );
-  assertEqual(
-    await manualTranscriptCount(cdp),
-    initialCount,
-    "manual exact showButton composer text must not append or complete",
-  );
-  await evaluate(
-    cdp,
-    `const input=document.querySelector('#composerForm textarea'); input.value=''; input.dispatchEvent(new Event('input', {bubbles:true})); input.focus()`,
-  );
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
-  assertEqual(
-    await manualTranscriptCount(cdp),
-    initialCount,
-    "manual empty-composer Space must not complete showButton",
-  );
-  if (!(await value(cdp, `document.querySelector('[data-foreground-button]') !== null`))) {
-    throw new Error("manual empty-composer Space must leave showButton rendered");
-  }
-  await click(cdp, "[data-foreground-button]");
-  await waitFor(cdp, `document.querySelector('[data-foreground-button]') === null`);
-  assertEqual(
-    await manualTranscriptCount(cdp),
-    initialCount + 1,
-    "manual rendered showButton activation must append and complete",
-  );
-
-  await selectDemoFixture(cdp, "foreground-fixture", "choose");
-  await typeAndSubmitManualPlayer(cdp, "Continue steadily");
-  await waitFor(cdp, `document.querySelector('[data-foreground-choice]') === null`);
-  assertEqual(
-    await manualTranscriptCount(cdp),
-    initialCount + 2,
-    "manual exact visible choose text must still complete",
-  );
-
-  await selectDemoFixture(cdp, "pacing-gate", "skippable");
-  await waitFor(cdp, `document.querySelectorAll('[data-transcript-entry-id]').length === 1`);
-  await evaluate(cdp, `document.querySelector('#composerForm textarea').focus()`);
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
-  await waitFor(cdp, `document.querySelectorAll('[data-transcript-entry-id]').length === 2`);
-}
-
-async function selectDemoFixture(cdp, key, selectedValue) {
-  await evaluate(
-    cdp,
-    `const select=document.querySelector(${JSON.stringify(`[data-demo-select="${key}"]`)}); select.value=${JSON.stringify(selectedValue)}; select.dispatchEvent(new Event('change', {bubbles:true}))`,
-  );
-}
-
-async function manualTranscriptCount(cdp) {
-  return value(cdp, `document.querySelectorAll('[data-transcript-entry-id]').length`);
-}
-
 async function vueRuntimeScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
-  await navigate(cdp, `${origin}/player-vue/?fixture=runtime-skippable-long`);
+  await navigate(cdp, `${origin}/player/?fixture=runtime-skippable-long`);
   await waitFor(
     cdp,
     `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
@@ -775,12 +706,12 @@ async function vueRuntimeScenario(cdp, origin) {
     "runtime restore must retain the interleaved presentation arrival order",
   );
 
-  await navigate(cdp, `${origin}/player-vue/`);
+  await navigate(cdp, `${origin}/player/`);
   await waitFor(
     cdp,
     `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
   );
-  await navigate(cdp, `${origin}/player-vue/?layout-debug=1`);
+  await navigate(cdp, `${origin}/player/?layout-debug=1`);
   await waitFor(
     cdp,
     `document.querySelector('[data-layout-debug-overlay]') !== null && document.querySelector('.player')?.dataset.chrome !== undefined`,
@@ -793,7 +724,7 @@ async function vueRuntimeScenario(cdp, origin) {
     "true",
     "direct Layout Debug URL must enable the non-interactive diagnostic overlay",
   );
-  await navigate(cdp, `${origin}/player-vue/`);
+  await navigate(cdp, `${origin}/player/`);
   await waitFor(cdp, `document.querySelector('.player') !== null`);
   await selectVueTool(cdp, "runtime-session");
 
@@ -974,7 +905,7 @@ async function vueRuntimeScenario(cdp, origin) {
   );
 
   await setViewport(cdp, 390, 844);
-  await navigate(cdp, `${origin}/player-vue/`);
+  await navigate(cdp, `${origin}/player/`);
   await waitFor(cdp, `document.querySelectorAll('[data-transcript-entry-id]').length === 1`);
   await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
   await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
@@ -992,7 +923,7 @@ async function vueRuntimeScenario(cdp, origin) {
     "narrow runtime-backed composer must remain inside the Player",
   );
 
-  await navigate(cdp, `${origin}/player-vue/?fixture=runtime-unskippable`);
+  await navigate(cdp, `${origin}/player/?fixture=runtime-unskippable`);
   await waitFor(
     cdp,
     `document.querySelector('[data-transcript-entry-id]')?.textContent.includes('Locked')`,
@@ -1139,7 +1070,7 @@ async function physicalDragTranscriptBackground(cdp) {
 }
 
 async function vueTranscriptScenario(cdp, origin) {
-  await navigate(cdp, `${origin}/player-vue/?fixture=transcript-stress`);
+  await navigate(cdp, `${origin}/player/?fixture=transcript-stress`);
   await waitFor(
     cdp,
     `document.querySelector('[data-transcript-fixture="stress"]') !== null && document.querySelector('[data-stress-count]')?.textContent === '2000 entries'`,
@@ -1398,13 +1329,6 @@ async function typeAndSubmit(cdp, text) {
   await evaluate(
     cdp,
     `const input=document.querySelector('#composer-input'); input.value=${JSON.stringify(text)}; input.dispatchEvent(new Event('input', {bubbles:true})); document.querySelector('#composer-form').requestSubmit()`,
-  );
-}
-
-async function typeAndSubmitManualPlayer(cdp, text) {
-  await evaluate(
-    cdp,
-    `const input=document.querySelector('#composerForm textarea'); input.value=${JSON.stringify(text)}; input.dispatchEvent(new Event('input', {bubbles:true})); document.querySelector('#composerForm').requestSubmit()`,
   );
 }
 
