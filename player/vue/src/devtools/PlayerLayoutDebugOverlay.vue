@@ -16,13 +16,13 @@ const regionBoxes = computed(() => {
   if (current === null) return [];
   const boxes: { readonly name: string; readonly rect: LayoutRect }[] = [];
   for (const name of [
-    "title",
+    "instruments",
     "tools",
     "stage",
     "transcript",
     "foreground",
     "composer",
-    "right",
+    "session",
   ] as const) {
     const rect = current.regions[name];
     if (rect !== undefined) boxes.push({ name, rect });
@@ -49,7 +49,7 @@ const constraintLines = computed(() => {
     `stage ${formatPixels(current.regions.stage?.height ?? 0)} / ${current.constraints.mediaHeight}`,
     `conversation ${formatPixels(current.regions.transcript?.width ?? 0)} / ${current.constraints.conversationMinWidth}…${current.constraints.conversationMaxWidth}`,
     `tool column ${formatPixels(current.regions.toolColumn?.width ?? 0)} / ${current.constraints.toolColumnWidth}`,
-    `right ${formatPixels(current.regions.right?.width ?? 0)} / ${current.constraints.rightRailWidth}`,
+    `session ${formatPixels(current.regions.session?.width ?? 0)} / ${current.constraints.sessionWidth}`,
     `composer input ${formatPixels(current.regions.input?.height ?? 0)} / ${current.constraints.composerMaxLines}, ${current.constraints.composerMaxViewportHeight}`,
     `usable height ${current.constraints.usableHeight}`,
   ];
@@ -75,15 +75,18 @@ function boxStyle(rect: LayoutRect): CSSProperties {
   };
 }
 
-function reserveStyle(side: "title" | "left" | "right" | "bottom"): CSSProperties {
+function reserveStyle(side: "instruments" | "tools" | "bottom"): CSSProperties {
   const current = snapshot.value;
-  const root = rootRect.value;
-  if (current === null || root === undefined) return {};
-  if (side === "title") return { inset: `0 0 auto 0`, height: `${current.reservations.title}px` };
-  if (side === "left") return { inset: `0 auto 0 0`, width: `${current.reservations.left}px` };
-  if (side === "right") return { inset: `0 0 0 auto`, width: `${current.reservations.right}px` };
+  if (current === null) return {};
+  if (side === "instruments")
+    return { inset: "0 auto 0 0", width: `${current.reservations.instruments}px` };
+  if (side === "tools")
+    return {
+      inset: `0 auto 0 ${current.reservations.instruments}px`,
+      width: `${current.reservations.tools}px`,
+    };
   const bottom = current.reservations.composerBottom + current.reservations.keyboardBottom;
-  return { inset: `auto 0 0 0`, height: `${bottom}px` };
+  return { inset: "auto 0 0 0", height: `${bottom}px` };
 }
 
 function safeStyle(side: "top" | "right" | "bottom" | "left"): CSSProperties {
@@ -134,7 +137,7 @@ function safeStyle(side: "top" | "right" | "bottom" | "left"): CSSProperties {
 
     <template v-if="options.reserves">
       <div
-        v-for="side in ['title', 'left', 'right', 'bottom'] as const"
+        v-for="side in ['instruments', 'tools', 'bottom'] as const"
         :key="side"
         class="debug-reserve"
         :data-debug-reserve="side"
@@ -225,7 +228,7 @@ function safeStyle(side: "top" | "right" | "bottom" | "left"): CSSProperties {
   border: 1px dashed #2563eb;
 }
 
-.debug-box[data-debug-kind="title"] {
+.debug-box[data-debug-kind="instruments"] {
   border-color: #7c3aed;
 }
 
@@ -245,7 +248,7 @@ function safeStyle(side: "top" | "right" | "bottom" | "left"): CSSProperties {
   border-color: #159447;
 }
 
-.debug-box[data-debug-kind="right"] {
+.debug-box[data-debug-kind="session"] {
   border-color: #ea580c;
 }
 

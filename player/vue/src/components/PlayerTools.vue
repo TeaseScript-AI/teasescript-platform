@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { DialogContent, DialogRoot, DialogTitle } from "reka-ui";
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { PlayerToolColumnState, PlayerToolDefinition, PlayerToolId } from "../../../model.js";
 import type { LayoutDebugSnapshot } from "../devtools/layoutDebugMeasurement.js";
 
 const props = defineProps<{
   open: boolean;
+  overlay: boolean;
   columns: readonly PlayerToolColumnState[];
   tools: readonly PlayerToolDefinition[];
   layoutDebugSnapshot?: LayoutDebugSnapshot | null;
@@ -28,6 +30,16 @@ watch(
     observeOverflow();
   },
   { deep: true },
+);
+
+watch(
+  () => [props.open, props.overlay],
+  async ([open, overlay]) => {
+    if (open && overlay) {
+      await nextTick();
+      stripScroll.value?.querySelector<HTMLSelectElement>("select")?.focus();
+    }
+  },
 );
 
 onMounted(observeOverflow);
@@ -65,69 +77,84 @@ function selectTool(columnId: string, event: Event): void {
 </script>
 
 <template>
-  <aside id="leftPanel" class="left-panel" aria-label="Player tools">
-    <div ref="stripScroll" class="tool-strip-scroll" :data-overflow="String(overflow)">
-      <div class="tool-strip">
-        <section
-          v-for="column in columns"
-          :key="column.id"
-          class="tool-column"
-          :data-tool-column-id="column.id"
-          :data-tool-id="column.toolId ?? undefined"
-        >
-          <header class="tool-column-header">
-            <select
-              class="tool-selector"
-              data-tool-column-select
-              aria-label="Tool shown in this column"
-              :value="column.toolId ?? ''"
-              @change="selectTool(column.id, $event)"
+  <DialogRoot :open="open" :modal="false" @update:open="!$event && overlay && emit('dismiss')">
+    <DialogContent
+      as-child
+      force-mount
+      :trap-focus="open && overlay"
+      :disable-outside-pointer-events="open && overlay"
+      :aria-describedby="undefined"
+      @open-auto-focus.prevent
+      @close-auto-focus.prevent
+      @interact-outside.prevent
+      @escape-key-down="!overlay && $event.preventDefault()"
+    >
+      <aside v-show="open" id="leftPanel" class="left-panel" aria-label="Player tools">
+        <DialogTitle class="sr-only">Player tools</DialogTitle>
+        <div ref="stripScroll" class="tool-strip-scroll" :data-overflow="String(overflow)">
+          <div class="tool-strip">
+            <section
+              v-for="column in columns"
+              :key="column.id"
+              class="tool-column"
+              :data-tool-column-id="column.id"
+              :data-tool-id="column.toolId ?? undefined"
             >
-              <option value="" disabled>Choose tool…</option>
-              <option v-for="tool in tools" :key="tool.id" :value="tool.id">
-                {{ tool.label }}
-              </option>
-            </select>
-            <button
-              class="tool-column-add"
-              data-tool-column-add
-              type="button"
-              aria-label="Add tool column"
-              title="Add tool column"
-              @click="emit('add')"
-            >
-              +
-            </button>
-            <button
-              class="tool-column-close"
-              data-tool-column-close
-              type="button"
-              aria-label="Close tool column"
-              title="Close tool column"
-              @click="emit('close', column.id)"
-            >
-              ×
-            </button>
-          </header>
-          <div class="tool-column-body" :data-tool-body="column.toolId ?? ''">
-            <slot
-              name="tool"
-              :layout-debug-snapshot="layoutDebugSnapshot"
-              :tool-id="column.toolId"
-            >
-              <p class="tool-placeholder">
-                {{
-                  column.toolId === null
-                    ? "Choose a tool for this column."
-                    : "No content is available for this tool."
-                }}
-              </p>
-            </slot>
+              <header class="tool-column-header">
+                <select
+                  class="tool-selector"
+                  data-tool-column-select
+                  aria-label="Tool shown in this column"
+                  :value="column.toolId ?? ''"
+                  @change="selectTool(column.id, $event)"
+                >
+                  <option value="" disabled>Choose tool…</option>
+                  <option v-for="tool in tools" :key="tool.id" :value="tool.id">
+                    {{ tool.label }}
+                  </option>
+                </select>
+                <button
+                  class="tool-column-add"
+                  data-tool-column-add
+                  type="button"
+                  aria-label="Add tool column"
+                  title="Add tool column"
+                  @click="emit('add')"
+                >
+                  +
+                </button>
+                <button
+                  class="tool-column-close"
+                  data-tool-column-close
+                  type="button"
+                  aria-label="Close tool column"
+                  title="Close tool column"
+                  @click="emit('close', column.id)"
+                >
+                  ×
+                </button>
+              </header>
+              <div class="tool-column-body" :data-tool-body="column.toolId ?? ''">
+                <slot
+                  name="tool"
+                  :layout-debug-snapshot="layoutDebugSnapshot"
+                  :tool-id="column.toolId"
+                >
+                  <p class="tool-placeholder">
+                    {{
+                      column.toolId === null
+                        ? "Choose a tool for this column."
+                        : "No content is available for this tool."
+                    }}
+                  </p>
+                </slot>
+              </div>
+            </section>
           </div>
-        </section>
-      </div>
-    </div>
-  </aside>
+        </div>
+      </aside>
+    </DialogContent>
+  </DialogRoot>
 
   <button
     v-if="open"

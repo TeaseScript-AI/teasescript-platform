@@ -25,14 +25,14 @@ function label(timer: PlayerTimerPresentation, index: number): string | null {
 
 <template>
   <div v-if="timerKind !== 'hidden'" class="timer-wrap">
-    <div class="timer-list">
+    <div class="timer-list" tabindex="0" role="group" aria-label="Timers">
       <div
         v-for="(item, index) in timers"
         :key="index"
         class="timer"
         :aria-label="label(item, index) ?? 'Timer'"
-        data-label-placement="below"
         :data-timer-kind="timerKind"
+        :data-long-value="formatTimer(item.remainingSeconds).length > 5"
         :style="{
           '--timer-progress': `${
             timerKind === 'mystery'

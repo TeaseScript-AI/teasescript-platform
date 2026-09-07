@@ -1,10 +1,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Ref } from "vue";
-import type { LeftPanelMode, RightPanelMode } from "../../../model.js";
-import {
-  canDockRightRail,
-  toggleLeftPanelMode,
-  toggleRightPanelMode,
-} from "../../../panel-state.js";
+import type { LeftPanelMode } from "../../../model.js";
+import { toggleLeftPanelMode } from "../../../panel-state.js";
 
 interface PlayerLayoutElements {
   readonly player: Ref<HTMLElement | null>;
@@ -38,12 +34,8 @@ interface KeyboardLayout {
 }
 
 export function usePlayerLayout(elements: PlayerLayoutElements) {
-  const leftMode = ref<LeftPanelMode>("auto");
-  const rightMode = ref<RightPanelMode>("auto");
-  const rightLayout = ref<"rail" | "stage">("stage");
-  const rightBacking = ref<"docked" | "overlay">("overlay");
-  const chrome = ref<"normal" | "overlay">("normal");
-  const compactTimers = ref(false);
+  const leftMode = ref<LeftPanelMode>("closed");
+  const chrome = ref<"normal" | "compact">("normal");
   const keyboard = ref<"closed" | "open">("closed");
   const keyboardGeometry = ref<KeyboardLayout["geometry"]>("none");
   const fullscreenActive = ref(false);
@@ -53,32 +45,28 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
   const virtualKeyboard = browserVirtualKeyboard();
   let visibleForegroundHeight = 0;
   let viewportSettleTimer: ReturnType<typeof setTimeout> | null = null;
-  let compositionFrame = 0;
   let resizeObserver: ResizeObserver | null = null;
-  let narrowScreen: MediaQueryList | null = null;
 
   const leftOpen = computed(() => isLeftPanelOpen(leftMode.value, narrow.value));
-  const rightDocked = computed(() => rightBacking.value === "docked");
 
   onMounted(() => {
-    narrowScreen = window.matchMedia("(max-width: 760px)");
-    narrow.value = narrowScreen.matches;
-    narrowScreen.addEventListener("change", handleNarrowChange);
     window.addEventListener("resize", syncViewportTransition);
     window.addEventListener("orientationchange", syncViewportTransition);
     window.visualViewport?.addEventListener("resize", syncViewportTransition);
     window.visualViewport?.addEventListener("scroll", syncViewportTransition);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("keydown", handleDocumentKeydown);
     virtualKeyboard?.addEventListener("geometrychange", syncViewportTransition);
 
     resizeObserver = new ResizeObserver(() => {
       syncLeftPreferredWidth();
-      queueRightCompositionSync();
+      syncOverlayChromeMode();
     });
     const player = elements.player.value;
     for (const element of [
       player,
+      player?.querySelector<HTMLElement>(".player-instruments"),
+      player?.querySelector<HTMLElement>(".composer"),
+      player?.querySelector<HTMLElement>(".transcript"),
       player?.querySelector<HTMLElement>(".tool-strip"),
       player?.querySelector<HTMLElement>(".tool-strip-scroll"),
     ]) {
@@ -92,38 +80,30 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
   });
 
   onBeforeUnmount(() => {
-    narrowScreen?.removeEventListener("change", handleNarrowChange);
     window.removeEventListener("resize", syncViewportTransition);
     window.removeEventListener("orientationchange", syncViewportTransition);
     window.visualViewport?.removeEventListener("resize", syncViewportTransition);
     window.visualViewport?.removeEventListener("scroll", syncViewportTransition);
     document.removeEventListener("fullscreenchange", handleFullscreenChange);
-    document.removeEventListener("keydown", handleDocumentKeydown);
     virtualKeyboard?.removeEventListener("geometrychange", syncViewportTransition);
     resizeObserver?.disconnect();
     if (viewportSettleTimer !== null) clearTimeout(viewportSettleTimer);
-    if (compositionFrame !== 0) cancelAnimationFrame(compositionFrame);
   });
 
   function toggleLeft(): void {
     leftMode.value = toggleLeftPanelMode(leftMode.value, !narrow.value);
     void nextTick(() => {
       syncLeftPreferredWidth();
-      queueRightCompositionSync();
+      syncOverlayChromeMode();
     });
   }
 
-  function closeLeft(): void {
+  function closeLeft(restoreFocus = true): void {
     leftMode.value = "closed";
     void nextTick(() => {
-      queueRightCompositionSync();
-      focusLeftToggle();
+      syncOverlayChromeMode();
+      if (restoreFocus) focusLeftToggle();
     });
-  }
-
-  function toggleRight(): void {
-    rightMode.value = toggleRightPanelMode(rightMode.value, rightLayout.value === "rail");
-    syncRightComposition();
   }
 
   async function toggleFullscreen(): Promise<void> {
@@ -149,29 +129,11 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     syncViewportTransition();
   }
 
-  function handleNarrowChange(event: MediaQueryListEvent): void {
-    const wasNarrow = narrow.value;
-    narrow.value = event.matches;
-    leftMode.value = resolveLeftPanelModeOnNarrowTransition(
-      leftMode.value,
-      !wasNarrow && event.matches,
-      leftPanelOwnsFocus(),
-    );
-    syncLeftPreferredWidth();
-    syncOverlayChromeMode();
-  }
-
   function handleFullscreenChange(): void {
     const player = elements.player.value;
     fullscreenActive.value = player !== null && document.fullscreenElement === player;
     syncVirtualKeyboardMode();
     syncOverlayChromeMode();
-  }
-
-  function handleDocumentKeydown(event: KeyboardEvent): void {
-    if (event.key !== "Escape" || !narrow.value || leftMode.value !== "open") return;
-    event.preventDefault();
-    closeLeft();
   }
 
   function leftPanelOwnsFocus(): boolean {
@@ -202,6 +164,26 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     const player = elements.player.value;
     if (player === null) return;
     const layout = resolveKeyboardLayout();
+    const style = getComputedStyle(player);
+    const workbenchWidth = Number.parseFloat(style.getPropertyValue("--tool-column-width"));
+    const conversationWidth = Number.parseFloat(style.getPropertyValue("--conversation-min-width"));
+    // Include both workbench gutters and conversation margins, not a device label.
+    const requiredWidth =
+      workbenchWidth +
+      conversationWidth +
+      4 * Number.parseFloat(style.getPropertyValue("--conversation-gap"));
+    const compactHeight = layout.usableHeight < 540;
+    const nextNarrow =
+      player.clientWidth -
+        (player.querySelector<HTMLElement>(".player-instruments")?.getBoundingClientRect().width ??
+          0) <
+        requiredWidth || compactHeight;
+    leftMode.value = resolveLeftPanelModeOnNarrowTransition(
+      leftMode.value,
+      !narrow.value && nextNarrow,
+      leftPanelOwnsFocus(),
+    );
+    narrow.value = nextNarrow;
     player.style.setProperty("--player-usable-height", `${layout.usableHeight}px`);
     player.style.setProperty(
       "--fullscreen-player-height",
@@ -210,28 +192,25 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     player.style.setProperty("--fullscreen-keyboard-inset", `${layout.fullscreenInset}px`);
     keyboard.value = layout.open ? "open" : "closed";
     keyboardGeometry.value = layout.geometry;
-    compactTimers.value = layout.usableHeight <= 600;
-    chrome.value = fullscreenActive.value || layout.usableHeight <= 768 ? "overlay" : "normal";
+    chrome.value = compactHeight ? "compact" : "normal";
 
-    const preferredMediaHeight = Number.parseFloat(
-      usableViewportLength(
-        chrome.value === "overlay" ? "--media-height-overlay" : "--media-height-normal",
-        layout.usableHeight,
-      ),
-    );
-    const mediaHeight = layout.open
-      ? constrainedKeyboardMediaHeight(
-          preferredMediaHeight,
-          layout.usableHeight,
-          chrome.value === "overlay",
-        )
-      : preferredMediaHeight;
-    player.style.setProperty("--media-height", `${Math.max(0, mediaHeight)}px`);
     player.style.setProperty(
       "--composer-effective-viewport-height",
       usableViewportLength("--composer-max-viewport-height", layout.usableHeight),
     );
-    queueRightCompositionSync();
+    const preferredMediaHeight = Math.min(
+      (player.querySelector<HTMLElement>(".media-area")?.clientWidth ?? player.clientWidth) * 0.75,
+      Number.parseFloat(
+        usableViewportLength(
+          chrome.value === "compact" ? "--media-height-compact" : "--media-height-normal",
+          layout.usableHeight,
+        ),
+      ),
+    );
+    const mediaHeight = layout.open
+      ? constrainedKeyboardMediaHeight(preferredMediaHeight, layout.usableHeight)
+      : constrainedNormalMediaHeight(preferredMediaHeight, layout.usableHeight);
+    player.style.setProperty("--media-height", `${Math.max(0, mediaHeight)}px`);
   }
 
   function resolveKeyboardLayout(): KeyboardLayout {
@@ -290,10 +269,33 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     };
   }
 
+  function constrainedNormalMediaHeight(preferred: number, usableHeight: number): number {
+    const player = elements.player.value;
+    const composer = player?.querySelector<HTMLElement>(".composer");
+    const input = composer?.querySelector<HTMLTextAreaElement>("textarea");
+    if (player == null || composer == null || input == null) return preferred;
+    const inputStyle = getComputedStyle(input);
+    const inputBudget = Math.max(
+      Number.parseFloat(inputStyle.minBlockSize),
+      Number.parseFloat(inputStyle.maxBlockSize),
+    );
+    const composerChrome =
+      composer.getBoundingClientRect().height - input.getBoundingClientRect().height;
+    const foreground =
+      player.querySelector<HTMLElement>(".foreground-controls")?.getBoundingClientRect().height ??
+      0;
+    const readingReserve =
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 2;
+    // Reserve the input's growth budget so typing changes the transcript, not the stage.
+    return Math.min(
+      preferred,
+      Math.max(0, usableHeight - foreground - inputBudget - composerChrome - readingReserve),
+    );
+  }
+
   function constrainedKeyboardMediaHeight(
     preferredMediaHeight: number,
     usableHeight: number,
-    overlayChrome: boolean,
   ): number {
     const player = elements.player.value;
     const composer = player?.querySelector<HTMLElement>(".composer") ?? null;
@@ -304,53 +306,15 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     const foregroundHeight = foregroundElement === null ? 0 : visibleForegroundHeight;
     const style = getComputedStyle(player);
     const transcriptReserve = remPixelValue(style, "--keyboard-transcript-reserve");
-    const titleTrackHeight = overlayChrome
-      ? 0
-      : (player.querySelector<HTMLElement>(".title-controls")?.getBoundingClientRect().height ?? 0);
     const availableConversationHeight = Math.max(
       0,
-      usableHeight - titleTrackHeight - composer.getBoundingClientRect().height - foregroundHeight,
+      usableHeight - composer.getBoundingClientRect().height - foregroundHeight,
     );
     const boundedTranscriptReserve = Math.min(transcriptReserve, availableConversationHeight);
     return Math.min(
       Math.max(0, preferredMediaHeight),
       Math.max(0, availableConversationHeight - boundedTranscriptReserve),
     );
-  }
-
-  function queueRightCompositionSync(): void {
-    if (compositionFrame !== 0) return;
-    compositionFrame = requestAnimationFrame(() => {
-      compositionFrame = 0;
-      syncRightComposition();
-    });
-  }
-
-  function syncRightComposition(): void {
-    const player = elements.player.value;
-    if (player === null) return;
-    const style = getComputedStyle(player);
-    const rightWidth = cssPixelValue(style, "--right-controls-width");
-    const conversationMinimum = cssPixelValue(style, "--conversation-min-width");
-    const stageMinimum = cssPixelValue(style, "--media-height");
-    const hasTools = player.querySelector(".tool-strip") !== null;
-    const desiredLeftWidth =
-      hasTools && !narrow.value && leftMode.value !== "closed"
-        ? cssPixelValue(style, "--left-preferred")
-        : 0;
-    rightLayout.value = canDockRightRail(
-      player.clientWidth,
-      desiredLeftWidth,
-      rightWidth,
-      Math.max(conversationMinimum, stageMinimum),
-      narrow.value,
-    )
-      ? "rail"
-      : "stage";
-    rightBacking.value =
-      rightMode.value === "docked" || (rightMode.value === "auto" && rightLayout.value === "rail")
-        ? "docked"
-        : "overlay";
   }
 
   function syncLeftPreferredWidth(): void {
@@ -385,7 +349,6 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
   return {
     chrome,
     closeLeft,
-    compactTimers,
     fullscreenActive,
     keyboard,
     keyboardGeometry,
@@ -393,19 +356,10 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     leftOpen,
     markInputBlurred,
     markTouchInputExpected,
-    rightBacking,
-    rightDocked,
-    rightLayout,
-    rightMode,
+    narrow,
     toggleFullscreen,
     toggleLeft,
-    toggleRight,
   };
-}
-
-function cssPixelValue(style: CSSStyleDeclaration, property: string): number {
-  const value = Number.parseFloat(style.getPropertyValue(property));
-  return Number.isFinite(value) ? value : 0;
 }
 
 function remPixelValue(style: CSSStyleDeclaration, property: string): number {

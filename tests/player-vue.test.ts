@@ -153,7 +153,7 @@ test("Vue Player route has one component owner and explicit development tool bou
   assert.match(core, /<PlayerTranscript/u);
   assert.match(core, /<PlayerForeground/u);
   assert.match(core, /<PlayerComposer/u);
-  assert.match(core, /<PlayerRightRail/u);
+  assert.match(core, /<PlayerSessionControls/u);
   assert.match(main, /createApp\(App\)\.mount\("#app"\)/u);
   assert.match(main, /components-visual-lab/u);
   assert.doesNotMatch(main, /components-layout-debug/u);
@@ -220,15 +220,15 @@ test("Vue transcript uses TanStack's single virtual scroll and anchor owner", as
   assert.match(fixture, /data-transcript-fixture="stress"/u);
 });
 
-test("Vue media transitions and timer allocation preserve accessibility and live sizing", async () => {
-  const [media, mediaStyles, rightRail] = await Promise.all([
+test("Vue media transitions and session disclosure preserve accessibility", async () => {
+  const [media, mediaStyles, sessionMenu] = await Promise.all([
     readFile(resolve(process.cwd(), "player/vue/src/components/PlayerMedia.vue"), "utf8"),
     readFile(resolve(process.cwd(), "player/styles/components-media.css"), "utf8"),
-    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerRightRail.vue"), "utf8"),
+    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerSessionMenu.vue"), "utf8"),
   ]);
   assert.match(media, /media-transition-outgoing[\s\S]*alt=""[\s\S]*aria-hidden="true"/u);
   assert.match(mediaStyles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation: none/u);
-  assert.match(rightRail, /props\.timerCount, props\.timerKind/u);
-  assert.match(rightRail, /querySelector<HTMLElement>\("\.timer-list"\)/u);
-  assert.match(rightRail, /observer\?\.observe\(timerList\)/u);
+  assert.match(sessionMenu, /PopoverContent/u);
+  assert.match(sessionMenu, /:collision-boundary="boundary"/u);
+  assert.match(sessionMenu, /PopoverClose[\s\S]*Close session controls/u);
 });

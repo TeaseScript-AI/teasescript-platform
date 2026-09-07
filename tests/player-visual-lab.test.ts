@@ -48,7 +48,7 @@ test("Visual Lab registry describes retained controls and excludes resolved expe
     "Script update target",
     "Simulate script update",
     "Script update feedback",
-    "Right-rail controls",
+    "Session controls",
     "History messages",
     "Reset visual tests",
   ]) {

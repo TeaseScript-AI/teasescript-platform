@@ -33,10 +33,50 @@ primitive/positioning/focus layer when interactive components need it, and TanSt
 transcript windowing/scroll-anchoring owner. The engine and shared presentation contracts remain framework-independent
 as required by ADR 0020.
 
-`styles/layout.css` currently owns the concrete light-theme palette values and semantic token mapping used by the
-source. Those values are also maintained as observable Player contract in `docs/ui/PLAYER-UI.md`; component CSS should
-consume semantic roles rather than raw application-palette primitives. Speaker, package-accent, media, and technical
-mask colours remain separate presentation data.
+`styles/layout.css` owns palette primitives and semantic roles; component CSS consumes those roles. Speaker,
+package-accent, authored-control, and media colours retain their separate ownership.
+
+## Phase 2A comparison presentation
+
+Issue #336 evaluates an independent presentation from shared commit
+`770b6f508a398d0f4dfd8ec892aae675404564b4`. This is a comparison candidate, not an accepted final Standard Player design.
+The runtime-backed foundation and its capability exclusions below remain unchanged.
+
+The candidate uses a narrow vertical instrument strip beside one uninterrupted scene/conversation flow. The strip
+holds the TeaseScript wordmark, visible timers, Session, Tools, and fullscreen/exit. There is no horizontal title bar,
+timer shelf, or right control rail. Scene/media stays above transcript, foreground decision, and persistent composer.
+The ink/plum canvas gives media the luminance; ivory serif spoken prose distinguishes narrative voice from sans-serif
+participant replies and instruments. Copper emphasizes the current response. Authored fonts and fills remain intact.
+
+This direction was selected after comparing a screening-room header, a scene-over-workbench composition, a session
+shelf, and a reading-first folio. The rendered shelf consumed scarce stage height and separated the scene from the
+conversation. Moving secondary instruments onto a vertical axis removed that cost without overlaying the media.
+The first spine render then exposed excessive empty media space on narrow screens; a width-based stage cap and a
+quieter media-derived wash corrected it. These are comparison choices, not new accepted Standard Player policy.
+
+Timers use values, labels, and linear elapsed progress in their own bounded vertical scroll region. Mystery timers
+expose neither duration nor progress; hidden timers leave no timer UI. More timers never change primary row allocation.
+Session opens an opaque Reka popover beside its trigger for background actions, switches, selects, and status. Busy,
+disabled, authored-fill, script-update, ordering, and transcript-provenance behavior remain supported. Its controls
+scroll independently when necessary; positioning, dismissal, and focus return stay inside the fullscreen Player.
+
+Tools start closed. They open as a full-height workbench when one tool column, protected reading width, gutters,
+instruments, and usable height fit; extra columns use the existing native horizontal strip when necessary. Otherwise
+the same tools use a focus-contained Reka drawer with outside and Escape dismissal. Tool state survives disclosure.
+Opening Session replaces the visible tools workspace, and opening Tools dismisses Session; their local content state
+is retained. The wordmark abbreviates and instrument width contracts under width pressure. Fullscreen retains the same explicit
+exit control. Dynamic safe areas and browser-reported keyboard geometry protect the input and controls.
+
+The stage preference is capped by primary width and the budget for foreground controls, bounded input growth, and
+conversation. Keyboard pressure lets it yield to the actual input and reading reserve. Long authored foreground labels
+wrap and scroll within their allocation. TanStack remains the sole transcript windowing and anchoring owner.
+
+Visual Lab retains stage proportion, tool width, reading width, composer tuning, and stress fixtures. These are local
+adjustments, not the principal design alternatives. Layout Debug measures the instruments, tool reservation, session
+popover, and actual scroll owners. Run `node tools/player-browser-smoke.mjs` after the build for runtime interactions,
+disclosure/focus, responsive geometry, fullscreen, simulated keyboard/safe-area constraints, long authored labels,
+and transcript virtualization/anchoring. Browser emulation does not establish physical software-keyboard or
+cross-browser acceptance.
 
 ## Demo-only behavior
 

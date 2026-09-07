@@ -4,7 +4,7 @@
       .composer form {
         width: min(100%, var(--conversation-max-width));
         min-width: 0;
-        min-block-size: 50px;
+        min-block-size: 56px;
         margin-inline: auto;
 
         display: grid;
@@ -21,15 +21,14 @@
         background: var(--color-surface-component);
       }
 
-      textarea {
+      .composer textarea {
         --composer-input-block-chrome: 22px;
 
         width: 100%;
         min-width: 0;
 
-        min-block-size: 38px;
-        max-block-size:
-          min(
+        min-block-size: 44px;
+        max-block-size: min(
             calc(var(--composer-max-lines) + var(--composer-input-block-chrome)),
             var(--composer-effective-viewport-height)
           );
@@ -51,14 +50,14 @@
         line-height: 1.2;
       }
 
-      textarea::placeholder {
+      .composer textarea::placeholder {
         color: var(--color-text-muted);
         opacity: 1;
       }
 
       .send-button {
         min-width: 80px;
-        block-size: 38px;
+        block-size: 44px;
 
         padding-inline: 14px;
 
@@ -70,11 +69,17 @@
 
         box-shadow: none;
 
-        font-size: 11px;
+        font-size: 13px;
         font-weight: 700;
         line-height: 1.2;
         text-shadow: none;
         cursor: pointer;
+      }
+
+      .composer:is([data-foreground-kind="choose"], [data-foreground-kind="show-button"]) .send-button:not(:disabled) {
+        border-color: var(--color-border-default);
+        background: var(--color-surface-chrome);
+        color: var(--color-text-primary);
       }
 
       .send-button:disabled {
@@ -109,5 +114,4 @@
       .composer-feedback[hidden] {
         display: none;
       }
-
 }

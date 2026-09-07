@@ -1,14 +1,13 @@
 @layer components {
       .foreground-controls {
-        grid-column: 2;
-        grid-row: 4;
+        grid-column: 3;
+        grid-row: 3;
 
         min-width: 0;
-        padding:
-          4px
-          calc(12px + var(--safe-right))
-          4px
-          calc(12px + var(--safe-left));
+        max-block-size: min(160px, calc(var(--player-usable-height) * 0.24));
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 4px calc(12px + var(--safe-right)) 4px 12px;
 
         background: var(--color-surface-canvas);
       }
@@ -19,7 +18,7 @@
 
       .foreground-shell {
         position: relative;
-        width: 100%;
+        width: min(100%, var(--conversation-max-width));
         min-width: 0;
         margin-inline: auto;
       }
@@ -29,7 +28,7 @@
 
         display: flex;
         flex-wrap: nowrap;
-        justify-content: safe center;
+        justify-content: safe flex-start;
         gap: 8px;
 
         overflow-x: auto;
@@ -47,16 +46,16 @@
         border: 1px solid var(--color-border-default);
         border-radius: 6px;
 
-        background: var(--color-surface-component);
-        color: var(--color-text-primary);
+        background: var(--color-accent-solid);
+        color: var(--color-text-inverse);
 
-        font-size: 12px;
+        font-size: 14px;
         font-weight: 600;
         line-height: 1.2;
       }
 
       .foreground-button {
-        inline-size: 100%;
+        inline-size: auto;
 
         min-inline-size: min(112px, 100%);
         max-inline-size: min(85vw, 420px);

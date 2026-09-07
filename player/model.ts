@@ -120,4 +120,3 @@ export interface PlayerPresentation {
 }
 
 export type LeftPanelMode = "auto" | "open" | "closed";
-export type RightPanelMode = "auto" | "docked" | "overlay";

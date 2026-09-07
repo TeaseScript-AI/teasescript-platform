@@ -121,7 +121,7 @@ test("Layout Debug card is screenshot-focused and excludes noisy composer and co
       scale: 1.25,
     },
     safeAreas: { top: 20, right: 0, bottom: 12, left: 0 },
-    reservations: { title: 52, left: 300, right: 190, composerBottom: 12, keyboardBottom: 0 },
+    reservations: { instruments: 88, tools: 300, composerBottom: 12, keyboardBottom: 0 },
     constraints: {
       mediaHeight: "360px",
       conversationMinWidth: "380px",
@@ -130,14 +130,13 @@ test("Layout Debug card is screenshot-focused and excludes noisy composer and co
       composerMaxViewportHeight: "144px",
       usableHeight: "640px",
       toolColumnWidth: "300px",
-      rightRailWidth: "190px",
+      sessionWidth: "190px",
     },
     composition: {
-      chrome: "overlay",
+      chrome: "compact",
       left: "open",
-      right: "open",
-      rightBacking: "docked",
-      rightLayout: "rail",
+      session: "open",
+      toolsLayout: "docked",
       keyboard: "open",
       keyboardGeometry: "viewport",
       fullscreen: false,
@@ -155,8 +154,8 @@ test("Layout Debug card is screenshot-focused and excludes noisy composer and co
 test("Layout Debug uses the rendered Vue tool-body contract and declarative overlay ownership", async () => {
   assert.equal(LAYOUT_DEBUG_SELECTORS.toolBodies, ".tool-column-body");
   assert.equal(LAYOUT_DEBUG_SELECTORS.toolColumn, ".tool-column");
-  assert.equal(LAYOUT_DEBUG_SELECTORS.rightTimerList, "#rightZone .timer-list");
-  assert.equal(LAYOUT_DEBUG_SELECTORS.rightActions, "#rightZone .action-scroll");
+  assert.equal(LAYOUT_DEBUG_SELECTORS.timerList, ".instrument-timers .timer-list");
+  assert.equal(LAYOUT_DEBUG_SELECTORS.sessionActions, ".session-popover .action-scroll");
   assert.doesNotMatch(JSON.stringify(LAYOUT_DEBUG_SELECTORS), /"\.tool-body"/u);
 
   const root = process.cwd();
@@ -166,13 +165,13 @@ test("Layout Debug uses the rendered Vue tool-body contract and declarative over
     readFile(resolve(root, "player/vue/src/devtools/usePlayerLayoutDebug.ts"), "utf8"),
   ]);
   assert.match(measurement, /querySelectorAll<HTMLElement>\(LAYOUT_DEBUG_SELECTORS\.toolBodies\)/u);
-  assert.match(measurement, /"right-timer-list"/u);
-  assert.match(measurement, /"right-actions"/u);
+  assert.match(measurement, /"timers"/u);
+  assert.match(measurement, /"session-actions"/u);
   assert.match(overlay, /current\.regions\.transcript\?\.width/u);
   assert.match(overlay, /regions\.toolColumn\?\.width/u);
   assert.match(overlay, /regions\.input\?\.height/u);
   assert.match(overlay, /constraints\.toolColumnWidth/u);
-  assert.match(overlay, /constraints\.rightRailWidth/u);
+  assert.match(overlay, /constraints\.sessionWidth/u);
   assert.doesNotMatch(measurement, /\.tool-body["']/u);
   assert.doesNotMatch(overlay, /appendChild|append\(|replaceChildren|innerHTML/u);
   assert.match(overlay, /pointer-events:\s*none/u);

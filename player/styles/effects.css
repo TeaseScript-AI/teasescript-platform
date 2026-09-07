@@ -7,7 +7,7 @@
         instead of stopping at a visible seam. The wash covers the complete
         stage, then fades out over the top of the conversation and is gone well
         before the composer. It stays inside the middle column, so tool columns,
-        the right rail, and Player chrome keep their own application surfaces.
+            session controls, and Player chrome keep their own application surfaces.
       */
       .player::before {
         opacity: 0;
@@ -15,14 +15,13 @@
         background:
           radial-gradient(
             ellipse 90% 55% at 68% 0%,
-            color-mix(in srgb, var(--scene-ambient) 34%, transparent),
+            color-mix(in srgb, var(--scene-ambient) 14%, transparent),
             transparent 72%
           ),
           linear-gradient(
             to bottom,
-            color-mix(in srgb, var(--scene-ambient) 26%, transparent) 0,
-            color-mix(in srgb, var(--scene-ambient) 26%, transparent)
-              var(--media-height),
+            color-mix(in srgb, var(--scene-ambient) 12%, transparent) 0,
+            color-mix(in srgb, var(--scene-ambient) 12%, transparent) var(--media-height),
             transparent calc(var(--media-height) + 200px)
           );
       }
@@ -77,7 +76,6 @@
         background: var(--color-component-pressed);
         box-shadow: none;
       }
-
 
       @media (any-hover: hover) {
         .action-button:not(:disabled):hover {
@@ -138,13 +136,8 @@
         inline-size: 18px;
         block-size: 3px;
 
-        background:
-          radial-gradient(
-            circle,
-            var(--package-accent) 0 1.25px,
-            transparent 1.5px
-          )
-          0 50% / 6px 3px repeat-x;
+        background: radial-gradient(circle, var(--package-accent) 0 1.25px, transparent 1.5px) 0 50% /
+          6px 3px repeat-x;
         opacity: 0.28;
 
         animation: action-busy-dots 2200ms ease-in-out infinite;
@@ -182,8 +175,7 @@
       .right-control[aria-busy="true"][data-busy-style="wash"]::after {
         inset: 0;
 
-        background:
-          linear-gradient(
+        background: linear-gradient(
             90deg,
             transparent 0 24%,
             color-mix(in srgb, var(--package-accent) 8%, transparent) 48% 52%,
@@ -257,6 +249,16 @@
         }
       }
 
+      .composer:is([data-foreground-kind="choose"], [data-foreground-kind="show-button"])
+        .send-button:not(:disabled):active {
+        background: var(--color-component-pressed);
+      }
+      @media (any-hover: hover) {
+        .composer:is([data-foreground-kind="choose"], [data-foreground-kind="show-button"])
+          .send-button:not(:disabled):hover {
+          background: var(--color-component-hover);
+        }
+      }
       .send-button:not(:disabled):active {
         border-color: var(--color-accent-solid-pressed);
         background: var(--color-accent-solid-pressed);
@@ -374,7 +376,6 @@
           transform: translateX(128%);
         }
 
-
         .right-control[aria-busy="true"][data-busy-style="spinner"]::after {
           transform: rotate(45deg);
         }
@@ -399,7 +400,6 @@
       }
 
       @media (any-hover: hover) {
-        .foreground-button:not(:disabled):hover,
         .return-to-latest:not(:disabled):hover,
         .right-toggle-control:not(:has(input:disabled)):hover,
         .right-select-control:not(:has(select:disabled)):hover {
@@ -413,7 +413,6 @@
         }
       }
 
-      .foreground-button:not(:disabled):active,
       .return-to-latest:not(:disabled):active,
       .right-toggle-control:not(:has(input:disabled)):active,
       .right-select-control:not(:has(select:disabled)):active {
@@ -425,6 +424,14 @@
         border-color: var(--color-border-pressed);
       }
 
+      .foreground-button:not(:disabled):active {
+        background: var(--color-accent-solid-pressed);
+      }
+      @media (any-hover: hover) {
+        .foreground-button:not(:disabled):hover {
+          background: var(--color-accent-solid-hover);
+        }
+      }
       .foreground-button:focus-visible,
       .return-to-latest:focus-visible,
       .right-toggle-control input:focus-visible + .right-switch-ui,
@@ -435,7 +442,7 @@
 
       .action-button[data-authored-fill]:not(:disabled) {
         border-color: color-mix(in oklab, var(--authored-control-fill) 78%, black);
-        background: color-mix(in srgb, var(--authored-control-fill) 60%, transparent);
+        background: var(--authored-control-fill);
         color: var(--authored-control-text);
       }
 
@@ -448,7 +455,7 @@
       @media (any-hover: hover) {
         .action-button[data-authored-fill]:not(:disabled):hover {
           border-color: color-mix(in oklab, var(--authored-control-hover) 76%, black);
-          background: color-mix(in srgb, var(--authored-control-hover) 60%, transparent);
+          background: var(--authored-control-hover);
           color: var(--authored-control-text);
         }
 
@@ -461,7 +468,7 @@
 
       .action-button[data-authored-fill]:not(:disabled):active {
         border-color: color-mix(in oklab, var(--authored-control-pressed) 72%, black);
-        background: color-mix(in srgb, var(--authored-control-pressed) 60%, transparent);
+        background: var(--authored-control-pressed);
         color: var(--authored-control-text);
       }
 
@@ -491,7 +498,8 @@
       }
 
       @keyframes script-update-highlight {
-        0%, 28% {
+        0%,
+        28% {
           border-color: var(--package-accent);
           box-shadow: 0 0 0 3px color-mix(in srgb, var(--package-accent) 24%, transparent);
         }
@@ -502,19 +510,12 @@
       }
 
       .timer[data-timer-kind="mystery"]::before {
-        background:
-          conic-gradient(
-            from 0deg,
-            transparent 0 18%,
-            var(--package-accent) 18% 52%,
-            transparent 52% 100%
-          );
-        animation: mystery-timer-ring 1500ms linear infinite;
+        width: 28%;
+        animation: mystery-timer-progress 1500ms ease-in-out infinite alternate;
       }
-
-      @keyframes mystery-timer-ring {
+      @keyframes mystery-timer-progress {
         to {
-          transform: rotate(360deg);
+          transform: translateX(250%);
         }
       }
 
@@ -540,7 +541,7 @@
 
         .timer[data-timer-kind="mystery"]::before {
           animation: none;
-          transform: rotate(45deg);
+          transform: translateX(125%);
         }
       }
 }

@@ -111,7 +111,10 @@ function messageStyle(entry: PlayerTranscriptEntryPresentation): Record<string, 
   const speaker = speakerFor(entry);
   return speaker === null
     ? {}
-    : { "--speaker-accent": speaker.accent, "--speaker-font": speaker.fontFamily };
+    : {
+        "--speaker-accent": speaker.accent,
+        ...(speaker.fontFamily === "inherit" ? {} : { "--speaker-font": speaker.fontFamily }),
+      };
 }
 
 function virtualItemStyle(start: number): CSSProperties {
@@ -253,14 +256,24 @@ function scrollToLatest(behavior: ScrollBehavior): void {
           :style="messageStyleFor(virtualItem.index)"
         >
           <div class="message-row">
-            <div v-if="!isUserMessage(virtualItem.index)" class="speaker-avatar" aria-hidden="true">
+            <div
+              v-if="!isUserMessage(virtualItem.index) && speakerForIndex(virtualItem.index)?.avatar"
+              class="speaker-avatar"
+              aria-hidden="true"
+            >
               {{ speakerForIndex(virtualItem.index)?.avatar }}
             </div>
             <div class="message-copy">
-              <div class="speaker-name">{{ speakerForIndex(virtualItem.index)?.name }}</div>
+              <div v-if="speakerForIndex(virtualItem.index)?.name" class="speaker-name">
+                {{ speakerForIndex(virtualItem.index)?.name }}
+              </div>
               <div class="message-body">{{ entryText(virtualItem.index) }}</div>
             </div>
-            <div v-if="isUserMessage(virtualItem.index)" class="speaker-avatar" aria-hidden="true">
+            <div
+              v-if="isUserMessage(virtualItem.index) && speakerForIndex(virtualItem.index)?.avatar"
+              class="speaker-avatar"
+              aria-hidden="true"
+            >
               {{ speakerForIndex(virtualItem.index)?.avatar }}
             </div>
           </div>

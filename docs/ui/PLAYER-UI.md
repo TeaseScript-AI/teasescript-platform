@@ -51,6 +51,11 @@ ADR 0001 fixes the responsive PWA direction; exact offline, storage, cache, and 
 
 ## Current maturity boundary
 
+The Phase 2A branch is an Owner-requested independent presentation comparison under #336. Its scoped visual departures
+from the maintained baseline below are described in [`player/README.md`](../../player/README.md#phase-2a-comparison-presentation).
+They do not accept a final replacement palette, geometry, timer shape, or secondary-panel arrangement. Runtime,
+interaction, accessibility, and content-identity contracts continue to apply.
+
 Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.md);
 [`player/README.md`](../../player/README.md) records POC seams and demo-only behavior. This specification may lead the
 implementation. The current Vue reference connects implemented Standard interactions, transcript output, pacing, time

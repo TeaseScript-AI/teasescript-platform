@@ -3,11 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import {
-  canDockRightRail,
-  toggleLeftPanelMode,
-  toggleRightPanelMode,
-} from "../player/panel-state.js";
+import { toggleLeftPanelMode } from "../player/panel-state.js";
 import {
   formatTimer,
   orderRightControls,
@@ -15,20 +11,12 @@ import {
   timerProgressPercent,
 } from "../player/presentation.js";
 import { addToolColumn, closeToolColumn, selectToolColumn } from "../player/tool-columns.js";
-import { allocateRightRailPaneHeights } from "../player/right-rail-layout.js";
 
 test("Player panel toggles preserve the current auto/manual semantics", () => {
   assert.equal(toggleLeftPanelMode("auto", true), "closed");
   assert.equal(toggleLeftPanelMode("auto", false), "open");
   assert.equal(toggleLeftPanelMode("open", false), "closed");
   assert.equal(toggleLeftPanelMode("closed", true), "open");
-  assert.equal(toggleRightPanelMode("auto", true), "overlay");
-  assert.equal(toggleRightPanelMode("auto", false), "docked");
-  assert.equal(toggleRightPanelMode("docked", false), "overlay");
-  assert.equal(toggleRightPanelMode("overlay", true), "docked");
-  assert.equal(canDockRightRail(1_400, 625, 190, 495, false), true);
-  assert.equal(canDockRightRail(1_024, 625, 190, 492, false), false);
-  assert.equal(canDockRightRail(760, 0, 190, 380, true), false);
 });
 
 test("Player presentation helpers remain deterministic and framework-independent", () => {
@@ -80,11 +68,6 @@ test("Player tool columns prefer unused tools and retain the final column", () =
   assert.throws(() => closeToolColumn(initial, "tool-column-1"), /final Player tool column/u);
 });
 
-test("Player right-rail allocation preserves small panes and shares contention fairly", () => {
-  assert.deepEqual(allocateRightRailPaneHeights(600, 120, 180), { timers: 120, actions: 480 });
-  assert.deepEqual(allocateRightRailPaneHeights(300, 240, 180), { timers: 150, actions: 150 });
-});
-
 test("Vue Player keeps shared CSS layers and the maintained route contract", async () => {
   const root = process.cwd();
   const [main, vite, layout, responsive, media, rightControls, readme] = await Promise.all([
@@ -120,19 +103,19 @@ test("Vue Player shared CSS retains the responsive composition contracts", async
     readFile(resolve(root, "player/styles/components-composer.css"), "utf8"),
     readFile(resolve(root, "player/styles/components-tools.css"), "utf8"),
   ]);
-  assert.match(layout, /\.transcript \{[\s\S]*grid-column: 2;/u);
-  assert.match(foreground, /\.foreground-controls \{[\s\S]*grid-column: 2;/u);
-  assert.match(layout, /\.composer \{[\s\S]*grid-column: 2;/u);
+  assert.match(layout, /\.transcript \{[\s\S]*grid-column: 3;/u);
+  assert.match(foreground, /\.foreground-controls \{[\s\S]*grid-column: 3;/u);
+  assert.match(layout, /\.composer \{[\s\S]*grid-column: 3;/u);
   assert.match(composer, /width: min\(100%, var\(--conversation-max-width\)\)/u);
-  assert.match(responsive, /@media \(min-width: 761px\)[\s\S]*--left-grid-track:/u);
-  assert.match(responsive, /@media \(max-width: 760px\)[\s\S]*--left-grid-track: 0px;/u);
+  assert.match(responsive, /data-tools-layout="docked"[\s\S]*--left-grid-track:/u);
+  assert.match(responsive, /data-tools-layout="drawer"[\s\S]*--left-grid-track: 0px;/u);
   assert.doesNotMatch(responsive, /orientation:[\s\S]*right-zone/u);
   assert.match(tools, /grid-template-columns: minmax\(0, 1fr\) auto auto/u);
   assert.match(tools, /scroll-snap-type: x proximity/u);
   assert.match(tools, /\.tool-column-body\s*\{[^}]*overflow-y:\s*auto/su);
 });
 
-test("Vue Player shared CSS retains safe-area, compact-timer, and interaction states", async () => {
+test("Vue Player shared CSS retains safe-area, timer overflow, and interaction states", async () => {
   const root = process.cwd();
   const [layout, responsive, effects, rightControls] = await Promise.all([
     readFile(resolve(root, "player/styles/layout.css"), "utf8"),
@@ -145,15 +128,13 @@ test("Vue Player shared CSS retains safe-area, compact-timer, and interaction st
     /--safe-bottom:\s*env\(safe-area-inset-bottom, 0px\);[\s\S]*--safe-bottom-reserve:\s*var\(--safe-bottom\)/u,
   );
   assert.doesNotMatch(layout, /safe-area-max-inset-bottom/u);
-  assert.match(
-    responsive,
-    /\.player\[data-compact-timers="true"\] \.timer-list \{[\s\S]*flex-direction: row;[\s\S]*overflow-x: auto;/u,
-  );
+  assert.match(responsive, /data-chrome="compact"/u);
+  assert.match(rightControls, /\.timer-list \{[\s\S]*display: flex;[\s\S]*overflow-y: auto;/u);
   assert.match(
     effects,
     /\.action-button:not\(:disabled\):hover[\s\S]*var\(--color-component-hover\) 60%/u,
   );
-  assert.match(rightControls, /\.timer[\s\S]*var\(--color-surface-component\) 60%/u);
+  assert.match(rightControls, /\.timer::before[\s\S]*width: var\(--timer-progress\)/u);
   assert.match(rightControls, /\.action-button[\s\S]*var\(--color-surface-component\) 60%/u);
 });
 

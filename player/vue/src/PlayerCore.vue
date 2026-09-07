@@ -24,8 +24,10 @@ import {
 import PlayerComposer from "./components/PlayerComposer.vue";
 import PlayerForeground from "./components/PlayerForeground.vue";
 import PlayerMedia from "./components/PlayerMedia.vue";
-import PlayerRightRail from "./components/PlayerRightRail.vue";
-import PlayerTitleBar from "./components/PlayerTitleBar.vue";
+import PlayerSessionControls from "./components/PlayerSessionControls.vue";
+import PlayerTimer from "./components/PlayerTimer.vue";
+import PlayerSessionMenu from "./components/PlayerSessionMenu.vue";
+import PlayerInstruments from "./components/PlayerInstruments.vue";
 import PlayerTools from "./components/PlayerTools.vue";
 import PlayerTranscript from "./components/PlayerTranscript.vue";
 import { usePlayerLayout } from "./composables/usePlayerLayout.js";
@@ -77,6 +79,17 @@ const transcriptSpeakers = computed(() => {
     : { ...runtime.value.speakers, user: presentationUser };
 });
 const layout = usePlayerLayout({ player });
+const sessionOpen = ref(false);
+
+function setSessionOpen(open: boolean): void {
+  sessionOpen.value = open;
+  if (open && layout.leftOpen.value) layout.closeLeft(false);
+}
+
+function toggleTools(): void {
+  sessionOpen.value = false;
+  layout.toggleLeft();
+}
 const { snapshot: layoutDebugSnapshot } = usePlayerLayoutDebug(player);
 const toolsAvailable = computed(() => toolDefinitions.value.length > 0);
 const effectiveLeftMode = computed(() => (toolsAvailable.value ? layout.leftMode.value : "closed"));
@@ -271,11 +284,7 @@ function forgetPlayerPointerTarget(event: PointerEvent): void {
 
 function isPacingBackgroundTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
-  if (
-    target === player.value ||
-    target.classList.contains("transcript") ||
-    target.classList.contains("title-bg")
-  ) {
+  if (target === player.value || target.classList.contains("transcript")) {
     return true;
   }
   const mediaSurface = target.closest(".media-surface");
@@ -420,14 +429,11 @@ function closeToolColumn(id: string): void {
     ref="player"
     class="player fx-ambient"
     :data-chrome="layout.chrome.value"
-    :data-compact-timers="String(layout.compactTimers.value)"
     :data-keyboard="layout.keyboard.value"
     :data-keyboard-geometry="layout.keyboardGeometry.value"
     :data-left="effectiveLeftMode"
+    :data-tools-layout="layout.narrow.value ? 'drawer' : 'docked'"
     :data-media-fit="presentation.media.fit"
-    :data-right="layout.rightMode.value"
-    :data-right-backing="layout.rightBacking.value"
-    :data-right-layout="layout.rightLayout.value"
     :data-timer-kind="development.timerKind"
     :style="playerStyle"
     @pointercancel="forgetPlayerPointerTarget"
@@ -435,24 +441,51 @@ function closeToolColumn(id: string): void {
     @pointermove="markPlayerPointerMoved"
     @pointerup="handlePlayerPointer"
   >
-    <PlayerTitleBar
-      :compact-timers="layout.compactTimers.value"
+    <PlayerInstruments
       :fullscreen-active="layout.fullscreenActive.value"
       :left-open="toolsAvailable && layout.leftOpen.value"
-      :right-docked="layout.rightDocked.value"
-      :timer="presentation.timer"
-      :timer-count="development.timerCount"
-      :timer-kind="development.timerKind"
       :tools-available="toolsAvailable"
       @toggle-fullscreen="layout.toggleFullscreen"
-      @toggle-left="layout.toggleLeft"
-      @toggle-right="layout.toggleRight"
-    />
+      @toggle-left="toggleTools"
+    >
+      <template #timers>
+        <PlayerTimer
+          :timer="presentation.timer"
+          :timer-count="development.timerCount"
+          :timer-kind="development.timerKind"
+        />
+      </template>
+      <template #session>
+        <PlayerSessionMenu
+          :open="sessionOpen"
+          @update:open="setSessionOpen"
+          :boundary="player"
+          :controls-available="development.rightControlsVisible && state.rightControls.length > 0"
+        >
+          <PlayerSessionControls
+            :busy-style="development.busyStyle"
+            :busy-target="development.busyTarget"
+            :controls="development.rightControlsVisible ? state.rightControls : []"
+            :controls-disabled="development.controlsDisabled"
+            :script-update-control-id="state.scriptUpdateControlId"
+            :script-update-feedback="state.scriptUpdateFeedback"
+            @action="dispatch({ type: 'activate-right-action', controlId: $event })"
+            @select="
+              (controlId, value) => dispatch({ type: 'change-right-select', controlId, value })
+            "
+            @toggle="
+              (controlId, checked) => dispatch({ type: 'change-right-toggle', controlId, checked })
+            "
+          />
+        </PlayerSessionMenu>
+      </template>
+    </PlayerInstruments>
 
     <PlayerTools
       v-if="toolsAvailable"
       :columns="state.toolColumns"
       :open="layout.leftOpen.value"
+      :overlay="layout.narrow.value"
       :tools="toolDefinitions"
       :layout-debug-snapshot="layoutDebugSnapshot"
       @add="dispatch({ type: 'add-tool-column' })"
@@ -489,24 +522,6 @@ function closeToolColumn(id: string): void {
       @submit="submitComposer"
       @touch-input="layout.markTouchInputExpected"
       @update:model-value="dispatch({ type: 'set-composer', value: $event })"
-    />
-
-    <PlayerRightRail
-      :compact-timers="layout.compactTimers.value"
-      :busy-style="development.busyStyle"
-      :busy-target="development.busyTarget"
-      :controls="development.rightControlsVisible ? state.rightControls : []"
-      :controls-disabled="development.controlsDisabled"
-      :script-update-control-id="state.scriptUpdateControlId"
-      :script-update-feedback="state.scriptUpdateFeedback"
-      :timer="presentation.timer"
-      :timer-count="development.timerCount"
-      :timer-kind="development.timerKind"
-      @action="dispatch({ type: 'activate-right-action', controlId: $event })"
-      @select="(controlId, value) => dispatch({ type: 'change-right-select', controlId, value })"
-      @toggle="
-        (controlId, checked) => dispatch({ type: 'change-right-toggle', controlId, checked })
-      "
     />
 
     <div

@@ -1,5 +1,5 @@
 export const LAYOUT_DEBUG_SELECTORS = {
-  title: ".title-controls",
+  instruments: ".player-instruments",
   tools: ".left-panel",
   toolColumn: ".tool-column",
   stage: ".media-area",
@@ -7,16 +7,16 @@ export const LAYOUT_DEBUG_SELECTORS = {
   foreground: ".foreground-controls",
   composer: ".composer",
   input: ".composer textarea",
-  right: "#rightZone",
-  rightTimerList: "#rightZone .timer-list",
-  rightActions: "#rightZone .action-scroll",
+  session: ".session-popover",
+  timerList: ".instrument-timers .timer-list",
+  sessionActions: ".session-popover .action-scroll",
   toolStrip: ".tool-strip-scroll",
   toolBodies: ".tool-column-body",
 } as const;
 
 export type LayoutDebugRegion =
   | "player"
-  | "title"
+  | "instruments"
   | "tools"
   | "toolColumn"
   | "stage"
@@ -24,11 +24,11 @@ export type LayoutDebugRegion =
   | "foreground"
   | "composer"
   | "input"
-  | "right";
+  | "session";
 
 const LAYOUT_DEBUG_REGIONS: readonly LayoutDebugRegion[] = [
   "player",
-  "title",
+  "instruments",
   "tools",
   "toolColumn",
   "stage",
@@ -36,7 +36,7 @@ const LAYOUT_DEBUG_REGIONS: readonly LayoutDebugRegion[] = [
   "foreground",
   "composer",
   "input",
-  "right",
+  "session",
 ];
 
 export interface LayoutRect {
@@ -86,9 +86,8 @@ export interface LayoutDebugInsets {
 }
 
 export interface LayoutDebugReservations {
-  readonly title: number;
-  readonly left: number;
-  readonly right: number;
+  readonly instruments: number;
+  readonly tools: number;
   readonly composerBottom: number;
   readonly keyboardBottom: number;
 }
@@ -101,15 +100,14 @@ export interface LayoutDebugConstraints {
   readonly composerMaxViewportHeight: string;
   readonly usableHeight: string;
   readonly toolColumnWidth: string;
-  readonly rightRailWidth: string;
+  readonly sessionWidth: string;
 }
 
 export interface LayoutDebugComposition {
   readonly chrome: string;
   readonly left: string;
-  readonly right: string;
-  readonly rightBacking: string;
-  readonly rightLayout: string;
+  readonly session: string;
+  readonly toolsLayout: string;
   readonly keyboard: string;
   readonly keyboardGeometry: string;
   readonly fullscreen: boolean;
@@ -212,7 +210,7 @@ export function buildDiagnosticCardLines(snapshot: LayoutDebugSnapshot): readonl
   const lines = [
     `viewport ${formatPixels(viewport.layoutWidth)} × ${formatPixels(viewport.layoutHeight)}`,
     `visual ${formatPixels(viewport.visualWidth)} × ${formatPixels(viewport.visualHeight)} @ ${formatPixels(viewport.offsetLeft)}, ${formatPixels(viewport.offsetTop)} scale ${String(viewport.scale)}`,
-    `mode ${composition.chrome}; left ${composition.left}; right ${composition.right}/${composition.rightBacking}/${composition.rightLayout}`,
+    `mode ${composition.chrome}; left ${composition.left}; tools ${composition.toolsLayout}; session ${composition.session}`,
     `fullscreen ${yesNo(composition.fullscreen)}; keyboard ${composition.keyboard}/${composition.keyboardGeometry}; composer focus ${yesNo(snapshot.composerFocused)}`,
   ];
   for (const region of ["player", "stage", "transcript", "foreground", "composer"] as const) {
@@ -223,9 +221,9 @@ export function buildDiagnosticCardLines(snapshot: LayoutDebugSnapshot): readonl
     "transcript",
     "composer",
     "tool-strip",
-    "right",
-    "right-timer-list",
-    "right-actions",
+    "session",
+    "timers",
+    "session-actions",
   ] as const) {
     lines.push(`${name} scroll ${formatScroll(snapshot.scroll[name])}`);
   }
@@ -240,7 +238,7 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
   const style = getComputedStyle(player);
   const regionElements = {
     player,
-    title: query(player, LAYOUT_DEBUG_SELECTORS.title),
+    instruments: query(player, LAYOUT_DEBUG_SELECTORS.instruments),
     tools: query(player, LAYOUT_DEBUG_SELECTORS.tools),
     toolColumn: query(player, LAYOUT_DEBUG_SELECTORS.toolColumn),
     stage: query(player, LAYOUT_DEBUG_SELECTORS.stage),
@@ -248,7 +246,7 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
     foreground: query(player, LAYOUT_DEBUG_SELECTORS.foreground),
     composer: query(player, LAYOUT_DEBUG_SELECTORS.composer),
     input: query(player, LAYOUT_DEBUG_SELECTORS.input),
-    right: query(player, LAYOUT_DEBUG_SELECTORS.right),
+    session: query(player, LAYOUT_DEBUG_SELECTORS.session),
   } satisfies Record<LayoutDebugRegion, HTMLElement | null>;
   const playerRect = captureRect(player.getBoundingClientRect());
   const regions: Partial<Record<LayoutDebugRegion, LayoutRect>> = {};
@@ -261,18 +259,13 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
   const scrollRects: Record<string, LayoutRect> = { player: playerRect };
   addScroll(scroll, scrollRects, "transcript", regionElements.transcript);
   addScroll(scroll, scrollRects, "composer", regionElements.input ?? regionElements.composer);
-  addScroll(scroll, scrollRects, "right", regionElements.right);
+  addScroll(scroll, scrollRects, "session", regionElements.session);
+  addScroll(scroll, scrollRects, "timers", query(player, LAYOUT_DEBUG_SELECTORS.timerList));
   addScroll(
     scroll,
     scrollRects,
-    "right-timer-list",
-    query(player, LAYOUT_DEBUG_SELECTORS.rightTimerList),
-  );
-  addScroll(
-    scroll,
-    scrollRects,
-    "right-actions",
-    query(player, LAYOUT_DEBUG_SELECTORS.rightActions),
+    "session-actions",
+    query(player, LAYOUT_DEBUG_SELECTORS.sessionActions),
   );
   addScroll(scroll, scrollRects, "tool-strip", query(player, LAYOUT_DEBUG_SELECTORS.toolStrip));
   const toolBodies = player.querySelectorAll<HTMLElement>(LAYOUT_DEBUG_SELECTORS.toolBodies);
@@ -305,9 +298,8 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
       left: propertyPixels(style, "--safe-left"),
     },
     reservations: {
-      title: propertyPixels(style, "--title-track"),
-      left: propertyPixels(style, "--left-reserve"),
-      right: propertyPixels(style, "--right-reserve"),
+      instruments: regions.instruments?.width ?? 0,
+      tools: propertyPixels(style, "--left-grid-track"),
       composerBottom: propertyPixels(style, "--safe-bottom-reserve"),
       keyboardBottom: propertyPixels(style, "--fullscreen-keyboard-inset"),
     },
@@ -319,14 +311,13 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
       composerMaxViewportHeight: property(style, "--composer-effective-viewport-height"),
       usableHeight: property(style, "--player-usable-height"),
       toolColumnWidth: property(style, "--tool-column-width"),
-      rightRailWidth: property(style, "--right-controls-width"),
+      sessionWidth: property(style, "--session-controls-width"),
     },
     composition: {
       chrome: data(player, "chrome"),
       left: data(player, "left"),
-      right: data(player, "right"),
-      rightBacking: data(player, "rightBacking"),
-      rightLayout: data(player, "rightLayout"),
+      session: player.querySelector(".session-trigger")?.getAttribute("data-state") ?? "absent",
+      toolsLayout: data(player, "toolsLayout"),
       keyboard: data(player, "keyboard"),
       keyboardGeometry: data(player, "keyboardGeometry"),
       fullscreen: document.fullscreenElement === player,

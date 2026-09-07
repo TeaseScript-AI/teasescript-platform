@@ -74,7 +74,7 @@ function handlePointerDown(event: PointerEvent): void {
 </script>
 
 <template>
-  <footer class="composer">
+  <footer class="composer" :data-foreground-kind="foreground?.kind">
     <form @submit.prevent="$emit('submit')">
       <textarea
         ref="input"

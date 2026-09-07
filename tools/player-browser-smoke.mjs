@@ -58,6 +58,7 @@ async function main() {
       await vueRuntimeScenario(cdp, origin);
       await vueDevelopmentToolsScenario(cdp, origin);
       await vueTranscriptScenario(cdp, origin);
+      await vuePresentationScenario(cdp, origin);
       console.log(
         "player-browser-smoke: PASS runtime-backed Vue Player plus transcript virtualization, anchoring, and follow",
       );
@@ -83,11 +84,215 @@ async function main() {
   if (cleanupError !== undefined) throw cleanupError;
 }
 
+async function vuePresentationScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  await navigate(cdp, `${origin}/player/`);
+  await waitFor(cdp, `document.querySelector('.composer textarea') !== null`);
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[aria-controls="leftPanel"]').getAttribute('aria-expanded')`,
+    ),
+    "false",
+    "tools start secondary and closed",
+  );
+
+  for (const [width, height] of [
+    [1440, 900],
+    [820, 1180],
+    [390, 844],
+    [844, 390],
+    [1100, 420],
+  ]) {
+    await setViewport(cdp, width, height);
+    await waitFor(
+      cdp,
+      `Math.abs(document.querySelector('.player').getBoundingClientRect().height - ${height}) < 1`,
+    );
+    await waitFor(
+      cdp,
+      `(() => {
+      const p = document.querySelector('.player');
+      const stage = p.querySelector('.media-area').getBoundingClientRect();
+      const transcript = p.querySelector('.transcript').getBoundingClientRect();
+      const composer = p.querySelector('.composer').getBoundingClientRect();
+      return p.scrollHeight <= p.clientHeight + 1 && p.scrollWidth <= p.clientWidth + 1 && stage.height > 40 && transcript.height > 30 && transcript.top >= stage.bottom && composer.bottom <= p.getBoundingClientRect().bottom + 1;
+    })()`,
+    );
+    await setVueSessionOpen(cdp, true);
+    assertEqual(
+      await value(
+        cdp,
+        `(() => {
+      const panel=document.querySelector('.session-popover');
+      const r=panel.getBoundingClientRect(); const p=document.querySelector('.player').getBoundingClientRect();
+      const actions=panel.querySelector('.action-scroll');
+      return r.left >= p.left && r.right <= p.right + 1 && r.top >= p.top && r.bottom <= p.bottom + 1 && actions.scrollWidth <= actions.clientWidth + 1;
+    })()`,
+      ),
+      true,
+      `session disclosure fits ${width} × ${height}`,
+    );
+    await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+    await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+    await waitFor(
+      cdp,
+      `document.querySelector('.session-popover') === null && document.activeElement === document.querySelector('.session-trigger')`,
+    );
+  }
+
+  await setViewport(cdp, 390, 844);
+  await selectVueTool(cdp, "visuals");
+  await waitFor(cdp, `document.querySelector('.left-panel').contains(document.activeElement)`);
+  for (let index = 0; index < 8; index += 1) {
+    await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab" });
+    await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab" });
+    assertEqual(
+      await value(cdp, `document.querySelector('.left-panel').contains(document.activeElement)`),
+      true,
+      "drawer contains keyboard focus",
+    );
+  }
+  await physicalClick(cdp, ".left-scrim");
+  await waitFor(
+    cdp,
+    `document.querySelector('.player').dataset.left === 'closed' && document.activeElement === document.querySelector('[aria-controls="leftPanel"]')`,
+  );
+
+  await selectVueTool(cdp, "visuals");
+  await setVueSessionOpen(cdp, true);
+  await waitFor(
+    cdp,
+    `document.querySelector('.player').dataset.left === 'closed' && document.querySelector('.session-popover').contains(document.activeElement)`,
+  );
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await waitFor(
+    cdp,
+    `document.querySelector('.session-popover') === null && document.activeElement === document.querySelector('.session-trigger')`,
+  );
+  await setVueSessionOpen(cdp, true);
+  await physicalClick(cdp, '[aria-controls="leftPanel"]');
+  await waitFor(
+    cdp,
+    `document.querySelector('.session-popover') === null && document.querySelector('.left-panel').contains(document.activeElement) && document.querySelector('[data-visual-lab-instance]') !== null`,
+  );
+  await physicalClick(cdp, ".left-scrim");
+
+  await physicalClick(cdp, ".fullscreen-toggle");
+  await waitFor(cdp, `document.fullscreenElement === document.querySelector('.player')`);
+  await setVueSessionOpen(cdp, true);
+  assertEqual(
+    await value(
+      cdp,
+      `document.fullscreenElement.contains(document.querySelector('.session-popover'))`,
+    ),
+    true,
+    "session disclosure remains inside fullscreen",
+  );
+  await setVueSessionOpen(cdp, false);
+  await physicalClick(cdp, ".fullscreen-toggle");
+  await waitFor(cdp, `document.fullscreenElement === null`);
+
+  // Synthetic browser-reported geometry, not a production Player test API.
+  await evaluate(
+    cdp,
+    `(() => {
+    const input=document.querySelector('.composer textarea');
+    input.focus(); input.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true,pointerType:'touch',isPrimary:true}));
+    Object.defineProperty(window.visualViewport, 'height', {configurable:true,get:()=>360});
+    window.visualViewport.dispatchEvent(new Event('resize'));
+  })()`,
+  );
+  await waitFor(cdp, `document.querySelector('.player').dataset.keyboard === 'open'`);
+  await evaluate(
+    cdp,
+    `(() => { const input=document.querySelector('.composer textarea'); input.value=['A longer answer','with several lines','that keeps growing','while the keyboard is open','and still remains contained.'].join(String.fromCharCode(10)); input.dispatchEvent(new Event('input',{bubbles:true})); })()`,
+  );
+  await waitFor(
+    cdp,
+    `(() => { const p=document.querySelector('.player'); const c=p.querySelector('.composer').getBoundingClientRect(); return c.bottom <= 361 && p.scrollHeight <= p.clientHeight + 1 && p.querySelector('.transcript').clientHeight > 0 && p.querySelector('.media-area').clientHeight > 0; })()`,
+  );
+  await evaluate(
+    cdp,
+    `delete window.visualViewport.height; window.visualViewport.dispatchEvent(new Event('resize'));`,
+  );
+  await waitFor(cdp, `document.querySelector('.player').dataset.keyboard === 'closed'`);
+
+  await evaluate(
+    cdp,
+    `(() => {
+    const p=document.querySelector('.player');
+    for (const [edge,value] of Object.entries({top:24,right:32,bottom:20,left:32})) p.style.setProperty('--safe-'+edge,value+'px');
+    window.dispatchEvent(new Event('resize'));
+  })()`,
+  );
+  await waitFor(
+    cdp,
+    `(() => { const input=document.querySelector('.composer textarea').getBoundingClientRect(); const send=document.querySelector('.send-button').getBoundingClientRect(); return input.left >= 32 && send.right <= 358 && send.bottom <= 824; })()`,
+  );
+  const keyboardFixture = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => { const keyboard = new EventTarget(); keyboard.boundingRect = new DOMRect(); keyboard.overlaysContent = false; Object.defineProperty(navigator, 'virtualKeyboard', {configurable:true, value:keyboard}); })()`,
+  });
+  try {
+    await setViewport(cdp, 390, 844);
+    await navigate(cdp, `${origin}/player/`);
+    await waitFor(cdp, `document.querySelector('.composer textarea') !== null`);
+    await physicalClick(cdp, ".fullscreen-toggle");
+    await waitFor(
+      cdp,
+      `document.fullscreenElement !== null && navigator.virtualKeyboard.overlaysContent === true`,
+    );
+    await evaluate(
+      cdp,
+      `(() => { const input=document.querySelector('.composer textarea'); input.focus(); input.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'touch',isPrimary:true})); navigator.virtualKeyboard.boundingRect = new DOMRect(0,420,390,424); navigator.virtualKeyboard.dispatchEvent(new Event('geometrychange')); })()`,
+    );
+    await waitFor(
+      cdp,
+      `(() => { const p=document.querySelector('.player'); return p.dataset.keyboardGeometry === 'virtual-keyboard' && p.getBoundingClientRect().height === 844 && p.querySelector('.composer').getBoundingClientRect().bottom <= 421 && p.querySelector('.media-area').clientHeight > 0 && p.querySelector('.transcript').clientHeight > 0; })()`,
+    );
+    await evaluate(
+      cdp,
+      `navigator.virtualKeyboard.boundingRect = new DOMRect(); navigator.virtualKeyboard.dispatchEvent(new Event('geometrychange'));`,
+    );
+    await waitFor(cdp, `document.querySelector('.player').dataset.keyboard === 'closed'`);
+    await physicalClick(cdp, ".fullscreen-toggle");
+    await waitFor(
+      cdp,
+      `document.fullscreenElement === null && navigator.virtualKeyboard.overlaysContent === false`,
+    );
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", {
+      identifier: keyboardFixture.identifier,
+    });
+  }
+  const longButtonSource = `say "A long authored action remains reachable.", 0\nshowButton "${"Continue after reading this important part of the scene. ".repeat(8)}"`;
+  const injected = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => { const originalFetch=window.fetch; window.fetch=(input, options) => String(input).endsWith('/examples/playground/player-controls.tease') ? Promise.resolve(new Response(${JSON.stringify(longButtonSource)})) : originalFetch(input, options); })()`,
+  });
+  try {
+    await setViewport(cdp, 740, 360);
+    await navigate(cdp, `${origin}/player/`);
+    await waitFor(cdp, `document.querySelector('[data-foreground-button]') !== null`);
+    await waitFor(
+      cdp,
+      `(() => { const p=document.querySelector('.player'); const foreground=p.querySelector('.foreground-controls'); return p.scrollHeight <= p.clientHeight + 1 && p.scrollTop === 0 && p.querySelector('.media-area').clientHeight > 0 && p.querySelector('.transcript').clientHeight > 0 && foreground.scrollHeight > foreground.clientHeight; })()`,
+    );
+    await evaluate(cdp, `document.querySelector('.foreground-controls').scrollTop = 1000;`);
+    await physicalClick(cdp, ".foreground-controls");
+    await waitFor(cdp, `document.querySelector('[data-foreground-button]') === null`);
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier: injected.identifier });
+  }
+  await navigate(cdp, `${origin}/player/`);
+}
+
 async function vueDevelopmentToolsScenario(cdp, origin) {
   await setViewport(cdp, 1200, 760);
   await navigate(cdp, `${origin}/player/`);
   await waitFor(cdp, `document.querySelector('.player') !== null`);
   const resetBaselineTranscript = await vueRuntimeTranscript(cdp);
+  await setVueSessionOpen(cdp, true);
   const resetBaselineToggle = await value(
     cdp,
     `document.querySelector('.right-toggle-control input').checked`,
@@ -105,6 +310,7 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
     cdp,
     `([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Simulate script update')).click()`,
   );
+  await setVueSessionOpen(cdp, true);
   await waitFor(cdp, `document.querySelector('[data-script-update-feedback]') !== null`);
   await evaluate(
     cdp,
@@ -116,6 +322,7 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
     JSON.stringify(resetBaselineTranscript),
     "Reset visual tests must restore the baseline runtime and transcript",
   );
+  await setVueSessionOpen(cdp, true);
   assertEqual(
     await value(cdp, `document.querySelector('.right-toggle-control input').checked`),
     resetBaselineToggle,
@@ -131,7 +338,7 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
   assertEqual(
     await value(
       cdp,
-      `(() => { const text=document.querySelector('.debug-constraints')?.textContent ?? ''; const pixels=(value) => Math.round(value * 10) / 10 + 'px'; return text.includes('conversation') && text.includes('right') && text.includes('tool column ' + pixels(document.querySelector('.tool-column').getBoundingClientRect().width) + ' /') && text.includes('composer input ' + pixels(document.querySelector('.composer textarea').getBoundingClientRect().height) + ' /'); })()`,
+      `(() => { const text=document.querySelector('.debug-constraints')?.textContent ?? ''; const pixels=(value) => Math.round(value * 10) / 10 + 'px'; return text.includes('conversation') && text.includes('session') && text.includes('tool column ' + pixels(document.querySelector('.tool-column').getBoundingClientRect().width) + ' /') && text.includes('composer input ' + pixels(document.querySelector('.composer textarea').getBoundingClientRect().height) + ' /'); })()`,
     ),
     true,
     "wide Layout Debug must compare the tool column and composer input measurements with their constraints",
@@ -147,7 +354,8 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
     "narrow Layout Debug must retain current region overlays",
   );
 
-  await setViewport(cdp, 868, 700);
+  await setViewport(cdp, 1100, 700);
+  await selectVueTool(cdp, "layout-debug");
   await evaluate(cdp, `document.querySelector('[data-tool-column-add]').click()`);
   await waitFor(cdp, `document.querySelectorAll('[data-tool-column-id]').length === 2`);
   await evaluate(
@@ -208,7 +416,7 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
   );
   const timerPaneBefore = await value(
     cdp,
-    `document.querySelector('#rightZone > .timer-wrap').getBoundingClientRect().height`,
+    `document.querySelector('.instrument-timers > .timer-wrap').getBoundingClientRect().height`,
   );
   await evaluate(
     cdp,
@@ -216,15 +424,15 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
   );
   await waitFor(
     cdp,
-    `document.querySelector('.debug-card')?.textContent.match(/right-timer-list scroll .* [1-9][0-9.]*px y/) !== null`,
+    `document.querySelector('.debug-card')?.textContent.match(/timers scroll 0px x \\/ [1-9][0-9.]*px y/) !== null`,
   );
   assertEqual(
     await value(
       cdp,
-      `document.querySelector('#rightZone > .timer-wrap').getBoundingClientRect().height > ${JSON.stringify(timerPaneBefore)}`,
+      `(() => { const list=document.querySelector('.timer-list'); return document.querySelector('.instrument-timers > .timer-wrap').getBoundingClientRect().height <= ${JSON.stringify(timerPaneBefore)} + list.offsetHeight - list.clientHeight; })()`,
     ),
     true,
-    "timer count changes must recompute right-rail pane allocation",
+    "additional timers must retain their bounded instrument allocation",
   );
   assertEqual(
     await value(
@@ -232,15 +440,15 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
       `document.querySelector('.tool-strip-scroll').scrollWidth > document.querySelector('.tool-strip-scroll').clientWidth && [...document.querySelectorAll('.tool-column-body')].some((body) => body.scrollHeight > body.clientHeight) && document.querySelector('.timer-list').scrollHeight > document.querySelector('.timer-list').clientHeight`,
     ),
     true,
-    "Layout Debug fixture must create tool-strip, tool-body, and right-timer overflow",
+    "Layout Debug fixture must create tool-strip, tool-body, and vertical timer overflow",
   );
   assertEqual(
     await value(
       cdp,
-      `document.querySelector('.debug-card')?.textContent.includes('tool-body-') && document.querySelector('.debug-card')?.textContent.match(/right-timer-list scroll .* [1-9][0-9.]*px y/) !== null`,
+      `document.querySelector('.debug-card')?.textContent.includes('tool-body-') && document.querySelector('.debug-card')?.textContent.match(/timers scroll 0px x \\/ [1-9][0-9.]*px y/) !== null`,
     ),
     true,
-    "Layout Debug must report the actual overflowing tool body and right timer scroll owner",
+    "Layout Debug must report the actual overflowing tool body and timer scroll owner",
   );
   await evaluate(
     cdp,
@@ -263,6 +471,7 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
   await physicalClick(cdp, "[data-save-player-checkpoint]");
   const runtimeBefore = await vueRuntimeTranscript(cdp);
   await physicalClick(cdp, "[data-tool-column-add]");
+  await setVueSessionOpen(cdp, true);
   await evaluate(
     cdp,
     `(() => { const selects=document.querySelectorAll('[data-tool-column-select]'); selects[1].value='visuals'; selects[1].dispatchEvent(new Event('change',{bubbles:true})); const toggle=document.querySelector('.right-toggle-control input'); toggle.click(); const composer=document.querySelector('.composer textarea'); composer.value='local draft'; composer.dispatchEvent(new Event('input',{bubbles:true})); })()`,
@@ -276,8 +485,10 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
     cdp,
     `(() => { const accent=document.querySelector('[aria-label="Accent"]'); accent.value='teal'; accent.dispatchEvent(new Event('change',{bubbles:true})); })()`,
   );
+  await setVueSessionOpen(cdp, false);
   await physicalClickTranscriptBackground(cdp);
   await waitFor(cdp, `document.querySelector('[data-foreground-button]') !== null`);
+  await selectVueTool(cdp, "runtime-session");
   await physicalClick(cdp, "[data-restore-player-checkpoint]");
   await waitFor(cdp, `document.querySelector('[data-foreground-button]') === null`);
   assertEqual(
@@ -287,6 +498,7 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
     JSON.stringify(runtimeBefore),
     "Runtime Session restore must rewind runtime presentation",
   );
+  await setVueSessionOpen(cdp, true);
   assertEqual(
     await value(
       cdp,
@@ -671,6 +883,7 @@ async function vueRuntimeScenario(cdp, origin) {
     true,
     "transcript message activation must not skip pacing",
   );
+  await setVueSessionOpen(cdp, true);
   await physicalClick(cdp, ".right-toggle-control .right-control-label");
   await waitFor(cdp, `document.body.textContent.includes('You changed Strict mode to off.')`);
   assertEqual(
@@ -678,6 +891,7 @@ async function vueRuntimeScenario(cdp, origin) {
     true,
     "nested right-rail control activation must not skip pacing",
   );
+  await setVueSessionOpen(cdp, false);
   await physicalDragTranscriptBackground(cdp);
   assertEqual(
     await value(cdp, `document.querySelector('[data-foreground-button]') === null`),
@@ -694,6 +908,7 @@ async function vueRuntimeScenario(cdp, origin) {
     JSON.stringify(["Long pacing", "You changed Strict mode to off.", "After"]),
     "runtime and fixture transcript entries must preserve their presentation arrival order",
   );
+  await selectVueTool(cdp, "runtime-session");
   await physicalClick(cdp, "[data-save-player-checkpoint]");
   await physicalClick(cdp, "[data-restore-player-checkpoint]");
   await waitFor(
@@ -856,14 +1071,14 @@ async function vueRuntimeScenario(cdp, origin) {
         const containerRect=container.getBoundingClientRect();
         return message.classList.contains('user') &&
           getComputedStyle(message).textAlign === 'right' &&
-          getComputedStyle(message.querySelector('.message-copy')).fontFamily.startsWith('Verdana') &&
+          getComputedStyle(message.querySelector('.message-body')).fontFamily.startsWith('Verdana') &&
           containerRect.right - messageRect.right < messageRect.left - containerRect.left;
       })()`,
     ),
     true,
     "fixture user messages must retain the existing right-aligned Phase 1 user presentation",
   );
-  await setViewport(cdp, 1200, 700);
+  await setViewport(cdp, 1440, 900);
   await physicalClick(cdp, "[data-tool-column-add]");
   await waitFor(cdp, `document.querySelectorAll('[data-tool-column-id]').length === 2`);
   await waitFor(
@@ -887,7 +1102,8 @@ async function vueRuntimeScenario(cdp, origin) {
     true,
     "two tool columns must fit their preferred desktop panel width without clipping",
   );
-  await setViewport(cdp, 868, 700);
+  await setViewport(cdp, 1100, 700);
+  await selectVueTool(cdp, "layout-debug");
   await waitFor(
     cdp,
     `(() => {
@@ -955,7 +1171,21 @@ async function typeAndSubmitVuePlayer(cdp, text) {
   );
 }
 
+async function setVueSessionOpen(cdp, open) {
+  const current = await value(
+    cdp,
+    `document.querySelector('.session-trigger')?.getAttribute('data-state') === 'open'`,
+  );
+  if (current !== open) await physicalClick(cdp, ".session-trigger");
+  await waitFor(cdp, `document.querySelector('.session-popover') ${open ? "!==" : "==="} null`);
+}
+
 async function selectVueTool(cdp, toolId) {
+  const open = await value(
+    cdp,
+    `document.querySelector('[aria-controls="leftPanel"]').getAttribute('aria-expanded') === 'true'`,
+  );
+  if (!open) await physicalClick(cdp, '[aria-controls="leftPanel"]');
   await evaluate(
     cdp,
     `(() => {
