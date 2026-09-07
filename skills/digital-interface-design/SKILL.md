@@ -10,12 +10,15 @@ description: >-
 
 Act as a design lead, not a component assembler. Make choices that are specific to the brief, audience, product, and
 real content. A technically correct interface can still be visually generic; aim for a coherent point of view that
-improves comprehension, use, and identity.
+improves comprehension, use, and identity. Be opinionated where the brief leaves room, and take aesthetic risks when
+they are justified by the product rather than by novelty alone.
 
 ## Ground the design in the product
 
 Before choosing a direction, identify the audience, primary job, most important content/actions, subject matter and
-tone, and any existing functional or accessibility behavior that must survive. Use those facts as design material.
+tone, and any existing functional or accessibility behavior that must survive. Use the domain itself as design material:
+its industry, workflows, language, materials, artifacts, imagery, and visual vernacular can suggest choices that a
+generic style catalogue cannot.
 
 Do not let the current DOM, component library, demo content, or existing layout become the visual brief by accident. Do
 not invent product capabilities merely to create visual interest.
@@ -30,14 +33,18 @@ Create a compact design plan:
 
 - **Thesis:** the intended experience and what makes it specific to this brief.
 - **Typography:** families, roles, scale, weight, width, spacing, and reading measure.
-- **Color:** a small role-based palette for canvas, surfaces, text, borders, accents, and meaningful states.
+- **Color:** a small explicit core palette by role for canvas, surfaces, text, borders, and accents. For an early design
+  direction, roughly 4–6 core values is often enough; add semantic and interaction-state colors when the product needs
+  them. Prefer a perceptual color representation such as OKLCH/Oklab when the implementation supports it, and judge
+  tonal spacing perceptually rather than from raw RGB-style numeric distance.
 - **Composition:** the main spatial idea, alignment, density, and hierarchy.
 - **Details:** shape language, borders/elevation, icon treatment, imagery, and decorative vocabulary.
 - **Motion/state:** what changes, why, and how the hierarchy responds to content, interaction, width, and height.
 
-Consider at least one materially different composition before committing. Review the plan against the brief before
-building: if a choice could be transplanted unchanged into an unrelated product, justify it from the content or replace
-it.
+Consider at least one materially different composition before committing. Explore alternatives cheaply before code
+locks in the structure: concise layout descriptions and simple ASCII wireframes are useful when they make spatial
+relationships easier to compare. Review the plan against the brief before building: if a choice could be transplanted
+unchanged into an unrelated product, justify it from the content or replace it.
 
 If the brief deliberately fixes a visual direction, follow it. Anti-template guidance is a check against unconscious
 defaults, not a reason to override an explicit design request.
@@ -46,16 +53,22 @@ defaults, not a reason to override an explicit design request.
 
 Typography is part of identity and hierarchy, not a neutral wrapper. Choose it deliberately rather than reaching for the
 same fashionable family or pairing. One family can be enough; if using two, make the contrast and roles meaningful.
-Establish clear text roles and use size, weight, width, spacing, and line length with intent. When display type is a
-visual element, let the type treatment itself carry character rather than decorating it with unrelated effects.
+Establish clear text roles and use size, weight, width, spacing, and line length with intent. For continuous prose, keep
+a readable measure; around 80 characters or glyphs per line is a useful default ceiling unless the content or interface
+needs another treatment. Do not apply that ceiling mechanically to code, data, identifiers, tables, or other content
+whose structure requires width. When display type is a visual element, let the type treatment itself carry character
+rather than decorating it with unrelated effects.
 
 Visual structure should explain relationships. Start with alignment, spacing, type hierarchy, and grouping before
 adding containers. Borders, dividers, numbering, labels, cards, groups, columns, and surface changes should encode real
 information. A number should indicate sequence or rank; a badge should indicate a real category or state; a card should
 represent a meaningful bounded unit.
 
-Words are design content. Use plain user-facing language, keep action names consistent through a flow, and make empty
-and failure states instructive. Avoid decorative microcopy or labels that add texture without understanding.
+Words are design content. Write from the user's side of the interface: name things by what people recognize and
+control, not by how the system is implemented. Prefer active, specific actions that say what will happen, and keep the
+same action name through the whole flow. Make empty and failure states explain what happened and what the user can do
+next. Match the tone to the product and audience, keep filler out, and let each label, example, hint, and message do one
+clear job. Avoid decorative microcopy or labels that add texture without understanding.
 
 ## Resist generated-design defaults
 
