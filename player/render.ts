@@ -370,6 +370,12 @@ function createToolBody(toolId: PlayerToolId | null, presentation: PlayerPresent
       return createSceneTool(presentation);
     case "layout-debug":
       return createLayoutDebugTool();
+    case "runtime-session": {
+      const placeholder = document.createElement("p");
+      placeholder.className = "tool-placeholder";
+      placeholder.textContent = "Runtime Session is available in the Vue Player.";
+      return placeholder;
+    }
   }
 }
 
@@ -392,16 +398,6 @@ function createVisualTool(): HTMLElement {
   const options = document.createElement("div");
   options.className = "lab-options";
   options.append(
-    createToggleOption(
-      "Ambient media colour",
-      "Weak scene colour bleed around media.",
-      "fx-ambient",
-    ),
-    createToggleOption(
-      "Vignette",
-      "Universal edge darkening for any media content.",
-      "fx-vignette",
-    ),
     createSelectOption(
       "Busy Action",
       "Compare low-distraction in-place activity cues.",
@@ -424,25 +420,6 @@ function createVisualTool(): HTMLElement {
         ["action", "Action"],
         ["toggle", "Toggle"],
         ["select", "Select"],
-      ],
-    ),
-    createSelectOption(
-      "Timer label",
-      "Compare generic visible-order label placement.",
-      "timer-label",
-      [
-        ["off", "Off"],
-        ["above", "Inside · above"],
-        ["below", "Inside · below"],
-      ],
-    ),
-    createSelectOption(
-      "Timer label content",
-      "Exercise generic visible-order labels and an authored visible timer label.",
-      "timer-label-content",
-      [
-        ["generic", "Generic"],
-        ["authored", "Authored first timer"],
       ],
     ),
     createDemoNumberOption(
@@ -615,27 +592,13 @@ function createVisualTool(): HTMLElement {
   note.className = "lab-note";
   note.textContent = "POC tuning only. Reset restores the maintained baseline values.";
 
-  const fixed = document.createElement("div");
-  fixed.className = "lab-fixed-note";
-
-  const fixedTitle = document.createElement("span");
-  fixedTitle.className = "lab-fixed-note-title";
-  fixedTitle.textContent = "Always on";
-
-  const fixedCopy = document.createElement("span");
-  fixedCopy.className = "lab-fixed-note-copy";
-  fixedCopy.textContent =
-    "accent · timer ring · refined controls · surface depth · speaker identity · speaker typography · micro-motion · transcript fade";
-
-  fixed.append(fixedTitle, fixedCopy);
-
   const reset = document.createElement("button");
   reset.type = "button";
   reset.className = "lab-reset";
   reset.dataset.resetVisuals = "";
   reset.textContent = "Reset visual tests";
 
-  content.append(picker, options, tuning, scriptUpdate, mediaReplacement, note, fixed, reset);
+  content.append(picker, options, tuning, scriptUpdate, mediaReplacement, note, reset);
   return content;
 }
 
@@ -669,27 +632,6 @@ function createTuningInput(
   field.append(input, unitElement);
 
   row.append(copy, field);
-  return row;
-}
-
-function createToggleOption(title: string, note: string, effect: string): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "lab-option";
-  const copy = createLabOptionCopy(title, note);
-
-  const switchElement = document.createElement("label");
-  switchElement.className = "switch";
-
-  const input = document.createElement("input");
-  input.type = "checkbox";
-  input.dataset.effect = effect;
-  input.setAttribute("aria-label", title);
-
-  const switchUi = document.createElement("span");
-  switchUi.className = "switch-ui";
-  switchElement.append(input, switchUi);
-
-  row.append(copy, switchElement);
   return row;
 }
 

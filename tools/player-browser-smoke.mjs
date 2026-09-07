@@ -491,6 +491,12 @@ async function vueRuntimeScenario(cdp, origin) {
     cdp,
     `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
   );
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-layout-debug-overlay]') === null`),
+    true,
+    "normal Vue route must start with Layout Debug disabled",
+  );
+  await selectVueTool(cdp, "runtime-session");
 
   const initialTranscript = await vueRuntimeTranscript(cdp);
   await physicalClick(cdp, "#save-player-checkpoint");
@@ -559,6 +565,22 @@ async function vueRuntimeScenario(cdp, origin) {
     cdp,
     `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
   );
+  await navigate(cdp, `${origin}/player-vue/?layout-debug=1`);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-layout-debug-overlay]') !== null && document.querySelector('.player')?.dataset.chrome !== undefined`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-layout-debug-overlay]')?.getAttribute('aria-hidden')`,
+    ),
+    "true",
+    "direct Layout Debug URL must enable the non-interactive diagnostic overlay",
+  );
+  await navigate(cdp, `${origin}/player-vue/`);
+  await waitFor(cdp, `document.querySelector('.player') !== null`);
+  await selectVueTool(cdp, "runtime-session");
 
   await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
   await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
@@ -785,6 +807,19 @@ async function typeAndSubmitVuePlayer(cdp, text) {
     cdp,
     `const input=document.querySelector('.composer textarea'); input.value=${JSON.stringify(text)}; input.dispatchEvent(new Event('input', {bubbles:true})); document.querySelector('.composer form').requestSubmit()`,
   );
+}
+
+async function selectVueTool(cdp, toolId) {
+  await evaluate(
+    cdp,
+    `(() => {
+      const select=document.querySelector('[data-tool-column-select]');
+      if (!(select instanceof HTMLSelectElement)) throw new Error('Vue tool selector missing');
+      select.value=${JSON.stringify(toolId)};
+      select.dispatchEvent(new Event('change', {bubbles:true}));
+    })()`,
+  );
+  await waitFor(cdp, `document.querySelector('[data-tool-id=${JSON.stringify(toolId)}]') !== null`);
 }
 
 async function vueRuntimeTranscript(cdp) {

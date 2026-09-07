@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 import { deserializeCheckpoint } from "../src/index.js";
 
@@ -169,4 +171,33 @@ test("runtime checkpoint restore handles retained event histories above the nati
   assert.equal(restored.events.length, restorePoint.events.length);
   assert.equal(restored.transcriptEntries.length, session.transcriptEntries.length);
   assert.deepEqual(restored.snapshot, session.snapshot);
+});
+
+test("runtime development scenarios compile through the real Player adapter", async () => {
+  const scenarios = [
+    ["show-button", "interaction", "button", null],
+    ["choose", "interaction", "choice", null],
+    ["ask-text", "interaction", "text", null],
+    ["ask-number", "interaction", "number", null],
+    ["skippable-pacing", "chatPacingGate", null, true],
+    ["unskippable-pacing", "chatPacingGate", null, false],
+  ] as const;
+
+  for (const [fileName, actionKind, interactionKind, skippable] of scenarios) {
+    const source = await readFile(
+      resolve(process.cwd(), `player/vue/src/runtime-scenarios/${fileName}.tease`),
+      "utf8",
+    );
+    const session = createPlayerRuntimeSession(source);
+    const action =
+      actionKind === "interaction"
+        ? session.snapshot.foregroundAction
+        : playerRuntimePacingGate(session);
+    assert.equal(action?.kind, actionKind, `${fileName} action kind`);
+    if (action?.kind === "interaction") {
+      assert.equal(action.interactionKind, interactionKind, `${fileName} interaction kind`);
+    } else if (action?.kind === "chatPacingGate") {
+      assert.equal(action.skippable, skippable, `${fileName} skip policy`);
+    }
+  }
 });

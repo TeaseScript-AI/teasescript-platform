@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { PlayerToolColumnState, PlayerToolDefinition, PlayerToolId } from "../../../model.js";
+import type { LayoutDebugSnapshot } from "../devtools/layoutDebugMeasurement.js";
 
 const props = defineProps<{
   open: boolean;
   columns: readonly PlayerToolColumnState[];
   tools: readonly PlayerToolDefinition[];
+  layoutDebugSnapshot?: LayoutDebugSnapshot | null;
 }>();
 
 const emit = defineEmits<{
@@ -108,7 +110,11 @@ function selectTool(columnId: string, event: Event): void {
             </button>
           </header>
           <div class="tool-column-body" :data-tool-body="column.toolId ?? ''">
-            <slot name="tool" :tool-id="column.toolId">
+            <slot
+              name="tool"
+              :layout-debug-snapshot="layoutDebugSnapshot"
+              :tool-id="column.toolId"
+            >
               <p class="tool-placeholder">
                 {{
                   column.toolId === null

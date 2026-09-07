@@ -343,7 +343,7 @@ constraint set: stage usefulness, readable conversation width, right-side reserv
 POC tool width. The maintained conversation bounds and stage-shape goal remain visual/tuning inputs rather than hidden
 additional responsive modes.
 
-`Visual Lab` and `Scene` remain development fixtures, not Standard Player tools. A real Debugger is a future platform
+`Visual Lab`, `Layout Debug`, and `Runtime Session` remain development fixtures, not Standard Player tools. A real Debugger is a future platform
 tool described in [DEBUGGER.md](../DEBUGGER.md).
 
 ## Stage and media presentation

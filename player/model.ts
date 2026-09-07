@@ -1,6 +1,6 @@
 export type MediaFit = "contain" | "cover";
 export type PlayerMediaTransitionFixture = "direct" | "fade" | "crossfade";
-export type PlayerToolId = "visuals" | "scene" | "layout-debug";
+export type PlayerToolId = "visuals" | "scene" | "layout-debug" | "runtime-session";
 export type PlayerTimerKind = "visible" | "mystery" | "hidden";
 export type PlayerForegroundFixtureKind =
   "none" | "show-button" | "choose" | "ask-text" | "ask-number";
@@ -30,6 +30,7 @@ export interface PlayerMediaPresentation {
 }
 
 export interface PlayerTimerPresentation {
+  readonly name?: string;
   readonly remainingSeconds: number;
   readonly totalSeconds: number;
 }

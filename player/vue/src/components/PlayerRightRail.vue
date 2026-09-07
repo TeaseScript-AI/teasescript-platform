@@ -1,17 +1,38 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type CSSProperties,
+} from "vue";
 import type {
   PlayerRightControlPresentation,
+  PlayerTimerKind,
   PlayerTimerPresentation,
 } from "../../../model.js";
 import { orderRightControls, readableControlText } from "../../../presentation.js";
 import { allocateRightRailPaneHeights } from "../../../right-rail-layout.js";
+import type {
+  BusyControlTarget,
+  BusyStyle,
+  ScriptUpdateFeedback,
+} from "../devtools/playerDevelopment.js";
 import PlayerTimer from "./PlayerTimer.vue";
 
 const props = defineProps<{
   compactTimers: boolean;
+  busyStyle: BusyStyle;
+  busyTarget: BusyControlTarget;
   controls: readonly PlayerRightControlPresentation[];
+  controlsDisabled: boolean;
+  scriptUpdateControlId: string | null;
+  scriptUpdateFeedback: ScriptUpdateFeedback | null;
   timer: PlayerTimerPresentation;
+  timerCount: number;
+  timerKind: PlayerTimerKind;
 }>();
 
 defineEmits<{
@@ -64,9 +85,10 @@ function syncPaneAllocation(): void {
   const timer = zone.querySelector<HTMLElement>(":scope > .timer-wrap");
   const actions = actionPane.value;
   const timerList = timer?.querySelector<HTMLElement>(".timer-list") ?? null;
-  const timerRequired = timer === null || timerList === null
-    ? 0
-    : naturalStackBlockSize(timerList) + verticalPadding(timer);
+  const timerRequired =
+    timer === null || timerList === null
+      ? 0
+      : naturalStackBlockSize(timerList) + verticalPadding(timer);
   const actionsRequired = actions === null ? 0 : naturalStackBlockSize(actions);
   timerPaneSize.value = allocateRightRailPaneHeights(
     zone.clientHeight,
@@ -78,9 +100,13 @@ function syncPaneAllocation(): void {
 function naturalStackBlockSize(element: HTMLElement): number {
   const style = getComputedStyle(element);
   const children = [...element.children].filter(
-    (child): child is HTMLElement => child instanceof HTMLElement && child.getClientRects().length > 0,
+    (child): child is HTMLElement =>
+      child instanceof HTMLElement && child.getClientRects().length > 0,
   );
-  const childrenHeight = children.reduce((total, child) => total + child.getBoundingClientRect().height, 0);
+  const childrenHeight = children.reduce(
+    (total, child) => total + child.getBoundingClientRect().height,
+    0,
+  );
   const gap = children.length > 1 ? finitePixel(style.rowGap) * (children.length - 1) : 0;
   return childrenHeight + gap + verticalPadding(element);
 }
@@ -94,6 +120,17 @@ function finitePixel(value: string): number {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
+
+function busy(kind: BusyControlTarget): boolean {
+  return props.busyStyle !== "off" && props.busyTarget === kind;
+}
+
+function scriptUpdateMarker(controlId: string): "highlight" | undefined {
+  return controlId === props.scriptUpdateControlId &&
+    (props.scriptUpdateFeedback === "highlight" || props.scriptUpdateFeedback === "toast-highlight")
+    ? "highlight"
+    : undefined;
+}
 </script>
 
 <template>
@@ -104,7 +141,12 @@ function finitePixel(value: string): number {
     aria-label="Timer and background controls"
     :style="{ '--timer-pane-size': `${timerPaneSize}px` }"
   >
-    <PlayerTimer v-if="!compactTimers" :timer="timer" />
+    <PlayerTimer
+      v-if="!compactTimers"
+      :timer="timer"
+      :timer-count="timerCount"
+      :timer-kind="timerKind"
+    />
 
     <div
       ref="actionPane"
@@ -119,6 +161,10 @@ function finitePixel(value: string): number {
           type="button"
           :data-action-id="control.id"
           :data-authored-fill="control.authoredFill === undefined ? undefined : ''"
+          :data-busy-style="busy('action') ? busyStyle : undefined"
+          :data-script-update-feedback="scriptUpdateMarker(control.id)"
+          :aria-busy="busy('action') || undefined"
+          :disabled="controlsDisabled"
           :style="authoredStyle(control.authoredFill)"
           @click="$emit('action', control.id)"
         >
@@ -129,6 +175,9 @@ function finitePixel(value: string): number {
           v-else-if="control.kind === 'toggle'"
           class="right-control right-toggle-control"
           :data-control-id="control.id"
+          :data-busy-style="busy('toggle') ? busyStyle : undefined"
+          :data-script-update-feedback="scriptUpdateMarker(control.id)"
+          :aria-busy="busy('toggle') || undefined"
         >
           <span class="right-control-label">{{ control.label }}</span>
           <input
@@ -136,6 +185,7 @@ function finitePixel(value: string): number {
             role="switch"
             :aria-label="control.label"
             :checked="control.value"
+            :disabled="controlsDisabled"
             @change="$emit('toggle', control.id, ($event.target as HTMLInputElement).checked)"
           />
           <span class="right-switch-ui" aria-hidden="true"></span>
@@ -145,11 +195,15 @@ function finitePixel(value: string): number {
           v-else-if="control.kind === 'select'"
           class="right-control right-select-control"
           :data-control-id="control.id"
+          :data-busy-style="busy('select') ? busyStyle : undefined"
+          :data-script-update-feedback="scriptUpdateMarker(control.id)"
+          :aria-busy="busy('select') || undefined"
         >
           <span class="right-control-label">{{ control.label }}</span>
           <select
             :aria-label="control.label"
             :value="control.value"
+            :disabled="controlsDisabled"
             @change="$emit('select', control.id, ($event.target as HTMLSelectElement).value)"
           >
             <option v-for="option in control.options" :key="option[0]" :value="option[0]">
@@ -158,12 +212,7 @@ function finitePixel(value: string): number {
           </select>
         </label>
 
-        <div
-          v-else
-          class="right-control right-status"
-          :data-control-id="control.id"
-          role="status"
-        >
+        <div v-else class="right-control right-status" :data-control-id="control.id" role="status">
           <span class="right-control-label">{{ control.label }}</span>
           <span class="right-status-detail">{{ control.detail }}</span>
           <progress

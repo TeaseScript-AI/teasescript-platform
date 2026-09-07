@@ -446,7 +446,7 @@ test("Player chrome roles and restrained Penpot elevation stay on structural she
   assert.match(tools, /\.tool-selector[\s\S]*background: var\(--color-surface-component\)/u);
   assert.match(visualLab, /\.lab-fixed-note[\s\S]*background: var\(--color-surface-chrome\)/u);
   assert.match(visualLab, /\.lab-fixed-note-title[\s\S]*color: var\(--package-accent\)/u);
-  assert.match(render, /fixedTitle\.textContent = "Always on"/u);
+  assert.doesNotMatch(render, /fixedTitle\.textContent = "Always on"/u);
 });
 
 test("Player Visual Lab exposes reversible Phase 4 geometry tuning", async () => {
@@ -521,10 +521,7 @@ test("Player Visual Lab exposes grouped reversible Phase 4 review choices", asyn
     render,
     /"Busy Action"[\s\S]*"busy-style"[\s\S]*"Soft pulse"[\s\S]*"Slow sweep"[\s\S]*"Three dots"[\s\S]*"Corner pulse"[\s\S]*"Corner spinner"[\s\S]*"Soft wash"/u,
   );
-  assert.match(
-    render,
-    /"Timer label"[\s\S]*"timer-label"[\s\S]*"Inside · above"[\s\S]*"Inside · below"/u,
-  );
+  assert.doesNotMatch(render, /"Timer label"|timer-label|Timer label content/u);
   assert.match(
     render,
     /createDemoNumberOption\([\s\S]*"Timer count"[\s\S]*"timer-count"[\s\S]*1,[\s\S]*1,/u,
@@ -832,7 +829,7 @@ test("Player Layout Debug exposes live development-only geometry inspection", as
   assert.match(debugCss, /height: var\(--safe-top\)/u);
   assert.match(debugCss, /width: var\(--safe-right\)/u);
   assert.match(debugCss, /data-debug-kind="overflow"[\s\S]*#c026d3/u);
-  assert.match(playerDocs, /`Visual\s+Lab`, `Layout Debug`, and `Scene` tools/u);
+  assert.match(playerDocs, /Visual Lab, Layout Debug, and Runtime Session tools/u);
 });
 
 test("Player composition changes preserve panel intent and keep a focused drawer open", async () => {
