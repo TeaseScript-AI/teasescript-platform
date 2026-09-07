@@ -1,0 +1,3 @@
+say unskippable "This runtime pacing gate cannot be skipped.", 60
+say "The unskippable runtime pacing gate completed.", 60
+exit

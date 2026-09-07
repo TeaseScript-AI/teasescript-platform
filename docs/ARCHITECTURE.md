@@ -120,8 +120,9 @@ lookup/completion seam lives at `player/runtime-adapter.ts`. The Player implemen
 production-direction Vue reference is built from `player/vue/` and served at `/player-vue/`. It uses Tailwind CSS 4,
 repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the single transcript windowing and
 scroll-anchoring owner, and drives the implemented interaction/pacing slice from canonical runtime state and events.
-The manual implementation at `/player/` is transitional legacy pending removal and temporarily hosts development
-fixtures; it is not a parallel production architecture. Both routes currently use the same framework-independent
+The manual implementation at `/player/` is transitional legacy pending removal and is not a parallel production
+architecture. Development-only Visual Lab, Layout Debug, and Runtime Session tools live in the Vue reference; their
+state remains local presentation/dev state except for canonical runtime checkpoints. Both routes currently use the same framework-independent
 presentation types, shared Player action helpers, and browser-native CSS geometry. The Vue choice and migration
 boundary are accepted in ADR 0020. Current presentation models, demo data, media, timer, and right-rail fixtures remain
 internal POC seams, not an accepted engine/Player protocol or cross-origin host contract.

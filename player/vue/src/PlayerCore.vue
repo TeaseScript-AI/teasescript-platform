@@ -29,11 +29,26 @@ import PlayerTitleBar from "./components/PlayerTitleBar.vue";
 import PlayerTools from "./components/PlayerTools.vue";
 import PlayerTranscript from "./components/PlayerTranscript.vue";
 import { usePlayerLayout } from "./composables/usePlayerLayout.js";
-import { createPlayerCoreState, reducePlayerCoreState, type PlayerCoreAction } from "./state.js";
+import PlayerLayoutDebugOverlay from "./devtools/PlayerLayoutDebugOverlay.vue";
+import type { LayoutDebugOptions } from "./devtools/layoutDebug.js";
+import type {
+  PlayerDevelopmentOptions,
+  ScriptUpdateFeedback,
+  ScriptUpdateTarget,
+} from "./devtools/playerDevelopment.js";
+import { usePlayerLayoutDebug } from "./devtools/usePlayerLayoutDebug.js";
+import {
+  createPlayerCoreState,
+  reducePlayerCoreState,
+  replaceRuntimeTranscriptEntries,
+  type PlayerCoreAction,
+} from "./state.js";
 
 const props = defineProps<{
   presentation: PlayerPresentation;
   runtimeSource: string;
+  development: PlayerDevelopmentOptions;
+  layoutDebugOptions: LayoutDebugOptions;
   tools?: readonly PlayerToolDefinition[];
   toolLabel?: string;
 }>();
@@ -64,10 +79,12 @@ const transcriptSpeakers = computed(() => {
     : { ...runtime.value.speakers, user: presentationUser };
 });
 const layout = usePlayerLayout({ player });
+const { snapshot: layoutDebugSnapshot } = usePlayerLayoutDebug(player);
 const toolsAvailable = computed(() => toolDefinitions.value.length > 0);
 const effectiveLeftMode = computed(() => (toolsAvailable.value ? layout.leftMode.value : "closed"));
 let sessionTimeOriginMs = performance.now() - runtime.value.snapshot.currentSessionTimeMs;
 let timeTimer: ReturnType<typeof setTimeout> | null = null;
+let scriptUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 let activeTypedActionId = typedInteractionActionId();
 const pointerGestures = new Map<
   number,
@@ -85,8 +102,13 @@ const playerStyle = computed(
       "--media-fit": props.presentation.media.fit,
       "--package-accent": props.presentation.package.accentColor,
       "--scene-ambient": props.presentation.media.ambientColor,
+      ...props.development.styleOverrides,
     }) as CSSProperties,
 );
+const displayedTranscriptEntries = computed(() => [
+  ...props.development.historyEntries,
+  ...presentationTranscriptEntries.value,
+]);
 
 function dispatch(action: PlayerCoreAction): void {
   const previousFixtureCount = state.value.fixtureTranscriptEntries.length;
@@ -279,9 +301,57 @@ function saveCheckpoint(): PlayerRuntimeRestorePoint {
 function restoreCheckpoint(restorePoint: PlayerRuntimeRestorePoint): void {
   applyRuntimeSession(restorePlayerRuntimeSession(restorePoint), true);
   sessionTimeOriginMs = performance.now() - runtime.value.snapshot.currentSessionTimeMs;
-  dispatch({ type: "set-composer", value: "" });
   focusComposerForActiveTypedInteraction(true);
   scheduleTimeObservation();
+}
+
+function startRuntimeSource(source: string): void {
+  const session = createPlayerRuntimeSession(source);
+  if (timeTimer !== null) {
+    clearTimeout(timeTimer);
+    timeTimer = null;
+  }
+  runtime.value = session;
+  presentationTranscriptEntries.value = replaceRuntimeTranscriptEntries(
+    state.value.fixtureTranscriptEntries,
+    session.transcriptEntries,
+  );
+  transcriptRevision.value += 1;
+  sessionTimeOriginMs = performance.now() - session.snapshot.currentSessionTimeMs;
+  activeTypedActionId = typedInteractionActionId();
+  focusComposerForActiveTypedInteraction(true);
+  scheduleTimeObservation();
+}
+
+function resetVisualTests(): void {
+  if (timeTimer !== null) {
+    clearTimeout(timeTimer);
+    timeTimer = null;
+  }
+  if (scriptUpdateTimer !== null) {
+    clearTimeout(scriptUpdateTimer);
+    scriptUpdateTimer = null;
+  }
+  state.value = createPlayerCoreState(
+    props.presentation,
+    toolDefinitions.value.map((tool) => tool.id),
+  );
+  const session = createPlayerRuntimeSession(props.runtimeSource);
+  runtime.value = session;
+  presentationTranscriptEntries.value = [...session.transcriptEntries];
+  transcriptRevision.value += 1;
+  sessionTimeOriginMs = performance.now() - session.snapshot.currentSessionTimeMs;
+  activeTypedActionId = typedInteractionActionId();
+  scheduleTimeObservation();
+}
+
+function simulateScriptUpdate(target: ScriptUpdateTarget, feedback: ScriptUpdateFeedback): void {
+  dispatch({ type: "simulate-script-update", target, feedback });
+  if (scriptUpdateTimer !== null) clearTimeout(scriptUpdateTimer);
+  scriptUpdateTimer = setTimeout(() => {
+    scriptUpdateTimer = null;
+    dispatch({ type: "clear-script-update-feedback" });
+  }, 1_600);
 }
 
 function observeCurrentTime(): void {
@@ -328,10 +398,17 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   if (timeTimer !== null) clearTimeout(timeTimer);
+  if (scriptUpdateTimer !== null) clearTimeout(scriptUpdateTimer);
   document.removeEventListener("visibilitychange", observeAfterVisibilityChange);
 });
 
-defineExpose({ restoreCheckpoint, saveCheckpoint });
+defineExpose({
+  restoreCheckpoint,
+  saveCheckpoint,
+  simulateScriptUpdate,
+  startRuntimeSource,
+  resetVisualTests,
+});
 
 function closeToolColumn(id: string): void {
   const collapsesPanel = state.value.toolColumns.length === 1;
@@ -353,7 +430,7 @@ function closeToolColumn(id: string): void {
     :data-right="layout.rightMode.value"
     :data-right-backing="layout.rightBacking.value"
     :data-right-layout="layout.rightLayout.value"
-    data-timer-kind="visible"
+    :data-timer-kind="development.timerKind"
     :style="playerStyle"
     @pointercancel="forgetPlayerPointerTarget"
     @pointerdown="rememberPlayerPointerTarget"
@@ -366,6 +443,8 @@ function closeToolColumn(id: string): void {
       :left-open="toolsAvailable && layout.leftOpen.value"
       :right-docked="layout.rightDocked.value"
       :timer="presentation.timer"
+      :timer-count="development.timerCount"
+      :timer-kind="development.timerKind"
       :tools-available="toolsAvailable"
       @toggle-fullscreen="layout.toggleFullscreen"
       @toggle-left="layout.toggleLeft"
@@ -377,6 +456,7 @@ function closeToolColumn(id: string): void {
       :columns="state.toolColumns"
       :open="layout.leftOpen.value"
       :tools="toolDefinitions"
+      :layout-debug-snapshot="layoutDebugSnapshot"
       @add="dispatch({ type: 'add-tool-column' })"
       @close="closeToolColumn"
       @dismiss="layout.closeLeft"
@@ -384,16 +464,16 @@ function closeToolColumn(id: string): void {
     >
       <template #tool="{ toolId }">
         <p v-if="toolId === null" class="tool-placeholder">Choose a tool for this column.</p>
-        <slot v-else name="tool" :tool-id="toolId">
+        <slot v-else name="tool" :layout-debug-snapshot="layoutDebugSnapshot" :tool-id="toolId">
           <p class="tool-placeholder">No content is available for this tool.</p>
         </slot>
       </template>
     </PlayerTools>
 
-    <PlayerMedia :media="presentation.media" />
+    <PlayerMedia :media="presentation.media" :transition="development.mediaTransition" />
 
     <PlayerTranscript
-      :entries="presentationTranscriptEntries"
+      :entries="displayedTranscriptEntries"
       :revision="transcriptRevision"
       :speakers="transcriptSpeakers"
     />
@@ -415,13 +495,33 @@ function closeToolColumn(id: string): void {
 
     <PlayerRightRail
       :compact-timers="layout.compactTimers.value"
-      :controls="state.rightControls"
+      :busy-style="development.busyStyle"
+      :busy-target="development.busyTarget"
+      :controls="development.rightControlsVisible ? state.rightControls : []"
+      :controls-disabled="development.controlsDisabled"
+      :script-update-control-id="state.scriptUpdateControlId"
+      :script-update-feedback="state.scriptUpdateFeedback"
       :timer="presentation.timer"
+      :timer-count="development.timerCount"
+      :timer-kind="development.timerKind"
       @action="dispatch({ type: 'activate-right-action', controlId: $event })"
       @select="(controlId, value) => dispatch({ type: 'change-right-select', controlId, value })"
       @toggle="
         (controlId, checked) => dispatch({ type: 'change-right-toggle', controlId, checked })
       "
     />
+
+    <div
+      v-if="
+        state.scriptUpdateNotice.length > 0 &&
+        (state.scriptUpdateFeedback === 'toast' || state.scriptUpdateFeedback === 'toast-highlight')
+      "
+      class="script-update-toast"
+      role="status"
+    >
+      {{ state.scriptUpdateNotice }}
+    </div>
+
+    <PlayerLayoutDebugOverlay :options="layoutDebugOptions" :snapshot="layoutDebugSnapshot" />
   </main>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PlayerTimerPresentation } from "../../../model.js";
+import type { PlayerTimerKind, PlayerTimerPresentation } from "../../../model.js";
 import PlayerTimer from "./PlayerTimer.vue";
 
 defineProps<{
@@ -8,14 +8,12 @@ defineProps<{
   leftOpen: boolean;
   rightDocked: boolean;
   timer: PlayerTimerPresentation;
+  timerCount: number;
+  timerKind: PlayerTimerKind;
   toolsAvailable: boolean;
 }>();
 
-defineEmits<{
-  toggleFullscreen: [];
-  toggleLeft: [];
-  toggleRight: [];
-}>();
+defineEmits<{ toggleFullscreen: []; toggleLeft: []; toggleRight: [] }>();
 </script>
 
 <template>
@@ -36,7 +34,12 @@ defineEmits<{
     <div class="title-text">TeaseScript Player</div>
 
     <div class="toolbar-spacer compact-timer-host">
-      <PlayerTimer v-if="compactTimers" :timer="timer" />
+      <PlayerTimer
+        v-if="compactTimers"
+        :timer="timer"
+        :timer-count="timerCount"
+        :timer-kind="timerKind"
+      />
     </div>
 
     <div class="global-controls">
@@ -44,7 +47,9 @@ defineEmits<{
         class="icon-button right-toggle"
         type="button"
         aria-controls="rightZone"
-        :aria-label="rightDocked ? 'Use overlay right panel background' : 'Dock right panel background'"
+        :aria-label="
+          rightDocked ? 'Use overlay right panel background' : 'Dock right panel background'
+        "
         :aria-pressed="rightDocked"
         @click="$emit('toggleRight')"
       >

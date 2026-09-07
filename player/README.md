@@ -11,8 +11,8 @@ ADRs.
 
 For local inspection, `npm run playground` serves the production-direction Vue reference at `/player-vue/` and the
 manual/vanilla legacy implementation at `/player/` through the existing development server. These development routes
-are not a public Player/host protocol. `/player/` is pending removal and temporarily hosts Visual Lab, Layout Debug, and
-other deliberate fixtures; it is not a maintained comparison architecture or a second production frontend.
+are not a public Player/host protocol. `/player/` is pending removal and is not a maintained comparison architecture or
+a second production frontend; `/player-vue/` owns the development-only Visual Lab, Layout Debug, and Runtime Session tools.
 
 ## Implementation seams
 
@@ -26,8 +26,8 @@ other deliberate fixtures; it is not a maintained comparison architecture or a s
 - `panel-state.ts` and `tool-columns.ts` keep the current local UI state transitions separate from rendering.
 - `browser.ts` wires local browser interactions, demo presentation state, responsive state synchronization, and demo
   media loading.
-- `layout-debug.ts` owns the development-only geometry observer and overlay/readout synchronization used by the local
-  `Layout Debug` fixture.
+- `layout-debug.ts` is the legacy manual-route geometry observer; Vue development diagnostics live under
+  `vue/src/devtools/`.
 - `styles/` separates reset, layout/theme ownership, components, effects, and responsive composition through cascade
   layers.
 - `demo-session.ts` and `demo-media/` are presentation fixtures, not runtime/package APIs.
@@ -46,19 +46,20 @@ mask colours remain separate presentation data.
 
 ## Demo-only behavior
 
-The local playground server may select a supported image from `player/demo-media/` when the Player opens. The `Visual
-Lab`, `Layout Debug`, and `Scene` tools, their fixture content, local tuning/inspection controls, filename-derived scene
-information, and the demo-media endpoint exist to exercise the presentation and are not Standard Library, runtime,
-package, or host APIs.
+The local playground server may select a supported image from `player/demo-media/` when the Player opens. Visual Lab,
+Layout Debug, Runtime Session, their fixture content, local tuning/inspection controls, and the demo-media endpoint are
+development-only presentation tools, not Standard Library, runtime, package, or host APIs.
 
-Visual Lab and Layout Debug, along with other deliberate presentation fixtures, remain on the legacy manual route until
-they are migrated or retired. Their temporary location does not make that route a supported frontend architecture or
-promote the fixtures into Player product contracts.
+Runtime Session restores canonical runtime/checkpoint state plus same-session runtime-event history; Visual Lab settings,
+tool columns, and fixture-only right-rail/composer history remain local.
 
 `/player-vue/?fixture=transcript-stress` is a development-only browser-verification route. It retains 2,000 transcript
 entries in presentation data while TanStack-owned windowing bounds rendered DOM, and exercises variable-height
 measurement, keyed prepend/append anchoring, resize behavior, scroll-away preservation, and return-to-latest follow.
 It is not a runtime, package, or host API.
+
+Browser automation can open `/player-vue/?layout-debug=1` to start the Vue Layout Debug overlay enabled; the ordinary
+`/player-vue/` route starts with diagnostics disabled.
 
 The default Vue development route compiles real `player-controls.tease` source and drives `say`, canonical
 `playerTranscript` output, foreground interactions, chat pacing, time observation, checkpoint, and restore through

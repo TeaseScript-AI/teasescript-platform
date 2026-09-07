@@ -4,7 +4,11 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import { DEMO_PRESENTATION } from "../player/demo-session.js";
-import { createPlayerCoreState, reducePlayerCoreState } from "../player/vue/src/state.js";
+import {
+  createPlayerCoreState,
+  reducePlayerCoreState,
+  replaceRuntimeTranscriptEntries,
+} from "../player/vue/src/state.js";
 import {
   isLeftPanelOpen,
   resolveLeftPanelModeOnNarrowTransition,
@@ -101,6 +105,24 @@ test("Vue Player tools prefer unused columns, allow duplicates, and retain the f
   assert.deepEqual(closingLast.toolColumns, retainedFinal.toolColumns);
 });
 
+test("starting a new runtime transcript removes old runtime entries and retains local fixture history", () => {
+  const fixtureEntry = {
+    kind: "session-event" as const,
+    id: "fixture-activity-1",
+    text: "Local Visual Lab activity",
+  };
+  const newRuntimeEntry = {
+    kind: "message" as const,
+    id: "runtime-event-1",
+    speakerId: "narrator",
+    text: "New runtime source",
+  };
+  const replaced = replaceRuntimeTranscriptEntries([fixtureEntry], [newRuntimeEntry]);
+
+  assert.deepEqual(replaced, [fixtureEntry, newRuntimeEntry]);
+  assert.equal(replaced.includes(fixtureEntry), true);
+});
+
 test("Vue panel mode keeps auto responsive while preserving explicit and focused intent", () => {
   const initialNarrowMode = resolveLeftPanelModeOnNarrowTransition("auto", true, false);
   assert.equal(initialNarrowMode, "auto");
@@ -114,27 +136,59 @@ test("Vue panel mode keeps auto responsive while preserving explicit and focused
   assert.equal(resolveLeftPanelModeOnNarrowTransition("open", true, false), "closed");
 });
 
-test("Vue reference route has one component owner and excludes development fixtures", async () => {
+test("Vue reference route has one component owner and explicit development tool boundaries", async () => {
   const root = process.cwd();
-  const [core, layout, main, index] = await Promise.all([
-    readFile(resolve(root, "player/vue/src/PlayerCore.vue"), "utf8"),
-    readFile(resolve(root, "player/vue/src/composables/usePlayerLayout.ts"), "utf8"),
-    readFile(resolve(root, "player/vue/src/main.ts"), "utf8"),
-    readFile(resolve(root, "player/vue/index.html"), "utf8"),
-  ]);
+  const [app, core, layout, main, index, visualLab, scenarioRegistry, runtimeSession] =
+    await Promise.all([
+      readFile(resolve(root, "player/vue/src/App.vue"), "utf8"),
+      readFile(resolve(root, "player/vue/src/PlayerCore.vue"), "utf8"),
+      readFile(resolve(root, "player/vue/src/composables/usePlayerLayout.ts"), "utf8"),
+      readFile(resolve(root, "player/vue/src/main.ts"), "utf8"),
+      readFile(resolve(root, "player/vue/index.html"), "utf8"),
+      readFile(resolve(root, "player/vue/src/components/VisualLabTool.vue"), "utf8"),
+      readFile(resolve(root, "player/vue/src/runtime-scenarios.ts"), "utf8"),
+      readFile(resolve(root, "player/vue/src/components/RuntimeSessionTool.vue"), "utf8"),
+    ]);
 
   assert.match(core, /<PlayerTranscript/u);
   assert.match(core, /<PlayerForeground/u);
   assert.match(core, /<PlayerComposer/u);
   assert.match(core, /<PlayerRightRail/u);
   assert.match(main, /createApp\(App\)\.mount\("#app"\)/u);
-  assert.doesNotMatch(main, /components-visual-lab|components-layout-debug/u);
-  assert.doesNotMatch(core, /Visual Lab|Layout Debug/u);
+  assert.match(main, /components-visual-lab/u);
+  assert.doesNotMatch(main, /components-layout-debug/u);
+  assert.doesNotMatch(core, /Visual Lab|Layout Debug|Runtime Session/u);
   assert.match(core, /createPlayerRuntimeSession/u);
   assert.match(core, /session\.transcriptEntries/u);
   assert.match(core, /presentationTranscriptEntries/u);
   assert.match(core, /state\.value\.fixtureTranscriptEntries/u);
   assert.match(core, /presentation\.speakers\.user/u);
+  assert.match(core, /function startRuntimeSource/u);
+  assert.match(core, /function resetVisualTests/u);
+  assert.match(core, /replaceRuntimeTranscriptEntries/u);
+  assert.match(app, /id: "visuals", label: "Visual Lab"/u);
+  assert.match(app, /id: "layout-debug", label: "Layout Debug"/u);
+  assert.match(app, /id: "runtime-session", label: "Runtime Session"/u);
+  assert.match(
+    app,
+    /startRuntimeSource\(scenario\.source\)[\s\S]*savedRestorePoint\.value = null/u,
+  );
+  for (const scenarioId of [
+    "show-button",
+    "choose",
+    "ask-text",
+    "ask-number",
+    "skippable-pacing",
+    "unskippable-pacing",
+  ]) {
+    assert.match(scenarioRegistry, new RegExp(`id: "${scenarioId}"`, "u"));
+  }
+  assert.match(visualLab, /VisualLabActionTarget/u);
+  assert.match(runtimeSession, />\s*Save runtime checkpoint\s*</u);
+  assert.match(runtimeSession, />\s*Restore runtime checkpoint\s*</u);
+  assert.match(runtimeSession, /canonical runtime\/checkpoint state/u);
+  assert.match(runtimeSession, /fixture-only[\s\S]*history stay local/u);
+  assert.match(runtimeSession, /useId\(\)/u);
   assert.match(layout, /stripWidth \+ panelChromeWidth/u);
   assert.doesNotMatch(index, /browser\.js/u);
 });
@@ -164,4 +218,17 @@ test("Vue transcript uses TanStack's single virtual scroll and anchor owner", as
   assert.match(app, /transcriptStressFixture[\s\S]*transcript-stress/u);
   assert.match(fixture, /INITIAL_HISTORY_SIZE = 2_000/u);
   assert.match(fixture, /data-transcript-fixture="stress"/u);
+});
+
+test("Vue media transitions and timer allocation preserve accessibility and live sizing", async () => {
+  const [media, mediaStyles, rightRail] = await Promise.all([
+    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerMedia.vue"), "utf8"),
+    readFile(resolve(process.cwd(), "player/styles/components-media.css"), "utf8"),
+    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerRightRail.vue"), "utf8"),
+  ]);
+  assert.match(media, /media-transition-outgoing[\s\S]*alt=""[\s\S]*aria-hidden="true"/u);
+  assert.match(mediaStyles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation: none/u);
+  assert.match(rightRail, /props\.timerCount, props\.timerKind/u);
+  assert.match(rightRail, /querySelector<HTMLElement>\("\.timer-list"\)/u);
+  assert.match(rightRail, /observer\?\.observe\(timerList\)/u);
 });

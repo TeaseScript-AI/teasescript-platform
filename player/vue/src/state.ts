@@ -8,6 +8,7 @@ import type {
   PlayerTranscriptEntryPresentation,
 } from "../../model.js";
 import { addToolColumn, closeToolColumn, selectToolColumn } from "../../tool-columns.js";
+import type { ScriptUpdateFeedback, ScriptUpdateTarget } from "./devtools/playerDevelopment.js";
 
 export interface PlayerCoreState {
   readonly composerFeedback: string;
@@ -16,6 +17,9 @@ export interface PlayerCoreState {
   readonly nextActivitySequence: number;
   readonly nextToolColumnNumber: number;
   readonly rightControls: readonly PlayerRightControlPresentation[];
+  readonly scriptUpdateControlId: string | null;
+  readonly scriptUpdateFeedback: ScriptUpdateFeedback | null;
+  readonly scriptUpdateNotice: string;
   readonly toolColumns: readonly PlayerToolColumnState[];
   readonly toolOrder: readonly PlayerToolId[];
 }
@@ -27,6 +31,12 @@ export type PlayerCoreAction =
   | { readonly type: "change-right-toggle"; readonly checked: boolean; readonly controlId: string }
   | { readonly type: "close-tool-column"; readonly id: string }
   | { readonly type: "select-tool-column"; readonly id: string; readonly toolId: PlayerToolId }
+  | {
+      readonly type: "simulate-script-update";
+      readonly feedback: ScriptUpdateFeedback;
+      readonly target: ScriptUpdateTarget;
+    }
+  | { readonly type: "clear-script-update-feedback" }
   | { readonly type: "set-composer"; readonly value: string }
   | { readonly type: "set-composer-feedback"; readonly message: string }
   | { readonly type: "submit-fixture-composer" };
@@ -42,9 +52,19 @@ export function createPlayerCoreState(
     nextActivitySequence: 1,
     nextToolColumnNumber: 2,
     rightControls: presentation.rightControls,
+    scriptUpdateControlId: null,
+    scriptUpdateFeedback: null,
+    scriptUpdateNotice: "",
     toolColumns: addToolColumn([], "tool-column-1", toolOrder),
     toolOrder,
   };
+}
+
+export function replaceRuntimeTranscriptEntries(
+  fixtureEntries: readonly PlayerTranscriptEntryPresentation[],
+  runtimeEntries: readonly PlayerTranscriptEntryPresentation[],
+): readonly PlayerTranscriptEntryPresentation[] {
+  return [...fixtureEntries, ...runtimeEntries];
 }
 
 export function reducePlayerCoreState(
@@ -64,6 +84,15 @@ export function reducePlayerCoreState(
       return { ...state, composerFeedback: "", composerValue: action.value };
     case "set-composer-feedback":
       return { ...state, composerFeedback: action.message };
+    case "clear-script-update-feedback":
+      return {
+        ...state,
+        scriptUpdateControlId: null,
+        scriptUpdateFeedback: null,
+        scriptUpdateNotice: "",
+      };
+    case "simulate-script-update":
+      return simulateScriptUpdate(state, action.target, action.feedback);
     case "submit-fixture-composer":
       return state.composerValue.trim().length === 0
         ? { ...state, composerFeedback: "Enter a response before sending." }
@@ -84,6 +113,48 @@ export function reducePlayerCoreState(
         ? state
         : { ...state, toolColumns: closeToolColumn(state.toolColumns, action.id) };
   }
+}
+
+function simulateScriptUpdate(
+  state: PlayerCoreState,
+  target: ScriptUpdateTarget,
+  feedback: ScriptUpdateFeedback,
+): PlayerCoreState {
+  const control = state.rightControls.find((candidate) => candidate.kind === target);
+  if (control === undefined || (control.kind !== "toggle" && control.kind !== "select"))
+    return state;
+
+  const nextControl =
+    control.kind === "toggle"
+      ? { ...control, value: !control.value }
+      : {
+          ...control,
+          value:
+            control.options[
+              (control.options.findIndex(([value]) => value === control.value) + 1) %
+                control.options.length
+            ]?.[0] ?? control.value,
+        };
+  const displayValue =
+    nextControl.kind === "toggle"
+      ? nextControl.value
+        ? "on"
+        : "off"
+      : (nextControl.options.find(([value]) => value === nextControl.value)?.[1] ??
+        nextControl.value);
+  const notice = `Script changed ${control.label} to ${displayValue}.`;
+  return appendSessionEvent(
+    {
+      ...state,
+      rightControls: state.rightControls.map((candidate) =>
+        candidate.id === control.id ? nextControl : candidate,
+      ),
+      scriptUpdateControlId: control.id,
+      scriptUpdateFeedback: feedback,
+      scriptUpdateNotice: notice,
+    },
+    notice,
+  );
 }
 
 function changeRightToggle(

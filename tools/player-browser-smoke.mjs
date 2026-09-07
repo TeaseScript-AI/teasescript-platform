@@ -57,6 +57,7 @@ async function main() {
       await narrowScenario(cdp);
       await manualPlayerForegroundScenario(cdp, origin);
       await vueRuntimeScenario(cdp, origin);
+      await vueDevelopmentToolsScenario(cdp, origin);
       await vueTranscriptScenario(cdp, origin);
       console.log(
         "player-browser-smoke: PASS runtime-backed Vue Player plus transcript virtualization, anchoring, and follow",
@@ -81,6 +82,220 @@ async function main() {
   }
   if (scenarioFailed) throw scenarioError;
   if (cleanupError !== undefined) throw cleanupError;
+}
+
+async function vueDevelopmentToolsScenario(cdp, origin) {
+  await setViewport(cdp, 1200, 760);
+  await navigate(cdp, `${origin}/player-vue/`);
+  await waitFor(cdp, `document.querySelector('.player') !== null`);
+  const resetBaselineTranscript = await vueRuntimeTranscript(cdp);
+  const resetBaselineToggle = await value(
+    cdp,
+    `document.querySelector('.right-toggle-control input').checked`,
+  );
+  await selectVueTool(cdp, "visuals");
+  await evaluate(
+    cdp,
+    `([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Run askText scenario')).click()`,
+  );
+  await waitFor(
+    cdp,
+    `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Answer'`,
+  );
+  await evaluate(
+    cdp,
+    `([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Simulate script update')).click()`,
+  );
+  await waitFor(cdp, `document.querySelector('[data-script-update-feedback]') !== null`);
+  await evaluate(
+    cdp,
+    `([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Reset visual tests')).click()`,
+  );
+  await waitFor(cdp, `document.querySelector('[data-script-update-feedback]') === null`);
+  assertEqual(
+    JSON.stringify(await vueRuntimeTranscript(cdp)),
+    JSON.stringify(resetBaselineTranscript),
+    "Reset visual tests must restore the baseline runtime and transcript",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelector('.right-toggle-control input').checked`),
+    resetBaselineToggle,
+    "Reset visual tests must undo simulated script updates",
+  );
+
+  await setViewport(cdp, 1200, 760);
+  await navigate(cdp, `${origin}/player-vue/?layout-debug=1`);
+  await waitFor(
+    cdp,
+    `document.querySelector('.debug-card')?.textContent.includes('viewport 1200px')`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const text=document.querySelector('.debug-constraints')?.textContent ?? ''; const pixels=(value) => Math.round(value * 10) / 10 + 'px'; return text.includes('conversation') && text.includes('right') && text.includes('tool column ' + pixels(document.querySelector('.tool-column').getBoundingClientRect().width) + ' /') && text.includes('composer input ' + pixels(document.querySelector('.composer textarea').getBoundingClientRect().height) + ' /'); })()`,
+    ),
+    true,
+    "wide Layout Debug must compare the tool column and composer input measurements with their constraints",
+  );
+  await setViewport(cdp, 390, 700);
+  await waitFor(
+    cdp,
+    `document.querySelector('.debug-card')?.textContent.includes('viewport 390px')`,
+  );
+  assertEqual(
+    await value(cdp, `document.querySelectorAll('[data-debug-kind]').length >= 5`),
+    true,
+    "narrow Layout Debug must retain current region overlays",
+  );
+
+  await setViewport(cdp, 868, 700);
+  await evaluate(cdp, `document.querySelector('[data-tool-column-add]').click()`);
+  await waitFor(cdp, `document.querySelectorAll('[data-tool-column-id]').length === 2`);
+  await evaluate(
+    cdp,
+    `(() => { const selects=document.querySelectorAll('[data-tool-column-select]'); selects[1].value='visuals'; selects[1].dispatchEvent(new Event('change',{bubbles:true})); })()`,
+  );
+  await waitFor(cdp, `document.querySelector('[aria-label="Timer count"]') !== null`);
+  await evaluate(cdp, `document.querySelector('[data-tool-column-add]').click()`);
+  await waitFor(cdp, `document.querySelectorAll('[data-tool-column-id]').length === 3`);
+  await evaluate(
+    cdp,
+    `(() => { const selects=document.querySelectorAll('[data-tool-column-select]'); selects[2].value='visuals'; selects[2].dispatchEvent(new Event('change',{bubbles:true})); })()`,
+  );
+  await waitFor(cdp, `document.querySelectorAll('[data-visual-lab-instance]').length >= 2`);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const ids=[...document.querySelectorAll('[id]')].map((node) => node.id); return ids.length === new Set(ids).size; })()`,
+    ),
+    true,
+    "duplicate Visual Lab columns must retain unique DOM IDs",
+  );
+  await evaluate(
+    cdp,
+    `document.querySelectorAll('[data-visual-lab-instance] .lab-option-info-trigger')[0].click()`,
+  );
+  await waitFor(
+    cdp,
+    `document.querySelectorAll('[data-visual-lab-instance]')[0].querySelector('[aria-expanded="true"]') !== null`,
+  );
+  await evaluate(
+    cdp,
+    `document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('.lab-option-info-trigger').click()`,
+  );
+  await waitFor(
+    cdp,
+    `document.querySelectorAll('[data-visual-lab-instance]')[0].querySelector('[aria-expanded="true"]') === null && document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('[aria-expanded="true"]') !== null`,
+  );
+  await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-visual-lab-instance] [aria-expanded="true"]') === null`,
+  );
+  await evaluate(
+    cdp,
+    `document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('.lab-option-info-trigger').click()`,
+  );
+  await waitFor(
+    cdp,
+    `document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('[aria-expanded="true"]') !== null`,
+  );
+  await physicalClick(cdp, ".media-surface");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-visual-lab-instance] [aria-expanded="true"]') === null`,
+  );
+  const timerPaneBefore = await value(
+    cdp,
+    `document.querySelector('#rightZone > .timer-wrap').getBoundingClientRect().height`,
+  );
+  await evaluate(
+    cdp,
+    `(() => { const input=document.querySelector('[aria-label="Timer count"]'); input.value='24'; input.dispatchEvent(new Event('change',{bubbles:true})); })()`,
+  );
+  await waitFor(
+    cdp,
+    `document.querySelector('.debug-card')?.textContent.match(/right-timer-list scroll .* [1-9][0-9.]*px y/) !== null`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('#rightZone > .timer-wrap').getBoundingClientRect().height > ${JSON.stringify(timerPaneBefore)}`,
+    ),
+    true,
+    "timer count changes must recompute right-rail pane allocation",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('.tool-strip-scroll').scrollWidth > document.querySelector('.tool-strip-scroll').clientWidth && [...document.querySelectorAll('.tool-column-body')].some((body) => body.scrollHeight > body.clientHeight) && document.querySelector('.timer-list').scrollHeight > document.querySelector('.timer-list').clientHeight`,
+    ),
+    true,
+    "Layout Debug fixture must create tool-strip, tool-body, and right-timer overflow",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('.debug-card')?.textContent.includes('tool-body-') && document.querySelector('.debug-card')?.textContent.match(/right-timer-list scroll .* [1-9][0-9.]*px y/) !== null`,
+    ),
+    true,
+    "Layout Debug must report the actual overflowing tool body and right timer scroll owner",
+  );
+  await evaluate(
+    cdp,
+    `(() => { const selects=document.querySelectorAll('[data-tool-column-select]'); for (const index of [1,2]) { selects[index].value='runtime-session'; selects[index].dispatchEvent(new Event('change',{bubbles:true})); } })()`,
+  );
+  await waitFor(cdp, `document.querySelectorAll('[data-player-runtime-status]').length === 2`);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const ids=[...document.querySelectorAll('[id]')].map((node) => node.id); return ids.length === new Set(ids).size; })()`,
+    ),
+    true,
+    "duplicate Runtime Session columns must retain unique DOM IDs",
+  );
+
+  await setViewport(cdp, 1200, 760);
+  await navigate(cdp, `${origin}/player-vue/?fixture=runtime-skippable-long`);
+  await waitFor(cdp, `document.querySelector('.player') !== null`);
+  await selectVueTool(cdp, "runtime-session");
+  await physicalClick(cdp, "[data-save-player-checkpoint]");
+  const runtimeBefore = await vueRuntimeTranscript(cdp);
+  await physicalClick(cdp, "[data-tool-column-add]");
+  await evaluate(
+    cdp,
+    `(() => { const selects=document.querySelectorAll('[data-tool-column-select]'); selects[1].value='visuals'; selects[1].dispatchEvent(new Event('change',{bubbles:true})); const toggle=document.querySelector('.right-toggle-control input'); toggle.click(); const composer=document.querySelector('.composer textarea'); composer.value='local draft'; composer.dispatchEvent(new Event('input',{bubbles:true})); })()`,
+  );
+  const localToggleValue = await value(
+    cdp,
+    `document.querySelector('.right-toggle-control input').checked`,
+  );
+  await waitFor(cdp, `document.querySelector('[aria-label="Accent"]') !== null`);
+  await evaluate(
+    cdp,
+    `(() => { const accent=document.querySelector('[aria-label="Accent"]'); accent.value='teal'; accent.dispatchEvent(new Event('change',{bubbles:true})); })()`,
+  );
+  await physicalClickTranscriptBackground(cdp);
+  await waitFor(cdp, `document.querySelector('[data-foreground-button]') !== null`);
+  await physicalClick(cdp, "[data-restore-player-checkpoint]");
+  await waitFor(cdp, `document.querySelector('[data-foreground-button]') === null`);
+  assertEqual(
+    JSON.stringify(
+      (await vueRuntimeTranscript(cdp)).filter((entry) => entry.id.startsWith("runtime-")),
+    ),
+    JSON.stringify(runtimeBefore),
+    "Runtime Session restore must rewind runtime presentation",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelectorAll('[data-tool-column-id]').length === 2 && document.querySelector('[aria-label="Accent"]').value === 'teal' && document.querySelector('.composer textarea').value === 'local draft' && document.querySelector('.right-toggle-control input').checked === ${JSON.stringify(localToggleValue)}`,
+    ),
+    true,
+    "Runtime Session restore must preserve local Visual Lab, tool, right-rail, and composer state",
+  );
 }
 
 function waitForBrowserClose(browser) {
@@ -491,12 +706,18 @@ async function vueRuntimeScenario(cdp, origin) {
     cdp,
     `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
   );
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-layout-debug-overlay]') === null`),
+    true,
+    "normal Vue route must start with Layout Debug disabled",
+  );
+  await selectVueTool(cdp, "runtime-session");
 
   const initialTranscript = await vueRuntimeTranscript(cdp);
-  await physicalClick(cdp, "#save-player-checkpoint");
+  await physicalClick(cdp, "[data-save-player-checkpoint]");
   await waitFor(
     cdp,
-    `document.querySelector('#player-runtime-status')?.textContent.includes('saved')`,
+    `document.querySelector('[data-player-runtime-status]')?.textContent.includes('saved')`,
   );
   assertEqual(
     JSON.stringify(await vueRuntimeTranscript(cdp)),
@@ -504,7 +725,7 @@ async function vueRuntimeScenario(cdp, origin) {
     "checkpoint control pointer activation must not also skip pacing",
   );
 
-  await evaluate(cdp, `document.querySelector('#save-player-checkpoint').focus()`);
+  await evaluate(cdp, `document.querySelector('[data-save-player-checkpoint]').focus()`);
   await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
   await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
   assertEqual(
@@ -542,11 +763,11 @@ async function vueRuntimeScenario(cdp, origin) {
     JSON.stringify(["Long pacing", "You changed Strict mode to off.", "After"]),
     "runtime and fixture transcript entries must preserve their presentation arrival order",
   );
-  await physicalClick(cdp, "#save-player-checkpoint");
-  await physicalClick(cdp, "#restore-player-checkpoint");
+  await physicalClick(cdp, "[data-save-player-checkpoint]");
+  await physicalClick(cdp, "[data-restore-player-checkpoint]");
   await waitFor(
     cdp,
-    `document.querySelector('#player-runtime-status')?.textContent.includes('restored')`,
+    `document.querySelector('[data-player-runtime-status]')?.textContent.includes('restored')`,
   );
   assertEqual(
     JSON.stringify((await vueRuntimeTranscript(cdp)).map((entry) => entry.text.trim())),
@@ -559,6 +780,22 @@ async function vueRuntimeScenario(cdp, origin) {
     cdp,
     `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
   );
+  await navigate(cdp, `${origin}/player-vue/?layout-debug=1`);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-layout-debug-overlay]') !== null && document.querySelector('.player')?.dataset.chrome !== undefined`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-layout-debug-overlay]')?.getAttribute('aria-hidden')`,
+    ),
+    "true",
+    "direct Layout Debug URL must enable the non-interactive diagnostic overlay",
+  );
+  await navigate(cdp, `${origin}/player-vue/`);
+  await waitFor(cdp, `document.querySelector('.player') !== null`);
+  await selectVueTool(cdp, "runtime-session");
 
   await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
   await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
@@ -611,13 +848,13 @@ async function vueRuntimeScenario(cdp, origin) {
     cdp,
     `document.querySelector('.composer-feedback')?.textContent.includes('non-whitespace')`,
   );
-  await physicalClick(cdp, "#save-player-checkpoint");
+  await physicalClick(cdp, "[data-save-player-checkpoint]");
   await typeAndSubmitVuePlayer(cdp, "Alex");
   await waitFor(
     cdp,
     `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Number'`,
   );
-  await physicalClick(cdp, "#restore-player-checkpoint");
+  await physicalClick(cdp, "[data-restore-player-checkpoint]");
   await waitFor(
     cdp,
     `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Answer'`,
@@ -653,12 +890,12 @@ async function vueRuntimeScenario(cdp, origin) {
     "Vue choices must preserve authored runtime order",
   );
 
-  await physicalClick(cdp, "#save-player-checkpoint");
+  await physicalClick(cdp, "[data-save-player-checkpoint]");
   const beforeChoice = await vueRuntimeTranscript(cdp);
   await click(cdp, ".foreground-choice-item:nth-child(2) button");
   await waitFor(cdp, `document.querySelector('[data-foreground-kind]') === null`);
   await waitFor(cdp, `document.body.textContent.includes('Thanks Alex')`);
-  await click(cdp, "#restore-player-checkpoint");
+  await click(cdp, "[data-restore-player-checkpoint]");
   await waitFor(cdp, `document.querySelectorAll('.foreground-choice-buttons button').length === 2`);
   assertEqual(
     JSON.stringify(await vueRuntimeTranscript(cdp)),
@@ -785,6 +1022,19 @@ async function typeAndSubmitVuePlayer(cdp, text) {
     cdp,
     `const input=document.querySelector('.composer textarea'); input.value=${JSON.stringify(text)}; input.dispatchEvent(new Event('input', {bubbles:true})); document.querySelector('.composer form').requestSubmit()`,
   );
+}
+
+async function selectVueTool(cdp, toolId) {
+  await evaluate(
+    cdp,
+    `(() => {
+      const select=document.querySelector('[data-tool-column-select]');
+      if (!(select instanceof HTMLSelectElement)) throw new Error('Vue tool selector missing');
+      select.value=${JSON.stringify(toolId)};
+      select.dispatchEvent(new Event('change', {bubbles:true}));
+    })()`,
+  );
+  await waitFor(cdp, `document.querySelector('[data-tool-id=${JSON.stringify(toolId)}]') !== null`);
 }
 
 async function vueRuntimeTranscript(cdp) {
