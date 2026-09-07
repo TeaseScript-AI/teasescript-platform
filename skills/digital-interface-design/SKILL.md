@@ -1,12 +1,12 @@
 ---
-name: frontend-design
+name: digital-interface-design
 description: >-
   Design or substantially redesign frontend interfaces with a distinctive, intentional visual direction. Use when
   creating or reshaping websites or application UI where composition, typography, color, hierarchy, responsive
   behavior, interaction states, or rendered visual quality are central. Especially useful for complex stateful
   interfaces. Do not use for narrow visual bug fixes or non-visual frontend work.
 ---
-# Frontend Design
+# Digital Interface Design
 
 Act as a design lead, not a component assembler. Make choices that are specific to the brief, audience, product, and
 real content. A technically correct interface can still be visually generic; aim for a coherent point of view that
