@@ -30,8 +30,17 @@ function handleDocumentClick(event: MouseEvent): void {
     return;
   openDescriptionId.value = null;
 }
-onMounted(() => document.addEventListener("click", handleDocumentClick));
-onBeforeUnmount(() => document.removeEventListener("click", handleDocumentClick));
+function handleDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") openDescriptionId.value = null;
+}
+onMounted(() => {
+  document.addEventListener("click", handleDocumentClick);
+  document.addEventListener("keydown", handleDocumentKeydown);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener("click", handleDocumentClick);
+  document.removeEventListener("keydown", handleDocumentKeydown);
+});
 
 function controlValue(control: VisualLabValueControl): VisualLabControlValue {
   const value = props.state.values[control.id];
@@ -69,6 +78,12 @@ function emitNumber(control: VisualLabValueControl, event: Event): void {
 function toggleDescription(control: VisualLabControl): void {
   openDescriptionId.value = openDescriptionId.value === control.id ? null : control.id;
 }
+
+function handleCopyClick(control: VisualLabControl, event: MouseEvent): void {
+  if (event.target instanceof Element && event.target.closest(".lab-option-info-trigger") !== null)
+    return;
+  toggleDescription(control);
+}
 </script>
 
 <template>
@@ -77,7 +92,6 @@ function toggleDescription(control: VisualLabControl): void {
     class="lab-content"
     autocomplete="off"
     @submit.prevent
-    @keydown.esc="openDescriptionId = null"
   >
     <div class="lab-options">
       <div
@@ -85,7 +99,7 @@ function toggleDescription(control: VisualLabControl): void {
         :key="control.id"
         class="lab-option"
       >
-        <span class="lab-option-copy" @click="toggleDescription(control)">
+        <span class="lab-option-copy" @click="handleCopyClick(control, $event)">
           <span class="lab-option-title">{{ control.label }}</span>
           <span class="lab-option-info" :data-open="openDescriptionId === control.id || undefined">
             <button
@@ -94,7 +108,7 @@ function toggleDescription(control: VisualLabControl): void {
               :aria-label="`About ${control.label}`"
               :aria-expanded="openDescriptionId === control.id"
               :aria-describedby="descriptionId(control)"
-              @click.stop="toggleDescription(control)"
+              @click="toggleDescription(control)"
             >
               i
             </button>
@@ -168,7 +182,7 @@ function toggleDescription(control: VisualLabControl): void {
         :key="control.id"
         class="lab-tuning-row"
       >
-        <span class="lab-option-copy" @click="toggleDescription(control)">
+        <span class="lab-option-copy" @click="handleCopyClick(control, $event)">
           <span class="lab-option-title">{{ control.label }}</span>
           <span class="lab-option-info" :data-open="openDescriptionId === control.id || undefined">
             <button
@@ -177,7 +191,7 @@ function toggleDescription(control: VisualLabControl): void {
               :aria-label="`About ${control.label}`"
               :aria-expanded="openDescriptionId === control.id"
               :aria-describedby="descriptionId(control)"
-              @click.stop="toggleDescription(control)"
+              @click="toggleDescription(control)"
             >
               i
             </button>

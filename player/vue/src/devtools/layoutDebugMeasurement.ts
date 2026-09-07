@@ -1,6 +1,7 @@
 export const LAYOUT_DEBUG_SELECTORS = {
   title: ".title-controls",
   tools: ".left-panel",
+  toolColumn: ".tool-column",
   stage: ".media-area",
   transcript: ".transcript",
   foreground: ".foreground-controls",
@@ -17,6 +18,7 @@ export type LayoutDebugRegion =
   | "player"
   | "title"
   | "tools"
+  | "toolColumn"
   | "stage"
   | "transcript"
   | "foreground"
@@ -28,6 +30,7 @@ const LAYOUT_DEBUG_REGIONS: readonly LayoutDebugRegion[] = [
   "player",
   "title",
   "tools",
+  "toolColumn",
   "stage",
   "transcript",
   "foreground",
@@ -239,6 +242,7 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
     player,
     title: query(player, LAYOUT_DEBUG_SELECTORS.title),
     tools: query(player, LAYOUT_DEBUG_SELECTORS.tools),
+    toolColumn: query(player, LAYOUT_DEBUG_SELECTORS.toolColumn),
     stage: query(player, LAYOUT_DEBUG_SELECTORS.stage),
     transcript: query(player, LAYOUT_DEBUG_SELECTORS.transcript),
     foreground: query(player, LAYOUT_DEBUG_SELECTORS.foreground),

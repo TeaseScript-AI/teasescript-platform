@@ -132,10 +132,10 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
   assertEqual(
     await value(
       cdp,
-      `document.querySelector('.debug-constraints')?.textContent.includes('conversation') && document.querySelector('.debug-constraints')?.textContent.includes('tools') && document.querySelector('.debug-constraints')?.textContent.includes('right')`,
+      `(() => { const text=document.querySelector('.debug-constraints')?.textContent ?? ''; const pixels=(value) => Math.round(value * 10) / 10 + 'px'; return text.includes('conversation') && text.includes('right') && text.includes('tool column ' + pixels(document.querySelector('.tool-column').getBoundingClientRect().width) + ' /') && text.includes('composer input ' + pixels(document.querySelector('.composer textarea').getBoundingClientRect().height) + ' /'); })()`,
     ),
     true,
-    "wide Layout Debug must expose measured conversation, tool, and right-rail constraints",
+    "wide Layout Debug must compare the tool column and composer input measurements with their constraints",
   );
   await setViewport(cdp, 390, 700);
   await waitFor(
@@ -173,7 +173,7 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
   );
   await evaluate(
     cdp,
-    `document.querySelectorAll('[data-visual-lab-instance] .lab-option-copy')[0].click()`,
+    `document.querySelectorAll('[data-visual-lab-instance] .lab-option-info-trigger')[0].click()`,
   );
   await waitFor(
     cdp,
@@ -181,11 +181,26 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
   );
   await evaluate(
     cdp,
-    `(() => { const title=document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('.lab-option-title'); title.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true})); title.click(); })()`,
+    `document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('.lab-option-info-trigger').click()`,
   );
   await waitFor(
     cdp,
     `document.querySelectorAll('[data-visual-lab-instance]')[0].querySelector('[aria-expanded="true"]') === null && document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('[aria-expanded="true"]') !== null`,
+  );
+  await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-visual-lab-instance] [aria-expanded="true"]') === null`,
+  );
+  await evaluate(
+    cdp,
+    `document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('.lab-option-info-trigger').click()`,
+  );
+  await waitFor(
+    cdp,
+    `document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('[aria-expanded="true"]') !== null`,
   );
   await physicalClick(cdp, ".media-surface");
   await waitFor(

@@ -154,6 +154,7 @@ test("Layout Debug card is screenshot-focused and excludes noisy composer and co
 
 test("Layout Debug uses the rendered Vue tool-body contract and declarative overlay ownership", async () => {
   assert.equal(LAYOUT_DEBUG_SELECTORS.toolBodies, ".tool-column-body");
+  assert.equal(LAYOUT_DEBUG_SELECTORS.toolColumn, ".tool-column");
   assert.equal(LAYOUT_DEBUG_SELECTORS.rightTimerList, "#rightZone .timer-list");
   assert.equal(LAYOUT_DEBUG_SELECTORS.rightActions, "#rightZone .action-scroll");
   assert.doesNotMatch(JSON.stringify(LAYOUT_DEBUG_SELECTORS), /"\.tool-body"/u);
@@ -168,6 +169,8 @@ test("Layout Debug uses the rendered Vue tool-body contract and declarative over
   assert.match(measurement, /"right-timer-list"/u);
   assert.match(measurement, /"right-actions"/u);
   assert.match(overlay, /current\.regions\.transcript\?\.width/u);
+  assert.match(overlay, /regions\.toolColumn\?\.width/u);
+  assert.match(overlay, /regions\.input\?\.height/u);
   assert.match(overlay, /constraints\.toolColumnWidth/u);
   assert.match(overlay, /constraints\.rightRailWidth/u);
   assert.doesNotMatch(measurement, /\.tool-body["']/u);
