@@ -1,16 +1,21 @@
 import * as monaco from "monaco-editor";
 import {
-  applyLanguageTextEdits,
   createLanguageDocument,
   formatLanguageDocument,
   languageCompletions,
-  languageDiagnostics,
   languageHover,
   languagePositionAt,
   languageSignatureHelp,
 } from "../src/language-tooling.js";
+import {
+  toMonacoCompletions,
+  toMonacoHover,
+  toMonacoSignatureHelp,
+  toMonacoTextEdits,
+} from "../src/editor/monaco-mapping.js";
+import { watchModelDiagnostics } from "../src/editor/model-diagnostics.js";
 
-export const TEASE_LANGUAGE_ID = "teasescript";
+const TEASE_LANGUAGE_ID = "teasescript";
 
 export function registerTeaseScriptLanguage(): void {
   if (!monaco.languages.getLanguages().some((language) => language.id === TEASE_LANGUAGE_ID)) {
@@ -77,23 +82,16 @@ function registerProviders(): void {
       const languagePosition = languagePositionAt(document, model.getOffsetAt(position));
       const items = languageCompletions(document, languagePosition);
       return {
-        suggestions: items.map((item) => ({
-          label: item.label,
-          kind:
-            item.kind === "value"
-              ? monaco.languages.CompletionItemKind.Value
-              : item.kind === "speaker"
-                ? monaco.languages.CompletionItemKind.Reference
-                : monaco.languages.CompletionItemKind.Keyword,
-          detail: item.detail,
-          insertText: item.insertText,
-          range: new monaco.Range(
+        suggestions: toMonacoCompletions(
+          items,
+          new monaco.Range(
             position.lineNumber,
             position.column,
             position.lineNumber,
             position.column,
           ),
-        })),
+          monaco.languages.CompletionItemKind,
+        ),
       };
     },
   });
@@ -104,12 +102,7 @@ function registerProviders(): void {
         document,
         languagePositionAt(document, model.getOffsetAt(position)),
       );
-      return result === null
-        ? null
-        : {
-            range: toMonacoRange(result.range),
-            contents: result.contents.map((value) => ({ value })),
-          };
+      return result === null ? null : { ...toMonacoHover(result) };
     },
   });
   monaco.languages.registerSignatureHelpProvider(TEASE_LANGUAGE_ID, {
@@ -120,64 +113,26 @@ function registerProviders(): void {
         document,
         languagePositionAt(document, model.getOffsetAt(position)),
       );
-      return result === null
-        ? null
-        : {
-            value: {
-              signatures: [
-                {
-                  label: result.label,
-                  documentation: result.documentation,
-                  parameters: result.parameters.map((label) => ({ label })),
-                },
-              ],
-              activeSignature: 0,
-              activeParameter: result.activeParameter,
-            },
-            dispose() {},
-          };
+      return result === null ? null : { ...toMonacoSignatureHelp(result) };
     },
   });
   monaco.languages.registerDocumentFormattingEditProvider(TEASE_LANGUAGE_ID, {
     provideDocumentFormattingEdits(model) {
       const document = createLanguageDocument(model.uri.toString(), model.getValue());
       const result = formatLanguageDocument(document);
-      return result.edits.map((edit) => ({ range: toMonacoRange(edit.range), text: edit.newText }));
+      return toMonacoTextEdits(result.edits);
     },
   });
 }
 
-export function updateDiagnostics(editor: monaco.editor.IStandaloneCodeEditor): void {
-  const model = editor.getModel();
-  if (model === null) return;
-  const document = createLanguageDocument(model.uri.toString(), model.getValue());
-  monaco.editor.setModelMarkers(
-    model,
-    "teasescript",
-    languageDiagnostics(document).map((diagnostic) => ({
-      severity:
-        diagnostic.severity === "error"
-          ? monaco.MarkerSeverity.Error
-          : monaco.MarkerSeverity.Warning,
-      message: `[${diagnostic.code}] ${diagnostic.message}`,
-      startLineNumber: diagnostic.span.start.line + 1,
-      startColumn: diagnostic.span.start.column + 1,
-      endLineNumber: diagnostic.span.end.line + 1,
-      endColumn: Math.max(diagnostic.span.end.column + 1, diagnostic.span.start.column + 2),
-    })),
-  );
+export function watchDiagnostics(
+  model: monaco.editor.ITextModel,
+  onCount: (count: number) => void,
+): monaco.IDisposable {
+  return watchModelDiagnostics(model, monaco.MarkerSeverity, (markers) => {
+    monaco.editor.setModelMarkers(model, "teasescript", [...markers]);
+    onCount(markers.length);
+  });
 }
 
-function toMonacoRange(span: {
-  start: { line: number; column: number };
-  end: { line: number; column: number };
-}): monaco.IRange {
-  return {
-    startLineNumber: span.start.line + 1,
-    startColumn: span.start.column + 1,
-    endLineNumber: span.end.line + 1,
-    endColumn: Math.max(span.end.column + 1, span.start.column + 2),
-  };
-}
-
-export { monaco, applyLanguageTextEdits };
+export { monaco };

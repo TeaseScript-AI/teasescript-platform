@@ -23,6 +23,7 @@
     "lint": "node tools/oxlint/run.mjs",
     "test:lint": "tsc -p tools/oxlint/tsconfig.json && node tools/oxlint/test.mjs",
     "playground": "npm run build && node dist/playground/server.js",
+    "test:editor-browser": "npm run build:editor && node tools/editor-browser-smoke.mjs",
     "test:property": "npm run build && node dist/tests/property/replay.js",
     "test:compiled:full-output": "node ./tools/test-output-filter.mjs --full-output",
     "test:full-output": "npm run build && node ./tools/test-output-filter.mjs --full-output",

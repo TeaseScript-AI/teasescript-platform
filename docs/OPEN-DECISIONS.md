@@ -60,6 +60,7 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 - Module metadata, selection, recursion, fallback, cooldown, and history rules.
 - Static treatment of contextual `speaker` access when control-flow analysis proves no explicit or default speaker is
   available.
+
 - Compatibility mapping and compact author syntax for invoking the accepted V30 `showButton` timeout and
   elapsed-time behavior.
 - Detailed interaction result objects, including the author-facing option that selects them.
@@ -72,6 +73,19 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
   answers.
 - Whether and how to revise the accepted V30 timer API for explicit handles and final pause/resume/stop/restart,
   repetition, persistence, and visible-presentation semantics.
+
+## Editor and authoring
+
+Current constraints: [`CODE-EDITOR.md`](CODE-EDITOR.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and
+[ADR 0020](decisions/0020-vue-3-production-browser-ui.md).
+
+- Final Monaco feature selection, worker loading, code splitting, and production bundle-size policy.
+- Final beginner and advanced authoring modes, workspace layout, project/file navigation, and mobile-browser support.
+- Whether editor-neutral tooling later gains CLI, LSP, or IDE consumers and the smallest stable adapter boundary they
+  require.
+- Source storage, version history, Git-backed workflows, collaboration, conflict resolution, and Laravel persistence.
+- Final package/import/library linkage and metadata transport; the current Monaco POC does not establish those
+  contracts.
 
 ## Player and interactions
 

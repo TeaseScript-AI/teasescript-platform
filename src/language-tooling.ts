@@ -79,7 +79,7 @@ const HELP = Object.freeze({
   askNumber: Object.freeze({
     command: "askNumber" as const,
     summary:
-      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and preserves negative zero.",
+      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript.",
     syntax: "askNumber [as speaker] [hint]",
   }),
   choose: Object.freeze({
@@ -104,24 +104,7 @@ export function languagePositionAt(document: LanguageDocument, offset: number): 
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > document.text.length) {
     throw new RangeError("Language document offset is outside the document.");
   }
-  let line = 0;
-  let column = 0;
-  let index = 0;
-  while (index < offset) {
-    const code = document.text.charCodeAt(index);
-    if (code === 13) {
-      if (index + 1 < offset && document.text.charCodeAt(index + 1) === 10) index += 1;
-      line += 1;
-      column = 0;
-    } else if (code === 10) {
-      line += 1;
-      column = 0;
-    } else {
-      column += 1;
-    }
-    index += 1;
-  }
-  return createSourcePosition(offset, line, column);
+  return positionAtOffset(offset, lineStarts(document.text), document.text);
 }
 
 export function languageDiagnostics(document: LanguageDocument): readonly LanguageDiagnostic[] {
@@ -247,12 +230,13 @@ export function formatLanguageDocument(document: LanguageDocument): LanguageForm
     },
   });
   const normalized = normalizeOffsetEdits(rawEdits);
+  const starts = lineStarts(document.text);
   const edits = Object.freeze(
     normalized.map((edit) =>
       Object.freeze({
         range: createSourceSpan(
-          languagePositionAt(document, edit.start),
-          languagePositionAt(document, edit.end),
+          positionAtOffset(edit.start, starts, document.text),
+          positionAtOffset(edit.end, starts, document.text),
         ),
         newText: edit.newText,
       }),
@@ -450,17 +434,66 @@ function activeParameterFor(
   start: number,
   offset: number,
 ): number {
-  const text = source.slice(start, Math.max(start, offset));
-  if (command === "say")
-    return text.includes(",")
-      ? 3
-      : text.includes("skippable") || text.includes("unskippable")
-        ? 2
-        : text.includes(" as ")
-          ? 2
-          : 2;
-  if (command === "choose") return text.includes(" as ") && !text.includes(",") ? 1 : 1;
-  return text.includes(" as ") ? 1 : 1;
+  const tokens = lex(source.slice(start, Math.max(start, offset))).tokens.filter(
+    (token) => token.kind !== TokenKind.EndOfFile && token.kind !== TokenKind.Newline,
+  );
+  const tail = tokens.slice(1);
+  const asIndex = tail.findIndex((token) => token.kind === TokenKind.KeywordAs);
+  if (asIndex >= 0 && tail.length <= asIndex + 2) return 0;
+  if (command !== "say") return 1;
+
+  let depth = 0;
+  for (const token of tail) {
+    if (
+      token.kind === TokenKind.LeftParenthesis ||
+      token.kind === TokenKind.LeftBracket ||
+      token.kind === TokenKind.LeftBrace
+    ) {
+      depth += 1;
+    } else if (
+      token.kind === TokenKind.RightParenthesis ||
+      token.kind === TokenKind.RightBracket ||
+      token.kind === TokenKind.RightBrace
+    ) {
+      depth = Math.max(0, depth - 1);
+    } else if (token.kind === TokenKind.Comma && depth === 0) {
+      return 3;
+    }
+  }
+  const last = tail.at(-1);
+  return last !== undefined && tokenIsSayModifier(last) ? 1 : 2;
+}
+
+function lineStarts(source: string): readonly number[] {
+  const starts = [0];
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    if (code === 13) {
+      if (source.charCodeAt(index + 1) === 10) index += 1;
+      starts.push(index + 1);
+    } else if (code === 10) {
+      starts.push(index + 1);
+    }
+  }
+  return starts;
+}
+
+function positionAtOffset(
+  offset: number,
+  starts: readonly number[],
+  source: string,
+): SourcePosition {
+  let low = 0;
+  let high = starts.length;
+  while (low + 1 < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (starts[middle]! <= offset) low = middle;
+    else high = middle;
+  }
+  if (offset > 0 && source.charCodeAt(offset - 1) === 13 && source.charCodeAt(offset) === 10) {
+    return createSourcePosition(offset, low + 1, 0);
+  }
+  return createSourcePosition(offset, low, offset - starts[low]!);
 }
 
 interface Visitor {
@@ -630,7 +663,8 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
   }
   const first = node.options[0];
   if (first !== undefined) whitespaceEdit(source, cursor, first.span.start.offset, " ", edits);
-  for (const option of node.options) {
+  for (let index = 0; index < node.options.length; index += 1) {
+    const option = node.options[index]!;
     if (option.label !== null && option.colonSpan !== null) {
       whitespaceEdit(
         source,
@@ -655,7 +689,7 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
         "",
         edits,
       );
-      const next = node.options[node.options.indexOf(option) + 1];
+      const next = node.options[index + 1];
       if (next !== undefined)
         whitespaceEdit(source, option.separatorSpan.end.offset, next.span.start.offset, " ", edits);
     }
