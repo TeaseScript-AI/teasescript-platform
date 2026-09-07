@@ -7,6 +7,8 @@ export const LAYOUT_DEBUG_SELECTORS = {
   composer: ".composer",
   input: ".composer textarea",
   right: "#rightZone",
+  rightTimerList: "#rightZone .timer-list",
+  rightActions: "#rightZone .action-scroll",
   toolStrip: ".tool-strip-scroll",
   toolBodies: ".tool-column-body",
 } as const;
@@ -95,6 +97,8 @@ export interface LayoutDebugConstraints {
   readonly composerMaxLines: string;
   readonly composerMaxViewportHeight: string;
   readonly usableHeight: string;
+  readonly toolColumnWidth: string;
+  readonly rightRailWidth: string;
 }
 
 export interface LayoutDebugComposition {
@@ -211,7 +215,15 @@ export function buildDiagnosticCardLines(snapshot: LayoutDebugSnapshot): readonl
   for (const region of ["player", "stage", "transcript", "foreground", "composer"] as const) {
     lines.push(`${region} ${formatRect(snapshot.regions[region])}`);
   }
-  for (const name of ["player", "transcript", "composer", "tool-strip", "right"] as const) {
+  for (const name of [
+    "player",
+    "transcript",
+    "composer",
+    "tool-strip",
+    "right",
+    "right-timer-list",
+    "right-actions",
+  ] as const) {
     lines.push(`${name} scroll ${formatScroll(snapshot.scroll[name])}`);
   }
   const toolBodies = Object.entries(snapshot.scroll).filter(([name]) =>
@@ -246,6 +258,18 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
   addScroll(scroll, scrollRects, "transcript", regionElements.transcript);
   addScroll(scroll, scrollRects, "composer", regionElements.input ?? regionElements.composer);
   addScroll(scroll, scrollRects, "right", regionElements.right);
+  addScroll(
+    scroll,
+    scrollRects,
+    "right-timer-list",
+    query(player, LAYOUT_DEBUG_SELECTORS.rightTimerList),
+  );
+  addScroll(
+    scroll,
+    scrollRects,
+    "right-actions",
+    query(player, LAYOUT_DEBUG_SELECTORS.rightActions),
+  );
   addScroll(scroll, scrollRects, "tool-strip", query(player, LAYOUT_DEBUG_SELECTORS.toolStrip));
   const toolBodies = player.querySelectorAll<HTMLElement>(LAYOUT_DEBUG_SELECTORS.toolBodies);
   toolBodies.forEach((element, index) =>
@@ -290,6 +314,8 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
       composerMaxLines: property(style, "--composer-max-lines"),
       composerMaxViewportHeight: property(style, "--composer-effective-viewport-height"),
       usableHeight: property(style, "--player-usable-height"),
+      toolColumnWidth: property(style, "--tool-column-width"),
+      rightRailWidth: property(style, "--right-controls-width"),
     },
     composition: {
       chrome: data(player, "chrome"),

@@ -62,5 +62,13 @@
         to { opacity: 0; }
       }
 
+      @media (prefers-reduced-motion: reduce) {
+        .media-area[data-media-transition="fade"] .media-transition-incoming,
+        .media-area[data-media-transition="crossfade"] .media-transition-incoming,
+        .media-area[data-media-transition="crossfade"] .media-transition-outgoing {
+          animation: none;
+        }
+      }
+
 
 }

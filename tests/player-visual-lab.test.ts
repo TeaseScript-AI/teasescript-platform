@@ -131,6 +131,9 @@ test("Visual Lab component renders registry entries and emits typed integration 
   assert.match(component, /action: \[controlId: string, target: VisualLabActionTarget\]/u);
   assert.match(component, /change: \[controlId: string, value: VisualLabControlValue\]/u);
   assert.match(component, /:aria-label="control\.label"/u);
+  assert.match(component, /useId\(\)/u);
+  assert.match(component, /document\.addEventListener\("click", handleDocumentClick\)/u);
+  assert.match(component, /class="lab-option-copy" @click="toggleDescription\(control\)"/u);
   assert.doesNotMatch(
     component,
     /Ambient media colour|Vignette|Timer label placement|Timer label content|Always on/u,

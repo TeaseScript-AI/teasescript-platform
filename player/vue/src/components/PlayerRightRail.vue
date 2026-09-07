@@ -48,9 +48,10 @@ const orderedControls = computed(() => orderRightControls(props.controls));
 let observer: ResizeObserver | null = null;
 
 watch(
-  () => [props.compactTimers, props.controls] as const,
+  () => [props.compactTimers, props.controls, props.timerCount, props.timerKind] as const,
   async () => {
     await nextTick();
+    observePaneElements();
     syncPaneAllocation();
   },
   { deep: true },
@@ -58,13 +59,20 @@ watch(
 
 onMounted(() => {
   observer = new ResizeObserver(syncPaneAllocation);
-  if (rightZone.value !== null) observer.observe(rightZone.value);
-  const timer = rightZone.value?.querySelector<HTMLElement>(":scope > .timer-wrap") ?? null;
-  if (timer !== null) observer.observe(timer);
-  if (actionPane.value !== null) observer.observe(actionPane.value);
+  observePaneElements();
   syncPaneAllocation();
 });
 onBeforeUnmount(() => observer?.disconnect());
+
+function observePaneElements(): void {
+  observer?.disconnect();
+  if (rightZone.value !== null) observer?.observe(rightZone.value);
+  const timer = rightZone.value?.querySelector<HTMLElement>(":scope > .timer-wrap") ?? null;
+  if (timer !== null) observer?.observe(timer);
+  const timerList = timer?.querySelector<HTMLElement>(".timer-list") ?? null;
+  if (timerList !== null) observer?.observe(timerList);
+  if (actionPane.value !== null) observer?.observe(actionPane.value);
+}
 
 function authoredStyle(fill: string | undefined): CSSProperties | undefined {
   if (fill === undefined) return undefined;

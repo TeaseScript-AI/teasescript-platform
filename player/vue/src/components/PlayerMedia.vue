@@ -36,7 +36,8 @@ onBeforeUnmount(() => {
         v-if="outgoing !== null && outgoing.src.length > 0"
         :key="`outgoing-${outgoing.id}`"
         class="media-content media-transition-outgoing"
-        :alt="outgoing.title"
+        alt=""
+        aria-hidden="true"
         :src="outgoing.src"
       />
       <img

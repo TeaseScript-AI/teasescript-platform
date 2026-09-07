@@ -301,7 +301,6 @@ function saveCheckpoint(): PlayerRuntimeRestorePoint {
 function restoreCheckpoint(restorePoint: PlayerRuntimeRestorePoint): void {
   applyRuntimeSession(restorePlayerRuntimeSession(restorePoint), true);
   sessionTimeOriginMs = performance.now() - runtime.value.snapshot.currentSessionTimeMs;
-  dispatch({ type: "set-composer", value: "" });
   focusComposerForActiveTypedInteraction(true);
   scheduleTimeObservation();
 }
@@ -321,6 +320,28 @@ function startRuntimeSource(source: string): void {
   sessionTimeOriginMs = performance.now() - session.snapshot.currentSessionTimeMs;
   activeTypedActionId = typedInteractionActionId();
   focusComposerForActiveTypedInteraction(true);
+  scheduleTimeObservation();
+}
+
+function resetVisualTests(): void {
+  if (timeTimer !== null) {
+    clearTimeout(timeTimer);
+    timeTimer = null;
+  }
+  if (scriptUpdateTimer !== null) {
+    clearTimeout(scriptUpdateTimer);
+    scriptUpdateTimer = null;
+  }
+  state.value = createPlayerCoreState(
+    props.presentation,
+    toolDefinitions.value.map((tool) => tool.id),
+  );
+  const session = createPlayerRuntimeSession(props.runtimeSource);
+  runtime.value = session;
+  presentationTranscriptEntries.value = [...session.transcriptEntries];
+  transcriptRevision.value += 1;
+  sessionTimeOriginMs = performance.now() - session.snapshot.currentSessionTimeMs;
+  activeTypedActionId = typedInteractionActionId();
   scheduleTimeObservation();
 }
 
@@ -381,7 +402,13 @@ onBeforeUnmount(() => {
   document.removeEventListener("visibilitychange", observeAfterVisibilityChange);
 });
 
-defineExpose({ restoreCheckpoint, saveCheckpoint, simulateScriptUpdate, startRuntimeSource });
+defineExpose({
+  restoreCheckpoint,
+  saveCheckpoint,
+  simulateScriptUpdate,
+  startRuntimeSource,
+  resetVisualTests,
+});
 
 function closeToolColumn(id: string): void {
   const collapsesPanel = state.value.toolColumns.length === 1;

@@ -21,6 +21,7 @@ import {
 import { PLAYER_RUNTIME_SCENARIOS } from "./runtime-scenarios.js";
 
 const presentation = ref<PlayerPresentation>(DEMO_PRESENTATION);
+const baselinePresentation = ref<PlayerPresentation>(DEMO_PRESENTATION);
 const playerCore = ref<InstanceType<typeof PlayerCore> | null>(null);
 const runtimeSource = ref<string | null>(null);
 const runtimeStatus = ref("Loading runtime source…");
@@ -88,6 +89,7 @@ onMounted(async () => {
   const [media, source] = await Promise.all([loadDemoMedia(), loadRuntimeSource()]);
   if (media !== null) {
     presentation.value = { ...DEMO_PRESENTATION, media: { ...DEMO_PRESENTATION.media, ...media } };
+    baselinePresentation.value = presentation.value;
   }
   if (source !== null) {
     runtimeSource.value = source;
@@ -132,6 +134,10 @@ async function activateVisualLabAction(target: VisualLabActionTarget): Promise<v
   switch (target.kind) {
     case "reset-visual-tests":
       visualLabState.value = resetVisualLabState(visualLabState.value);
+      presentation.value = baselinePresentation.value;
+      playerCore.value?.resetVisualTests();
+      savedRestorePoint.value = null;
+      runtimeStatus.value = "Visual tests reset.";
       return;
     case "replace-demo-media": {
       const media = await loadDemoMedia();

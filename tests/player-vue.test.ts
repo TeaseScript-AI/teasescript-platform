@@ -164,6 +164,7 @@ test("Vue reference route has one component owner and explicit development tool 
   assert.match(core, /state\.value\.fixtureTranscriptEntries/u);
   assert.match(core, /presentation\.speakers\.user/u);
   assert.match(core, /function startRuntimeSource/u);
+  assert.match(core, /function resetVisualTests/u);
   assert.match(core, /replaceRuntimeTranscriptEntries/u);
   assert.match(app, /id: "visuals", label: "Visual Lab"/u);
   assert.match(app, /id: "layout-debug", label: "Layout Debug"/u);
@@ -187,6 +188,7 @@ test("Vue reference route has one component owner and explicit development tool 
   assert.match(runtimeSession, />\s*Restore runtime checkpoint\s*</u);
   assert.match(runtimeSession, /canonical runtime\/checkpoint state/u);
   assert.match(runtimeSession, /fixture-only[\s\S]*history stay local/u);
+  assert.match(runtimeSession, /useId\(\)/u);
   assert.match(layout, /stripWidth \+ panelChromeWidth/u);
   assert.doesNotMatch(index, /browser\.js/u);
 });
@@ -216,4 +218,17 @@ test("Vue transcript uses TanStack's single virtual scroll and anchor owner", as
   assert.match(app, /transcriptStressFixture[\s\S]*transcript-stress/u);
   assert.match(fixture, /INITIAL_HISTORY_SIZE = 2_000/u);
   assert.match(fixture, /data-transcript-fixture="stress"/u);
+});
+
+test("Vue media transitions and timer allocation preserve accessibility and live sizing", async () => {
+  const [media, mediaStyles, rightRail] = await Promise.all([
+    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerMedia.vue"), "utf8"),
+    readFile(resolve(process.cwd(), "player/styles/components-media.css"), "utf8"),
+    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerRightRail.vue"), "utf8"),
+  ]);
+  assert.match(media, /media-transition-outgoing[\s\S]*alt=""[\s\S]*aria-hidden="true"/u);
+  assert.match(mediaStyles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation: none/u);
+  assert.match(rightRail, /props\.timerCount, props\.timerKind/u);
+  assert.match(rightRail, /querySelector<HTMLElement>\("\.timer-list"\)/u);
+  assert.match(rightRail, /observer\?\.observe\(timerList\)/u);
 });

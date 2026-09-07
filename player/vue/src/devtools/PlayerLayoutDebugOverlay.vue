@@ -47,7 +47,9 @@ const constraintLines = computed(() => {
   if (current === null) return [];
   return [
     `stage ${formatPixels(current.regions.stage?.height ?? 0)} / ${current.constraints.mediaHeight}`,
-    `conversation ${current.constraints.conversationMinWidth}…${current.constraints.conversationMaxWidth}`,
+    `conversation ${formatPixels(current.regions.transcript?.width ?? 0)} / ${current.constraints.conversationMinWidth}…${current.constraints.conversationMaxWidth}`,
+    `tools ${formatPixels(current.regions.tools?.width ?? 0)} / column ${current.constraints.toolColumnWidth}`,
+    `right ${formatPixels(current.regions.right?.width ?? 0)} / ${current.constraints.rightRailWidth}`,
     `composer ${formatPixels(current.regions.composer?.height ?? 0)} / ${current.constraints.composerMaxLines}, ${current.constraints.composerMaxViewportHeight}`,
     `usable height ${current.constraints.usableHeight}`,
   ];

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, useId } from "vue";
 import type {
   VisualLabActionTarget,
   VisualLabControl,
@@ -17,6 +17,21 @@ const emit = defineEmits<{
 }>();
 
 const openDescriptionId = ref<string | null>(null);
+const instanceId = `visual-lab-${useId()}`;
+function descriptionId(control: VisualLabControl): string {
+  return `${instanceId}-description-${control.id}`;
+}
+function handleDocumentClick(event: MouseEvent): void {
+  const target = event.target;
+  if (
+    target instanceof Element &&
+    target.closest(`[data-visual-lab-instance="${instanceId}"]`) !== null
+  )
+    return;
+  openDescriptionId.value = null;
+}
+onMounted(() => document.addEventListener("click", handleDocumentClick));
+onBeforeUnmount(() => document.removeEventListener("click", handleDocumentClick));
 
 function controlValue(control: VisualLabValueControl): VisualLabControlValue {
   const value = props.state.values[control.id];
@@ -58,6 +73,7 @@ function toggleDescription(control: VisualLabControl): void {
 
 <template>
   <form
+    :data-visual-lab-instance="instanceId"
     class="lab-content"
     autocomplete="off"
     @submit.prevent
@@ -69,7 +85,7 @@ function toggleDescription(control: VisualLabControl): void {
         :key="control.id"
         class="lab-option"
       >
-        <span class="lab-option-copy">
+        <span class="lab-option-copy" @click="toggleDescription(control)">
           <span class="lab-option-title">{{ control.label }}</span>
           <span class="lab-option-info" :data-open="openDescriptionId === control.id || undefined">
             <button
@@ -77,16 +93,12 @@ function toggleDescription(control: VisualLabControl): void {
               class="lab-option-info-trigger"
               :aria-label="`About ${control.label}`"
               :aria-expanded="openDescriptionId === control.id"
-              :aria-describedby="`visual-lab-description-${control.id}`"
-              @click="toggleDescription(control)"
+              :aria-describedby="descriptionId(control)"
+              @click.stop="toggleDescription(control)"
             >
               i
             </button>
-            <span
-              :id="`visual-lab-description-${control.id}`"
-              class="lab-option-note"
-              role="tooltip"
-            >
+            <span :id="descriptionId(control)" class="lab-option-note" role="tooltip">
               {{ control.description }}
             </span>
           </span>
@@ -156,7 +168,7 @@ function toggleDescription(control: VisualLabControl): void {
         :key="control.id"
         class="lab-tuning-row"
       >
-        <span class="lab-option-copy">
+        <span class="lab-option-copy" @click="toggleDescription(control)">
           <span class="lab-option-title">{{ control.label }}</span>
           <span class="lab-option-info" :data-open="openDescriptionId === control.id || undefined">
             <button
@@ -164,16 +176,12 @@ function toggleDescription(control: VisualLabControl): void {
               class="lab-option-info-trigger"
               :aria-label="`About ${control.label}`"
               :aria-expanded="openDescriptionId === control.id"
-              :aria-describedby="`visual-lab-description-${control.id}`"
-              @click="toggleDescription(control)"
+              :aria-describedby="descriptionId(control)"
+              @click.stop="toggleDescription(control)"
             >
               i
             </button>
-            <span
-              :id="`visual-lab-description-${control.id}`"
-              class="lab-option-note"
-              role="tooltip"
-            >
+            <span :id="descriptionId(control)" class="lab-option-note" role="tooltip">
               {{ control.description }}
             </span>
           </span>

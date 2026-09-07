@@ -129,6 +129,8 @@ test("Layout Debug card is screenshot-focused and excludes noisy composer and co
       composerMaxLines: "96px",
       composerMaxViewportHeight: "144px",
       usableHeight: "640px",
+      toolColumnWidth: "300px",
+      rightRailWidth: "190px",
     },
     composition: {
       chrome: "overlay",
@@ -152,6 +154,8 @@ test("Layout Debug card is screenshot-focused and excludes noisy composer and co
 
 test("Layout Debug uses the rendered Vue tool-body contract and declarative overlay ownership", async () => {
   assert.equal(LAYOUT_DEBUG_SELECTORS.toolBodies, ".tool-column-body");
+  assert.equal(LAYOUT_DEBUG_SELECTORS.rightTimerList, "#rightZone .timer-list");
+  assert.equal(LAYOUT_DEBUG_SELECTORS.rightActions, "#rightZone .action-scroll");
   assert.doesNotMatch(JSON.stringify(LAYOUT_DEBUG_SELECTORS), /"\.tool-body"/u);
 
   const root = process.cwd();
@@ -161,6 +165,11 @@ test("Layout Debug uses the rendered Vue tool-body contract and declarative over
     readFile(resolve(root, "player/vue/src/devtools/usePlayerLayoutDebug.ts"), "utf8"),
   ]);
   assert.match(measurement, /querySelectorAll<HTMLElement>\(LAYOUT_DEBUG_SELECTORS\.toolBodies\)/u);
+  assert.match(measurement, /"right-timer-list"/u);
+  assert.match(measurement, /"right-actions"/u);
+  assert.match(overlay, /current\.regions\.transcript\?\.width/u);
+  assert.match(overlay, /constraints\.toolColumnWidth/u);
+  assert.match(overlay, /constraints\.rightRailWidth/u);
   assert.doesNotMatch(measurement, /\.tool-body["']/u);
   assert.doesNotMatch(overlay, /appendChild|append\(|replaceChildren|innerHTML/u);
   assert.match(overlay, /pointer-events:\s*none/u);
