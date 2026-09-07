@@ -28,8 +28,8 @@ Before editing, make a compact temporary constraint ledger with four groups:
 4. unresolved product or architecture decisions that require escalation rather than invention.
 
 Keep the ledger outside the repository unless the assignment explicitly requires a durable artifact. Do not ask the
-Owner to choose routine design axes that are already open. Make those decisions yourself. Escalate only a real unresolved
-product/architecture choice, conflicting authority, or an explicitly required Owner decision.
+Owner to choose routine design axes that are already open. Make those decisions yourself. Escalate only genuine
+product/architecture uncertainty, conflicting authority, or an explicitly required Owner decision.
 
 ## Observe the shared baseline before redesigning it
 
@@ -59,8 +59,8 @@ Write a short temporary design thesis that answers:
 
 Keep the thesis outside the repository unless the assignment requires it as a deliverable. When the assigned brief
 explicitly fixes a visual direction, follow it unless it conflicts with higher authority. When visual direction is open,
-derive it from the product, user/session context, content, interaction model, and assignment intent rather than selecting
-a prepackaged style, palette, type pairing, generated design preset, or another candidate branch.
+derive it from the product, user/session context, content, interaction model, and assignment intent. Do not select a
+prepackaged style, palette, type pairing, generated design preset, or another candidate branch.
 
 For a substantial redesign, consider at least two materially different structural approaches before committing. Compare
 them against the constraint ledger and choose deliberately. Do not build permanent variants merely to prove exploration;
@@ -141,15 +141,16 @@ Critique at least these dimensions:
 - **Responsive system:** does the design transform coherently instead of falling into emergency patches?
 - **Density/readability:** do pressure states remain usable rather than merely fitting?
 - **Interaction:** are focus, touch, pointer, keyboard, dismissal, disabled, busy, selected, and active states legible?
-- **Content resilience:** do long labels, empty/changing content, authored colors, repeated items, and variable text fit?
+- **Content resilience:** do long labels, empty/changing content, authored colors, repeated items, and variable text
+  fit?
 - **Visual coherence:** do type, color, surfaces, shape, iconography, and motion remain one language across states?
 - **Product specificity:** could the visible system be transplanted unchanged to an unrelated generic application?
 - **Restraint:** what can be removed without losing information, identity, or usability?
 
 Do not diagnose a visual defect from a screenshot alone when measurement or state inspection can establish the cause. If
 browser evidence required by the assignment or repository workflow is unavailable, report the exact limitation and
-follow the repository's blocked-evidence path. Do not present source review, DOM assertions, or green tests as equivalent
-visual verification.
+follow the repository's blocked-evidence path. Source review, DOM assertions, and green tests are not equivalent visual
+verification.
 
 ## Protect independent comparison branches
 
@@ -182,6 +183,7 @@ Use this compact handoff structure, adapting only when the assigned issue requir
 - **Responsive and interaction decisions:** how the system behaves under the important constraint/state classes.
 - **Tunables:** secondary values that remain easy to adjust without changing the concept.
 - **Evidence:** browser states reviewed, screenshots/measurements where available, and repository verification.
-- **Open visual questions:** only meaningful unresolved presentation trade-offs; do not restate settled product contracts.
+- **Open visual questions:** only meaningful unresolved presentation trade-offs; do not restate settled product
+  contracts.
 
 Do not sell a minor size, spacing, or color adjustment as the candidate's central idea.
