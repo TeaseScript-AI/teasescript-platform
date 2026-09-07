@@ -1,7 +1,4 @@
-import type {
-  PlayerForegroundOptionPresentation,
-  PlayerRightControlPresentation,
-} from "./model.js";
+import type { PlayerRightControlPresentation } from "./model.js";
 
 export function timerProgressPercent(remainingSeconds: number, totalSeconds: number): number {
   if (!Number.isFinite(remainingSeconds) || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
@@ -21,14 +18,6 @@ export function formatTimer(totalSeconds: number): string {
   const hours = Math.floor(safeSeconds / 3600);
   const minutes = Math.floor((safeSeconds % 3600) / 60);
   return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-export function matchForegroundChoiceByVisibleText(
-  options: readonly PlayerForegroundOptionPresentation[],
-  submittedText: string,
-): PlayerForegroundOptionPresentation | null {
-  const matches = options.filter((option) => option.label === submittedText);
-  return matches.length === 1 ? (matches[0] ?? null) : null;
 }
 
 export function orderRightControls(

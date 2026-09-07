@@ -1,11 +1,7 @@
 export type MediaFit = "contain" | "cover";
 export type PlayerMediaTransitionFixture = "direct" | "fade" | "crossfade";
-export type PlayerToolId = "visuals" | "scene" | "layout-debug" | "runtime-session";
+export type PlayerToolId = "visuals" | "layout-debug" | "runtime-session";
 export type PlayerTimerKind = "visible" | "mystery" | "hidden";
-export type PlayerForegroundFixtureKind =
-  "none" | "show-button" | "choose" | "ask-text" | "ask-number";
-export type PlayerPacingFixture = "off" | "skippable" | "unskippable";
-export type PlayerControlAvailability = "enabled" | "disabled";
 
 export interface PlayerToolDefinition {
   readonly id: PlayerToolId;
@@ -120,15 +116,7 @@ export interface PlayerPresentation {
   readonly media: PlayerMediaPresentation;
   readonly timer: PlayerTimerPresentation;
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
-  readonly messages: readonly PlayerMessagePresentation[];
-  readonly foreground: PlayerForegroundPresentation;
   readonly rightControls: readonly PlayerRightControlPresentation[];
-}
-
-export interface PlayerVisualPreferences {
-  readonly accentColor: string;
-  readonly ambient: boolean;
-  readonly vignette: boolean;
 }
 
 export type LeftPanelMode = "auto" | "open" | "closed";

@@ -28,8 +28,8 @@ accept syntax, architecture, or implementation details.
   (Vue/Vite, Tailwind CSS 4, repository-owned local shadcn-vue source/config, the selected Reka primitive foundation,
   and TanStack Vue Virtual as the single bounded, variable-height, stable-anchor transcript owner) connected through a
   framework-independent adapter to the implemented deterministic interaction, transcript, pacing, time-observation,
-  checkpoint, and restore slice; the Vue reference now hosts development-only Visual Lab, Layout Debug, and Runtime
-  Session tools while the manual/vanilla Player remains transitional legacy pending removal; source-to-runtime
+  checkpoint, and restore slice; the Vue Player now hosts development-only Visual Lab, Layout Debug, and Runtime
+  Session tools; source-to-runtime
   conformance coverage; focused runtime/checkpoint/state-validation tests;
   reproducible desktop and narrow-screen browser smoke coverage; and a bounded deterministic property campaign.
 

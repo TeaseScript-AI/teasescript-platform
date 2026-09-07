@@ -55,7 +55,7 @@ Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.
 [`player/README.md`](../../player/README.md) records POC seams and demo-only behavior. This specification may lead the
 implementation. The current Vue reference connects implemented Standard interactions, transcript output, pacing, time
 observation, checkpoint, and restore to canonical runtime state. Production host wiring remains incomplete; `Visual
-Lab`, `Layout Debug`, `Scene`, placeholder content, demo media, timers, and right-rail controls are development fixtures
+Lab`, `Layout Debug`, placeholder content, demo media, timers, and right-rail controls are development fixtures
 rather than Standard Player product content. Values explicitly marked for retesting remain provisional tuning
 baselines.
 

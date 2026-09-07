@@ -1,12 +1,4 @@
-import type {
-  PlayerForegroundFixtureKind,
-  PlayerForegroundPresentation,
-  PlayerMessagePresentation,
-  PlayerPresentation,
-  PlayerToolColumnState,
-  PlayerToolDefinition,
-  PlayerVisualPreferences,
-} from "./model.js";
+import type { PlayerMessagePresentation, PlayerPresentation } from "./model.js";
 
 const BASE_MESSAGES: readonly PlayerMessagePresentation[] = [
   {
@@ -36,29 +28,6 @@ const BASE_MESSAGES: readonly PlayerMessagePresentation[] = [
 ];
 
 export const MAX_DEMO_HISTORY_MESSAGES = 10_000;
-
-export const DEMO_FOREGROUND_PRESENTATIONS: Readonly<
-  Record<Exclude<PlayerForegroundFixtureKind, "none">, PlayerForegroundPresentation>
-> = {
-  "show-button": {
-    kind: "show-button",
-    accessibleName: "Ready button",
-    label: "I am ready",
-    authoredFill: "#8f3f5d",
-  },
-  choose: {
-    kind: "choose",
-    accessibleName: "Choose how to continue",
-    options: [
-      { id: "steady", label: "Continue steadily" },
-      { id: "strict", label: "Choose the stricter option", authoredFill: "#8f3f5d" },
-      { id: "clarify", label: "Ask for clarification before continuing" },
-      { id: "rules", label: "Review the current rules first" },
-    ],
-  },
-  "ask-text": { kind: "ask-text", accessibleName: "Text answer", hint: "Type your answer…" },
-  "ask-number": { kind: "ask-number", accessibleName: "Number answer", hint: "Enter a number…" },
-};
 
 export const DEMO_PRESENTATION: PlayerPresentation = {
   package: { accentColor: "#e84c71" },
@@ -93,9 +62,6 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
       fontFamily: "Verdana, 'DejaVu Sans', system-ui, sans-serif",
     },
   },
-
-  messages: BASE_MESSAGES,
-  foreground: DEMO_FOREGROUND_PRESENTATIONS.choose,
 
   rightControls: [
     { kind: "action", id: "continue", label: "Continue", priority: 10 },
@@ -134,22 +100,6 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
     },
   ],
 };
-
-export const DEFAULT_VISUAL_PREFERENCES: PlayerVisualPreferences = {
-  accentColor: DEMO_PRESENTATION.package.accentColor,
-  ambient: true,
-  vignette: false,
-};
-
-export const DEMO_TOOL_DEFINITIONS: readonly PlayerToolDefinition[] = [
-  { id: "visuals", label: "Visual Lab" },
-  { id: "scene", label: "Scene" },
-  { id: "layout-debug", label: "Layout Debug" },
-];
-
-export const INITIAL_TOOL_COLUMNS: readonly PlayerToolColumnState[] = [
-  { id: "tool-column-1", toolId: "visuals" },
-];
 
 export function createDemoHistoryMessages(count: number): readonly PlayerMessagePresentation[] {
   const safeCount = Math.min(MAX_DEMO_HISTORY_MESSAGES, Math.max(0, Math.trunc(count)));

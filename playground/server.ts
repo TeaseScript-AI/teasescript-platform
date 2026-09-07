@@ -392,18 +392,16 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
     return { root: roots.playgroundRoot, path: resolve(roots.playgroundRoot, "playground.css") };
   }
   if (pathname === "/player" || pathname === "/player/") {
-    return { root: roots.playerRoot, path: resolve(roots.playerRoot, "index.html") };
-  }
-  if (pathname === "/player-vue" || pathname === "/player-vue/") {
-    const playerVueRoot = resolve(roots.distRoot, "player-vue");
-    return { root: playerVueRoot, path: resolve(playerVueRoot, "index.html") };
-  }
-  if (pathname.startsWith("/player-vue/")) {
-    const playerVueRoot = resolve(roots.distRoot, "player-vue");
-    return resolveInside(playerVueRoot, pathname.slice("/player-vue/".length));
+    const playerBuildRoot = resolve(roots.distRoot, "player-app");
+    return { root: playerBuildRoot, path: resolve(playerBuildRoot, "index.html") };
   }
   if (pathname.startsWith("/player/")) {
-    return resolveInside(roots.playerRoot, pathname.slice("/player/".length));
+    const relativePath = pathname.slice("/player/".length);
+    if (relativePath.startsWith("demo-media/")) {
+      return resolveInside(roots.playerRoot, relativePath);
+    }
+    const playerBuildRoot = resolve(roots.distRoot, "player-app");
+    return resolveInside(playerBuildRoot, relativePath);
   }
   if (pathname.startsWith("/dist/")) {
     return resolveInside(roots.distRoot, pathname.slice("/dist/".length));

@@ -489,10 +489,10 @@ The local Standard Player POC has a reproducible Chromium smoke route after `npm
 node tools/player-browser-smoke.mjs
 ```
 
-It drives the real playground, legacy manual Player route, and runtime-backed Vue reference at representative desktop
+It drives the real playground and runtime-backed Vue Player at representative desktop
 and 390 × 844 CSS-pixel viewports. The Vue runtime scenario covers interactions, pacing, focus, transcript chronology,
 checkpoint/restore, and responsive behavior. The development-only route
-`/player-vue/?fixture=transcript-stress` retains 2,000 entries while asserting bounded rendered DOM, variable-height
+`/player/?fixture=transcript-stress` retains 2,000 entries while asserting bounded rendered DOM, variable-height
 measurement, stable keyed prepend/append anchoring, pinned and scroll-away resize behavior, and
 follow-latest/scroll-away return-to-latest behavior. An unavailable Chromium executable is an explicit skip; an
 available browser must pass these checks.

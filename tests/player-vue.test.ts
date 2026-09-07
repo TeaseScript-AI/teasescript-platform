@@ -66,13 +66,13 @@ test("Vue Player state keeps fixture transcript behavior separate from runtime s
 });
 
 test("Vue Player tools prefer unused columns, allow duplicates, and retain the final column", () => {
-  const initial = createPlayerCoreState(DEMO_PRESENTATION, ["scene", "visuals"]);
-  assert.deepEqual(initial.toolColumns, [{ id: "tool-column-1", toolId: "scene" }]);
+  const initial = createPlayerCoreState(DEMO_PRESENTATION, ["visuals", "layout-debug"]);
+  assert.deepEqual(initial.toolColumns, [{ id: "tool-column-1", toolId: "visuals" }]);
 
   const withSecond = reducePlayerCoreState(initial, { type: "add-tool-column" });
   assert.deepEqual(withSecond.toolColumns, [
-    { id: "tool-column-1", toolId: "scene" },
-    { id: "tool-column-2", toolId: "visuals" },
+    { id: "tool-column-1", toolId: "visuals" },
+    { id: "tool-column-2", toolId: "layout-debug" },
   ]);
 
   const withBlank = reducePlayerCoreState(withSecond, { type: "add-tool-column" });
@@ -81,22 +81,22 @@ test("Vue Player tools prefer unused columns, allow duplicates, and retain the f
   const duplicated = reducePlayerCoreState(withBlank, {
     type: "select-tool-column",
     id: "tool-column-3",
-    toolId: "scene",
+    toolId: "visuals",
   });
   const withoutSecond = reducePlayerCoreState(duplicated, {
     type: "close-tool-column",
     id: "tool-column-2",
   });
   assert.deepEqual(withoutSecond.toolColumns, [
-    { id: "tool-column-1", toolId: "scene" },
-    { id: "tool-column-3", toolId: "scene" },
+    { id: "tool-column-1", toolId: "visuals" },
+    { id: "tool-column-3", toolId: "visuals" },
   ]);
 
   const retainedFinal = reducePlayerCoreState(withoutSecond, {
     type: "close-tool-column",
     id: "tool-column-1",
   });
-  assert.deepEqual(retainedFinal.toolColumns, [{ id: "tool-column-3", toolId: "scene" }]);
+  assert.deepEqual(retainedFinal.toolColumns, [{ id: "tool-column-3", toolId: "visuals" }]);
 
   const closingLast = reducePlayerCoreState(retainedFinal, {
     type: "close-tool-column",
@@ -136,7 +136,7 @@ test("Vue panel mode keeps auto responsive while preserving explicit and focused
   assert.equal(resolveLeftPanelModeOnNarrowTransition("open", true, false), "closed");
 });
 
-test("Vue reference route has one component owner and explicit development tool boundaries", async () => {
+test("Vue Player route has one component owner and explicit development tool boundaries", async () => {
   const root = process.cwd();
   const [app, core, layout, main, index, visualLab, scenarioRegistry, runtimeSession] =
     await Promise.all([

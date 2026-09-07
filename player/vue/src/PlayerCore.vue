@@ -50,14 +50,12 @@ const props = defineProps<{
   development: PlayerDevelopmentOptions;
   layoutDebugOptions: LayoutDebugOptions;
   tools?: readonly PlayerToolDefinition[];
-  toolLabel?: string;
 }>();
 
 const player = ref<HTMLElement | null>(null);
 const composer = ref<InstanceType<typeof PlayerComposer> | null>(null);
 const toolDefinitions = computed<readonly PlayerToolDefinition[]>(() => {
-  if (props.tools !== undefined) return props.tools;
-  return props.toolLabel === undefined ? [] : [{ id: "scene", label: props.toolLabel }];
+  return props.tools ?? [];
 });
 const state = ref(
   createPlayerCoreState(
