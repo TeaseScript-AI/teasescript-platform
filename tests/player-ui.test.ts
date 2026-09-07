@@ -10,7 +10,6 @@ import {
 } from "../player/panel-state.js";
 import {
   formatTimer,
-  matchForegroundChoiceByVisibleText,
   orderRightControls,
   readableControlText,
   timerProgressPercent,
@@ -42,13 +41,6 @@ test("Player presentation helpers remain deterministic and framework-independent
   assert.equal(formatTimer(3600), "1:00:00");
   assert.equal(formatTimer(3661), "1:01:01");
   assert.equal(formatTimer(-1), "0:00");
-  assert.equal(
-    matchForegroundChoiceByVisibleText(
-      [{ id: "steady", label: "Continue steadily" }],
-      "Continue steadily",
-    )?.id,
-    "steady",
-  );
   assert.equal(readableControlText("#ffffff"), "#000000");
   assert.equal(readableControlText("#000000"), "#ffffff");
   assert.deepEqual(

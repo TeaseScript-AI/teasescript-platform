@@ -63,18 +63,6 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
     },
   },
 
-  messages: BASE_MESSAGES,
-  foreground: {
-    kind: "choose",
-    accessibleName: "Choose how to continue",
-    options: [
-      { id: "steady", label: "Continue steadily" },
-      { id: "strict", label: "Choose the stricter option", authoredFill: "#8f3f5d" },
-      { id: "clarify", label: "Ask for clarification before continuing" },
-      { id: "rules", label: "Review the current rules first" },
-    ],
-  },
-
   rightControls: [
     { kind: "action", id: "continue", label: "Continue", priority: 10 },
     {

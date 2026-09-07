@@ -116,8 +116,6 @@ export interface PlayerPresentation {
   readonly media: PlayerMediaPresentation;
   readonly timer: PlayerTimerPresentation;
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
-  readonly messages: readonly PlayerMessagePresentation[];
-  readonly foreground: PlayerForegroundPresentation;
   readonly rightControls: readonly PlayerRightControlPresentation[];
 }
 

@@ -69,7 +69,7 @@ prematurely promoting development fixtures into product contracts.
   to Vue.
 - During migration, documentation and development tooling identified the manual route as legacy pending removal rather
   than a supported comparison architecture.
-- Development-only tools need a deliberate migration or retirement before the manual route is removed; they are not
+- Development-only tools were deliberately migrated or retired before the manual route was removed; they were not
   copied into the production core by default.
 
 ## Alternatives considered
