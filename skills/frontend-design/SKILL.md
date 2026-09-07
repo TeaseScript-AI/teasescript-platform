@@ -8,21 +8,21 @@ description: >-
 ---
 # Frontend Design
 
-Act as a design lead, not a component assembler. Make choices that are specific to the brief, audience, product, and real
-content. A technically correct interface can still be visually generic; aim for a coherent point of view that improves
-comprehension, use, and identity.
+Act as a design lead, not a component assembler. Make choices that are specific to the brief, audience, product, and
+real content. A technically correct interface can still be visually generic; aim for a coherent point of view that
+improves comprehension, use, and identity.
 
 ## Ground the design in the product
 
-Before choosing a direction, identify the audience, primary job, most important content/actions, subject matter and tone,
-and any existing functional or accessibility behavior that must survive. Use those facts as design material.
+Before choosing a direction, identify the audience, primary job, most important content/actions, subject matter and
+tone, and any existing functional or accessibility behavior that must survive. Use those facts as design material.
 
 Do not let the current DOM, component library, demo content, or existing layout become the visual brief by accident. Do
 not invent product capabilities merely to create visual interest.
 
-For a content-oriented site, make the opening viewport express the subject and purpose rather than defaulting to a generic
-hero recipe. For an application, make the primary workspace or task surface visually dominant; navigation, settings,
-tools, status, and other chrome should support the work rather than compete with it.
+For a content-oriented site, make the opening viewport express the subject and purpose rather than defaulting to a
+generic hero recipe. For an application, make the primary workspace or task surface visually dominant; navigation,
+settings, tools, status, and other chrome should support the work rather than compete with it.
 
 ## Form a visual point of view before coding
 
@@ -49,13 +49,13 @@ same fashionable family or pairing. One family can be enough; if using two, make
 Establish clear text roles and use size, weight, width, spacing, and line length with intent. When display type is a
 visual element, let the type treatment itself carry character rather than decorating it with unrelated effects.
 
-Visual structure should explain relationships. Start with alignment, spacing, type hierarchy, and grouping before adding
-containers. Borders, dividers, numbering, labels, cards, groups, columns, and surface changes should encode real
+Visual structure should explain relationships. Start with alignment, spacing, type hierarchy, and grouping before
+adding containers. Borders, dividers, numbering, labels, cards, groups, columns, and surface changes should encode real
 information. A number should indicate sequence or rank; a badge should indicate a real category or state; a card should
 represent a meaningful bounded unit.
 
-Words are design content. Use plain user-facing language, keep action names consistent through a flow, and make empty and
-failure states instructive. Avoid decorative microcopy or labels that add texture without understanding.
+Words are design content. Use plain user-facing language, keep action names consistent through a flow, and make empty
+and failure states instructive. Avoid decorative microcopy or labels that add texture without understanding.
 
 ## Resist generated-design defaults
 
@@ -73,8 +73,8 @@ Treat these recurring patterns as warning signs, not bans:
 - hover lift, bounce, glow, or slide motion on nearly every control;
 - familiar palette/type combinations chosen because they already look "designed".
 
-The failure is not any individual ingredient; it is using the bundle without a reason. Spend visual boldness selectively.
-Let a small number of memorable decisions carry identity and keep the surrounding system disciplined.
+The failure is not any individual ingredient; it is using the bundle without a reason. Spend visual boldness
+selectively. Let a small number of memorable decisions carry identity and keep the surrounding system disciplined.
 
 ## Design stateful applications as systems
 
@@ -102,8 +102,8 @@ scannable rather than automatically replacing it with oversized spacing or contr
 Motion should communicate causality, hierarchy, or focus. User-triggered transitions can help show what changed;
 non-user-triggered motion should be rare. Do not animate every hover or section entrance.
 
-Visible keyboard focus, reduced-motion behavior, readable contrast, and touch usability are a quality floor, not optional
-polish.
+Visible keyboard focus, reduced-motion behavior, readable contrast, and touch usability are a quality floor, not
+optional polish.
 
 ## Build, render, critique, revise
 
@@ -111,8 +111,8 @@ Work in passes: plan and challenge generic choices; build one coherent version; 
 content and states; inspect it visually; critique it against the brief; revise and render again.
 
 For a substantial redesign, perform at least two deliberate visual review passes. For complex applications, include
-representative width, height, content, and interaction-pressure states. Source correctness does not substitute for seeing
-the interface.
+representative width, height, content, and interaction-pressure states. Source correctness does not substitute for
+seeing the interface.
 
 Ask during critique:
 
