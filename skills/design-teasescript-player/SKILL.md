@@ -175,7 +175,13 @@ Before handoff:
 - remove losing temporary variants or controls that no longer serve an active comparison;
 - perform a final browser review after the last visible change.
 
-Summarize the handoff around the design thesis, fundamental structural/hierarchy decisions, responsive/interaction
-decisions, meaningful trade-offs or unresolved visual questions, verification, and representative visual evidence.
-Separate fundamental design decisions from easy tuning values; do not sell a minor size, spacing, or color adjustment as
-the candidate's central idea.
+Use this compact handoff structure, adapting only when the assigned issue requires more:
+
+- **Design thesis:** the intended experience and core structural idea.
+- **Fundamental decisions:** composition, hierarchy, visual language, and major departures from the shared baseline.
+- **Responsive and interaction decisions:** how the system behaves under the important constraint/state classes.
+- **Tunables:** secondary values that remain easy to adjust without changing the concept.
+- **Evidence:** browser states reviewed, screenshots/measurements where available, and repository verification.
+- **Open visual questions:** only meaningful unresolved presentation trade-offs; do not restate settled product contracts.
+
+Do not sell a minor size, spacing, or color adjustment as the candidate's central idea.
