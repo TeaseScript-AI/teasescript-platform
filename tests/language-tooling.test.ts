@@ -152,7 +152,15 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(active('say "Hello, there"'), 2);
   assert.equal(active('say "Hello, there",'), 3);
   assert.equal(active("say as narrator"), 0);
+  assert.equal(active("say as narrator "), 2);
   assert.equal(active("say skippable"), 1);
+  assert.equal(active("say skippable "), 2);
+  assert.equal(active("say unskippable "), 2);
+  assert.equal(active("askText as mistress"), 0);
+  assert.equal(active("askText as mistress "), 1);
+  assert.equal(active("askNumber as mistress "), 1);
+  assert.equal(active("showButton as mistress "), 1);
+  assert.equal(active("choose as mistress "), 1);
   assert.equal(active('say ["Hello", "there"]'), 2);
 });
 

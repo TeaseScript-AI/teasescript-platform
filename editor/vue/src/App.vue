@@ -4,6 +4,7 @@ import { monaco, registerTeaseScriptLanguage, watchDiagnostics } from "../../mon
 
 const container = ref<HTMLElement | null>(null);
 const diagnostics = ref(0);
+const ready = ref(false);
 let editor: monaco.editor.IStandaloneCodeEditor | null = null;
 let model: monaco.editor.ITextModel | null = null;
 let listener: monaco.IDisposable | null = null;
@@ -26,6 +27,7 @@ onMounted(() => {
   listener = watchDiagnostics(model, (count) => {
     diagnostics.value = count;
   });
+  ready.value = true;
 });
 onBeforeUnmount(() => {
   listener?.dispose();
@@ -44,6 +46,11 @@ onBeforeUnmount(() => {
       </div>
       <span class="status">{{ diagnostics }} diagnostics</span>
     </header>
-    <section ref="container" class="editor" aria-label="TeaseScript source editor" />
+    <section
+      ref="container"
+      class="editor"
+      aria-label="TeaseScript source editor"
+      :data-monaco-ready="String(ready)"
+    />
   </main>
 </template>

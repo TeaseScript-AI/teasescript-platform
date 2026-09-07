@@ -1,18 +1,8 @@
 import * as monaco from "monaco-editor";
 import {
-  createLanguageDocument,
-  formatLanguageDocument,
-  languageCompletions,
-  languageHover,
-  languagePositionAt,
-  languageSignatureHelp,
-} from "../src/language-tooling.js";
-import {
-  toMonacoCompletions,
-  toMonacoHover,
-  toMonacoSignatureHelp,
-  toMonacoTextEdits,
-} from "../src/editor/monaco-mapping.js";
+  createTeaseScriptProviders,
+  registerTeaseScriptProviders,
+} from "../src/editor/monaco-providers.js";
 import { watchModelDiagnostics } from "../src/editor/model-diagnostics.js";
 
 const TEASE_LANGUAGE_ID = "teasescript";
@@ -75,54 +65,28 @@ export function registerTeaseScriptLanguage(): void {
 }
 
 function registerProviders(): void {
-  monaco.languages.registerCompletionItemProvider(TEASE_LANGUAGE_ID, {
-    triggerCharacters: [" ", "\n"],
-    provideCompletionItems(model, position) {
-      const document = createLanguageDocument(model.uri.toString(), model.getValue());
-      const languagePosition = languagePositionAt(document, model.getOffsetAt(position));
-      const items = languageCompletions(document, languagePosition);
-      return {
-        suggestions: toMonacoCompletions(
-          items,
-          new monaco.Range(
-            position.lineNumber,
-            position.column,
-            position.lineNumber,
-            position.column,
-          ),
-          monaco.languages.CompletionItemKind,
-        ),
-      };
+  const providers = createTeaseScriptProviders(
+    (startLineNumber, startColumn, endLineNumber, endColumn) =>
+      new monaco.Range(startLineNumber, startColumn, endLineNumber, endColumn),
+    monaco.languages.CompletionItemKind,
+  );
+  registerTeaseScriptProviders(
+    {
+      completion: (provider) => {
+        monaco.languages.registerCompletionItemProvider(TEASE_LANGUAGE_ID, provider);
+      },
+      hover: (provider) => {
+        monaco.languages.registerHoverProvider(TEASE_LANGUAGE_ID, provider);
+      },
+      signature: (provider) => {
+        monaco.languages.registerSignatureHelpProvider(TEASE_LANGUAGE_ID, provider);
+      },
+      formatting: (provider) => {
+        monaco.languages.registerDocumentFormattingEditProvider(TEASE_LANGUAGE_ID, provider);
+      },
     },
-  });
-  monaco.languages.registerHoverProvider(TEASE_LANGUAGE_ID, {
-    provideHover(model, position) {
-      const document = createLanguageDocument(model.uri.toString(), model.getValue());
-      const result = languageHover(
-        document,
-        languagePositionAt(document, model.getOffsetAt(position)),
-      );
-      return result === null ? null : { ...toMonacoHover(result) };
-    },
-  });
-  monaco.languages.registerSignatureHelpProvider(TEASE_LANGUAGE_ID, {
-    signatureHelpTriggerCharacters: [" ", ","],
-    provideSignatureHelp(model, position) {
-      const document = createLanguageDocument(model.uri.toString(), model.getValue());
-      const result = languageSignatureHelp(
-        document,
-        languagePositionAt(document, model.getOffsetAt(position)),
-      );
-      return result === null ? null : { ...toMonacoSignatureHelp(result) };
-    },
-  });
-  monaco.languages.registerDocumentFormattingEditProvider(TEASE_LANGUAGE_ID, {
-    provideDocumentFormattingEdits(model) {
-      const document = createLanguageDocument(model.uri.toString(), model.getValue());
-      const result = formatLanguageDocument(document);
-      return toMonacoTextEdits(result.edits);
-    },
-  });
+    providers,
+  );
 }
 
 export function watchDiagnostics(

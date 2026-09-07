@@ -438,8 +438,15 @@ function activeParameterFor(
     (token) => token.kind !== TokenKind.EndOfFile && token.kind !== TokenKind.Newline,
   );
   const tail = tokens.slice(1);
+  const last = tail.at(-1);
+  const cursorAfterLastToken =
+    last !== undefined && Math.max(start, offset) - start > last.span.end.offset;
   const asIndex = tail.findIndex((token) => token.kind === TokenKind.KeywordAs);
-  if (asIndex >= 0 && tail.length <= asIndex + 2) return 0;
+  if (
+    asIndex >= 0 &&
+    (tail.length === asIndex + 1 || (tail.length === asIndex + 2 && !cursorAfterLastToken))
+  )
+    return 0;
   if (command !== "say") return 1;
 
   let depth = 0;
@@ -460,8 +467,7 @@ function activeParameterFor(
       return 3;
     }
   }
-  const last = tail.at(-1);
-  return last !== undefined && tokenIsSayModifier(last) ? 1 : 2;
+  return last !== undefined && tokenIsSayModifier(last) && !cursorAfterLastToken ? 1 : 2;
 }
 
 function lineStarts(source: string): readonly number[] {

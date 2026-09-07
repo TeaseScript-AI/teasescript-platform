@@ -46,9 +46,11 @@ try {
   if (result.code !== 0) throw new Error(`Chromium exited with ${result.code}: ${result.stderr}`);
   if (
     !result.stdout.includes("Browser editor") ||
-    !result.stdout.includes("TeaseScript source editor")
+    !result.stdout.includes("TeaseScript source editor") ||
+    !result.stdout.includes('data-monaco-ready="true"') ||
+    !result.stdout.includes('class="monaco-editor')
   ) {
-    throw new Error("The built editor did not render its Vue/Monaco shell.");
+    throw new Error("The built editor did not create and mark a ready Monaco instance.");
   }
   console.log("editor-browser-smoke: PASS built Vue/Monaco editor starts without a CDN dependency");
 } finally {
