@@ -1,0 +1,5 @@
+{
+  "extends": "../../player/vue/tsconfig.json",
+  "compilerOptions": { "rootDir": "../..", "baseUrl": "../.." },
+  "include": ["./**/*.ts", "./**/*.vue", "../monaco.ts", "../../src/**/*.ts"]
+}

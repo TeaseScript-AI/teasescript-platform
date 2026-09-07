@@ -4,7 +4,10 @@ The future browser editor owns source authoring: syntax highlighting, diagnostic
 and integration with compiler/runtime tooling. Runtime inspection and diagnostic execution belong to
 [`DEBUGGER.md`](DEBUGGER.md); the editor may embed those controls without owning debugger semantics.
 
-The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
+The Monaco browser editor POC is a separate editor-owned Vue/Vite surface under `editor/vue/`; it consumes the
+editor-neutral tooling through thin Monaco providers and registers `.tease` presentation without becoming a second
+correctness grammar. It deliberately keeps the beginner-facing surface focused and does not expose every Monaco
+feature. The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
 validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC
 through the DOM-free workspace controller. It deliberately has no Monaco integration, package authoring,
@@ -72,7 +75,7 @@ The first implementation should provide:
 - source-span preservation from compact syntax through fully lowered plan instructions;
 - debugger/simulator inspection of pending interaction kind, requesting speaker, normalized completion, prepared output, pacing deadline, action location, and skip policy;
 - diagnostics for concrete versioned technical limits selected by the implementation;
-- earlier non-blocking usability warnings for unusually long control text or unusually large choice sets without presenting those warnings as language limits.
+- canonical parser/semantic/compiler errors and current technical-limit diagnostics; usability-warning thresholds remain deferred until representative authoring and Player evidence exists.
 
 The editor may preview the Player application's dynamic choice presentation, but button rows versus dropdown are not canonical runtime state. Buttons may use one or two rows; exact layout measurements and breakpoints remain Player UI work.
 
