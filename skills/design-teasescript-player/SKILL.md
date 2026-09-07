@@ -116,7 +116,7 @@ usable without letting their chrome dominate merely because they contain many co
 
 Use motion to explain state or causality. Respect reduced motion and visible keyboard focus. Do not add a visual device
 only because it conventionally signals polish; it should perform a real hierarchy, interaction, content, or identity
-  job.
+job.
 
 ## Iterate from rendered evidence
 
