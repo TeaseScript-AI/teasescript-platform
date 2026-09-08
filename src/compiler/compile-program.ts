@@ -1,7 +1,6 @@
 import type { FunctionDeclaration, Program } from "../ast.js";
 import {
   AST_VALIDATION_CODES,
-  captureProgramAst,
   findNonFiniteNumericLiteralDiagnosticsInStableProgram,
 } from "../ast-validation.js";
 import type { SourceSpan } from "../source.js";
@@ -18,26 +17,7 @@ import { InstructionCompilationError } from "./errors.js";
 export type { InstructionPlan } from "../plan/model.js";
 export { InstructionCompilationError } from "./errors.js";
 
-export function compileProgram(program: Program): InstructionPlan {
-  const capture = captureProgramAst(program);
-  if (capture.program === null) {
-    throw new InstructionCompilationError(
-      AST_VALIDATION_CODES.invalidExternalAst,
-      capture.diagnostic!.message,
-      capture.diagnostic!.span,
-    );
-  }
-  return compileStableProgram(capture.program);
-}
-
-/**
- * Lowers parser-owned or already-captured stable AST data.
- *
- * The canonical source route calls this after parsing and semantic validation so
- * parser-owned AST data is not copied through the direct caller-data capture
- * path. `compileProgram(...)` remains the guarded internal entry point for
- * caller-constructed AST data.
- */
+/** Lowers parser-owned AST data after source parsing and semantic validation. */
 export function compileStableProgram(program: Program): InstructionPlan {
   const nonFiniteDiagnostic = findNonFiniteNumericLiteralDiagnosticsInStableProgram(program)[0];
   if (nonFiniteDiagnostic !== undefined) {

@@ -21,7 +21,6 @@ test("the package root exposes supported runtime and checkpoint capabilities", (
 
 test("the package root excludes internal compiler and test seams", () => {
   for (const internal of [
-    "compileProgram",
     "InstructionCompilationError",
     "Interpreter",
     "execute",

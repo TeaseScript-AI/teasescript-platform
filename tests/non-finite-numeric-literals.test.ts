@@ -3,7 +3,10 @@ import test from "node:test";
 
 import type { Program } from "../src/ast.js";
 import { compileSource } from "../src/compiler.js";
-import { compileProgram, InstructionCompilationError } from "../src/compiler/compile-program.js";
+import {
+  compileStableProgram,
+  InstructionCompilationError,
+} from "../src/compiler/compile-program.js";
 import { parse } from "../src/parser.js";
 import type { SourceSpan } from "../src/source.js";
 
@@ -31,13 +34,13 @@ test("preserves large finite scientific notation", () => {
   assert.notEqual(result.plan, null);
 });
 
-test("direct lowering rejects a non-finite literal with a structured compiler error", () => {
+test("stable lowering rejects a non-finite literal with a structured compiler error", () => {
   const program = mutableProgram("let value = 1\nexit");
   const literal = numberLiterals(program)[0]!;
   literal.value = Infinity;
 
   assert.throws(
-    () => compileProgram(program),
+    () => compileStableProgram(program),
     (error: unknown) => {
       assert.ok(error instanceof InstructionCompilationError);
       assert.equal(error.code, "TSC001");
