@@ -1,4 +1,4 @@
-import { captureInstructionPlan } from "../plan/capture.js";
+import { captureOrReuseInstructionPlan } from "../plan/capture.js";
 import type { InstructionPlan } from "../plan/model.js";
 import { planLocationToSourceSpan } from "../plan/source-location.js";
 import type { SourceSpan } from "../source.js";
@@ -62,7 +62,7 @@ export function inspectRuntimeState(
   planValue: unknown,
   snapshotValue: unknown,
 ): RuntimeInspectionResult {
-  const capturedPlan = captureInstructionPlan(planValue);
+  const capturedPlan = captureOrReuseInstructionPlan(planValue);
   if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
     return invalid(
       "plan",

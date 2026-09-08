@@ -11,7 +11,7 @@ import type {
   InstructionPlan,
   InteractionUiPayload,
 } from "../plan/model.js";
-import { captureInstructionPlan } from "../plan/capture.js";
+import { captureOrReuseInstructionPlan } from "../plan/capture.js";
 import { captureExternalData, type ExternalDataFailureKind } from "../external-data-capture.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
@@ -237,7 +237,7 @@ export function createFreshRuntimeSnapshot(
   plan: InstructionPlan,
   options: FreshRuntimeOptions = {},
 ): RuntimeSnapshot {
-  const capturedPlan = captureInstructionPlan(plan);
+  const capturedPlan = captureOrReuseInstructionPlan(plan);
   if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
     throw new TypeError(
       capturedPlan.validation.errors[0]?.message ?? "Malformed instruction plan.",
@@ -583,7 +583,7 @@ function captureRuntimeSnapshot(
   plan?: InstructionPlan,
 ): CapturedRuntimeSnapshotResult {
   if (plan === undefined) return captureRuntimeSnapshotWithValidatedPlan(value);
-  const capturedPlan = captureInstructionPlan(plan);
+  const capturedPlan = captureOrReuseInstructionPlan(plan);
   if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
     return Object.freeze({
       validation: Object.freeze({
@@ -603,6 +603,7 @@ export function captureRuntimeSnapshotWithValidatedPlan(
   value: unknown,
   plan?: InstructionPlan,
 ): CapturedRuntimeSnapshotResult {
+  recordValidationTestWork("runtimeSnapshotCaptureCalls");
   const snapshotCapture = captureExternalData(value);
   if (!snapshotCapture.ok) {
     return Object.freeze({

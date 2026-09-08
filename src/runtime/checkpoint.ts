@@ -1,6 +1,7 @@
 import { type InstructionPlan } from "../plan/model.js";
-import { captureInstructionPlan } from "../plan/capture.js";
+import { captureOrReuseInstructionPlan } from "../plan/capture.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
+import { markValidatedImmutableInstructionPlan } from "../plan/validated-immutable.js";
 import { validateCapturedInstructionPlan } from "../plan/validation.js";
 import {
   captureRuntimeSnapshotWithValidatedPlan,
@@ -161,7 +162,9 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
     );
   }
   // EVIDENCE: validation: validateCapturedInstructionPlan accepted this JSON-parsed plan above.
-  const plan = freezeInstructionPlan(envelope.plan as InstructionPlan);
+  const plan = markValidatedImmutableInstructionPlan(
+    freezeInstructionPlan(envelope.plan as InstructionPlan),
+  );
   const snapshotValidation = validateCapturedRuntimeSnapshot(envelope.snapshot, plan);
   if (!snapshotValidation.valid) {
     const message = checkpointComponentCaptureMessage(
@@ -183,7 +186,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
 }
 
 function capturePlan(value: unknown, path: string): InstructionPlan {
-  const captured = captureInstructionPlan(value);
+  const captured = captureOrReuseInstructionPlan(value);
   if (!captured.validation.valid || captured.plan === null) {
     const first = captured.validation.errors[0];
     throw checkpointError(

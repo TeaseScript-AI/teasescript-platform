@@ -4,6 +4,7 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import { compileStableProgram, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
+import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { validateSemantics, type SemanticValidationOptions } from "./semantic.js";
@@ -40,7 +41,7 @@ export function compileSource(source: string, options: CompileOptions = {}): Com
     const compiled = compileStableProgram(parsed.program);
     const diagnostic = compiledPlanValidationDiagnostic(compiled);
     if (diagnostic === null) {
-      plan = compiled;
+      plan = markValidatedImmutableInstructionPlan(compiled);
     } else {
       loweringDiagnostics.push(diagnostic);
     }

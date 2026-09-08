@@ -167,14 +167,16 @@ test("compiler and runtime paths avoid duplicate whole-plan capture", () => {
   const executableVisits = withValidationTestStatistics((finish) => {
     captureExecutableData(plan, snapshot);
     return finish();
-  }).counts.externalCaptureVisits!;
-  assert.equal(executableVisits, planVisits + snapshotVisits);
+  }).counts;
+  assert.equal(executableVisits.instructionPlanCaptureCalls, undefined);
+  assert.ok((executableVisits.externalCaptureVisits ?? 0) < planVisits + snapshotVisits);
 
   const checkpointVisits = withValidationTestStatistics((finish) => {
     createCheckpoint(plan, snapshot);
     return finish();
-  }).counts.externalCaptureVisits!;
-  assert.equal(checkpointVisits, planVisits + snapshotVisits);
+  }).counts;
+  assert.equal(checkpointVisits.instructionPlanCaptureCalls, undefined);
+  assert.ok((checkpointVisits.externalCaptureVisits ?? 0) < planVisits + snapshotVisits);
 
   const serialized = JSON.stringify(createCheckpoint(plan, snapshot));
   const deserializeStatistics = withValidationTestStatistics((finish) => {
@@ -189,6 +191,102 @@ test("compiler and runtime paths avoid duplicate whole-plan capture", () => {
     return finish();
   }).counts;
   assert.equal(serializationStatistics.externalCaptureVisits, undefined);
+});
+
+test("repeated event stepping reuses validated immutable plans and preserves restore behavior", () => {
+  const statementCount = 64;
+  const source = Array.from(
+    { length: statementCount },
+    (_, index) => `say "Line ${index}", instant`,
+  ).join("\n");
+  const plan = compiledPlan(source);
+  const uninterrupted = run(plan, createFreshRuntimeSnapshot(plan));
+  const wholePlanCaptureVisits = withValidationTestStatistics((finish) => {
+    assert.notEqual(captureInstructionPlan(plan).plan, null);
+    return finish();
+  }).counts.externalCaptureVisits!;
+  let snapshot = createFreshRuntimeSnapshot(plan);
+  const events: (typeof uninterrupted.events)[number][] = [];
+  let calls = 0;
+
+  const statistics = withValidationTestStatistics((finish) => {
+    while (snapshot.status !== "halted") {
+      const callerBefore = structuredClone(snapshot);
+      const stepped = stepToEvent(plan, snapshot);
+      assert.deepEqual(snapshot, callerBefore);
+      events.push(...stepped.events);
+      calls += 1;
+      snapshot = stepped.snapshot;
+    }
+    return finish();
+  }).counts;
+
+  assert.equal(calls, statementCount);
+  assert.equal(statistics.instructionPlanCaptureCalls, undefined);
+  assert.equal(statistics.runtimeSnapshotCaptureCalls, statementCount);
+  assert.ok((statistics.externalCaptureVisits ?? 0) < wholePlanCaptureVisits * 2);
+  assert.deepEqual(events, uninterrupted.events);
+  assert.deepEqual(snapshot, uninterrupted.snapshot);
+
+  let restoredPlan = plan;
+  let restoredSnapshot = createFreshRuntimeSnapshot(plan);
+  const restoredEvents: (typeof uninterrupted.events)[number][] = [];
+  while (restoredSnapshot.status !== "halted") {
+    const stepped = stepToEvent(restoredPlan, restoredSnapshot);
+    restoredEvents.push(...stepped.events);
+    const restored = deserializeCheckpoint(
+      JSON.stringify(createCheckpoint(restoredPlan, stepped.snapshot)),
+    );
+    restoredPlan = restored.plan;
+    restoredSnapshot = restored.snapshot;
+  }
+  assert.deepEqual(restoredEvents, uninterrupted.events);
+  assert.deepEqual(restoredSnapshot, uninterrupted.snapshot);
+});
+
+test("runtime entry validates mutable external plans and snapshots before halted or failed returns", () => {
+  const exitPlan = compiledPlan("exit");
+  const halted = run(exitPlan, createFreshRuntimeSnapshot(exitPlan)).snapshot;
+  const faultSource = "let values = []\nsay values.first\nexit";
+  const faultPlan = compiledPlan(faultSource);
+  const failed = run(faultPlan, createFreshRuntimeSnapshot(faultPlan)).snapshot;
+
+  for (const terminal of [
+    { source: "exit", plan: exitPlan, snapshot: halted },
+    { source: faultSource, plan: faultPlan, snapshot: failed },
+  ]) {
+    for (const operation of [executeInstruction, stepToEvent, run]) {
+      const malformedPlan = mutablePlan(terminal.source);
+      // EVIDENCE: this external plan has not passed the private immutable-plan validation seam.
+      (malformedPlan as { version: number }).version += 1;
+      assert.throws(
+        () => operation(malformedPlan, terminal.snapshot),
+        (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+      );
+
+      const malformedSnapshot = structuredClone(terminal.snapshot);
+      // EVIDENCE: terminal status cannot bypass validation of caller-controlled snapshot fields.
+      (malformedSnapshot as { nextEventSequence: number }).nextEventSequence = 0;
+      assert.throws(
+        () => operation(terminal.plan, malformedSnapshot),
+        (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+      );
+    }
+  }
+});
+
+test("a shallow-frozen external plan is recaptured after nested mutation", () => {
+  const plan = mutablePlan("exit");
+  Object.freeze(plan);
+  const initial = createFreshRuntimeSnapshot(compiledPlan("exit"));
+  assert.equal(run(plan, initial).snapshot.status, "halted");
+
+  // EVIDENCE: freezing only the root does not make the caller-owned nested instruction graph immutable.
+  (plan.instructions[0] as { kind: string }).kind = "unknown";
+  assert.throws(
+    () => run(plan, initial),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+  );
 });
 
 test("external plan capture freezes the detached graph without freezing generic capture", () => {
