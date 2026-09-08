@@ -225,20 +225,50 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
   );
 });
 
-test("rejects malformed serialized loop state", () => {
-  const compiled = plan("for value in 1..=3 { say value }");
-  const active = stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled));
-  // EVIDENCE: fixture: parse the serialized checkpoint as a mutable dictionary for malformed loop-position injection.
-  const checkpoint = JSON.parse(
-    JSON.stringify(createCheckpoint(compiled, active.snapshot)),
-  ) as Record<string, unknown>;
+test("checkpoint restore accepts range loop-position length and rejects length + 1", () => {
+  for (const { name, source, values } of [
+    { name: "exclusive", source: "for value in 1..4 { say value }", values: ["1", "2", "3"] },
+    { name: "inclusive", source: "for value in 1..=3 { say value }", values: ["1", "2", "3"] },
+  ]) {
+    const compiled = plan(source);
+    let active = createImmediatePacingRuntimeSnapshot(compiled);
+    for (const expected of values) {
+      const stepped = stepToEvent(compiled, active);
+      assert.deepEqual(sayTexts(stepped), [expected], name);
+      active = stepped.snapshot;
+    }
 
-  // EVIDENCE: fixture: the checkpoint serializer emitted the snapshot object inspected here.
-  const snapshot = checkpoint.snapshot as Record<string, unknown>;
-  // EVIDENCE: fixture: the active for-loop checkpoint emitted the loop-frame array mutated here.
-  const loops = snapshot.loopFrames as Array<Record<string, unknown>>;
-  loops[0]!.position = 99;
-  assertCheckpointRejected(checkpoint, "TSK002");
+    // EVIDENCE: fixture: the runtime-produced snapshot has consumed every value but retains the
+    // active loop frame until its next loop-start instruction observes the completed position.
+    const activeLoop = active.loopFrames[0];
+    assert.ok(activeLoop?.kind === "for", name);
+    assert.equal(activeLoop.position, values.length, name);
+    // EVIDENCE: fixture: JSON parsing makes the runtime-created checkpoint mutable while retaining the loop-frame structure asserted immediately above.
+    const checkpoint = JSON.parse(JSON.stringify(createCheckpoint(compiled, active))) as {
+      snapshot: { loopFrames: Array<{ position: number }> };
+    };
+
+    const restored = restoreCheckpoint(checkpoint);
+    const restoredLoop = restored.snapshot.loopFrames[0];
+    assert.ok(restoredLoop?.kind === "for", name);
+    assert.equal(restoredLoop.position, values.length, name);
+    const completed = run(restored.plan, restored.snapshot);
+    assert.equal(completed.snapshot.status, "halted", name);
+    assert.deepEqual(sayTexts(completed), [], name);
+
+    // EVIDENCE: fixture: clone the otherwise valid serialized checkpoint and move only its
+    // completed range position one step beyond the runtime-produced boundary.
+    const beyondEnd = structuredClone(checkpoint);
+    beyondEnd.snapshot.loopFrames[0]!.position = values.length + 1;
+    assert.throws(
+      () => restoreCheckpoint(beyondEnd),
+      (error: unknown) =>
+        error instanceof CheckpointError &&
+        error.info.code === "TSK002" &&
+        error.info.message === "Runtime for-loop iterator state is malformed.",
+      name,
+    );
+  }
 });
 
 test("rejects loop frames that do not match the next plan instruction", () => {
