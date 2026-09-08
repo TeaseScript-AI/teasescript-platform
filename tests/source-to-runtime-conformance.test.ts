@@ -94,7 +94,8 @@ test("executes folded string and template continuation lines without text loss",
     [
       'let name = "Ada"',
       'say "One.\n   \n\tTwo."',
-      "say `Hello ${name}\n \t\n  there.`",
+      'say "Many.\r\n\t\r\n  \r\n blanks."',
+      "say `Before\\t\n \t\n${name}\n \n\t\nAfter\\nnext`",
       'say "Escaped:\\t\n \n done\\nnext"',
     ].join("\n"),
   );
@@ -102,7 +103,7 @@ test("executes folded string and template continuation lines without text loss",
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["One.  Two.", "Hello Ada  there.", "Escaped:\t  done\nnext"],
+    ["One.  Two.", "Many.   blanks.", "Before\t  Ada   After\nnext", "Escaped:\t  done\nnext"],
   );
 });
 
