@@ -26,13 +26,13 @@ test("flat-chain compilation remains iterative with a constrained host stack", (
   const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
   const parserUrl = new URL("../src/parser.js", import.meta.url).href;
   const semanticUrl = new URL("../src/semantic.js", import.meta.url).href;
-  const compileProgramUrl = new URL("../src/compiler/compile-program.js", import.meta.url).href;
+  const compilerLoweringUrl = new URL("../src/compiler/compile-program.js", import.meta.url).href;
   const script = `
     const [{ compileSource }, { parse }, { validateSemantics }, { compileStableProgram }] = await Promise.all([
       import(${JSON.stringify(compilerUrl)}),
       import(${JSON.stringify(parserUrl)}),
       import(${JSON.stringify(semanticUrl)}),
-      import(${JSON.stringify(compileProgramUrl)}),
+      import(${JSON.stringify(compilerLoweringUrl)}),
     ]);
     const source = process.env.TEASESCRIPT_STACK_SOURCE;
     const parsed = parse(source);
