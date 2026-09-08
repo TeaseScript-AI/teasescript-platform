@@ -1,11 +1,11 @@
 import { createSourceSpan, type SourceSpan } from "../source.js";
 
-/** Controlled compiler-boundary failure for semantically invalid AST input. */
+/** Controlled failure while lowering parser-owned AST data. */
 export class InstructionCompilationError extends Error {
   readonly span: SourceSpan;
 
   public constructor(
-    readonly code: "TSC001" | "TSC003" | "TSC005",
+    readonly code: "TSC001" | "TSC003",
     message: string,
     span: SourceSpan,
   ) {
