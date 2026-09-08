@@ -65,6 +65,9 @@ function update(option: LayoutDebugOption, event: Event): void {
       <dt>Composition</dt>
       <dd>
         {{ snapshot?.composition.chrome ?? "unset" }} ·
+        {{ snapshot?.composition.conversation ?? "unset" }} ·
+        {{ snapshot?.composition.tools ?? "unset" }} ·
+        {{ snapshot?.composition.rightLayout ?? "unset" }} ·
         {{ snapshot?.composition.keyboard ?? "unset" }}
       </dd>
       <dt>Player</dt>
