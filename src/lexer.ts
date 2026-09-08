@@ -275,10 +275,15 @@ class Lexer {
         value += this.#scanEscape("string");
         continue;
       }
+      if (isHorizontalWhitespace(this.#peek())) {
+        const whitespaceOffset = this.#offset;
+        this.#consumeHorizontalWhitespace();
+        if (!this.#isNewline()) value += this.source.slice(whitespaceOffset, this.#offset);
+        continue;
+      }
       if (this.#isNewline()) {
-        value = this.#trimSourceIndentation(value);
         this.#consumeNewline();
-        this.#skipHorizontalWhitespace();
+        this.#consumeHorizontalWhitespace();
         value += " ";
         continue;
       }
@@ -334,10 +339,15 @@ class Lexer {
         value += this.#scanEscape("template");
         continue;
       }
+      if (isHorizontalWhitespace(this.#peek())) {
+        const whitespaceOffset = this.#offset;
+        this.#consumeHorizontalWhitespace();
+        if (!this.#isNewline()) value += this.source.slice(whitespaceOffset, this.#offset);
+        continue;
+      }
       if (this.#isNewline()) {
-        value = this.#trimSourceIndentation(value);
         this.#consumeNewline();
-        this.#skipHorizontalWhitespace();
+        this.#consumeHorizontalWhitespace();
         value += " ";
         continue;
       }
@@ -523,18 +533,8 @@ class Lexer {
     );
   }
 
-  #skipHorizontalWhitespace(): void {
+  #consumeHorizontalWhitespace(): void {
     while (isHorizontalWhitespace(this.#peek())) this.#advanceCodeUnit();
-  }
-
-  #trimSourceIndentation(value: string): string {
-    let indentationLength = 0;
-    let offset = this.#offset - 1;
-    while (offset >= 0 && isHorizontalWhitespace(this.source[offset] ?? "")) {
-      indentationLength += 1;
-      offset -= 1;
-    }
-    return indentationLength === 0 ? value : value.slice(0, -indentationLength);
   }
 
   #consumeNewline(): void {

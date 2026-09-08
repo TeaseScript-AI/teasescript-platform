@@ -79,6 +79,21 @@ test("folds physical newlines and surrounding indentation inside strings", () =>
   assert.deepEqual(result.tokens[2]?.span, span(23, 3, 0, 27, 3, 4));
 });
 
+test("folds every whitespace-only continuation line inside strings", () => {
+  const cases = [
+    ['"One.\n   \n\tTwo."', "One.  Two."],
+    ['"One.\r\n\t\r\n  \r\n Three."', "One.   Three."],
+    ['"Escaped:\\t\n \n done\\nnext"', "Escaped:\t  done\nnext"],
+  ] as const;
+
+  for (const [source, expected] of cases) {
+    const result = lex(source);
+
+    assert.deepEqual(result.diagnostics, []);
+    assert.equal(tokenValue(result.tokens[0]), expected);
+  }
+});
+
 test("emits template text and interpolation boundaries", () => {
   const result = lex("`Hello ${player.alias}.`");
 
@@ -116,6 +131,14 @@ test("folds physical newlines inside template text", () => {
   assert.deepEqual(result.diagnostics, []);
   assert.equal(tokenValue(result.tokens[7]), ", welcome.");
   assert.deepEqual(result.tokens[7]?.span, span(22, 0, 22, 37, 1, 10));
+});
+
+test("folds whitespace-only continuation lines across template interpolation boundaries", () => {
+  const result = lex("`Before\n \t\n${name}\n \n\t\nAfter`");
+
+  assert.deepEqual(result.diagnostics, []);
+  assert.equal(tokenValue(result.tokens[1]), "Before  ");
+  assert.equal(tokenValue(result.tokens[5]), "   After");
 });
 
 test("tracks LF and CRLF as one newline with original lexemes", () => {

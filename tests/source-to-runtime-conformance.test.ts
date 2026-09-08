@@ -89,6 +89,23 @@ test("executes source output, speaker provenance, collection copies, and control
   assert.equal(rootBinding(result.snapshot.frames[0]?.bindings ?? [], "total"), 4);
 });
 
+test("executes folded string and template continuation lines without text loss", () => {
+  const plan = compiled(
+    [
+      'let name = "Ada"',
+      'say "One.\n   \n\tTwo."',
+      "say `Hello ${name}\n \t\n  there.`",
+      'say "Escaped:\\t\n \n done\\nnext"',
+    ].join("\n"),
+  );
+
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["One.  Two.", "Hello Ada  there.", "Escaped:\t  done\nnext"],
+  );
+});
+
 test("keeps contextual say skip words available as ordinary identifier expressions", () => {
   const plan = compiled(
     [
