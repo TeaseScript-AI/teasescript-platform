@@ -1,241 +1,272 @@
 @layer components {
-      .tool-column-add,
-      .tool-column-close {
-        display: grid;
-        place-items: center;
+  /* ---------- tools ---------- */
 
-        padding: 0;
-        border: 1px solid var(--color-border-default);
-        border-radius: 6px;
+  .tool-strip-scroll {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
 
-        background: var(--color-surface-component);
-        color: var(--color-text-primary);
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: x proximity;
+    touch-action: pan-x pan-y pinch-zoom;
 
-        cursor: pointer;
-      }
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-text-muted) 40%, transparent) transparent;
+  }
 
-      .tool-column-add {
-        flex: none;
-        inline-size: 30px;
-        block-size: 30px;
-        font-size: 20px;
-        font-weight: 500;
-        line-height: 1;
-      }
+  .tool-strip {
+    min-inline-size: 0;
+    block-size: 100%;
+    inline-size: max-content;
 
-      .tool-strip-scroll {
-        position: relative;
-        min-width: 0;
-        min-height: 0;
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
 
-        overflow-x: auto;
-        overflow-y: hidden;
-        overscroll-behavior-inline: contain;
-        scroll-snap-type: x proximity;
-        touch-action: pan-x pan-y pinch-zoom;
+    padding-block: var(--tools-gutter) calc(var(--tools-gutter) + var(--safe-bottom-reserve));
+  }
 
-        scrollbar-width: thin;
-        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
-      }
+  .tool-column {
+    --tool-column-effective-width: var(--tool-column-width);
 
-      .tool-strip {
-        min-inline-size: 0;
-        block-size: 100%;
-        inline-size: max-content;
+    flex: 0 0 auto;
 
-        display: flex;
-        align-items: stretch;
-        gap: 8px;
+    inline-size: var(--tool-column-effective-width);
+    min-inline-size: var(--tool-column-effective-width);
+    max-inline-size: var(--tool-column-effective-width);
+    min-block-size: 0;
 
-        padding-top: 8px;
-        padding-right: 0;
-        padding-bottom: calc(8px + var(--safe-bottom-reserve));
-        padding-left: 0;
-      }
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
 
-      .tool-column {
-        --tool-column-effective-width: var(--tool-column-width);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
 
-        flex: 0 0 auto;
+    overflow: hidden;
+    border-radius: var(--radius-panel);
 
-        inline-size: var(--tool-column-effective-width);
-        min-inline-size: var(--tool-column-effective-width);
-        max-inline-size: var(--tool-column-effective-width);
-        scroll-snap-align: start;
-        scroll-snap-stop: always;
-        min-block-size: 0;
+    background: var(--color-surface-component);
+  }
 
-        display: grid;
-        grid-template-rows: auto minmax(0, 1fr);
+  /*
+    Header and body share one continuous component surface. The selector and the
+    add/close controls provide the header's raised hierarchy instead of a second
+    chrome-coloured band.
+  */
+  .tool-column-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 6px;
+    align-items: center;
 
-        overflow: hidden;
-        border: 1px solid var(--color-border-default);
-        border-radius: 8px;
+    min-block-size: 46px;
+    padding: 8px;
+    background: transparent;
+  }
 
-        background: var(--color-surface-component);
-      }
+  .tool-selector {
+    min-inline-size: 0;
+    block-size: 32px;
 
-      .tool-column-header {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto auto;
-        gap: 6px;
-        align-items: center;
+    padding-inline: 10px 28px;
+    padding-block: 0;
 
-        min-block-size: 44px;
-        padding: 6px;
-        border-bottom: 1px solid var(--color-border-default);
-        background: transparent;
-      }
+    border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+    border-radius: var(--radius-tight);
 
-      .tool-selector {
-        min-inline-size: 0;
-        block-size: 30px;
+    background: transparent;
+    color: var(--color-text-primary);
+    font: inherit;
+    font-size: var(--text-instrument);
+    font-weight: 650;
+  }
 
-        padding-inline: 8px 26px;
-        padding-block: 0;
+  .tool-column-add,
+  .tool-column-close {
+    inline-size: 32px;
+    block-size: 32px;
 
-        border: 1px solid var(--color-border-default);
-        border-radius: 6px;
+    display: grid;
+    place-items: center;
 
-        background: var(--color-surface-component);
-        color: var(--color-text-primary);
-        font: inherit;
-        font-size: 11px;
-        font-weight: 600;
-      }
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-tight);
 
-      .tool-column-close {
-        inline-size: 30px;
-        block-size: 30px;
-        font-size: 18px;
-        font-weight: 500;
-        line-height: 1;
-      }
+    background: transparent;
+    color: var(--color-text-muted);
 
-      .tool-column-body {
-        min-width: 0;
-        min-height: 0;
+    font-weight: 500;
+    line-height: 1;
+  }
 
-        overflow-y: auto;
-        overflow-x: clip;
-        overscroll-behavior-block: contain;
+  .tool-column-add {
+    flex: none;
+    font-size: 19px;
+  }
 
-        background: var(--color-surface-component);
+  .tool-column-close {
+    font-size: 17px;
+  }
 
-        scrollbar-width: thin;
-        scrollbar-gutter: stable;
-        scrollbar-color: color-mix(in srgb, var(--color-text-muted) 45%, transparent) transparent;
-      }
+  .tool-column-body {
+    min-width: 0;
+    min-height: 0;
 
-      .tool-placeholder {
-        max-inline-size: 24ch;
-        padding: 12px;
-        color: var(--color-text-muted);
-        font-size: 11px;
-        line-height: 1.35;
-      }
+    overflow-y: auto;
+    overflow-x: clip;
+    overscroll-behavior-block: contain;
 
-      .tool-section {
-        min-inline-size: 0;
-        padding: 10px;
-      }
+    background: transparent;
 
-      .runtime-session-controls {
-        display: grid;
-        gap: 8px;
-      }
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    scrollbar-color: color-mix(in srgb, var(--color-text-muted) 40%, transparent) transparent;
+  }
 
-      .runtime-session-button {
-        width: 100%;
-        height: auto;
-        min-height: 34px;
-        padding: 7px 10px;
-        font-size: 11px;
-        font-weight: 600;
-        line-height: 1.25;
-      }
+  .tool-placeholder {
+    max-inline-size: 28ch;
+    padding: 14px;
+    color: var(--color-text-muted);
+    font-size: var(--text-instrument);
+    line-height: 1.4;
+  }
 
-      .runtime-session-status {
-        margin: 2px 0 0;
-        color: var(--color-text-muted);
-        font-size: 11px;
-        line-height: 1.35;
-      }
+  .tool-section {
+    min-inline-size: 0;
+    padding: 12px;
+  }
 
-      @supports selector(::scroll-button(left)) and selector(::scroll-marker) {
-        .tool-strip-scroll[data-overflow="true"] {
-          scroll-marker-group: after;
-        }
+  .runtime-session-controls {
+    display: grid;
+    gap: 10px;
+  }
 
-        .tool-strip-scroll[data-overflow="true"] .tool-column-body {
-          padding-bottom: calc(46px + var(--safe-bottom-reserve));
-          scroll-padding-bottom: calc(46px + var(--safe-bottom-reserve));
-        }
+  .runtime-session-controls h2 {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-label);
+    font-weight: 700;
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+  }
 
-        .tool-strip-scroll::scroll-button(left),
-        .tool-strip-scroll::scroll-button(right) {
-          position: absolute;
-          z-index: 5;
-          bottom: calc(8px + var(--safe-bottom-reserve));
-          width: 34px;
-          height: 34px;
-          border: 1px solid var(--color-border-default);
-          border-radius: 50%;
-          background: color-mix(in srgb, var(--color-surface-component) 92%, transparent);
-          color: var(--color-text-primary);
-          box-shadow: 0 2px 8px var(--color-structural-shadow);
-          cursor: pointer;
-        }
+  .runtime-session-controls p {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-note);
+    line-height: 1.45;
+  }
 
-        .tool-strip-scroll::scroll-button(left) {
-          left: 0;
-          content: "‹" / "Previous tool column";
-        }
+  .runtime-session-button {
+    inline-size: 100%;
+    block-size: auto;
+    min-block-size: 38px;
 
-        .tool-strip-scroll::scroll-button(right) {
-          right: 0;
-          content: "›" / "Next tool column";
-        }
+    display: block;
 
-        .tool-strip-scroll:not([data-overflow="true"])::scroll-button(left),
-        .tool-strip-scroll:not([data-overflow="true"])::scroll-button(right) {
-          display: none;
-          content: none;
-        }
+    padding: 9px 12px;
+    border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+    border-radius: var(--radius-tight);
+    background: transparent;
+    color: var(--color-text-primary);
 
-        .tool-strip-scroll::scroll-button(left):disabled,
-        .tool-strip-scroll::scroll-button(right):disabled {
-          opacity: 0;
-          pointer-events: none;
-        }
+    font-size: var(--text-instrument);
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: start;
+  }
 
-        .tool-strip-scroll::scroll-marker-group {
-          position: absolute;
-          z-index: 5;
-          right: 44px;
-          bottom: calc(20px + var(--safe-bottom-reserve));
-          left: 44px;
-          display: flex;
-          justify-content: center;
-          gap: 6px;
-          pointer-events: auto;
-        }
+  .runtime-session-status {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-note);
+    line-height: 1.4;
+  }
 
-        .tool-column::scroll-marker {
-          content: "";
-          width: 9px;
-          height: 9px;
-          border: 1px solid var(--color-border-hover);
-          border-radius: 50%;
-          background: var(--color-surface-component);
-        }
+  /*
+    Carousel chrome appears only while the strip actually overflows and is
+    navigation only; revealing a column never activates a control inside it.
+  */
+  @supports selector(::scroll-button(left)) and selector(::scroll-marker) {
+    .tool-strip-scroll[data-overflow="true"] {
+      scroll-marker-group: after;
+    }
 
-        .tool-column::scroll-marker:target-current {
-          background: var(--package-accent);
-        }
+    .tool-strip-scroll[data-overflow="true"] .tool-column-body {
+      padding-bottom: calc(48px + var(--safe-bottom-reserve));
+      scroll-padding-bottom: calc(48px + var(--safe-bottom-reserve));
+    }
 
-        .tool-strip-scroll:not([data-overflow="true"])::scroll-marker-group {
-          display: none;
-        }
-      }
+    .tool-strip-scroll::scroll-button(left),
+    .tool-strip-scroll::scroll-button(right) {
+      position: absolute;
+      z-index: 5;
+      bottom: calc(10px + var(--safe-bottom-reserve));
+      width: 36px;
+      height: 36px;
+      border: 1px solid color-mix(in srgb, var(--color-text-muted) 26%, transparent);
+      border-radius: 50%;
+      background: var(--color-instrument-veil);
+      color: var(--color-text-primary);
+      box-shadow: 0 4px 14px var(--color-structural-shadow);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      cursor: pointer;
+    }
+
+    .tool-strip-scroll::scroll-button(left) {
+      left: 0;
+      content: "‹" / "Previous tool column";
+    }
+
+    .tool-strip-scroll::scroll-button(right) {
+      right: 0;
+      content: "›" / "Next tool column";
+    }
+
+    .tool-strip-scroll:not([data-overflow="true"])::scroll-button(left),
+    .tool-strip-scroll:not([data-overflow="true"])::scroll-button(right) {
+      display: none;
+      content: none;
+    }
+
+    .tool-strip-scroll::scroll-button(left):disabled,
+    .tool-strip-scroll::scroll-button(right):disabled {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .tool-strip-scroll::scroll-marker-group {
+      position: absolute;
+      z-index: 5;
+      right: 46px;
+      bottom: calc(22px + var(--safe-bottom-reserve));
+      left: 46px;
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      pointer-events: auto;
+    }
+
+    .tool-column::scroll-marker {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border: 1px solid color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+      border-radius: 50%;
+      background: var(--color-surface-chrome);
+    }
+
+    .tool-column::scroll-marker:target-current {
+      border-color: var(--package-accent);
+      background: var(--package-accent);
+    }
+
+    .tool-strip-scroll:not([data-overflow="true"])::scroll-marker-group {
+      display: none;
+    }
+  }
 }

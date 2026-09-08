@@ -21,9 +21,10 @@ Debug, and Runtime Session tools.
 - `model.ts` contains presentation-only POC data shapes.
 - `presentation.ts` contains framework-independent presentation ordering, formatting, matching, and colour helpers.
 - `panel-state.ts` and `tool-columns.ts` keep the current local UI state transitions separate from rendering.
+- `stage-geometry.ts` resolves the stage height from the available width, the session media aspect, and the height that
+  actually remains after the composer, response lane and control tray.
 - Vue development diagnostics live under `vue/src/devtools/`.
-- `styles/` separates reset, layout/theme ownership, components, effects, and responsive composition through cascade
-  layers.
+- `styles/` separates reset, theme, layout, components, effects, and responsive composition through cascade layers.
 - `demo-session.ts` and `demo-media/` are presentation fixtures, not runtime/package APIs.
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
@@ -33,10 +34,30 @@ primitive/positioning/focus layer when interactive components need it, and TanSt
 transcript windowing/scroll-anchoring owner. The engine and shared presentation contracts remain framework-independent
 as required by ADR 0020.
 
-`styles/layout.css` currently owns the concrete light-theme palette values and semantic token mapping used by the
-source. Those values are also maintained as observable Player contract in `docs/ui/PLAYER-UI.md`; component CSS should
-consume semantic roles rather than raw application-palette primitives. Speaker, package-accent, media, and technical
-mask colours remain separate presentation data.
+`styles/theme.css` owns the concrete palette primitives, semantic token mapping, type scale, and shape language;
+`styles/layout.css` owns geometry. Component CSS consumes semantic roles rather than raw application-palette
+primitives. Speaker, package-accent, media, and technical mask colours remain separate presentation data.
+
+## Phase 2B presentation candidate
+
+This branch carries the Phase 2B redesign from issue #337. It is a comparison candidate, so `docs/ui/PLAYER-UI.md`
+still records the pre-Phase-2 presentation and is only synchronized once the Owner accepts a candidate. The
+deliberate departures from that document, each pending an Owner decision, are:
+
+- global controls float over the stage instead of reserving a full-width title band, which removes the separate
+  overlay-chrome mode;
+- the stage height is constraint-derived rather than a fixed `dvh` value, using a session-stable media aspect between
+  a floor and a cap;
+- visible timers are dial capsules docked to the stage's lower edge rather than rings stacked in the right region,
+  which also removes the two-pane right-rail height allocation;
+- long-lived background controls are bottom-anchored, and when a side track no longer fits they reflow to a
+  horizontal tray above the response lane, then to an anchored sheet, rather than overlaying the stage;
+- responsive composition is driven by measured constraints published as `data-*` composition states, not by viewport
+  media queries;
+- the default presentation is a low-light `stage` theme, with the warm `daylight` theme selectable in Visual Lab.
+
+Reka provides the tooltip, popover and focus-scope behavior for anchored and overlay chrome; the tooltip surface is
+repository-owned shadcn-vue source under `vue/src/components/ui/`.
 
 ## Demo-only behavior
 
@@ -74,4 +95,9 @@ to runtime or product semantics:
 - the pacing-gate fixture reveals a short message sequence over time, with Player-background/empty-composer Space
   skipping available only in the skippable variant;
 - script-initiated control changes add a neutral event to transcript history and compare toast, local highlight, and
-  toast-plus-highlight as transient feedback. The final transient treatment remains a playtest decision.
+  toast-plus-highlight as transient feedback. The final transient treatment remains a playtest decision;
+- `Theme` compares the low-light `stage` presentation with the warm `daylight` presentation on the same structure;
+- `Scrolled transcript edge` compares the three candidate treatments for the line sitting on the scrolled top
+  boundary — a late-closing mask, a soft fade, and a hard cut — which the Owner left undecided;
+- `Stage floor`, `Stage cap`, `Immersive stage cap` and `Control rail width` tune the constraints that decide the
+  stage/conversation balance and when a side track stops fitting.

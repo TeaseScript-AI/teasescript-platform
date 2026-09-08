@@ -1,38 +1,27 @@
 <script setup lang="ts">
-import {
-  computed,
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  watch,
-  type CSSProperties,
-} from "vue";
-import type {
-  PlayerRightControlPresentation,
-  PlayerTimerKind,
-  PlayerTimerPresentation,
-} from "../../../model.js";
+import { computed, type CSSProperties } from "vue";
+import type { PlayerRightControlPresentation } from "../../../model.js";
 import { orderRightControls, readableControlText } from "../../../presentation.js";
-import { allocateRightRailPaneHeights } from "../../../right-rail-layout.js";
 import type {
   BusyControlTarget,
   BusyStyle,
   ScriptUpdateFeedback,
 } from "../devtools/playerDevelopment.js";
-import PlayerTimer from "./PlayerTimer.vue";
 
+/*
+  One long-lived control group with one markup, reused by every geometry the
+  layout owner selects: a bottom-anchored rail while a side track fits, a
+  horizontal tray above the response lane while width is scarce, and an anchored
+  sheet while width and height are both scarce. Geometry never changes control
+  semantics, ordering or appearance.
+*/
 const props = defineProps<{
-  compactTimers: boolean;
   busyStyle: BusyStyle;
   busyTarget: BusyControlTarget;
   controls: readonly PlayerRightControlPresentation[];
   controlsDisabled: boolean;
   scriptUpdateControlId: string | null;
   scriptUpdateFeedback: ScriptUpdateFeedback | null;
-  timer: PlayerTimerPresentation;
-  timerCount: number;
-  timerKind: PlayerTimerKind;
 }>();
 
 defineEmits<{
@@ -41,38 +30,7 @@ defineEmits<{
   toggle: [controlId: string, checked: boolean];
 }>();
 
-const rightZone = ref<HTMLElement | null>(null);
-const actionPane = ref<HTMLElement | null>(null);
-const timerPaneSize = ref(0);
 const orderedControls = computed(() => orderRightControls(props.controls));
-let observer: ResizeObserver | null = null;
-
-watch(
-  () => [props.compactTimers, props.controls, props.timerCount, props.timerKind] as const,
-  async () => {
-    await nextTick();
-    observePaneElements();
-    syncPaneAllocation();
-  },
-  { deep: true },
-);
-
-onMounted(() => {
-  observer = new ResizeObserver(syncPaneAllocation);
-  observePaneElements();
-  syncPaneAllocation();
-});
-onBeforeUnmount(() => observer?.disconnect());
-
-function observePaneElements(): void {
-  observer?.disconnect();
-  if (rightZone.value !== null) observer?.observe(rightZone.value);
-  const timer = rightZone.value?.querySelector<HTMLElement>(":scope > .timer-wrap") ?? null;
-  if (timer !== null) observer?.observe(timer);
-  const timerList = timer?.querySelector<HTMLElement>(".timer-list") ?? null;
-  if (timerList !== null) observer?.observe(timerList);
-  if (actionPane.value !== null) observer?.observe(actionPane.value);
-}
 
 function authoredStyle(fill: string | undefined): CSSProperties | undefined {
   if (fill === undefined) return undefined;
@@ -82,51 +40,6 @@ function authoredStyle(fill: string | undefined): CSSProperties | undefined {
     "--authored-control-pressed": `color-mix(in oklab, ${fill} 76%, black)`,
     "--authored-control-text": readableControlText(fill),
   } as CSSProperties;
-}
-
-function syncPaneAllocation(): void {
-  const zone = rightZone.value;
-  if (zone === null || props.compactTimers) {
-    timerPaneSize.value = 0;
-    return;
-  }
-  const timer = zone.querySelector<HTMLElement>(":scope > .timer-wrap");
-  const actions = actionPane.value;
-  const timerList = timer?.querySelector<HTMLElement>(".timer-list") ?? null;
-  const timerRequired =
-    timer === null || timerList === null
-      ? 0
-      : naturalStackBlockSize(timerList) + verticalPadding(timer);
-  const actionsRequired = actions === null ? 0 : naturalStackBlockSize(actions);
-  timerPaneSize.value = allocateRightRailPaneHeights(
-    zone.clientHeight,
-    timerRequired,
-    actionsRequired,
-  ).timers;
-}
-
-function naturalStackBlockSize(element: HTMLElement): number {
-  const style = getComputedStyle(element);
-  const children = [...element.children].filter(
-    (child): child is HTMLElement =>
-      child instanceof HTMLElement && child.getClientRects().length > 0,
-  );
-  const childrenHeight = children.reduce(
-    (total, child) => total + child.getBoundingClientRect().height,
-    0,
-  );
-  const gap = children.length > 1 ? finitePixel(style.rowGap) * (children.length - 1) : 0;
-  return childrenHeight + gap + verticalPadding(element);
-}
-
-function verticalPadding(element: HTMLElement): number {
-  const style = getComputedStyle(element);
-  return finitePixel(style.paddingTop) + finitePixel(style.paddingBottom);
-}
-
-function finitePixel(value: string): number {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
 function busy(kind: BusyControlTarget): boolean {
@@ -142,26 +55,8 @@ function scriptUpdateMarker(controlId: string): "highlight" | undefined {
 </script>
 
 <template>
-  <aside
-    id="rightZone"
-    ref="rightZone"
-    class="right-zone"
-    aria-label="Timer and background controls"
-    :style="{ '--timer-pane-size': `${timerPaneSize}px` }"
-  >
-    <PlayerTimer
-      v-if="!compactTimers"
-      :timer="timer"
-      :timer-count="timerCount"
-      :timer-kind="timerKind"
-    />
-
-    <div
-      ref="actionPane"
-      class="action-scroll"
-      role="group"
-      aria-label="Background controls and status"
-    >
+  <aside id="rightZone" class="instrument-zone" aria-label="Background controls and status">
+    <div class="action-scroll">
       <template v-for="control in orderedControls" :key="control.id">
         <button
           v-if="control.kind === 'action'"

@@ -16,7 +16,7 @@ const regionBoxes = computed(() => {
   if (current === null) return [];
   const boxes: { readonly name: string; readonly rect: LayoutRect }[] = [];
   for (const name of [
-    "title",
+    "chrome",
     "tools",
     "stage",
     "transcript",
@@ -46,7 +46,7 @@ const constraintLines = computed(() => {
   const current = snapshot.value;
   if (current === null) return [];
   return [
-    `stage ${formatPixels(current.regions.stage?.height ?? 0)} / ${current.constraints.mediaHeight}`,
+    `stage ${formatPixels(current.regions.stage?.height ?? 0)} / ${current.constraints.stageHeight} (aspect ${current.constraints.stageAspect} floor ${current.constraints.stageFloor}% cap ${current.constraints.stageCap}%)`,
     `conversation ${formatPixels(current.regions.transcript?.width ?? 0)} / ${current.constraints.conversationMinWidth}…${current.constraints.conversationMaxWidth}`,
     `tool column ${formatPixels(current.regions.toolColumn?.width ?? 0)} / ${current.constraints.toolColumnWidth}`,
     `right ${formatPixels(current.regions.right?.width ?? 0)} / ${current.constraints.rightRailWidth}`,
@@ -75,11 +75,11 @@ function boxStyle(rect: LayoutRect): CSSProperties {
   };
 }
 
-function reserveStyle(side: "title" | "left" | "right" | "bottom"): CSSProperties {
+function reserveStyle(side: "chrome" | "left" | "right" | "bottom"): CSSProperties {
   const current = snapshot.value;
   const root = rootRect.value;
   if (current === null || root === undefined) return {};
-  if (side === "title") return { inset: `0 0 auto 0`, height: `${current.reservations.title}px` };
+  if (side === "chrome") return { inset: `0 0 auto 0`, height: `${current.reservations.chrome}px` };
   if (side === "left") return { inset: `0 auto 0 0`, width: `${current.reservations.left}px` };
   if (side === "right") return { inset: `0 0 0 auto`, width: `${current.reservations.right}px` };
   const bottom = current.reservations.composerBottom + current.reservations.keyboardBottom;
@@ -134,7 +134,7 @@ function safeStyle(side: "top" | "right" | "bottom" | "left"): CSSProperties {
 
     <template v-if="options.reserves">
       <div
-        v-for="side in ['title', 'left', 'right', 'bottom'] as const"
+        v-for="side in ['chrome', 'left', 'right', 'bottom'] as const"
         :key="side"
         class="debug-reserve"
         :data-debug-reserve="side"
@@ -225,7 +225,7 @@ function safeStyle(side: "top" | "right" | "bottom" | "left"): CSSProperties {
   border: 1px dashed #2563eb;
 }
 
-.debug-box[data-debug-kind="title"] {
+.debug-box[data-debug-kind="chrome"] {
   border-color: #7c3aed;
 }
 

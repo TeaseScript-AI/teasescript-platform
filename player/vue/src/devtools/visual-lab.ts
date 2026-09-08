@@ -41,7 +41,8 @@ export interface VisualLabRangeControl extends VisualLabBoundedNumberControl {
 export interface VisualLabTuningControl extends VisualLabBoundedNumberControl {
   readonly kind: "tuning";
   readonly cssProperty: `--${string}`;
-  readonly unit: "dvh" | "lh" | "px" | "rem";
+  /** An empty unit tunes a unitless custom property such as a percentage share. */
+  readonly unit: "" | "dvh" | "lh" | "px" | "rem";
 }
 
 export type VisualLabRuntimeScenarioId =
@@ -131,11 +132,32 @@ export function resetVisualLabState(state: VisualLabState): VisualLabState {
 }
 
 export const VISUAL_LAB_CONTROLS = defineVisualLabRegistry([
+  select(
+    "theme",
+    "Theme",
+    "Compare the low-light Stage theme with the warm Daylight theme.",
+    "stage",
+    [
+      ["stage", "Stage (low light)"],
+      ["daylight", "Daylight"],
+    ],
+  ),
   select("accent", "Accent", "Compare the live package accent.", "rose", [
     ["rose", "Rose"],
     ["plum", "Plum"],
     ["teal", "Teal"],
   ]),
+  select(
+    "transcript-edge",
+    "Scrolled transcript edge",
+    "Compare the unresolved treatments for the line on the scrolled top boundary.",
+    "late",
+    [
+      ["late", "Late fade"],
+      ["fade", "Soft fade"],
+      ["cut", "Hard cut"],
+    ],
+  ),
   select("busy-action", "Busy Action", "Compare in-place activity treatments.", "off", [
     ["off", "Off"],
     ["pulse", "Soft pulse"],
@@ -258,25 +280,47 @@ export const VISUAL_LAB_CONTROLS = defineVisualLabRegistry([
     "unskippable-pacing",
   ),
   tuning(
+    "stage-floor",
+    "Stage floor",
+    "Tune the smallest share of usable height an empty stage keeps.",
+    "--stage-floor",
+    "",
+    22,
+    0,
+    100,
+    1,
+  ),
+  tuning(
     "stage-height",
-    "Stage height",
-    "Tune the normal-composition stage baseline.",
-    "--media-height-normal",
-    "dvh",
-    55,
+    "Stage cap",
+    "Tune the largest share of usable height the stage may take.",
+    "--stage-cap",
+    "",
+    46,
     0,
     100,
     1,
   ),
   tuning(
     "overlay-stage-height",
-    "Overlay stage height",
-    "Tune fullscreen and low-height composition.",
-    "--media-height-overlay",
-    "dvh",
-    64,
+    "Immersive stage cap",
+    "Tune the fullscreen and short-viewport stage cap.",
+    "--stage-cap-immersive",
+    "",
+    60,
     0,
     100,
+    1,
+  ),
+  tuning(
+    "rail-width",
+    "Control rail width",
+    "Tune when long-lived controls stop fitting a side track.",
+    "--rail-width",
+    "px",
+    212,
+    120,
+    420,
     1,
   ),
   tuning(
@@ -296,7 +340,7 @@ export const VISUAL_LAB_CONTROLS = defineVisualLabRegistry([
     "Tune the readability cap.",
     "--conversation-max-width",
     "px",
-    900,
+    760,
     240,
     1_600,
     1,

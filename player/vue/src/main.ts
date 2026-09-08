@@ -3,6 +3,7 @@ import App from "./App.vue";
 import "./styles/globals.css";
 import "../../styles/cascade.css";
 import "../../styles/reset.css";
+import "../../styles/theme.css";
 import "../../styles/layout.css";
 import "../../styles/components-base.css";
 import "../../styles/components-tools.css";

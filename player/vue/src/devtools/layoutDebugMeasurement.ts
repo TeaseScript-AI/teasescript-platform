@@ -1,5 +1,5 @@
 export const LAYOUT_DEBUG_SELECTORS = {
-  title: ".title-controls",
+  chrome: ".global-bar",
   tools: ".left-panel",
   toolColumn: ".tool-column",
   stage: ".media-area",
@@ -8,7 +8,7 @@ export const LAYOUT_DEBUG_SELECTORS = {
   composer: ".composer",
   input: ".composer textarea",
   right: "#rightZone",
-  rightTimerList: "#rightZone .timer-list",
+  stageTimerList: ".stage-timers .timer-list",
   rightActions: "#rightZone .action-scroll",
   toolStrip: ".tool-strip-scroll",
   toolBodies: ".tool-column-body",
@@ -16,7 +16,7 @@ export const LAYOUT_DEBUG_SELECTORS = {
 
 export type LayoutDebugRegion =
   | "player"
-  | "title"
+  | "chrome"
   | "tools"
   | "toolColumn"
   | "stage"
@@ -28,7 +28,7 @@ export type LayoutDebugRegion =
 
 const LAYOUT_DEBUG_REGIONS: readonly LayoutDebugRegion[] = [
   "player",
-  "title",
+  "chrome",
   "tools",
   "toolColumn",
   "stage",
@@ -86,7 +86,8 @@ export interface LayoutDebugInsets {
 }
 
 export interface LayoutDebugReservations {
-  readonly title: number;
+  /** Overlay keep-clear band for the floating global cluster; it reserves no track. */
+  readonly chrome: number;
   readonly left: number;
   readonly right: number;
   readonly composerBottom: number;
@@ -94,7 +95,10 @@ export interface LayoutDebugReservations {
 }
 
 export interface LayoutDebugConstraints {
-  readonly mediaHeight: string;
+  readonly stageHeight: string;
+  readonly stageFloor: string;
+  readonly stageCap: string;
+  readonly stageAspect: string;
   readonly conversationMinWidth: string;
   readonly conversationMaxWidth: string;
   readonly composerMaxLines: string;
@@ -106,10 +110,12 @@ export interface LayoutDebugConstraints {
 
 export interface LayoutDebugComposition {
   readonly chrome: string;
+  readonly conversation: string;
   readonly left: string;
   readonly right: string;
   readonly rightBacking: string;
   readonly rightLayout: string;
+  readonly tools: string;
   readonly keyboard: string;
   readonly keyboardGeometry: string;
   readonly fullscreen: boolean;
@@ -212,7 +218,7 @@ export function buildDiagnosticCardLines(snapshot: LayoutDebugSnapshot): readonl
   const lines = [
     `viewport ${formatPixels(viewport.layoutWidth)} × ${formatPixels(viewport.layoutHeight)}`,
     `visual ${formatPixels(viewport.visualWidth)} × ${formatPixels(viewport.visualHeight)} @ ${formatPixels(viewport.offsetLeft)}, ${formatPixels(viewport.offsetTop)} scale ${String(viewport.scale)}`,
-    `mode ${composition.chrome}; left ${composition.left}; right ${composition.right}/${composition.rightBacking}/${composition.rightLayout}`,
+    `mode ${composition.chrome}/${composition.conversation}; tools ${composition.tools}/${composition.left}; right ${composition.right}/${composition.rightBacking}/${composition.rightLayout}`,
     `fullscreen ${yesNo(composition.fullscreen)}; keyboard ${composition.keyboard}/${composition.keyboardGeometry}; composer focus ${yesNo(snapshot.composerFocused)}`,
   ];
   for (const region of ["player", "stage", "transcript", "foreground", "composer"] as const) {
@@ -224,7 +230,7 @@ export function buildDiagnosticCardLines(snapshot: LayoutDebugSnapshot): readonl
     "composer",
     "tool-strip",
     "right",
-    "right-timer-list",
+    "stage-timer-list",
     "right-actions",
   ] as const) {
     lines.push(`${name} scroll ${formatScroll(snapshot.scroll[name])}`);
@@ -240,7 +246,7 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
   const style = getComputedStyle(player);
   const regionElements = {
     player,
-    title: query(player, LAYOUT_DEBUG_SELECTORS.title),
+    chrome: query(player, LAYOUT_DEBUG_SELECTORS.chrome),
     tools: query(player, LAYOUT_DEBUG_SELECTORS.tools),
     toolColumn: query(player, LAYOUT_DEBUG_SELECTORS.toolColumn),
     stage: query(player, LAYOUT_DEBUG_SELECTORS.stage),
@@ -265,8 +271,8 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
   addScroll(
     scroll,
     scrollRects,
-    "right-timer-list",
-    query(player, LAYOUT_DEBUG_SELECTORS.rightTimerList),
+    "stage-timer-list",
+    query(player, LAYOUT_DEBUG_SELECTORS.stageTimerList),
   );
   addScroll(
     scroll,
@@ -305,28 +311,36 @@ export function measurePlayerLayout(player: HTMLElement): LayoutDebugSnapshot {
       left: propertyPixels(style, "--safe-left"),
     },
     reservations: {
-      title: propertyPixels(style, "--title-track"),
-      left: propertyPixels(style, "--left-reserve"),
-      right: propertyPixels(style, "--right-reserve"),
+      chrome: propertyPixels(style, "--chrome-overlay-height"),
+      left: propertyPixels(style, "--tools-reserve"),
+      right: propertyPixels(style, "--rail-reserve"),
       composerBottom: propertyPixels(style, "--safe-bottom-reserve"),
       keyboardBottom: propertyPixels(style, "--fullscreen-keyboard-inset"),
     },
     constraints: {
-      mediaHeight: property(style, "--media-height"),
+      stageHeight: property(style, "--stage-height"),
+      stageAspect: property(style, "--stage-aspect"),
+      stageFloor: property(style, "--stage-floor"),
+      stageCap: property(
+        style,
+        data(player, "chrome") === "immersive" ? "--stage-cap-immersive" : "--stage-cap",
+      ),
       conversationMinWidth: property(style, "--conversation-min-width"),
       conversationMaxWidth: property(style, "--conversation-max-width"),
       composerMaxLines: property(style, "--composer-max-lines"),
       composerMaxViewportHeight: property(style, "--composer-effective-viewport-height"),
       usableHeight: property(style, "--player-usable-height"),
       toolColumnWidth: property(style, "--tool-column-width"),
-      rightRailWidth: property(style, "--right-controls-width"),
+      rightRailWidth: property(style, "--rail-width"),
     },
     composition: {
       chrome: data(player, "chrome"),
+      conversation: data(player, "conversation"),
       left: data(player, "left"),
       right: data(player, "right"),
       rightBacking: data(player, "rightBacking"),
       rightLayout: data(player, "rightLayout"),
+      tools: data(player, "tools"),
       keyboard: data(player, "keyboard"),
       keyboardGeometry: data(player, "keyboardGeometry"),
       fullscreen: document.fullscreenElement === player,

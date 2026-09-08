@@ -1,98 +1,148 @@
 @layer components {
-      .icon-button {
-        width: 34px;
-        height: 34px;
+  /* ---------- shared instrument vocabulary ---------- */
 
-        display: grid;
-        place-items: center;
+  /*
+    Instruments are self-contained capsules that can sit on any surface,
+    including directly on stage media. They carry their own translucent veil and
+    a hairline only where they float, so the same control reads correctly on the
+    canvas, on a panel, and over an image.
+  */
+  .instrument {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
 
-        padding: 0;
+    min-block-size: 34px;
+    padding: 0;
 
-        border: 1px solid var(--color-border-default);
-        border-radius: 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-instrument);
 
-        background: var(--color-surface-component);
-        color: var(--color-text-primary);
+    background: var(--color-instrument-veil);
+    color: var(--color-text-primary);
 
-        box-shadow: none;
-        cursor: pointer;
-      }
+    -webkit-backdrop-filter: blur(14px) saturate(1.1);
+    backdrop-filter: blur(14px) saturate(1.1);
 
-      .menu-icon {
-        width: 18px;
-        display: grid;
-        gap: 3px;
-      }
+    font-size: var(--text-label);
+    font-weight: 600;
+    letter-spacing: var(--tracking-label);
+    line-height: 1.2;
+  }
 
-      .menu-icon span {
-        height: 2px;
-        border-radius: 1px;
-        background: currentColor;
-      }
+  /* ---------- floating global chrome ---------- */
 
-      .panel-icon {
-        position: relative;
+  .global-title {
+    min-width: 0;
+    margin: 0;
+    padding-inline: 14px;
+    block-size: 38px;
 
-        width: 18px;
-        height: 16px;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
 
-        border: 1px solid currentColor;
-        border-radius: 2px;
-      }
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-      .panel-icon::after {
-        content: "";
+  .global-actions {
+    flex: 0 0 auto;
+    margin-inline-start: auto;
 
-        position: absolute;
-        top: 0;
-        right: 4px;
-        bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
 
-        border-left: 1px solid currentColor;
-      }
+  .icon-button {
+    inline-size: 38px;
+    block-size: 38px;
+    flex: 0 0 auto;
 
-      .right-toggle[aria-pressed="false"] .panel-icon::after {
-        top: 4px;
-        right: 4px;
-        bottom: auto;
+    display: grid;
+    place-items: center;
 
-        width: 6px;
-        height: 6px;
+    padding: 0;
+    border-radius: var(--radius-control);
+    color: var(--color-text-primary);
+  }
 
-        border: 0;
-        border-top: 1px solid currentColor;
-        border-right: 1px solid currentColor;
-        transform: rotate(45deg);
-      }
+  .icon-button:disabled {
+    background: var(--color-surface-disabled);
+    color: var(--color-text-disabled);
+    cursor: not-allowed;
+  }
 
-      .title-text {
-        color: var(--color-text-primary);
-        font-size: 14px;
-        font-weight: 700;
-        letter-spacing: 0;
-      }
+  .menu-icon {
+    width: 17px;
+    display: grid;
+    gap: 4px;
+  }
 
-      .toolbar-spacer {
-        min-width: 0;
-        flex: 1;
+  .menu-icon span {
+    height: 1.5px;
+    border-radius: 1px;
+    background: currentcolor;
+  }
 
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-      }
+  .panel-icon {
+    position: relative;
 
-      .global-controls {
-        flex: 0 0 auto;
+    width: 18px;
+    height: 15px;
 
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
+    border: 1.5px solid currentcolor;
+    border-radius: 3px;
+  }
 
-      .icon-button:disabled {
-        border-color: var(--color-border-disabled);
-        background: var(--color-surface-disabled);
-        color: var(--color-text-disabled);
-        cursor: not-allowed;
-      }
+  .panel-icon::after {
+    content: "";
+
+    position: absolute;
+    top: -1px;
+    right: 3px;
+    bottom: -1px;
+
+    border-left: 1.5px solid currentcolor;
+  }
+
+  /* The collapsed state shows the rail leaving the reserved track. */
+  .right-toggle[aria-pressed="false"] .panel-icon::after {
+    top: 3px;
+    right: 2px;
+    bottom: auto;
+
+    width: 5px;
+    height: 5px;
+
+    border: 0;
+    border-top: 1.5px solid currentcolor;
+    border-right: 1.5px solid currentcolor;
+    transform: rotate(45deg);
+  }
+
+  .fullscreen-icon {
+    font-size: 15px;
+    line-height: 1;
+  }
+
+  /* ---------- tooltip ---------- */
+
+  .player-tooltip {
+    z-index: 80;
+
+    max-inline-size: 220px;
+    padding: 6px 10px;
+
+    border-radius: var(--radius-tight);
+    background: var(--color-surface-component);
+    color: var(--color-text-primary);
+    box-shadow: 0 6px 18px var(--color-structural-shadow);
+
+    font-size: var(--text-label);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.3;
+  }
 }

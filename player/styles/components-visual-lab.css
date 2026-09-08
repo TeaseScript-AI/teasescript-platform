@@ -1,251 +1,222 @@
 @layer components {
-      /* ---------- Visual Lab ---------- */
+  /* ---------- Visual Lab (development tool) ---------- */
 
-      .lab-content {
-        min-width: 0;
+  .lab-content {
+    min-width: 0;
+    display: grid;
+    gap: 0;
+    padding: 4px 12px 14px;
+  }
 
-        display: grid;
-        gap: 0;
+  .lab-options,
+  .lab-tuning {
+    display: grid;
+    gap: 0;
+  }
 
-        padding: 8px 10px 10px;
-      }
+  .lab-tuning {
+    margin-block-start: 10px;
+    padding-block-start: 4px;
+    border-top: 1px solid color-mix(in srgb, var(--color-text-muted) 22%, transparent);
+  }
 
-      .lab-tuning {
-        display: grid;
-        border-top: 1px solid var(--color-border-default);
-      }
+  .lab-option,
+  .lab-tuning-row {
+    position: relative;
 
-      .lab-tuning-row {
-        position: relative;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: center;
-        gap: 10px;
-        min-block-size: 58px;
-        padding: 8px 0;
-        border-bottom: 1px solid var(--color-border-default);
-      }
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
 
-      .lab-tuning-field {
-        display: inline-grid;
-        grid-template-columns: 58px auto;
-        align-items: center;
-        gap: 4px;
-      }
+    min-width: 0;
+    min-block-size: 46px;
+    padding-block: 8px;
 
-      .lab-tuning-input {
-        width: 58px;
-        min-height: 30px;
-        padding: 4px 5px;
-        border: 1px solid var(--color-border-default);
-        border-radius: 5px;
-        background: var(--color-surface-component);
-        color: var(--color-text-primary);
-        font: inherit;
-      }
+    border-bottom: 1px solid color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+  }
 
-      .lab-tuning-unit {
-        color: var(--color-text-muted);
-        font-size: 9px;
-      }
+  .lab-option-copy {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+  }
 
-      .lab-reset {
-        width: 100%;
-        min-height: 34px;
+  .lab-option-title {
+    display: block;
 
-        margin: 14px 0 0;
+    color: var(--color-text-primary);
+    font-size: var(--text-instrument);
+    font-weight: 600;
+    line-height: 1.25;
 
-        border: 1px solid var(--color-border-default);
-        border-radius: 6px;
+    overflow-wrap: anywhere;
+  }
 
-        background: var(--color-surface-component);
-        color: var(--color-text-primary);
+  .lab-option-note {
+    position: absolute;
+    z-index: 15;
+    top: calc(100% - 6px);
+    right: 0;
+    left: 0;
+    display: none;
 
-        box-shadow: none;
+    padding: 9px 10px;
+    border-radius: var(--radius-tight);
+    background: var(--color-surface-chrome);
+    box-shadow: 0 8px 22px var(--color-structural-shadow);
 
-        font-size: 10px;
-        font-weight: 600;
-        line-height: 1.2;
+    color: var(--color-text-muted);
+    font-size: var(--text-note);
+    line-height: 1.4;
 
-        cursor: pointer;
-      }
+    overflow-wrap: anywhere;
+  }
 
-      .lab-options {
-        display: grid;
-        gap: 0;
-      }
+  .lab-option:has(.lab-option-copy:hover),
+  .lab-option:has(.lab-option-info-trigger:focus-visible),
+  .lab-option:has(.lab-option-info[data-open="true"]),
+  .lab-tuning-row:has(.lab-option-copy:hover),
+  .lab-tuning-row:has(.lab-option-info-trigger:focus-visible),
+  .lab-tuning-row:has(.lab-option-info[data-open="true"]) {
+    z-index: 10;
+  }
 
-      .lab-option {
-        position: relative;
-        display: grid;
-        grid-template-columns:
-          minmax(0, 1fr)
-          auto;
+  .lab-option-info {
+    display: block;
+  }
 
-        align-items: center;
-        gap: 10px;
+  .lab-option-copy:hover .lab-option-note,
+  .lab-option-info-trigger:focus-visible + .lab-option-note,
+  .lab-option-info[data-open="true"] .lab-option-note {
+    display: block;
+  }
 
-        min-width: 0;
-        min-block-size: 50px;
+  .lab-option-info-trigger {
+    inline-size: 20px;
+    block-size: 20px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--color-text-muted) 34%, transparent);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    list-style: none;
+  }
 
-        padding: 10px 0;
+  .lab-select,
+  .lab-tuning-input {
+    min-block-size: 32px;
+    padding: 4px 8px;
+    border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+    border-radius: var(--radius-tight);
+    background: transparent;
+    color: var(--color-text-primary);
+    font: inherit;
+    font-size: var(--text-note);
+  }
 
-        border-bottom: 1px solid var(--color-border-default);
-        border-radius: 0;
-      }
+  .lab-select {
+    inline-size: 116px;
+    padding-inline-end: 24px;
+  }
 
-      .lab-option-copy {
-        min-width: 0;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: center;
-        gap: 6px;
-      }
+  .lab-tuning-input {
+    inline-size: 62px;
+  }
 
-      .lab-option-title {
-        display: block;
+  .lab-tuning-field {
+    display: inline-grid;
+    grid-template-columns: auto auto;
+    align-items: center;
+    gap: 6px;
+  }
 
-        color: var(--color-text-primary);
-        font-size: 11px;
-        font-weight: 700;
-        line-height: 1.2;
+  .lab-tuning-unit {
+    color: var(--color-text-muted);
+    font-size: var(--text-label);
+  }
 
-        overflow-wrap: anywhere;
-      }
+  .lab-tuning-field:has(input[type="range"]) {
+    grid-template-columns: minmax(0, 120px) auto;
+  }
 
-      .lab-option-note {
-        position: absolute;
-        z-index: 15;
-        top: calc(100% - 6px);
-        right: 0;
-        left: 0;
-        display: block;
+  .lab-tuning-field output {
+    color: var(--color-text-muted);
+    font-size: var(--text-label);
+    font-variant-numeric: tabular-nums;
+  }
 
-        padding: 8px 9px;
-        border: 1px solid var(--color-border-default);
-        border-radius: 6px;
-        background: var(--color-surface-component);
-        box-shadow: 0 3px 10px var(--color-structural-shadow);
+  .lab-reset {
+    inline-size: 100%;
+    min-block-size: 36px;
+    margin-block-start: 6px;
 
-        color: var(--color-text-muted);
-        font-size: 10px;
-        line-height: 1.35;
+    border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+    border-radius: var(--radius-tight);
 
-        overflow-wrap: anywhere;
-      }
+    background: transparent;
+    color: var(--color-text-primary);
 
-      .lab-option:has(.lab-option-copy:hover),
-      .lab-option:has(.lab-option-info-trigger:focus-visible),
-      .lab-option:has(.lab-option-info[data-open="true"]),
-      .lab-tuning-row:has(.lab-option-copy:hover),
-      .lab-tuning-row:has(.lab-option-info-trigger:focus-visible),
-      .lab-tuning-row:has(.lab-option-info[data-open="true"]) {
-        z-index: 10;
-      }
+    font-size: var(--text-instrument);
+    font-weight: 650;
+    line-height: 1.25;
+  }
 
-      .lab-option-info {
-        display: block;
-      }
+  .switch {
+    position: relative;
+    inline-size: 34px;
+    block-size: 20px;
+  }
 
-      .lab-option-note {
-        display: none;
-      }
+  .switch input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
 
-      .lab-option-copy:hover .lab-option-note {
-        display: block;
-      }
+  .switch-ui {
+    position: absolute;
+    inset: 0;
 
-      .lab-option-info-trigger:focus-visible + .lab-option-note,
-      .lab-option-info[data-open="true"] .lab-option-note {
-        display: block;
-      }
+    border: 1px solid color-mix(in srgb, var(--color-text-muted) 40%, transparent);
+    border-radius: var(--radius-instrument);
 
-      .lab-option-info-trigger {
-        width: 20px;
-        height: 20px;
-        display: grid;
-        place-items: center;
-        padding: 0;
-        border: 1px solid var(--color-border-default);
-        border-radius: 50%;
-        background: var(--color-surface-component);
-        color: var(--color-text-muted);
-        font-size: 11px;
-        font-weight: 700;
-        line-height: 1;
-        list-style: none;
-        cursor: pointer;
-      }
+    background: color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+    cursor: pointer;
+  }
 
-      .lab-option-info-trigger:focus-visible {
-        outline: var(--focus-outline-width) solid var(--color-accent-focus);
-        outline-offset: 1px;
-      }
+  .switch-ui::after {
+    content: "";
 
+    position: absolute;
+    top: 2px;
+    left: 2px;
 
-      .lab-select {
-        width: 112px;
-        min-height: 30px;
-        padding: 4px 24px 4px 6px;
-        border: 1px solid var(--color-border-default);
-        border-radius: 5px;
-        background: var(--color-surface-component);
-        color: var(--color-text-primary);
-        font: inherit;
-        font-size: 10px;
-        cursor: pointer;
-      }
+    inline-size: 14px;
+    aspect-ratio: 1;
 
-      .switch {
-        position: relative;
+    border-radius: 50%;
+    background: var(--color-text-muted);
 
-        width: 34px;
-        height: 20px;
-      }
+    transition:
+      translate 140ms ease,
+      background 140ms ease;
+  }
 
-      .switch input {
-        position: absolute;
-        opacity: 0;
-        pointer-events: none;
-      }
+  .switch input:checked + .switch-ui {
+    border-color: var(--package-accent);
+    background: color-mix(in srgb, var(--package-accent) 26%, transparent);
+  }
 
-      .switch-ui {
-        position: absolute;
-        inset: 0;
-
-        border: 1px solid var(--color-border-default);
-        border-radius: 999px;
-
-        background: var(--color-surface-component);
-        cursor: pointer;
-      }
-
-      .switch-ui::after {
-        content: "";
-
-        position: absolute;
-        top: 2px;
-        left: 2px;
-
-        width: 14px;
-        aspect-ratio: 1;
-
-        border-radius: 50%;
-
-        background: var(--color-text-quiet);
-
-        transition:
-          translate 120ms ease,
-          background 120ms ease;
-      }
-
-      .switch input:checked + .switch-ui {
-        border-color: var(--package-accent);
-        background: var(--color-surface-component);
-      }
-
-      .switch input:checked + .switch-ui::after {
-        translate: 14px 0;
-        background: var(--package-accent);
-      }
+  .switch input:checked + .switch-ui::after {
+    translate: 14px 0;
+    background: var(--package-accent);
+  }
 }

@@ -1,322 +1,223 @@
 @layer responsive {
-      @media (min-width: 761px) {
-        .player[data-left="auto"],
-        .player[data-left="open"] {
-          --left-grid-track:
-            min(
-              max(var(--left-preferred), var(--left-open)),
-              var(--left-panel-max)
-            );
-        }
+  /*
+    Responsive composition is driven by measured constraints, not by device
+    classes or comparison viewport pixels. The layout owner resolves the axes
+    below from the currently usable visual viewport, the space the tool strip
+    actually wants, the protected conversation minimum and the space the
+    response lane and composer really need. A narrow desktop window and a
+    similarly shaped phone therefore reach the same composition.
+  */
 
-        .player[data-left="auto"] .left-panel,
-        .player[data-left="open"] .left-panel {
-          min-inline-size: var(--left-open);
-          padding-left: var(--tool-strip-gutter-start);
-          padding-right: var(--tool-strip-gutter-end);
-        }
+  /* ---------- tools: docked track or overlay drawer ---------- */
 
-      }
+  .player[data-tools-open="false"] {
+    --tools-track: 0px;
+    --tools-reserve: 0px;
+  }
 
-      @media (max-width: 760px) {
-        .player {
-          --mobile-drawer-width:
-            min(90vw, max(var(--left-open), var(--left-preferred)));
-        }
+  .player[data-tools-open="false"] .left-panel {
+    display: none;
+  }
 
-        .player[data-left="auto"],
-        .player[data-left="open"] {
-          --left-grid-track: 0px;
-          --left-reserve: 0px;
-        }
+  .player[data-tools="docked"][data-tools-open="true"] {
+    --tools-track: max(
+      var(--tools-single),
+      min(
+        var(--tools-preferred),
+        calc(100vw - var(--rail-track) - var(--conversation-min-width))
+      )
+    );
+    --tools-reserve: var(--tools-track);
+  }
 
-        .composer {
-          padding-top: 9px;
-          padding-bottom: calc(10px + var(--safe-bottom-reserve));
-          padding-left: calc(10px + var(--safe-left));
-          padding-right: calc(10px + var(--safe-right));
-        }
+  .player[data-tools="docked"] .left-panel {
+    padding-inline: var(--tools-gutter);
+    padding-inline-start: calc(var(--tools-gutter) + var(--safe-left));
+  }
 
-        /*
-          Mobile keeps the existing integrated footer, but the input and Send
-          control are separate surfaces rather than the desktop shared shell.
-        */
-        .composer form {
-          min-block-size: 0;
-          padding: 0;
-          border: 0;
-          border-radius: 0;
-          outline: 0;
-          background: transparent;
-        }
+  .player[data-tools="drawer"] {
+    --drawer-width: min(90vw, max(var(--tools-single), var(--tools-preferred)));
+  }
 
-        .composer form:focus-within {
-          outline: 0;
-        }
+  /*
+    A narrow drawer is an opaque overlay rather than a squeezed track: the Player
+    content keeps its full width beneath it, a visible outside area stays
+    available for dismissal, and the scrim intercepts outside activation.
+  */
+  .player[data-tools="drawer"][data-tools-open="true"] .left-panel {
+    position: absolute;
+    z-index: 40;
 
-        .composer textarea {
-          --composer-input-block-chrome: 22px;
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
 
-          min-block-size: 42px;
-          padding: 10px 11px;
-          border: 1px solid var(--color-border-default);
-          border-radius: 7px;
-          background: var(--color-surface-component);
-          font-size: var(--composer-font-size);
-        }
+    inset: 0 auto 0 0;
+    inline-size: var(--drawer-width);
 
-        .composer textarea:focus-visible {
-          border-color: var(--color-border-default);
-          outline: var(--focus-outline-width) solid var(--color-accent-focus);
-          outline-offset: 1px;
-        }
+    padding-block-start: var(--chrome-overlay-height);
+    padding-inline: var(--tools-gutter);
+    padding-inline-start: calc(var(--tools-gutter) + var(--safe-left));
 
-        @media (any-hover: hover) {
-          .composer textarea:not(:disabled):hover {
-            border-color: var(--color-border-hover);
-            background: var(--color-surface-component);
-          }
-        }
+    background: var(--color-surface-chrome);
+    box-shadow: 12px 0 36px var(--color-structural-shadow);
+  }
 
-        .composer textarea:not(:disabled):active {
-          border-color: var(--color-border-pressed);
-          background: var(--color-surface-component);
-        }
+  .player[data-tools="drawer"][data-tools-open="true"] .left-scrim {
+    display: block;
 
-        .composer textarea:disabled {
-          border-color: var(--color-border-disabled);
-          background: var(--color-surface-disabled);
-          color: var(--color-text-disabled);
-          cursor: not-allowed;
-        }
+    position: absolute;
+    z-index: 35;
+    inset: 0 0 0 var(--drawer-width);
 
-        .composer .send-button {
-          block-size: 42px;
-        }
+    padding: 0;
+    border: 0;
+    background: var(--color-structural-scrim);
 
-        /*
-          Collapsed mobile side tracks must not leave desktop rail dividers
-          behind. Keep the drawer divider only while the drawer itself is open.
-        */
-        .player:not([data-left="open"]) .left-panel {
-          border-right: 0;
-          box-shadow: none;
-        }
+    cursor: default;
+  }
 
-        .transcript {
-          scrollbar-gutter: auto;
-          scrollbar-width: none;
-        }
+  .player[data-tools="drawer"] .tool-column {
+    --tool-column-effective-width: min(
+      var(--tool-column-width),
+      calc(var(--drawer-width) - var(--tools-gutter) * 2 - var(--safe-left))
+    );
+  }
 
-        .transcript::-webkit-scrollbar {
-          display: none;
-        }
+  /* ---------- compact conversation column ---------- */
 
-        .player[data-left="open"] .left-scrim {
-          display: block;
+  /*
+    The compact composition applies when the measured conversation column can no
+    longer carry the comfortable presentation. It is the same composition for a
+    phone and for a narrow desktop window.
+  */
+  .player[data-conversation="compact"] {
+    --conversation-gap: 14px;
+  }
 
-          position: absolute;
-          z-index: 35;
-          top: var(--title-height);
-          right: 0;
-          bottom: 0;
-          left: var(--mobile-drawer-width);
+  .player[data-conversation="compact"] .message {
+    width: 100%;
+    max-width: 100%;
+  }
 
-          padding: 0;
-          border: 0;
-          background: var(--color-structural-scrim);
+  .player[data-conversation="compact"] .transcript {
+    scrollbar-gutter: auto;
+    scrollbar-width: none;
+  }
 
-          cursor: default;
-        }
+  .player[data-conversation="compact"] .transcript::-webkit-scrollbar {
+    display: none;
+  }
 
-        .player[data-left="open"] .left-panel {
-          /*
-            True opaque overlay drawer. Its width is constrained by the space
-            that must remain visible for dismissal rather than by a fixed
-            Penpot frame percentage.
-          */
-          position: absolute;
-          z-index: 40;
+  /*
+    Compact keeps the composer in the same footer position, but the input and
+    the primary action become separate visible surfaces instead of one shell.
+    This is a deliberate presentation difference, not a fallback.
+  */
+  .player[data-conversation="compact"] .composer form {
+    min-block-size: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    gap: 8px;
+  }
 
-          grid-column: 1 / -1;
-          grid-row: 1 / -1;
+  .player[data-conversation="compact"] .composer form:has(textarea:focus-visible) {
+    outline: 0;
+  }
 
-          top: var(--title-height);
-          bottom: 0;
-          left: 0;
+  .player[data-conversation="compact"] .composer textarea {
+    min-block-size: 46px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-control);
+    background: var(--color-surface-component);
+  }
 
-          width: var(--mobile-drawer-width);
-          padding-top: 0;
-          padding-left: var(--tool-strip-gutter-start);
-          padding-right: var(--tool-strip-gutter-end);
+  .player[data-conversation="compact"] .composer textarea:focus-visible {
+    outline: var(--focus-outline-width) solid var(--color-accent-focus);
+    outline-offset: 1px;
+  }
 
-          background: var(--color-surface-chrome);
-          border-right: 1px solid var(--color-border-default);
-          box-shadow: 3px 0 8px var(--color-structural-shadow);
-        }
+  .player[data-conversation="compact"] .send-button {
+    block-size: 46px;
+    min-width: 68px;
+  }
 
-        .player[data-left="open"] .tool-column {
-          --tool-column-effective-width:
-            min(
-              var(--tool-column-width),
-              calc(
-                var(--mobile-drawer-width)
-                - var(--tool-strip-inline-gutters)
-              )
-            );
-        }
-      }
+  .player[data-conversation="compact"] .foreground-button {
+    min-block-size: 50px;
+  }
 
-      @media (max-width: 480px) {
-        .player {
-          --timer-size: 72px;
-        }
+  /* ---------- immersive chrome ---------- */
 
-        /*
-          Compact control geometry belongs to genuinely phone-sized widths.
-          The 760px layout transition changes docking/overlay composition only;
-          it must not make the timer, Actions, or panel toggle jump in size or
-          inset when the viewport crosses that boundary.
-        */
-        .timer-wrap {
-          padding:
-            8px
-            calc(8px + var(--safe-right))
-            15px
-            10px;
-        }
+  /*
+    Fullscreen and genuinely short viewports drop the title label and let the
+    stage take its immersive cap. Required global controls stay visible rather
+    than auto-hiding, so nothing critical becomes unreachable.
+  */
+  .player[data-chrome="immersive"] .global-title {
+    display: none;
+  }
 
-        .timer {
-          font-size: 15px;
-        }
+  .player[data-chrome="immersive"] .global-bar {
+    padding-block: calc(8px + var(--safe-top)) 8px;
+  }
 
-        .action-button {
-          min-block-size: 42px;
-        }
+  /* ---------- compact timers ---------- */
 
-        .foreground-controls,
-        .composer-feedback {
-          padding-left:
-            calc(10px + var(--safe-left));
-          padding-right:
-            calc(10px + var(--safe-right));
-        }
+  /*
+    When vertical room is scarce the timer stack reflows to a horizontal strip
+    along the stage's lower edge, so timer count stops consuming stage height.
+  */
+  .player[data-compact-timers="true"] .stage-timers {
+    bottom: 8px;
+    max-block-size: none;
+  }
 
-        .send-button {
-          min-width: 64px;
-        }
-      }
+  .player[data-compact-timers="true"] .timer-list {
+    --instrument-edge-fade: 8px;
 
-      /*
-        Overlay chrome moves the timer presentation into the title strip.
-        The timer list stays one horizontal scroller while global controls keep
-        their own non-shrinking cluster.
-      */
-      .player[data-chrome="overlay"] {
-        --title-track: 0px;
-        --title-overlay-clearance:
-          var(--title-height);
-      }
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
 
-      /* Keep the Actions scroll boundary below the visible overlay chrome. */
-      .player[data-chrome="overlay"] .right-zone {
-        margin-block-start: var(--title-height);
-      }
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
 
-      .player[data-chrome="overlay"] .title-bg {
-          background: transparent;
-        }
+    padding-block: 0;
+    padding-inline: var(--instrument-edge-fade);
 
-        .player[data-chrome="overlay"] .title-text {
-          padding: 7px 9px;
-          border: 1px solid var(--color-border-default);
-          border-radius: 6px;
-          background:
-            color-mix(
-              in srgb,
-              var(--color-surface-component) 90%,
-              transparent
-            );
-        }
+    scroll-snap-type: inline proximity;
 
-        .player[data-chrome="overlay"] .icon-button {
-          background:
-            color-mix(
-              in srgb,
-              var(--color-surface-component) 90%,
-              transparent
-            );
-        }
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 var(--instrument-edge-fade),
+      #000 calc(100% - var(--instrument-edge-fade)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 var(--instrument-edge-fade),
+      #000 calc(100% - var(--instrument-edge-fade)),
+      transparent 100%
+    );
+  }
 
-        .player[data-chrome="overlay"] .title-text {
-          min-width: 0;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
+  .player[data-compact-timers="true"] .timer {
+    --timer-dial: 22px;
 
-        .player[data-chrome="overlay"] .compact-timer-host {
-          overflow: hidden;
-        }
+    padding-block: 4px;
+    scroll-snap-align: start;
+  }
 
-        .player[data-compact-timers="true"] .timer-wrap {
-          inline-size: 100%;
-          block-size: 44px;
-          min-block-size: 0;
-          overflow: hidden;
-          padding: 0;
-        }
+  .player[data-compact-timers="true"] .timer .timer-text {
+    font-size: 0.8125rem;
+  }
 
-        .player[data-compact-timers="true"] .timer-list {
-          inline-size: 100%;
-          block-size: 44px;
-
-          flex-direction: row;
-          flex-wrap: nowrap;
-          justify-content: safe flex-end;
-          align-items: center;
-          gap: 10px;
-
-          overflow-x: auto;
-          overflow-y: hidden;
-          overscroll-behavior-inline: contain;
-
-          padding: 5px;
-
-          scroll-snap-type: inline proximity;
-          scrollbar-width: none;
-        }
-
-        .player[data-compact-timers="true"] .timer-list::-webkit-scrollbar {
-          display: none;
-        }
-
-        .player[data-compact-timers="true"] .timer {
-          flex-basis: 34px;
-          inline-size: 34px;
-          min-inline-size: 34px;
-          block-size: 34px;
-          aspect-ratio: 1;
-
-          border-radius: 50%;
-          scroll-snap-align: end;
-
-          font-size: 12px;
-        }
-
-        .player[data-compact-timers="true"] .timer[data-label-placement="above"],
-        .player[data-compact-timers="true"] .timer[data-label-placement="below"] {
-          gap: 1px;
-        }
-
-        .player[data-compact-timers="true"] .timer[data-label-placement="above"] .timer-text,
-        .player[data-compact-timers="true"] .timer[data-label-placement="below"] .timer-text {
-          font-size: 10px;
-        }
-
-        .player[data-compact-timers="true"] .timer[data-label-placement="above"] .timer-label,
-        .player[data-compact-timers="true"] .timer[data-label-placement="below"] .timer-label {
-          font-size: 7px;
-        }
-
+  .player[data-compact-timers="true"] .timer .timer-label {
+    max-inline-size: 11ch;
+  }
 }

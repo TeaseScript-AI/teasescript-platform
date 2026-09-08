@@ -206,9 +206,12 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
     cdp,
     `document.querySelector('[data-visual-lab-instance] [aria-expanded="true"]') === null`,
   );
-  const timerPaneBefore = await value(
+  const geometryBeforeTimers = await value(
     cdp,
-    `document.querySelector('#rightZone > .timer-wrap').getBoundingClientRect().height`,
+    `(() => {
+      const round = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().height);
+      return {stage: round('.media-area'), transcript: round('.transcript')};
+    })()`,
   );
   await evaluate(
     cdp,
@@ -216,31 +219,48 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
   );
   await waitFor(
     cdp,
-    `document.querySelector('.debug-card')?.textContent.match(/right-timer-list scroll .* [1-9][0-9.]*px y/) !== null`,
+    `document.querySelector('.debug-card')?.textContent.match(/stage-timer-list scroll .* [1-9][0-9.]*px y/) !== null`,
   );
   assertEqual(
     await value(
       cdp,
-      `document.querySelector('#rightZone > .timer-wrap').getBoundingClientRect().height > ${JSON.stringify(timerPaneBefore)}`,
+      `(() => {
+        const round = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().height);
+        return round('.media-area') === ${JSON.stringify(geometryBeforeTimers.stage)} &&
+          round('.transcript') === ${JSON.stringify(geometryBeforeTimers.transcript)};
+      })()`,
     ),
     true,
-    "timer count changes must recompute right-rail pane allocation",
+    "timer count must not change the stage or conversation allocation",
   );
   assertEqual(
     await value(
       cdp,
-      `document.querySelector('.tool-strip-scroll').scrollWidth > document.querySelector('.tool-strip-scroll').clientWidth && [...document.querySelectorAll('.tool-column-body')].some((body) => body.scrollHeight > body.clientHeight) && document.querySelector('.timer-list').scrollHeight > document.querySelector('.timer-list').clientHeight`,
+      `(() => {
+        const timers = document.querySelector('.stage-timers .timer-list');
+        const stage = document.querySelector('.media-area').getBoundingClientRect();
+        return timers.scrollHeight > timers.clientHeight &&
+          timers.getBoundingClientRect().bottom <= stage.bottom + 1;
+      })()`,
     ),
     true,
-    "Layout Debug fixture must create tool-strip, tool-body, and right-timer overflow",
+    "an overflowing timer stack must scroll inside the stage it is docked to",
   );
   assertEqual(
     await value(
       cdp,
-      `document.querySelector('.debug-card')?.textContent.includes('tool-body-') && document.querySelector('.debug-card')?.textContent.match(/right-timer-list scroll .* [1-9][0-9.]*px y/) !== null`,
+      `document.querySelector('.tool-strip-scroll').scrollWidth > document.querySelector('.tool-strip-scroll').clientWidth && [...document.querySelectorAll('.tool-column-body')].some((body) => body.scrollHeight > body.clientHeight)`,
     ),
     true,
-    "Layout Debug must report the actual overflowing tool body and right timer scroll owner",
+    "Layout Debug fixture must create tool-strip and tool-body overflow",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('.debug-card')?.textContent.includes('tool-body-') && document.querySelector('.debug-card')?.textContent.match(/stage-timer-list scroll .* [1-9][0-9.]*px y/) !== null`,
+    ),
+    true,
+    "Layout Debug must report the actual overflowing tool body and stage timer scroll owner",
   );
   await evaluate(
     cdp,

@@ -1,147 +1,226 @@
 @layer components {
-      /* ---------- Transcript ---------- */
+  /* ---------- transcript ---------- */
 
-      .message {
-        width: 90%;
-        max-width: 90%;
+  /*
+    A short conversation rests against the composer rather than floating at the
+    top of an empty region, so the newest line is always next to the place the
+    user answers. The auto start margin only takes effect while the content is
+    shorter than the region, so it never interferes with scrolling a long
+    history.
+  */
+  .transcript-virtualizer {
+    position: relative;
 
-        --speaker-accent: #9ba4b2;
-        --speaker-font: inherit;
-      }
+    flex: 0 0 auto;
+    inline-size: min(100%, var(--conversation-max-width));
+    min-block-size: 0;
+    margin-block-start: auto;
+    margin-inline: auto;
+  }
 
-      .message.user {
-        align-self: flex-end;
-        margin-inline-start: auto;
+  .transcript-virtual-item {
+    display: flex;
+    flex-direction: column;
 
-        text-align: right;
-      }
+    box-sizing: border-box;
+    inset-block-start: 0;
+  }
 
-      .message-row {
-        display: grid;
-        grid-template-columns:
-          auto
-          minmax(0, 1fr);
+  /*
+    Consecutive output from one speaker forms a group: the avatar and name
+    appear once at the head, and a continuous thread in the speaker's own colour
+    carries identity down the rest of the group. Row spacing lives inside the
+    measured item so the virtualizer keeps exact heights.
+  */
+  .message {
+    --speaker-accent: oklch(62% 0.02 60);
+    --speaker-font: inherit;
+    /*
+      The speaker name keeps the authored identity hue but is pulled toward the
+      theme's text colour so a mid-tone speaker colour stays legible on a light
+      canvas as well as a dark one. The thread keeps the authored colour itself.
+    */
+    --speaker-ink: color-mix(in oklab, var(--speaker-accent), var(--color-text-primary) 45%);
+    --speaker-gutter: 30px;
+    --group-gap: 20px;
+    --line-gap: 5px;
 
-        align-items: start;
-        gap: 12px;
-      }
+    width: 92%;
+    max-width: 92%;
 
-      .message.user .message-row {
-        grid-template-columns:
-          minmax(0, 1fr)
-          auto;
+    padding-block-start: var(--group-gap);
+  }
 
-        justify-items: end;
-      }
+  .message[data-group="continued"] {
+    padding-block-start: var(--line-gap);
+  }
 
-      .speaker-avatar {
-        width: 30px;
-        aspect-ratio: 1;
+  .message.user {
+    align-self: flex-end;
+    margin-inline-start: auto;
 
-        display: grid;
-        place-items: center;
+    text-align: right;
+  }
 
-        margin-top: 4px;
-        border: 1px solid var(--speaker-accent);
-        border-radius: 50%;
+  .message-row {
+    position: relative;
 
-        background: var(--color-surface-component);
-        color: var(--speaker-accent);
+    display: grid;
+    grid-template-columns: var(--speaker-gutter) minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
+  }
 
-        font-size: 10px;
-        font-weight: 700;
-      }
+  .message.user .message-row {
+    grid-template-columns: minmax(0, 1fr) var(--speaker-gutter);
+    justify-items: end;
+  }
 
-      .message.user .speaker-avatar {
-        order: 2;
-      }
+  /* The thread: one stroke reused as speaker rule, timer ring and progress fill. */
+  .message-row::before {
+    content: "";
 
-      .message-copy {
-        min-width: 0;
-        max-width: 65ch;
-        font-family: var(--speaker-font);
-      }
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--speaker-gutter) / 2 - var(--thread) / 2);
 
-      .message.user .message-copy {
-        text-align: right;
-      }
+    inline-size: var(--thread);
+    border-radius: var(--thread);
+    background: color-mix(in srgb, var(--speaker-accent) 60%, transparent);
+  }
 
-      .speaker-name {
-        margin-bottom: 5px;
+  /*
+    A continued row reaches back through its own leading space so the group
+    reads as one unbroken spine rather than a column of separate ticks.
+  */
+  .message[data-group="continued"] .message-row::before {
+    top: calc(var(--line-gap) * -1);
+  }
 
-        color: var(--speaker-accent);
+  .message.user .message-row::before {
+    right: calc(var(--speaker-gutter) / 2 - var(--thread) / 2);
+    left: auto;
+  }
 
-        font-family:
-          "Inter Tight",
-          Inter,
-          ui-sans-serif,
-          system-ui,
-          sans-serif;
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: 0;
-        line-height: 1.2;
-      }
+  /*
+    The avatar sits on the thread rather than above it, so a speaker group reads
+    as one continuous spine with a node at its head.
+  */
+  .speaker-avatar {
+    position: relative;
+    grid-column: 1;
 
-      .message-body {
-        padding-left: 12px;
+    inline-size: var(--speaker-gutter);
+    aspect-ratio: 1;
 
-        border-left: 2px solid color-mix(in srgb, var(--speaker-accent) 85%, transparent);
+    display: grid;
+    place-items: center;
 
-        color: var(--color-text-primary);
-        font-size: 1rem;
-        line-height: 1.25;
-      }
+    border: 1px solid color-mix(in srgb, var(--speaker-accent) 70%, transparent);
+    border-radius: 50%;
 
-      .message.user .message-body {
-        padding-left: 0;
-        padding-right: 12px;
+    background: var(--color-surface-canvas);
+    color: var(--speaker-ink);
 
-        border-left: 0;
-        border-right: 2px solid var(--speaker-accent);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1;
+  }
 
-        font-size: 1rem;
-      }
+  .message.user .speaker-avatar {
+    grid-column: 2;
+  }
 
-      .session-event {
-        align-self: center;
-        max-width: min(90%, 65ch);
-        color: var(--color-text-muted);
-        font-family:
-          "Inter Tight",
-          Inter,
-          ui-sans-serif,
-          system-ui,
-          sans-serif;
-        font-size: 0.75rem;
-        line-height: 1.25;
-        text-align: center;
-      }
+  .message-copy {
+    grid-column: 2;
 
-      .session-event-text {
-        display: inline-block;
-        padding: 4px 8px;
-        border: 1px solid var(--color-border-default);
-        border-radius: 999px;
-        background: color-mix(in srgb, var(--color-surface-component) 88%, transparent);
-      }
-}
+    min-width: 0;
+    max-width: 64ch;
 
-@layer components {
-      .transcript-virtualizer {
-        position: relative;
+    font-family: var(--speaker-font);
+  }
 
-        flex: 0 0 auto;
-        inline-size: 100%;
-        min-block-size: 0;
-      }
+  .message.user .message-copy {
+    grid-column: 1;
+    text-align: right;
+  }
 
-      .transcript-virtual-item {
-        display: flex;
-        flex-direction: column;
+  .speaker-name {
+    margin-bottom: 6px;
 
-        box-sizing: border-box;
-        inset-block-start: 0;
-      }
+    color: var(--speaker-ink);
 
+    font-family: var(--font-ui);
+    font-size: var(--text-label);
+    font-weight: 700;
+    letter-spacing: var(--tracking-label);
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  .message-body {
+    color: var(--color-text-primary);
+    font-size: var(--text-voice);
+    font-weight: 400;
+    line-height: var(--leading-voice);
+    overflow-wrap: anywhere;
+  }
+
+  /*
+    Player-authored output keeps the opposite reading side and takes a quieter
+    register so the speaker's voice stays dominant in the column.
+  */
+  .message.user .message-body {
+    color: var(--color-text-muted);
+    font-size: var(--text-reply);
+  }
+
+  /* A neutral session event is a scene note, not spoken prose. */
+  .session-event {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    inline-size: 100%;
+    padding-block-start: 18px;
+
+    color: var(--color-text-muted);
+    font-family: var(--font-ui);
+    font-size: var(--text-note);
+    line-height: 1.35;
+  }
+
+  .session-event::before,
+  .session-event::after {
+    content: "";
+    flex: 1 1 0;
+    block-size: 1px;
+    background: color-mix(in srgb, var(--color-text-muted) 28%, transparent);
+  }
+
+  .session-event-text {
+    flex: 0 1 auto;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .return-to-latest {
+    border: 1px solid color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+    border-radius: 50%;
+
+    background: var(--color-instrument-veil);
+    color: var(--color-text-primary);
+
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .return-to-latest[hidden] {
+    display: none;
+  }
 }

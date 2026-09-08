@@ -204,14 +204,16 @@ function handleCopyClick(control: VisualLabControl, event: MouseEvent): void {
           <input
             class="lab-tuning-input"
             type="number"
-            :aria-label="`${control.label} (${control.unit})`"
+            :aria-label="
+              control.unit.length === 0 ? control.label : `${control.label} (${control.unit})`
+            "
             :min="control.min"
             :max="control.max"
             :step="control.step"
             :value="numberValue(control)"
             @change="emitNumber(control, $event)"
           />
-          <span class="lab-tuning-unit">{{ control.unit }}</span>
+          <span v-if="control.unit.length > 0" class="lab-tuning-unit">{{ control.unit }}</span>
         </span>
       </div>
     </div>

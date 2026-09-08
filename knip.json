@@ -27,6 +27,6 @@
     "tools/oxlint/**/*.ts",
     "tools/local-agent/**/*.{cjs,mjs}"
   ],
-  "ignoreDependencies": ["@vue/tsconfig", "reka-ui", "shadcn-vue"],
+  "ignoreDependencies": ["@vue/tsconfig", "shadcn-vue"],
   "include": ["files", "exports", "dependencies", "unlisted", "unresolved"]
 }

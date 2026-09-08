@@ -1,0 +1,134 @@
+@layer theme {
+  /*
+    Application palette, type scale, and shape language.
+
+    Palette primitives are canonical in OKLCH and are mapped to semantic roles
+    before any component consumes them. Two complete themes share one role set:
+    `stage` is the default low-light presentation and `daylight` is the warm
+    light presentation. Both deliberately keep a wide lightness spread between
+    canvas, chrome, and component surfaces so structure reads without relying on
+    hairline borders.
+
+    Speaker, package-accent, media, and authored control colours are content
+    data and never enter this palette.
+  */
+
+  :root,
+  .player[data-theme="stage"] {
+    color-scheme: dark;
+
+    --palette-surface-base: oklch(20.5% 0.0125 52);
+    --palette-surface-chrome: oklch(26% 0.015 52);
+    --palette-surface-component: oklch(32% 0.017 52);
+    --palette-component-hover: oklch(37.5% 0.0195 50);
+    --palette-component-pressed: oklch(43% 0.022 48);
+    --palette-border-subtle: oklch(38% 0.017 52);
+    --palette-border-interactive: oklch(49% 0.024 50);
+    --palette-border-strong: oklch(62% 0.033 48);
+    --palette-text-primary: oklch(94% 0.013 78);
+    --palette-text-muted: oklch(74% 0.018 66);
+    --palette-accent-focus: oklch(72% 0.17 12);
+    --palette-accent-solid: oklch(55.5% 0.196 12);
+    --palette-accent-solid-hover: oklch(60.5% 0.196 12);
+    --palette-accent-solid-pressed: oklch(50.5% 0.185 13);
+    --palette-disabled-bg: oklch(27% 0.01 52);
+    --palette-disabled-border: oklch(35% 0.012 52);
+    --palette-disabled-text: oklch(62% 0.014 58);
+
+    --color-text-inverse: oklch(100% 0 0);
+    --color-structural-shadow: oklch(8% 0.01 50 / 46%);
+    --color-structural-scrim: oklch(12% 0.012 50 / 62%);
+    --color-instrument-veil: oklch(20.5% 0.0125 52 / 72%);
+    --color-stage-void: oklch(14% 0.011 52);
+  }
+
+  .player[data-theme="daylight"] {
+    color-scheme: light;
+
+    --palette-surface-base: oklch(92.8% 0.017 74);
+    --palette-surface-chrome: oklch(96.2% 0.0125 76);
+    --palette-surface-component: oklch(99.2% 0.0073 81);
+    --palette-component-hover: oklch(95.6% 0.018 66);
+    --palette-component-pressed: oklch(91% 0.026 58);
+    --palette-border-subtle: oklch(84.2% 0.029 66);
+    --palette-border-interactive: oklch(76% 0.038 56);
+    --palette-border-strong: oklch(66% 0.049 52);
+    --palette-text-primary: oklch(28% 0.018 36);
+    --palette-text-muted: oklch(49% 0.028 41);
+    --palette-accent-focus: oklch(58% 0.195 11);
+    --palette-accent-solid: oklch(54.5% 0.193 11);
+    --palette-accent-solid-hover: oklch(50.5% 0.183 12);
+    --palette-accent-solid-pressed: oklch(46.5% 0.172 12);
+    --palette-disabled-bg: oklch(90.5% 0.014 61);
+    --palette-disabled-border: oklch(84% 0.0225 59);
+    --palette-disabled-text: oklch(52% 0.026 41);
+
+    --color-text-inverse: oklch(100% 0 0);
+    --color-structural-shadow: oklch(28% 0.018 36 / 12%);
+    --color-structural-scrim: oklch(28% 0.018 36 / 26%);
+    --color-instrument-veil: oklch(99.2% 0.0073 81 / 78%);
+    --color-stage-void: oklch(88% 0.02 72);
+  }
+
+  /* Semantic roles. A future theme replaces only the primitives above. */
+  :root,
+  .player {
+    --color-surface-canvas: var(--palette-surface-base);
+    --color-surface-chrome: var(--palette-surface-chrome);
+    --color-surface-component: var(--palette-surface-component);
+    --color-component-hover: var(--palette-component-hover);
+    --color-component-pressed: var(--palette-component-pressed);
+    --color-border-default: var(--palette-border-subtle);
+    --color-border-hover: var(--palette-border-interactive);
+    --color-border-pressed: var(--palette-border-strong);
+    --color-text-primary: var(--palette-text-primary);
+    --color-text-muted: var(--palette-text-muted);
+    --color-text-quiet: var(--palette-disabled-text);
+    --color-text-disabled: var(--palette-disabled-text);
+    --color-accent-focus: var(--palette-accent-focus);
+    --color-accent-solid: var(--palette-accent-solid);
+    --color-accent-solid-hover: var(--palette-accent-solid-hover);
+    --color-accent-solid-pressed: var(--palette-accent-solid-pressed);
+    --color-surface-disabled: var(--palette-disabled-bg);
+    --color-border-disabled: var(--palette-disabled-border);
+
+    /* Package/media values are presentation data, not application palette roles. */
+    --package-accent: var(--color-accent-focus);
+    --scene-ambient: oklch(72% 0.08 52);
+  }
+
+  :root {
+    /*
+      One family, two registers. The voice register carries authored prose at a
+      generous reading rhythm; the instrument register carries labels, values and
+      controls at a small tight rhythm. Authored speaker fonts replace the voice
+      family per message and must stay distinguishable, so the Player default
+      deliberately stays neutral.
+    */
+    --font-ui:
+      "Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+    --font-voice: var(--font-ui);
+
+    --text-voice: 1.0625rem;
+    --leading-voice: 1.58;
+    --text-reply: 1rem;
+    --text-instrument: 0.8125rem;
+    --text-label: 0.6875rem;
+    --text-note: 0.75rem;
+    --tracking-label: 0.055em;
+
+    /*
+      Shape language. Instruments are capsules, working surfaces are panels, and
+      the stage is an unframed window. The `thread` is the shared identity mark:
+      speaker rules, timer rings and progress fills are all the same stroke.
+    */
+    --radius-instrument: 999px;
+    --radius-panel: 14px;
+    --radius-control: 10px;
+    --radius-tight: 7px;
+    --thread: 2px;
+
+    --focus-outline-width: 2px;
+  }
+}
