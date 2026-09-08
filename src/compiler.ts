@@ -8,6 +8,7 @@ import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutabl
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { validateSemantics, type SemanticValidationOptions } from "./semantic.js";
+import { createSourcePosition, createSourceSpan } from "./source.js";
 
 export interface CompileOptions extends SemanticValidationOptions {}
 
@@ -23,7 +24,26 @@ export { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 
 /** Parses, validates, and compiles source without executing it. */
 export function compileSource(source: string, options: CompileOptions = {}): CompilationResult {
-  const parsed = parse(source);
+  let parsed: ReturnType<typeof parse>;
+  try {
+    parsed = parse(source);
+  } catch (error) {
+    if (!isNativeStackExhaustion(error)) throw error;
+    return stackExhaustionResult(source, null);
+  }
+
+  try {
+    return compileParsedSource(parsed, options);
+  } catch (error) {
+    if (!isNativeStackExhaustion(error)) throw error;
+    return stackExhaustionResult(source, parsed.program, parsed.diagnostics);
+  }
+}
+
+function compileParsedSource(
+  parsed: ReturnType<typeof parse>,
+  options: CompileOptions,
+): CompilationResult {
   const parserDiagnostics = Object.freeze([
     ...parsed.diagnostics,
     ...findNonFiniteNumericLiteralDiagnosticsInStableProgram(parsed.program),
@@ -58,6 +78,63 @@ export function compileSource(source: string, options: CompileOptions = {}): Com
     diagnostics,
     plan,
   });
+}
+
+function stackExhaustionResult(
+  source: string,
+  parsedProgram: Program | null,
+  parserDiagnostics: readonly Diagnostic[] = [],
+): CompilationResult {
+  const sourceSpan = parsedProgram?.span ?? completeSourceSpan(source);
+  const stackDiagnostic = createDiagnostic(
+    DiagnosticSeverity.Error,
+    "TSC007",
+    "Compilation exhausted the JavaScript host's call stack while processing this source.",
+    sourceSpan,
+  );
+  const frozenParserDiagnostics = Object.freeze([...parserDiagnostics]);
+  const semanticDiagnostics = Object.freeze([]);
+  return Object.freeze({
+    program:
+      parsedProgram ??
+      Object.freeze({ kind: "program", statements: Object.freeze([]), span: sourceSpan }),
+    parserDiagnostics: frozenParserDiagnostics,
+    semanticDiagnostics,
+    diagnostics: Object.freeze([...frozenParserDiagnostics, stackDiagnostic]),
+    plan: null,
+  });
+}
+
+function completeSourceSpan(source: string) {
+  let line = 0;
+  let column = 0;
+  for (let offset = 0; offset < source.length; offset += 1) {
+    if (source[offset] === "\r" && source[offset + 1] === "\n") {
+      offset += 1;
+      line += 1;
+      column = 0;
+    } else if (source[offset] === "\n") {
+      line += 1;
+      column = 0;
+    } else {
+      column += 1;
+    }
+  }
+  return createSourceSpan(
+    createSourcePosition(0, 0, 0),
+    createSourcePosition(source.length, line, column),
+  );
+}
+
+function isNativeStackExhaustion(error: unknown): boolean {
+  if (!(error instanceof RangeError) && !(error instanceof SyntaxError)) return false;
+  const message = error.message.toLowerCase();
+  if (error instanceof RangeError) {
+    return (
+      message.includes("maximum call stack size exceeded") || message.includes("stack overflow")
+    );
+  }
+  return message.startsWith("invalid regular expression:") && message.endsWith("stack overflow");
 }
 
 function compiledPlanValidationDiagnostic(plan: InstructionPlan): Diagnostic | null {

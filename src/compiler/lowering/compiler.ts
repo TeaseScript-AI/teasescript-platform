@@ -697,7 +697,19 @@ export class InstructionCompiler {
         return { plan, temporaryIds: operand.temporaryIds };
       }
       case "binaryExpression": {
-        const [left, right] = this.#lowerOrderedExpressions([expression.left, expression.right]);
+        const leftExpression = expression.left;
+        const rightExpression = expression.right;
+        if (
+          this.#contextualSpeakerTemporary === null &&
+          !this.#containsUserCall(leftExpression) &&
+          !this.#containsUserCall(rightExpression)
+        ) {
+          return {
+            plan: compileBinaryExpression(expression, leftExpression, rightExpression),
+            temporaryIds: [],
+          };
+        }
+        const [left, right] = this.#lowerOrderedExpressions([leftExpression, rightExpression]);
         return {
           plan: {
             kind: "binary",
@@ -1440,13 +1452,7 @@ function compileExpression(expression: Expression): ExpressionPlan {
       return plan;
     }
     case "binaryExpression":
-      return {
-        kind: "binary",
-        operator: expression.operator,
-        left: compileExpression(expression.left),
-        right: compileExpression(expression.right),
-        span: copySpan(expression.span),
-      };
+      return compileBinaryExpression(expression);
     case "rangeExpression":
       return {
         kind: "range",
@@ -1460,6 +1466,62 @@ function compileExpression(expression: Expression): ExpressionPlan {
         "Blocking interactions must be lowered before expression-plan compilation.",
       );
   }
+}
+
+function compileBinaryExpression(
+  expression: Extract<Expression, { kind: "binaryExpression" }>,
+  left: Expression = expression.left,
+  right: Expression = expression.right,
+): ExpressionPlan {
+  const plans = new WeakMap<Expression, ExpressionPlan>();
+  const work: BinaryCompilationFrame[] = [{ expression, left, right, expanded: false }];
+  while (work.length > 0) {
+    const current = work.pop()!;
+    if (current.expanded) {
+      plans.set(current.expression, {
+        kind: "binary",
+        operator: current.expression.operator,
+        left: compiledBinaryChild(current.left, plans),
+        right: compiledBinaryChild(current.right, plans),
+        span: copySpan(current.expression.span),
+      });
+      continue;
+    }
+
+    work.push({ ...current, expanded: true });
+    const rightExpression = unwrapParentheses(current.right);
+    if (rightExpression.kind === "binaryExpression") {
+      work.push(binaryCompilationFrame(rightExpression));
+    }
+    const leftExpression = unwrapParentheses(current.left);
+    if (leftExpression.kind === "binaryExpression") {
+      work.push(binaryCompilationFrame(leftExpression));
+    }
+  }
+  return plans.get(expression)!;
+}
+
+interface BinaryCompilationFrame {
+  readonly expression: Extract<Expression, { kind: "binaryExpression" }>;
+  readonly left: Expression;
+  readonly right: Expression;
+  readonly expanded: boolean;
+}
+
+function binaryCompilationFrame(
+  expression: Extract<Expression, { kind: "binaryExpression" }>,
+): BinaryCompilationFrame {
+  return { expression, left: expression.left, right: expression.right, expanded: false };
+}
+
+function compiledBinaryChild(
+  expression: Expression,
+  plans: Readonly<WeakMap<Expression, ExpressionPlan>>,
+): ExpressionPlan {
+  expression = unwrapParentheses(expression);
+  return expression.kind === "binaryExpression"
+    ? plans.get(expression)!
+    : compileExpression(expression);
 }
 
 function compileArgument(argument: CallArgument): ArgumentPlan {
