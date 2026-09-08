@@ -10,8 +10,8 @@ import type {
 const FOLLOW_DISTANCE_PX = 36;
 const SCROLL_SETTLE_MS = 140;
 const TOP_FADE_DISTANCE_PX = 2;
-const MESSAGE_ESTIMATE_PX = 96;
-const SESSION_EVENT_ESTIMATE_PX = 32;
+const MESSAGE_ESTIMATE_PX = 104;
+const SESSION_EVENT_ESTIMATE_PX = 42;
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -40,7 +40,11 @@ const virtualizerOptions = computed(() => {
     followOnAppend: true,
     scrollEndThreshold: FOLLOW_DISTANCE_PX,
     overscan: 6,
-    gap: 12,
+    /*
+      Row rhythm lives inside each measured item so a speaker group can close up
+      while a new group opens; the virtualizer keeps exact measured heights.
+    */
+    gap: 0,
   };
 });
 const virtualizer = useVirtualizer(virtualizerOptions);
@@ -105,6 +109,36 @@ function isUserMessage(index: number): boolean {
 
 function isSessionEvent(index: number): boolean {
   return entryFor(index)?.kind === "session-event";
+}
+
+/*
+  Consecutive output from one speaker forms a group. Only the head carries the
+  avatar and name; the rest of the group is carried by the speaker's thread, so
+  the reading column stays continuous instead of repeating identity per line.
+
+  Grouping compares the presented speaker identity rather than the transcript
+  entry's speaker key, because the runtime adapter mints a fresh key per
+  authored `say` event. Two entries that present as the same person therefore
+  read as the same person, and a scene note between them still opens a new group.
+*/
+function speakerIdentity(index: number): string | null {
+  const entry = messageFor(index);
+  if (entry === null) return null;
+  const speaker = speakerFor(entry);
+  return speaker === null
+    ? `entry:${entry.speakerId}`
+    : [speaker.name, speaker.accent, speaker.avatar, speaker.fontFamily].join("\u0000");
+}
+
+function groupPosition(index: number): "continued" | "head" {
+  const identity = speakerIdentity(index);
+  if (identity === null) return "head";
+  return identity === speakerIdentity(index - 1) ? "continued" : "head";
+}
+
+/* A message whose speaker cannot be resolved shows no empty identity slot. */
+function showsSpeakerIdentity(index: number): boolean {
+  return groupPosition(index) === "head" && speakerForIndex(index) !== null;
 }
 
 function messageStyle(entry: PlayerTranscriptEntryPresentation): Record<string, string> {
@@ -249,19 +283,23 @@ function scrollToLatest(behavior: ScrollBehavior): void {
           v-if="messageFor(virtualItem.index) !== null"
           class="message"
           :class="{ user: isUserMessage(virtualItem.index) }"
+          :data-group="groupPosition(virtualItem.index)"
           :data-transcript-entry-id="entryId(virtualItem.index)"
           :style="messageStyleFor(virtualItem.index)"
         >
           <div class="message-row">
-            <div v-if="!isUserMessage(virtualItem.index)" class="speaker-avatar" aria-hidden="true">
+            <div
+              v-if="showsSpeakerIdentity(virtualItem.index)"
+              class="speaker-avatar"
+              aria-hidden="true"
+            >
               {{ speakerForIndex(virtualItem.index)?.avatar }}
             </div>
             <div class="message-copy">
-              <div class="speaker-name">{{ speakerForIndex(virtualItem.index)?.name }}</div>
+              <div v-if="showsSpeakerIdentity(virtualItem.index)" class="speaker-name">
+                {{ speakerForIndex(virtualItem.index)?.name }}
+              </div>
               <div class="message-body">{{ entryText(virtualItem.index) }}</div>
-            </div>
-            <div v-if="isUserMessage(virtualItem.index)" class="speaker-avatar" aria-hidden="true">
-              {{ speakerForIndex(virtualItem.index)?.avatar }}
             </div>
           </div>
         </article>

@@ -72,6 +72,7 @@ function toggleFixtureSize(): void {
   <main
     class="transcript-stress-fixture"
     data-transcript-fixture="stress"
+    data-transcript-edge="late"
     :data-compact="String(compact)"
   >
     <header class="transcript-stress-controls" aria-label="Transcript stress fixture controls">
@@ -88,16 +89,17 @@ function toggleFixtureSize(): void {
 
 <style scoped>
 .transcript-stress-fixture {
+  color-scheme: light;
+
   --color-surface-canvas: #f4ede6;
   --color-surface-component: #fffaf5;
   --color-text-primary: #493b35;
   --color-text-muted: #806e65;
   --color-border-default: #d9c8ba;
-  --conversation-max-width: 900px;
+  --conversation-max-width: 760px;
   --conversation-gap: 18px;
   --safe-left: 0px;
   --safe-right: 0px;
-  --transcript-edge-fade: 28px;
 
   position: relative;
   inline-size: min(100vw, 980px);
@@ -106,7 +108,7 @@ function toggleFixtureSize(): void {
   overflow: hidden;
   background: var(--color-surface-canvas);
   color: var(--color-text-primary);
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-ui);
 }
 
 .transcript-stress-controls {

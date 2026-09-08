@@ -7,6 +7,8 @@ const props = defineProps<{
   transition: PlayerMediaTransitionFixture;
 }>();
 
+const emit = defineEmits<{ naturalSize: [width: number, height: number] }>();
+
 const current = shallowRef(props.media);
 const outgoing = shallowRef<PlayerMediaPresentation | null>(null);
 let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -27,6 +29,17 @@ watch(
 onBeforeUnmount(() => {
   if (cleanupTimer !== null) clearTimeout(cleanupTimer);
 });
+
+/*
+  The stage reports the media's intrinsic shape so the layout owner can derive a
+  stage height that fits the content instead of reserving a fixed viewport
+  fraction with empty side bands.
+*/
+function reportNaturalSize(event: Event): void {
+  const image = event.target;
+  if (image instanceof HTMLImageElement)
+    emit("naturalSize", image.naturalWidth, image.naturalHeight);
+}
 </script>
 
 <template>
@@ -46,7 +59,13 @@ onBeforeUnmount(() => {
         class="media-content media-transition-incoming"
         :alt="current.title"
         :src="current.src"
+        @load="reportNaturalSize"
       />
     </div>
+
+    <div class="stage-vignette" aria-hidden="true"></div>
+    <div class="stage-edge" aria-hidden="true"></div>
+
+    <slot name="stage-instruments" />
   </section>
 </template>

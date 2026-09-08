@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import { FocusScope } from "reka-ui";
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { PlayerToolColumnState, PlayerToolDefinition, PlayerToolId } from "../../../model.js";
 import type { LayoutDebugSnapshot } from "../devtools/layoutDebugMeasurement.js";
 
 const props = defineProps<{
   open: boolean;
+  /** True while the panel is an overlay drawer with a scrim over the Player. */
+  overlay: boolean;
   columns: readonly PlayerToolColumnState[];
   tools: readonly PlayerToolDefinition[];
   layoutDebugSnapshot?: LayoutDebugSnapshot | null;
@@ -65,7 +68,21 @@ function selectTool(columnId: string, event: Event): void {
 </script>
 
 <template>
-  <aside id="leftPanel" class="left-panel" aria-label="Player tools">
+  <!--
+    While the panel is an overlay drawer it also owns keyboard focus, so Reka's
+    focus scope keeps tabbing inside it and returns focus when it closes. In the
+    docked composition the same panel is ordinary page content and is neither
+    trapped nor auto-focused.
+  -->
+  <FocusScope
+    id="leftPanel"
+    as="aside"
+    class="left-panel"
+    aria-label="Player tools"
+    :loop="overlay && open"
+    :trapped="overlay && open"
+    :present="overlay && open"
+  >
     <div ref="stripScroll" class="tool-strip-scroll" :data-overflow="String(overflow)">
       <div class="tool-strip">
         <section
@@ -110,11 +127,7 @@ function selectTool(columnId: string, event: Event): void {
             </button>
           </header>
           <div class="tool-column-body" :data-tool-body="column.toolId ?? ''">
-            <slot
-              name="tool"
-              :layout-debug-snapshot="layoutDebugSnapshot"
-              :tool-id="column.toolId"
-            >
+            <slot name="tool" :layout-debug-snapshot="layoutDebugSnapshot" :tool-id="column.toolId">
               <p class="tool-placeholder">
                 {{
                   column.toolId === null
@@ -127,10 +140,10 @@ function selectTool(columnId: string, event: Event): void {
         </section>
       </div>
     </div>
-  </aside>
+  </FocusScope>
 
   <button
-    v-if="open"
+    v-if="overlay && open"
     class="left-scrim"
     type="button"
     aria-label="Close tools"

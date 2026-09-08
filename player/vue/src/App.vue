@@ -80,8 +80,10 @@ const developmentOptions = computed<PlayerDevelopmentOptions>(() => ({
         : [],
     ),
   ),
+  theme: choiceSetting("theme", ["stage", "daylight"]),
   timerCount: numberSetting("timer-count"),
   timerKind: choiceSetting("timer-presentation", ["visible", "mystery", "hidden"]),
+  transcriptEdge: choiceSetting("transcript-edge", ["late", "fade", "cut"]),
 }));
 
 onMounted(async () => {

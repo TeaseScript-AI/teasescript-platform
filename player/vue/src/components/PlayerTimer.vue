@@ -3,6 +3,12 @@ import { computed } from "vue";
 import type { PlayerTimerKind, PlayerTimerPresentation } from "../../../model.js";
 import { formatTimer, timerProgressPercent } from "../../../presentation.js";
 
+/*
+  Timers are dial capsules docked to the stage rather than rings stacked in a
+  side rail, so time pressure sits where the scene is and several timers stay
+  affordable. The first capsule in presentation order carries the lead reading;
+  presentation order never reveals whether script execution is blocked.
+*/
 const props = defineProps<{
   timer: PlayerTimerPresentation;
   timerCount: number;
@@ -21,30 +27,34 @@ function label(timer: PlayerTimerPresentation, index: number): string | null {
   if (timer.name !== undefined && timer.name.length > 0) return timer.name;
   return timers.value.length > 1 ? `Timer ${index + 1}` : null;
 }
+
+function progress(timer: PlayerTimerPresentation): string {
+  return props.timerKind === "mystery"
+    ? "28%"
+    : `${timerProgressPercent(timer.remainingSeconds, timer.totalSeconds)}%`;
+}
 </script>
 
 <template>
-  <div v-if="timerKind !== 'hidden'" class="timer-wrap">
+  <div v-if="timerKind !== 'hidden'" class="stage-timers">
     <div class="timer-list">
       <div
         v-for="(item, index) in timers"
         :key="index"
-        class="timer"
+        class="timer instrument"
         :aria-label="label(item, index) ?? 'Timer'"
-        data-label-placement="below"
         :data-timer-kind="timerKind"
-        :style="{
-          '--timer-progress': `${
-            timerKind === 'mystery'
-              ? 28
-              : timerProgressPercent(item.remainingSeconds, item.totalSeconds)
-          }%`,
-        }"
+        :style="{ '--timer-progress': progress(item) }"
       >
-        <span class="timer-text">{{
-          timerKind === "mystery" ? "?" : formatTimer(item.remainingSeconds)
-        }}</span>
-        <span v-if="label(item, index) !== null" class="timer-label">{{ label(item, index) }}</span>
+        <span class="timer-dial" aria-hidden="true"></span>
+        <span class="timer-readout">
+          <span class="timer-text">{{
+            timerKind === "mystery" ? "?" : formatTimer(item.remainingSeconds)
+          }}</span>
+          <span v-if="label(item, index) !== null" class="timer-label">{{
+            label(item, index)
+          }}</span>
+        </span>
       </div>
     </div>
   </div>

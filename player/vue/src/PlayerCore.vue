@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from "reka-ui";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { CSSProperties } from "vue";
 import type {
   PlayerPresentation,
@@ -21,13 +22,15 @@ import {
   type PlayerRuntimeControlResult,
   type PlayerRuntimeRestorePoint,
 } from "../../runtime-adapter.js";
+import PlayerBackgroundControls from "./components/PlayerBackgroundControls.vue";
 import PlayerComposer from "./components/PlayerComposer.vue";
 import PlayerForeground from "./components/PlayerForeground.vue";
+import PlayerGlobalBar from "./components/PlayerGlobalBar.vue";
 import PlayerMedia from "./components/PlayerMedia.vue";
-import PlayerRightRail from "./components/PlayerRightRail.vue";
-import PlayerTitleBar from "./components/PlayerTitleBar.vue";
+import PlayerTimer from "./components/PlayerTimer.vue";
 import PlayerTools from "./components/PlayerTools.vue";
 import PlayerTranscript from "./components/PlayerTranscript.vue";
+import { TooltipProvider } from "./components/ui/tooltip/index.js";
 import { usePlayerLayout } from "./composables/usePlayerLayout.js";
 import PlayerLayoutDebugOverlay from "./devtools/PlayerLayoutDebugOverlay.vue";
 import type { LayoutDebugOptions } from "./devtools/layoutDebug.js";
@@ -70,16 +73,23 @@ const presentationTranscriptEntries = shallowRef<readonly PlayerTranscriptEntryP
   ...runtime.value.transcriptEntries,
 ]);
 const transcriptRevision = ref(runtime.value.transcriptRevision);
+/*
+  Runtime speakers own runtime output. Presentation speakers stay available
+  underneath so development history fixtures still resolve an identity instead
+  of rendering an empty avatar and name slot.
+*/
 const transcriptSpeakers = computed(() => {
   const presentationUser = props.presentation.speakers.user;
-  return presentationUser === undefined
-    ? runtime.value.speakers
-    : { ...runtime.value.speakers, user: presentationUser };
+  const merged = { ...props.presentation.speakers, ...runtime.value.speakers };
+  return presentationUser === undefined ? merged : { ...merged, user: presentationUser };
 });
 const layout = usePlayerLayout({ player });
 const { snapshot: layoutDebugSnapshot } = usePlayerLayoutDebug(player);
 const toolsAvailable = computed(() => toolDefinitions.value.length > 0);
 const effectiveLeftMode = computed(() => (toolsAvailable.value ? layout.leftMode.value : "closed"));
+const visibleRightControls = computed(() =>
+  props.development.rightControlsVisible ? state.value.rightControls : [],
+);
 let sessionTimeOriginMs = performance.now() - runtime.value.snapshot.currentSessionTimeMs;
 let timeTimer: ReturnType<typeof setTimeout> | null = null;
 let scriptUpdateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -274,7 +284,7 @@ function isPacingBackgroundTarget(target: EventTarget | null): boolean {
   if (
     target === player.value ||
     target.classList.contains("transcript") ||
-    target.classList.contains("title-bg")
+    target.classList.contains("transcript-virtualizer")
   ) {
     return true;
   }
@@ -390,6 +400,16 @@ function observeAfterVisibilityChange(): void {
   if (document.visibilityState === "visible") observeCurrentTime();
 }
 
+/*
+  A response lane or control tray that appears or disappears changes how much
+  height the conversation can keep. Neither is a resize of an existing element,
+  so the layout owner is told to re-solve the composition explicitly.
+*/
+watch(
+  () => [foreground.value?.kind ?? null, visibleRightControls.value.length] as const,
+  () => layout.refreshComposition(),
+);
+
 onMounted(() => {
   scheduleTimeObservation();
   document.addEventListener("visibilitychange", observeAfterVisibilityChange);
@@ -416,110 +436,170 @@ function closeToolColumn(id: string): void {
 </script>
 
 <template>
-  <main
-    ref="player"
-    class="player fx-ambient"
-    :data-chrome="layout.chrome.value"
-    :data-compact-timers="String(layout.compactTimers.value)"
-    :data-keyboard="layout.keyboard.value"
-    :data-keyboard-geometry="layout.keyboardGeometry.value"
-    :data-left="effectiveLeftMode"
-    :data-media-fit="presentation.media.fit"
-    :data-right="layout.rightMode.value"
-    :data-right-backing="layout.rightBacking.value"
-    :data-right-layout="layout.rightLayout.value"
-    :data-timer-kind="development.timerKind"
-    :style="playerStyle"
-    @pointercancel="forgetPlayerPointerTarget"
-    @pointerdown="rememberPlayerPointerTarget"
-    @pointermove="markPlayerPointerMoved"
-    @pointerup="handlePlayerPointer"
-  >
-    <PlayerTitleBar
-      :compact-timers="layout.compactTimers.value"
-      :fullscreen-active="layout.fullscreenActive.value"
-      :left-open="toolsAvailable && layout.leftOpen.value"
-      :right-docked="layout.rightDocked.value"
-      :timer="presentation.timer"
-      :timer-count="development.timerCount"
-      :timer-kind="development.timerKind"
-      :tools-available="toolsAvailable"
-      @toggle-fullscreen="layout.toggleFullscreen"
-      @toggle-left="layout.toggleLeft"
-      @toggle-right="layout.toggleRight"
-    />
-
-    <PlayerTools
-      v-if="toolsAvailable"
-      :columns="state.toolColumns"
-      :open="layout.leftOpen.value"
-      :tools="toolDefinitions"
-      :layout-debug-snapshot="layoutDebugSnapshot"
-      @add="dispatch({ type: 'add-tool-column' })"
-      @close="closeToolColumn"
-      @dismiss="layout.closeLeft"
-      @select="(id, toolId) => dispatch({ type: 'select-tool-column', id, toolId })"
+  <TooltipProvider :delay-duration="500" :skip-delay-duration="300">
+    <main
+      ref="player"
+      class="player fx-ambient"
+      :data-chrome="layout.chrome.value"
+      :data-compact-timers="String(layout.compactTimers.value)"
+      :data-conversation="layout.conversationDensity.value"
+      :data-keyboard="layout.keyboard.value"
+      :data-keyboard-geometry="layout.keyboardGeometry.value"
+      :data-left="effectiveLeftMode"
+      :data-media-fit="presentation.media.fit"
+      :data-right="layout.rightMode.value"
+      :data-right-backing="layout.rightBacking.value"
+      :data-right-layout="layout.rightLayout.value"
+      :data-theme="development.theme"
+      :data-timer-kind="development.timerKind"
+      :data-transcript-edge="development.transcriptEdge"
+      :data-tools="layout.toolsGeometry.value"
+      :data-tools-open="String(toolsAvailable && layout.leftOpen.value)"
+      :style="playerStyle"
+      @pointercancel="forgetPlayerPointerTarget"
+      @pointerdown="rememberPlayerPointerTarget"
+      @pointermove="markPlayerPointerMoved"
+      @pointerup="handlePlayerPointer"
     >
-      <template #tool="{ toolId }">
-        <p v-if="toolId === null" class="tool-placeholder">Choose a tool for this column.</p>
-        <slot v-else name="tool" :layout-debug-snapshot="layoutDebugSnapshot" :tool-id="toolId">
-          <p class="tool-placeholder">No content is available for this tool.</p>
-        </slot>
-      </template>
-    </PlayerTools>
+      <PlayerMedia
+        :media="presentation.media"
+        :transition="development.mediaTransition"
+        @natural-size="layout.observeStageMedia"
+      >
+        <template #stage-instruments>
+          <PlayerTimer
+            :timer="presentation.timer"
+            :timer-count="development.timerCount"
+            :timer-kind="development.timerKind"
+          />
+        </template>
+      </PlayerMedia>
 
-    <PlayerMedia :media="presentation.media" :transition="development.mediaTransition" />
+      <PlayerGlobalBar
+        :fullscreen-active="layout.fullscreenActive.value"
+        :left-open="toolsAvailable && layout.leftOpen.value"
+        :right-docked="layout.rightDocked.value"
+        title="TeaseScript Player"
+        :tools-available="toolsAvailable"
+        :tooltip-host="player"
+        @toggle-fullscreen="layout.toggleFullscreen"
+        @toggle-left="layout.toggleLeft"
+        @toggle-right="layout.toggleRight"
+      />
 
-    <PlayerTranscript
-      :entries="displayedTranscriptEntries"
-      :revision="transcriptRevision"
-      :speakers="transcriptSpeakers"
-    />
+      <PlayerTools
+        v-if="toolsAvailable"
+        :columns="state.toolColumns"
+        :open="layout.leftOpen.value"
+        :overlay="layout.toolsGeometry.value === 'drawer'"
+        :tools="toolDefinitions"
+        :layout-debug-snapshot="layoutDebugSnapshot"
+        @add="dispatch({ type: 'add-tool-column' })"
+        @close="closeToolColumn"
+        @dismiss="layout.closeLeft"
+        @select="(id, toolId) => dispatch({ type: 'select-tool-column', id, toolId })"
+      >
+        <template #tool="{ toolId }">
+          <p v-if="toolId === null" class="tool-placeholder">Choose a tool for this column.</p>
+          <slot v-else name="tool" :layout-debug-snapshot="layoutDebugSnapshot" :tool-id="toolId">
+            <p class="tool-placeholder">No content is available for this tool.</p>
+          </slot>
+        </template>
+      </PlayerTools>
 
-    <PlayerForeground :foreground="foreground" @activate="activateForeground" />
+      <PlayerTranscript
+        :entries="displayedTranscriptEntries"
+        :revision="transcriptRevision"
+        :speakers="transcriptSpeakers"
+      />
 
-    <PlayerComposer
-      ref="composer"
-      :feedback="state.composerFeedback"
-      :foreground="foreground"
-      :model-value="state.composerValue"
-      :pacing-active="pacingGate !== null"
-      @input-blur="layout.markInputBlurred"
-      @skip-pacing="skipPacing"
-      @submit="submitComposer"
-      @touch-input="layout.markTouchInputExpected"
-      @update:model-value="dispatch({ type: 'set-composer', value: $event })"
-    />
+      <!--
+        The long-lived control group keeps one component and one markup across
+        geometries. Only the sheet needs an anchored surface, so it borrows the
+        shared Reka popover for positioning, focus return and dismissal instead
+        of introducing a second overlay mechanism.
+      -->
+      <PlayerBackgroundControls
+        v-if="layout.rightLayout.value !== 'sheet'"
+        :busy-style="development.busyStyle"
+        :busy-target="development.busyTarget"
+        :controls="visibleRightControls"
+        :controls-disabled="development.controlsDisabled"
+        :script-update-control-id="state.scriptUpdateControlId"
+        :script-update-feedback="state.scriptUpdateFeedback"
+        @action="dispatch({ type: 'activate-right-action', controlId: $event })"
+        @select="(controlId, value) => dispatch({ type: 'change-right-select', controlId, value })"
+        @toggle="
+          (controlId, checked) => dispatch({ type: 'change-right-toggle', controlId, checked })
+        "
+      />
+      <PopoverRoot
+        v-else-if="visibleRightControls.length > 0"
+        :open="layout.sheetOpen.value"
+        @update:open="layout.setSheetOpen"
+      >
+        <PopoverTrigger as-child>
+          <button class="instrument-disclosure instrument" type="button" data-instrument-sheet>
+            Controls
+            <span class="instrument-disclosure-count">{{ visibleRightControls.length }}</span>
+          </button>
+        </PopoverTrigger>
+        <PopoverPortal v-if="player !== null" :to="player">
+          <PopoverContent
+            class="instrument-sheet"
+            side="top"
+            align="start"
+            :side-offset="8"
+            :collision-padding="10"
+          >
+            <PlayerBackgroundControls
+              :busy-style="development.busyStyle"
+              :busy-target="development.busyTarget"
+              :controls="visibleRightControls"
+              :controls-disabled="development.controlsDisabled"
+              :script-update-control-id="state.scriptUpdateControlId"
+              :script-update-feedback="state.scriptUpdateFeedback"
+              @action="dispatch({ type: 'activate-right-action', controlId: $event })"
+              @select="
+                (controlId, value) => dispatch({ type: 'change-right-select', controlId, value })
+              "
+              @toggle="
+                (controlId, checked) =>
+                  dispatch({ type: 'change-right-toggle', controlId, checked })
+              "
+            />
+          </PopoverContent>
+        </PopoverPortal>
+      </PopoverRoot>
 
-    <PlayerRightRail
-      :compact-timers="layout.compactTimers.value"
-      :busy-style="development.busyStyle"
-      :busy-target="development.busyTarget"
-      :controls="development.rightControlsVisible ? state.rightControls : []"
-      :controls-disabled="development.controlsDisabled"
-      :script-update-control-id="state.scriptUpdateControlId"
-      :script-update-feedback="state.scriptUpdateFeedback"
-      :timer="presentation.timer"
-      :timer-count="development.timerCount"
-      :timer-kind="development.timerKind"
-      @action="dispatch({ type: 'activate-right-action', controlId: $event })"
-      @select="(controlId, value) => dispatch({ type: 'change-right-select', controlId, value })"
-      @toggle="
-        (controlId, checked) => dispatch({ type: 'change-right-toggle', controlId, checked })
-      "
-    />
+      <PlayerForeground :foreground="foreground" @activate="activateForeground" />
 
-    <div
-      v-if="
-        state.scriptUpdateNotice.length > 0 &&
-        (state.scriptUpdateFeedback === 'toast' || state.scriptUpdateFeedback === 'toast-highlight')
-      "
-      class="script-update-toast"
-      role="status"
-    >
-      {{ state.scriptUpdateNotice }}
-    </div>
+      <PlayerComposer
+        ref="composer"
+        :feedback="state.composerFeedback"
+        :foreground="foreground"
+        :model-value="state.composerValue"
+        :pacing-active="pacingGate !== null"
+        @input-blur="layout.markInputBlurred"
+        @skip-pacing="skipPacing"
+        @submit="submitComposer"
+        @touch-input="layout.markTouchInputExpected"
+        @update:model-value="dispatch({ type: 'set-composer', value: $event })"
+      />
 
-    <PlayerLayoutDebugOverlay :options="layoutDebugOptions" :snapshot="layoutDebugSnapshot" />
-  </main>
+      <div
+        v-if="
+          state.scriptUpdateNotice.length > 0 &&
+          (state.scriptUpdateFeedback === 'toast' ||
+            state.scriptUpdateFeedback === 'toast-highlight')
+        "
+        class="script-update-toast"
+        role="status"
+      >
+        {{ state.scriptUpdateNotice }}
+      </div>
+
+      <PlayerLayoutDebugOverlay :options="layoutDebugOptions" :snapshot="layoutDebugSnapshot" />
+    </main>
+  </TooltipProvider>
 </template>
