@@ -17,7 +17,13 @@ The source-oriented layer includes:
 - `validateSemantics(...)`;
 - `compileSource(...)`.
 
-`compileSource(...)` is the normal combined route from source text to diagnostics and a compiled instruction plan. It returns no plan when parser, finite-literal, or semantic errors remain. In particular, non-finite numeric literals are reported as exact-span `TSC001`, while large finite literals remain valid. A returned plan is validated when a fresh runtime snapshot is created, when runtime execution begins, or when a caller invokes `validateInstructionPlan(...)` explicitly.
+`compileSource(...)` is the normal combined route from source text to diagnostics and a compiled instruction plan. It
+returns no plan when parser, finite-literal, semantic, lowering, or compiled-plan validation errors remain. In
+particular, non-finite numeric literals are reported as exact-span `TSC001`, while recognized native host-stack
+exhaustion is reported across the complete source as `TSC007`. The latter contains an environment-specific failure; it
+does not establish a TeaseScript nesting limit. A returned plan is already fully validated and deeply immutable, so
+runtime entry points can reuse that identity; `validateInstructionPlan(...)` remains the explicit boundary for other
+plan data.
 
 The lower-level `lex(...)` and `parse(...)` functions expose frontend results without promising that the source is compilable. Callers must not substitute parsing alone for the `compileSource(...)` validation boundary.
 

@@ -571,10 +571,22 @@ class SemanticValidator {
           }
         }
         return;
-      case "binaryExpression":
-        this.#validateExpression(expression.left, scope, contextualSpeaker);
-        this.#validateExpression(expression.right, scope, contextualSpeaker);
+      case "binaryExpression": {
+        const work: Expression[] = [expression.right, expression.left];
+        while (work.length > 0) {
+          let current = work.pop()!;
+          while (current.kind === "parenthesizedExpression" || current.kind === "unaryExpression") {
+            current =
+              current.kind === "parenthesizedExpression" ? current.expression : current.operand;
+          }
+          if (current.kind === "binaryExpression") {
+            work.push(current.right, current.left);
+          } else {
+            this.#validateExpression(current, scope, contextualSpeaker);
+          }
+        }
         return;
+      }
       case "rangeExpression":
         this.#validateExpression(expression.start, scope, contextualSpeaker);
         this.#validateExpression(expression.end, scope, contextualSpeaker);

@@ -29,10 +29,18 @@ test("nested source beyond the former parser guard remains valid", () => {
     assert.deepEqual(parsed.diagnostics, [], name);
   }
 
-  for (const [name, source] of cases.slice(0, 3)) {
+  for (const [name, source] of cases) {
     const compiled = compileSource(source);
-    assert.equal(compiled.plan === null, false, name);
-    assert.deepEqual(compiled.diagnostics, [], name);
+    if (name === "sets") {
+      assert.equal(compiled.plan, null, name);
+      assert.ok(
+        compiled.diagnostics.every((diagnostic) => diagnostic.code === "TSV006"),
+        name,
+      );
+    } else {
+      assert.notEqual(compiled.plan, null, name);
+      assert.deepEqual(compiled.diagnostics, [], name);
+    }
   }
 });
 

@@ -459,12 +459,17 @@ consumption, and checkpoint/restore.
 2. runs shared AST-level validation for parsed non-finite numeric literals;
 3. runs semantic validation when parsing and finite-literal checking produced no errors;
 4. includes the core runtime built-ins plus configured global and builtin names in validation;
-5. lowers the program only when no error diagnostics remain.
+5. lowers the program only when no error diagnostics remain;
+6. completely validates and deeply freezes an instruction plan before returning it.
 
-The result separates parser and semantic diagnostics and returns `plan: null` when compilation fails. A returned plan is checked at the snapshot/runtime boundary or may be checked explicitly with `validateInstructionPlan(...)` before use.
+The result separates parser and semantic diagnostics and returns `plan: null` when compilation fails. Runtime entry
+points reuse the identity of a returned validated immutable plan. Other plan data remains subject to the complete
+`validateInstructionPlan(...)` boundary.
 
-Unexpected native JavaScript exceptions from parsing or compilation propagate unchanged through `compileSource(...)`;
-they are not reclassified as TeaseScript capacity failures.
+Recognized native JavaScript stack exhaustion during parsing or compilation returns error diagnostic `TSC007` across
+the complete source rather than escaping from `compileSource(...)`. This contains a host failure without defining a
+TeaseScript source-depth limit; unrelated native exceptions propagate unchanged. Current evidence and remaining
+host-dependent recursive paths are recorded in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).
 
 `compileSource(...)` rejects numeric literals such as `1e999` and `-1e999` with error diagnostic `TSC001`. It does not return an instruction plan for those inputs. Large finite values such as `1e308` remain valid. The normal compilation route therefore cannot return a plan containing literal `Infinity`, `-Infinity`, or `NaN`, and instruction-plan validation independently rejects any non-finite number in plan data.
 

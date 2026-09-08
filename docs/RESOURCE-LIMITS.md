@@ -50,6 +50,21 @@ the old nesting guard, so these exact depths are historical observations rather 
 They are retained only as evidence that host-stack failure varies materially by syntax and implementation shape; they are
 not TeaseScript limits, supported capacity, CI thresholds, safety margins, or production-classifier inputs.
 
+## Compiler stack-exhaustion containment
+
+`compileSource(...)` reports recognized native JavaScript stack exhaustion as error diagnostic `TSC007`, with no plan
+and a span covering the complete source. It recognizes the V8 `RangeError` call-stack signature and the observed
+`RangeError` or `SyntaxError` stack-overflow signature; unrelated exceptions continue to propagate. When parsing
+completed, the result retains the parsed program. When parsing itself exhausted the stack before producing a program,
+the result carries an empty program with the complete source span.
+
+This is failure containment at the normal compiler boundary, not an input preflight or rejection policy. The compiler
+does not count source depth, impose a numeric nesting limit, or promise that a particular source size will compile on
+every JavaScript host. Flat binary-chain semantic traversal, synchronous plan construction, prepared-reference scanning,
+and plan-expression validation avoid the native stack. Parser nesting, nested statements, and non-binary recursive
+expression shapes may still reach a host-dependent native boundary. The focused regression uses a deliberately
+constrained child-process stack to exercise containment without turning its fixture depth into a CI capacity threshold.
+
 ## Non-rejecting scale diagnostics
 
 Traversal work, observed depth, node or instruction counts, temporary counts, validation work, and serialized byte

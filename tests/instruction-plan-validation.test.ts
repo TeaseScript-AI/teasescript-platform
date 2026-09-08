@@ -11,6 +11,85 @@ import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runt
 
 const REGION_ERROR = "Control-flow target leaves the instruction's execution region.";
 
+test("reports malformed binary expression plans in pre-order", () => {
+  const malformed = structuredClone(plan("let target = 0\ntarget = 1 + 2 + 3"));
+  const assignment = malformed.instructions[1];
+  assert.equal(assignment?.kind, "assign");
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: the compiler-produced second instruction is asserted above to be the assignment fixture being mutated.
+  const mutableAssignment = assignment as unknown as { target: unknown; value: unknown };
+  // EVIDENCE: the fixture's assignment value is compiled from the binary source expression `1 + 2 + 3`.
+  const expression = structuredClone(mutableAssignment.value) as MutableBinaryExpression;
+  mutableAssignment.target = expression;
+
+  expression.operator = "invalid-root";
+  // EVIDENCE: the compiler-produced left-associative `1 + 2 + 3` expression has a binary left child.
+  const left = expression.left as MutableBinaryExpression;
+  left.span = null;
+  left.operator = "invalid-left";
+  left.left = null;
+  // EVIDENCE: the compiler-produced inner binary expression has literal `2` as its right child.
+  const leftRight = left.right as MutableLiteralExpression;
+  leftRight.value = {};
+  expression.right = { kind: "unknown", span: null };
+
+  assert.deepEqual(validateInstructionPlan(malformed).errors, [
+    {
+      code: "TSC002",
+      message: "Invalid assignment target plan.",
+      path: "$.instructions[1].target",
+    },
+    {
+      code: "TSC002",
+      message: "Invalid binary operator.",
+      path: "$.instructions[1].target.operator",
+    },
+    {
+      code: "TSC002",
+      message: "Plan source location is malformed.",
+      path: "$.instructions[1].target.left.span",
+    },
+    {
+      code: "TSC002",
+      message: "Invalid binary operator.",
+      path: "$.instructions[1].target.left.operator",
+    },
+    {
+      code: "TSC002",
+      message: "Expression must be an object with a kind.",
+      path: "$.instructions[1].target.left.left",
+    },
+    {
+      code: "TSC002",
+      message: "Literal value must be a finite JSON scalar.",
+      path: "$.instructions[1].target.left.right.value",
+    },
+    {
+      code: "TSC002",
+      message: "Plan source location is malformed.",
+      path: "$.instructions[1].target.right.span",
+    },
+    {
+      code: "TSC002",
+      message: "Unknown expression kind 'unknown'.",
+      path: "$.instructions[1].target.right.kind",
+    },
+  ]);
+});
+
+interface MutableBinaryExpression {
+  kind: "binary";
+  operator: unknown;
+  left: unknown;
+  right: unknown;
+  span: unknown;
+}
+
+interface MutableLiteralExpression {
+  kind: "literal";
+  value: unknown;
+  span: unknown;
+}
+
 test("rejects a root jump into a function prologue", () => {
   const compiled = plan(rootBranchWithTwoFunctions());
   const jumpIndex = rootInstructionIndex(compiled, "jump");

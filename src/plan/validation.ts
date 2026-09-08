@@ -146,18 +146,23 @@ function validatePreparedReferenceStructure(
 }
 
 function collectPreparedReferenceIds(value: unknown, output: Set<number>): void {
-  if (Array.isArray(value)) {
-    for (const item of value) collectPreparedReferenceIds(item, output);
-    return;
-  }
-  if (!isRecord(value)) return;
-  if (value.kind === "preparedReference" && Number.isInteger(value.temporaryId)) {
-    // EVIDENCE: validation: the prepared-reference temporary ID passed Number.isInteger.
-    output.add(value.temporaryId as number);
-    return;
-  }
-  for (const nested of Object.values(value)) {
-    collectPreparedReferenceIds(nested, output);
+  const pending = [value];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (Array.isArray(current)) {
+      for (let index = current.length - 1; index >= 0; index -= 1) pending.push(current[index]);
+      continue;
+    }
+    if (!isRecord(current)) continue;
+    if (current.kind === "preparedReference" && Number.isInteger(current.temporaryId)) {
+      // EVIDENCE: validation: the prepared-reference temporary ID passed Number.isInteger.
+      output.add(current.temporaryId as number);
+      continue;
+    }
+    const nestedValues = Object.values(current);
+    for (let index = nestedValues.length - 1; index >= 0; index -= 1) {
+      pending.push(nestedValues[index]);
+    }
   }
 }
 
@@ -1041,6 +1046,29 @@ function validateExpression(
   assignmentTarget = false,
   temporaryCount = -1,
 ): void {
+  const pending = [{ value, path, assignmentTarget }];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) return;
+    validateExpressionNode(
+      current.value,
+      current.path,
+      errors,
+      current.assignmentTarget,
+      temporaryCount,
+      pending,
+    );
+  }
+}
+
+function validateExpressionNode(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+  assignmentTarget: boolean,
+  temporaryCount: number,
+  pending: Array<{ value: unknown; path: string; assignmentTarget: boolean }>,
+): void {
   if (!isRecord(value) || typeof value.kind !== "string") {
     errors.push(planError("TSC002", "Expression must be an object with a kind.", path));
     return;
@@ -1099,8 +1127,10 @@ function validateExpression(
       if (!binaryOperators.has(String(value.operator))) {
         errors.push(planError("TSC002", "Invalid binary operator.", `${path}.operator`));
       }
-      validateExpression(value.left, `${path}.left`, errors, false, temporaryCount);
-      validateExpression(value.right, `${path}.right`, errors, false, temporaryCount);
+      pending.push(
+        { value: value.right, path: `${path}.right`, assignmentTarget: false },
+        { value: value.left, path: `${path}.left`, assignmentTarget: false },
+      );
       return;
     case "range":
       validateExpression(value.start, `${path}.start`, errors, false, temporaryCount);
