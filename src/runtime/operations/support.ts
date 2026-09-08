@@ -1,5 +1,5 @@
 import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
-import { captureInstructionPlan } from "../../plan/capture.js";
+import { captureOrReuseInstructionPlan } from "../../plan/capture.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { planLocationToSourceSpan } from "../../plan/source-location.js";
 import { RuntimeFault } from "../errors.js";
@@ -150,7 +150,7 @@ export function captureExecutableData(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
 ): CapturedExecutableData {
-  const capturedPlan = captureInstructionPlan(plan);
+  const capturedPlan = captureOrReuseInstructionPlan(plan);
   if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
     throw new RuntimeDataError(
       "TSR100",

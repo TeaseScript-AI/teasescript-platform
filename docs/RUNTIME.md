@@ -546,13 +546,17 @@ Live externally supplied instruction plans, runtime snapshots, globals, and seri
 into stable plain-data graphs before detailed validation, freezing, state construction, execution, event emission, or
 RNG consumption. Capture rejects accessors, failed traps, cycles, unsupported prototypes, non-finite values, and
 non-canonical arrays without imposing a generic graph-work or nesting ceiling. Compiler-owned plans are validated
-directly. Runtime and checkpoint operations reuse an instruction plan already captured and validated by that operation
-when validating the snapshot, and checkpoint data freshly produced by `JSON.parse(...)` goes directly through complete
-structural validation. Checkpoint restore validates its envelope, plan, snapshot, and their consistency before execution
-resumes. A generic capture depth/work or detailed-validation counter alone does not make otherwise structurally valid
-data malformed. Malformed or inconsistent plan and snapshot data still produces the existing public invalid results,
-`TSR100`, `TSR101`, or `TSK002`. The compact user-function call representation and its format consequences are
-described under [Format evolution](#format-evolution).
+directly. Runtime entry points reuse an exact immutable plan graph after complete validation has established
+process-local evidence for that graph; compiler output and plans returned from capture or checkpoint restore can retain
+this evidence across calls. A caller-owned plan without that evidence is captured and validated at every entry, while
+caller-controlled snapshots are always freshly captured and validated, including for halted and failed entries. Runtime
+and checkpoint operations also reuse a plan already captured and validated by that operation when validating the
+snapshot, and checkpoint data freshly produced by `JSON.parse(...)` goes directly through complete structural
+validation. Checkpoint restore validates its envelope, plan, snapshot, and their consistency before execution resumes.
+A generic capture depth/work or detailed-validation counter alone does not make otherwise structurally valid data
+malformed. Malformed or inconsistent plan and snapshot data still produces the existing public invalid results,
+`TSR100`, `TSR101`, or `TSK002`. The compact user-function call representation and its format consequences are described
+under [Format evolution](#format-evolution).
 
 Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality and duplicate handling are unchanged.
 
