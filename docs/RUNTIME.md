@@ -487,7 +487,8 @@ Ordinary TeaseScript source is compiled through `compileSource(...)` into a vali
 
 ### Low-level runtime route
 
-The compiler internally lowers semantically valid AST data after `compileSource(...)` validation. This internal lowering does not replace semantic validation or create a supported direct-AST product route.
+The compiler internally lowers semantically valid parser-owned AST data after `compileSource(...)` validation. This
+internal lowering does not replace semantic validation or expose a supported caller-constructed AST compilation route.
 
 The low-level runtime entry points are:
 

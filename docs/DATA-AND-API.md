@@ -47,7 +47,10 @@ source
     -> executeInstruction, stepToEvent, or run
 ```
 
-Ordinary TeaseScript source is compiled through `compileSource(...)`; the resulting validated instruction plan runs with explicit serializable runtime state. Parser AST data remains available to compiler and authoring tooling, while `compileProgram(...)` is an internal compiler implementation detail rather than a product execution API. `validateInstructionPlan(...)` independently rejects non-JSON-safe plan data.
+Ordinary TeaseScript source is compiled through `compileSource(...)`; the resulting validated instruction plan runs
+with explicit serializable runtime state. Parser AST data remains available to compiler and authoring tooling, but
+there is no supported caller-constructed AST compilation route. `validateInstructionPlan(...)` independently rejects
+non-JSON-safe plan data.
 
 The explicit plan/snapshot/runtime API is the canonical resumable route for waits, including pending actions, checkpoints, completion, and resumption.
 
