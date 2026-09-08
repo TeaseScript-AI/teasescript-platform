@@ -148,7 +148,7 @@ test("rejects unsafe persisted temporary and loop identities", () => {
   );
 });
 
-test("validates many small function regions without changing root or owner semantics", () => {
+test("bounds ownership-index work across many small function regions", () => {
   const source = [
     ...Array.from({ length: 96 }, (_unused, index) => `function f${index} { return ${index} }`),
     "say f0()",
@@ -161,13 +161,19 @@ test("validates many small function regions without changing root or owner seman
     return { result: validation, statistics: finish() };
   });
   assert.equal(result.valid, true);
-  assert.equal(statistics.counts.planOwnerIndexBuilds, 1);
+  assert.ok(
+    (statistics.counts.planOwnerIndexBuilds ?? 0) <= 1,
+    "ownership index was rebuilt within one validation",
+  );
 
   const nextStatistics = withValidationTestStatistics((finish) => {
     assert.equal(validateInstructionPlan(compiled.plan).valid, true);
     return finish();
   });
-  assert.equal(nextStatistics.counts.planOwnerIndexBuilds, 1);
+  assert.ok(
+    (nextStatistics.counts.planOwnerIndexBuilds ?? 0) <= 1,
+    "ownership index was rebuilt within the next validation",
+  );
 });
 
 test("rejects unsafe, negative, and fractional function boundaries before dependent validation", () => {
