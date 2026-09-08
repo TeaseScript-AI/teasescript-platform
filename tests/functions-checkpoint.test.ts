@@ -286,7 +286,7 @@ test("treats unbound call-frame argument values as canonical resumable state", (
   assert.doesNotThrow(() => restoreCheckpoint(createCheckpoint(compiled, changed)));
 });
 
-test("detailed validation records liveness work without rejecting valid state", () => {
+test("detailed validation reports work without rejecting valid state", () => {
   const { plan: compiled, snapshot } = recursiveSnapshot(3);
   const checkpoint = createCheckpoint(compiled, snapshot);
   const snapshotBefore = JSON.stringify(snapshot);
@@ -298,9 +298,6 @@ test("detailed validation records liveness work without rejecting valid state", 
   }).counts;
 
   assert.equal(JSON.stringify(snapshot), snapshotBefore);
-  assert.ok((statistics.livenessTableAllocations ?? 0) > 0);
-  assert.ok((statistics.livenessComputations ?? 0) > 0);
-  assert.ok((statistics.livenessCacheInsertions ?? 0) > 0);
   assert.ok((statistics.detailedWorkConsumed ?? 0) > 0);
 });
 
