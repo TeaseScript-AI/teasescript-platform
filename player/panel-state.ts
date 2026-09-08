@@ -16,13 +16,19 @@ export function toggleRightPanelMode(
   return isDocked ? "overlay" : "docked";
 }
 
-export function canDockRightRail(
-  viewportWidth: number,
-  desiredLeftWidth: number,
-  rightRailWidth: number,
-  minimumMiddleWidth: number,
-  narrowComposition: boolean,
+/**
+ * Decide whether a side track can reserve horizontal space without pushing the
+ * primary content column below the width it must keep.
+ *
+ * One rule serves both side regions: the tool track asks first because a tool
+ * strip has no alternative geometry, and the long-lived control track asks with
+ * the tool reservation already counted because it can fall back to a tray.
+ */
+export function canReserveSideTrack(
+  availableWidth: number,
+  otherReservedWidth: number,
+  trackWidth: number,
+  protectedContentWidth: number,
 ): boolean {
-  if (narrowComposition) return false;
-  return viewportWidth - desiredLeftWidth - rightRailWidth >= minimumMiddleWidth;
+  return availableWidth - otherReservedWidth - trackWidth >= protectedContentWidth;
 }

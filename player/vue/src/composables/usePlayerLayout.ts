@@ -1,17 +1,21 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import type { LeftPanelMode, RightPanelMode } from "../../../model.js";
 import {
-  canDockRightRail,
+  canReserveSideTrack,
   toggleLeftPanelMode,
   toggleRightPanelMode,
 } from "../../../panel-state.js";
+import { resolveStageHeight, type StageHeightConstraints } from "../../../stage-geometry.js";
 
 interface PlayerLayoutElements {
   readonly player: Ref<HTMLElement | null>;
 }
 
-export function isLeftPanelOpen(mode: LeftPanelMode, narrow: boolean): boolean {
-  return mode === "open" || (mode === "auto" && !narrow);
+export type PlayerRightLayout = "rail" | "sheet" | "tray";
+export type PlayerToolsGeometry = "docked" | "drawer";
+
+export function isLeftPanelOpen(mode: LeftPanelMode, toolsUseDrawer: boolean): boolean {
+  return mode === "open" || (mode === "auto" && !toolsUseDrawer);
 }
 
 export function resolveLeftPanelModeOnNarrowTransition(
@@ -37,33 +41,44 @@ interface KeyboardLayout {
   readonly usableHeight: number;
 }
 
+/*
+  The conversation column becomes compact once it can no longer carry the
+  comfortable presentation. The margin above the protected minimum keeps a
+  window that is merely a little tight from flipping back and forth.
+*/
+const COMPACT_CONVERSATION_MARGIN_PX = 96;
+const SHEET_HYSTERESIS_PX = 24;
+
 export function usePlayerLayout(elements: PlayerLayoutElements) {
   const leftMode = ref<LeftPanelMode>("auto");
   const rightMode = ref<RightPanelMode>("auto");
-  const rightLayout = ref<"rail" | "stage">("stage");
+  const rightLayout = ref<PlayerRightLayout>("tray");
   const rightBacking = ref<"docked" | "overlay">("overlay");
-  const chrome = ref<"normal" | "overlay">("normal");
+  const toolsGeometry = ref<PlayerToolsGeometry>("drawer");
+  const conversationDensity = ref<"compact" | "regular">("regular");
+  const chrome = ref<"immersive" | "normal">("normal");
   const compactTimers = ref(false);
   const keyboard = ref<"closed" | "open">("closed");
   const keyboardGeometry = ref<KeyboardLayout["geometry"]>("none");
   const fullscreenActive = ref(false);
-  const narrow = ref(false);
+  const sheetOpen = ref(false);
   const touchInputExpected = ref(false);
   const viewportHeightBaselines = new Map<string, number>();
   const virtualKeyboard = browserVirtualKeyboard();
+  let stageAspect: number | null = null;
   let visibleForegroundHeight = 0;
+  let visibleInstrumentHeight = 0;
   let viewportSettleTimer: ReturnType<typeof setTimeout> | null = null;
   let compositionFrame = 0;
   let resizeObserver: ResizeObserver | null = null;
-  let narrowScreen: MediaQueryList | null = null;
+  let observedElements: readonly (HTMLElement | null)[] = [];
 
-  const leftOpen = computed(() => isLeftPanelOpen(leftMode.value, narrow.value));
+  const leftOpen = computed(() =>
+    isLeftPanelOpen(leftMode.value, toolsGeometry.value === "drawer"),
+  );
   const rightDocked = computed(() => rightBacking.value === "docked");
 
   onMounted(() => {
-    narrowScreen = window.matchMedia("(max-width: 760px)");
-    narrow.value = narrowScreen.matches;
-    narrowScreen.addEventListener("change", handleNarrowChange);
     window.addEventListener("resize", syncViewportTransition);
     window.addEventListener("orientationchange", syncViewportTransition);
     window.visualViewport?.addEventListener("resize", syncViewportTransition);
@@ -72,27 +87,15 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     document.addEventListener("keydown", handleDocumentKeydown);
     virtualKeyboard?.addEventListener("geometrychange", syncViewportTransition);
 
-    resizeObserver = new ResizeObserver(() => {
-      syncLeftPreferredWidth();
-      queueRightCompositionSync();
-    });
-    const player = elements.player.value;
-    for (const element of [
-      player,
-      player?.querySelector<HTMLElement>(".tool-strip"),
-      player?.querySelector<HTMLElement>(".tool-strip-scroll"),
-    ]) {
-      if (element !== null && element !== undefined) resizeObserver.observe(element);
-    }
+    resizeObserver = new ResizeObserver(queueComposition);
+    syncObservedElements();
 
     rememberViewportHeightBaseline();
     syncVirtualKeyboardMode();
-    syncLeftPreferredWidth();
-    syncOverlayChromeMode();
+    syncComposition();
   });
 
   onBeforeUnmount(() => {
-    narrowScreen?.removeEventListener("change", handleNarrowChange);
     window.removeEventListener("resize", syncViewportTransition);
     window.removeEventListener("orientationchange", syncViewportTransition);
     window.visualViewport?.removeEventListener("resize", syncViewportTransition);
@@ -105,25 +108,59 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     if (compositionFrame !== 0) cancelAnimationFrame(compositionFrame);
   });
 
+  /*
+    Regions that come and go — the response lane, the control tray, the tool
+    strip — must join the measured set when they appear, or the composition keeps
+    solving against a region that is no longer the one on screen. Re-observing is
+    skipped while the element set is unchanged, because observing an element
+    fires the observer again and would otherwise loop.
+  */
+  function syncObservedElements(): void {
+    const player = elements.player.value;
+    if (player === null || resizeObserver === null) return;
+    const next = [
+      player,
+      player.querySelector<HTMLElement>(".tool-strip"),
+      player.querySelector<HTMLElement>(".tool-strip-scroll"),
+      player.querySelector<HTMLElement>(".composer"),
+      player.querySelector<HTMLElement>(".foreground-controls"),
+      player.querySelector<HTMLElement>("#rightZone"),
+      player.querySelector<HTMLElement>(".global-bar"),
+    ];
+    if (
+      next.length === observedElements.length &&
+      next.every((element, index) => element === observedElements[index])
+    ) {
+      return;
+    }
+    observedElements = next;
+    resizeObserver.disconnect();
+    for (const element of next) {
+      if (element !== null) resizeObserver.observe(element);
+    }
+  }
+
   function toggleLeft(): void {
-    leftMode.value = toggleLeftPanelMode(leftMode.value, !narrow.value);
-    void nextTick(() => {
-      syncLeftPreferredWidth();
-      queueRightCompositionSync();
-    });
+    leftMode.value = toggleLeftPanelMode(leftMode.value, toolsGeometry.value === "docked");
+    void nextTick(syncComposition);
   }
 
   function closeLeft(): void {
     leftMode.value = "closed";
     void nextTick(() => {
-      queueRightCompositionSync();
+      queueComposition();
       focusLeftToggle();
     });
   }
 
   function toggleRight(): void {
-    rightMode.value = toggleRightPanelMode(rightMode.value, rightLayout.value === "rail");
-    syncRightComposition();
+    rightMode.value = toggleRightPanelMode(rightMode.value, rightBacking.value === "docked");
+    syncComposition();
+  }
+
+  function setSheetOpen(open: boolean): void {
+    sheetOpen.value = open;
+    void nextTick(syncComposition);
   }
 
   async function toggleFullscreen(): Promise<void> {
@@ -149,29 +186,34 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     syncViewportTransition();
   }
 
-  function handleNarrowChange(event: MediaQueryListEvent): void {
-    const wasNarrow = narrow.value;
-    narrow.value = event.matches;
-    leftMode.value = resolveLeftPanelModeOnNarrowTransition(
-      leftMode.value,
-      !wasNarrow && event.matches,
-      leftPanelOwnsFocus(),
-    );
-    syncLeftPreferredWidth();
-    syncOverlayChromeMode();
+  /*
+    Media aspect is captured once per session so the stage keeps a stable height
+    while media appears, changes and disappears. Extreme aspects are clamped so
+    one unusual asset cannot produce an unusable stage. The captured value is
+    published as the live custom property, which keeps one source of truth and
+    makes the resolved shape inspectable through Layout Debug.
+  */
+  function observeStageMedia(naturalWidth: number, naturalHeight: number): void {
+    const player = elements.player.value;
+    if (stageAspect !== null || player === null || naturalWidth <= 0 || naturalHeight <= 0) return;
+    stageAspect = Math.min(2.2, Math.max(0.62, naturalWidth / naturalHeight));
+    player.style.setProperty("--stage-aspect", String(stageAspect));
+    syncComposition();
   }
 
   function handleFullscreenChange(): void {
     const player = elements.player.value;
     fullscreenActive.value = player !== null && document.fullscreenElement === player;
     syncVirtualKeyboardMode();
-    syncOverlayChromeMode();
+    syncComposition();
   }
 
   function handleDocumentKeydown(event: KeyboardEvent): void {
-    if (event.key !== "Escape" || !narrow.value || leftMode.value !== "open") return;
-    event.preventDefault();
-    closeLeft();
+    if (event.key !== "Escape") return;
+    if (toolsGeometry.value === "drawer" && leftMode.value === "open") {
+      event.preventDefault();
+      closeLeft();
+    }
   }
 
   function leftPanelOwnsFocus(): boolean {
@@ -190,48 +232,220 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
   }
 
   function syncViewportTransition(): void {
-    syncOverlayChromeMode();
+    syncComposition();
     if (viewportSettleTimer !== null) clearTimeout(viewportSettleTimer);
     viewportSettleTimer = setTimeout(() => {
       viewportSettleTimer = null;
-      syncOverlayChromeMode();
+      syncComposition();
     }, 300);
   }
 
-  function syncOverlayChromeMode(): void {
+  function queueComposition(): void {
+    if (compositionFrame !== 0) return;
+    compositionFrame = requestAnimationFrame(() => {
+      compositionFrame = 0;
+      syncComposition();
+    });
+  }
+
+  function syncComposition(): void {
     const player = elements.player.value;
     if (player === null) return;
+    syncObservedElements();
+    const style = getComputedStyle(player);
     const layout = resolveKeyboardLayout();
+
     player.style.setProperty("--player-usable-height", `${layout.usableHeight}px`);
     player.style.setProperty(
       "--fullscreen-player-height",
       layout.fullscreenHeight === null ? "100dvh" : `${layout.fullscreenHeight}px`,
     );
     player.style.setProperty("--fullscreen-keyboard-inset", `${layout.fullscreenInset}px`);
-    keyboard.value = layout.open ? "open" : "closed";
-    keyboardGeometry.value = layout.geometry;
-    compactTimers.value = layout.usableHeight <= 600;
-    chrome.value = fullscreenActive.value || layout.usableHeight <= 768 ? "overlay" : "normal";
-
-    const preferredMediaHeight = Number.parseFloat(
-      usableViewportLength(
-        chrome.value === "overlay" ? "--media-height-overlay" : "--media-height-normal",
-        layout.usableHeight,
-      ),
+    player.style.setProperty(
+      "--chrome-overlay-height",
+      `${measuredHeight(player, ".global-bar", 0)}px`,
     );
-    const mediaHeight = layout.open
-      ? constrainedKeyboardMediaHeight(
-          preferredMediaHeight,
-          layout.usableHeight,
-          chrome.value === "overlay",
-        )
-      : preferredMediaHeight;
-    player.style.setProperty("--media-height", `${Math.max(0, mediaHeight)}px`);
     player.style.setProperty(
       "--composer-effective-viewport-height",
-      usableViewportLength("--composer-max-viewport-height", layout.usableHeight),
+      usableViewportLength(style, "--composer-max-viewport-height", layout.usableHeight),
     );
-    queueRightCompositionSync();
+
+    keyboard.value = layout.open ? "open" : "closed";
+    keyboardGeometry.value = layout.geometry;
+    compactTimers.value = layout.usableHeight <= 620;
+    chrome.value = fullscreenActive.value || layout.usableHeight <= 720 ? "immersive" : "normal";
+
+    syncToolStripPreference(player);
+    syncSideTracks(player, style, layout.usableHeight);
+    syncStageHeight(player, style, layout.usableHeight);
+  }
+
+  /*
+    Side tracks are resolved from the space each one needs against the space the
+    primary content column must keep. Tools claim first because a tool strip has
+    no alternative geometry; the long-lived control group yields to a tray and
+    then to an anchored sheet.
+  */
+  function syncSideTracks(
+    player: HTMLElement,
+    style: CSSStyleDeclaration,
+    usableHeight: number,
+  ): void {
+    const available = player.clientWidth;
+    const railWidth = cssPixelValue(style, "--rail-width");
+    const conversationMinimum = cssPixelValue(style, "--conversation-min-width");
+    const toolsSingle = cssPixelValue(style, "--tools-single");
+    const toolsPreferred = Math.max(toolsSingle, cssPixelValue(style, "--tools-preferred"));
+    const hasTools = player.querySelector(".tool-strip") !== null;
+
+    /*
+      A docked track needs room for one complete tool column, never for every
+      open column: extra columns scroll inside the track rather than widening it
+      past the protected conversation width.
+
+      Manual open/closed intent survives a composition change. An open docked
+      strip that becomes an overlay drawer while focus is elsewhere closes, so a
+      newly overlaid drawer never covers the Player while the user is working in
+      another region.
+    */
+    const nextToolsGeometry: PlayerToolsGeometry =
+      hasTools && canReserveSideTrack(available, 0, toolsSingle, conversationMinimum)
+        ? "docked"
+        : "drawer";
+    if (nextToolsGeometry !== toolsGeometry.value) {
+      leftMode.value = resolveLeftPanelModeOnNarrowTransition(
+        leftMode.value,
+        toolsGeometry.value === "docked" && nextToolsGeometry === "drawer",
+        leftPanelOwnsFocus(),
+      );
+      toolsGeometry.value = nextToolsGeometry;
+    }
+    const toolsReserved =
+      toolsGeometry.value === "docked" && leftOpen.value
+        ? Math.max(toolsSingle, Math.min(toolsPreferred, available - conversationMinimum))
+        : 0;
+
+    const railFits = canReserveSideTrack(available, toolsReserved, railWidth, conversationMinimum);
+    const conversationWidth = available - toolsReserved - (railFits ? railWidth : 0);
+    conversationDensity.value =
+      conversationWidth < conversationMinimum + COMPACT_CONVERSATION_MARGIN_PX
+        ? "compact"
+        : "regular";
+
+    rightLayout.value = railFits
+      ? "rail"
+      : resolveTrayOrSheet(player, style, usableHeight, rightLayout.value);
+    if (rightLayout.value !== "sheet") sheetOpen.value = false;
+
+    rightBacking.value =
+      rightMode.value === "docked" || (rightMode.value === "auto" && railFits)
+        ? "docked"
+        : "overlay";
+  }
+
+  /*
+    The tray keeps long-lived controls next to the composer while a row of them
+    still leaves the conversation its reserve. Below that the same controls move
+    into an anchored sheet so the stage and conversation stay usable.
+  */
+  function resolveTrayOrSheet(
+    player: HTMLElement,
+    style: CSSStyleDeclaration,
+    usableHeight: number,
+    current: PlayerRightLayout,
+  ): PlayerRightLayout {
+    /*
+      Only a rendered tray measures a tray. A rail fills its whole side track, so
+      its height says nothing about the row a tray would need, and a sheet is not
+      in flow at all. Both fall back to the last real tray measurement, then to
+      one control row plus its padding.
+    */
+    if (current === "tray") {
+      const measured = measuredHeight(player, "#rightZone", 0);
+      if (measured > 0) visibleInstrumentHeight = measured;
+    } else if (visibleInstrumentHeight === 0) {
+      visibleInstrumentHeight = cssPixelValue(style, "--instrument-height") + 12;
+    }
+    const reserve = remPixelValue(style, "--keyboard-transcript-reserve");
+    const stageFloor = stageFloorHeight(style, usableHeight);
+    const room =
+      usableHeight -
+      stageFloor -
+      measuredHeight(player, ".composer", 0) -
+      foregroundHeight(player) -
+      visibleInstrumentHeight;
+    const threshold = current === "sheet" ? reserve + SHEET_HYSTERESIS_PX : reserve;
+    return room >= threshold ? "tray" : "sheet";
+  }
+
+  function syncStageHeight(
+    player: HTMLElement,
+    style: CSSStyleDeclaration,
+    usableHeight: number,
+  ): void {
+    const stage = player.querySelector<HTMLElement>(".media-area");
+    const stageWidth = stage === null ? player.clientWidth : stage.clientWidth;
+    const constraints: StageHeightConstraints = {
+      availableWidth: stageWidth,
+      aspect: cssNumberValue(style, "--stage-aspect", 4 / 3),
+      floor: stageFloorHeight(style, usableHeight),
+      cap:
+        (usableHeight *
+          cssNumberValue(
+            style,
+            chrome.value === "immersive" ? "--stage-cap-immersive" : "--stage-cap",
+            46,
+          )) /
+        100,
+      remainingConversationHeight: Math.max(
+        0,
+        usableHeight -
+          measuredHeight(player, ".composer", 0) -
+          foregroundHeight(player) -
+          instrumentRowHeight(player),
+      ),
+      conversationReserve: remPixelValue(style, "--keyboard-transcript-reserve"),
+    };
+    player.style.setProperty("--stage-height", `${resolveStageHeight(constraints)}px`);
+  }
+
+  function stageFloorHeight(style: CSSStyleDeclaration, usableHeight: number): number {
+    return Math.max(
+      cssPixelValue(style, "--stage-min-height"),
+      (usableHeight * cssNumberValue(style, "--stage-floor", 22)) / 100,
+    );
+  }
+
+  /*
+    Whatever the long-lived controls put between the conversation and the
+    response lane costs the same height to the stage: the tray itself while it is
+    in flow, or the disclosure control that replaces it once a sheet is used.
+  */
+  function instrumentRowHeight(player: HTMLElement): number {
+    return rightLayout.value === "tray"
+      ? measuredHeight(player, "#rightZone", 0)
+      : measuredHeight(player, ".instrument-disclosure", 0);
+  }
+
+  function foregroundHeight(player: HTMLElement): number {
+    const element = player.querySelector<HTMLElement>(".foreground-controls");
+    const measured = element?.getBoundingClientRect().height ?? 0;
+    if (measured > 0) visibleForegroundHeight = measured;
+    return element === null ? 0 : visibleForegroundHeight;
+  }
+
+  function syncToolStripPreference(player: HTMLElement): void {
+    const panel = player.querySelector<HTMLElement>(".left-panel");
+    const strip = player.querySelector<HTMLElement>(".tool-strip");
+    const scroller = player.querySelector<HTMLElement>(".tool-strip-scroll");
+    if (panel === null || strip === null || scroller === null) return;
+    const stripWidth = Math.ceil(strip.getBoundingClientRect().width);
+    if (stripWidth <= 0) return;
+    const panelChromeWidth = Math.max(
+      0,
+      Math.ceil(panel.getBoundingClientRect().width - scroller.clientWidth),
+    );
+    player.style.setProperty("--tools-preferred", `${stripWidth + panelChromeWidth}px`);
   }
 
   function resolveKeyboardLayout(): KeyboardLayout {
@@ -290,87 +504,12 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     };
   }
 
-  function constrainedKeyboardMediaHeight(
-    preferredMediaHeight: number,
+  function usableViewportLength(
+    style: CSSStyleDeclaration,
+    property: string,
     usableHeight: number,
-    overlayChrome: boolean,
-  ): number {
-    const player = elements.player.value;
-    const composer = player?.querySelector<HTMLElement>(".composer") ?? null;
-    if (player === null || composer === null) return preferredMediaHeight;
-    const foregroundElement = player.querySelector<HTMLElement>(".foreground-controls");
-    const measuredForegroundHeight = foregroundElement?.getBoundingClientRect().height ?? 0;
-    if (measuredForegroundHeight > 0) visibleForegroundHeight = measuredForegroundHeight;
-    const foregroundHeight = foregroundElement === null ? 0 : visibleForegroundHeight;
-    const style = getComputedStyle(player);
-    const transcriptReserve = remPixelValue(style, "--keyboard-transcript-reserve");
-    const titleTrackHeight = overlayChrome
-      ? 0
-      : (player.querySelector<HTMLElement>(".title-controls")?.getBoundingClientRect().height ?? 0);
-    const availableConversationHeight = Math.max(
-      0,
-      usableHeight - titleTrackHeight - composer.getBoundingClientRect().height - foregroundHeight,
-    );
-    const boundedTranscriptReserve = Math.min(transcriptReserve, availableConversationHeight);
-    return Math.min(
-      Math.max(0, preferredMediaHeight),
-      Math.max(0, availableConversationHeight - boundedTranscriptReserve),
-    );
-  }
-
-  function queueRightCompositionSync(): void {
-    if (compositionFrame !== 0) return;
-    compositionFrame = requestAnimationFrame(() => {
-      compositionFrame = 0;
-      syncRightComposition();
-    });
-  }
-
-  function syncRightComposition(): void {
-    const player = elements.player.value;
-    if (player === null) return;
-    const style = getComputedStyle(player);
-    const rightWidth = cssPixelValue(style, "--right-controls-width");
-    const conversationMinimum = cssPixelValue(style, "--conversation-min-width");
-    const stageMinimum = cssPixelValue(style, "--media-height");
-    const hasTools = player.querySelector(".tool-strip") !== null;
-    const desiredLeftWidth =
-      hasTools && !narrow.value && leftMode.value !== "closed"
-        ? cssPixelValue(style, "--left-preferred")
-        : 0;
-    rightLayout.value = canDockRightRail(
-      player.clientWidth,
-      desiredLeftWidth,
-      rightWidth,
-      Math.max(conversationMinimum, stageMinimum),
-      narrow.value,
-    )
-      ? "rail"
-      : "stage";
-    rightBacking.value =
-      rightMode.value === "docked" || (rightMode.value === "auto" && rightLayout.value === "rail")
-        ? "docked"
-        : "overlay";
-  }
-
-  function syncLeftPreferredWidth(): void {
-    const player = elements.player.value;
-    const panel = player?.querySelector<HTMLElement>(".left-panel") ?? null;
-    const strip = player?.querySelector<HTMLElement>(".tool-strip") ?? null;
-    const scroller = player?.querySelector<HTMLElement>(".tool-strip-scroll") ?? null;
-    if (player === null || panel === null || strip === null || scroller === null) return;
-    const stripWidth = Math.ceil(strip.getBoundingClientRect().width);
-    const panelChromeWidth = Math.max(
-      0,
-      Math.ceil(panel.getBoundingClientRect().width - scroller.clientWidth),
-    );
-    player.style.setProperty("--left-preferred", `${stripWidth + panelChromeWidth}px`);
-  }
-
-  function usableViewportLength(property: string, usableHeight: number): string {
-    const player = elements.player.value;
-    if (player === null) return "0px";
-    const raw = getComputedStyle(player).getPropertyValue(property).trim();
+  ): string {
+    const raw = style.getPropertyValue(property).trim();
     if (raw.endsWith("dvh")) {
       const percent = Number.parseFloat(raw);
       if (Number.isFinite(percent)) return `${Math.max(0, (usableHeight * percent) / 100)}px`;
@@ -386,6 +525,7 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     chrome,
     closeLeft,
     compactTimers,
+    conversationDensity,
     fullscreenActive,
     keyboard,
     keyboardGeometry,
@@ -393,19 +533,34 @@ export function usePlayerLayout(elements: PlayerLayoutElements) {
     leftOpen,
     markInputBlurred,
     markTouchInputExpected,
+    observeStageMedia,
+    refreshComposition: queueComposition,
     rightBacking,
     rightDocked,
     rightLayout,
     rightMode,
+    setSheetOpen,
+    sheetOpen,
     toggleFullscreen,
     toggleLeft,
     toggleRight,
+    toolsGeometry,
   };
+}
+
+function measuredHeight(player: HTMLElement, selector: string, fallback: number): number {
+  const element = player.querySelector<HTMLElement>(selector);
+  return element === null ? fallback : element.getBoundingClientRect().height;
 }
 
 function cssPixelValue(style: CSSStyleDeclaration, property: string): number {
   const value = Number.parseFloat(style.getPropertyValue(property));
   return Number.isFinite(value) ? value : 0;
+}
+
+function cssNumberValue(style: CSSStyleDeclaration, property: string, fallback: number): number {
+  const value = Number.parseFloat(style.getPropertyValue(property));
+  return Number.isFinite(value) ? value : fallback;
 }
 
 function remPixelValue(style: CSSStyleDeclaration, property: string): number {
