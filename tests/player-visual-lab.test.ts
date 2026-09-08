@@ -36,6 +36,8 @@ test("Visual Lab registry exposes every reusable control kind with unique valid 
 test("Visual Lab registry describes retained controls and excludes resolved experiments", () => {
   const labels = VISUAL_LAB_CONTROLS.map((control) => control.label);
   for (const retained of [
+    "Theme",
+    "Scrolled transcript edge",
     "Accent",
     "Busy Action",
     "Busy control target",
@@ -63,7 +65,7 @@ test("Visual Lab registry describes retained controls and excludes resolved expe
   ]) {
     assert.ok(!labels.includes(obsolete), obsolete);
   }
-  assert.equal(VISUAL_LAB_CONTROLS.filter((control) => control.kind === "tuning").length, 8);
+  assert.equal(VISUAL_LAB_CONTROLS.filter((control) => control.kind === "tuning").length, 10);
   assert.deepEqual(
     VISUAL_LAB_CONTROLS.flatMap((control) =>
       control.kind === "action" && control.target.kind === "runtime-scenario"

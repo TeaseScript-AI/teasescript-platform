@@ -121,19 +121,24 @@ test("Layout Debug card is screenshot-focused and excludes noisy composer and co
       scale: 1.25,
     },
     safeAreas: { top: 20, right: 0, bottom: 12, left: 0 },
-    reservations: { title: 52, left: 300, right: 190, composerBottom: 12, keyboardBottom: 0 },
+    reservations: { chrome: 46, left: 320, right: 212, composerBottom: 12, keyboardBottom: 0 },
     constraints: {
-      mediaHeight: "360px",
+      stageHeight: "360px",
+      stageAspect: "1.7778",
+      stageFloor: "22",
+      stageCap: "46",
       conversationMinWidth: "380px",
       conversationMaxWidth: "900px",
       composerMaxLines: "96px",
       composerMaxViewportHeight: "144px",
       usableHeight: "640px",
       toolColumnWidth: "300px",
-      rightRailWidth: "190px",
+      rightRailWidth: "212px",
     },
     composition: {
-      chrome: "overlay",
+      chrome: "immersive",
+      conversation: "regular",
+      tools: "docked",
       left: "open",
       right: "open",
       rightBacking: "docked",
@@ -155,7 +160,8 @@ test("Layout Debug card is screenshot-focused and excludes noisy composer and co
 test("Layout Debug uses the rendered Vue tool-body contract and declarative overlay ownership", async () => {
   assert.equal(LAYOUT_DEBUG_SELECTORS.toolBodies, ".tool-column-body");
   assert.equal(LAYOUT_DEBUG_SELECTORS.toolColumn, ".tool-column");
-  assert.equal(LAYOUT_DEBUG_SELECTORS.rightTimerList, "#rightZone .timer-list");
+  assert.equal(LAYOUT_DEBUG_SELECTORS.chrome, ".global-bar");
+  assert.equal(LAYOUT_DEBUG_SELECTORS.stageTimerList, ".stage-timers .timer-list");
   assert.equal(LAYOUT_DEBUG_SELECTORS.rightActions, "#rightZone .action-scroll");
   assert.doesNotMatch(JSON.stringify(LAYOUT_DEBUG_SELECTORS), /"\.tool-body"/u);
 
@@ -166,13 +172,15 @@ test("Layout Debug uses the rendered Vue tool-body contract and declarative over
     readFile(resolve(root, "player/vue/src/devtools/usePlayerLayoutDebug.ts"), "utf8"),
   ]);
   assert.match(measurement, /querySelectorAll<HTMLElement>\(LAYOUT_DEBUG_SELECTORS\.toolBodies\)/u);
-  assert.match(measurement, /"right-timer-list"/u);
+  assert.match(measurement, /"stage-timer-list"/u);
   assert.match(measurement, /"right-actions"/u);
+  assert.match(measurement, /stageAspect: property\(style, "--stage-aspect"\)/u);
   assert.match(overlay, /current\.regions\.transcript\?\.width/u);
   assert.match(overlay, /regions\.toolColumn\?\.width/u);
   assert.match(overlay, /regions\.input\?\.height/u);
   assert.match(overlay, /constraints\.toolColumnWidth/u);
   assert.match(overlay, /constraints\.rightRailWidth/u);
+  assert.match(overlay, /constraints\.stageAspect/u);
   assert.doesNotMatch(measurement, /\.tool-body["']/u);
   assert.doesNotMatch(overlay, /appendChild|append\(|replaceChildren|innerHTML/u);
   assert.match(overlay, /pointer-events:\s*none/u);

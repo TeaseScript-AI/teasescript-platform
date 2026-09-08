@@ -153,7 +153,7 @@ test("Vue Player route has one component owner and explicit development tool bou
   assert.match(core, /<PlayerTranscript/u);
   assert.match(core, /<PlayerForeground/u);
   assert.match(core, /<PlayerComposer/u);
-  assert.match(core, /<PlayerRightRail/u);
+  assert.match(core, /<PlayerBackgroundControls/u);
   assert.match(main, /createApp\(App\)\.mount\("#app"\)/u);
   assert.match(main, /components-visual-lab/u);
   assert.doesNotMatch(main, /components-layout-debug/u);
@@ -190,6 +190,8 @@ test("Vue Player route has one component owner and explicit development tool bou
   assert.match(runtimeSession, /fixture-only[\s\S]*history stay local/u);
   assert.match(runtimeSession, /useId\(\)/u);
   assert.match(layout, /stripWidth \+ panelChromeWidth/u);
+  assert.match(layout, /resolveStageHeight/u);
+  assert.match(layout, /canReserveSideTrack/u);
   assert.doesNotMatch(index, /browser\.js/u);
 });
 
@@ -221,14 +223,15 @@ test("Vue transcript uses TanStack's single virtual scroll and anchor owner", as
 });
 
 test("Vue media transitions and timer allocation preserve accessibility and live sizing", async () => {
-  const [media, mediaStyles, rightRail] = await Promise.all([
+  const [media, mediaStyles, timer] = await Promise.all([
     readFile(resolve(process.cwd(), "player/vue/src/components/PlayerMedia.vue"), "utf8"),
     readFile(resolve(process.cwd(), "player/styles/components-media.css"), "utf8"),
-    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerRightRail.vue"), "utf8"),
+    readFile(resolve(process.cwd(), "player/vue/src/components/PlayerTimer.vue"), "utf8"),
   ]);
   assert.match(media, /media-transition-outgoing[\s\S]*alt=""[\s\S]*aria-hidden="true"/u);
   assert.match(mediaStyles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation: none/u);
-  assert.match(rightRail, /props\.timerCount, props\.timerKind/u);
-  assert.match(rightRail, /querySelector<HTMLElement>\("\.timer-list"\)/u);
-  assert.match(rightRail, /observer\?\.observe\(timerList\)/u);
+  assert.match(timer, /timerProgressPercent/u);
+  assert.match(timer, /class="stage-timers"/u);
+  assert.match(timer, /aria-label="\$\{.*\}"|:aria-label=/u);
+  assert.match(timer, /timerKind !== 'hidden'/u);
 });
