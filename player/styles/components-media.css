@@ -1,74 +1,270 @@
 @layer components {
-      /* ---------- Media ---------- */
+  /* ---------- stage ---------- */
 
-      .media-surface {
-        position: relative;
+  .media-surface {
+    position: relative;
 
-        width: 100%;
-        height: 100%;
+    width: 100%;
+    height: 100%;
 
-        display: grid;
-        place-items: center;
+    display: grid;
+    place-items: center;
 
-        overflow: hidden;
+    overflow: hidden;
 
-        outline: 0;
-        color: transparent;
-      }
+    outline: 0;
+    color: transparent;
+  }
 
-      .media-content {
-        width: 100%;
-        height: 100%;
-        min-width: 0;
-        min-height: 0;
-      }
+  .media-content {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
 
-      .media-transition-outgoing {
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-      }
+  .media-transition-outgoing {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
 
-      .media-area[data-media-transition="fade"] .media-transition-incoming {
-        animation: media-fade-in 320ms ease both;
-      }
+  .media-area[data-media-transition="fade"] .media-transition-incoming,
+  .media-area[data-media-transition="crossfade"] .media-transition-incoming {
+    animation: media-fade-in 320ms ease both;
+  }
 
-      .media-area[data-media-transition="crossfade"] .media-transition-incoming {
-        animation: media-fade-in 320ms ease both;
-      }
+  .media-area[data-media-transition="crossfade"] .media-transition-outgoing {
+    animation: media-fade-out 320ms ease both;
+  }
 
-      .media-area[data-media-transition="crossfade"] .media-transition-outgoing {
-        animation: media-fade-out 320ms ease both;
-      }
+  .media-content[hidden] {
+    display: none;
+  }
 
-      .media-content[hidden] {
-        display: none;
-      }
+  img.media-content,
+  video.media-content {
+    display: block;
+    object-fit: var(--media-fit, contain);
+    object-position: center;
+  }
 
-      img.media-content,
-      video.media-content {
-        display: block;
-        object-fit: var(--media-fit, contain);
-        object-position: center;
-      }
+  /*
+    Decorative stage effects stay pointer-neutral so the stage remains a valid
+    pacing-skip background. The vignette is clipped to the stage; the soft lower
+    edge carries the media into the shared background field instead of ending on
+    a hard horizontal cut.
+  */
+  .stage-vignette,
+  .stage-edge {
+    position: absolute;
+    pointer-events: none;
+  }
 
-      @keyframes media-fade-in {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
+  .stage-vignette {
+    inset: 0;
+    background: radial-gradient(
+      130% 108% at 50% 42%,
+      transparent 52%,
+      color-mix(in srgb, var(--color-stage-void) 62%, transparent) 100%
+    );
+  }
 
-      @keyframes media-fade-out {
-        from { opacity: 1; }
-        to { opacity: 0; }
-      }
+  .stage-edge {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    block-size: 64px;
+    background: linear-gradient(
+      to bottom,
+      transparent 0,
+      color-mix(in srgb, var(--color-surface-canvas) 68%, transparent) 100%
+    );
+  }
 
-      @media (prefers-reduced-motion: reduce) {
-        .media-area[data-media-transition="fade"] .media-transition-incoming,
-        .media-area[data-media-transition="crossfade"] .media-transition-incoming,
-        .media-area[data-media-transition="crossfade"] .media-transition-outgoing {
-          animation: none;
-        }
-      }
+  @keyframes media-fade-in {
+    from {
+      opacity: 0;
+    }
 
+    to {
+      opacity: 1;
+    }
+  }
 
+  @keyframes media-fade-out {
+    from {
+      opacity: 1;
+    }
+
+    to {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .media-area[data-media-transition="fade"] .media-transition-incoming,
+    .media-area[data-media-transition="crossfade"] .media-transition-incoming,
+    .media-area[data-media-transition="crossfade"] .media-transition-outgoing {
+      animation: none;
+    }
+  }
+
+  /* ---------- timers on the stage ---------- */
+
+  /*
+    Time pressure belongs where the scene is, not in a far corner of a side
+    rail. Timers dock to the stage's lower-left as determinate dial capsules and
+    stay pointer-neutral so they never create a dead zone on the stage.
+  */
+  .stage-timers {
+    position: absolute;
+    z-index: 3;
+    right: calc(12px + var(--safe-right));
+    bottom: 12px;
+    left: calc(12px + var(--safe-left));
+
+    display: flex;
+    justify-content: start;
+
+    min-inline-size: 0;
+    max-block-size: min(62%, 260px);
+
+    pointer-events: none;
+  }
+
+  .timer-list {
+    --instrument-edge-fade: 10px;
+
+    box-sizing: border-box;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    min-block-size: 0;
+
+    display: flex;
+    flex-direction: column;
+    align-items: start;
+    gap: 6px;
+
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+
+    padding-block: var(--instrument-edge-fade);
+
+    scrollbar-width: none;
+
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--instrument-edge-fade),
+      #000 calc(100% - var(--instrument-edge-fade)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--instrument-edge-fade),
+      #000 calc(100% - var(--instrument-edge-fade)),
+      transparent 100%
+    );
+  }
+
+  .timer-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .timer {
+    position: relative;
+    flex: 0 0 auto;
+
+    display: flex;
+    align-items: center;
+    gap: 9px;
+
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    padding-inline: 7px 14px;
+    padding-block: 6px;
+
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The dial is the shared thread bent into a ring. */
+  .timer-dial {
+    --timer-ring: 3px;
+
+    position: relative;
+    flex: 0 0 auto;
+
+    inline-size: var(--timer-dial);
+    block-size: var(--timer-dial);
+
+    display: grid;
+    place-items: center;
+
+    border-radius: 50%;
+    background: conic-gradient(
+      var(--package-accent) 0 var(--timer-progress),
+      color-mix(in srgb, var(--color-text-muted) 52%, transparent) var(--timer-progress) 100%
+    );
+
+    -webkit-mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - var(--timer-ring)),
+      #000 calc(100% - var(--timer-ring) + 0.5px)
+    );
+    mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - var(--timer-ring)),
+      #000 calc(100% - var(--timer-ring) + 0.5px)
+    );
+  }
+
+  .timer-readout {
+    min-inline-size: 0;
+    display: grid;
+    gap: 1px;
+  }
+
+  .timer-text {
+    color: var(--color-text-primary);
+    font-size: 1.05rem;
+    font-weight: 650;
+    letter-spacing: 0;
+    line-height: 1.1;
+  }
+
+  .timer-label {
+    color: var(--color-text-muted);
+    font-size: var(--text-label);
+    font-weight: 600;
+    letter-spacing: var(--tracking-label);
+    line-height: 1.2;
+
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /*
+    Only the first visible timer in presentation order carries the lead reading.
+    Presentation order never indicates whether script execution is blocked.
+  */
+  .timer:not(:first-child) {
+    --timer-dial: 22px;
+    padding-block: 4px;
+  }
+
+  .timer:not(:first-child) .timer-dial {
+    --timer-ring: 2px;
+  }
+
+  .timer:not(:first-child) .timer-text {
+    font-size: 0.8125rem;
+  }
+
+  .timer[data-timer-kind="mystery"] .timer-text {
+    letter-spacing: 0.02em;
+  }
 }

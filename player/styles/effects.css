@@ -1,546 +1,512 @@
 @layer effects {
-      /* Optional effects here are cosmetic only and never change geometry. */
-
-      /*
-        Media-derived ambience for the shared stage/transcript field. One owner
-        paints both regions, so the scene's colour carries across the boundary
-        instead of stopping at a visible seam. The wash covers the complete
-        stage, then fades out over the top of the conversation and is gone well
-        before the composer. It stays inside the middle column, so tool columns,
-        the right rail, and Player chrome keep their own application surfaces.
-      */
-      .player::before {
-        opacity: 0;
-
-        background:
-          radial-gradient(
-            ellipse 90% 55% at 68% 0%,
-            color-mix(in srgb, var(--scene-ambient) 34%, transparent),
-            transparent 72%
-          ),
-          linear-gradient(
-            to bottom,
-            color-mix(in srgb, var(--scene-ambient) 26%, transparent) 0,
-            color-mix(in srgb, var(--scene-ambient) 26%, transparent)
-              var(--media-height),
-            transparent calc(var(--media-height) + 200px)
-          );
-      }
-
-      .player.fx-ambient::before {
-        opacity: 1;
-      }
-
-      .composer form,
-      .icon-button,
-      .tool-column-add,
-      .tool-column-close,
-      .tool-selector,
-      .action-button,
-      .send-button,
-      .lab-reset {
-        transition:
-          background 120ms ease,
-          border-color 120ms ease,
-          box-shadow 120ms ease;
-      }
-
-      @media (any-hover: hover) {
-        .composer form:has(textarea:not(:disabled):hover) {
-          border-color: var(--color-border-hover);
-          background: var(--color-surface-component);
-        }
-
-        .icon-button:not(:disabled):hover,
-        .tool-column-add:not(:disabled):hover,
-        .tool-column-close:not(:disabled):hover,
-        .tool-selector:not(:disabled):hover,
-        .lab-reset:not(:disabled):hover {
-          border-color: var(--color-border-hover);
-          background: var(--color-component-hover);
-          box-shadow: none;
-        }
-
-        .send-button:not(:disabled):hover {
-          border-color: var(--color-accent-solid-hover);
-          background: var(--color-accent-solid-hover);
-          box-shadow: none;
-        }
-      }
-
-      .icon-button:not(:disabled):active,
-      .tool-column-add:not(:disabled):active,
-      .tool-column-close:not(:disabled):active,
-      .tool-selector:not(:disabled):active,
-      .lab-reset:not(:disabled):active {
-        border-color: var(--color-border-pressed);
-        background: var(--color-component-pressed);
-        box-shadow: none;
-      }
-
-
-      @media (any-hover: hover) {
-        .action-button:not(:disabled):hover {
-          border-color: var(--color-border-hover);
-          background: color-mix(in srgb, var(--color-component-hover) 60%, transparent);
-          box-shadow: none;
-        }
-      }
-
-      .action-button:not(:disabled):active {
-        border-color: var(--color-border-pressed);
-        background: color-mix(in srgb, var(--color-component-pressed) 60%, transparent);
-        box-shadow: none;
-      }
-
-      .right-control[aria-busy="true"] {
-        overflow: hidden;
-      }
-
-      .right-control[aria-busy="true"]::after {
-        content: "";
-
-        position: absolute;
-        pointer-events: none;
-      }
-
-      .right-control[aria-busy="true"][data-busy-style="pulse"]::after {
-        right: 0;
-        bottom: 0;
-        left: 0;
-
-        block-size: 2px;
-
-        background: var(--package-accent);
-        opacity: 0.22;
-
-        animation: action-busy-pulse 2400ms ease-in-out infinite;
-      }
-
-      .right-control[aria-busy="true"][data-busy-style="sweep"]::after {
-        bottom: 0;
-        left: 0;
-
-        inline-size: 28%;
-        block-size: 2px;
-
-        background: var(--package-accent);
-        opacity: 0.55;
-        transform: translateX(-110%);
-
-        animation: action-busy-sweep 2800ms linear infinite;
-      }
-
-      .right-control[aria-busy="true"][data-busy-style="dots"]::after {
-        right: 8px;
-        bottom: 3px;
-
-        inline-size: 18px;
-        block-size: 3px;
-
-        background:
-          radial-gradient(
-            circle,
-            var(--package-accent) 0 1.25px,
-            transparent 1.5px
-          )
-          0 50% / 6px 3px repeat-x;
-        opacity: 0.28;
-
-        animation: action-busy-dots 2200ms ease-in-out infinite;
-      }
-
-      .right-control[aria-busy="true"][data-busy-style="corner-dot"]::after {
-        right: 8px;
-        bottom: 7px;
-
-        inline-size: 6px;
-        block-size: 6px;
-        border-radius: 50%;
-
-        background: var(--package-accent);
-        opacity: 0.25;
-
-        animation: action-busy-corner-dot 2600ms ease-in-out infinite;
-      }
-
-      .right-control[aria-busy="true"][data-busy-style="spinner"]::after {
-        right: 7px;
-        bottom: 6px;
-
-        inline-size: 10px;
-        block-size: 10px;
-        border: 2px solid color-mix(in srgb, var(--package-accent) 22%, transparent);
-        border-top-color: var(--package-accent);
-        border-radius: 50%;
-
-        opacity: 0.6;
-
-        animation: action-busy-spinner 2400ms linear infinite;
-      }
-
-      .right-control[aria-busy="true"][data-busy-style="wash"]::after {
-        inset: 0;
-
-        background:
-          linear-gradient(
-            90deg,
-            transparent 0 24%,
-            color-mix(in srgb, var(--package-accent) 8%, transparent) 48% 52%,
-            transparent 76% 100%
-          );
-        opacity: 0.45;
-        transform: translateX(-34%);
-
-        animation: action-busy-wash 3600ms ease-in-out infinite;
-      }
-
-      @keyframes action-busy-pulse {
-        0%,
-        100% {
-          opacity: 0.18;
-        }
-
-        50% {
-          opacity: 0.5;
-        }
-      }
-
-      @keyframes action-busy-sweep {
-        from {
-          transform: translateX(-110%);
-        }
-
-        to {
-          transform: translateX(470%);
-        }
-      }
-
-      @keyframes action-busy-dots {
-        0%,
-        100% {
-          opacity: 0.22;
-        }
-
-        50% {
-          opacity: 0.58;
-        }
-      }
-
-      @keyframes action-busy-corner-dot {
-        0%,
-        100% {
-          opacity: 0.2;
-        }
-
-        50% {
-          opacity: 0.62;
-        }
-      }
-
-      @keyframes action-busy-spinner {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-
-      @keyframes action-busy-wash {
-        0%,
-        100% {
-          transform: translateX(-34%);
-          opacity: 0.28;
-        }
-
-        50% {
-          transform: translateX(34%);
-          opacity: 0.52;
-        }
-      }
-
-      .send-button:not(:disabled):active {
-        border-color: var(--color-accent-solid-pressed);
-        background: var(--color-accent-solid-pressed);
-        box-shadow: none;
-      }
-
-      .composer form:has(textarea:not(:disabled):active) {
-        border-color: var(--color-border-pressed);
-        background: var(--color-surface-component);
-      }
-
-      .composer form:has(textarea:disabled) {
-        border-color: var(--color-border-disabled);
-        background: var(--color-surface-disabled);
-      }
-
-      @media (hover: none), (pointer: coarse) {
-        .icon-button,
-        .tool-column-add,
-        .tool-column-close,
-        .action-button,
-        .foreground-button,
-        .return-to-latest,
-        .right-toggle-control,
-        .right-select-control,
-        .send-button,
-        .lab-reset {
-          -webkit-tap-highlight-color: transparent;
-          touch-action: manipulation;
-        }
-      }
-
-      .composer form:has(textarea:focus-visible) {
-        outline: var(--focus-outline-width) solid var(--color-accent-focus);
-        outline-offset: 1px;
-      }
-
-      .icon-button:focus-visible,
-      .tool-column-add:focus-visible,
-      .tool-column-close:focus-visible,
-      .tool-selector:focus-visible,
-      .action-button:focus-visible,
-      .send-button:focus-visible,
-      .lab-reset:focus-visible,
-      .lab-tuning-input:focus-visible,
-      .lab-select:focus-visible {
-        outline: var(--focus-outline-width) solid var(--color-accent-focus);
-        outline-offset: 1px;
-      }
-
-      .switch input:focus-visible + .switch-ui {
-        outline: var(--focus-outline-width) solid var(--color-accent-focus);
-        outline-offset: 1px;
-      }
-
-      @media (any-hover: hover) {
-        .lab-tuning-input:not(:disabled):hover,
-        .lab-select:not(:disabled):hover {
-          border-color: var(--color-border-hover);
-        }
-
-        .switch input:not(:disabled) + .switch-ui:hover {
-          background: var(--color-component-hover);
-        }
-      }
-
-      .switch input:not(:disabled) + .switch-ui:active {
-        border-color: var(--color-border-pressed);
-        background: var(--color-component-pressed);
-      }
-
-      .switch input:checked:not(:disabled) + .switch-ui:active {
-        border-color: var(--color-accent-solid);
-      }
-
-      .tool-column-add:disabled,
-      .tool-column-close:disabled,
-      .tool-selector:disabled,
-      .lab-reset:disabled,
-      .lab-select:disabled {
-        border-color: var(--color-border-disabled);
-        background: var(--color-surface-disabled);
-        color: var(--color-text-disabled);
-        cursor: not-allowed;
-      }
-
-      .switch input:disabled + .switch-ui {
-        border-color: var(--color-border-disabled);
-        background: var(--color-surface-disabled);
-        cursor: not-allowed;
-      }
-
-      .switch input:disabled + .switch-ui::after {
-        background: var(--color-text-disabled);
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .composer form,
-        .icon-button,
-        .tool-column-add,
-        .tool-column-close,
-        .tool-selector,
-        .action-button,
-        .send-button,
-        .lab-reset {
-          transition-duration: 0.001ms;
-        }
-
-        .right-control[aria-busy="true"]::after {
-          animation: none;
-          opacity: 0.42;
-        }
-
-        .right-control[aria-busy="true"][data-busy-style="sweep"]::after {
-          transform: translateX(128%);
-        }
-
-
-        .right-control[aria-busy="true"][data-busy-style="spinner"]::after {
-          transform: rotate(45deg);
-        }
-
-        .right-control[aria-busy="true"][data-busy-style="wash"]::after {
-          transform: translateX(0);
-        }
-      }
+  /* Effects here are cosmetic only and never change geometry. */
+
+  /*
+    Media-derived ambience for the shared stage/transcript field. One owner
+    paints both regions so the scene's colour carries across the boundary
+    instead of stopping at a visible seam. The wash covers the complete stage,
+    then fades out over the top of the conversation and is gone well before the
+    response lane and composer.
+  */
+  .player::before {
+    opacity: 0;
+
+    background:
+      radial-gradient(
+        ellipse 96% 62% at 62% 0%,
+        color-mix(in srgb, var(--scene-ambient) 30%, transparent),
+        transparent 74%
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--scene-ambient) 20%, transparent) 0,
+        color-mix(in srgb, var(--scene-ambient) 20%, transparent) var(--stage-height),
+        transparent calc(var(--stage-height) + 220px)
+      );
+  }
+
+  .player.fx-ambient::before {
+    opacity: 1;
+  }
+
+  /* ---------- shared neutral control progression ---------- */
+
+  .icon-button,
+  .instrument-disclosure,
+  .tool-selector,
+  .tool-column-add,
+  .tool-column-close,
+  .runtime-session-button,
+  .lab-select,
+  .lab-tuning-input,
+  .lab-reset,
+  .lab-option-info-trigger,
+  .foreground-button,
+  .return-to-latest,
+  .action-button,
+  .right-toggle-control,
+  .right-select-control,
+  .right-select-control select,
+  .right-switch-ui,
+  .send-button,
+  .composer form {
+    transition:
+      background 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease,
+      box-shadow 140ms ease;
+  }
+
+  @media (any-hover: hover) {
+    .icon-button:not(:disabled):hover,
+    .instrument-disclosure:not(:disabled):hover,
+    .tool-selector:not(:disabled):hover,
+    .tool-column-add:not(:disabled):hover,
+    .tool-column-close:not(:disabled):hover,
+    .runtime-session-button:not(:disabled):hover,
+    .lab-select:not(:disabled):hover,
+    .lab-tuning-input:not(:disabled):hover,
+    .lab-reset:not(:disabled):hover,
+    .lab-option-info-trigger:not(:disabled):hover,
+    .foreground-button:not(:disabled):hover,
+    .return-to-latest:not(:disabled):hover,
+    .action-button:not(:disabled):hover,
+    .right-toggle-control:not(:has(input:disabled)):hover,
+    .right-select-control:not(:has(select:disabled)):hover {
+      border-color: var(--color-border-hover);
+      background: var(--color-component-hover);
+      color: var(--color-text-primary);
     }
 
-@layer effects {
-      .foreground-button,
-      .return-to-latest,
-      .right-toggle-control,
-      .right-select-control,
-      .right-select-control select,
-      .right-switch-ui {
-        transition:
-          background 120ms ease,
-          border-color 120ms ease,
-          box-shadow 120ms ease;
-      }
+    .tool-column-add:not(:disabled):hover,
+    .tool-column-close:not(:disabled):hover,
+    .lab-option-info-trigger:not(:disabled):hover {
+      color: var(--color-text-primary);
+    }
 
-      @media (any-hover: hover) {
-        .foreground-button:not(:disabled):hover,
-        .return-to-latest:not(:disabled):hover,
-        .right-toggle-control:not(:has(input:disabled)):hover,
-        .right-select-control:not(:has(select:disabled)):hover {
-          border-color: var(--color-border-hover);
-          background: color-mix(in srgb, var(--color-component-hover) 60%, transparent);
-        }
+    .right-select-control select:not(:disabled):hover,
+    .right-toggle-control:not(:has(input:disabled)):hover .right-switch-ui {
+      border-color: var(--color-border-hover);
+    }
 
-        .right-select-control select:not(:disabled):hover,
-        .right-toggle-control:not(:has(input:disabled)):hover .right-switch-ui {
-          border-color: var(--color-border-hover);
-        }
-      }
+    .composer form:has(textarea:not(:disabled):hover) {
+      border-color: var(--color-border-hover);
+    }
 
-      .foreground-button:not(:disabled):active,
-      .return-to-latest:not(:disabled):active,
-      .right-toggle-control:not(:has(input:disabled)):active,
-      .right-select-control:not(:has(select:disabled)):active {
-        border-color: var(--color-border-pressed);
-        background: color-mix(in srgb, var(--color-component-pressed) 60%, transparent);
-      }
+    .send-button:not(:disabled):hover {
+      border-color: var(--color-accent-solid-hover);
+      background: var(--color-accent-solid-hover);
+    }
 
-      .right-select-control select:not(:disabled):active {
-        border-color: var(--color-border-pressed);
-      }
+    .switch input:not(:disabled) + .switch-ui:hover {
+      border-color: var(--color-border-hover);
+    }
+  }
 
-      .foreground-button:focus-visible,
-      .return-to-latest:focus-visible,
-      .right-toggle-control input:focus-visible + .right-switch-ui,
-      .right-select-control select:focus-visible {
-        outline: var(--focus-outline-width) solid var(--color-accent-focus);
-        outline-offset: 1px;
-      }
+  .icon-button:not(:disabled):active,
+  .instrument-disclosure:not(:disabled):active,
+  .tool-selector:not(:disabled):active,
+  .tool-column-add:not(:disabled):active,
+  .tool-column-close:not(:disabled):active,
+  .runtime-session-button:not(:disabled):active,
+  .lab-select:not(:disabled):active,
+  .lab-reset:not(:disabled):active,
+  .lab-option-info-trigger:not(:disabled):active,
+  .foreground-button:not(:disabled):active,
+  .return-to-latest:not(:disabled):active,
+  .action-button:not(:disabled):active,
+  .right-toggle-control:not(:has(input:disabled)):active,
+  .right-select-control:not(:has(select:disabled)):active {
+    border-color: var(--color-border-pressed);
+    background: var(--color-component-pressed);
+  }
 
-      .action-button[data-authored-fill]:not(:disabled) {
-        border-color: color-mix(in oklab, var(--authored-control-fill) 78%, black);
-        background: color-mix(in srgb, var(--authored-control-fill) 60%, transparent);
-        color: var(--authored-control-text);
-      }
+  .composer form:has(textarea:not(:disabled):active) {
+    border-color: var(--color-border-pressed);
+  }
 
-      .foreground-button[data-authored-fill]:not(:disabled) {
-        border-color: color-mix(in oklab, var(--authored-control-fill) 78%, black);
-        background: var(--authored-control-fill);
-        color: var(--authored-control-text);
-      }
+  .send-button:not(:disabled):active {
+    border-color: var(--color-accent-solid-pressed);
+    background: var(--color-accent-solid-pressed);
+  }
 
-      @media (any-hover: hover) {
-        .action-button[data-authored-fill]:not(:disabled):hover {
-          border-color: color-mix(in oklab, var(--authored-control-hover) 76%, black);
-          background: color-mix(in srgb, var(--authored-control-hover) 60%, transparent);
-          color: var(--authored-control-text);
-        }
+  .switch input:not(:disabled) + .switch-ui:active,
+  .right-toggle-control input:not(:disabled) + .right-switch-ui:active {
+    border-color: var(--color-border-pressed);
+    background: var(--color-component-pressed);
+  }
 
-        .foreground-button[data-authored-fill]:not(:disabled):hover {
-          border-color: color-mix(in oklab, var(--authored-control-hover) 76%, black);
-          background: var(--authored-control-hover);
-          color: var(--authored-control-text);
-        }
-      }
+  .composer form:has(textarea:disabled) {
+    border-color: var(--color-border-disabled);
+    background: var(--color-surface-disabled);
+  }
 
-      .action-button[data-authored-fill]:not(:disabled):active {
-        border-color: color-mix(in oklab, var(--authored-control-pressed) 72%, black);
-        background: color-mix(in srgb, var(--authored-control-pressed) 60%, transparent);
-        color: var(--authored-control-text);
-      }
+  /* ---------- focus ---------- */
 
-      .foreground-button[data-authored-fill]:not(:disabled):active {
-        border-color: color-mix(in oklab, var(--authored-control-pressed) 72%, black);
-        background: var(--authored-control-pressed);
-        color: var(--authored-control-text);
-      }
+  .icon-button:focus-visible,
+  .instrument-disclosure:focus-visible,
+  .tool-selector:focus-visible,
+  .tool-column-add:focus-visible,
+  .tool-column-close:focus-visible,
+  .runtime-session-button:focus-visible,
+  .lab-select:focus-visible,
+  .lab-tuning-input:focus-visible,
+  .lab-reset:focus-visible,
+  .lab-option-info-trigger:focus-visible,
+  .foreground-button:focus-visible,
+  .return-to-latest:focus-visible,
+  .action-button:focus-visible,
+  .send-button:focus-visible,
+  .right-select-control select:focus-visible,
+  .right-toggle-control input:focus-visible + .right-switch-ui,
+  .switch input:focus-visible + .switch-ui,
+  .composer form:has(textarea:focus-visible) {
+    outline: var(--focus-outline-width) solid var(--color-accent-focus);
+    outline-offset: 1px;
+  }
 
-      .right-control[data-script-update-feedback="highlight"] {
-        animation: script-update-highlight 2400ms ease-out both;
-      }
+  /* ---------- disabled ---------- */
 
-      .script-update-toast {
-        position: absolute;
-        z-index: 70;
-        right: calc(12px + var(--safe-right));
-        bottom: calc(12px + var(--safe-bottom-reserve));
-        max-width: min(320px, calc(100% - 24px));
-        padding: 8px 10px;
-        border: 1px solid var(--color-border-default);
-        border-radius: 6px;
-        background: var(--color-surface-component);
-        color: var(--color-text-primary);
-        box-shadow: 0 3px 10px var(--color-structural-shadow);
-        font-size: 10px;
-      }
+  .tool-selector:disabled,
+  .tool-column-add:disabled,
+  .tool-column-close:disabled,
+  .runtime-session-button:disabled,
+  .lab-select:disabled,
+  .lab-tuning-input:disabled,
+  .lab-reset:disabled {
+    border-color: var(--color-border-disabled);
+    background: var(--color-surface-disabled);
+    color: var(--color-text-disabled);
+    cursor: not-allowed;
+  }
 
-      @keyframes script-update-highlight {
-        0%, 28% {
-          border-color: var(--package-accent);
-          box-shadow: 0 0 0 3px color-mix(in srgb, var(--package-accent) 24%, transparent);
-        }
+  .switch input:disabled + .switch-ui {
+    border-color: var(--color-border-disabled);
+    background: var(--color-surface-disabled);
+    cursor: not-allowed;
+  }
 
-        100% {
-          box-shadow: 0 0 0 0 transparent;
-        }
-      }
+  .switch input:disabled + .switch-ui::after {
+    background: var(--color-text-disabled);
+  }
 
-      .timer[data-timer-kind="mystery"]::before {
-        background:
-          conic-gradient(
-            from 0deg,
-            transparent 0 18%,
-            var(--package-accent) 18% 52%,
-            transparent 52% 100%
-          );
-        animation: mystery-timer-ring 1500ms linear infinite;
-      }
+  /* ---------- authored control colour ---------- */
 
-      @keyframes mystery-timer-ring {
-        to {
-          transform: rotate(360deg);
-        }
-      }
+  /*
+    Authored response-lane controls use their solid fill because media never
+    sits behind that lane; authored background controls keep the translucent
+    floating treatment used by the rest of the rail.
+  */
+  .foreground-button[data-authored-fill]:not(:disabled) {
+    border-color: color-mix(in oklab, var(--authored-control-fill) 78%, black);
+    background: var(--authored-control-fill);
+    color: var(--authored-control-text);
+  }
 
-      @media (prefers-reduced-motion: reduce) {
-        .right-control[data-script-update-feedback="highlight"] {
-          animation: none;
-          border-color: var(--package-accent);
-          box-shadow: 0 0 0 2px color-mix(in srgb, var(--package-accent) 24%, transparent);
-        }
+  .action-button[data-authored-fill]:not(:disabled) {
+    border-color: color-mix(in oklab, var(--authored-control-fill) 78%, black);
+    background: color-mix(in srgb, var(--authored-control-fill) 62%, transparent);
+    color: var(--authored-control-text);
+  }
 
-        .foreground-button,
-        .return-to-latest,
-        .right-toggle-control,
-        .right-select-control,
-        .right-select-control select,
-        .right-switch-ui {
-          transition-duration: 0.001ms;
-        }
+  @media (any-hover: hover) {
+    .foreground-button[data-authored-fill]:not(:disabled):hover {
+      border-color: color-mix(in oklab, var(--authored-control-hover) 76%, black);
+      background: var(--authored-control-hover);
+      color: var(--authored-control-text);
+    }
 
-        .right-switch-ui::after {
-          transition-duration: 0.001ms;
-        }
+    .action-button[data-authored-fill]:not(:disabled):hover {
+      border-color: color-mix(in oklab, var(--authored-control-hover) 76%, black);
+      background: color-mix(in srgb, var(--authored-control-hover) 62%, transparent);
+      color: var(--authored-control-text);
+    }
+  }
 
-        .timer[data-timer-kind="mystery"]::before {
-          animation: none;
-          transform: rotate(45deg);
-        }
-      }
+  .foreground-button[data-authored-fill]:not(:disabled):active {
+    border-color: color-mix(in oklab, var(--authored-control-pressed) 72%, black);
+    background: var(--authored-control-pressed);
+    color: var(--authored-control-text);
+  }
+
+  .action-button[data-authored-fill]:not(:disabled):active {
+    border-color: color-mix(in oklab, var(--authored-control-pressed) 72%, black);
+    background: color-mix(in srgb, var(--authored-control-pressed) 62%, transparent);
+    color: var(--authored-control-text);
+  }
+
+  /* ---------- touch ---------- */
+
+  @media (hover: none), (pointer: coarse) {
+    .icon-button,
+    .instrument-disclosure,
+    .tool-column-add,
+    .tool-column-close,
+    .action-button,
+    .foreground-button,
+    .return-to-latest,
+    .right-toggle-control,
+    .right-select-control,
+    .send-button,
+    .lab-reset {
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+  }
+
+  /* ---------- in-place busy activity ---------- */
+
+  /*
+    Interactive background controls stay in place while their handler runs and
+    expose a distinct busy state without reflow and without implying that the
+    control was disabled or removed.
+  */
+  .right-control[aria-busy="true"] {
+    overflow: hidden;
+  }
+
+  .right-control[aria-busy="true"]::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+  }
+
+  .right-control[aria-busy="true"][data-busy-style="pulse"]::after {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    block-size: var(--thread);
+    background: var(--package-accent);
+    opacity: 0.24;
+    animation: action-busy-pulse 2400ms ease-in-out infinite;
+  }
+
+  .right-control[aria-busy="true"][data-busy-style="sweep"]::after {
+    bottom: 0;
+    left: 0;
+    inline-size: 28%;
+    block-size: var(--thread);
+    background: var(--package-accent);
+    opacity: 0.6;
+    transform: translateX(-110%);
+    animation: action-busy-sweep 2800ms linear infinite;
+  }
+
+  .right-control[aria-busy="true"][data-busy-style="dots"]::after {
+    right: 10px;
+    bottom: 4px;
+    inline-size: 18px;
+    block-size: 3px;
+    background: radial-gradient(circle, var(--package-accent) 0 1.25px, transparent 1.5px) 0 50% /
+      6px 3px repeat-x;
+    opacity: 0.32;
+    animation: action-busy-dots 2200ms ease-in-out infinite;
+  }
+
+  .right-control[aria-busy="true"][data-busy-style="corner-dot"]::after {
+    right: 10px;
+    bottom: 8px;
+    inline-size: 6px;
+    block-size: 6px;
+    border-radius: 50%;
+    background: var(--package-accent);
+    opacity: 0.3;
+    animation: action-busy-corner-dot 2600ms ease-in-out infinite;
+  }
+
+  .right-control[aria-busy="true"][data-busy-style="spinner"]::after {
+    right: 9px;
+    bottom: 7px;
+    inline-size: 10px;
+    block-size: 10px;
+    border: 2px solid color-mix(in srgb, var(--package-accent) 24%, transparent);
+    border-top-color: var(--package-accent);
+    border-radius: 50%;
+    opacity: 0.7;
+    animation: action-busy-spinner 2400ms linear infinite;
+  }
+
+  .right-control[aria-busy="true"][data-busy-style="wash"]::after {
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0 24%,
+      color-mix(in srgb, var(--package-accent) 12%, transparent) 48% 52%,
+      transparent 76% 100%
+    );
+    opacity: 0.5;
+    transform: translateX(-34%);
+    animation: action-busy-wash 3600ms ease-in-out infinite;
+  }
+
+  /* ---------- script-initiated change feedback ---------- */
+
+  .right-control[data-script-update-feedback="highlight"] {
+    animation: script-update-highlight 2400ms ease-out both;
+  }
+
+  .script-update-toast {
+    position: absolute;
+    z-index: 70;
+    right: calc(14px + var(--safe-right));
+    bottom: calc(14px + var(--safe-bottom-reserve));
+
+    max-width: min(320px, calc(100% - 28px));
+    padding: 9px 12px;
+
+    border-radius: var(--radius-control);
+    border-left: var(--thread) solid var(--package-accent);
+    background: var(--color-surface-component);
+    color: var(--color-text-primary);
+    box-shadow: 0 8px 24px var(--color-structural-shadow);
+
+    font-size: var(--text-note);
+    line-height: 1.35;
+  }
+
+  /* ---------- mystery timer ---------- */
+
+  .timer[data-timer-kind="mystery"] .timer-dial {
+    background: conic-gradient(
+      from 0deg,
+      transparent 0 18%,
+      var(--package-accent) 18% 52%,
+      transparent 52% 100%
+    );
+    animation: mystery-timer-ring 1500ms linear infinite;
+  }
+
+  @keyframes action-busy-pulse {
+    0%,
+    100% {
+      opacity: 0.18;
+    }
+
+    50% {
+      opacity: 0.52;
+    }
+  }
+
+  @keyframes action-busy-sweep {
+    from {
+      transform: translateX(-110%);
+    }
+
+    to {
+      transform: translateX(470%);
+    }
+  }
+
+  @keyframes action-busy-dots {
+    0%,
+    100% {
+      opacity: 0.24;
+    }
+
+    50% {
+      opacity: 0.6;
+    }
+  }
+
+  @keyframes action-busy-corner-dot {
+    0%,
+    100% {
+      opacity: 0.22;
+    }
+
+    50% {
+      opacity: 0.64;
+    }
+  }
+
+  @keyframes action-busy-spinner {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes action-busy-wash {
+    0%,
+    100% {
+      transform: translateX(-34%);
+      opacity: 0.3;
+    }
+
+    50% {
+      transform: translateX(34%);
+      opacity: 0.54;
+    }
+  }
+
+  @keyframes mystery-timer-ring {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes script-update-highlight {
+    0%,
+    28% {
+      border-color: var(--package-accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--package-accent) 26%, transparent);
+    }
+
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .icon-button,
+    .instrument-disclosure,
+    .tool-selector,
+    .tool-column-add,
+    .tool-column-close,
+    .runtime-session-button,
+    .lab-select,
+    .lab-tuning-input,
+    .lab-reset,
+    .lab-option-info-trigger,
+    .foreground-button,
+    .return-to-latest,
+    .action-button,
+    .right-toggle-control,
+    .right-select-control,
+    .right-select-control select,
+    .right-switch-ui,
+    .send-button,
+    .composer form,
+    .switch-ui::after,
+    .right-switch-ui::after {
+      transition-duration: 0.001ms;
+    }
+
+    .right-control[aria-busy="true"]::after {
+      animation: none;
+      opacity: 0.45;
+    }
+
+    .right-control[aria-busy="true"][data-busy-style="sweep"]::after {
+      transform: translateX(128%);
+    }
+
+    .right-control[aria-busy="true"][data-busy-style="spinner"]::after {
+      transform: rotate(45deg);
+    }
+
+    .right-control[aria-busy="true"][data-busy-style="wash"]::after {
+      transform: translateX(0);
+    }
+
+    .right-control[data-script-update-feedback="highlight"] {
+      animation: none;
+      border-color: var(--package-accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--package-accent) 26%, transparent);
+    }
+
+    .timer[data-timer-kind="mystery"] .timer-dial {
+      animation: none;
+      transform: rotate(45deg);
+    }
+  }
 }

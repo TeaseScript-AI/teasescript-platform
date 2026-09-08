@@ -1,481 +1,386 @@
+/*
+  The tool-track widths are read numerically by the layout owner and written back
+  as resolved lengths. Registering them makes the browser compute the `calc()`
+  form to a real length instead of handing JavaScript an unresolved token stream.
+  They are declared on the Player element so a Visual Lab tool-width override
+  still participates in the computation.
+*/
+@property --tools-single {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 320px;
+}
+
+@property --tools-preferred {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 320px;
+}
+
 @layer layout {
-      :root {
-        color-scheme: light;
-
-        /* Palette primitives: current light theme only. */
-        --palette-surface-base: oklch(95.839% 0.01306 71.33);
-        --palette-surface-chrome: oklch(97.586% 0.01130 71.90);
-        --palette-surface-component: oklch(99.199% 0.00734 80.72);
-        --palette-component-hover: oklch(95.449% 0.01618 64.67);
-        --palette-component-pressed: oklch(92.481% 0.02213 58.77);
-        --palette-border-subtle: oklch(84.246% 0.02905 65.71);
-        --palette-border-interactive: oklch(78.050% 0.03740 56.32);
-        --palette-border-strong: oklch(68.851% 0.04826 51.55);
-        --palette-text-primary: oklch(30.838% 0.01712 35.72);
-        --palette-text-muted: oklch(52.649% 0.02679 41.27);
-        --palette-accent-focus: oklch(64.182% 0.19236 10.29);
-        --palette-accent-solid: oklch(59.208% 0.19138 11.08);
-        --palette-accent-solid-hover: oklch(56.375% 0.18326 11.66);
-        --palette-accent-solid-pressed: oklch(52.588% 0.17301 12.20);
-        --palette-disabled-bg: oklch(93.009% 0.01361 60.56);
-        --palette-disabled-border: oklch(86.370% 0.02252 58.74);
-        --palette-disabled-text: oklch(58.486% 0.02603 41.30);
-
-        /* Semantic component tokens. A future theme replaces these mappings. */
-        --color-surface-canvas: var(--palette-surface-base);
-        --color-surface-chrome: var(--palette-surface-chrome);
-        --color-surface-component: var(--palette-surface-component);
-        --color-component-hover: var(--palette-component-hover);
-        --color-component-pressed: var(--palette-component-pressed);
-        --color-border-default: var(--palette-border-subtle);
-        --color-border-hover: var(--palette-border-interactive);
-        --color-border-pressed: var(--palette-border-strong);
-        --color-text-primary: var(--palette-text-primary);
-        --color-text-muted: var(--palette-text-muted);
-        --color-text-quiet: var(--palette-disabled-text);
-        --color-text-disabled: var(--palette-disabled-text);
-        --color-accent-focus: var(--palette-accent-focus);
-        --color-accent-solid: var(--palette-accent-solid);
-        --color-accent-solid-hover: var(--palette-accent-solid-hover);
-        --color-accent-solid-pressed: var(--palette-accent-solid-pressed);
-        --color-surface-disabled: var(--palette-disabled-bg);
-        --color-border-disabled: var(--palette-disabled-border);
-        --color-text-inverse: oklch(100% 0 0);
-        --color-structural-shadow: oklch(30.838% 0.01712 35.72 / 8%);
-        --color-structural-scrim: oklch(30.838% 0.01712 35.72 / 18%);
-
-        /* Package/media values are presentation data, not application palette tokens. */
-        --package-accent: var(--color-accent-focus);
-
-        /*
-          Player chrome respects device safe areas while media remains full-bleed.
-          The variables can also be overridden by the embedding host in tests.
-        */
-        --safe-top: env(safe-area-inset-top, 0px);
-        --safe-right: env(safe-area-inset-right, 0px);
-        --safe-bottom: env(safe-area-inset-bottom, 0px);
-        --safe-bottom-reserve: var(--safe-bottom);
-        --safe-left: env(safe-area-inset-left, 0px);
-        --player-usable-height: 100dvh;
-        --fullscreen-player-height: 100dvh;
-        --fullscreen-keyboard-inset: 0px;
-
-        --title-bar-height: 52px;
-        --title-height:
-          calc(var(--title-bar-height) + var(--safe-top));
-        --title-track: var(--title-height);
-        --title-overlay-clearance: 0px;
-
-        --tool-column-width: 300px;
-        --tool-strip-gutter-start: calc(8px + var(--safe-left));
-        --tool-strip-gutter-end: 8px;
-        --tool-strip-inline-gutters:
-          calc(
-            var(--tool-strip-gutter-start)
-            + var(--tool-strip-gutter-end)
-          );
-        --left-open:
-          calc(var(--tool-column-width) + var(--tool-strip-inline-gutters));
-        --left-grid-track: var(--left-open);
-        --left-preferred: var(--left-open);
-        --left-reserve: var(--left-open);
-
-        --media-height-normal: 55dvh;
-        --media-height-overlay: 64dvh;
-        --media-height: var(--media-height-normal);
-
-        /*
-          One authoritative right-control width.
-          Docked and overlay use exactly the same value.
-          Long Action labels wrap vertically instead of widening the rail.
-        */
-        --right-controls-width: 190px;
-        --right-track: 0px;
-        --right-reserve: 0px;
-
-        --timer-size: 86px;
-        --timer-font-size: 18px;
-
-        --action-min-height: 44px;
-        --action-font-size: 12px;
-
-        --control-padding:
-          clamp(10px, 1vmin, 17px);
-        --control-gap:
-          clamp(8px, 0.7vmin, 13px);
-
-        --conversation-max-width: 900px;
-        --conversation-min-width: 380px;
-        --conversation-gap: 18px;
-        --conversation-overlay-reserve: 0px;
-        --keyboard-transcript-reserve: 5rem;
-        --composer-max-lines: 6lh;
-        --composer-max-viewport-height: 20dvh;
-        --composer-effective-viewport-height: var(--composer-max-viewport-height);
-        --composer-font-size: 1rem;
-        --focus-outline-width: 2px;
-
-        --scene-ambient: #f7cdaf;
-        --timer-progress: 46%;
-      }
-
-      .player {
-        --primary-column-min:
-          max(
-            var(--media-height),
-            calc(
-              var(--conversation-min-width)
-              + var(--conversation-overlay-reserve)
-            )
-          );
-        --left-panel-max:
-          max(
-            var(--left-open),
-            calc(100vw - var(--right-track) - var(--primary-column-min))
-          );
-
-        position: relative;
-
-        width: 100vw;
-        height: min(100dvh, var(--player-usable-height));
-
-        display: grid;
-        grid-template-columns:
-          var(--left-grid-track)
-          minmax(0, 1fr)
-          var(--right-track);
-
-        grid-template-rows:
-          var(--title-track)
-          var(--media-height)
-          minmax(0, 1fr)
-          auto
-          auto;
-
-        overflow: hidden;
-        background: var(--color-surface-canvas);
-      }
-
-      /*
-        A measured open keyboard replaces the physical screen bottom as the
-        usable edge. Do not reserve the device bottom inset a second time.
-      */
-      .player[data-keyboard="open"] {
-        --safe-bottom-reserve: 0px;
-      }
-
-      .player[data-keyboard="open"]:not(:fullscreen) {
-        height: var(--player-usable-height);
-      }
-
-      /*
-        Browsers keep the fullscreen element itself full-size. Reserve the
-        measured keyboard occlusion inside the Player instead of asking the
-        browser to resize fullscreen.
-      */
-      .player:fullscreen {
-        height: var(--fullscreen-player-height);
-        padding-bottom: var(--fullscreen-keyboard-inset);
-      }
-
-      .player[data-left="closed"] {
-        --left-grid-track: 0px;
-        --left-reserve: 0px;
-      }
-
-      .title-bg {
-        z-index: 30;
-
-        grid-column: 1 / -1;
-        grid-row: 1;
-
-        background: var(--color-surface-chrome);
-        box-shadow: 0 2px 6px var(--color-structural-shadow);
-      }
-
-      .title-controls {
-        z-index: 50;
-
-        grid-column: 1 / -1;
-        grid-row: 1 / 3;
-        align-self: start;
-
-        height: var(--title-height);
-
-        display: flex;
-        align-items: center;
-        gap: 10px;
-
-        padding-top: var(--safe-top);
-        padding-left: calc(14px + var(--safe-left));
-        padding-right: calc(14px + var(--safe-right));
-
-        pointer-events: none;
-      }
-
-      .title-controls > * {
-        pointer-events: auto;
-      }
-
-      .left-panel {
-        position: relative;
-        z-index: 10;
-
-        grid-column: 1;
-        grid-row: 2 / 6;
-
-        min-width: 0;
-        min-height: 0;
-
-        display: grid;
-        grid-template-rows: minmax(0, 1fr);
-
-        padding-top: var(--title-overlay-clearance);
-        padding-left: 0;
-        padding-right: 0;
-
-        overflow: hidden;
-        background: var(--color-surface-chrome);
-        box-shadow: 3px 0 8px var(--color-structural-shadow);
-      }
-
-      .left-scrim {
-        display: none;
-      }
-
-      .media-area {
-        position: relative;
-
-        grid-column: 2;
-        grid-row: 2;
-
-        min-width: 0;
-        min-height: 0;
-
-        display: grid;
-        place-items: center;
-
-        overflow: hidden;
-        background: transparent;
-      }
-
-      /*
-        Stage and transcript remain separate regions with separate scrolling and
-        content ownership, but they share one continuous background field. The
-        field is placed here because it participates in the Player Grid; its
-        paint stays in the effects layer.
-      */
-      .player::before {
-        content: "";
-        z-index: 0;
-
-        grid-column: 2;
-        grid-row: 2 / 4;
-
-        pointer-events: none;
-      }
-
-      .player[data-right-layout="rail"][data-right-backing="overlay"]::before {
-        grid-column: 2 / 4;
-      }
-
-      .transcript {
-        position: relative;
-
-        grid-column: 2;
-        grid-row: 3;
-
-        min-width: 0;
-        min-height: 0;
-
-        overflow-y: auto;
-        overscroll-behavior: contain;
-
-        /*
-          The top padding matches the fade distance, so the fade consumes that
-          padding while the transcript rests at the top and only reaches real
-          content once it is actually scrolled under the stage. The right rail
-          uses the same relationship for its own edge fades.
-        */
-        --transcript-edge-fade: 28px;
-
-        padding-block: var(--transcript-edge-fade) 12px;
-
-        /*
-          Center the readable conversation shell inside the actual middle Grid
-          track. The calculation deliberately uses 100%, not 100vw, so tool
-          columns and the right rail remain the geometry owners.
-        */
-        padding-left:
-          calc(
-            max(
-              var(--conversation-gap),
-              calc((100% - var(--conversation-max-width)) / 2 + var(--conversation-gap))
-            )
-            + var(--safe-left)
-          );
-        padding-right:
-          calc(
-            max(
-              var(--conversation-gap),
-              calc((100% - var(--conversation-max-width)) / 2 + var(--conversation-gap))
-            )
-            + var(--safe-right)
-          );
-
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-
-        /* The shared stage/transcript field paints this region's background. */
-        background: transparent;
-
-        scrollbar-width: thin;
-        scrollbar-gutter: stable;
-        scrollbar-color:
-          color-mix(in srgb, var(--color-text-muted) 45%, transparent)
-          transparent;
-
-      }
-
-      /*
-        The soft top fade hides content passing under the stage, so it applies
-        only while the transcript is actually scrolled. An unscrolled
-        transcript keeps its first line fully opaque.
-      */
-      .transcript[data-scrolled-from-top="true"] {
-        -webkit-mask-image:
-          linear-gradient(
-            to bottom,
-            transparent 0,
-            #000 var(--transcript-edge-fade),
-            #000 100%
-          );
-
-        mask-image:
-          linear-gradient(
-            to bottom,
-            transparent 0,
-            #000 var(--transcript-edge-fade),
-            #000 100%
-          );
-      }
-
-      .return-to-latest {
-        z-index: 15;
-
-        grid-column: 2;
-        grid-row: 3;
-        align-self: end;
-        justify-self: end;
-
-        inline-size: 36px;
-        block-size: 36px;
-        margin:
-          0
-          calc(12px + var(--safe-right))
-          10px
-          0;
-        padding: 0;
-
-        border: 1px solid var(--color-border-default);
-        border-radius: 50%;
-        background:
-          color-mix(
-            in srgb,
-            var(--color-surface-component) 72%,
-            transparent
-          );
-        color: var(--color-text-primary);
-        -webkit-backdrop-filter: blur(6px);
-        backdrop-filter: blur(6px);
-
-        font-size: 20px;
-        font-weight: 700;
-        line-height: 1;
-        cursor: pointer;
-      }
-
-      .return-to-latest[hidden] {
-        display: none;
-      }
-
-      .composer {
-        position: relative;
-        grid-column: 2;
-        grid-row: 5;
-
-        min-width: 0;
-
-        padding-top: 5px;
-        padding-bottom: calc(6px + var(--safe-bottom-reserve));
-
-        padding-left:
-          calc(12px + var(--safe-left));
-        padding-right:
-          calc(12px + var(--safe-right));
-
-        background: var(--color-surface-canvas);
-      }
-
-      .right-zone {
-        position: relative;
-        z-index: 20;
-
-        /*
-          The base composition places Actions over the stage. The responsive
-          owner promotes this to a full docked rail only when both side
-          columns and the readable conversation width fit together.
-        */
-        grid-column: 2 / 4;
-        grid-row: 2 / 3;
-
-        justify-self: end;
-
-        inline-size: var(--right-controls-width);
-        min-inline-size: 0;
-        max-inline-size: var(--right-controls-width);
-
-        min-height: 0;
-
-        display: grid;
-        grid-template-rows:
-          var(--timer-pane-size, calc(var(--timer-size) + 26px))
-          minmax(0, 1fr);
-
-        overflow: hidden;
-
-        background: transparent;
-
-        border-left: 0;
-        box-shadow: none;
-      }
-
-      /* Backing and responsive geometry are independent derived states. */
-      .player[data-right-backing="docked"] .right-zone {
-        background: var(--color-surface-chrome);
-        box-shadow: -3px 0 8px var(--color-structural-shadow);
-      }
-
-      .player[data-right-backing="overlay"] .right-zone {
-        background: transparent;
-        box-shadow: none;
-      }
-
-      .player[data-right-layout="rail"] {
-        --right-track: var(--right-controls-width);
-        --right-reserve: var(--right-controls-width);
-      }
-
-      .player[data-right-layout="rail"] .right-zone {
-        grid-column: 3;
-        grid-row: 2 / 6;
-      }
-
-      /* A collapsed wide backing reveals stage media without recentering conversation content. */
-      .player[data-right-layout="rail"][data-right-backing="overlay"] .media-area {
-        grid-column: 2 / 4;
-      }
-
-
-    }
+  :root {
+    --player-usable-height: 100dvh;
+    --fullscreen-player-height: 100dvh;
+    --fullscreen-keyboard-inset: 0px;
+
+    /*
+      The floating global cluster overlays the stage instead of reserving a
+      band, so this is a keep-clear inset for overlaid stage content rather than
+      a layout track. The layout owner measures the rendered cluster into it.
+    */
+    --chrome-overlay-height: 46px;
+
+    /*
+      Constraint-derived stage. The layout owner resolves --stage-height from
+      the available stage width, the session media aspect, and the floor/cap
+      fractions below; the literal fallback only applies before first measure.
+      Percentages are of the currently usable visual-viewport height.
+    */
+    --stage-floor: 22;
+    --stage-cap: 46;
+    --stage-cap-immersive: 60;
+    --stage-min-height: 132px;
+    --stage-aspect: 1.3333;
+    --stage-height: 42dvh;
+
+    --tool-column-width: 300px;
+    --tools-gutter: 10px;
+    --tools-track: 0px;
+    --tools-reserve: 0px;
+
+    --rail-width: 212px;
+    --rail-track: 0px;
+    --rail-reserve: 0px;
+
+    --conversation-max-width: 760px;
+    --conversation-min-width: 380px;
+    --conversation-gap: 20px;
+    --keyboard-transcript-reserve: 5rem;
+
+    --composer-max-lines: 6lh;
+    --composer-max-viewport-height: 20dvh;
+    --composer-effective-viewport-height: var(--composer-max-viewport-height);
+    --composer-font-size: 1rem;
+
+    --timer-dial: 30px;
+    --instrument-height: 44px;
+  }
+
+  .player {
+    /*
+      Player chrome respects the safe areas the browser actually reports while
+      stage media stays full-bleed. Never reserve a static maximum inset.
+
+      These are declared on the Player, not the document root, because a custom
+      property substitutes `var()` on the element that declares it: deriving the
+      reserve here is what lets an embedding host or a test override the insets
+      on the Player and have every dependent reservation follow.
+    */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-bottom-reserve: var(--safe-bottom);
+    --safe-left: env(safe-area-inset-left, 0px);
+
+    --tools-single: calc(var(--tool-column-width) + var(--tools-gutter) * 2 + var(--safe-left));
+    /* The layout owner replaces this with the measured multi-column strip width. */
+    --tools-preferred: var(--tools-single);
+
+    position: relative;
+    isolation: isolate;
+
+    width: 100vw;
+    height: min(100dvh, var(--player-usable-height));
+
+    display: grid;
+    grid-template-columns: var(--tools-track) minmax(0, 1fr) var(--rail-track);
+    grid-template-rows:
+      var(--stage-height)
+      minmax(0, 1fr)
+      auto
+      auto
+      auto;
+
+    overflow: hidden;
+    background: var(--color-surface-canvas);
+    color: var(--color-text-primary);
+    font-family: var(--font-ui);
+  }
+
+  /*
+    A measured open keyboard replaces the physical screen bottom as the usable
+    edge, so the device bottom inset is not reserved a second time.
+  */
+  .player[data-keyboard="open"] {
+    --safe-bottom-reserve: 0px;
+  }
+
+  .player[data-keyboard="open"]:not(:fullscreen) {
+    height: var(--player-usable-height);
+  }
+
+  /*
+    Browsers keep the fullscreen element itself full-size, so the measured
+    keyboard occlusion is reserved inside the Player rather than by asking the
+    browser to resize fullscreen.
+  */
+  .player:fullscreen {
+    height: var(--fullscreen-player-height);
+    padding-bottom: var(--fullscreen-keyboard-inset);
+  }
+
+  /* ---------- stage ---------- */
+
+  .media-area {
+    position: relative;
+    z-index: 1;
+
+    grid-column: 2;
+    grid-row: 1;
+
+    min-width: 0;
+    min-height: 0;
+
+    display: grid;
+    place-items: center;
+
+    overflow: hidden;
+    background: transparent;
+  }
+
+  /*
+    Stage and transcript stay separate regions with separate content and
+    scrolling ownership while sharing one continuous background field. The field
+    participates in the Player grid here; its paint lives in the effects layer.
+    It never leaves the middle content column, so tool columns, the rail and
+    Player chrome keep their own application surfaces.
+  */
+  .player::before {
+    content: "";
+    z-index: 0;
+
+    grid-column: 2;
+    grid-row: 1 / 3;
+
+    pointer-events: none;
+  }
+
+  .player[data-right-layout="rail"][data-right-backing="overlay"]::before,
+  .player[data-right-layout="rail"][data-right-backing="overlay"] .media-area {
+    grid-column: 2 / 4;
+  }
+
+  /* ---------- floating global chrome ---------- */
+
+  .global-bar {
+    z-index: 40;
+
+    grid-column: 2 / -1;
+    grid-row: 1;
+    align-self: start;
+
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    min-width: 0;
+
+    padding:
+      calc(10px + var(--safe-top))
+      calc(12px + var(--safe-right))
+      10px
+      calc(12px + var(--safe-left));
+
+    pointer-events: none;
+  }
+
+  .global-bar > * {
+    pointer-events: auto;
+  }
+
+  /* ---------- tools ---------- */
+
+  .left-panel {
+    position: relative;
+    z-index: 10;
+
+    grid-column: 1;
+    grid-row: 1 / -1;
+
+    min-width: 0;
+    min-height: 0;
+
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+
+    overflow: hidden;
+    background: var(--color-surface-chrome);
+  }
+
+  .left-scrim {
+    display: none;
+  }
+
+  /* ---------- conversation ---------- */
+
+  .transcript {
+    position: relative;
+    z-index: 1;
+
+    grid-column: 2;
+    grid-row: 2;
+
+    min-width: 0;
+    min-height: 0;
+
+    display: flex;
+    flex-direction: column;
+
+    overflow-y: auto;
+    overscroll-behavior: contain;
+
+    /*
+      The block padding matches the edge-fade distance, so a fade consumes its
+      own padding while the transcript rests at an edge and only reaches real
+      content once the region is actually scrolled.
+    */
+    --transcript-edge-fade: 24px;
+
+    padding-block: var(--transcript-edge-fade) 10px;
+    padding-inline: calc(var(--conversation-gap) + var(--safe-left))
+      calc(var(--conversation-gap) + var(--safe-right));
+
+    background: transparent;
+
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    scrollbar-color: color-mix(in srgb, var(--color-text-muted) 40%, transparent) transparent;
+  }
+
+  /*
+    The top fade hides content passing under the stage, so it applies only while
+    the transcript is actually scrolled away from the top. At the top of history
+    the first visible line stays fully opaque.
+
+    Which treatment the boundary line itself should get is an open presentation
+    question, so all three candidates stay selectable through Visual Lab. The
+    default closes the mask late, which makes a clipped line disappear instead of
+    turning into grey ghost text.
+  */
+  [data-transcript-edge="late"] .transcript[data-scrolled-from-top="true"] {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0 calc(var(--transcript-edge-fade) - 8px),
+      #000 var(--transcript-edge-fade),
+      #000 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0 calc(var(--transcript-edge-fade) - 8px),
+      #000 var(--transcript-edge-fade),
+      #000 100%
+    );
+  }
+
+  [data-transcript-edge="fade"] .transcript[data-scrolled-from-top="true"] {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--transcript-edge-fade),
+      #000 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--transcript-edge-fade),
+      #000 100%
+    );
+  }
+
+  .return-to-latest {
+    z-index: 15;
+
+    grid-column: 2;
+    grid-row: 2;
+    align-self: end;
+    justify-self: end;
+
+    inline-size: 38px;
+    block-size: 38px;
+    margin: 0 calc(10px + var(--safe-right)) 8px 0;
+    padding: 0;
+  }
+
+  /* ---------- long-lived instruments ---------- */
+
+  .instrument-zone {
+    position: relative;
+    z-index: 20;
+
+    grid-column: 3;
+    grid-row: 1 / -1;
+
+    min-inline-size: 0;
+    min-block-size: 0;
+
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+
+    overflow: hidden;
+    background: transparent;
+  }
+
+  .player[data-right-layout="tray"] .instrument-zone {
+    grid-column: 2;
+    grid-row: 3;
+
+    padding-inline: calc(var(--conversation-gap) + var(--safe-left))
+      calc(var(--conversation-gap) + var(--safe-right));
+  }
+
+  /* An empty control set must not leave an empty conversation-width band. */
+  .player[data-right-layout="tray"] .instrument-zone:not(:has(.right-control)) {
+    display: none;
+  }
+
+  .player[data-right-backing="docked"][data-right-layout="rail"] .instrument-zone {
+    background: var(--color-surface-chrome);
+  }
+
+  .player[data-right-layout="rail"] {
+    --rail-track: var(--rail-width);
+    --rail-reserve: var(--rail-width);
+  }
+
+  /* ---------- response lane and composer ---------- */
+
+  .foreground-controls {
+    position: relative;
+    z-index: 2;
+
+    grid-column: 2;
+    grid-row: 4;
+
+    min-width: 0;
+
+    padding: 6px calc(var(--conversation-gap) + var(--safe-right)) 2px
+      calc(var(--conversation-gap) + var(--safe-left));
+
+    background: var(--color-surface-canvas);
+  }
+
+  .composer {
+    position: relative;
+    z-index: 2;
+
+    grid-column: 2;
+    grid-row: 5;
+
+    min-width: 0;
+
+    padding: 8px calc(var(--conversation-gap) + var(--safe-right))
+      calc(10px + var(--safe-bottom-reserve)) calc(var(--conversation-gap) + var(--safe-left));
+
+    background: var(--color-surface-canvas);
+  }
+}
