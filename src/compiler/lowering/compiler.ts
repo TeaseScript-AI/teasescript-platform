@@ -41,6 +41,7 @@ export class InstructionCompiler {
     string,
     { readonly id: number; readonly declaration: FunctionDeclaration }
   >;
+  readonly #instructionEmissionByExpression = new WeakMap<Expression, boolean>();
   #nextLoopId = 1;
   #nextTemporaryId = 1;
   #contextualSpeakerTemporary: number | null = null;
@@ -1222,61 +1223,49 @@ export class InstructionCompiler {
   }
 
   #containsUserCall(expression: Expression): boolean {
-    const work: Expression[] = [expression];
+    const cached = this.#instructionEmissionByExpression.get(expression);
+    if (cached !== undefined) return cached;
+
+    const work: Array<
+      | { readonly expression: Expression; readonly children: null }
+      | { readonly expression: Expression; readonly children: readonly Expression[] }
+    > = [{ expression, children: null }];
     while (work.length > 0) {
       const current = work.pop()!;
-      if (current.kind === "interactionExpression") return true;
-      if (
-        current.kind === "callExpression" &&
-        current.callee.kind === "identifier" &&
-        this.#functionByName.has(current.callee.name)
-      ) {
-        return true;
+      if (this.#instructionEmissionByExpression.has(current.expression)) continue;
+
+      if (current.children !== null) {
+        this.#instructionEmissionByExpression.set(
+          current.expression,
+          current.children.some(
+            (child) => this.#instructionEmissionByExpression.get(child) === true,
+          ),
+        );
+        continue;
       }
-      switch (current.kind) {
-        case "booleanLiteral":
-        case "nullLiteral":
-        case "numberLiteral":
-        case "stringLiteral":
-        case "identifier":
-          break;
-        case "parenthesizedExpression":
-          work.push(current.expression);
-          break;
-        case "listLiteral":
-        case "setLiteral":
-          for (const item of current.elements) work.push(item);
-          break;
-        case "objectLiteral":
-          for (const property of current.properties) work.push(property.value);
-          break;
-        case "templateLiteral":
-          for (const part of current.parts) {
-            if (part.kind === "templateInterpolation") work.push(part.expression);
-          }
-          break;
-        case "propertyAccessExpression":
-          work.push(current.object);
-          break;
-        case "indexExpression":
-          work.push(current.object, current.index);
-          break;
-        case "callExpression":
-          work.push(current.callee);
-          for (const argument of current.arguments) work.push(argument.value);
-          break;
-        case "unaryExpression":
-          work.push(current.operand);
-          break;
-        case "binaryExpression":
-          work.push(current.left, current.right);
-          break;
-        case "rangeExpression":
-          work.push(current.start, current.end);
-          break;
+
+      if (current.expression.kind === "interactionExpression") {
+        this.#instructionEmissionByExpression.set(current.expression, true);
+        continue;
+      }
+      if (
+        current.expression.kind === "callExpression" &&
+        current.expression.callee.kind === "identifier" &&
+        this.#functionByName.has(current.expression.callee.name)
+      ) {
+        this.#instructionEmissionByExpression.set(current.expression, true);
+        continue;
+      }
+
+      const children = instructionEmissionChildren(current.expression);
+      work.push({ expression: current.expression, children });
+      for (const child of children) {
+        if (!this.#instructionEmissionByExpression.has(child)) {
+          work.push({ expression: child, children: null });
+        }
       }
     }
-    return false;
+    return this.#instructionEmissionByExpression.get(expression)!;
   }
 
   #allocateTemporary(): number {
@@ -1295,6 +1284,41 @@ export class InstructionCompiler {
 interface LoweredExpression {
   readonly plan: ExpressionPlan;
   readonly temporaryIds: readonly number[];
+}
+
+function instructionEmissionChildren(expression: Expression): readonly Expression[] {
+  switch (expression.kind) {
+    case "booleanLiteral":
+    case "nullLiteral":
+    case "numberLiteral":
+    case "stringLiteral":
+    case "identifier":
+    case "interactionExpression":
+      return [];
+    case "parenthesizedExpression":
+      return [expression.expression];
+    case "listLiteral":
+    case "setLiteral":
+      return expression.elements;
+    case "objectLiteral":
+      return expression.properties.map((property) => property.value);
+    case "templateLiteral":
+      return expression.parts.flatMap((part) =>
+        part.kind === "templateInterpolation" ? [part.expression] : [],
+      );
+    case "propertyAccessExpression":
+      return [expression.object];
+    case "indexExpression":
+      return [expression.object, expression.index];
+    case "callExpression":
+      return [expression.callee, ...expression.arguments.map((argument) => argument.value)];
+    case "unaryExpression":
+      return [expression.operand];
+    case "binaryExpression":
+      return [expression.left, expression.right];
+    case "rangeExpression":
+      return [expression.start, expression.end];
+  }
 }
 
 function unwrapParentheses(expression: Expression): Expression {
