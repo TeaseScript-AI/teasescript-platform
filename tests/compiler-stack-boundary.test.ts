@@ -4,29 +4,13 @@ import test from "node:test";
 
 import { compileSource } from "../src/index.js";
 
-test("large flat chains complete or return the host-stack diagnostic with full provenance", () => {
-  let completedPlans = 0;
+test("large flat chains complete full compilation with source provenance", () => {
   for (const termCount of [200, 1_600, 6_400, 12_800]) {
     const source = flatChain(termCount);
     const result = compileSource(source);
-    if (result.plan === null) {
-      assert.deepEqual(
-        result.diagnostics.map((diagnostic) => diagnostic.code),
-        ["TSC007"],
-      );
-      assert.deepEqual(
-        result.diagnostics.map((diagnostic) => [
-          diagnostic.span.start.offset,
-          diagnostic.span.end.offset,
-        ]),
-        [[0, source.length]],
-      );
-      continue;
-    }
-
-    completedPlans += 1;
     assert.deepEqual(result.diagnostics, []);
-    const declaration = result.plan.instructions[0];
+    assert.notEqual(result.plan, null);
+    const declaration = result.plan!.instructions[0];
     assert.equal(declaration?.kind, "declareBinding");
     assert.deepEqual(
       declaration === undefined ? null : [declaration.span.so, declaration.span.eo],
@@ -34,10 +18,9 @@ test("large flat chains complete or return the host-stack diagnostic with full p
     );
     assert.equal(declaration?.kind === "declareBinding" ? declaration.value.kind : null, "binary");
   }
-  assert.ok(completedPlans > 0);
 });
 
-test("flat-chain semantic validation and lowering remain iterative with a constrained host stack", () => {
+test("flat-chain compilation remains iterative with a constrained host stack", () => {
   const source = flatChain(1_024);
   const nestedSource = `let value = ${"(".repeat(256)}1${")".repeat(256)}`;
   const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
@@ -55,12 +38,15 @@ test("flat-chain semantic validation and lowering remain iterative with a constr
     const parsed = parse(source);
     const semantic = validateSemantics(parsed.program);
     const plan = compileStableProgram(parsed.program);
+    const compiledFlat = compileSource(source);
     const contained = compileSource(process.env.TEASESCRIPT_NESTED_SOURCE);
     process.stdout.write(JSON.stringify({
       parserDiagnostics: parsed.diagnostics.length,
       semanticDiagnostics: semantic.diagnostics.length,
       instructionKinds: plan.instructions.map((instruction) => instruction.kind),
       expressionKind: plan.instructions[0]?.value?.kind,
+      compiledFlatCodes: compiledFlat.diagnostics.map((diagnostic) => diagnostic.code),
+      compiledFlatExpressionKind: compiledFlat.plan?.instructions[0]?.value?.kind,
       boundaryCodes: contained.diagnostics.map((diagnostic) => diagnostic.code),
       boundaryProgramStatements: contained.program.statements.length,
       boundarySpan: contained.diagnostics.map((diagnostic) => [
@@ -89,6 +75,8 @@ test("flat-chain semantic validation and lowering remain iterative with a constr
     semanticDiagnostics: 0,
     instructionKinds: ["declareBinding"],
     expressionKind: "binary",
+    compiledFlatCodes: [],
+    compiledFlatExpressionKind: "binary",
     boundaryCodes: ["TSC007"],
     boundaryProgramStatements: 0,
     boundarySpan: [[0, nestedSource.length]],

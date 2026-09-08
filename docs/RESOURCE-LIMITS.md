@@ -60,10 +60,10 @@ the result carries an empty program with the complete source span.
 
 This is failure containment at the normal compiler boundary, not an input preflight or rejection policy. The compiler
 does not count source depth, impose a numeric nesting limit, or promise that a particular source size will compile on
-every JavaScript host. Flat binary-chain semantic traversal and synchronous plan construction avoid the native stack;
-parser nesting, nested statements, other recursive expression shapes, and complete compiled-plan validation may still
-reach a host-dependent native boundary. The focused regression uses a deliberately constrained child-process stack to
-exercise containment without turning its fixture depth into a CI capacity threshold.
+every JavaScript host. Flat binary-chain semantic traversal, synchronous plan construction, prepared-reference scanning,
+and plan-expression validation avoid the native stack. Parser nesting, nested statements, and non-binary recursive
+expression shapes may still reach a host-dependent native boundary. The focused regression uses a deliberately
+constrained child-process stack to exercise containment without turning its fixture depth into a CI capacity threshold.
 
 ## Non-rejecting scale diagnostics
 
