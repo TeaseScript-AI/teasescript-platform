@@ -81,6 +81,17 @@ test("rejects later-parameter defaults, function assignment, values, and unknown
   assert.ok(result.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV018"));
 });
 
+test("keeps repeated parameter names in later-default reference tracking until their last occurrence", () => {
+  const result = compileSource(
+    "function repeated(value = value, value = final, final = 1) { return value }",
+  );
+
+  assert.deepEqual(
+    result.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV014", "TSV025", "TSV002", "TSV025", "TSV002"],
+  );
+});
+
 test("function scopes access globals but keep parameters and locals isolated", () => {
   const valid = compileSource(
     [
