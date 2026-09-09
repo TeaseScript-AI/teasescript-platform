@@ -60,6 +60,26 @@ test("recursively deep-copies nested lists", () => {
   ]);
 });
 
+test("list literals capture sibling values after their evaluations finish", () => {
+  const captured: unknown[] = [];
+  const result = executeSource(
+    [
+      "let source = [1]",
+      "let value = [source, source.add(2)]",
+      "source.add(3)",
+      "capture(source)",
+      "capture(value)",
+    ],
+    { capture: captureInto(captured) },
+  );
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(captured, [
+    [1, 2, 3],
+    [[1, 2], null],
+  ]);
+});
+
 test("passes builtins deep copies of canonical runtime values", () => {
   const captured: unknown[] = [];
   const mutate: RuntimeBuiltinFunction = (call) => {
@@ -159,6 +179,23 @@ test("rejects list, object, and set values in set literals at the semantic bound
       [start, start + elementText.length],
     );
   }
+});
+
+test("set literals reject each value before evaluating the next element", () => {
+  let marked = false;
+  const source = "let values = set[bad(), mark()]";
+  const bad: RuntimeBuiltinFunction = () => ({ kind: "list", items: [] });
+  const mark: RuntimeBuiltinFunction = () => {
+    marked = true;
+    return 1;
+  };
+  const result = executeSource([source], { bad, mark });
+
+  assert.deepEqual(
+    result.errors.map((error) => [error.code, error.span.start.offset, error.span.end.offset]),
+    [["TSR032", source.indexOf("bad()"), source.indexOf("bad()") + "bad()".length]],
+  );
+  assert.equal(marked, false);
 });
 
 test("rejects composite values through set add, contains, and list toSet", () => {
