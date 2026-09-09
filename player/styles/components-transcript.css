@@ -94,6 +94,120 @@
         line-height: 1.25;
       }
 
+      .message-markup,
+      .markup-paragraph,
+      .markup-quote,
+      .markup-list {
+        margin: 0;
+      }
+
+      .message-markup > :not(:first-child) {
+        margin-block-start: 0.65em;
+      }
+
+      .markup-heading {
+        font-weight: 700;
+        line-height: 1.25;
+      }
+
+      .markup-heading-1 {
+        font-size: 1.2em;
+      }
+
+      .markup-heading-2 {
+        font-size: 1.1em;
+      }
+
+      .markup-heading-3 {
+        font-size: 1.02em;
+      }
+
+      .markup-quote {
+        padding-inline-start: 0.75em;
+        border-inline-start: 0.18em solid color-mix(in srgb, currentColor 45%, transparent);
+        opacity: 0.9;
+      }
+
+      .markup-list {
+        padding-inline-start: 1.4em;
+      }
+
+      ul.markup-list {
+        list-style-type: disc;
+      }
+
+      ol.markup-list {
+        list-style-type: decimal;
+      }
+
+      .markup-italic {
+        font-style: italic;
+      }
+
+      .markup-bold {
+        font-weight: 700;
+      }
+
+      .markup-strikethrough {
+        text-decoration-line: line-through;
+      }
+
+      .markup-underline {
+        text-decoration-line: underline;
+      }
+
+      .markup-strikethrough.markup-underline {
+        text-decoration-line: underline line-through;
+      }
+
+      .markup-code {
+        padding: 0.08em 0.28em;
+        border-radius: 0.28em;
+        background: color-mix(in srgb, currentColor 10%, transparent);
+        font-family: ui-monospace, "DejaVu Sans Mono", Consolas, monospace;
+        font-size: 0.92em;
+      }
+
+      .markup-size-small {
+        font-size: 0.86em;
+      }
+
+      .markup-size-large {
+        font-size: 1.16em;
+      }
+
+      .markup-size-x-large {
+        font-size: 1.32em;
+      }
+
+      .markup-spoiler {
+        appearance: none;
+        padding: 0 0.2em;
+        border: 0;
+        border-radius: 0.2em;
+        background: color-mix(in srgb, var(--speaker-accent) 42%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--speaker-accent) 65%, transparent);
+        color: transparent;
+        cursor: pointer;
+        font: inherit;
+      }
+
+      .markup-spoiler:focus-visible {
+        outline: 2px solid var(--speaker-accent);
+        outline-offset: 2px;
+      }
+
+      .markup-spoiler-revealed {
+        border-radius: 0.2em;
+        background: color-mix(in srgb, currentColor 8%, transparent);
+      }
+
+      .message-markup a {
+        color: inherit;
+        text-decoration: underline;
+        text-underline-offset: 0.12em;
+      }
+
       .message.user .message-body {
         padding-left: 0;
         padding-right: 12px;

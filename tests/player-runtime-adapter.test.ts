@@ -24,7 +24,7 @@ speaker guide {
   title: "Guide"
   color: "#b784ff"
 }
-say as guide "Ready?", instant
+say as guide "**Ready?**", instant
 showButton as guide "Continue"
 let text = askText as guide "Text"
 let amount = askNumber as guide "Number"
@@ -40,6 +40,13 @@ exit
   if (firstEntry?.kind !== "message") throw new Error("Expected a runtime message.");
   const guide = session.speakers[firstEntry.speakerId];
   assert.deepEqual(guide, { name: "Guide", accent: "#b784ff", avatar: "G", fontFamily: "inherit" });
+  assert.equal(firstEntry.content?.visibleText, "Ready?");
+  assert.deepEqual(
+    firstEntry.content?.blocks[0]?.kind === "paragraph"
+      ? firstEntry.content.blocks[0].lines[0]?.spans.map((span) => span.kind)
+      : [],
+    ["bold"],
+  );
 
   const buttonSnapshot = structuredClone(session.snapshot);
   assert.equal(submitPlayerRuntimeComposer(session, "Continue"), null);
@@ -86,6 +93,21 @@ exit
   const transcriptIds = session.transcriptEntries.map((entry) => entry.id);
   assert.equal(new Set(transcriptIds).size, transcriptIds.length);
   assert.ok(transcriptIds.every((id) => /^runtime-event-\d+$/u.test(id)));
+  assert.equal(
+    session.transcriptEntries[0]?.kind === "message" &&
+      session.transcriptEntries[0].content !== undefined,
+    true,
+  );
+  assert.equal(
+    session.transcriptEntries[1]?.kind === "message" &&
+      session.transcriptEntries[1].content === undefined,
+    true,
+  );
+  assert.equal(
+    session.transcriptEntries[5]?.kind === "message" &&
+      session.transcriptEntries[5].content !== undefined,
+    true,
+  );
 });
 
 test("runtime adapter preserves unlabelled choice order and rendered-selection semantics", () => {

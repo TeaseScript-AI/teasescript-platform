@@ -614,7 +614,7 @@
     </wish>
     <wish id="W-047" status="active">
       <title>Interpolated and formatted say text</title>
-      <description>Use quoted single-line and block strings for say text, with ${expression} interpolation in both forms and explicit \n line breaks where needed. Keep the switchable default speaker, Markdown plus limited BBCode, and raw HTML without compatibility guarantees.</description>
+      <description>Use quoted single-line and block strings for say text, with ${expression} interpolation in both forms and explicit \n line breaks where needed. Keep the switchable default speaker and one constrained message-markup grammar with Markdown-like forms, controlled bracket extensions, and explicit literal insertion; do not accept raw HTML or arbitrary CSS.</description>
       <tags>
         <tag>teasescript</tag>
         <tag>say</tag>
@@ -625,6 +625,7 @@
         <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
         <event date="2026-07-21" type="refined">Selected quote strings for plain text and backtick templates for interpolation.</event>
         <event date="2026-09-09" type="refined">Unified interpolation under quoted single-line and block strings and removed backtick templates.</event>
+        <event date="2026-09-09" type="refined">Replaced the loose Markdown, BBCode, and raw-HTML direction with the accepted constrained message-markup grammar and explicit escapeMarkup() literal insertion.</event>
       </history>
     </wish>
     <wish id="W-048" status="superseded">

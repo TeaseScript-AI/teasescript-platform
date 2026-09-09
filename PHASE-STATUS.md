@@ -15,7 +15,8 @@ accept syntax, architecture, or implementation details.
 
 - **Source pipeline:** lexer, parser, immutable AST, source spans, diagnostics, semantic validation, and compilation
   for the implemented TeaseScript subset.
-- **Language foundation:** values, variables, assignments, speakers, output, collections, expressions, interpolated single-line and block strings,
+- **Language foundation:** values, variables, assignments, speakers, output, collections, expressions, interpolated
+  single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
   control flow, deterministic random built-ins, and top-level user-defined functions.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
@@ -28,7 +29,8 @@ accept syntax, architecture, or implementation details.
   (Vue/Vite, Tailwind CSS 4, repository-owned local shadcn-vue source/config, the selected Reka primitive foundation,
   and TanStack Vue Virtual as the single bounded, variable-height, stable-anchor transcript owner) connected through a
   framework-independent adapter to the implemented deterministic interaction, transcript, pacing, time-observation,
-  checkpoint, and restore slice; the Vue Player now hosts development-only Visual Lab, Layout Debug, and Runtime
+  checkpoint, and restore slice, including typed message-markup rendering with controlled links and spoilers; the Vue
+  Player now hosts development-only Visual Lab, Layout Debug, and Runtime
   Session tools; source-to-runtime
   conformance coverage; focused runtime/checkpoint/state-validation tests;
   reproducible desktop and narrow-screen browser smoke coverage; and a bounded deterministic property campaign.

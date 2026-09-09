@@ -41,6 +41,9 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 - Package code has no unrestricted external network access; published media uses platform-managed storage/CDN.
 - Future external APIs use platform-managed typed integrations.
 - LLM output is untrusted input and may not directly rewrite canonical state or bypass deterministic rules.
+- Authored Standard-chat message markup crosses into the Player as validated typed blocks and spans. Angle-bracket HTML
+  remains literal text, controlled style values cannot carry arbitrary CSS, and only canonical HTTP(S) targets become
+  links. The Player renders this structure without a raw-HTML path and opens links with opener isolation.
 
 ## Accepted pending-action boundary
 

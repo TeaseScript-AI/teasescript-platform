@@ -1,3 +1,5 @@
+import type { MessageMarkup } from "../src/message-markup.js";
+
 export type MediaFit = "contain" | "cover";
 export type PlayerMediaTransitionFixture = "direct" | "fade" | "crossfade";
 export type PlayerToolId = "visuals" | "layout-debug" | "runtime-session";
@@ -43,6 +45,8 @@ export interface PlayerMessagePresentation {
   readonly id: string;
   readonly speakerId: string;
   readonly text: string;
+  /** Present only for authored runtime output; player-authored entries remain plain text. */
+  readonly content?: MessageMarkup;
 }
 
 export interface PlayerSessionEventPresentation {

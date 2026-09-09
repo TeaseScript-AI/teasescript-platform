@@ -423,6 +423,12 @@ opposite-side margin on narrow layouts without forcing short wrapping on wider o
 and speaker-coloured rule remain the POC visual baseline. Speaker identity colour/font and per-message rich-text styling
 are content presentation, not application palette roles.
 
+Authored Standard-chat `say` messages carry the typed structure defined by the
+[message-markup specification](../specifications/message-markup.md). The Player renders only those controlled blocks,
+spans, values, and validated HTTP(S) links; it does not interpret authored HTML or use a raw-HTML rendering path. Links
+open a new browsing context with opener isolation, and concealed spans expose a reader-operated reveal control.
+Player-authored transcript messages remain plain text and do not enter the markup parser.
+
 ADR 0018 owns canonical transcript effects of foreground completion: valid text/number answers and choice/button
 activations become player-authored transcript messages according to its normalization and visible-text rules. Every
 accepted user activation/change on the long-lived control family also carries machine-readable canonical provenance. A
@@ -738,7 +744,7 @@ ownership, and other Standard Player properties remain Player-owned unless a lat
 Authored speaker/rich-text/control colours that carry script meaning are content semantics, not theme defaults. User
 theme or accessibility preferences must preserve that meaning: for example, a story-defined red control cannot simply
 be recoloured blue. Accessibility treatment may add or alter non-semantic presentation while retaining the authored
-distinction. Platform dark-theme values, theme API shape, preference persistence, rich-text allowlist, exact fallback
+distinction. Platform dark-theme values, theme API shape, preference persistence, exact authored-colour fallback
 mechanics, and numeric accessibility thresholds remain open; see [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). Ordinary
 transcript text does not accept unrestricted raw HTML. Fully custom HTML/CSS/TypeScript uses the separate custom
 view/tool/stage capability inside the accepted sandbox.

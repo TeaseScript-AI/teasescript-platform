@@ -112,8 +112,12 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
 
 export const CORE_RUNTIME_BUILTINS = Object.freeze(["random", "chance", "randomInteger"] as const);
 
+/** Temporary direct-call bridge for implemented Platform Standard Library helpers. */
+export const PLATFORM_STANDARD_LIBRARY_PRELUDE = Object.freeze(["escapeMarkup"] as const);
+
 export const TEASESCRIPT_PROTECTED_NAMES = Object.freeze([
   ...TEASESCRIPT_GRAMMAR_KEYWORDS,
   ...TEASESCRIPT_PROTECTED_TYPE_NAMES,
   ...TEASESCRIPT_PROTECTED_ENGINE_NAMES,
+  ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
 ] as const);

@@ -8,7 +8,11 @@ import type {
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { SourceSpan } from "./source.js";
-import { CORE_RUNTIME_BUILTINS, TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
+import {
+  CORE_RUNTIME_BUILTINS,
+  PLATFORM_STANDARD_LIBRARY_PRELUDE,
+  TEASESCRIPT_PROTECTED_NAMES,
+} from "./protected-names.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 
 export interface SemanticValidationOptions {
@@ -100,7 +104,11 @@ class SemanticValidator {
         ["showButton", "askText", "askNumber", "choose"].includes(name),
       ),
     );
-    this.#builtins = new Set([...CORE_RUNTIME_BUILTINS, ...(options.builtins ?? [])]);
+    this.#builtins = new Set([
+      ...CORE_RUNTIME_BUILTINS,
+      ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
+      ...(options.builtins ?? []),
+    ]);
     this.#protectedNames = new Set([...TEASESCRIPT_PROTECTED_NAMES, ...(options.builtins ?? [])]);
     for (const name of options.globals ?? []) {
       this.#root.declare(name, { kind: "global" });

@@ -9,6 +9,7 @@ import type {
   InstructionPlan,
   InteractionUiPayload,
 } from "../plan/model.js";
+import { cloneMessageMarkup } from "../message-markup.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
 import { captureExternalData, type ExternalDataFailureKind } from "../external-data-capture.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
@@ -40,7 +41,7 @@ import {
 import { recordValidationTestWork } from "../validation-testing.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 19;
+export const RUNTIME_SNAPSHOT_VERSION = 20;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -470,6 +471,7 @@ function clonePreparedSayOutput(
     owningInstruction: output.owningInstruction,
     continuationInstruction: output.continuationInstruction,
     speaker: output.speaker === null ? null : { ...output.speaker },
+    content: cloneMessageMarkup(output.content),
     text: output.text,
     durationMs: output.durationMs,
     skippable: output.skippable,

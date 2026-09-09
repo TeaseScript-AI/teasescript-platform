@@ -119,6 +119,7 @@ askText
 askNumber
 choose
 say
+escapeMarkup
 ```
 
 Ordinary scripts may not shadow these names. The first POC has no default-prelude opt-out, replacement mapping, alternative Standard Library, or namespace requirement.
@@ -138,6 +139,18 @@ A new session may be compiled with a newer compatible Standard Library/compiler,
 
 ADR 0018 does not add package identity or metadata values to plans/checkpoints
 and does not treat them as a final package or semver identity.
+
+### Message-markup helper bridge
+
+The accepted [message-markup specification](specifications/message-markup.md) places `escapeMarkup(text)` in the
+Platform Standard Library. It is a deterministic synchronous string helper that uses the shared message-markup escaping
+rules and creates no action, RNG use, host capability, or checkpoint state.
+
+Generic `.tease`-to-TypeScript library linkage is still deferred. The current implementation therefore exposes only
+this helper through a narrow compiler/runtime prelude dispatch. That bridge is separate from core runtime built-ins and
+does not add package metadata, imports, semver, generated declarations, replacement policy, or a general library
+registry. The public source spelling can remain unchanged when the helper later moves behind ordinary Standard Library
+linkage.
 
 ### Generic interaction wrapper family
 

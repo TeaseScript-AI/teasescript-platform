@@ -5,6 +5,7 @@ import type {
   PlanSourceLocation,
   PreparedInteractionUiPayload,
 } from "../plan/model.js";
+import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
 import {
   boundedInteractionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
@@ -1412,7 +1413,7 @@ function executeSay(
   if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) {
     validatePacingCreation(snapshot, instruction.span, prepared.durationMs);
     snapshot.preparedSayOutput = null;
-    emitSay(snapshot, events, instruction.span, prepared.speaker, prepared.text);
+    emitSay(snapshot, events, instruction.span, prepared.speaker, prepared.content, prepared.text);
     establishPacingAfterSay(
       snapshot,
       events,
@@ -1446,10 +1447,12 @@ function executeSay(
     preparedSpeaker.speakerId === null
       ? null
       : evaluator.speakerById(preparedSpeaker.speakerId, instruction.span);
-  const text =
+  const authoredText =
     instruction.textTemporary === undefined
       ? evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span)
       : preparedSayText(snapshot.temporaries, instruction.textTemporary, instruction.span);
+  const content = parseMessageMarkup(authoredText);
+  const text = content.visibleText;
   const pacingValue =
     typeof instruction.pacing === "object"
       ? evaluator.evaluate(instruction.pacing)
@@ -1463,7 +1466,7 @@ function executeSay(
     if (durationMs === 0) {
       assertEventSequenceCapacity(snapshot, 2, instruction.span);
       settleBackgroundPacingGate(plan, snapshot, activeGate, "supersededByInstantOutput", events);
-      emitSay(snapshot, events, instruction.span, output, text);
+      emitSay(snapshot, events, instruction.span, output, content, text);
       advance(snapshot);
       return;
     }
@@ -1471,6 +1474,7 @@ function executeSay(
       owningInstruction: snapshot.nextInstruction,
       continuationInstruction: snapshot.nextInstruction + 1,
       speaker: output === null ? null : { ...output },
+      content,
       text,
       durationMs,
       skippable,
@@ -1482,7 +1486,7 @@ function executeSay(
     return;
   }
   if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs);
-  emitSay(snapshot, events, instruction.span, output, text);
+  emitSay(snapshot, events, instruction.span, output, content, text);
   if (durationMs > 0)
     establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
   advance(snapshot);
@@ -1569,6 +1573,7 @@ function emitSay(
   events: InterpreterEvent[],
   span: SourceSpan,
   speaker: OutputSpeaker | null,
+  content: MessageMarkup,
   text: string,
 ): void {
   events.push(
@@ -1576,6 +1581,7 @@ function emitSay(
       kind: "say",
       sequence: takeSequence(snapshot),
       speaker,
+      content,
       text,
       span: copySpan(span),
     } satisfies SayEvent),

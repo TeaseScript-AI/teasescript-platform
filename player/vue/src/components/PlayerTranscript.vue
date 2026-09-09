@@ -6,6 +6,7 @@ import type {
   PlayerSpeakerPresentation,
   PlayerTranscriptEntryPresentation,
 } from "../../../model.js";
+import PlayerMessageMarkup from "./PlayerMessageMarkup.vue";
 
 const FOLLOW_DISTANCE_PX = 36;
 const SCROLL_SETTLE_MS = 140;
@@ -99,6 +100,10 @@ function entryText(index: number): string | undefined {
   return entryFor(index)?.text;
 }
 
+function messageContent(index: number): PlayerMessagePresentation["content"] {
+  return messageFor(index)?.content;
+}
+
 function isUserMessage(index: number): boolean {
   return messageFor(index)?.speakerId === "user";
 }
@@ -183,7 +188,9 @@ function markTouchEnd(): void {
 function markPointerStart(event: PointerEvent): void {
   pointerActive.value = true;
   markInteractionStart();
-  transcript.value?.setPointerCapture(event.pointerId);
+  const target = event.target;
+  if (!(target instanceof Element && target.closest("a, button, input, textarea, select") !== null))
+    transcript.value?.setPointerCapture(event.pointerId);
 }
 
 function markPointerEnd(event: PointerEvent): void {
@@ -258,7 +265,13 @@ function scrollToLatest(behavior: ScrollBehavior): void {
             </div>
             <div class="message-copy">
               <div class="speaker-name">{{ speakerForIndex(virtualItem.index)?.name }}</div>
-              <div class="message-body">{{ entryText(virtualItem.index) }}</div>
+              <div class="message-body">
+                <PlayerMessageMarkup
+                  v-if="messageContent(virtualItem.index) !== undefined"
+                  :content="messageContent(virtualItem.index)!"
+                />
+                <template v-else>{{ entryText(virtualItem.index) }}</template>
+              </div>
             </div>
             <div v-if="isUserMessage(virtualItem.index)" class="speaker-avatar" aria-hidden="true">
               {{ speakerForIndex(virtualItem.index)?.avatar }}

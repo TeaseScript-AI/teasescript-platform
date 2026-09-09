@@ -4,6 +4,7 @@ import type {
   ExpressionPlan,
   PlanSourceLocation,
 } from "../plan/model.js";
+import { escapeMarkup } from "../message-markup.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
@@ -678,8 +679,9 @@ export class Evaluator {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
       const coreBuiltin = name === "random" || name === "chance" || name === "randomInteger";
+      const platformPrelude = name === "escapeMarkup";
       const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
-      if (!coreBuiltin && builtin === undefined) {
+      if (!coreBuiltin && !platformPrelude && builtin === undefined) {
         throw fault(
           "TSR011",
           `Unknown built-in function '${expression.callee.name}'.`,
@@ -702,6 +704,9 @@ export class Evaluator {
             break;
           case "randomInteger":
             returned = this.#randomIntegerBuiltin(call);
+            break;
+          case "escapeMarkup":
+            returned = this.#escapeMarkupBuiltin(call);
             break;
           default:
             returned = builtin!(call);
@@ -950,6 +955,13 @@ export class Evaluator {
       throw fault("TSR041", "randomInteger(range) requires a non-empty range.", call.span);
     }
     return range.start + Math.floor(this.#findRandom(call.span) * length);
+  }
+
+  #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
+    this.#expectBuiltinArguments("escapeMarkup", call, 1);
+    const text = call.positional[0];
+    if (typeof text !== "string") throw new TypeError("escapeMarkup(text) requires a string.");
+    return escapeMarkup(text);
   }
 
   #expectBuiltinArguments(name: string, call: RuntimeCapabilityCall, count: number): void {
