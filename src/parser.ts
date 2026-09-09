@@ -1872,7 +1872,7 @@ class Parser {
     let openIndex = firstIndex;
     let scan = this.#current;
     let token = start;
-    while (true) {
+    while (!this.#skipObjectChainScanIndexes.has(openIndex)) {
       while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
       const name = this.tokens[scan];
       if (
@@ -1884,55 +1884,45 @@ class Parser {
       scan += 2;
       while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
       if (this.tokens[scan]?.kind !== TokenKind.LeftBrace) break;
+      // Flatten one contiguous run of pure wrappers. Siblings or expression work
+      // end the run at an ordinary inner object; they do not invalidate ancestors.
+      const matching = this.#getMatchingRightBrackets();
+      const childClose = matching[scan];
+      if (childClose === undefined) break;
+      let next = childClose + 1;
+      while (this.tokens[next]?.kind === TokenKind.Newline) next += 1;
+      if (next !== matching[openIndex]) break;
       starts.push({ token, name, openIndex });
       openIndex = scan;
       token = this.tokens[scan++]!;
     }
     if (starts.length === 0) return this.#parseObjectProperties(start);
-    // Only flatten pure wrappers. Other expression work and malformed recovery keep
-    // the ordinary parser path, including its name/colon diagnostics.
-    const matching = this.#getMatchingRightBrackets();
-    let close = matching[openIndex];
-    let eligible = close !== undefined;
-    let ineligibleThrough = starts.length - 1;
-    for (let index = starts.length - 1; index >= 0 && eligible; index -= 1) {
-      let next = close! + 1;
-      while (this.tokens[next]?.kind === TokenKind.Newline) next += 1;
-      eligible =
-        this.tokens[next]?.kind === TokenKind.RightBrace &&
-        matching[starts[index]!.openIndex] === next;
-      if (eligible) ineligibleThrough = index - 1;
-      close = next;
-    }
-    const disableScans = (through = starts.length - 1): void => {
-      for (let index = 0; index <= through; index += 1)
-        this.#skipObjectChainScanIndexes.add(starts[index]!.openIndex);
-    };
-    if (!eligible) {
-      // An outer sibling excludes that wrapper, not its already verified nested suffix.
-      disableScans(ineligibleThrough);
-      return this.#parseObjectProperties(start);
-    }
     const original = this.#current;
     const diagnosticCount = this.#diagnostics.length;
     const recovered = this.#recoveredAtStatementBoundary;
     const parenthesisScan = this.#skipParenthesisChainScanThroughIndex;
-    this.#current = openIndex + 1;
-    let completed = this.#parseObjectProperties(token);
-    // Recovery wholly contained by the inner object cannot affect a wrapper.
-    // Reparse only when recovery moved across its expected closing delimiter.
-    if (this.#current !== matching[openIndex]! + 1) {
+    const parseWithBaselineRecovery = (): ObjectLiteral => {
       this.#current = original;
       this.#diagnostics.length = diagnosticCount;
       this.#recoveredAtStatementBoundary = recovered;
       this.#skipParenthesisChainScanThroughIndex = parenthesisScan;
-      disableScans();
+      for (const wrapper of starts) this.#skipObjectChainScanIndexes.add(wrapper.openIndex);
       return this.#parseObjectProperties(start);
-    }
+    };
+    this.#current = openIndex + 1;
+    let completed = this.#parseObjectProperties(token);
     for (let index = starts.length - 1; index >= 0; index -= 1) {
       const wrapper = starts[index]!;
+      // A recovered child still ends an ordinary expression unless a postfix or
+      // infix token follows. Missing closers can therefore use normal insertion
+      // recovery without reparsing every ancestor of the same malformed subtree.
+      if (isExpressionContinuation(this.#peek().kind)) return parseWithBaselineRecovery();
       this.#skipNewlines();
-      const end = this.#advance().span;
+      if (this.#check(TokenKind.Comma)) return parseWithBaselineRecovery();
+      const end = this.#consumeClosingDelimiter(
+        TokenKind.RightBrace,
+        "Expected '}' after the object literal.",
+      );
       const name = this.#identifier(wrapper.name);
       completed = Object.freeze({
         kind: "objectLiteral",
@@ -2349,6 +2339,24 @@ const propertyNameKinds: ReadonlySet<TokenKind> = new Set([
 
 function isPropertyName(token: Token): boolean {
   return propertyNameKinds.has(token.kind);
+}
+
+function isExpressionContinuation(kind: TokenKind): boolean {
+  return (
+    kind === TokenKind.Dot ||
+    kind === TokenKind.LeftBracket ||
+    kind === TokenKind.LeftParenthesis ||
+    kind === TokenKind.Plus ||
+    kind === TokenKind.Minus ||
+    kind === TokenKind.Star ||
+    kind === TokenKind.Slash ||
+    kind === TokenKind.Percent ||
+    kind === TokenKind.RangeExclusive ||
+    kind === TokenKind.RangeInclusive ||
+    kind === TokenKind.KeywordAnd ||
+    kind === TokenKind.KeywordOr ||
+    isComparisonKind(kind)
+  );
 }
 
 function isExpressionStart(token: Token): boolean {

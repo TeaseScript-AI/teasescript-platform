@@ -60,6 +60,9 @@ test("flat, parenthesis, collection, and object compilation remain iterative wit
     const compiledSet = compileSource(process.env.TEASESCRIPT_SET_SOURCE);
     const compiledObject = compileSource(process.env.TEASESCRIPT_OBJECT_SOURCE);
     const deepObject = "{ x: ".repeat(1024) + "1" + " }".repeat(1024);
+    const innerObjectCodes = ["{a:1, b:{q:1}}", "{a:{q:1}, b:2}", "{a:{q:1}.q}", "{a:{q:1} + 2}"].map((leaf) =>
+      compileSource("let value = " + "{x:".repeat(1024) + leaf + "}".repeat(1024)).diagnostics.map((diagnostic) => diagnostic.code),
+    );
     const siblingObjects = ["{ before: 2, child: " + deepObject + " }", "{ child: " + deepObject + ", after: 2 }"].map((expression) => {
       const compiled = compileSource("let value = " + expression);
       return {codes: compiled.diagnostics.map((diagnostic) => diagnostic.code), status: compiled.plan ? run(compiled.plan, createFreshRuntimeSnapshot(compiled.plan)).snapshot.status : null};
@@ -80,6 +83,16 @@ test("flat, parenthesis, collection, and object compilation remain iterative wit
       collectionValue = collectionValue.items[0];
     }
     const {createCheckpoint, restoreCheckpoint} = await import(${JSON.stringify(checkpointUrl)});
+    const downstreamObjects = [
+      "let value = " + deepObject + " == null",
+      "function take(value = " + deepObject + ") { return value }\\nlet got = take()\\nexit",
+    ].map((source) => {
+      const compiled = compileSource(source);
+      if (!compiled.plan) return {codes: compiled.diagnostics.map((diagnostic) => diagnostic.code), status: null};
+      const result = run(compiled.plan, createFreshRuntimeSnapshot(compiled.plan));
+      const restored = restoreCheckpoint(createCheckpoint(compiled.plan, result.snapshot));
+      return {codes: [], status: restored.snapshot.status};
+    });
     const objectRuntime = run(compiledObject.plan, createFreshRuntimeSnapshot(compiledObject.plan));
     const restoredObject = restoreCheckpoint(createCheckpoint(compiledObject.plan, objectRuntime.snapshot));
     let objectValue = restoredObject.snapshot.frames[0]?.bindings[0]?.value;
@@ -98,6 +111,8 @@ test("flat, parenthesis, collection, and object compilation remain iterative wit
       compiledNestedCodes: compiledNested.diagnostics.map((diagnostic) => diagnostic.code),
       compiledNestedProgramStatements: compiledNested.program.statements.length,
       compiledNestedExpressionKind: compiledNested.plan?.instructions[0]?.value?.kind,
+      innerObjectCodes,
+      downstreamObjects,
       siblingObjects,
       objectCodes: compiledObject.diagnostics.map((diagnostic) => diagnostic.code),
       objectRuntimeStatus: objectRuntime.snapshot.status,
@@ -148,6 +163,11 @@ test("flat, parenthesis, collection, and object compilation remain iterative wit
     compiledNestedCodes: [],
     compiledNestedProgramStatements: 1,
     compiledNestedExpressionKind: "literal",
+    innerObjectCodes: [[], [], [], []],
+    downstreamObjects: [
+      { codes: [], status: "halted" },
+      { codes: [], status: "halted" },
+    ],
     siblingObjects: [
       { codes: [], status: "halted" },
       { codes: [], status: "halted" },

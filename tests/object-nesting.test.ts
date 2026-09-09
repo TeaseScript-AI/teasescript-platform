@@ -108,15 +108,20 @@ test("object name, colon, trailing-comma and cross-delimiter recovery keep diagn
   }
 });
 
-test("mixed object and collection chains preserve contained malformed recovery", () => {
+test("mixed object and collection chains preserve contained and cross-delimiter recovery", () => {
   const depth = 96;
-  const source = `let value = ${"{ x: { y: [".repeat(depth)}{ nope }${"] } }".repeat(depth)}\nexit`;
-  const parsed = parse(source);
-  assert.deepEqual(
-    parsed.diagnostics.map((diagnostic) => diagnostic.code),
-    ["TSP005"],
-  );
-  assert.equal(parsed.program.statements[1]?.kind, "exitStatement");
+  for (const fixture of [
+    { leaf: "{ nope }", codes: ["TSP005"] },
+    { leaf: "{ a: value[] }", codes: ["TSP012", "TSP017", "TSP017", "TSP002"] },
+  ]) {
+    const source = `let value = ${"{ x: { y: [".repeat(depth)}${fixture.leaf}${"] } }".repeat(depth)}\nexit`;
+    const parsed = parse(source);
+    assert.deepEqual(
+      parsed.diagnostics.map((diagnostic) => diagnostic.code),
+      fixture.codes,
+    );
+    assert.equal(parsed.program.statements[1]?.kind, "exitStatement");
+  }
 });
 
 test("nested object data resumes equivalently through JSON checkpoints", () => {
