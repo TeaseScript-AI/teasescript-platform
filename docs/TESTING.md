@@ -11,7 +11,8 @@ Owner-selected release-stage testing outcomes are tracked in [`planning/RELEASE-
 The current repository uses:
 
 - TypeScript type checking through `tsc --noEmit`;
-- a complete TypeScript build before compiled tests run;
+- a TypeScript build that removes the previous compiled test tree before emitting, so removed or renamed source tests
+  cannot remain discoverable;
 - Node's built-in test runner;
 - focused tests during development plus the complete configured suite before merge;
 - real source-to-runtime tests where public behavior crosses parser, compiler, instruction-plan, and runtime boundaries;
