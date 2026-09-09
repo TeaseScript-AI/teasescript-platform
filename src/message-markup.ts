@@ -638,7 +638,8 @@ function bareLinkAt(
   while (authorityEnd < candidateEnd && !/[/?#]/u.test(units[authorityEnd]!.character)) {
     authorityEnd += 1;
   }
-  if (validUrl(unitsText(units, index, authorityEnd)) === null) return null;
+  if (authorityEnd < candidateEnd && validUrl(unitsText(units, index, authorityEnd)) === null)
+    return null;
 
   let targetEnd = candidateEnd;
   let parenthesisBalance = delimiterBalance(units, index, targetEnd, "(", ")");

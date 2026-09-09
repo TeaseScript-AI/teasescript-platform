@@ -169,6 +169,35 @@ test("parses labeled and bare HTTP links with deterministic boundaries", () => {
   assert.deepEqual(spanKinds(markup).slice(0, 2), ["link", "bold"]);
 });
 
+test("trims bare-link terminal punctuation after ports and paths", () => {
+  for (const hasPort of [false, true]) {
+    for (const hasPath of [false, true]) {
+      for (const wrapper of ["comma", "parentheses"] as const) {
+        const path = hasPath ? "/path" : "";
+        const url = `https://example.com${hasPort ? ":443" : ""}${path}`;
+        const source = wrapper === "comma" ? `${url},` : `(${url})`;
+        const start = wrapper === "comma" ? 0 : 1;
+        const markup = parseMessageMarkup(source);
+
+        assert.equal(markup.visibleText, source, source);
+        assert.deepEqual(
+          allSpans(markup),
+          [
+            {
+              kind: "link",
+              start,
+              end: start + url.length,
+              depth: 0,
+              target: `https://example.com${path || "/"}`,
+            },
+          ],
+          source,
+        );
+      }
+    }
+  }
+});
+
 test("bounds malformed bare-link work and recovers a later URL in the same run", () => {
   const invalidPrefix = "http://?";
   const validLink = "https://example.com";
