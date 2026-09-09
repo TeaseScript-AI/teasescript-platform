@@ -117,6 +117,7 @@ class Parser {
   #skipParenthesisChainScanThroughIndex = -1;
   readonly #skipCollectionChainScanIndexes = new Set<number>();
   #collectionRecoveryVersion = 0;
+  readonly #skipObjectChainScanIndexes = new Set<number>();
   #recoveredAtStatementBoundary = false;
 
   public constructor(
@@ -1815,7 +1816,8 @@ class Parser {
         start = open.pop()!;
         openCounts.set(start.kind, openCounts.get(start.kind)! - 1);
       }
-      if (expectedOpen === TokenKind.LeftBracket) matching[start.index] = index;
+      if (expectedOpen === TokenKind.LeftBracket || expectedOpen === TokenKind.LeftBrace)
+        matching[start.index] = index;
     }
     this.delimiterMatchCache.brackets = matching;
     return matching;
@@ -1864,6 +1866,81 @@ class Parser {
   }
 
   #parseObjectLiteral(start: Token): ObjectLiteral {
+    const firstIndex = this.#current - 1;
+    if (this.#skipObjectChainScanIndexes.has(firstIndex)) return this.#parseObjectProperties(start);
+    const starts: { token: Token; name: Token; openIndex: number }[] = [];
+    let openIndex = firstIndex;
+    let scan = this.#current;
+    let token = start;
+    while (!this.#skipObjectChainScanIndexes.has(openIndex)) {
+      while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
+      const name = this.tokens[scan];
+      if (
+        name === undefined ||
+        !isPropertyName(name) ||
+        this.tokens[scan + 1]?.kind !== TokenKind.Colon
+      )
+        break;
+      scan += 2;
+      while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
+      if (this.tokens[scan]?.kind !== TokenKind.LeftBrace) break;
+      // Flatten one contiguous run of pure wrappers. Siblings or expression work
+      // end the run at an ordinary inner object; they do not invalidate ancestors.
+      const matching = this.#getMatchingRightBrackets();
+      const childClose = matching[scan];
+      if (childClose === undefined) break;
+      let next = childClose + 1;
+      while (this.tokens[next]?.kind === TokenKind.Newline) next += 1;
+      if (next !== matching[openIndex]) break;
+      starts.push({ token, name, openIndex });
+      openIndex = scan;
+      token = this.tokens[scan++]!;
+    }
+    if (starts.length === 0) return this.#parseObjectProperties(start);
+    const original = this.#current;
+    const diagnosticCount = this.#diagnostics.length;
+    const recovered = this.#recoveredAtStatementBoundary;
+    const parenthesisScan = this.#skipParenthesisChainScanThroughIndex;
+    const parseWithBaselineRecovery = (): ObjectLiteral => {
+      this.#current = original;
+      this.#diagnostics.length = diagnosticCount;
+      this.#recoveredAtStatementBoundary = recovered;
+      this.#skipParenthesisChainScanThroughIndex = parenthesisScan;
+      for (const wrapper of starts) this.#skipObjectChainScanIndexes.add(wrapper.openIndex);
+      return this.#parseObjectProperties(start);
+    };
+    this.#current = openIndex + 1;
+    let completed = this.#parseObjectProperties(token);
+    for (let index = starts.length - 1; index >= 0; index -= 1) {
+      const wrapper = starts[index]!;
+      // A recovered child still ends an ordinary expression unless a postfix or
+      // infix token follows. Missing closers can therefore use normal insertion
+      // recovery without reparsing every ancestor of the same malformed subtree.
+      if (isExpressionContinuation(this.#peek().kind)) return parseWithBaselineRecovery();
+      this.#skipNewlines();
+      if (this.#check(TokenKind.Comma)) return parseWithBaselineRecovery();
+      const end = this.#consumeClosingDelimiter(
+        TokenKind.RightBrace,
+        "Expected '}' after the object literal.",
+      );
+      const name = this.#identifier(wrapper.name);
+      completed = Object.freeze({
+        kind: "objectLiteral",
+        properties: Object.freeze([
+          Object.freeze({
+            kind: "objectProperty",
+            name,
+            value: completed,
+            span: spanFrom(name.span, completed.span),
+          }),
+        ]),
+        span: spanFrom(wrapper.token.span, end),
+      });
+    }
+    return completed;
+  }
+
+  #parseObjectProperties(start: Token): ObjectLiteral {
     const properties: ObjectProperty[] = [];
     this.#skipNewlines();
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
@@ -2262,6 +2339,24 @@ const propertyNameKinds: ReadonlySet<TokenKind> = new Set([
 
 function isPropertyName(token: Token): boolean {
   return propertyNameKinds.has(token.kind);
+}
+
+function isExpressionContinuation(kind: TokenKind): boolean {
+  return (
+    kind === TokenKind.Dot ||
+    kind === TokenKind.LeftBracket ||
+    kind === TokenKind.LeftParenthesis ||
+    kind === TokenKind.Plus ||
+    kind === TokenKind.Minus ||
+    kind === TokenKind.Star ||
+    kind === TokenKind.Slash ||
+    kind === TokenKind.Percent ||
+    kind === TokenKind.RangeExclusive ||
+    kind === TokenKind.RangeInclusive ||
+    kind === TokenKind.KeywordAnd ||
+    kind === TokenKind.KeywordOr ||
+    isComparisonKind(kind)
+  );
 }
 
 function isExpressionStart(token: Token): boolean {

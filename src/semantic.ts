@@ -495,21 +495,9 @@ class SemanticValidator {
       case "setLiteral":
         this.#validateCollectionExpression(expression, scope, contextualSpeaker);
         return;
-      case "objectLiteral": {
-        const names = new Set<string>();
-        for (const property of expression.properties) {
-          if (names.has(property.name.name)) {
-            this.#report(
-              semanticCode.duplicateProperty,
-              `Duplicate object property '${property.name.name}'.`,
-              property.name.span,
-            );
-          }
-          names.add(property.name.name);
-          this.#validateExpression(property.value, scope, contextualSpeaker);
-        }
+      case "objectLiteral":
+        this.#validateCollectionExpression(expression, scope, contextualSpeaker);
         return;
-      }
       case "propertyAccessExpression":
         this.#validateExpression(expression.object, scope, contextualSpeaker);
         return;
@@ -676,16 +664,33 @@ class SemanticValidator {
   }
 
   #validateCollectionExpression(
-    root: Extract<Expression, { kind: "listLiteral" | "setLiteral" }>,
+    root: Extract<Expression, { kind: "listLiteral" | "setLiteral" | "objectLiteral" }>,
     scope: SemanticScope,
     contextualSpeaker: string | null,
   ): void {
     type Work =
       | { readonly kind: "expression"; readonly expression: Expression }
-      | { readonly kind: "setElement"; readonly expression: Expression };
+      | { readonly kind: "setElement"; readonly expression: Expression }
+      | {
+          readonly kind: "property";
+          readonly property: Extract<Expression, { kind: "objectLiteral" }>["properties"][number];
+          readonly names: Set<string>;
+        };
     const work: Work[] = [{ kind: "expression", expression: root }];
     while (work.length > 0) {
       const current = work.pop()!;
+      if (current.kind === "property") {
+        const { property, names } = current;
+        if (names.has(property.name.name))
+          this.#report(
+            semanticCode.duplicateProperty,
+            `Duplicate object property '${property.name.name}'.`,
+            property.name.span,
+          );
+        names.add(property.name.name);
+        work.push({ kind: "expression", expression: property.value });
+        continue;
+      }
       if (current.kind === "setElement") {
         if (isDefinitelyComposite(current.expression, scope)) {
           this.#report(
@@ -706,6 +711,12 @@ class SemanticValidator {
           expression.kind === "parenthesizedExpression"
             ? expression.expression
             : expression.operand;
+      }
+      if (expression.kind === "objectLiteral") {
+        const names = new Set<string>();
+        for (let index = expression.properties.length - 1; index >= 0; index -= 1)
+          work.push({ kind: "property", property: expression.properties[index]!, names });
+        continue;
       }
       if (expression.kind !== "listLiteral" && expression.kind !== "setLiteral") {
         this.#validateExpression(current.expression, scope, contextualSpeaker);
@@ -837,17 +848,33 @@ function findFirstInteraction(
       expression.kind === "parenthesizedExpression" ? expression.expression : expression.operand;
   }
   if (expression.kind === "interactionExpression") return expression;
-  if (expression.kind === "listLiteral" || expression.kind === "setLiteral") {
-    const work = [...expression.elements].reverse();
+  if (
+    expression.kind === "listLiteral" ||
+    expression.kind === "setLiteral" ||
+    expression.kind === "objectLiteral"
+  ) {
+    const work = [
+      ...(expression.kind === "objectLiteral"
+        ? expression.properties.map((property) => property.value)
+        : expression.elements),
+    ].reverse();
     while (work.length > 0) {
       let child = work.pop()!;
       while (child.kind === "parenthesizedExpression" || child.kind === "unaryExpression") {
         child = child.kind === "parenthesizedExpression" ? child.expression : child.operand;
       }
       if (child.kind === "interactionExpression") return child;
-      if (child.kind === "listLiteral" || child.kind === "setLiteral") {
-        for (let index = child.elements.length - 1; index >= 0; index -= 1) {
-          work.push(child.elements[index]!);
+      if (
+        child.kind === "listLiteral" ||
+        child.kind === "setLiteral" ||
+        child.kind === "objectLiteral"
+      ) {
+        const elements =
+          child.kind === "objectLiteral"
+            ? child.properties.map((property) => property.value)
+            : child.elements;
+        for (let index = elements.length - 1; index >= 0; index -= 1) {
+          work.push(elements[index]!);
         }
         continue;
       }
@@ -867,8 +894,6 @@ function findFirstInteraction(
         return expression.parts.flatMap((part) =>
           part.kind === "stringInterpolation" ? [part.expression] : [],
         );
-      case "objectLiteral":
-        return expression.properties.map((property) => property.value);
       case "propertyAccessExpression":
         return [expression.object];
       case "indexExpression":
@@ -961,7 +986,10 @@ function visitExpression(
       visitCollectionExpressions(expression.elements, visitor);
       return;
     case "objectLiteral":
-      expression.properties.forEach((property) => visitExpression(property.value, visitor));
+      visitCollectionExpressions(
+        expression.properties.map((property) => property.value),
+        visitor,
+      );
       return;
     case "propertyAccessExpression":
       visitExpression(expression.object, visitor);
@@ -1002,9 +1030,17 @@ function visitCollectionExpressions(
       expression =
         expression.kind === "parenthesizedExpression" ? expression.expression : expression.operand;
     }
-    if (expression.kind === "listLiteral" || expression.kind === "setLiteral") {
-      for (let index = expression.elements.length - 1; index >= 0; index -= 1) {
-        work.push(expression.elements[index]!);
+    if (
+      expression.kind === "listLiteral" ||
+      expression.kind === "setLiteral" ||
+      expression.kind === "objectLiteral"
+    ) {
+      const elements =
+        expression.kind === "objectLiteral"
+          ? expression.properties.map((property) => property.value)
+          : expression.elements;
+      for (let index = elements.length - 1; index >= 0; index -= 1) {
+        work.push(elements[index]!);
       }
     } else {
       visitExpression(expression, visitor);

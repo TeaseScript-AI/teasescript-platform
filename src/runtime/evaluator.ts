@@ -26,7 +26,6 @@ import {
   cloneCapturedSerializableValue,
   cloneSerializableValue,
   createCapturedSerializableList,
-  createCapturedSerializableObject,
   createCapturedSerializableSet,
   getSerializableProperty,
   removeSerializableSetValue,
@@ -133,21 +132,8 @@ export class Evaluator {
       case "list":
       case "set":
         return this.#evaluateCollection(expression);
-      case "object": {
-        const names = new Set<string>();
-        for (const property of expression.properties) {
-          if (names.has(property.name)) {
-            throw fault("TSR007", `Duplicate object property '${property.name}'.`, property.span);
-          }
-          names.add(property.name);
-        }
-        return createCapturedSerializableObject(
-          expression.properties.map((property) => ({
-            name: property.name,
-            value: this.evaluate(property.value),
-          })),
-        );
-      }
+      case "object":
+        return this.#evaluateCollection(expression);
       case "group":
         return this.evaluate(expression.expression);
       case "template": {
@@ -199,7 +185,7 @@ export class Evaluator {
   }
 
   #evaluateCollection(
-    root: Extract<ExpressionPlan, { kind: "list" | "set" }>,
+    root: Extract<ExpressionPlan, { kind: "list" | "set" | "object" }>,
   ): SerializableRuntimeValue {
     interface EvaluatedValue {
       readonly value: SerializableRuntimeValue;
@@ -217,11 +203,31 @@ export class Evaluator {
           readonly membership: Set<SerializableRuntimeScalar>;
           readonly element: ExpressionPlan;
         }
+      | {
+          readonly kind: "assembleObject";
+          readonly expression: Extract<ExpressionPlan, { kind: "object" }>;
+        }
       | { readonly kind: "completeSet"; readonly set: SerializableRuntimeSet };
     const work: Work[] = [{ kind: "expression", expression: root }];
     const results: EvaluatedValue[] = [];
     while (work.length > 0) {
       const current = work.pop()!;
+      if (current.kind === "assembleObject") {
+        const evaluated = results.splice(results.length - current.expression.properties.length);
+        results.push({
+          value: {
+            kind: "object",
+            properties: current.expression.properties.map((property, index) => ({
+              name: property.name,
+              value: evaluated[index]!.owned
+                ? evaluated[index]!.value
+                : cloneCapturedSerializableValue(evaluated[index]!.value),
+            })),
+          },
+          owned: true,
+        });
+        continue;
+      }
       if (current.kind === "assembleList") {
         const evaluated = results.splice(results.length - current.expression.elements.length);
         results.push({
@@ -251,6 +257,21 @@ export class Evaluator {
         continue;
       }
 
+      if (current.expression.kind === "object") {
+        const names = new Set<string>();
+        for (const property of current.expression.properties) {
+          if (names.has(property.name))
+            throw fault("TSR007", `Duplicate object property '${property.name}'.`, property.span);
+          names.add(property.name);
+        }
+        work.push({ kind: "assembleObject", expression: current.expression });
+        for (let index = current.expression.properties.length - 1; index >= 0; index -= 1)
+          work.push({
+            kind: "expression",
+            expression: current.expression.properties[index]!.value,
+          });
+        continue;
+      }
       if (current.expression.kind !== "list" && current.expression.kind !== "set") {
         results.push({ value: this.evaluate(current.expression), owned: false });
         continue;

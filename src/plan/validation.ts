@@ -858,6 +858,11 @@ function validateInteractionAccessibleName(
   }
 }
 
+type ExpressionValidationWork =
+  | { value: unknown; path: string; assignmentTarget: boolean }
+  | { kind: "property"; value: unknown; path: string }
+  | { kind: "span"; value: unknown; path: string };
+
 function validateExpression(
   value: unknown,
   path: string,
@@ -865,10 +870,25 @@ function validateExpression(
   assignmentTarget = false,
   temporaryCount = -1,
 ): void {
-  const pending = [{ value, path, assignmentTarget }];
+  const pending: ExpressionValidationWork[] = [{ value, path, assignmentTarget }];
   while (pending.length > 0) {
     const current = pending.pop();
     if (current === undefined) return;
+    if ("kind" in current) {
+      if (current.kind === "span") validateSpan(current.value, current.path, errors);
+      else if (!isRecord(current.value))
+        errors.push(planError("TSC002", "Property must be an object.", current.path));
+      else {
+        requireString(current.value.name, `${current.path}.name`, errors);
+        pending.push({ kind: "span", value: current.value.span, path: `${current.path}.span` });
+        pending.push({
+          value: current.value.value,
+          path: `${current.path}.value`,
+          assignmentTarget: false,
+        });
+      }
+      continue;
+    }
     validateExpressionNode(
       current.value,
       current.path,
@@ -886,7 +906,7 @@ function validateExpressionNode(
   errors: PlanValidationError[],
   assignmentTarget: boolean,
   temporaryCount: number,
-  pending: Array<{ value: unknown; path: string; assignmentTarget: boolean }>,
+  pending: ExpressionValidationWork[],
 ): void {
   if (!isRecord(value) || typeof value.kind !== "string") {
     errors.push(planError("TSC002", "Expression must be an object with a kind.", path));
@@ -928,7 +948,15 @@ function validateExpressionNode(
       return;
     }
     case "object":
-      validateProperties(value.properties, `${path}.properties`, errors, temporaryCount);
+      if (!Array.isArray(value.properties))
+        errors.push(planError("TSC002", "Properties must be an array.", `${path}.properties`));
+      else
+        for (let index = value.properties.length - 1; index >= 0; index -= 1)
+          pending.push({
+            kind: "property",
+            value: value.properties[index],
+            path: `${path}.properties[${index}]`,
+          });
       return;
     case "group":
       validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);

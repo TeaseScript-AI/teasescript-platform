@@ -4,6 +4,7 @@ import type {
   Expression,
   FunctionDeclaration,
   ListLiteral,
+  ObjectLiteral,
   SetLiteral,
   Statement,
   InteractionExpression,
@@ -577,27 +578,8 @@ export class InstructionCompiler {
       case "listLiteral":
       case "setLiteral":
         return this.#lowerCollectionExpression(expression);
-      case "objectLiteral": {
-        const values = this.#lowerOrderedExpressions(
-          expression.properties.map((property) => property.value),
-        );
-        const lowered = expression.properties.map((property, index) => ({
-          property,
-          lowered: values[index]!,
-        }));
-        return {
-          plan: {
-            kind: "object",
-            properties: lowered.map(({ property, lowered: value }) => ({
-              name: property.name.name,
-              value: value.plan,
-              span: copySpan(property.span),
-            })),
-            span: copySpan(expression.span),
-          },
-          temporaryIds: lowered.flatMap((item) => item.lowered.temporaryIds),
-        };
-      }
+      case "objectLiteral":
+        return this.#lowerCollectionExpression(expression);
       case "propertyAccessExpression": {
         const object = this.#lowerExpression(expression.object);
         return {
@@ -1097,7 +1079,7 @@ export class InstructionCompiler {
     return lowered;
   }
 
-  #lowerCollectionExpression(root: ListLiteral | SetLiteral): LoweredExpression {
+  #lowerCollectionExpression(root: ListLiteral | SetLiteral | ObjectLiteral): LoweredExpression {
     type Work =
       | {
           readonly kind: "expression";
@@ -1106,7 +1088,7 @@ export class InstructionCompiler {
         }
       | {
           readonly kind: "assemble";
-          readonly expression: ListLiteral | SetLiteral;
+          readonly expression: ListLiteral | SetLiteral | ObjectLiteral;
           readonly elementCount: number;
           readonly materialize: boolean;
           readonly materializationSpan: SourceSpan;
@@ -1118,11 +1100,22 @@ export class InstructionCompiler {
       if (current.kind === "assemble") {
         const elements = results.splice(results.length - current.elementCount);
         let lowered: LoweredExpression = {
-          plan: {
-            kind: current.expression.kind === "listLiteral" ? "list" : "set",
-            elements: elements.map((item) => item.plan),
-            span: copySpan(current.expression.span),
-          },
+          plan:
+            current.expression.kind === "objectLiteral"
+              ? {
+                  kind: "object",
+                  properties: current.expression.properties.map((property, index) => ({
+                    name: property.name.name,
+                    value: elements[index]!.plan,
+                    span: copySpan(property.span),
+                  })),
+                  span: copySpan(current.expression.span),
+                }
+              : {
+                  kind: current.expression.kind === "listLiteral" ? "list" : "set",
+                  elements: elements.map((item) => item.plan),
+                  span: copySpan(current.expression.span),
+                },
           temporaryIds: elements.flatMap((item) => item.temporaryIds),
         };
         if (current.materialize && lowered.plan.kind !== "temporary") {
@@ -1133,7 +1126,11 @@ export class InstructionCompiler {
       }
 
       const expression = unwrapParentheses(current.expression);
-      if (expression.kind !== "listLiteral" && expression.kind !== "setLiteral") {
+      if (
+        expression.kind !== "listLiteral" &&
+        expression.kind !== "setLiteral" &&
+        expression.kind !== "objectLiteral"
+      ) {
         let lowered = this.#lowerExpression(current.expression);
         if (current.materialize && lowered.plan.kind !== "temporary") {
           lowered = this.#materializeExpression(lowered, current.expression.span);
@@ -1142,26 +1139,28 @@ export class InstructionCompiler {
         continue;
       }
 
-      const emitsInstructions = expression.elements.map((element) =>
-        this.#containsUserCall(element),
-      );
-      const laterEmitsInstructions = new Array<boolean>(expression.elements.length);
+      const children =
+        expression.kind === "objectLiteral"
+          ? expression.properties.map((property) => property.value)
+          : expression.elements;
+      const emitsInstructions = children.map((element) => this.#containsUserCall(element));
+      const laterEmitsInstructions = new Array<boolean>(children.length);
       let suffixEmitsInstructions = false;
-      for (let index = expression.elements.length - 1; index >= 0; index -= 1) {
+      for (let index = children.length - 1; index >= 0; index -= 1) {
         laterEmitsInstructions[index] = suffixEmitsInstructions;
         if (emitsInstructions[index]) suffixEmitsInstructions = true;
       }
       work.push({
         kind: "assemble",
         expression,
-        elementCount: expression.elements.length,
+        elementCount: children.length,
         materialize: current.materialize,
         materializationSpan: current.expression.span,
       });
-      for (let index = expression.elements.length - 1; index >= 0; index -= 1) {
+      for (let index = children.length - 1; index >= 0; index -= 1) {
         work.push({
           kind: "expression",
-          expression: expression.elements[index]!,
+          expression: children[index]!,
           materialize: laterEmitsInstructions[index]!,
         });
       }
@@ -1479,15 +1478,7 @@ function compileExpression(expression: Expression): ExpressionPlan {
     case "listLiteral":
       return compileCollectionExpression(expression);
     case "objectLiteral":
-      return {
-        kind: "object",
-        properties: expression.properties.map((property) => ({
-          name: property.name.name,
-          value: compileExpression(property.value),
-          span: copySpan(property.span),
-        })),
-        span: copySpan(expression.span),
-      };
+      return compileCollectionExpression(expression);
     case "setLiteral":
       return compileCollectionExpression(expression);
     case "propertyAccessExpression":
@@ -1541,12 +1532,14 @@ function compileExpression(expression: Expression): ExpressionPlan {
   }
 }
 
-function compileCollectionExpression(root: ListLiteral | SetLiteral): ExpressionPlan {
+function compileCollectionExpression(
+  root: ListLiteral | SetLiteral | ObjectLiteral,
+): ExpressionPlan {
   type Work =
     | { readonly kind: "expression"; readonly expression: Expression }
     | {
         readonly kind: "assemble";
-        readonly expression: ListLiteral | SetLiteral;
+        readonly expression: ListLiteral | SetLiteral | ObjectLiteral;
         readonly elementCount: number;
       };
   const work: Work[] = [{ kind: "expression", expression: root }];
@@ -1555,22 +1548,42 @@ function compileCollectionExpression(root: ListLiteral | SetLiteral): Expression
     const current = work.pop()!;
     if (current.kind === "assemble") {
       const elements = results.splice(results.length - current.elementCount);
-      results.push({
-        kind: current.expression.kind === "listLiteral" ? "list" : "set",
-        elements,
-        span: copySpan(current.expression.span),
-      });
+      results.push(
+        current.expression.kind === "objectLiteral"
+          ? {
+              kind: "object",
+              properties: current.expression.properties.map((property, index) => ({
+                name: property.name.name,
+                value: elements[index]!,
+                span: copySpan(property.span),
+              })),
+              span: copySpan(current.expression.span),
+            }
+          : {
+              kind: current.expression.kind === "listLiteral" ? "list" : "set",
+              elements,
+              span: copySpan(current.expression.span),
+            },
+      );
       continue;
     }
 
     const expression = unwrapParentheses(current.expression);
-    if (expression.kind !== "listLiteral" && expression.kind !== "setLiteral") {
+    if (
+      expression.kind !== "listLiteral" &&
+      expression.kind !== "setLiteral" &&
+      expression.kind !== "objectLiteral"
+    ) {
       results.push(compileExpression(current.expression));
       continue;
     }
-    work.push({ kind: "assemble", expression, elementCount: expression.elements.length });
-    for (let index = expression.elements.length - 1; index >= 0; index -= 1) {
-      work.push({ kind: "expression", expression: expression.elements[index]! });
+    const children =
+      expression.kind === "objectLiteral"
+        ? expression.properties.map((property) => property.value)
+        : expression.elements;
+    work.push({ kind: "assemble", expression, elementCount: children.length });
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      work.push({ kind: "expression", expression: children[index]! });
     }
   }
   return results[0]!;
