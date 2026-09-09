@@ -456,7 +456,7 @@ consumption, and checkpoint/restore.
 `compileSource(source, options)` is the normal source compilation route. It:
 
 1. parses source text into a `Program`;
-2. runs shared AST-level validation for parsed non-finite numeric literals;
+2. runs AST-level validation for parsed non-finite numeric literals;
 3. runs semantic validation when parsing and finite-literal checking produced no errors;
 4. includes the core runtime built-ins plus configured global and builtin names in validation;
 5. lowers the program only when no error diagnostics remain;
@@ -473,7 +473,9 @@ host-dependent recursive paths are recorded in [`RESOURCE-LIMITS.md`](RESOURCE-L
 
 `compileSource(...)` rejects numeric literals such as `1e999` and `-1e999` with error diagnostic `TSC001`. It does not return an instruction plan for those inputs. Large finite values such as `1e308` remain valid. The normal compilation route therefore cannot return a plan containing literal `Infinity`, `-Infinity`, or `NaN`, and instruction-plan validation independently rejects any non-finite number in plan data.
 
-The `TSC001` check is implemented as shared AST-level validation. `compileSource(...)` includes these diagnostics in its parser-diagnostic boundary, while the lower-level `parse(...)` result may still expose the raw JavaScript number produced while parsing. Callers must not treat parsing alone as successful compilation.
+`compileSource(...)` performs the `TSC001` AST-level validation once and includes the diagnostics in its
+parser-diagnostic boundary. The lower-level `parse(...)` result may still expose the raw JavaScript number produced
+while parsing, so callers must not treat parsing alone as successful compilation.
 
 ### Template interpolation
 
