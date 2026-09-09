@@ -625,6 +625,7 @@ function visitExpression(expression: Expression, visitor: Visitor): void {
     case "stringLiteral":
       return;
   }
+  expression satisfies never;
 }
 
 interface OffsetEdit {
