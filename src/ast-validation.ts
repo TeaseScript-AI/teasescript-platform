@@ -3,8 +3,6 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import { createCapturedArray } from "./external-data-capture.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 
-export const AST_VALIDATION_CODES = { nonFiniteNumericLiteral: "TSC001" } as const;
-
 const FALLBACK_SPAN = createSourceSpan(
   createSourcePosition(0, 0, 0),
   createSourcePosition(0, 0, 0),
@@ -40,7 +38,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
       diagnostics.push(
         createDiagnostic(
           DiagnosticSeverity.Error,
-          AST_VALIDATION_CODES.nonFiniteNumericLiteral,
+          "TSC001",
           "Numeric literal must evaluate to a finite number.",
           isSourceSpan(node.span) ? node.span : FALLBACK_SPAN,
         ),
