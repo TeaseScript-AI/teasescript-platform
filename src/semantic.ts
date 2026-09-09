@@ -358,18 +358,15 @@ class SemanticValidator {
 
     const defaultScope = new SemanticScope(this.#root);
     const laterNameCounts = new Map<string, number>();
-    const laterNames = new Set<string>();
     for (const parameter of declaration.parameters) {
       const name = parameter.name.name;
       laterNameCounts.set(name, (laterNameCounts.get(name) ?? 0) + 1);
-      laterNames.add(name);
     }
     for (const parameter of declaration.parameters) {
       const name = parameter.name.name;
       const remaining = (laterNameCounts.get(name) ?? 1) - 1;
       if (remaining === 0) {
         laterNameCounts.delete(name);
-        laterNames.delete(name);
       } else {
         laterNameCounts.set(name, remaining);
       }
@@ -382,7 +379,7 @@ class SemanticValidator {
             blockingInteraction.span,
           );
         }
-        this.#reportLaterParameterReferences(parameter.defaultValue, laterNames);
+        this.#reportLaterParameterReferences(parameter.defaultValue, laterNameCounts);
         this.#validateExpression(parameter.defaultValue, defaultScope, null);
       }
       defaultScope.declare(name, { kind: "variable" });
@@ -744,9 +741,12 @@ class SemanticValidator {
     }
   }
 
-  #reportLaterParameterReferences(expression: Expression, laterNames: ReadonlySet<string>): void {
+  #reportLaterParameterReferences(
+    expression: Expression,
+    laterNameCounts: ReadonlyMap<string, number>,
+  ): void {
     visitExpression(expression, (identifier) => {
-      if (!laterNames.has(identifier.name)) return;
+      if (!laterNameCounts.has(identifier.name)) return;
       this.#report(
         semanticCode.laterParameterDefault,
         `Default expression may not reference later parameter '${identifier.name}'.`,

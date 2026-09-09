@@ -200,6 +200,23 @@ test("compact choose reports a missing continued option and recovers at the foll
   );
 });
 
+test("nested compact choices report missing options once per affected invocation", () => {
+  const nestedOnly = parse("let result = choose [choose]");
+  assert.deepEqual(
+    nestedOnly.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSP030"],
+  );
+
+  const nestedAndOuter = parse("let result = choose choose,");
+  assert.deepEqual(
+    nestedAndOuter.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+    [
+      ["TSP030", "Expected at least one choice option."],
+      ["TSP030", "Expected a choice option after ','."],
+    ],
+  );
+});
+
 test("parenthesized advanced interaction-call forms are rejected with a focused diagnostic and exact span", () => {
   for (const source of [
     'showButton("Continue")',

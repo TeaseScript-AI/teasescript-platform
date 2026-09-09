@@ -124,6 +124,46 @@ test("parses positional and named arguments and rejects mixing", () => {
   );
 });
 
+test("accepts every keyword as a property name in unambiguous property positions", () => {
+  const keywords = [
+    "speaker",
+    "say",
+    "wait",
+    "as",
+    "exit",
+    "let",
+    "if",
+    "else",
+    "true",
+    "false",
+    "null",
+    "not",
+    "and",
+    "or",
+    "set",
+    "repeat",
+    "for",
+    "in",
+    "while",
+    "break",
+    "continue",
+    "function",
+    "return",
+  ];
+
+  for (const keyword of keywords) {
+    const sources = [
+      `speaker vera { ${keyword}: "value" }`,
+      `let object = { ${keyword}: 1 }`,
+      `let property = object.${keyword}`,
+      `invoke(${keyword}: 1)`,
+    ];
+    for (const source of sources) {
+      assert.deepEqual(parse(source).diagnostics, [], source);
+    }
+  }
+});
+
 test("parses list, object, and set literals", () => {
   const result = parse('let value = { items: ["key", 2], unique: set[1, 2, 2] }');
 

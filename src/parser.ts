@@ -938,7 +938,6 @@ class Parser {
   #parseOr(): Expression | null {
     let expression = this.#parseAnd();
     while (expression !== null && this.#match(TokenKind.KeywordOr)) {
-      const operator = this.#previous();
       this.#skipContinuationNewlines();
       const right = this.#parseAnd();
       if (right === null) {
@@ -948,7 +947,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, operator, right, "or");
+      expression = this.#binary(expression, right, "or");
     }
     return expression;
   }
@@ -956,7 +955,6 @@ class Parser {
   #parseAnd(): Expression | null {
     let expression = this.#parseNot();
     while (expression !== null && this.#match(TokenKind.KeywordAnd)) {
-      const operator = this.#previous();
       this.#skipContinuationNewlines();
       const right = this.#parseNot();
       if (right === null) {
@@ -966,7 +964,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, operator, right, "and");
+      expression = this.#binary(expression, right, "and");
     }
     return expression;
   }
@@ -1006,7 +1004,7 @@ class Parser {
       );
       return null;
     }
-    const expression = this.#binary(left, operator, right, binaryOperator(operator));
+    const expression = this.#binary(left, right, binaryOperator(operator));
     if (isComparisonKind(this.#peek().kind)) {
       this.#reportToken(
         parserDiagnosticCode.chainedComparison,
@@ -1075,7 +1073,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, operator, right, binaryOperator(operator));
+      expression = this.#binary(expression, right, binaryOperator(operator));
     }
     return expression;
   }
@@ -1098,7 +1096,7 @@ class Parser {
         );
         return null;
       }
-      expression = this.#binary(expression, operator, right, binaryOperator(operator));
+      expression = this.#binary(expression, right, binaryOperator(operator));
     }
     return expression;
   }
@@ -1361,6 +1359,7 @@ class Parser {
     }
 
     const options: InteractionChoiceOption[] = [];
+    let missingChoiceOptionWasReported = false;
     while (!this.#isInteractionChoiceTerminator()) {
       const label =
         (this.#check(TokenKind.Identifier) || this.#check(TokenKind.NumberLiteral)) &&
@@ -1374,6 +1373,7 @@ class Parser {
       }
       const value = this.#parseExpression();
       if (value === null) {
+        missingChoiceOptionWasReported = true;
         this.#reportInsertion(
           parserDiagnosticCode.expectedChoiceOption,
           label === null
@@ -1420,6 +1420,7 @@ class Parser {
       }
       this.#skipContinuationNewlines();
       if (this.#isInteractionChoiceTerminator()) {
+        missingChoiceOptionWasReported = true;
         this.#reportInsertion(
           parserDiagnosticCode.expectedChoiceOption,
           "Expected a choice option after ','.",
@@ -1427,11 +1428,6 @@ class Parser {
         break;
       }
     }
-    const missingChoiceOptionWasReported = this.#diagnostics.some(
-      (item) =>
-        item.code === parserDiagnosticCode.expectedChoiceOption &&
-        item.span.start.offset >= command.span.start.offset,
-    );
     if (options.length === 0 && !missingChoiceOptionWasReported) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedChoiceOption,
@@ -1681,7 +1677,6 @@ class Parser {
 
   #binary(
     left: Expression,
-    _operatorToken: Token,
     right: Expression,
     operator: BinaryExpression["operator"],
   ): BinaryExpression {
@@ -1924,8 +1919,35 @@ function isScalarType(value: string): value is ScalarTypeName {
   return scalarTypes.has(value as ScalarTypeName);
 }
 
+const propertyNameKinds: ReadonlySet<TokenKind> = new Set([
+  TokenKind.Identifier,
+  TokenKind.KeywordSpeaker,
+  TokenKind.KeywordSay,
+  TokenKind.KeywordWait,
+  TokenKind.KeywordAs,
+  TokenKind.KeywordExit,
+  TokenKind.KeywordLet,
+  TokenKind.KeywordIf,
+  TokenKind.KeywordElse,
+  TokenKind.KeywordTrue,
+  TokenKind.KeywordFalse,
+  TokenKind.KeywordNull,
+  TokenKind.KeywordNot,
+  TokenKind.KeywordAnd,
+  TokenKind.KeywordOr,
+  TokenKind.KeywordSet,
+  TokenKind.KeywordRepeat,
+  TokenKind.KeywordFor,
+  TokenKind.KeywordIn,
+  TokenKind.KeywordWhile,
+  TokenKind.KeywordBreak,
+  TokenKind.KeywordContinue,
+  TokenKind.KeywordFunction,
+  TokenKind.KeywordReturn,
+]);
+
 function isPropertyName(token: Token): boolean {
-  return token.kind === TokenKind.Identifier || token.kind.startsWith("keyword");
+  return propertyNameKinds.has(token.kind);
 }
 
 function isExpressionStart(token: Token): boolean {
