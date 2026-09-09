@@ -20,17 +20,19 @@ test("large flat chains complete full compilation with source provenance", () =>
   }
 });
 
-test("flat, parenthesis, and collection compilation remain iterative with a constrained host stack", () => {
+test("flat, parenthesis, collection, and object compilation remain iterative with a constrained host stack", () => {
   const source = flatChain(1_024);
   const nestedSource = `let value = ${"(".repeat(1_024)}1${")".repeat(1_024)}`;
   const collectionSource = `let value = ${"[".repeat(1_024)}1${"]".repeat(1_024)}\nexit`;
   const setSource = `let value = ${"set[".repeat(1_024)}1${"]".repeat(1_024)}`;
-  const residualNestedSource = `let value = ${"{ value: ".repeat(256)}1${" }".repeat(256)}`;
+  const objectSource = `let value = ${"{ value: ".repeat(1_024)}1${" }".repeat(1_024)}\nexit`;
+  const residualNestedSource = `${"if true {".repeat(1_024)}exit${"}".repeat(1_024)}`;
   const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
   const parserUrl = new URL("../src/parser.js", import.meta.url).href;
   const semanticUrl = new URL("../src/semantic.js", import.meta.url).href;
   const compilerLoweringUrl = new URL("../src/compiler/compile-program.js", import.meta.url).href;
   const runtimeStateUrl = new URL("../src/runtime/state.js", import.meta.url).href;
+  const checkpointUrl = new URL("../src/runtime/checkpoint.js", import.meta.url).href;
   const runtimeEngineUrl = new URL("../src/runtime/engine.js", import.meta.url).href;
   const script = `
     const [
@@ -56,6 +58,12 @@ test("flat, parenthesis, and collection compilation remain iterative with a cons
     const compiledNested = compileSource(process.env.TEASESCRIPT_NESTED_SOURCE);
     const compiledCollection = compileSource(process.env.TEASESCRIPT_COLLECTION_SOURCE);
     const compiledSet = compileSource(process.env.TEASESCRIPT_SET_SOURCE);
+    const compiledObject = compileSource(process.env.TEASESCRIPT_OBJECT_SOURCE);
+    const deepObject = "{ x: ".repeat(1024) + "1" + " }".repeat(1024);
+    const siblingObjects = ["{ before: 2, child: " + deepObject + " }", "{ child: " + deepObject + ", after: 2 }"].map((expression) => {
+      const compiled = compileSource("let value = " + expression);
+      return {codes: compiled.diagnostics.map((diagnostic) => diagnostic.code), status: compiled.plan ? run(compiled.plan, createFreshRuntimeSnapshot(compiled.plan)).snapshot.status : null};
+    });
     const containedResidual = compileSource(process.env.TEASESCRIPT_RESIDUAL_NESTED_SOURCE);
     const runtimeResult = run(
       compiledCollection.plan,
@@ -71,6 +79,15 @@ test("flat, parenthesis, and collection compilation remain iterative with a cons
       collectionDepth += 1;
       collectionValue = collectionValue.items[0];
     }
+    const {createCheckpoint, restoreCheckpoint} = await import(${JSON.stringify(checkpointUrl)});
+    const objectRuntime = run(compiledObject.plan, createFreshRuntimeSnapshot(compiledObject.plan));
+    const restoredObject = restoreCheckpoint(createCheckpoint(compiledObject.plan, objectRuntime.snapshot));
+    let objectValue = restoredObject.snapshot.frames[0]?.bindings[0]?.value;
+    let objectDepth = 0;
+    while (objectValue?.kind === "object") {
+      objectDepth += 1;
+      objectValue = objectValue.properties[0].value;
+    }
     process.stdout.write(JSON.stringify({
       parserDiagnostics: parsed.diagnostics.length,
       semanticDiagnostics: semantic.diagnostics.length,
@@ -81,6 +98,11 @@ test("flat, parenthesis, and collection compilation remain iterative with a cons
       compiledNestedCodes: compiledNested.diagnostics.map((diagnostic) => diagnostic.code),
       compiledNestedProgramStatements: compiledNested.program.statements.length,
       compiledNestedExpressionKind: compiledNested.plan?.instructions[0]?.value?.kind,
+      siblingObjects,
+      objectCodes: compiledObject.diagnostics.map((diagnostic) => diagnostic.code),
+      objectRuntimeStatus: objectRuntime.snapshot.status,
+      objectDepth,
+      objectLeaf: objectValue,
       collectionCodes: compiledCollection.diagnostics.map((diagnostic) => diagnostic.code),
       collectionRuntimeStatus: runtimeResult.snapshot.status,
       collectionDepth,
@@ -107,6 +129,7 @@ test("flat, parenthesis, and collection compilation remain iterative with a cons
         TEASESCRIPT_STACK_SOURCE: source,
         TEASESCRIPT_NESTED_SOURCE: nestedSource,
         TEASESCRIPT_COLLECTION_SOURCE: collectionSource,
+        TEASESCRIPT_OBJECT_SOURCE: objectSource,
         TEASESCRIPT_SET_SOURCE: setSource,
         TEASESCRIPT_RESIDUAL_NESTED_SOURCE: residualNestedSource,
       },
@@ -125,6 +148,14 @@ test("flat, parenthesis, and collection compilation remain iterative with a cons
     compiledNestedCodes: [],
     compiledNestedProgramStatements: 1,
     compiledNestedExpressionKind: "literal",
+    siblingObjects: [
+      { codes: [], status: "halted" },
+      { codes: [], status: "halted" },
+    ],
+    objectCodes: [],
+    objectRuntimeStatus: "halted",
+    objectDepth: 1_024,
+    objectLeaf: 1,
     collectionCodes: [],
     collectionRuntimeStatus: "halted",
     collectionDepth: 1_024,

@@ -117,6 +117,7 @@ class Parser {
   #skipParenthesisChainScanThroughIndex = -1;
   readonly #skipCollectionChainScanIndexes = new Set<number>();
   #collectionRecoveryVersion = 0;
+  readonly #skipObjectChainScanIndexes = new Set<number>();
   #recoveredAtStatementBoundary = false;
 
   public constructor(
@@ -1815,7 +1816,8 @@ class Parser {
         start = open.pop()!;
         openCounts.set(start.kind, openCounts.get(start.kind)! - 1);
       }
-      if (expectedOpen === TokenKind.LeftBracket) matching[start.index] = index;
+      if (expectedOpen === TokenKind.LeftBracket || expectedOpen === TokenKind.LeftBrace)
+        matching[start.index] = index;
     }
     this.delimiterMatchCache.brackets = matching;
     return matching;
@@ -1864,6 +1866,91 @@ class Parser {
   }
 
   #parseObjectLiteral(start: Token): ObjectLiteral {
+    const firstIndex = this.#current - 1;
+    if (this.#skipObjectChainScanIndexes.has(firstIndex)) return this.#parseObjectProperties(start);
+    const starts: { token: Token; name: Token; openIndex: number }[] = [];
+    let openIndex = firstIndex;
+    let scan = this.#current;
+    let token = start;
+    while (true) {
+      while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
+      const name = this.tokens[scan];
+      if (
+        name === undefined ||
+        !isPropertyName(name) ||
+        this.tokens[scan + 1]?.kind !== TokenKind.Colon
+      )
+        break;
+      scan += 2;
+      while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
+      if (this.tokens[scan]?.kind !== TokenKind.LeftBrace) break;
+      starts.push({ token, name, openIndex });
+      openIndex = scan;
+      token = this.tokens[scan++]!;
+    }
+    if (starts.length === 0) return this.#parseObjectProperties(start);
+    // Only flatten pure wrappers. Other expression work and malformed recovery keep
+    // the ordinary parser path, including its name/colon diagnostics.
+    const matching = this.#getMatchingRightBrackets();
+    let close = matching[openIndex];
+    let eligible = close !== undefined;
+    let ineligibleThrough = starts.length - 1;
+    for (let index = starts.length - 1; index >= 0 && eligible; index -= 1) {
+      let next = close! + 1;
+      while (this.tokens[next]?.kind === TokenKind.Newline) next += 1;
+      eligible =
+        this.tokens[next]?.kind === TokenKind.RightBrace &&
+        matching[starts[index]!.openIndex] === next;
+      if (eligible) ineligibleThrough = index - 1;
+      close = next;
+    }
+    const disableScans = (through = starts.length - 1): void => {
+      for (let index = 0; index <= through; index += 1)
+        this.#skipObjectChainScanIndexes.add(starts[index]!.openIndex);
+    };
+    if (!eligible) {
+      // An outer sibling excludes that wrapper, not its already verified nested suffix.
+      disableScans(ineligibleThrough);
+      return this.#parseObjectProperties(start);
+    }
+    const original = this.#current;
+    const diagnosticCount = this.#diagnostics.length;
+    const recovered = this.#recoveredAtStatementBoundary;
+    const parenthesisScan = this.#skipParenthesisChainScanThroughIndex;
+    this.#current = openIndex + 1;
+    let completed = this.#parseObjectProperties(token);
+    // Recovery wholly contained by the inner object cannot affect a wrapper.
+    // Reparse only when recovery moved across its expected closing delimiter.
+    if (this.#current !== matching[openIndex]! + 1) {
+      this.#current = original;
+      this.#diagnostics.length = diagnosticCount;
+      this.#recoveredAtStatementBoundary = recovered;
+      this.#skipParenthesisChainScanThroughIndex = parenthesisScan;
+      disableScans();
+      return this.#parseObjectProperties(start);
+    }
+    for (let index = starts.length - 1; index >= 0; index -= 1) {
+      const wrapper = starts[index]!;
+      this.#skipNewlines();
+      const end = this.#advance().span;
+      const name = this.#identifier(wrapper.name);
+      completed = Object.freeze({
+        kind: "objectLiteral",
+        properties: Object.freeze([
+          Object.freeze({
+            kind: "objectProperty",
+            name,
+            value: completed,
+            span: spanFrom(name.span, completed.span),
+          }),
+        ]),
+        span: spanFrom(wrapper.token.span, end),
+      });
+    }
+    return completed;
+  }
+
+  #parseObjectProperties(start: Token): ObjectLiteral {
     const properties: ObjectProperty[] = [];
     this.#skipNewlines();
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {

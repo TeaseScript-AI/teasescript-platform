@@ -2377,25 +2377,21 @@ function collectExpressionTemporaries(expression: ExpressionPlan, output: Set<nu
     case "identifier":
       return;
     case "list":
-    case "set": {
-      const work = [...expression.elements].reverse();
+    case "set":
+    case "object": {
+      const work: ExpressionPlan[] = [expression];
       while (work.length > 0) {
-        const current = work.pop()!;
-        if (current.kind === "list" || current.kind === "set") {
-          for (let index = current.elements.length - 1; index >= 0; index -= 1) {
-            work.push(current.elements[index]!);
-          }
-        } else {
-          collectExpressionTemporaries(current, output);
-        }
+        const current: ExpressionPlan = work.pop()!;
+        if (current.kind === "list" || current.kind === "set" || current.kind === "object") {
+          const children =
+            current.kind === "object"
+              ? current.properties.map((property) => property.value)
+              : current.elements;
+          for (let index = children.length - 1; index >= 0; index -= 1) work.push(children[index]!);
+        } else collectExpressionTemporaries(current, output);
       }
       return;
     }
-    case "object":
-      expression.properties.forEach((property) =>
-        collectExpressionTemporaries(property.value, output),
-      );
-      return;
     case "group":
       collectExpressionTemporaries(expression.expression, output);
       return;

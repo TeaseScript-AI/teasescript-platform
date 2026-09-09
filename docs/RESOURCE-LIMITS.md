@@ -62,14 +62,20 @@ This is failure containment at the normal compiler boundary, not an input prefli
 does not count source depth, impose a numeric nesting limit, or promise that a particular source size will compile on
 every JavaScript host. Flat binary-chain semantic traversal, synchronous plan construction, prepared-reference scanning,
 and plan-expression validation avoid the native stack. The parser also handles direct parenthesis and list/set chains
-iteratively, and collection-specific semantic, lowering, plan-validation, fresh-state, and runtime paths avoid recursive
-descent through consecutive collections. With a deliberately constrained child-process stack, the focused regression
-compiles 1,024 nested groups, compiles and runs 1,024 nested lists, and produces the normal semantic diagnostics for
-1,024 nested sets. Parenthesis nesting with expression work between successive closing groups, object/string nesting,
-nested statements, and other recursive expression shapes may still reach a host-dependent native boundary. In the same
-constrained child process, 256 nested object literals retain `TSC007`, an empty program, and the complete source span.
-These regression depths exercise the repaired and residual structures without becoming CI capacity thresholds or
-supported capacity claims.
+and pure single-property object-wrapper chains iteratively. Collection/object semantic, lowering, plan-validation,
+fresh-state, and runtime paths avoid recursive descent through consecutive collections and objects. With a deliberately
+constrained child-process stack, focused regressions compile 1,024 nested groups, compile and run 1,024 nested lists and
+objects, restore the nested-object checkpoint in memory, and produce normal semantic diagnostics for 1,024 nested sets.
+Parenthesis nesting with expression work between successive closing groups, object chains with siblings or intervening
+expression work, string nesting, nested statements, and other recursive expression shapes may still reach a
+host-dependent native boundary. The constrained child process retains `TSC007`, an empty program, and the complete
+source span for nested statements. These regression depths exercise repaired and residual structures without becoming
+CI capacity thresholds or supported capacity claims.
+
+Checkpoint capture and restore use iterative traversal for these nested values, but `serializeCheckpoint` and callers
+using native `JSON.stringify` can still exhaust the host stack while serializing deep plan or runtime data. Issue #408
+tracks the shared checkpoint serializer repair; this boundary also exists for nested lists and is not an object-depth
+rejection policy. Smaller nested-object regressions verify the complete JSON checkpoint/resume route.
 
 ## Non-rejecting scale diagnostics
 
