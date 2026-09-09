@@ -4,6 +4,7 @@
 
 - `../README-FIRST.md`: authority and conflict-routing rules.
 - `specifications/accepted-syntaxes-v30.md`: accepted consolidated syntax baseline.
+- `specifications/message-markup.md`: accepted authored Standard-chat `say` presentation markup and escaping contract.
 - `decisions/`: accepted and proposed ADRs; each file states its status.
 - `../CURRENT-DESIGN.md`: stable cross-component architecture and implementation boundaries.
 - `../PHASE-STATUS.md`: current phase, gate, and high-level implemented-capability status.

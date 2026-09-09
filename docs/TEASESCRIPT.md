@@ -12,6 +12,8 @@ Accepted post-V30 additions:
 - ADR 0016 defines the shared resumable pending-action contract and selects blocking `wait` as its first implementation slice.
 - ADR 0017 defines the accepted boundary between official syntax, the public Standard Library, package libraries, privileged platform adapters, and deterministic engine primitives.
 - ADR 0018 defines the accepted first Standard Library POC contract for `showButton`, `askText`, `askNumber`, `choose`, and `say` smart autoplay.
+- `specifications/message-markup.md` defines the accepted constrained presentation markup for authored Standard-chat
+  `say` output and the `escapeMarkup()` literal-insertion helper.
 
 Rejected forms remain rejected, including `set score = 20`, `procedure`, and `call` for ordinary function calls. Historical research may still contain those forms and is non-authoritative.
 
@@ -151,6 +153,24 @@ With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySk
 
 `wait` remains separate. It does not become a `say` option and does not consume the pacing gate.
 
+### Authored `say` message markup
+
+After the final `say` string is evaluated and interpolated, the runtime parses it once using the constrained grammar in
+[`specifications/message-markup.md`](specifications/message-markup.md). The grammar provides selected Markdown-like
+formatting, controlled bracket extensions, HTTP(S) links, and block presentation without accepting raw HTML or
+arbitrary CSS. Smart pacing counts the resulting visible text rather than markup delimiters.
+
+Ordinary interpolation participates in that final parse. Use the protected Platform Standard Library helper
+`escapeMarkup(text)` when inserted string content must remain literal:
+
+```tease
+let name = "**Mistress**"
+say "**Warning:** ${escapeMarkup(name)}, no touching."
+```
+
+Player-authored transcript entries remain plain text. The canonical specification owns the complete grammar, escaping,
+nesting, recovery, and link rules.
+
 ### Bounded-data boundary
 
 ADR 0018 does not assign separate author-facing character limits to text answers, hints, buttons, or choice labels. Interaction definitions and completions remain subject to justified current platform constraints for strings, collections, messages, plans, snapshots, checkpoints, nesting, and validation work.
@@ -199,6 +219,9 @@ implementation constraint, not language capacity. Historical diagnostic measurem
 
 Grammar keywords, type names, engine names, and implemented core built-ins are centrally protected from user declarations even when a protected future engine API is not yet callable. Protection does not make a deferred API implemented.
 
-A Standard Library export does not automatically become a protected grammar keyword. ADR 0018 explicitly protects the selected first-POC direct names as part of the automatic prelude. Broader import qualification, conflicts, replacement, and compatibility policy remain later library-linkage decisions.
+A Standard Library export does not automatically become a protected grammar keyword. ADR 0018 explicitly protects its
+selected first-POC direct names, and the message-markup specification explicitly protects `escapeMarkup`, as part of
+the automatic prelude. Broader import qualification, conflicts, replacement, and compatibility policy remain later
+library-linkage decisions.
 
 The V30-to-V31 gap review is not a V31 syntax document. A future `accepted-syntaxes-v31.md` should consolidate V30 with accepted post-V30 decisions, including ADR 0018, rather than treating this topic document as the consolidated syntax specification.

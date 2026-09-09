@@ -164,9 +164,11 @@ delayMs =
     )
 ```
 
-The measured value is the final emitted text after expression evaluation, interpolation, escapes, deterministic list
-selection, and block-string newline normalization and dedent. Words are maximal non-whitespace sequences; visible
-characters are Unicode code points.
+The measured value is the visible text from the final message-markup representation after expression evaluation,
+interpolation, string escaping, deterministic list selection, block-string newline normalization/dedent, and one shared
+message-markup parse. Formatting delimiters and block markers do not count. Words are maximal non-whitespace sequences;
+visible characters are Unicode code points. The authored markup grammar and flattening rules are defined in
+[`specifications/message-markup.md`](specifications/message-markup.md).
 
 All counts, multiplication, addition, and deadline construction use checked arithmetic. A non-finite, unsafe, unsupported-magnitude, or overflowing result fails before an action ID or partial gate is created. There is no additional product reading-time cap, but ADR 0016 numeric-magnitude and deadline-overflow limits still apply.
 
@@ -180,7 +182,9 @@ The first POC has at most one active pacing gate because it has one Standard cha
 
 #### Initial message and background gate
 
-A normal or positive-duration `say` evaluates speaker, text, pacing, skip policy, and deterministic text selection once in source order.
+A normal or positive-duration `say` evaluates speaker, authored text, pacing, skip policy, and deterministic text
+selection once in source order. It then parses the final authored string once into structured message content and its
+canonical visible text. The emitted `say` event carries both representations.
 
 When no earlier gate blocks it, one atomic instruction boundary:
 
@@ -195,7 +199,8 @@ The text-output event precedes `actionRequested`. No checkpoint may contain the 
 
 When execution reaches a later normal or positive-duration `say` while the background gate remains active:
 
-1. evaluate and store the later prepared output once, including speaker, final text, pacing, skip policy, and RNG results;
+1. evaluate and store the later prepared output once, including speaker, structured message content, canonical visible
+   text, pacing, skip policy, and RNG results;
 2. atomically move the same gate from `backgroundActions` to `foregroundAction` without changing its action ID or deadline;
 3. attach the prepared-output continuation;
 4. set status to `waiting` and stop normal execution.
@@ -610,8 +615,8 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
 | Instruction plan | 19 | Plan-owned source provenance is the compact self-contained `PlanSourceLocation` record `{so,sl,sc,eo,el,ec}`. Compiler/parser diagnostics and public runtime events, faults, warnings, built-in calls, and snapshot-owned spans retain rich `SourceSpan` values; the runtime converts plan locations at those boundaries. |
-| Runtime snapshot | 19 | Call-frame argument values are the canonical exactly-once inputs retained for parameter binding, default prologues, suspension, and resume. Validation checks supplied/missing argument state against the owning call instruction without requiring historical duplicate values in caller temporaries, and rejects a pre-call snapshot whose result destination is already occupied. |
-| Checkpoint | 27 | Updated the self-contained bundle for instruction-plan revision 19 and runtime-snapshot revision 19. |
+| Runtime snapshot | 20 | Prepared `say` output retains validated structured message markup together with its canonical visible text so pacing promotion and restore do not reparse or reevaluate authored content. |
+| Checkpoint | 28 | Updated the self-contained bundle for runtime-snapshot revision 20. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -634,7 +639,7 @@ During the POC, only the current revision of each format is supported. Non-curre
 obsolete development saves and fixtures may become invalid after an incompatible change, and migration code requires
 a separate owner-approved decision. Git history is sufficient for reconstructing exact older schemas. The current
 revisions include populated `chatPacingGate` background state, prepared pacing output, captured smart-autoplay
-settings, and exact pacing-settlement release lineage.
+settings, exact pacing-settlement release lineage, and validated prepared message markup with canonical visible text.
 
 ## API stability boundary
 

@@ -106,8 +106,6 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Exact author-facing data/API form for supported Standard Player per-control base/fill colours. The Player already owns
   derived interaction styling and automatic readable black/white control-label text; syntax, serialization, and which
   Standard control kinds expose the colour input remain unresolved.
-- Constrained transcript rich-text/BBCode capability: allowed formatting elements/attributes, sanitization, and how
-  accessibility treatment preserves authored colour/formatting semantics while meeting readability needs.
 - Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
   readable scaling/zoom behavior, minimum control sizing, contrast thresholds, and browser/platform responsibility.
 - Player UI preference persistence: which panel/tool/theme/media-fit/text-display preferences survive reload or session
