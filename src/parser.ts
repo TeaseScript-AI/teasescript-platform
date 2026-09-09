@@ -35,10 +35,10 @@ import type {
   SpeakerProperty,
   SpeakerSetterStatement,
   Statement,
-  TemplateInterpolation,
-  TemplateLiteral,
-  TemplatePart,
-  TemplateText,
+  StringInterpolation,
+  StringLiteral,
+  StringPart,
+  StringText,
   TypeAnnotation,
   UnaryExpression,
   WhileStatement,
@@ -63,8 +63,8 @@ const parserDiagnosticCode = {
   expectedColon: "TSP005",
   expectedString: "TSP006",
   expectedRightBrace: "TSP007",
-  expectedTemplateExpression: "TSP008",
-  unsupportedTemplateExpression: "TSP009",
+  expectedStringExpression: "TSP008",
+  unsupportedStringExpression: "TSP009",
   expectedPropertyAfterDot: "TSP010",
   expectedPropertyEnd: "TSP011",
   expectedExpression: "TSP012",
@@ -349,7 +349,7 @@ class Parser {
     if (value === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedString,
-        "Expected a string or template for the speaker property.",
+        "Expected a string for the speaker property.",
       );
       this.#synchronizeProperty();
       return null;
@@ -389,14 +389,11 @@ class Parser {
     const valueStart = this.#peek().kind;
     const value = this.#parseExpression();
     if (value === null) {
-      if (valueStart === TokenKind.TemplateStart) {
+      if (valueStart === TokenKind.StringStart) {
         this.#synchronizeStatement();
         return null;
       }
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedString,
-        "Expected a string or template after 'say'.",
-      );
+      this.#reportInsertion(parserDiagnosticCode.expectedString, "Expected a string after 'say'.");
       this.#synchronizeStatement();
       return null;
     }
@@ -1266,7 +1263,6 @@ class Parser {
         span: copySpan(token.span),
       });
     }
-    if (this.#match(TokenKind.StringLiteral)) return this.#stringLiteral(token);
     if (this.#match(TokenKind.KeywordTrue)) {
       return Object.freeze({ kind: "booleanLiteral", value: true, span: copySpan(token.span) });
     }
@@ -1283,8 +1279,8 @@ class Parser {
     ) {
       return this.#identifier(token);
     }
-    if (this.#match(TokenKind.TemplateStart)) {
-      return this.#parseTemplateLiteral(token);
+    if (this.#match(TokenKind.StringStart)) {
+      return this.#parseStringLiteral(token);
     }
     if (this.#match(TokenKind.LeftParenthesis)) {
       return this.#parseParenthesized(token);
@@ -1704,55 +1700,57 @@ class Parser {
     });
   }
 
-  #parseTemplateLiteral(start: Token): TemplateLiteral | null {
-    const parts: TemplatePart[] = [];
+  #parseStringLiteral(start: Token): StringLiteral | null {
+    const parts: StringPart[] = [];
     let valid = true;
-    while (!this.#check(TokenKind.TemplateEnd) && !this.#check(TokenKind.EndOfFile)) {
-      if (this.#match(TokenKind.TemplateText)) {
-        parts.push(this.#templateText(this.#previous()));
+    while (!this.#check(TokenKind.StringEnd) && !this.#check(TokenKind.EndOfFile)) {
+      if (this.#match(TokenKind.StringText)) {
+        parts.push(this.#stringText(this.#previous()));
         continue;
       }
       if (this.#match(TokenKind.InterpolationStart)) {
-        const interpolation = this.#parseTemplateInterpolation(this.#previous());
+        const interpolation = this.#parseStringInterpolation(this.#previous());
         if (interpolation === null) valid = false;
         else parts.push(interpolation);
         continue;
       }
       this.#reportToken(
-        parserDiagnosticCode.unsupportedTemplateExpression,
-        "Unexpected token in template string.",
+        parserDiagnosticCode.unsupportedStringExpression,
+        "Unexpected token in string.",
         this.#peek(),
       );
       valid = false;
       this.#advance();
     }
-    if (!this.#match(TokenKind.TemplateEnd)) return null;
+    if (!this.#match(TokenKind.StringEnd)) return null;
     if (!valid) return null;
     return Object.freeze({
-      kind: "templateLiteral",
+      kind: "stringLiteral",
+      form: start.lexeme.length === 3 ? "block" : "singleLine",
       parts: Object.freeze(parts),
       span: spanFrom(start.span, this.#previous().span),
     });
   }
 
-  #parseTemplateInterpolation(start: Token): TemplateInterpolation | null {
+  #parseStringInterpolation(start: Token): StringInterpolation | null {
+    this.#skipNewlines();
     if (this.#check(TokenKind.InterpolationEnd)) {
       this.#reportInsertion(
-        parserDiagnosticCode.expectedTemplateExpression,
-        "Expected an expression inside the template interpolation.",
+        parserDiagnosticCode.expectedStringExpression,
+        "Expected an expression inside the string interpolation.",
       );
       this.#advance();
       return null;
     }
-    if (this.#check(TokenKind.TemplateEnd) || this.#check(TokenKind.EndOfFile)) {
+    if (this.#check(TokenKind.StringEnd) || this.#check(TokenKind.EndOfFile)) {
       return null;
     }
     const diagnosticCount = this.#diagnostics.length;
     const expression = this.#parseExpression();
     if (expression === null) {
       this.#reportToken(
-        parserDiagnosticCode.unsupportedTemplateExpression,
-        "Expected a supported expression inside the template interpolation.",
+        parserDiagnosticCode.unsupportedStringExpression,
+        "Expected a supported expression inside the string interpolation.",
         this.#peek(),
       );
       this.#synchronizeInterpolation();
@@ -1764,23 +1762,20 @@ class Parser {
       this.#match(TokenKind.InterpolationEnd);
       return null;
     }
+    this.#skipNewlines();
     if (!this.#match(TokenKind.InterpolationEnd)) {
-      if (!this.#check(TokenKind.TemplateEnd) && !this.#check(TokenKind.EndOfFile)) {
+      if (!this.#check(TokenKind.StringEnd) && !this.#check(TokenKind.EndOfFile)) {
         const message = this.#check(TokenKind.Colon)
-          ? "Only identifiers and chained property access are supported in template interpolation."
-          : "Only one complete expression is allowed in template interpolation.";
-        this.#reportToken(
-          parserDiagnosticCode.unsupportedTemplateExpression,
-          message,
-          this.#peek(),
-        );
+          ? "Only identifiers and chained property access are supported in string interpolation."
+          : "Only one complete expression is allowed in string interpolation.";
+        this.#reportToken(parserDiagnosticCode.unsupportedStringExpression, message, this.#peek());
       }
       this.#synchronizeInterpolation();
       this.#match(TokenKind.InterpolationEnd);
       return null;
     }
     return Object.freeze({
-      kind: "templateInterpolation",
+      kind: "stringInterpolation",
       expression,
       span: spanFrom(start.span, this.#previous().span),
     });
@@ -1831,18 +1826,9 @@ class Parser {
     return Object.freeze({ kind: "identifier", name: token.lexeme, span: copySpan(token.span) });
   }
 
-  #stringLiteral(token: Token): Expression {
+  #stringText(token: Token): StringText {
     return Object.freeze({
-      kind: "stringLiteral",
-      raw: token.lexeme,
-      value: tokenValue(token),
-      span: copySpan(token.span),
-    });
-  }
-
-  #templateText(token: Token): TemplateText {
-    return Object.freeze({
-      kind: "templateText",
+      kind: "stringText",
       raw: token.lexeme,
       value: tokenValue(token),
       span: copySpan(token.span),
@@ -1925,7 +1911,7 @@ class Parser {
   #synchronizeInterpolation(): void {
     while (
       !this.#check(TokenKind.InterpolationEnd) &&
-      !this.#check(TokenKind.TemplateEnd) &&
+      !this.#check(TokenKind.StringEnd) &&
       !this.#check(TokenKind.EndOfFile)
     ) {
       this.#advance();
@@ -2065,8 +2051,7 @@ function isExpressionStart(token: Token): boolean {
   return (
     token.kind === TokenKind.Identifier ||
     token.kind === TokenKind.NumberLiteral ||
-    token.kind === TokenKind.StringLiteral ||
-    token.kind === TokenKind.TemplateStart ||
+    token.kind === TokenKind.StringStart ||
     token.kind === TokenKind.KeywordSpeaker ||
     token.kind === TokenKind.KeywordWait ||
     token.kind === TokenKind.KeywordTrue ||

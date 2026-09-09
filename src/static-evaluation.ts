@@ -47,8 +47,19 @@ export function staticNumber(expression: Expression): number | undefined {
 export function staticVisibleText(expression: Expression): string | undefined {
   expression = unwrapParentheses(expression);
   switch (expression.kind) {
-    case "stringLiteral":
-      return expression.value;
+    case "stringLiteral": {
+      const parts: string[] = [];
+      for (const part of expression.parts) {
+        if (part.kind === "stringText") {
+          parts.push(part.value);
+          continue;
+        }
+        const value = staticVisibleText(part.expression);
+        if (value === undefined) return undefined;
+        parts.push(value);
+      }
+      return parts.join("");
+    }
     case "numberLiteral":
       return Number.isFinite(expression.value)
         ? String(Object.is(expression.value, -0) ? 0 : expression.value)
@@ -63,19 +74,6 @@ export function staticVisibleText(expression: Expression): string | undefined {
       return value !== undefined && Number.isFinite(value)
         ? String(Object.is(value, -0) ? 0 : value)
         : undefined;
-    }
-    case "templateLiteral": {
-      const parts: string[] = [];
-      for (const part of expression.parts) {
-        if (part.kind === "templateText") {
-          parts.push(part.value);
-          continue;
-        }
-        const value = staticVisibleText(part.expression);
-        if (value === undefined) return undefined;
-        parts.push(value);
-      }
-      return parts.join("");
     }
     default:
       return undefined;

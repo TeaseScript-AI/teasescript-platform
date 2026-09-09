@@ -90,25 +90,23 @@ test("defines the preserved and core-milestone keywords and punctuation", () => 
   );
 });
 
-test("represents strings, templates, interpolation boundaries, newlines, and EOF", () => {
+test("represents strings, interpolation boundaries, newlines, and EOF", () => {
   const kinds = [
-    TokenKind.StringLiteral,
-    TokenKind.TemplateStart,
-    TokenKind.TemplateText,
+    TokenKind.StringStart,
+    TokenKind.StringText,
     TokenKind.InterpolationStart,
     TokenKind.InterpolationEnd,
-    TokenKind.TemplateEnd,
+    TokenKind.StringEnd,
     TokenKind.Newline,
     TokenKind.EndOfFile,
   ];
 
   assert.deepEqual(kinds, [
-    "stringLiteral",
-    "templateStart",
-    "templateText",
+    "stringStart",
+    "stringText",
     "interpolationStart",
     "interpolationEnd",
-    "templateEnd",
+    "stringEnd",
     "newline",
     "endOfFile",
   ]);

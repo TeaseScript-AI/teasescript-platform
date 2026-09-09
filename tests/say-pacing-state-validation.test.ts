@@ -471,7 +471,7 @@ test("prepared say text retains caller temporaries through a suspended text call
       '  return "hello"',
       "}",
       "function pace { paceCalls = paceCalls + 1\nreturn 1 }",
-      "say `${prefix()}${textValue()}`, pace()",
+      'say "${prefix()}${textValue()}", pace()',
     ].join("\n"),
   );
   const textPreparation = compiled.instructions.find(
@@ -534,7 +534,7 @@ test("prepared say temporary values reject malformed top-level and caller state"
     "speaker other {}",
     'function textValue { return "hello" }',
     "function pace { return 1 }",
-    "say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()",
+    'say as vera "${speaker.title} ${textValue()}", speaker.delay + pace()',
   ].join("\n");
   const compiled = plan(source);
   const say = compiled.instructions.find((instruction) => instruction.kind === "say");
@@ -700,7 +700,7 @@ test("prepared say temporary values reject malformed top-level and caller state"
       "speaker other {}",
       'function textValue { return "hello" }',
       "function pace { wait 1 ms\nreturn 1 }",
-      "say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()",
+      'say as vera "${speaker.title} ${textValue()}", speaker.delay + pace()',
     ].join("\n"),
   );
   const suspendedSay = suspended.instructions.find((instruction) => instruction.kind === "say");

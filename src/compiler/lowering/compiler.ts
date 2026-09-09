@@ -532,8 +532,32 @@ export class InstructionCompiler {
       case "booleanLiteral":
       case "nullLiteral":
       case "numberLiteral":
-      case "stringLiteral":
         return { plan: compileExpression(expression), temporaryIds: [] };
+      case "stringLiteral": {
+        const interpolations = expression.parts
+          .filter((part) => part.kind === "stringInterpolation")
+          .map((part) => part.expression);
+        if (interpolations.length === 0) {
+          return { plan: compileExpression(expression), temporaryIds: [] };
+        }
+        const ids: number[] = [];
+        const loweredInterpolations = this.#lowerOrderedExpressions(interpolations);
+        let interpolationIndex = 0;
+        const parts = expression.parts.flatMap((part): TemplatePartPlan[] => {
+          if (part.kind === "stringText") {
+            return part.value.length === 0
+              ? []
+              : [{ kind: "text", value: part.value, span: copySpan(part.span) }];
+          }
+          const lowered = loweredInterpolations[interpolationIndex++]!;
+          for (const temporaryId of lowered.temporaryIds) ids.push(temporaryId);
+          return [{ kind: "expression", expression: lowered.plan, span: copySpan(part.span) }];
+        });
+        return {
+          plan: { kind: "template", parts, span: copySpan(expression.span) },
+          temporaryIds: ids,
+        };
+      }
       case "identifier":
         if (expression.name === "speaker" && this.#contextualSpeakerTemporary !== null) {
           return {
@@ -579,26 +603,6 @@ export class InstructionCompiler {
             span: copySpan(expression.span),
           },
           temporaryIds: lowered.flatMap((item) => item.lowered.temporaryIds),
-        };
-      }
-      case "templateLiteral": {
-        const ids: number[] = [];
-        const interpolations = expression.parts
-          .filter((part) => part.kind === "templateInterpolation")
-          .map((part) => part.expression);
-        const loweredInterpolations = this.#lowerOrderedExpressions(interpolations);
-        let interpolationIndex = 0;
-        const parts = expression.parts.map((part): TemplatePartPlan => {
-          if (part.kind === "templateText") {
-            return { kind: "text", value: part.value, span: copySpan(part.span) };
-          }
-          const lowered = loweredInterpolations[interpolationIndex++]!;
-          for (const temporaryId of lowered.temporaryIds) ids.push(temporaryId);
-          return { kind: "expression", expression: lowered.plan, span: copySpan(part.span) };
-        });
-        return {
-          plan: { kind: "template", parts, span: copySpan(expression.span) },
-          temporaryIds: ids,
         };
       }
       case "propertyAccessExpression": {
@@ -1304,7 +1308,11 @@ function instructionEmissionChildren(expression: Expression): readonly Expressio
     case "booleanLiteral":
     case "nullLiteral":
     case "numberLiteral":
+      return [];
     case "stringLiteral":
+      return expression.parts.flatMap((part) =>
+        part.kind === "stringInterpolation" ? [part.expression] : [],
+      );
     case "identifier":
     case "interactionExpression":
       return [];
@@ -1315,10 +1323,6 @@ function instructionEmissionChildren(expression: Expression): readonly Expressio
       return expression.elements;
     case "objectLiteral":
       return expression.properties.map((property) => property.value);
-    case "templateLiteral":
-      return expression.parts.flatMap((part) =>
-        part.kind === "templateInterpolation" ? [part.expression] : [],
-      );
     case "propertyAccessExpression":
       return [expression.object];
     case "indexExpression":
@@ -1376,8 +1380,33 @@ function compileExpression(expression: Expression): ExpressionPlan {
     case "booleanLiteral":
     case "nullLiteral":
     case "numberLiteral":
-    case "stringLiteral":
       return { kind: "literal", value: expression.value, span: copySpan(expression.span) };
+    case "stringLiteral":
+      return expression.parts.some((part) => part.kind === "stringInterpolation")
+        ? {
+            kind: "template",
+            parts: expression.parts.flatMap((part): TemplatePartPlan[] =>
+              part.kind === "stringText"
+                ? part.value.length === 0
+                  ? []
+                  : [{ kind: "text", value: part.value, span: copySpan(part.span) }]
+                : [
+                    {
+                      kind: "expression",
+                      expression: compileExpression(part.expression),
+                      span: copySpan(part.span),
+                    },
+                  ],
+            ),
+            span: copySpan(expression.span),
+          }
+        : {
+            kind: "literal",
+            value: expression.parts
+              .map((part) => (part.kind === "stringText" ? part.value : ""))
+              .join(""),
+            span: copySpan(expression.span),
+          };
     case "identifier":
       return { kind: "identifier", name: expression.name, span: copySpan(expression.span) };
     case "parenthesizedExpression":
@@ -1402,20 +1431,6 @@ function compileExpression(expression: Expression): ExpressionPlan {
       return {
         kind: "set",
         elements: expression.elements.map(compileExpression),
-        span: copySpan(expression.span),
-      };
-    case "templateLiteral":
-      return {
-        kind: "template",
-        parts: expression.parts.map((part) =>
-          part.kind === "templateText"
-            ? { kind: "text", value: part.value, span: copySpan(part.span) }
-            : {
-                kind: "expression",
-                expression: compileExpression(part.expression),
-                span: copySpan(part.span),
-              },
-        ),
         span: copySpan(expression.span),
       };
     case "propertyAccessExpression":

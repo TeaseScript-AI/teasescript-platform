@@ -185,7 +185,6 @@ export type Expression =
   | NullLiteral
   | NumberLiteral
   | StringLiteral
-  | TemplateLiteral
   | ListLiteral
   | ObjectLiteral
   | SetLiteral
@@ -219,7 +218,7 @@ export interface InteractionChoiceOption {
 }
 
 /** Kept as a compatibility alias for the initial parser POC public API. */
-export type StringExpression = StringLiteral | TemplateLiteral;
+export type StringExpression = StringLiteral;
 
 /** Kept as a compatibility alias; interpolation now accepts all expressions. */
 export type InterpolationExpression = Expression;
@@ -252,28 +251,22 @@ export interface NumberLiteral {
 
 export interface StringLiteral {
   readonly kind: "stringLiteral";
+  readonly form: "singleLine" | "block";
+  readonly parts: readonly StringPart[];
+  readonly span: SourceSpan;
+}
+
+export type StringPart = StringText | StringInterpolation;
+
+export interface StringText {
+  readonly kind: "stringText";
   readonly raw: string;
   readonly value: string;
   readonly span: SourceSpan;
 }
 
-export interface TemplateLiteral {
-  readonly kind: "templateLiteral";
-  readonly parts: readonly TemplatePart[];
-  readonly span: SourceSpan;
-}
-
-export type TemplatePart = TemplateText | TemplateInterpolation;
-
-export interface TemplateText {
-  readonly kind: "templateText";
-  readonly raw: string;
-  readonly value: string;
-  readonly span: SourceSpan;
-}
-
-export interface TemplateInterpolation {
-  readonly kind: "templateInterpolation";
+export interface StringInterpolation {
+  readonly kind: "stringInterpolation";
   readonly expression: Expression;
   readonly span: SourceSpan;
 }

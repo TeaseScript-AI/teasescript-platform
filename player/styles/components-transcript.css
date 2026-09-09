@@ -85,6 +85,7 @@
 
       .message-body {
         padding-left: 12px;
+        white-space: pre-wrap;
 
         border-left: 2px solid color-mix(in srgb, var(--speaker-accent) 85%, transparent);
 

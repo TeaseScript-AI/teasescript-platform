@@ -32,9 +32,9 @@ test("preserves ordered user calls and interaction resume through the public sou
     [
       "let order = []",
       "function mark(value) { order.add(value)\nreturn value }",
-      "function combine(first, second, third) { return `${first}:${second}:${third}` }",
+      'function combine(first, second, third) { return "${first}:${second}:${third}" }',
       'let answer = combine(mark("before"), askText, mark("after"))',
-      "say `${answer}|${order[0]}|${order[1]}`, instant",
+      'say "${answer}|${order[0]}|${order[1]}", instant',
     ].join("\n"),
   );
   const rootCalls = plan.instructions

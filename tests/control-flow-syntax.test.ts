@@ -22,7 +22,7 @@ test("comments are whitespace across tokens, statements, blocks, LF, and CRLF", 
 });
 
 test("comment markers remain ordinary string and template text", () => {
-  const result = parse('say "// not a comment /* either */"\nsay `/* ${"//"} */`');
+  const result = parse('say "// not a comment /* either */"\nsay \"/* ${"//"} */\"');
 
   assert.deepEqual(result.diagnostics, []);
   assert.equal(result.program.statements.length, 2);

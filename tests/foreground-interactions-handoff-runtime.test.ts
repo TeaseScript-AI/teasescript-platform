@@ -215,7 +215,7 @@ test("compiler-shaped foo, interaction, bar source order remains exact", () => {
     [
       'function foo { say "foo"\nreturn "first" }',
       'function bar { say "bar"\nreturn "third" }',
-      "function send(first, answer, third) { say `${first}:${answer}:${third}`\nreturn }",
+      'function send(first, answer, third) { say "${first}:${answer}:${third}"\nreturn }',
       'send(foo(), "__interaction_result__", bar())',
       "exit",
     ].join("\n"),
@@ -2973,7 +2973,7 @@ test("PR194 matrix: ownership contexts resume from pending and committed boundar
     {
       id: "PR194-resume-context-suspended-caller",
       source:
-        'function prompt { return "__interaction_result__" }\nfunction send(before, answer) { say `${before}:${answer}`\nreturn }\nsend("first", prompt())\nexit',
+        'function prompt { return "__interaction_result__" }\nfunction send(before, answer) { say \"${before}:${answer}\"\nreturn }\nsend("first", prompt())\nexit',
       owner: "active-frame",
       makePlan: (injected) => injected.plan,
       assertPending: (snapshot) => {

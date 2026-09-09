@@ -6,5 +6,5 @@ speaker guide {
 speaker guide
 
 say "Welkom in TeaseScript."
-say `Ik ben ${speaker.firstName}.`
+say "Ik ben ${speaker.firstName}."
 exit

@@ -39,7 +39,7 @@ boundary rechecks found:
 | unary `-` chain | 4,276 / 4,277 | `SE` |
 | lists / sets | 501 / 502 | `SE` |
 | objects | 525 / 526 | `SE` |
-| template interpolation | 520 / 521 | `SE` |
+| string interpolation (then backtick-template syntax) | 520 / 521 | `SE` |
 | nested `if` blocks | 1,644 / 1,645 | `RE` (`#parseStatement`) |
 
 `SE` is `SyntaxError: Invalid regular expression: /[.eE]/u: Stack overflow`, with `RegExp.test` then `#parsePrimary`;
@@ -63,7 +63,7 @@ does not count source depth, impose a numeric nesting limit, or promise that a p
 every JavaScript host. Flat binary-chain semantic traversal, synchronous plan construction, prepared-reference scanning,
 and plan-expression validation avoid the native stack. The parser also handles direct parenthesis chains iteratively;
 the focused regression compiles 1,024 nested groups with a deliberately constrained child-process stack. Parenthesis
-nesting with expression work between successive closing groups, collection/object/template nesting, nested statements,
+nesting with expression work between successive closing groups, collection/object/string nesting, nested statements,
 and other recursive expression shapes may still reach a host-dependent native boundary. The regression depth exercises
 the repaired structure without becoming a CI capacity threshold or supported capacity claim. In the same constrained
 child process, 256 nested list literals currently exercise the residual boundary and retain `TSC007`, an empty program,

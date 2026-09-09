@@ -12,7 +12,7 @@ test("selects an eligible visible list value exactly once", () => {
   assert.equal(direct.randomCalls, 1);
   assert.deepEqual(sayTexts(direct.result), ["2"]);
 
-  const template = runSource(['let values = ["left", 2]', "say `Value: ${values}`"].join("\n"), 0);
+  const template = runSource(['let values = ["left", 2]', 'say "Value: ${values}"'].join("\n"), 0);
   assert.equal(template.result.snapshot.failure, null);
   assert.equal(template.randomCalls, 1);
   assert.deepEqual(sayTexts(template.result), ["Value: left"]);

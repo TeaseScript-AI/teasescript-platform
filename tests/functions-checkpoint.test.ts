@@ -32,8 +32,8 @@ test("restores every instruction boundary during defaults and nested calls", () 
   const { boundaries: observations } = assertRuntimeResumeEquivalent(
     [
       "let count = 0",
-      "function next(value) { count = count + 1\nreturn `${value}:${count}` }",
-      "function describe(name, title = next(name)) { say `inside:${title}`\nreturn title }",
+      'function next(value) { count = count + 1\nreturn "${value}:${count}" }',
+      'function describe(name, title = next(name)) { say "inside:${title}"\nreturn title }',
       'say describe("pet")',
     ].join("\n"),
   );
@@ -74,7 +74,7 @@ test("restores inside function loops, after continue, and before early return", 
       "function find(limit) {",
       "  for value in 1..=limit {",
       "    if value == 1 { continue }",
-      "    say `loop:${value}`",
+      '    say "loop:${value}"',
       "    if value == 3 { return value }",
       "  }",
       "  return null",
@@ -430,7 +430,7 @@ test("restores between assignment-target and right-hand call evaluation", () => 
       "items[indexFunction()] = valueFunction()",
       "let randomItems = [0, 0]",
       "randomItems[randomInteger(0..=1)] = randomInteger(7..=9)",
-      "say `${order[0]}:${order[1]}:${items[0]}`",
+      'say "${order[0]}:${order[1]}:${items[0]}"',
     ].join("\n"),
   );
 
@@ -455,12 +455,12 @@ test("restores mixed ordinary and user-call evaluation at every instruction boun
       'let listValue = [random(), mark("list")]',
       'let setValue = set[randomInteger(1..=3), mark("set")]',
       'let objectValue = { first: random(), second: mark("object") }',
-      'let templateValue = `${random()}:${mark("template")}`',
+      'let templateValue = "${random()}:${mark(\"template\")}"',
       "let binaryValue = random() + mark(2)",
       "let rangeValue = randomInteger(0..=1)..mark(3)",
       "target.nested[0] = retarget()",
       "target.nested.add(mark(8))",
-      "say `${first.nested[0]}:${second.nested[0]}:${target.nested.length}:${order.length}`",
+      'say "${first.nested[0]}:${second.nested[0]}:${target.nested.length}:${order.length}"',
     ].join("\n"),
   );
 
@@ -493,7 +493,7 @@ test("restores prepared speaker aliases before and after nested identity mutatio
       "function shiftItems { alias.items.removeFirst()\nreturn 9 }",
       "vera.config.value = replaceConfig()",
       "vera.items[0].value = shiftItems()",
-      "say `${vera.config.value}:${vera.items[0].value}`",
+      'say "${vera.config.value}:${vera.items[0].value}"',
     ].join("\n"),
   );
 
@@ -521,7 +521,7 @@ test("restores retained prepared list items across structural index shifts", () 
       "function shiftAlias { alias.items.removeFirst()\nreturn 9 }",
       "direct[2].value = removeMiddle()",
       "vera.items[1].value = shiftAlias()",
-      "say `${direct[1].value}:${vera.items[0].value}`",
+      'say "${direct[1].value}:${vera.items[0].value}"',
     ].join("\n"),
   );
 

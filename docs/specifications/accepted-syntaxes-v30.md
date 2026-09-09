@@ -62,7 +62,7 @@ add a new grammar form.
 - `[]` — list syntax and positional access: list literals, list type suffixes such as `string[]`, and indexing.
 - `{}` — structured bodies and records: executable blocks, structured declaration bodies such as
   `speaker mistressVera { ... }`, and object literals.
-- `${...}` — the reserved template-interpolation form. It is distinct from an ordinary `{}` structured body; normal
+- `${...}` — the reserved string-interpolation form. It is distinct from an ordinary `{}` structured body; normal
   TeaseScript expression parsing applies inside.
 
 When named properties or fields appear inside a structured declaration or record, `{}` delimit the containing
@@ -190,7 +190,8 @@ let distance = 4
 km // compile error
 ```
 
-Physical newlines inside an open string token do not terminate the surrounding statement. Their text behavior is defined under [Strings and interpolation](#8-strings-and-interpolation).
+Physical newlines are valid only in block strings. They do not terminate the surrounding statement, and their text
+behavior is defined under [Strings and interpolation](#8-strings-and-interpolation).
 
 ## 2. Literal values
 **Status:** Accepted
@@ -551,32 +552,39 @@ Rules:
 ## 8. Strings and interpolation
 **Status:** Accepted
 
-Plain strings use double quotes:
+Strings use double quotes. The single-line form supports interpolation:
 
 ```text
 say "The door opens"
+say "The ${doorName} opens"
 ```
 
-Template strings use backticks and `${...}`:
+The block form uses triple double quotes, supports interpolation, and preserves physical newlines as `\n` in the
+resulting value:
 
 ```text
-say `The ${doorName} opens`
+say """
+    Hello ${playerName}.
+
+    The door opens.
+"""
 ```
 
-`${...}` is not available inside double-quoted strings.
+Backticks have no delimiter role. A raw backtick inside either quoted form is ordinary text.
 
-When an eligible list is interpolated into a template string, the engine selects one random element for that evaluation:
+When an eligible list is interpolated into a string, the engine selects one random element for that evaluation:
 
 ```text
 let greetings = ["Hello", "Hi", "Welcome"]
-say `${greetings}, ${playerName}`
+say "${greetings}, ${playerName}"
 ```
 
-This automatic selection is limited to approved visible-text contexts. It is not a general list-to-string conversion. The complete rules are defined under [Lists](#16-lists).
+This automatic selection is limited to approved visible-text contexts. It is not a general list-to-string conversion.
+The complete rules are defined under [Lists](#16-lists).
 
 ### String escape sequences
 
-Double-quoted strings support these escapes:
+Both string forms support exactly these escapes:
 
 ```text
 \\   // one literal backslash
@@ -584,6 +592,7 @@ Double-quoted strings support these escapes:
 \n    // newline
 \r    // carriage return
 \t    // tab
+\${   // the literal characters ${ without starting interpolation
 ```
 
 Example:
@@ -592,21 +601,10 @@ Example:
 let message = "Quote: \"hello\"\nNext line"
 ```
 
-Template strings support:
-
-```text
-\\   // one literal backslash
-\`    // one literal backtick
-\n    // newline
-\r    // carriage return
-\t    // tab
-\${   // the literal characters ${ without starting interpolation
-```
-
 For example:
 
 ```text
-say `The source text is \${player.name}`
+say "The source text is \${player.name}"
 ```
 
 This displays the literal text:
@@ -615,39 +613,63 @@ This displays the literal text:
 The source text is ${player.name}
 ```
 
-The backslash is an escape marker and is not included in the displayed result. To display an actual backslash, use `\\`.
+The backslash is an escape marker and is not included in the displayed result. To display an actual backslash, use
+`\\`.
 
-Unknown escape sequences are compile errors. Inside `${...}`, normal TeaseScript expression parsing applies.
+Unknown escape sequences are compile errors. Inside `${...}`, normal TeaseScript expression parsing applies, including
+nested quoted strings. Interpolations evaluate in source order.
 
 ### Physical newlines inside strings
 
-A double-quoted or template string may continue over physical source lines. A physical newline and the indentation surrounding it are folded into one ordinary space in the resulting string:
-
-```text
-let message = "This is one long sentence
-    written across two source lines."
-```
-
-The resulting value is:
-
-```text
-This is one long sentence written across two source lines.
-```
-
-The same rule applies to template strings:
-
-```text
-say `Hello ${player.firstName},
-    this sentence continues on the same displayed line.`
-```
-
-Use the explicit `\n` escape when the displayed result must contain an actual line break:
+A single-line string cannot contain a physical LF or CRLF anywhere before its closing quote. This includes physical
+newlines inside an interpolation, a nested block string, or a multiline comment within that string's source extent.
+Use `\n` for an explicit newline in a compact string:
 
 ```text
 let message = "First displayed line\nSecond displayed line"
 ```
 
-This distinction lets authors wrap long source text for readability without unintentionally changing the visible layout. A physical newline inside an open string does not end the surrounding statement.
+Block strings accept physical newlines. LF and CRLF spellings normalize to `\n` in the value; an explicit `\r` escape
+remains a carriage return. Source indentation is removed deterministically:
+
+1. A physical newline immediately after the opening `"""` is omitted. Spaces or tabs before it prevent this
+   omission.
+2. When the closing `"""` is on its own line, its preceding spaces or tabs and the immediately preceding newline are
+   omitted.
+3. From the remaining content, the longest exact spaces-and-tabs prefix shared by every nonblank physical content line
+   is removed from those lines. An interpolation makes its line nonblank; source lines inside its expression are not
+   block content.
+4. Spaces and tabs are removed from blank lines. Deeper indentation and all other whitespace remain.
+
+Tabs have no implied width: mixed indentation shares a prefix only where its characters match exactly. Dedent applies
+to physical block text before escape decoding and never changes newlines created by escapes or interpolated values.
+
+For example:
+
+```text
+if condition {
+    say """
+        First line.
+
+            Intentionally indented.
+        Third line.
+    """
+}
+```
+
+The value is:
+
+```text
+First line.
+
+    Intentionally indented.
+Third line.
+```
+
+`""""""`, `"""\n"""`, and a block with one whitespace-only content line have the empty value. A same-line closing
+delimiter trims nothing. Additional blank lines remain after the two structural edge omissions, so
+`"""\n\n\n"""` has the value `"\n"`. Inside block content, one or two unescaped `"` characters are text; the first
+unescaped `"""` closes the block. Escaping one quote can break a would-be delimiter.
 
 ## 9. Commands
 **Status:** Accepted
@@ -656,7 +678,7 @@ Engine-provided commands may omit parentheses and receive one expression:
 
 ```text
 say "Fixed text"
-say `Text with ${playerName}`
+say "Text with ${playerName}"
 say message
 say greetings
 wait 2
@@ -3387,7 +3409,7 @@ Resolved in this revision:
 - user identifiers are ASCII, case-sensitive, and follow `[A-Za-z_][A-Za-z0-9_]*`;
 - numeric literals accept leading zeros, leading or trailing decimal dots, and the fixed scientific-notation forms documented in chapter 3;
 - complete expression precedence and associativity are defined, with comparisons binding more strongly than `not`;
-- double-quoted and template-string escape sequences are defined, including `\${` for literal template interpolation text;
+- single-line and block string escape sequences are defined, including `\${` for literal interpolation text;
 - exact unit abbreviations, full names, singular forms, plural forms, capitalization, and multi-word matching are defined.
 
 Open language and runtime decisions:

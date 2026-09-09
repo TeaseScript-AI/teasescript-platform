@@ -6,10 +6,10 @@ import { parse } from "../src/parser.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
-function nestedTemplate(depth: number): string {
+function nestedString(depth: number): string {
   let expression = "1";
   for (let index = 0; index < depth; index += 1) {
-    expression = `\`level ${"${"}${expression}}\``;
+    expression = `"level ${"${"}${expression}}"`;
   }
   return expression;
 }
@@ -23,7 +23,7 @@ test("nested source beyond the former parser guard remains valid", () => {
     ["lists", `let value = ${"[".repeat(depth)}1${"]".repeat(depth)}`],
     ["objects", `let value = ${"{ value: ".repeat(depth)}1${" }".repeat(depth)}`],
     ["sets", `let value = ${"set[".repeat(depth)}1${"]".repeat(depth)}`],
-    ["templates", `let value = ${nestedTemplate(depth)}`],
+    ["strings", `let value = ${nestedString(depth)}`],
     ["blocks", `${"if true {\n".repeat(depth)}exit\n${"}\n".repeat(depth)}`],
   ];
   for (const [name, source] of cases) {

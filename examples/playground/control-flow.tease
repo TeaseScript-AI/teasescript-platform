@@ -27,11 +27,11 @@ for step in 1..=5 {
 let counter = 0
 while counter < 2 {
     counter = counter + 1
-    say `Counter ${counter}`
+    say "Counter ${counter}"
 }
 
 if chance(50) {
-    say `Random branch, value ${random()}`
+    say "Random branch, value ${random()}"
 } else if randomInteger(1..=6) == 6 {
     say "Rolled six"
 } else {

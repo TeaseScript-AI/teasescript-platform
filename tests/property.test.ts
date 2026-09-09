@@ -152,7 +152,7 @@ test("required campaign reaches retained variants and varied source-fuzz familie
     createValidSourceCase(1, index),
   ).find(({ family }) => family === "functions-defaults-calls-and-recursion");
   assert.ok(functionsCase);
-  assert.match(functionsCase.source, /return `\$\{prefix\}:\$\{value\}`/);
+  assert.match(functionsCase.source, /return \"\$\{prefix\}:\$\{value\}\"/);
 });
 
 function assertSourceFamilyCoverage(

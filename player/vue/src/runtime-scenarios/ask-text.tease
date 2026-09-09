@@ -1,4 +1,4 @@
 say "The real runtime is waiting for askText.", instant
 let answer = askText "Your answer"
-say `The runtime received ${answer}.`, instant
+say "The runtime received ${answer}.", instant
 exit

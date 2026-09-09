@@ -12,5 +12,5 @@ showButton as guide "Continue"
 let name = askText as guide "Your name"
 let amount = askNumber as guide "A number"
 let choice = choose as guide first: "First option", second: "Second option"
-say as guide `Thanks ${name}. You entered ${amount} and selected ${choice}.`, instant
+say as guide "Thanks ${name}. You entered ${amount} and selected ${choice}.", instant
 exit

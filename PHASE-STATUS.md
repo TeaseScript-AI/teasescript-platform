@@ -15,7 +15,7 @@ accept syntax, architecture, or implementation details.
 
 - **Source pipeline:** lexer, parser, immutable AST, source spans, diagnostics, semantic validation, and compilation
   for the implemented TeaseScript subset.
-- **Language foundation:** values, variables, assignments, speakers, output, collections, expressions, templates,
+- **Language foundation:** values, variables, assignments, speakers, output, collections, expressions, interpolated single-line and block strings,
   control flow, deterministic random built-ins, and top-level user-defined functions.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.

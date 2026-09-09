@@ -29,7 +29,7 @@ showButton as guide "Continue"
 let text = askText as guide "Text"
 let amount = askNumber as guide "Number"
 let choice = choose as guide first: "Same", second: "Same"
-say as guide \`${"${text}"} / ${"${amount}"} / ${"${choice}"}\`, instant
+say as guide "${"${text}"} / ${"${amount}"} / ${"${choice}"}", instant
 exit
 `);
   assert.deepEqual(

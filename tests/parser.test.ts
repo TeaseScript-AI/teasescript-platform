@@ -26,12 +26,7 @@ test("parses a speaker declaration with exact nested spans", () => {
       {
         kind: "speakerProperty",
         name: { kind: "identifier", name: "displayName", span: sourceSpan(source, 27, 38) },
-        value: {
-          kind: "stringLiteral",
-          raw: '"Mistress Vera"',
-          value: "Mistress Vera",
-          span: sourceSpan(source, 40, 55),
-        },
+        value: stringNode(source, 40, 55, "Mistress Vera"),
         span: sourceSpan(source, 27, 55),
       },
     ],
@@ -71,12 +66,7 @@ test("parses say, say as, and exit statements", () => {
       kind: "sayStatement",
       speaker: null,
       skipPolicy: null,
-      value: {
-        kind: "stringLiteral",
-        raw: '"Kneel."',
-        value: "Kneel.",
-        span: sourceSpan(source, 4, 12),
-      },
+      value: stringNode(source, 4, 12, "Kneel."),
       pacing: null,
       span: sourceSpan(source, 0, 12),
     },
@@ -84,12 +74,7 @@ test("parses say, say as, and exit statements", () => {
       kind: "sayStatement",
       speaker: { kind: "identifier", name: "cashier", span: sourceSpan(source, 20, 27) },
       skipPolicy: null,
-      value: {
-        kind: "stringLiteral",
-        raw: '"Your total is five euros."',
-        value: "Your total is five euros.",
-        span: sourceSpan(source, 28, 55),
-      },
+      value: stringNode(source, 28, 55, "Your total is five euros."),
       pacing: null,
       span: sourceSpan(source, 13, 55),
     },
@@ -186,7 +171,7 @@ test("rejects missing say pacing expressions", () => {
 });
 
 test("preserves template text and identifier interpolation", () => {
-  const source = "say `Hello ${player}!`";
+  const source = 'say "Hello ${player}!"';
   const result = parse(source);
 
   assert.deepEqual(result.diagnostics, []);
@@ -195,15 +180,16 @@ test("preserves template text and identifier interpolation", () => {
     speaker: null,
     skipPolicy: null,
     value: {
-      kind: "templateLiteral",
+      kind: "stringLiteral",
+      form: "singleLine",
       parts: [
-        { kind: "templateText", raw: "Hello ", value: "Hello ", span: sourceSpan(source, 5, 11) },
+        { kind: "stringText", raw: "Hello ", value: "Hello ", span: sourceSpan(source, 5, 11) },
         {
-          kind: "templateInterpolation",
+          kind: "stringInterpolation",
           expression: { kind: "identifier", name: "player", span: sourceSpan(source, 13, 19) },
           span: sourceSpan(source, 11, 20),
         },
-        { kind: "templateText", raw: "!", value: "!", span: sourceSpan(source, 20, 21) },
+        { kind: "stringText", raw: "!", value: "!", span: sourceSpan(source, 20, 21) },
       ],
       span: sourceSpan(source, 4, 22),
     },
@@ -213,19 +199,19 @@ test("preserves template text and identifier interpolation", () => {
 });
 
 test("builds left-associated chained property access in interpolation", () => {
-  const source = "say `Hello ${player.profile.name}`";
+  const source = 'say "Hello ${player.profile.name}"';
   const result = parse(source);
   const statement = result.program.statements[0];
 
   assert.deepEqual(result.diagnostics, []);
   assert.equal(statement?.kind, "sayStatement");
-  if (statement?.kind !== "sayStatement" || statement.value.kind !== "templateLiteral") {
+  if (statement?.kind !== "sayStatement" || statement.value.kind !== "stringLiteral") {
     assert.fail("Expected a template say statement.");
   }
 
   const interpolation = statement.value.parts[1];
   assert.deepEqual(interpolation, {
-    kind: "templateInterpolation",
+    kind: "stringInterpolation",
     expression: {
       kind: "propertyAccessExpression",
       object: {
@@ -242,18 +228,18 @@ test("builds left-associated chained property access in interpolation", () => {
 });
 
 test("parses the contextual speaker reference in interpolation", () => {
-  const source = "say as mistressVera `You will obey your ${speaker.title}.`";
+  const source = 'say as mistressVera "You will obey your ${speaker.title}."';
   const result = parse(source);
   const statement = result.program.statements[0];
 
   assert.deepEqual(result.diagnostics, []);
   assert.equal(statement?.kind, "sayStatement");
-  if (statement?.kind !== "sayStatement" || statement.value.kind !== "templateLiteral") {
+  if (statement?.kind !== "sayStatement" || statement.value.kind !== "stringLiteral") {
     assert.fail("Expected a template say statement.");
   }
 
   assert.deepEqual(statement.value.parts[1], {
-    kind: "templateInterpolation",
+    kind: "stringInterpolation",
     expression: {
       kind: "propertyAccessExpression",
       object: { kind: "identifier", name: "speaker", span: sourceSpan(source, 42, 49) },
@@ -277,8 +263,8 @@ test("accepts multiple statements separated by LF or CRLF", () => {
   assert.deepEqual(result.program.span, sourceSpan(source, 0, source.length));
 });
 
-test("preserves decoded multiline string and template values", () => {
-  const source = 'say "one\n  two"\nsay `three\r\n  four`';
+test("preserves decoded block values and forms", () => {
+  const source = 'say """\n  one\n    two\n"""\nsay "three\\nfour"';
   const result = parse(source);
   const first = result.program.statements[0];
   const second = result.program.statements[1];
@@ -286,19 +272,43 @@ test("preserves decoded multiline string and template values", () => {
   assert.deepEqual(result.diagnostics, []);
   assert.equal(
     first?.kind === "sayStatement" && first.value.kind === "stringLiteral"
-      ? first.value.value
+      ? first.value.form
       : undefined,
-    "one two",
+    "block",
+  );
+  assert.equal(
+    first?.kind === "sayStatement" && first.value.kind === "stringLiteral"
+      ? first.value.parts[0]?.kind === "stringText"
+        ? first.value.parts[0].value
+        : ""
+      : undefined,
+    "one\n  two",
   );
   assert.equal(
     second?.kind === "sayStatement" &&
-      second.value.kind === "templateLiteral" &&
-      second.value.parts[0]?.kind === "templateText"
+      second.value.kind === "stringLiteral" &&
+      second.value.parts[0]?.kind === "stringText"
       ? second.value.parts[0].value
       : undefined,
-    "three four",
+    "three\nfour",
   );
 });
+
+function stringNode(source: string, start: number, end: number, value: string) {
+  return {
+    kind: "stringLiteral",
+    form: "singleLine",
+    parts: [
+      {
+        kind: "stringText",
+        raw: source.slice(start + 1, end - 1),
+        value,
+        span: sourceSpan(source, start + 1, end - 1),
+      },
+    ],
+    span: sourceSpan(source, start, end),
+  };
+}
 
 function sourceSpan(source: string, start: number, end: number) {
   return { start: sourcePosition(source, start), end: sourcePosition(source, end) };

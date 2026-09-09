@@ -420,7 +420,9 @@ delayMs =
     )
 ```
 
-`wordCount` counts maximal non-whitespace sequences. `visibleCharacterCount` counts Unicode code points in the final visible string after expression evaluation, interpolation, escape processing, deterministic list selection, and ordinary source-string newline folding.
+`wordCount` counts maximal non-whitespace sequences. `visibleCharacterCount` counts Unicode code points in the final
+visible string after expression evaluation, interpolation, escape processing, deterministic list selection, and
+block-string newline normalization and dedent.
 
 All counts, multiplication, addition, and deadline construction use checked arithmetic. A non-finite, unsafe, unsupported-magnitude, or overflowing result fails structurally before an action ID, partial gate, or settlement is created. Integer smart-autoplay settings require no rounding.
 

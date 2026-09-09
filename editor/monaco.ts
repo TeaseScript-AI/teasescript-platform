@@ -16,7 +16,8 @@ export function registerTeaseScriptLanguage(): void {
     });
     monaco.languages.setMonarchTokensProvider(TEASE_LANGUAGE_ID, {
       tokenizer: {
-        root: [
+        root: [{ include: "@expression" }],
+        expression: [
           [/\/\/.*$/, "comment"],
           [
             /[A-Za-z_][\w-]*/,
@@ -29,9 +30,50 @@ export function registerTeaseScriptLanguage(): void {
             },
           ],
           [/-?\d+(?:\.\d+)?/, "number"],
-          [/`[^`]*`/, "string"],
-          [/"([^"\\]|\\.)*"/, "string"],
+          [/"""/, { token: "string.quote", next: "@blockString" }],
+          [
+            /"/,
+            {
+              cases: {
+                "@eos": "string.invalid",
+                "@default": { token: "string.quote", next: "@singleLineString" },
+              },
+            },
+          ],
           [/[{}()[\],:]/, "delimiter"],
+        ],
+        singleLineString: [
+          [
+            /[^\\$\"]+/,
+            { cases: { "@eos": { token: "string.invalid", next: "@pop" }, "@default": "string" } },
+          ],
+          [/\\(?:[\\\"nrt]|\$\{)/, "string.escape"],
+          [/\\./, "string.escape.invalid"],
+          [/\\$/, { token: "string.escape.invalid", next: "@pop" }],
+          [/\$\{/, { token: "delimiter.bracket", next: "@stringInterpolation" }],
+          [
+            /\$(?!\{)/,
+            { cases: { "@eos": { token: "string.invalid", next: "@pop" }, "@default": "string" } },
+          ],
+          [/"/, { token: "string.quote", next: "@pop" }],
+        ],
+        blockString: [
+          [/"""/, { token: "string.quote", next: "@pop" }],
+          [/[^\\$\"]+/, "string"],
+          [/\\(?:[\\\"nrt]|\$\{)/, "string.escape"],
+          [/\\./, "string.escape.invalid"],
+          [/\$\{/, { token: "delimiter.bracket", next: "@stringInterpolation" }],
+          [/"{1,2}(?!")|\$(?!\{)/, "string"],
+        ],
+        stringInterpolation: [
+          [/\}/, { token: "delimiter.bracket", next: "@pop" }],
+          [/\{/, { token: "delimiter", next: "@interpolationBrace" }],
+          { include: "@expression" },
+        ],
+        interpolationBrace: [
+          [/\}/, { token: "delimiter", next: "@pop" }],
+          [/\{/, { token: "delimiter", next: "@push" }],
+          { include: "@expression" },
         ],
       },
       keywords: [
@@ -53,11 +95,25 @@ export function registerTeaseScriptLanguage(): void {
       commands: ["showButton", "askText", "askNumber", "choose", "say", "wait", "exit"],
     });
     monaco.languages.setLanguageConfiguration(TEASE_LANGUAGE_ID, {
-      comments: { lineComment: "//" },
+      comments: { lineComment: "//", blockComment: ["/*", "*/"] },
       brackets: [
         ["{", "}"],
         ["[", "]"],
         ["(", ")"],
+      ],
+      autoClosingPairs: [
+        { open: '"""', close: '"""' },
+        { open: '"', close: '"' },
+        { open: "{", close: "}" },
+        { open: "[", close: "]" },
+        { open: "(", close: ")" },
+      ],
+      surroundingPairs: [
+        { open: '"""', close: '"""' },
+        { open: '"', close: '"' },
+        { open: "{", close: "}" },
+        { open: "[", close: "]" },
+        { open: "(", close: ")" },
       ],
     });
     registerProviders();

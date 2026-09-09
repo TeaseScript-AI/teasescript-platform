@@ -96,7 +96,7 @@ test("rejects core and injected builtin identifiers in ordinary value positions"
     ["declaration initializer", "let value = BUILTIN"],
     ["list literal", "let values = [BUILTIN]"],
     ["object property value", "let value = { callback: BUILTIN }"],
-    ["template interpolation", "say `${BUILTIN}`"],
+    ["template interpolation", 'say "${BUILTIN}"'],
     ["function parameter default", "function sample(value = BUILTIN) { return value }"],
     ["return expression", "function sample { return BUILTIN }"],
     ["parenthesized expression", "let value = (BUILTIN)"],
@@ -172,7 +172,7 @@ test("preserves direct builtin calls in every supported nested context", () => {
     [
       "let values = [random(), chance(50), randomInteger(1..=6), customBuiltin()]",
       "let objectValue = { core: random(), injected: customBuiltin() }",
-      "say `${random()}:${customBuiltin()}`",
+      'say "${random()}:${customBuiltin()}"',
       "function sample(core = random(), injected = customBuiltin()) {",
       "  return core",
       "}",

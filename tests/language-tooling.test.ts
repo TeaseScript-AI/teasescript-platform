@@ -10,6 +10,8 @@ import {
   languageHover,
   languagePositionAt,
   languageSignatureHelp,
+  createFreshRuntimeSnapshot,
+  run,
 } from "../src/index.js";
 
 function labels(source: string, offset = source.length): readonly string[] {
@@ -98,20 +100,37 @@ test("formatter normalizes compact owned whitespace and is idempotent", () => {
   assert.equal(second.edits.length, 0);
 });
 
-test("formatter preserves strings, escapes, templates, comments, and choice order", () => {
+test("formatter preserves strings, escapes, interpolation, comments, and choice order", () => {
   const source = [
     "// keep  comment spacing",
     'let prefix = "x  y"',
-    'let result = choose first: `A  ${prefix}`, second: "B\\n  C"',
+    'let result = choose first: "A  ${prefix}", second: "B\\n  C"',
   ].join("\n");
   const formatted = formatLanguageDocument(
     createLanguageDocument("file:///main.tease", source),
   ).text;
   assert.ok(formatted.includes("// keep  comment spacing"));
   assert.ok(formatted.includes('"x  y"'));
-  assert.ok(formatted.includes("`A  ${prefix}`"));
+  assert.ok(formatted.includes('"A  ${prefix}"'));
   assert.ok(formatted.includes('"B\\n  C"'));
   assert.ok(formatted.indexOf("first:") < formatted.indexOf("second:"));
+});
+
+test("formatter preserves block-string values and is idempotent", () => {
+  const source = 'say   """\r\n\tFirst\r\n\t  Second ${1 + 1}\r\n\t""",   instant';
+  const document = createLanguageDocument("file:///block.tease", source);
+  const first = formatLanguageDocument(document);
+  const second = formatLanguageDocument(createLanguageDocument(document.uri, first.text));
+  assert.equal(second.text, first.text);
+  assert.equal(second.edits.length, 0);
+
+  for (const candidate of [source, first.text]) {
+    const compiled = compileSource(candidate);
+    assert.deepEqual(compiled.diagnostics, []);
+    assert.notEqual(compiled.plan, null);
+    const execution = run(compiled.plan!, createFreshRuntimeSnapshot(compiled.plan!));
+    assert.equal(execution.events.find((event) => event.kind === "say")?.text, "First\n  Second 2");
+  }
 });
 
 test("formatter leaves malformed and incomplete source untouched", () => {

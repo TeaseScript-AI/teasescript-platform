@@ -3,12 +3,11 @@ import { createSourceSpan, type SourceSpan } from "./source.js";
 export const TokenKind = {
   Identifier: "identifier",
   NumberLiteral: "numberLiteral",
-  StringLiteral: "stringLiteral",
-  TemplateStart: "templateStart",
-  TemplateText: "templateText",
+  StringStart: "stringStart",
+  StringText: "stringText",
   InterpolationStart: "interpolationStart",
   InterpolationEnd: "interpolationEnd",
-  TemplateEnd: "templateEnd",
+  StringEnd: "stringEnd",
 
   KeywordSpeaker: "keywordSpeaker",
   KeywordSay: "keywordSay",
@@ -65,10 +64,7 @@ export const TokenKind = {
 export type TokenKind = (typeof TokenKind)[keyof typeof TokenKind];
 
 type TokenWithValueKind =
-  | typeof TokenKind.Identifier
-  | typeof TokenKind.NumberLiteral
-  | typeof TokenKind.StringLiteral
-  | typeof TokenKind.TemplateText;
+  typeof TokenKind.Identifier | typeof TokenKind.NumberLiteral | typeof TokenKind.StringText;
 
 type TokenWithoutValueKind = Exclude<TokenKind, TokenWithValueKind>;
 

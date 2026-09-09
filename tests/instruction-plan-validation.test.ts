@@ -530,7 +530,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     [
       'speaker vera { title: "Captain" }',
       "function pace { return 1 }",
-      "say as vera `${speaker.title}`, pace()",
+      'say as vera "${speaker.title}", pace()',
     ].join("\n"),
   );
   const contextualSpeakerPreparation = contextual.instructions.findIndex(
@@ -582,7 +582,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
       source: [
         'speaker vera { title: "Captain" }',
         "function pace { return 1 }",
-        "say as vera `${speaker.title}`, pace()",
+        'say as vera "${speaker.title}", pace()',
       ].join("\n"),
       consumerKind: "prepareSayText",
     },
@@ -600,7 +600,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
       source: [
         'speaker vera { title: "Captain" }',
         "function pace { return 1 }",
-        "say as vera `${true and speaker.title}`, pace()",
+        'say as vera "${true and speaker.title}", pace()',
       ].join("\n"),
       consumerKind: "prepareSayText",
     },
