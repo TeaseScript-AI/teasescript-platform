@@ -100,7 +100,8 @@ contract; `capture.ts` and `validation.ts` own stable external-data capture and 
 validation, with the small private capture support seam shared to avoid a
 capture/validation cycle. `src/compiler/compile-program.ts` owns compilation
 orchestration, while `src/compiler/lowering/compiler.ts` owns the cohesive
-stateful lowering pass.
+stateful lowering pass. `src/static-evaluation.ts` owns the pure AST number and
+visible-text evaluation shared by semantic validation and lowering.
 
 Serializable pending-action and settlement contracts live in
 `src/runtime/actions/model.ts`; action modules remain pure. The two atomic

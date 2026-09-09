@@ -9,6 +9,7 @@ import type {
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { SourceSpan } from "./source.js";
 import { CORE_RUNTIME_BUILTINS, TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
+import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -188,7 +189,7 @@ class SemanticValidator {
         this.#validateExpression(statement.value, scope, contextualSpeaker);
         if (statement.pacing !== null && statement.pacing !== "instant") {
           this.#validateExpression(statement.pacing, scope, contextualSpeaker);
-          const known = knownNumber(statement.pacing);
+          const known = staticNumber(statement.pacing);
           if (known !== undefined && known < 0) {
             this.#report(
               semanticCode.invalidRepeatCount,
@@ -206,7 +207,7 @@ class SemanticValidator {
       }
       case "waitStatement": {
         this.#validateExpression(statement.duration, scope, null);
-        const known = knownNumber(statement.duration);
+        const known = staticNumber(statement.duration);
         if (known !== undefined && known < 0) {
           this.#report(
             semanticCode.invalidRepeatCount,
@@ -236,7 +237,7 @@ class SemanticValidator {
         return;
       case "repeatStatement":
         this.#validateExpression(statement.count, scope, null);
-        const knownCount = knownNumber(statement.count);
+        const knownCount = staticNumber(statement.count);
         if (knownCount !== undefined && (!Number.isInteger(knownCount) || knownCount < 0)) {
           this.#report(
             semanticCode.invalidRepeatCount,
@@ -667,7 +668,7 @@ class SemanticValidator {
         }
         labels.add(key);
       } else {
-        const text = knownString(option.value);
+        const text = staticVisibleText(option.value);
         if (text !== undefined) {
           if (visible.has(text)) {
             this.#report(
@@ -783,7 +784,7 @@ class SemanticValidator {
 }
 
 function isKnownInteger(expression: Expression): boolean {
-  const value = knownNumber(expression);
+  const value = staticNumber(expression);
   return value === undefined || Number.isInteger(value);
 }
 
@@ -831,96 +832,9 @@ function findFirstInteraction(
   return null;
 }
 
-function knownNumber(expression: Expression): number | undefined {
-  let negate = false;
-  while (true) {
-    if (expression.kind === "parenthesizedExpression") {
-      expression = expression.expression;
-      continue;
-    }
-    if (
-      expression.kind === "unaryExpression" &&
-      (expression.operator === "+" || expression.operator === "-")
-    ) {
-      if (expression.operator === "-") negate = !negate;
-      expression = expression.operand;
-      continue;
-    }
-    break;
-  }
-
-  let value: number | undefined;
-  if (expression.kind === "numberLiteral") {
-    value = expression.value;
-  } else if (expression.kind === "binaryExpression") {
-    const left = knownNumber(expression.left);
-    const right = knownNumber(expression.right);
-    if (left === undefined || right === undefined) return undefined;
-    switch (expression.operator) {
-      case "+":
-        value = left + right;
-        break;
-      case "-":
-        value = left - right;
-        break;
-      case "*":
-        value = left * right;
-        break;
-      case "/":
-        value = right === 0 ? undefined : left / right;
-        break;
-      case "%":
-        value = right === 0 ? undefined : left % right;
-        break;
-      default:
-        value = undefined;
-        break;
-    }
-  }
-  return value === undefined || !negate ? value : -value;
-}
-
 function unwrapParentheses(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;
-}
-
-function knownString(expression: Expression): string | undefined {
-  expression = unwrapParentheses(expression);
-  switch (expression.kind) {
-    case "stringLiteral":
-      return expression.value;
-    case "numberLiteral":
-      return Number.isFinite(expression.value)
-        ? String(Object.is(expression.value, -0) ? 0 : expression.value)
-        : undefined;
-    case "booleanLiteral":
-      return expression.value ? "true" : "false";
-    case "nullLiteral":
-      return "null";
-    case "unaryExpression":
-    case "binaryExpression": {
-      const value = knownNumber(expression);
-      return value !== undefined && Number.isFinite(value)
-        ? String(Object.is(value, -0) ? 0 : value)
-        : undefined;
-    }
-    case "templateLiteral": {
-      const parts: string[] = [];
-      for (const part of expression.parts) {
-        if (part.kind === "templateText") {
-          parts.push(part.value);
-          continue;
-        }
-        const value = knownString(part.expression);
-        if (value === undefined) return undefined;
-        parts.push(value);
-      }
-      return parts.join("");
-    }
-    default:
-      return undefined;
-  }
 }
 
 function isDefinitelyNonNumeric(expression: Expression): boolean {
