@@ -200,7 +200,7 @@ test("lowers calls in templates, conditions, loop conditions, and returns", () =
     [
       "function truth { return true }",
       "function nested { return truth() }",
-      "if truth() { say `value ${nested()}` }",
+      'if truth() { say "value ${nested()}" }',
       "while truth() { break }",
     ].join("\n"),
   );

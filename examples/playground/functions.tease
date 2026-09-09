@@ -9,7 +9,7 @@ function kneel {
 }
 
 function greet(name, title = "pet") {
-    say `Hello, ${title} ${name}.`
+    say "Hello, ${title} ${name}."
 }
 
 function add(left, right) {
@@ -29,7 +29,7 @@ function countdown(value) {
         return "Done."
     }
 
-    say `Countdown ${value}`
+    say "Countdown ${value}"
     return countdown(value - 1)
 }
 
@@ -41,11 +41,11 @@ greet(
 )
 
 let result = add(2, 3)
-say `Two plus three is ${result}.`
-say `A nested result is ${add(add(1, 2), 3)}.`
+say "Two plus three is ${result}."
+say "A nested result is ${add(add(1, 2), 3)}."
 
 repeat 2 {
-    say `Loop result: ${add(4, 1)}`
+    say "Loop result: ${add(4, 1)}"
 }
 
 say stopEarly(1)

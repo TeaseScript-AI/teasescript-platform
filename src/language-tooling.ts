@@ -614,15 +614,14 @@ function visitExpression(expression: Expression, visitor: Visitor): void {
       visitExpression(expression.start, visitor);
       visitExpression(expression.end, visitor);
       return;
-    case "templateLiteral":
+    case "stringLiteral":
       for (const part of expression.parts)
-        if (part.kind === "templateInterpolation") visitExpression(part.expression, visitor);
+        if (part.kind === "stringInterpolation") visitExpression(part.expression, visitor);
       return;
     case "identifier":
     case "booleanLiteral":
     case "nullLiteral":
     case "numberLiteral":
-    case "stringLiteral":
       return;
   }
   expression satisfies never;

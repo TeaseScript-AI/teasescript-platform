@@ -521,7 +521,7 @@
     </wish>
     <wish id="W-040" status="active">
       <title>Named multi-speaker chat messages</title>
-      <description>Use the English `say` command without an implied Mistress argument. Allow authors to declare any practical number of speakers. Each speaker has only a unique identifier, display name, text color and font. Plain messages use quoted strings; backtick strings support `${expression}` interpolation; `say as &lt;speakerIdentifier&gt;` overrides the current default speaker for one message. Do not assume avatars, voices or other speaker properties.</description>
+      <description>Use the English `say` command without an implied Mistress argument. Allow authors to declare any practical number of speakers. Each speaker has only a unique identifier, display name, text color and font. Messages use quoted single-line or block strings with `${expression}` interpolation; `say as &lt;speakerIdentifier&gt;` overrides the current default speaker for one message. Do not assume avatars, voices or other speaker properties.</description>
       <tags>
         <tag>teasescript</tag>
         <tag>speakers</tag>
@@ -533,6 +533,7 @@
         <event date="2026-07-21" type="created">Accepted as the preferred design for say and multi-speaker chat.</event>
         <event date="2026-07-21" type="corrected">Restricted speaker properties to identifier, display name, color and font; removed unrequested avatar and voice assumptions.</event>
         <event date="2026-07-21" type="refined">Replaced the intermediate brace-message syntax with ADR 0011 quoted and backtick string literals.</event>
+        <event date="2026-09-09" type="refined">Replaced the plain/backtick split with ADR 0011's unified quoted single-line and block strings.</event>
       </history>
     </wish>
     <wish id="W-041" status="active">
@@ -613,7 +614,7 @@
     </wish>
     <wish id="W-047" status="active">
       <title>Interpolated and formatted say text</title>
-      <description>Use ordinary quoted strings for non-interpolated say text and backtick template strings for ${expression} interpolation. Both support explicit \n line breaks. Keep the switchable default speaker, Markdown plus limited BBCode, and raw HTML without compatibility guarantees.</description>
+      <description>Use quoted single-line and block strings for say text, with ${expression} interpolation in both forms and explicit \n line breaks where needed. Keep the switchable default speaker, Markdown plus limited BBCode, and raw HTML without compatibility guarantees.</description>
       <tags>
         <tag>teasescript</tag>
         <tag>say</tag>
@@ -623,6 +624,7 @@
       <history>
         <event date="2026-07-21" type="created">Confirmed during the iframe, library, text and concurrent-media design review.</event>
         <event date="2026-07-21" type="refined">Selected quote strings for plain text and backtick templates for interpolation.</event>
+        <event date="2026-09-09" type="refined">Unified interpolation under quoted single-line and block strings and removed backtick templates.</event>
       </history>
     </wish>
     <wish id="W-048" status="superseded">

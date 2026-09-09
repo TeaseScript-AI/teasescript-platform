@@ -7,20 +7,22 @@ import { TokenKind, type Token } from "../src/token.js";
 test("emits one EOF token for empty and horizontal-whitespace-only input", () => {
   for (const source of ["", " \t  "]) {
     const result = lex(source);
-
     assert.deepEqual(result.diagnostics, []);
-    assert.equal(result.tokens.length, 1);
-    assert.deepEqual(result.tokens[0], {
-      kind: TokenKind.EndOfFile,
-      lexeme: "",
-      span: span(source.length, 0, source.length, source.length, 0, source.length),
-    });
+    assert.deepEqual(result.tokens, [
+      {
+        kind: TokenKind.EndOfFile,
+        lexeme: "",
+        span: {
+          start: { offset: source.length, line: 0, column: source.length },
+          end: { offset: source.length, line: 0, column: source.length },
+        },
+      },
+    ]);
   }
 });
 
-test("recognizes exact slice keywords while longer names remain identifiers", () => {
+test("recognizes exact keywords while longer names remain identifiers", () => {
   const result = lex("speaker speakers say saying as ask exit exiting");
-
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(
     result.tokens.map((token) => [token.kind, token.lexeme]),
@@ -38,9 +40,9 @@ test("recognizes exact slice keywords while longer names remain identifiers", ()
   );
 });
 
-test("tokenizes slice punctuation and property access with exact spans", () => {
-  const result = lex("speaker vera {\nname: player.alias\n}");
-
+test("recognizes keywords and punctuation with exact source spans", () => {
+  const source = "speaker vera {\nname: player.alias\n}";
+  const result = lex(source);
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(result.tokens.map(compactToken), [
     ["keywordSpeaker", "speaker", [0, 0, 0, 7, 0, 7]],
@@ -58,92 +60,100 @@ test("tokenizes slice punctuation and property access with exact spans", () => {
   ]);
 });
 
-test("decodes every accepted ordinary-string escape", () => {
-  const source = '"Quote: \\"hello\\"; slash: \\\\; \\n\\r\\t"';
+test("uses one segmented token family for quoted strings and interpolation", () => {
+  const source = '"Hello ${player.alias}."';
   const result = lex(source);
-  const string = result.tokens[0];
-
-  assert.deepEqual(result.diagnostics, []);
-  assert.equal(string?.kind, TokenKind.StringLiteral);
-  assert.equal(tokenValue(string), 'Quote: "hello"; slash: \\; \n\r\t');
-  assert.deepEqual(string?.span, span(0, 0, 0, source.length, 0, source.length));
-});
-
-test("folds physical newlines and surrounding indentation inside strings", () => {
-  const result = lex('"one  \r\n\t two\n  three"\nexit');
-
-  assert.deepEqual(result.diagnostics, []);
-  assert.equal(tokenValue(result.tokens[0]), "one two three");
-  assert.deepEqual(result.tokens[0]?.span, span(0, 0, 0, 22, 2, 8));
-  assert.deepEqual(result.tokens[1]?.span, span(22, 2, 8, 23, 3, 0));
-  assert.deepEqual(result.tokens[2]?.span, span(23, 3, 0, 27, 3, 4));
-});
-
-test("folds every whitespace-only continuation line inside strings", () => {
-  const cases = [
-    ['"One.\n   \n\tTwo."', "One.  Two."],
-    ['"One.\r\n\t\r\n  \r\n Three."', "One.   Three."],
-    ['"Escaped:\\t\n \n done\\nnext"', "Escaped:\t  done\nnext"],
-  ] as const;
-
-  for (const [source, expected] of cases) {
-    const result = lex(source);
-
-    assert.deepEqual(result.diagnostics, []);
-    assert.equal(tokenValue(result.tokens[0]), expected);
-  }
-});
-
-test("emits template text and interpolation boundaries", () => {
-  const result = lex("`Hello ${player.alias}.`");
-
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(result.tokens.map(compactToken), [
-    ["templateStart", "`", [0, 0, 0, 1, 0, 1]],
-    ["templateText", "Hello ", [1, 0, 1, 7, 0, 7]],
+    ["stringStart", '"', [0, 0, 0, 1, 0, 1]],
+    ["stringText", "Hello ", [1, 0, 1, 7, 0, 7]],
     ["interpolationStart", "${", [7, 0, 7, 9, 0, 9]],
     ["identifier", "player", [9, 0, 9, 15, 0, 15]],
     ["dot", ".", [15, 0, 15, 16, 0, 16]],
     ["identifier", "alias", [16, 0, 16, 21, 0, 21]],
     ["interpolationEnd", "}", [21, 0, 21, 22, 0, 22]],
-    ["templateText", ".", [22, 0, 22, 23, 0, 23]],
-    ["templateEnd", "`", [23, 0, 23, 24, 0, 24]],
+    ["stringText", ".", [22, 0, 22, 23, 0, 23]],
+    ["stringEnd", '"', [23, 0, 23, 24, 0, 24]],
     ["endOfFile", "", [24, 0, 24, 24, 0, 24]],
   ]);
-  assert.equal(tokenValue(result.tokens[1]), "Hello ");
-  assert.equal(tokenValue(result.tokens[7]), ".");
 });
 
-test("decodes accepted template escapes without opening interpolation", () => {
-  const result = lex("`slash \\\\ tick \\` line \\n\\r\\t literal \\${name}`");
-
+test("decodes the shared escape set and literal interpolation opener", () => {
+  const source = '"Quote: \\"hello\\"; slash: \\\\; \\n\\r\\t; literal \\${name}; `"';
+  const result = lex(source);
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(
-    result.tokens.map((token) => token.kind),
-    [TokenKind.TemplateStart, TokenKind.TemplateText, TokenKind.TemplateEnd, TokenKind.EndOfFile],
+  assert.equal(
+    tokenValue(result.tokens[1]),
+    'Quote: "hello"; slash: \\; \n\r\t; literal ${name}; `',
   );
-  assert.equal(tokenValue(result.tokens[1]), "slash \\ tick ` line \n\r\t literal ${name}");
 });
 
-test("folds physical newlines inside template text", () => {
-  const result = lex("`Hello ${player.alias},  \r\n\t welcome.`");
+test("normalizes and dedents LF and CRLF block strings", () => {
+  for (const newline of ["\n", "\r\n"]) {
+    const source = [
+      '"""',
+      "    First.",
+      "    ",
+      "        Intentionally indented.",
+      "    Third.",
+      '"""',
+    ].join(newline);
+    const result = lex(source);
+    assert.deepEqual(result.diagnostics, []);
+    assert.equal(stringText(result.tokens), "First.\n\n    Intentionally indented.\nThird.");
+  }
+});
 
+test("defines block edge trimming, empty blocks, and trailing newlines", () => {
+  const cases = [
+    ['""""""', ""],
+    ['"""\n"""', ""],
+    ['"""text"""', "text"],
+    ['"""\n  text\n\n"""', "text\n"],
+    ['"""  \n  text"""', "\ntext"],
+  ] as const;
+  for (const [source, expected] of cases) {
+    const result = lex(source);
+    assert.deepEqual(result.diagnostics, [], source);
+    assert.equal(stringText(result.tokens), expected, source);
+  }
+});
+
+test("dedents across interpolation while preserving deeper indentation and escape newlines", () => {
+  const source = '"""\n    before ${name}\n        after\\n  escaped\n    end\n"""';
+  const result = lex(source);
   assert.deepEqual(result.diagnostics, []);
-  assert.equal(tokenValue(result.tokens[7]), ", welcome.");
-  assert.deepEqual(result.tokens[7]?.span, span(22, 0, 22, 37, 1, 10));
+  const values = result.tokens.flatMap((token) =>
+    token.kind === TokenKind.StringText ? [token.value] : [],
+  );
+  assert.deepEqual(values, ["before ", "\n    after\n  escaped\nend"]);
 });
 
-test("folds whitespace-only continuation lines across template interpolation boundaries", () => {
-  const result = lex("`Before\n \t\n${name}\n \n\t\nAfter`");
-
+test("allows quote runs and Markdown backticks inside blocks", () => {
+  const source = '"""one " two "" three \\""" and ```code```"""';
+  const result = lex(source);
   assert.deepEqual(result.diagnostics, []);
-  assert.equal(tokenValue(result.tokens[1]), "Before  ");
-  assert.equal(tokenValue(result.tokens[5]), "   After");
+  assert.equal(stringText(result.tokens), 'one " two "" three """ and ```code```');
 });
 
-test("tracks LF and CRLF as one newline with original lexemes", () => {
+test("rejects physical newlines anywhere inside a single-line string", () => {
+  const cases = [
+    '"literal\ntext"',
+    '"${1 +\n2}"',
+    '"${"""\nblock\n"""}"',
+    '"${1 /* comment\ncontinued */}"',
+  ];
+  for (const source of cases) {
+    const result = lex(source);
+    assert.ok(
+      result.diagnostics.some((diagnostic) => diagnostic.code === "TSL008"),
+      source,
+    );
+  }
+});
+
+test("tracks standalone LF and CRLF outside strings", () => {
   const result = lex("say\r\nexit\nsay");
-
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(result.tokens.map(compactToken), [
     ["keywordSay", "say", [0, 0, 0, 3, 0, 3]],
@@ -155,18 +165,22 @@ test("tracks LF and CRLF as one newline with original lexemes", () => {
   ]);
 });
 
-test("counts UTF-16 code units in offsets and columns", () => {
+test("counts UTF-16 code units in string token offsets and columns", () => {
   const result = lex('say "é😀"\nexit');
-
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.tokens[1]?.span, span(4, 0, 4, 9, 0, 9));
-  assert.equal(tokenValue(result.tokens[1]), "é😀");
-  assert.deepEqual(result.tokens[2]?.span, span(9, 0, 9, 10, 1, 0));
+  assert.deepEqual(result.tokens.slice(1, 4).map(compactToken), [
+    ["stringStart", '"', [4, 0, 4, 5, 0, 5]],
+    ["stringText", "é😀", [5, 0, 5, 8, 0, 8]],
+    ["stringEnd", '"', [8, 0, 8, 9, 0, 9]],
+  ]);
+  assert.deepEqual(result.tokens[4]?.span, {
+    start: { offset: 9, line: 0, column: 9 },
+    end: { offset: 10, line: 1, column: 0 },
+  });
 });
 
 test("diagnoses invalid characters and continues lexing", () => {
   const result = lex("😀@ say");
-
   assert.deepEqual(result.diagnostics.map(compactDiagnostic), [
     ["TSL001", 'Invalid character "😀".', [0, 0, 0, 2, 0, 2]],
     ["TSL001", 'Invalid character "@".', [2, 0, 2, 3, 0, 3]],
@@ -177,92 +191,62 @@ test("diagnoses invalid characters and continues lexing", () => {
   );
 });
 
-test("diagnoses unknown escapes precisely and recovers within strings", () => {
-  const result = lex('"bad \\q still" exit');
-
-  assert.deepEqual(result.diagnostics.map(compactDiagnostic), [
+test("diagnoses unknown escapes and obsolete backticks precisely", () => {
+  const unknown = lex('"bad \\q still"');
+  assert.deepEqual(unknown.diagnostics.map(compactDiagnostic), [
     ["TSL002", "Unknown escape sequence \\q.", [5, 0, 5, 7, 0, 7]],
   ]);
-  assert.equal(tokenValue(result.tokens[0]), "bad q still");
-  assert.equal(result.tokens[1]?.kind, TokenKind.KeywordExit);
+  assert.equal(tokenValue(unknown.tokens[1]), "bad q still");
+  assert.deepEqual(
+    lex("`old`").diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSL001", "TSL001"],
+  );
 });
 
 test("recovers an unknown escape before a physical newline", () => {
   const result = lex('"first\\\n  second"\nexit');
-
-  assert.deepEqual(result.diagnostics.map(compactDiagnostic), [
-    ["TSL002", "Unknown escape sequence before a physical newline.", [6, 0, 6, 7, 0, 7]],
-  ]);
-  assert.equal(tokenValue(result.tokens[0]), "first second");
-  assert.deepEqual(result.tokens[1]?.span, span(17, 1, 9, 18, 2, 0));
-});
-
-test("diagnoses unterminated ordinary strings with exact spans", () => {
-  const result = lex('say "unfinished');
-
-  assert.deepEqual(result.diagnostics.map(compactDiagnostic), [
-    ["TSL003", "Unterminated string literal.", [4, 0, 4, 15, 0, 15]],
-  ]);
-  assert.equal(result.tokens[1]?.kind, TokenKind.StringLiteral);
-  assert.equal(result.tokens.at(-1)?.kind, TokenKind.EndOfFile);
-});
-
-test("diagnoses unterminated templates without duplicate EOF tokens", () => {
-  const result = lex("`unfinished");
-
-  assert.deepEqual(result.diagnostics.map(compactDiagnostic), [
-    ["TSL004", "Unterminated template string.", [0, 0, 0, 11, 0, 11]],
-  ]);
   assert.deepEqual(
-    result.tokens.map((token) => token.kind),
-    [TokenKind.TemplateStart, TokenKind.TemplateText, TokenKind.EndOfFile],
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSL002", "TSL008"],
   );
-});
-
-test("recovers an unterminated interpolation at the template boundary", () => {
-  const result = lex("`before ${player.alias`\nexit");
-
-  assert.deepEqual(result.diagnostics.map(compactDiagnostic), [
-    ["TSL005", "Unterminated template interpolation.", [8, 0, 8, 22, 0, 22]],
-  ]);
   assert.deepEqual(
-    result.tokens.map((token) => token.kind),
+    result.diagnostics.map((diagnostic) => [
+      diagnostic.span.start.offset,
+      diagnostic.span.end.offset,
+    ]),
     [
-      TokenKind.TemplateStart,
-      TokenKind.TemplateText,
-      TokenKind.InterpolationStart,
-      TokenKind.Identifier,
-      TokenKind.Dot,
-      TokenKind.Identifier,
-      TokenKind.TemplateEnd,
-      TokenKind.Newline,
-      TokenKind.KeywordExit,
-      TokenKind.EndOfFile,
+      [6, 7],
+      [7, 8],
     ],
   );
+  assert.equal(stringText(result.tokens), "first\n  second");
+  assert.equal(result.tokens.at(-2)?.kind, TokenKind.KeywordExit);
 });
 
-test("reports only the interpolation error when interpolation reaches EOF", () => {
-  const result = lex("`before ${player.alias");
-
-  assert.deepEqual(result.diagnostics.map(compactDiagnostic), [
-    ["TSL005", "Unterminated template interpolation.", [8, 0, 8, 22, 0, 22]],
+test("diagnoses unterminated ordinary, block, and interpolated strings", () => {
+  const ordinary = lex('say "unfinished');
+  assert.deepEqual(ordinary.diagnostics.map(compactDiagnostic), [
+    ["TSL003", "Unterminated string literal.", [4, 0, 4, 15, 0, 15]],
   ]);
-  assert.equal(result.tokens.filter((token) => token.kind === TokenKind.EndOfFile).length, 1);
+  assert.deepEqual(
+    lex('"""unfinished').diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSL004"],
+  );
+  const interpolation = lex('"before ${value"');
+  assert.deepEqual(
+    interpolation.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSL005"],
+  );
+  assert.equal(
+    interpolation.tokens.filter((token) => token.kind === TokenKind.EndOfFile).length,
+    1,
+  );
 });
 
-function span(
-  startOffset: number,
-  startLine: number,
-  startColumn: number,
-  endOffset: number,
-  endLine: number,
-  endColumn: number,
-) {
-  return {
-    start: { offset: startOffset, line: startLine, column: startColumn },
-    end: { offset: endOffset, line: endLine, column: endColumn },
-  };
+function stringText(tokens: readonly Token[]): string {
+  return tokens
+    .flatMap((token) => (token.kind === TokenKind.StringText ? [token.value] : []))
+    .join("");
 }
 
 function compactToken(

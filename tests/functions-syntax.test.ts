@@ -38,7 +38,7 @@ test("parses multiline defaults, named calls, and exact declaration spans", () =
     "  name,",
     '  title = "pet"',
     ") {",
-    "  say `Hello, ${title} ${name}.`",
+    '  say "Hello, ${title} ${name}."',
     "}",
     "greet(",
     '  name: "Alex",',

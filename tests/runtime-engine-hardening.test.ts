@@ -91,7 +91,7 @@ test("detects duplicate prototype-sensitive named arguments", () => {
 
 test("refreshes builtin registration between instructions while reusing operation context", () => {
   const compiled = compile(
-    ["let first = probe()", "let second = probe()", "say `${first}:${second}`, instant"].join("\n"),
+    ["let first = probe()", "let second = probe()", 'say "${first}:${second}", instant'].join("\n"),
     ["probe"],
   );
   const calls: string[] = [];

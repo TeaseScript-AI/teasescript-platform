@@ -164,7 +164,9 @@ delayMs =
     )
 ```
 
-The measured value is the final emitted text after expression evaluation, interpolation, escapes, deterministic list selection, and source-string newline folding. Words are maximal non-whitespace sequences; visible characters are Unicode code points.
+The measured value is the final emitted text after expression evaluation, interpolation, escapes, deterministic list
+selection, and block-string newline normalization and dedent. Words are maximal non-whitespace sequences; visible
+characters are Unicode code points.
 
 All counts, multiplication, addition, and deadline construction use checked arithmetic. A non-finite, unsafe, unsupported-magnitude, or overflowing result fails before an action ID or partial gate is created. There is no additional product reading-time cap, but ADR 0016 numeric-magnitude and deadline-overflow limits still apply.
 
@@ -477,11 +479,16 @@ host-dependent recursive paths are recorded in [`RESOURCE-LIMITS.md`](RESOURCE-L
 parser-diagnostic boundary. The lower-level `parse(...)` result may still expose the raw JavaScript number produced
 while parsing, so callers must not treat parsing alone as successful compilation.
 
-### Template interpolation
+### String interpolation
 
-Template interpolation uses normal TeaseScript expression parsing and supports recursively nested template literals and nested interpolation expressions. The lexer preserves exact source spans and keeps escaped backticks and escaped `${` as literal template text.
+Both single-line and block strings use normal TeaseScript expression parsing for interpolation and support recursively
+nested strings and interpolation expressions. The lexer preserves exact source spans and keeps escaped quotes and
+escaped `${` as literal string text. Block physical LF and CRLF endings normalize to `\n`; the accepted syntax
+specification defines dedent.
 
-Unterminated nested content remains structured: `TSL004` reports an unterminated template and `TSL005` reports an unterminated interpolation. A backtick starts a nested template whenever the current interpolation position can begin an expression, including when horizontal whitespace or a physical line ending follows the nested opening backtick. A backtick in a position where an expression cannot start remains the outer-template recovery boundary.
+Unterminated nested content remains structured: `TSL003` reports an unterminated single-line string, `TSL004` reports
+an unterminated block string, and `TSL005` reports an unterminated interpolation. A quote at a valid expression-start
+position begins a nested string. A quote that cannot begin an expression remains the outer string's recovery boundary.
 
 ### Canonical source-to-runtime route
 

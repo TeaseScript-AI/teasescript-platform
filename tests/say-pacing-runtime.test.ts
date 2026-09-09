@@ -167,14 +167,14 @@ test("prepared says retain contextual speaker identity across text and pacing ca
     {
       name: "explicit speaker in text before a text-side call",
       speaker: "say as vera",
-      text: "`${speaker.title} ${textValue()}`",
+      text: '"${speaker.title} ${textValue()}"',
       pacing: "instant",
       expected: "Captain hello",
     },
     {
       name: "explicit speaker in text before a pacing-side call",
       speaker: "say as vera",
-      text: "`${speaker.title} hello`",
+      text: '"${speaker.title} hello"',
       pacing: "pace()",
       expected: "Captain hello",
     },
@@ -188,7 +188,7 @@ test("prepared says retain contextual speaker identity across text and pacing ca
     {
       name: "default speaker in text before a text-side call",
       speaker: "say",
-      text: "`${speaker.title} ${textValue()}`",
+      text: '"${speaker.title} ${textValue()}"',
       pacing: "instant",
       expected: "Captain hello",
     },
@@ -226,7 +226,7 @@ test("prepared says retain contextual speaker identity across text and pacing ca
       '  return "hello"',
       "}",
       "function pace { return 1 }",
-      "say as vera `${speaker.title} ${mutate()}`, pace()",
+      'say as vera "${speaker.title} ${mutate()}", pace()',
     ].join("\n"),
   );
   const result = run(mutated, createFreshRuntimeSnapshot(mutated));
@@ -251,7 +251,7 @@ test("prepared contextual speaker values survive a suspended text call checkpoin
       '  return "hello"',
       "}",
       "function pace { return 1 }",
-      "say as vera `${speaker.title} ${textValue()}`, speaker.delay + pace()",
+      'say as vera "${speaker.title} ${textValue()}", speaker.delay + pace()',
     ].join("\n"),
   );
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
@@ -437,7 +437,7 @@ test("speaker default and explicit skip policy determine pacing gate skippabilit
 test("smart pacing uses the final visible text and captured settings", () => {
   const cases = [
     {
-      source: 'let name = "Ada"\nsay `Hi ${name}`',
+      source: 'let name = "Ada"\nsay \"Hi ${name}\"',
       options: {},
       text: "Hi Ada",
       deadlineMs: 2_100,

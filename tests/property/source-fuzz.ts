@@ -2,7 +2,7 @@ export const MAX_SOURCE_FUZZ_LENGTH = 512;
 export const SOURCE_FUZZ_INSTRUCTION_BUDGET = 200;
 
 export const VALID_SOURCE_FAMILIES = [
-  "literals-expressions-ranges-templates",
+  "literals-expressions-ranges-strings",
   "variables-scope-and-collections",
   "conditions-and-loop-control",
   "functions-defaults-calls-and-recursion",
@@ -12,7 +12,7 @@ export const VALID_SOURCE_FAMILIES = [
 
 export const NEAR_VALID_SOURCE_FAMILIES = [
   "missing-declaration-identifier",
-  "template-interpolation",
+  "string-interpolation",
   "loop-control",
   "semantic-name",
   "function-arguments",
@@ -39,7 +39,7 @@ export function createValidSourceCase(seed: number, index: number): ValidSourceC
   const family = selectSourceFamily(VALID_SOURCE_FAMILIES, seed, index);
 
   switch (family) {
-    case "literals-expressions-ranges-templates":
+    case "literals-expressions-ranges-strings":
       return literalsSource(choices);
     case "variables-scope-and-collections":
       return collectionsSource(choices);
@@ -61,8 +61,8 @@ export function createNearValidSourceCase(seed: number, index: number): NearVali
   switch (family) {
     case "missing-declaration-identifier":
       return missingIdentifierCase(choices, family);
-    case "template-interpolation":
-      return missingTemplateExpressionCase(choices, family);
+    case "string-interpolation":
+      return missingStringExpressionCase(choices, family);
     case "loop-control":
       return outsideLoopCase(choices, family);
     case "semantic-name":
@@ -80,13 +80,13 @@ function literalsSource(choices: SourceChoices): ValidSourceCase {
   const operator = choices.pick(["+", "-"] as const);
   const text = choices.pick(["total", "sum", "value"] as const);
   return valid(
-    "literals-expressions-ranges-templates",
+    "literals-expressions-ranges-strings",
     `start=${start} operator=${operator} range=${rangeLength} text=${text}`,
     [
       `let start = ${start}`,
       `let total = -start ${operator} 2 * 3`,
       `for item in start..=start + ${rangeLength} { total = total + item }`,
-      `say \`${text}:\${total}\``,
+      `say "${text}:\${total}"`,
     ],
   );
 }
@@ -105,7 +105,7 @@ function collectionsSource(choices: SourceChoices): ValidSourceCase {
       "let copy = source",
       `copy[0] = ${replacement}`,
       `let record = { label: "${label}", values: set[${setValues}] }`,
-      "for item in record.values { say `${record.label}:${item}` }",
+      'for item in record.values { say "${record.label}:${item}" }',
       "say source[0]",
     ],
   );
@@ -148,7 +148,7 @@ function functionsSource(choices: SourceChoices): ValidSourceCase {
       "  return step + count(value - 1, step)",
       "}",
       `function describeValue(value, prefix = "${prefix}") {`,
-      "  return `${prefix}:${value}`",
+      '  return "${prefix}:${value}"',
       "}",
       `say describeValue(${call})`,
     ],
@@ -181,7 +181,7 @@ function randomSource(choices: SourceChoices): ValidSourceCase {
   return valid("deterministic-random-builtins", `range=${range} chance=${chance}`, [
     `let roll = randomInteger(${range})`,
     `let lucky = chance(${chance})`,
-    "say `${roll}:${lucky}:${random()}`",
+    'say "${roll}:${lucky}:${random()}"',
   ]);
 }
 
@@ -193,12 +193,12 @@ function missingIdentifierCase(
   return nearValid(family, `literal=${value}`, `let = ${value}`, "TSP013");
 }
 
-function missingTemplateExpressionCase(
+function missingStringExpressionCase(
   choices: SourceChoices,
-  family: "template-interpolation",
+  family: "string-interpolation",
 ): NearValidSourceCase {
   const text = choices.pick(["Hello", "Count", "Value"] as const);
-  return nearValid(family, `text=${text}`, `say \`${text} \${}\``, "TSP008");
+  return nearValid(family, `text=${text}`, `say "${text} \${}"`, "TSP008");
 }
 
 function outsideLoopCase(choices: SourceChoices, family: "loop-control"): NearValidSourceCase {

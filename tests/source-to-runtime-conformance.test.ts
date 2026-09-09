@@ -65,7 +65,7 @@ test("executes source output, speaker provenance, collection copies, and control
       'let values = set["first", "second", "first"]',
       "let total = 0",
       "for value in 1..=3 { if value == 2 { continue }\ntotal = total + value }",
-      "say `Total ${total}: ${values.first}`",
+      'say "Total ${total}: ${values.first}"',
       "say source[0]",
       'say as vera "Override"',
     ].join("\n"),
@@ -90,21 +90,27 @@ test("executes source output, speaker provenance, collection copies, and control
   assert.equal(rootBinding(result.snapshot.frames[0]?.bindings ?? [], "total"), 4);
 });
 
-test("executes folded string and template continuation lines without text loss", () => {
+test("executes explicit block newlines, dedent, escapes, and interpolation without text loss", () => {
   const plan = compiled(
     [
       'let name = "Ada"',
-      'say "One.\n   \n\tTwo."',
-      'say "Many.\r\n\t\r\n  \r\n blanks."',
-      "say `Before\\t\n \t\n${name}\n \n\t\nAfter\\nnext`",
-      'say "Escaped:\\t\n \n done\\nnext"',
+      'say """',
+      "  One.",
+      "   ",
+      "    Two.",
+      '"""',
+      'say """',
+      "  Before\\t ${name}",
+      "    After\\nnext",
+      '"""',
+      'say "Escaped:\\t and explicit\\nnext"',
     ].join("\n"),
   );
 
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["One.  Two.", "Many.   blanks.", "Before\t  Ada   After\nnext", "Escaped:\t  done\nnext"],
+    ["One.\n\n  Two.", "Before\t Ada\n  After\nnext", "Escaped:\t and explicit\nnext"],
   );
 });
 
@@ -155,7 +161,7 @@ test("preserves function evaluation, deterministic random output, and checkpoint
       "function mark(value) { order.add(value)\nreturn value }",
       "function add(left, right = left) { return left + right }",
       "say add(mark(2))",
-      "say `${order[0]}:${randomInteger(1..=6)}`",
+      'say "${order[0]}:${randomInteger(1..=6)}"',
     ].join("\n"),
     { scenarioName: "public source conformance function and RNG scenario", seed: 0x2468_ace1 },
   );

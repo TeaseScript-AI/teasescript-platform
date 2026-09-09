@@ -178,12 +178,12 @@ test("compact choose follows V30 continuation and enclosing-terminator boundarie
   assert.equal(listInitializer?.initializer.kind, "listLiteral");
   assert.equal(listInitializer?.initializer.elements[0]?.kind, "interactionExpression");
 
-  const interpolation = parse('let message = `Selected: ${choose "A", "B"}`');
+  const interpolation = parse(`let message = "Selected: \${choose "A", "B"}"`);
   assert.deepEqual(interpolation.diagnostics, []);
   const messageInitializer = interpolation.program.statements[0];
   assert.equal(messageInitializer?.kind, "letStatement");
-  assert.equal(messageInitializer?.initializer.kind, "templateLiteral");
-  assert.equal(messageInitializer?.initializer.parts[1]?.kind, "templateInterpolation");
+  assert.equal(messageInitializer?.initializer.kind, "stringLiteral");
+  assert.equal(messageInitializer?.initializer.parts[1]?.kind, "stringInterpolation");
   assert.equal(messageInitializer?.initializer.parts[1]?.expression.kind, "interactionExpression");
 });
 
@@ -346,7 +346,7 @@ test("every accepted compact interaction variant carries exact command and const
 
 test("compact choices diagnose a missing separator at the next option and recover", () => {
   const cases = [
-    { source: 'let result = choose "One" "Two"', span: [26, 31] },
+    { source: 'let result = choose "One" "Two"', span: [26, 27] },
     { source: 'let result = choose first: "One" second: "Two"', span: [33, 39] },
   ];
   for (const scenario of cases) {
@@ -428,14 +428,14 @@ test("choice diagnostics reject mixing and duplicates while labelled visible tex
 });
 
 test("static choice rules align duplicate diagnostics with direct and prepared interaction UI", () => {
-  const duplicate = compileSource('let result = choose "sum 3", `sum ${1 + 2}`');
+  const duplicate = compileSource('let result = choose "sum 3", "sum ${1 + 2}"');
   assert.equal(duplicate.plan, null);
   assert.deepEqual(
     duplicate.semanticDiagnostics.map((diagnostic) => diagnostic.code),
     ["TSV030"],
   );
 
-  const staticPlan = compiled("let result = choose `sum ${1 + 2}`, -0, true, null");
+  const staticPlan = compiled('let result = choose "sum ${1 + 2}", -0, true, null');
   const staticInstruction = staticPlan.instructions.find(
     (instruction) => instruction.kind === "interaction",
   );
@@ -458,7 +458,7 @@ test("static choice rules align duplicate diagnostics with direct and prepared i
     },
   );
 
-  const dynamicPlan = compiled('let value = 3\nlet result = choose `sum ${value}`, "other"');
+  const dynamicPlan = compiled('let value = 3\nlet result = choose "sum ${value}", "other"');
   const dynamicInstruction = dynamicPlan.instructions.find(
     (instruction) => instruction.kind === "interaction",
   );
@@ -811,7 +811,7 @@ test("requesting speaker is captured before payload side effects change the defa
 });
 
 test("fixed-seed payload RNG is prepared once and restore does not reevaluate it", () => {
-  const plan = compiled("let result = choose `A ${random()}`, `B ${random()}`");
+  const plan = compiled('let result = choose "A ${random()}", "B ${random()}"');
   const pending = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1364229357 }));
   const savedRng = pending.snapshot.rng;
   const restored = deserializeCheckpoint(
@@ -936,7 +936,7 @@ test("interaction expressions preserve function-argument source order across sus
   const plan = compiled(
     [
       "function middle(first, second, third) { return second }",
-      'let answer = middle(mark("before"), `received ${askText}`, mark("after"))',
+      'let answer = middle(mark("before"), "received ${askText}", mark("after"))',
       "say answer",
     ].join("\n"),
     { builtins: ["mark"] },
@@ -1325,7 +1325,7 @@ test("representative static and dynamic root/function choices complete through c
       name: "dynamic-root",
       source: [
         'let prefix = "Option"',
-        "let result = choose `${prefix} A`, `${prefix} B`, `${prefix} C`",
+        'let result = choose "${prefix} A", "${prefix} B", "${prefix} C"',
       ].join("\n"),
       payload: { kind: "selectedText" as const, selectedText: "Option B" },
     },
@@ -1333,7 +1333,7 @@ test("representative static and dynamic root/function choices complete through c
       name: "dynamic-function",
       source: [
         "function prompt(prefix) {",
-        "let result = choose `${prefix} A`, `${prefix} B`, `${prefix} C`",
+        'let result = choose "${prefix} A", "${prefix} B", "${prefix} C"',
         "return result",
         "}",
         'let output = prompt("Option")',

@@ -40,7 +40,7 @@ test("runtime snapshots survive JSON stringify and parse validation", () => {
 });
 
 test("restores a self-contained checkpoint from serialized JSON", () => {
-  const compiled = plan("let score = 1\nsay `${score}`\nexit");
+  const compiled = plan('let score = 1\nsay "${score}"\nexit');
   const first = executeInstruction(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(compiled, first.snapshot)),
@@ -137,9 +137,9 @@ test("uninterrupted and checkpoint-resumed execution are identical", () => {
       "speaker vera",
       'let values = set["first", "second", "third"]',
       "let chosen = values.random",
-      "say `Choice: ${chosen}`",
+      'say "Choice: ${chosen}"',
       'values.add("fourth")',
-      "say `Again: ${values.random}`",
+      'say "Again: ${values.random}"',
       "exit",
     ].join("\n"),
     { scenarioName: "general runtime checkpoint equivalence", seed: 12345 },

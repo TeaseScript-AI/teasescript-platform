@@ -215,6 +215,7 @@ test("Vue transcript uses TanStack's single virtual scroll and anchor owner", as
   assert.doesNotMatch(transcript, /column-reverse|scrollTop\s*\+=|scrollHeight\s*-/u);
   assert.match(styles, /\.transcript-virtualizer\s*\{/u);
   assert.match(styles, /inset-block-start:\s*0/u);
+  assert.match(styles, /\.message-body\s*\{[\s\S]*white-space:\s*pre-wrap/u);
   assert.match(app, /transcriptStressFixture[\s\S]*transcript-stress/u);
   assert.match(fixture, /INITIAL_HISTORY_SIZE = 2_000/u);
   assert.match(fixture, /data-transcript-fixture="stress"/u);

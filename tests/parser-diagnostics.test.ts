@@ -28,7 +28,7 @@ test("reports a missing say string and recovers at LF", () => {
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    ["TSP006", "Expected a string or template after 'say'.", [3, 0, 3, 3, 0, 3]],
+    ["TSP006", "Expected a string after 'say'.", [3, 0, 3, 3, 0, 3]],
   ]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
@@ -47,7 +47,7 @@ test("reports missing property names, colons, and strings at bounded lines", () 
   assert.deepEqual(compactDiagnostics(result), [
     ["TSP004", "Expected a speaker property name.", [15, 1, 0, 15, 1, 0]],
     ["TSP005", "Expected ':' after the speaker property name.", [39, 2, 12, 39, 2, 12]],
-    ["TSP006", "Expected a string or template for the speaker property.", [56, 3, 6, 56, 3, 6]],
+    ["TSP006", "Expected a string for the speaker property.", [56, 3, 6, 56, 3, 6]],
   ]);
   assert.deepEqual(statementKinds(result), ["speakerDeclaration", "exitStatement"]);
 });
@@ -76,24 +76,24 @@ test("reports a missing closing brace at EOF once", () => {
   assert.deepEqual(statementKinds(result), ["speakerDeclaration"]);
 });
 
-test("reports an empty template interpolation and parses a later statement", () => {
-  const source = "say `Hello ${}`\r\nexit";
+test("reports an empty string interpolation and parses a later statement", () => {
+  const source = 'say "Hello ${}"\r\nexit';
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    ["TSP008", "Expected an expression inside the template interpolation.", [13, 0, 13, 13, 0, 13]],
+    ["TSP008", "Expected an expression inside the string interpolation.", [13, 0, 13, 13, 0, 13]],
   ]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
 test("rejects unsupported interpolation expressions deterministically", () => {
-  const source = "say `${player: other}`\nexit";
+  const source = 'say "${player: other}"\nexit';
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
     [
       "TSP009",
-      "Only identifiers and chained property access are supported in template interpolation.",
+      "Only identifiers and chained property access are supported in string interpolation.",
       [13, 0, 13, 14, 0, 14],
     ],
   ]);
@@ -101,7 +101,7 @@ test("rejects unsupported interpolation expressions deterministically", () => {
 });
 
 test("reports a missing property after dot without cascading", () => {
-  const source = "say `${player.}`\nexit";
+  const source = 'say "${player.}"\nexit';
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
@@ -111,29 +111,21 @@ test("reports a missing property after dot without cascading", () => {
 });
 
 test("does not duplicate lexer diagnostics for an unterminated interpolation", () => {
-  const source = "say `Hello ${player`\nexit";
+  const source = 'say "Hello ${player"\nexit';
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    ["TSL005", "Unterminated template interpolation.", [11, 0, 11, 19, 0, 19]],
+    ["TSL005", "Unterminated string interpolation.", [11, 0, 11, 19, 0, 19]],
   ]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
-test("treats a backtick after an interpolation start as a nested template", () => {
-  const source = "say `Hello ${`\nexit";
+test("accepts physical continuation lines inside block-string interpolation", () => {
+  const source = ['say """', "  ${", "    1 + 2", "  }", '"""', "exit"].join("\n");
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSL004", "Unterminated template string.", [13, 0, 13, 19, 1, 4]],
-    ["TSL005", "Unterminated template interpolation.", [11, 0, 11, 19, 1, 4]],
-    [
-      "TSP009",
-      "Expected a supported expression inside the template interpolation.",
-      [19, 1, 4, 19, 1, 4],
-    ],
-  ]);
-  assert.deepEqual(statementKinds(result), []);
+  assert.deepEqual(compactDiagnostics(result), []);
+  assert.deepEqual(statementKinds(result), ["sayStatement", "exitStatement"]);
 });
 
 test("rejects a non-slice statement and recovers at the next CRLF line", () => {

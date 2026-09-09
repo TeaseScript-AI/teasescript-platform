@@ -97,7 +97,7 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
 
 test("keeps valid halted execution resume-equivalent", () => {
   const result = assertRuntimeResumeEquivalent(
-    ["function inner { return 2 }", "say `value:${inner()}`", "exit"].join("\n"),
+    ["function inner { return 2 }", 'say "value:${inner()}"', "exit"].join("\n"),
     { scenarioName: "runtime snapshot invariant resume equivalence" },
   );
 

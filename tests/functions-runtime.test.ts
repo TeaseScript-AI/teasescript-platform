@@ -42,7 +42,7 @@ test("binds defaults per invocation after all supplied parameters", () => {
       "let counter = 0",
       "function next { counter = counter + 1\nreturn counter }",
       "function describe(name, title = name, count = next()) {",
-      "  return `${title}:${name}:${count}`",
+      '  return "${title}:${name}:${count}"',
       "}",
       'say describe("pet")',
       'say describe(name: "Alex", title: "puppy")',
@@ -174,7 +174,7 @@ test("supports nested calls in arithmetic and templates", () => {
       "function one { return 1 }",
       "function add(left, right) { return left + right }",
       "say one() + add(one(), one())",
-      "say `nested:${add(one(), one())}`",
+      'say "nested:${add(one(), one())}"',
     ].join("\n"),
   );
 
@@ -186,10 +186,10 @@ test("preserves left-to-right call and named-argument side effects", () => {
     [
       "let order = []",
       "function mark(value) { order.add(value)\nreturn value }",
-      "function combine(left, right) { return `${left}${right}` }",
+      'function combine(left, right) { return "${left}${right}" }',
       'say combine(mark("a"), mark("b"))',
       'say combine(right: mark("d"), left: mark("c"))',
-      "say `${order[0]}${order[1]}${order[2]}${order[3]}`",
+      'say "${order[0]}${order[1]}${order[2]}${order[3]}"',
     ].join("\n"),
   );
 
@@ -224,7 +224,7 @@ test("evaluates a property-call receiver before its arguments", () => {
       'function receiver { order.add("receiver")\nreturn values }',
       'function argument { order.add("argument")\nreturn 7 }',
       "receiver().add(argument())",
-      "say `${order[0]}:${order[1]}`",
+      'say "${order[0]}:${order[1]}"',
     ].join("\n"),
   );
 
@@ -239,7 +239,7 @@ test("evaluates assignment indexes before right-hand values", () => {
       'function indexFunction { order.add("index")\nreturn 0 }',
       'function valueFunction { order.add("value")\nreturn 7 }',
       "items[indexFunction()] = valueFunction()",
-      "say `${order[0]}:${order[1]}:${items[0]}`",
+      'say "${order[0]}:${order[1]}:${items[0]}"',
     ].join("\n"),
   );
 
@@ -278,7 +278,7 @@ test("preserves ordinary built-in order before later user calls in composite exp
     'let listValue = [mark("list"), userText()]',
     'let setValue = set[mark("set"), userText()]',
     'let objectValue = { first: mark("object"), second: userText() }',
-    'let templateValue = `${mark("template")}:${userText()}`',
+    'let templateValue = "${mark(\"template\")}:${userText()}"',
     'let binaryValue = markNumber(1, "binary") + userNumber()',
     'let rangeValue = markNumber(1, "range")..userNumber()',
     "let indexedValue = sourceList()[indexUser()]",
@@ -359,7 +359,7 @@ test("keeps a prepared collection receiver attached through argument side effect
       "let items = []",
       "function argument { items.add(1)\nreturn 2 }",
       "items.add(argument())",
-      "say `${items[0]}:${items[1]}`",
+      'say "${items[0]}:${items[1]}"',
     ].join("\n"),
   );
 
@@ -431,7 +431,7 @@ test("rebases prepared list descendants when earlier removals shift retained ite
       "firstItems[1].value = removeFirstItem()",
       "middleItems[2].value = removeMiddleItem()",
       "lastItems[0].value = removeLastItem()",
-      "say `${firstItems[0].value}:${middleItems[1].value}:${lastItems[0].value}`",
+      'say "${firstItems[0].value}:${middleItems[1].value}:${lastItems[0].value}"',
     ].join("\n"),
   );
 

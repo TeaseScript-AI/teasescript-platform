@@ -441,7 +441,13 @@ class SemanticValidator {
       case "booleanLiteral":
       case "nullLiteral":
       case "numberLiteral":
+        return;
       case "stringLiteral":
+        for (const part of expression.parts) {
+          if (part.kind === "stringInterpolation") {
+            this.#validateExpression(part.expression, scope, contextualSpeaker);
+          }
+        }
         return;
       case "interactionExpression": {
         const contextualSpeaker = this.#interactionSpeaker(expression.speaker, scope);
@@ -509,13 +515,6 @@ class SemanticValidator {
         }
         return;
       }
-      case "templateLiteral":
-        for (const part of expression.parts) {
-          if (part.kind === "templateInterpolation") {
-            this.#validateExpression(part.expression, scope, contextualSpeaker);
-          }
-        }
-        return;
       case "propertyAccessExpression":
         this.#validateExpression(expression.object, scope, contextualSpeaker);
         return;
@@ -802,18 +801,17 @@ function findFirstInteraction(
       case "booleanLiteral":
       case "nullLiteral":
       case "numberLiteral":
-      case "stringLiteral":
       case "identifier":
         return [];
+      case "stringLiteral":
+        return expression.parts.flatMap((part) =>
+          part.kind === "stringInterpolation" ? [part.expression] : [],
+        );
       case "listLiteral":
       case "setLiteral":
         return expression.elements;
       case "objectLiteral":
         return expression.properties.map((property) => property.value);
-      case "templateLiteral":
-        return expression.parts.flatMap((part) =>
-          part.kind === "templateInterpolation" ? [part.expression] : [],
-        );
       case "propertyAccessExpression":
         return [expression.object];
       case "indexExpression":
@@ -852,7 +850,6 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
-    expression.kind === "templateLiteral" ||
     expression.kind === "rangeExpression"
   );
 }
@@ -865,7 +862,6 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     expression.kind === "nullLiteral" ||
     expression.kind === "numberLiteral" ||
     expression.kind === "objectLiteral" ||
-    expression.kind === "templateLiteral" ||
     expression.kind === "interactionExpression"
   );
 }
@@ -897,7 +893,11 @@ function visitExpression(
     case "booleanLiteral":
     case "nullLiteral":
     case "numberLiteral":
+      return;
     case "stringLiteral":
+      expression.parts.forEach((part) => {
+        if (part.kind === "stringInterpolation") visitExpression(part.expression, visitor);
+      });
       return;
     case "listLiteral":
     case "setLiteral":
@@ -905,13 +905,6 @@ function visitExpression(
       return;
     case "objectLiteral":
       expression.properties.forEach((property) => visitExpression(property.value, visitor));
-      return;
-    case "templateLiteral":
-      expression.parts.forEach((part) => {
-        if (part.kind === "templateInterpolation") {
-          visitExpression(part.expression, visitor);
-        }
-      });
       return;
     case "propertyAccessExpression":
       visitExpression(expression.object, visitor);

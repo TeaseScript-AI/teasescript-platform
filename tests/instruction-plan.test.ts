@@ -8,7 +8,7 @@ import { run } from "../src/runtime/engine.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("compiles deterministically to the same instruction plan", () => {
-  const source = "let score = 1\nscore = score + 1\nsay `${score}`\nexit";
+  const source = 'let score = 1\nscore = score + 1\nsay "${score}"\nexit';
 
   assert.deepEqual(plan(source), plan(source));
 });
@@ -51,7 +51,7 @@ test("preserves relevant statement and nested expression source spans", () => {
 });
 
 test("survives JSON stringify and parse as an equivalent executable plan", () => {
-  const original = plan("let value = [1, 2]\nsay `${value.first}`\nexit");
+  const original = plan('let value = [1, 2]\nsay "${value.first}"\nexit');
   const restored: unknown = JSON.parse(JSON.stringify(original));
 
   assert.equal(validateInstructionPlan(restored).valid, true);
