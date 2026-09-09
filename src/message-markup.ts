@@ -347,10 +347,10 @@ function parseInlineSegments(
 ): ParsedSegments {
   const frames: InlineFrame[] = [createFrame("root", "", null, 0)];
   const nextBacktick = nextUnescapedIndexes(units, "`", start, end);
-  const nextLabelSeparator = linksEnabled
-    ? nextLinkLabelSeparators(units, start, end, nextBacktick)
+  const linkLabelClosers = linksEnabled
+    ? matchLinkLabelClosers(units, start, end, nextBacktick)
     : null;
-  const nextCloseParenthesis = linksEnabled ? nextUnescapedIndexes(units, ")", start, end) : null;
+  const targetClosers = linksEnabled ? matchClosingParentheses(units, start, end) : null;
 
   for (let index = start; index < end;) {
     const unit = units[index]!;
@@ -381,9 +381,9 @@ function parseInlineSegments(
     }
 
     if (linksEnabled && unit.character === "[") {
-      const labelClose = nextLabelSeparator![index + 1 - start] ?? -1;
+      const labelClose = linkLabelClosers![index - start] ?? -1;
       if (labelClose !== -1) {
-        const targetClose = nextCloseParenthesis![labelClose + 2 - start] ?? -1;
+        const targetClose = targetClosers![labelClose + 1 - start] ?? -1;
         if (targetClose !== -1) {
           const target = validLinkTarget(units.slice(labelClose + 2, targetClose));
           const label = parseInlineSegments(units, index + 1, labelClose, false);
@@ -715,13 +715,14 @@ function nextUnescapedIndexes(
   return indexes;
 }
 
-function nextLinkLabelSeparators(
+function matchLinkLabelClosers(
   units: readonly InputUnit[],
   start: number,
   end: number,
   nextBacktick: readonly number[],
 ): readonly number[] {
-  const separators = new Set<number>();
+  const closers = new Array<number>(end - start + 1).fill(-1);
+  const openers: number[] = [];
   for (let index = start; index < end;) {
     if (unitIs(units[index], "`")) {
       const close = nextBacktick[index + 1 - start] ?? -1;
@@ -737,17 +738,35 @@ function nextLinkLabelSeparators(
         continue;
       }
     }
-    if (unitIs(units[index], "]") && unitIs(units[index + 1], "(")) separators.add(index);
+    if (unitIs(units[index], "[")) {
+      openers.push(index);
+    } else if (unitIs(units[index], "]")) {
+      const opener = openers.pop();
+      if (opener !== undefined && unitIs(units[index + 1], "(")) {
+        closers[opener - start] = index;
+      }
+    }
     index += 1;
   }
+  return closers;
+}
 
-  const indexes = new Array<number>(end - start + 1).fill(-1);
-  let next = -1;
-  for (let index = end - 1; index >= start; index -= 1) {
-    if (separators.has(index)) next = index;
-    indexes[index - start] = next;
+function matchClosingParentheses(
+  units: readonly InputUnit[],
+  start: number,
+  end: number,
+): readonly number[] {
+  const closers = new Array<number>(end - start + 1).fill(-1);
+  const openers: number[] = [];
+  for (let index = start; index < end; index += 1) {
+    if (unitIs(units[index], "(")) {
+      openers.push(index);
+    } else if (unitIs(units[index], ")")) {
+      const opener = openers.pop();
+      if (opener !== undefined) closers[opener - start] = index;
+    }
   }
-  return indexes;
+  return closers;
 }
 
 function flattenSegments(segments: readonly InlineSegment[]): ParsedLineContent {

@@ -151,10 +151,17 @@ backslash, or escaped character. The shared implementation uses the platform URL
 serialization as the activation target. Any other scheme or invalid URL remains non-link literal text.
 
 A labeled link has the exact form `[label](target)`. The label must contain at least one non-whitespace visible
-character. Its closing `](` is the first eligible unescaped pair outside an inline-code candidate or a complete valid
-bracket-tag token, allowing those supported forms inside the label. The target cannot contain whitespace, `(`, or `)`.
-If text has the complete link-shaped delimiters but its label or target is invalid, that complete candidate is one
-literal atom: its target is not reconsidered as a bare link.
+character. A candidate begins at an unescaped `[` that is not part of a complete valid bracket-tag token. On the line,
+unescaped ordinary `[` and `]` pair from the inside out; paired inline-code candidates and complete valid bracket-tag
+tokens are atoms whose brackets do not participate. A candidate becomes a link only when the `]` paired with its own
+opener is immediately followed by an unescaped `(`. A paired `]` without `(` ends that opener's candidacy, so an earlier
+literal bracket group or extension cannot consume a later independent link. Balanced literal bracket pairs and escaped
+brackets may appear in a label. Link-shaped text inside a label remains literal because link recognition is disabled
+there. The target ends at the `)` paired with its opening `(` using the same inside-out rule. The target cannot contain
+whitespace, `(`, or `)`, so a balanced inner parenthesis makes the complete candidate invalid, while an unmatched target
+opener cannot claim a closer paired with a later independent construct. If text has complete link-shaped delimiters but
+its label or target is invalid, that complete candidate is one literal atom: its target is not reconsidered as a bare
+link.
 
 A bare URL candidate begins with `http://` or `https://` at the start of inline content or after a character that is not
 a Unicode letter, mark, number, or underscore. It continues until whitespace, a control character, or one of

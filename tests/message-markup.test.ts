@@ -182,6 +182,90 @@ test("finds labeled-link closers after brackets owned by label markup", () => {
   );
 });
 
+test("pairs each labeled link with its own bracket boundary", async (context) => {
+  const cases = [
+    {
+      name: "extension followed by link",
+      source: "[u]under[/u] [label](https://example.com)",
+      visibleText: "under label",
+      kinds: ["underline", "link"],
+      depths: [0, 0],
+    },
+    {
+      name: "link nested in extension",
+      source: "[u][label](https://example.com)[/u]",
+      visibleText: "label",
+      kinds: ["underline", "link"],
+      depths: [0, 1],
+    },
+    {
+      name: "unknown bracket text followed by link",
+      source: "[first] ordinary [label](https://example.com)",
+      visibleText: "[first] ordinary label",
+      kinds: ["link"],
+      depths: [0],
+    },
+    {
+      name: "balanced literal brackets inside label",
+      source: "[a [b] c](https://example.com)",
+      visibleText: "a [b] c",
+      kinds: ["link"],
+      depths: [0],
+    },
+    {
+      name: "escaped literal brackets inside label",
+      source: "[a \\[b\\] c](https://example.com)",
+      visibleText: "a [b] c",
+      kinds: ["link"],
+      depths: [0],
+    },
+    {
+      name: "unmatched earlier bracket followed by link",
+      source: "[broken ordinary [label](https://example.com)",
+      visibleText: "[broken ordinary label",
+      kinds: ["link"],
+      depths: [0],
+    },
+    {
+      name: "invalid complete link followed by valid link",
+      source: "[bad](javascript:alert) [good](https://example.com)",
+      visibleText: "[bad](javascript:alert) good",
+      kinds: ["link"],
+      depths: [0],
+    },
+    {
+      name: "unmatched target opener followed by valid link",
+      source: "[broken](no close [label](https://example.com)",
+      visibleText: "[broken](no close label",
+      kinds: ["link"],
+      depths: [0],
+    },
+    {
+      name: "code atom followed by link",
+      source: "`[` [label](https://example.com)",
+      visibleText: "[ label",
+      kinds: ["code", "link"],
+      depths: [0, 0],
+    },
+  ] as const;
+
+  for (const example of cases) {
+    await context.test(example.name, () => {
+      const markup = parseMessageMarkup(example.source);
+      const spans = allSpans(markup);
+      assert.equal(markup.visibleText, example.visibleText);
+      assert.deepEqual(
+        spans.map((span) => span.kind),
+        example.kinds,
+      );
+      assert.deepEqual(
+        spans.map((span) => span.depth),
+        example.depths,
+      );
+    });
+  }
+});
+
 test("keeps rejected complete labeled links atomic and non-activatable", () => {
   for (const source of [
     "[script](javascript:alert)",
