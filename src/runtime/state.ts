@@ -642,13 +642,6 @@ export function validateRuntimeSnapshot(
   return captureRuntimeSnapshot(value, plan).validation;
 }
 
-export function validateCapturedRuntimeSnapshot(
-  value: unknown,
-  plan?: InstructionPlan,
-): SnapshotValidationResult {
-  return validateCapturedRuntimeSnapshotDetails(value, plan).validation;
-}
-
 export function classifyCapturedRuntimeSnapshot(
   value: unknown,
   plan?: InstructionPlan,

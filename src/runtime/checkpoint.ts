@@ -178,7 +178,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
     plan,
-    // EVIDENCE: validation: validateCapturedRuntimeSnapshot accepted this snapshot against the validated plan above.
+    // EVIDENCE: validation: classified snapshot validation accepted this snapshot against the validated plan above.
     snapshot: envelope.snapshot as RuntimeSnapshot,
   });
 }
