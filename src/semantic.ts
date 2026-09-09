@@ -492,21 +492,8 @@ class SemanticValidator {
         }
         return;
       case "listLiteral":
-        for (const element of expression.elements) {
-          this.#validateExpression(element, scope, contextualSpeaker);
-        }
-        return;
       case "setLiteral":
-        for (const element of expression.elements) {
-          this.#validateExpression(element, scope, contextualSpeaker);
-          if (isDefinitelyComposite(element, scope)) {
-            this.#report(
-              semanticCode.invalidSetElement,
-              "Sets may contain only string, boolean, integer, number, or null values.",
-              element.span,
-            );
-          }
-        }
+        this.#validateCollectionExpression(expression, scope, contextualSpeaker);
         return;
       case "objectLiteral": {
         const names = new Set<string>();
@@ -688,6 +675,52 @@ class SemanticValidator {
     }
   }
 
+  #validateCollectionExpression(
+    root: Extract<Expression, { kind: "listLiteral" | "setLiteral" }>,
+    scope: SemanticScope,
+    contextualSpeaker: string | null,
+  ): void {
+    type Work =
+      | { readonly kind: "expression"; readonly expression: Expression }
+      | { readonly kind: "setElement"; readonly expression: Expression };
+    const work: Work[] = [{ kind: "expression", expression: root }];
+    while (work.length > 0) {
+      const current = work.pop()!;
+      if (current.kind === "setElement") {
+        if (isDefinitelyComposite(current.expression, scope)) {
+          this.#report(
+            semanticCode.invalidSetElement,
+            "Sets may contain only string, boolean, integer, number, or null values.",
+            current.expression.span,
+          );
+        }
+        continue;
+      }
+
+      let expression = current.expression;
+      while (
+        expression.kind === "parenthesizedExpression" ||
+        expression.kind === "unaryExpression"
+      ) {
+        expression =
+          expression.kind === "parenthesizedExpression"
+            ? expression.expression
+            : expression.operand;
+      }
+      if (expression.kind !== "listLiteral" && expression.kind !== "setLiteral") {
+        this.#validateExpression(current.expression, scope, contextualSpeaker);
+        continue;
+      }
+      for (let index = expression.elements.length - 1; index >= 0; index -= 1) {
+        const element = expression.elements[index]!;
+        if (expression.kind === "setLiteral") {
+          work.push({ kind: "setElement", expression: element });
+        }
+        work.push({ kind: "expression", expression: element });
+      }
+    }
+  }
+
   #validateFunctionCall(
     expression: Extract<Expression, { kind: "callExpression" }>,
     declaration: FunctionDeclaration,
@@ -804,6 +837,25 @@ function findFirstInteraction(
       expression.kind === "parenthesizedExpression" ? expression.expression : expression.operand;
   }
   if (expression.kind === "interactionExpression") return expression;
+  if (expression.kind === "listLiteral" || expression.kind === "setLiteral") {
+    const work = [...expression.elements].reverse();
+    while (work.length > 0) {
+      let child = work.pop()!;
+      while (child.kind === "parenthesizedExpression" || child.kind === "unaryExpression") {
+        child = child.kind === "parenthesizedExpression" ? child.expression : child.operand;
+      }
+      if (child.kind === "interactionExpression") return child;
+      if (child.kind === "listLiteral" || child.kind === "setLiteral") {
+        for (let index = child.elements.length - 1; index >= 0; index -= 1) {
+          work.push(child.elements[index]!);
+        }
+        continue;
+      }
+      const found = findFirstInteraction(child);
+      if (found !== null) return found;
+    }
+    return null;
+  }
   const nested: readonly Expression[] = (() => {
     switch (expression.kind) {
       case "booleanLiteral":
@@ -815,9 +867,6 @@ function findFirstInteraction(
         return expression.parts.flatMap((part) =>
           part.kind === "stringInterpolation" ? [part.expression] : [],
         );
-      case "listLiteral":
-      case "setLiteral":
-        return expression.elements;
       case "objectLiteral":
         return expression.properties.map((property) => property.value);
       case "propertyAccessExpression":
@@ -909,7 +958,7 @@ function visitExpression(
       return;
     case "listLiteral":
     case "setLiteral":
-      expression.elements.forEach((element) => visitExpression(element, visitor));
+      visitCollectionExpressions(expression.elements, visitor);
       return;
     case "objectLiteral":
       expression.properties.forEach((property) => visitExpression(property.value, visitor));
@@ -940,4 +989,25 @@ function visitExpression(
       return;
   }
   expression satisfies never;
+}
+
+function visitCollectionExpressions(
+  elements: readonly Expression[],
+  visitor: (identifier: Extract<Expression, { kind: "identifier" }>) => void,
+): void {
+  const work = [...elements].reverse();
+  while (work.length > 0) {
+    let expression = work.pop()!;
+    while (expression.kind === "parenthesizedExpression" || expression.kind === "unaryExpression") {
+      expression =
+        expression.kind === "parenthesizedExpression" ? expression.expression : expression.operand;
+    }
+    if (expression.kind === "listLiteral" || expression.kind === "setLiteral") {
+      for (let index = expression.elements.length - 1; index >= 0; index -= 1) {
+        work.push(expression.elements[index]!);
+      }
+    } else {
+      visitExpression(expression, visitor);
+    }
+  }
 }

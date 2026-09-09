@@ -912,9 +912,21 @@ function validateExpressionNode(
       validateTemporaryId(value.temporaryId, `${path}.temporaryId`, temporaryCount, errors);
       return;
     case "list":
-    case "set":
-      validateExpressionArray(value.elements, `${path}.elements`, errors, temporaryCount);
+    case "set": {
+      const elementsPath = `${path}.elements`;
+      if (!Array.isArray(value.elements)) {
+        errors.push(planError("TSC002", "Expression list must be an array.", elementsPath));
+        return;
+      }
+      for (let index = value.elements.length - 1; index >= 0; index -= 1) {
+        pending.push({
+          value: value.elements[index],
+          path: `${elementsPath}[${index}]`,
+          assignmentTarget: false,
+        });
+      }
       return;
+    }
     case "object":
       validateProperties(value.properties, `${path}.properties`, errors, temporaryCount);
       return;
@@ -1025,21 +1037,6 @@ function validateProperties(
     validateExpression(property.value, `${propertyPath}.value`, errors, false, temporaryCount);
     validateSpan(property.span, `${propertyPath}.span`, errors);
   }
-}
-
-function validateExpressionArray(
-  value: unknown,
-  path: string,
-  errors: PlanValidationError[],
-  temporaryCount: number,
-): void {
-  if (!Array.isArray(value)) {
-    errors.push(planError("TSC002", "Expression list must be an array.", path));
-    return;
-  }
-  value.forEach((item, index) =>
-    validateExpression(item, `${path}[${index}]`, errors, false, temporaryCount),
-  );
 }
 
 function validateTemplateParts(

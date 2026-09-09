@@ -28,6 +28,7 @@ import type {
   InteractionExpression,
   InteractionChoiceOption,
   WaitStatement,
+  ListLiteral,
   RepeatStatement,
   ReturnStatement,
   SetLiteral,
@@ -53,7 +54,16 @@ export interface ParseResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
-type ParenthesisMatchCache = [readonly (number | undefined)[] | null];
+interface DelimiterMatchCache {
+  parentheses: readonly (number | undefined)[] | null;
+  brackets: readonly (number | undefined)[] | null;
+}
+
+interface CollectionStart {
+  readonly kind: "listLiteral" | "setLiteral";
+  readonly token: Token;
+  readonly bracketIndex: number;
+}
 
 const parserDiagnosticCode = {
   expectedStatement: "TSP001",
@@ -105,11 +115,16 @@ class Parser {
   readonly #diagnostics: Diagnostic[] = [];
   #current = 0;
   #skipParenthesisChainScanThroughIndex = -1;
+  readonly #skipCollectionChainScanIndexes = new Set<number>();
+  #collectionRecoveryVersion = 0;
   #recoveredAtStatementBoundary = false;
 
   public constructor(
     private readonly tokens: readonly Token[],
-    private readonly parenthesisMatchCache: ParenthesisMatchCache = [null],
+    private readonly delimiterMatchCache: DelimiterMatchCache = {
+      parentheses: null,
+      brackets: null,
+    },
   ) {}
 
   public get diagnostics(): readonly Diagnostic[] {
@@ -433,7 +448,7 @@ class Parser {
    * can consume a complete value (and optional pacing) from this position.
    */
   #canParseCompleteSayValue(): boolean {
-    const speculative = new Parser(this.tokens, this.parenthesisMatchCache);
+    const speculative = new Parser(this.tokens, this.delimiterMatchCache);
     speculative.#current = this.#current;
 
     const value = speculative.#parseExpression();
@@ -462,7 +477,7 @@ class Parser {
   /** `instant` remains an identifier unless it fills the entire pacing slot. */
   #canParseInstantPacingAlias(): boolean {
     if (!this.#checkIdentifier("instant")) return false;
-    const speculative = new Parser(this.tokens, this.parenthesisMatchCache);
+    const speculative = new Parser(this.tokens, this.delimiterMatchCache);
     speculative.#current = this.#current;
     speculative.#advance();
     return speculative.#isSayStatementBoundary();
@@ -1544,7 +1559,7 @@ class Parser {
   }
 
   #getMatchingRightParentheses(): readonly (number | undefined)[] {
-    const cached = this.parenthesisMatchCache[0];
+    const cached = this.delimiterMatchCache.parentheses;
     if (cached !== null) return cached;
 
     const matching: (number | undefined)[] = new Array(this.tokens.length);
@@ -1557,7 +1572,7 @@ class Parser {
         if (start !== undefined) matching[start] = index;
       }
     }
-    this.parenthesisMatchCache[0] = matching;
+    this.delimiterMatchCache.parentheses = matching;
     return matching;
   }
 
@@ -1596,27 +1611,229 @@ class Parser {
     return parenthesized;
   }
 
-  #parseListLiteral(start: Token): Expression {
-    const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
-    const end = this.#consumeClosingDelimiter(
-      TokenKind.RightBracket,
-      "Expected ']' after the list literal.",
-    );
-    return Object.freeze({
-      kind: "listLiteral",
-      elements: Object.freeze(elements),
-      span: spanFrom(start.span, end),
-    });
+  #parseListLiteral(start: Token): ListLiteral {
+    return this.#parseCollectionLiteral(start, "listLiteral");
   }
 
   #parseSetLiteral(start: Token): SetLiteral {
+    return this.#parseCollectionLiteral(start, "setLiteral");
+  }
+
+  #parseCollectionLiteral(start: Token, kind: "listLiteral"): ListLiteral;
+  #parseCollectionLiteral(start: Token, kind: "setLiteral"): SetLiteral;
+  #parseCollectionLiteral(start: Token, kind: CollectionStart["kind"]): ListLiteral | SetLiteral {
+    const starts = this.#collectionChainStarts({
+      kind,
+      token: start,
+      bracketIndex: this.#current - 1,
+    });
+    if (starts === null) return this.#parseCollectionLiteralElements(start, kind);
+
+    const originalState = {
+      current: this.#current,
+      diagnosticsLength: this.#diagnostics.length,
+      recoveredAtStatementBoundary: this.#recoveredAtStatementBoundary,
+      skipParenthesisChainScanThroughIndex: this.#skipParenthesisChainScanThroughIndex,
+      collectionRecoveryVersion: this.#collectionRecoveryVersion,
+    };
+    const parseWithBaselineRecovery = (): ListLiteral | SetLiteral => {
+      this.#current = originalState.current;
+      this.#diagnostics.length = originalState.diagnosticsLength;
+      this.#recoveredAtStatementBoundary = originalState.recoveredAtStatementBoundary;
+      this.#skipParenthesisChainScanThroughIndex =
+        originalState.skipParenthesisChainScanThroughIndex;
+      this.#skipCollectionChainScans(starts);
+      // Keep every failed opener disabled so an ancestor recovery cannot make the same
+      // malformed subtree retry this optimized path.
+      this.#collectionRecoveryVersion += 1;
+      return this.#parseCollectionLiteralElements(start, kind);
+    };
+    const unclosedChain =
+      this.#getMatchingRightBrackets()[starts.at(-1)!.bracketIndex] === undefined;
+    for (let index = 1; index < starts.length; index += 1) {
+      this.#skipNewlines();
+      if (starts[index]!.kind === "setLiteral") this.#advance();
+      this.#advance();
+    }
+
+    const inner = starts.at(-1)!;
+    let completed: ListLiteral | SetLiteral = this.#parseCollectionLiteralElements(
+      inner.token,
+      inner.kind,
+    );
+    if (
+      !unclosedChain &&
+      this.#diagnostics.length > originalState.diagnosticsLength &&
+      this.#collectionRecoveryVersion === originalState.collectionRecoveryVersion
+    ) {
+      // Recovery inside the innermost expression may consume a token that would otherwise
+      // close a wrapper. Reparse this chain once through the ordinary recovery path.
+      return parseWithBaselineRecovery();
+    }
+    const diagnosticsAfterInner = this.#diagnostics.length;
+    for (let index = starts.length - 2; index >= 0; index -= 1) {
+      const collection = starts[index]!;
+      const end = this.#consumeClosingDelimiter(
+        TokenKind.RightBracket,
+        collection.kind === "listLiteral"
+          ? "Expected ']' after the list literal."
+          : "Expected ']' after the set literal.",
+      );
+      completed = Object.freeze({
+        kind: collection.kind,
+        elements: Object.freeze([completed]),
+        span: spanFrom(collection.token.span, end),
+      });
+    }
+    if (!unclosedChain && this.#diagnostics.length > diagnosticsAfterInner) {
+      return parseWithBaselineRecovery();
+    }
+    return completed;
+  }
+
+  #collectionChainStarts(first: CollectionStart): readonly CollectionStart[] | null {
+    if (this.#skipCollectionChainScanIndexes.has(first.bracketIndex)) return null;
+
+    const starts = [first];
+    let scan = this.#current;
+    while (true) {
+      while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
+      const token = this.tokens[scan];
+      if (token?.kind === TokenKind.LeftBracket) {
+        starts.push({ kind: "listLiteral", token, bracketIndex: scan });
+        scan += 1;
+        continue;
+      }
+      if (
+        token?.kind === TokenKind.KeywordSet &&
+        this.tokens[scan + 1]?.kind === TokenKind.LeftBracket
+      ) {
+        starts.push({ kind: "setLiteral", token, bracketIndex: scan + 1 });
+        scan += 2;
+        continue;
+      }
+      break;
+    }
+    if (starts.length === 1) return null;
+
+    const matching = this.#getMatchingRightBrackets();
+    let innerClose = matching[starts.at(-1)!.bracketIndex];
+    if (
+      innerClose === undefined &&
+      !this.#isSimpleUnclosedCollectionContent(scan, this.tokens.length - 1)
+    ) {
+      this.#skipCollectionChainScans(starts);
+      return null;
+    }
+    for (let index = starts.length - 2; index >= 0; index -= 1) {
+      const outerClose = matching[starts[index]!.bracketIndex];
+      if (innerClose === undefined) {
+        if (outerClose !== undefined) {
+          this.#skipCollectionChainScans(starts);
+          return null;
+        }
+      } else {
+        let next = innerClose + 1;
+        while (this.tokens[next]?.kind === TokenKind.Newline) next += 1;
+        if (outerClose === undefined) {
+          if (this.tokens[next]?.kind !== TokenKind.EndOfFile) {
+            this.#skipCollectionChainScans(starts);
+            return null;
+          }
+        } else if (outerClose !== next) {
+          this.#skipCollectionChainScans(starts);
+          return null;
+        }
+      }
+      innerClose = outerClose;
+    }
+    return starts;
+  }
+
+  #skipCollectionChainScans(starts: readonly CollectionStart[]): void {
+    for (const start of starts) this.#skipCollectionChainScanIndexes.add(start.bracketIndex);
+  }
+
+  #isSimpleUnclosedCollectionContent(scan: number, end: number): boolean {
+    while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
+    if (scan === end) return true;
+    switch (this.tokens[scan]!.kind) {
+      case TokenKind.NumberLiteral:
+      case TokenKind.Identifier:
+      case TokenKind.KeywordTrue:
+      case TokenKind.KeywordFalse:
+      case TokenKind.KeywordNull:
+      case TokenKind.KeywordSpeaker:
+      case TokenKind.KeywordWait:
+        break;
+      default:
+        return false;
+    }
+    scan += 1;
+    while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
+    return scan === end;
+  }
+
+  #getMatchingRightBrackets(): readonly (number | undefined)[] {
+    const cached = this.delimiterMatchCache.brackets;
+    if (cached !== null) return cached;
+
+    const matching: (number | undefined)[] = new Array(this.tokens.length);
+    const open: { readonly kind: Token["kind"]; readonly index: number }[] = [];
+    const openCounts = new Map<Token["kind"], number>();
+    for (let index = 0; index < this.tokens.length; index += 1) {
+      const kind = this.tokens[index]!.kind;
+      if (
+        kind === TokenKind.LeftBracket ||
+        kind === TokenKind.LeftBrace ||
+        kind === TokenKind.LeftParenthesis ||
+        kind === TokenKind.StringStart ||
+        kind === TokenKind.InterpolationStart
+      ) {
+        open.push({ kind, index });
+        openCounts.set(kind, (openCounts.get(kind) ?? 0) + 1);
+        continue;
+      }
+
+      const expectedOpen =
+        kind === TokenKind.RightBracket
+          ? TokenKind.LeftBracket
+          : kind === TokenKind.RightBrace
+            ? TokenKind.LeftBrace
+            : kind === TokenKind.RightParenthesis
+              ? TokenKind.LeftParenthesis
+              : kind === TokenKind.StringEnd
+                ? TokenKind.StringStart
+                : kind === TokenKind.InterpolationEnd
+                  ? TokenKind.InterpolationStart
+                  : null;
+      if (expectedOpen === null || (openCounts.get(expectedOpen) ?? 0) === 0) continue;
+
+      let start = open.pop()!;
+      openCounts.set(start.kind, openCounts.get(start.kind)! - 1);
+      while (start.kind !== expectedOpen) {
+        start = open.pop()!;
+        openCounts.set(start.kind, openCounts.get(start.kind)! - 1);
+      }
+      if (expectedOpen === TokenKind.LeftBracket) matching[start.index] = index;
+    }
+    this.delimiterMatchCache.brackets = matching;
+    return matching;
+  }
+
+  #parseCollectionLiteralElements(
+    start: Token,
+    kind: CollectionStart["kind"],
+  ): ListLiteral | SetLiteral {
     const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
     const end = this.#consumeClosingDelimiter(
       TokenKind.RightBracket,
-      "Expected ']' after the set literal.",
+      kind === "listLiteral"
+        ? "Expected ']' after the list literal."
+        : "Expected ']' after the set literal.",
     );
     return Object.freeze({
-      kind: "setLiteral",
+      kind,
       elements: Object.freeze(elements),
       span: spanFrom(start.span, end),
     });
