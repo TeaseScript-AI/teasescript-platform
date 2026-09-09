@@ -5,7 +5,8 @@ import { markValidatedImmutableInstructionPlan } from "../plan/validated-immutab
 import { validateCapturedInstructionPlan } from "../plan/validation.js";
 import {
   captureRuntimeSnapshotWithValidatedPlan,
-  validateCapturedRuntimeSnapshot,
+  classifyCapturedRuntimeSnapshot,
+  type RuntimeSnapshotValidationFailureKind,
   type RuntimeSnapshot,
 } from "./state.js";
 
@@ -157,7 +158,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
     const first = planValidation.errors[0];
     throw checkpointError(
       first?.code === "TSC001" ? "TSK001" : "TSK002",
-      checkpointComponentCaptureMessage(first?.message ?? "Instruction plan is malformed."),
+      first?.message ?? "Instruction plan is malformed.",
       `$.plan${first?.path.slice(1) ?? ""}`,
     );
   }
@@ -165,14 +166,11 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
   const plan = markValidatedImmutableInstructionPlan(
     freezeInstructionPlan(envelope.plan as InstructionPlan),
   );
-  const snapshotValidation = validateCapturedRuntimeSnapshot(envelope.snapshot, plan);
-  if (!snapshotValidation.valid) {
-    const message = checkpointComponentCaptureMessage(
-      snapshotValidation.errors[0] ?? "Runtime snapshot is malformed.",
-    );
+  const snapshotValidation = classifyCapturedRuntimeSnapshot(envelope.snapshot, plan);
+  if (!snapshotValidation.validation.valid) {
     throw checkpointError(
-      message.includes("Unsupported runtime-snapshot") ? "TSK001" : "TSK002",
-      message,
+      checkpointSnapshotErrorCode(snapshotValidation.failureKind),
+      snapshotValidation.validation.errors[0] ?? "Runtime snapshot is malformed.",
       "$.snapshot",
     );
   }
@@ -191,7 +189,10 @@ function capturePlan(value: unknown, path: string): InstructionPlan {
     const first = captured.validation.errors[0];
     throw checkpointError(
       first?.code === "TSC001" ? "TSK001" : "TSK002",
-      checkpointComponentCaptureMessage(first?.message ?? "Instruction plan is malformed."),
+      checkpointExternalDataMessage(
+        captured.failureKind,
+        first?.message ?? "Instruction plan is malformed.",
+      ),
       `${path}${first?.path.slice(1) ?? ""}`,
     );
   }
@@ -201,38 +202,37 @@ function capturePlan(value: unknown, path: string): InstructionPlan {
 function captureSnapshot(value: unknown, plan: InstructionPlan, path: string): RuntimeSnapshot {
   const captured = captureRuntimeSnapshotWithValidatedPlan(value, plan);
   if (!captured.validation.valid || captured.snapshot === null) {
-    const message = checkpointComponentCaptureMessage(
+    const message = checkpointExternalDataMessage(
+      captured.failureKind,
       captured.validation.errors[0] ?? "Runtime snapshot is malformed.",
     );
-    const unsupported = message.includes("Unsupported runtime-snapshot");
-    throw checkpointError(unsupported ? "TSK001" : "TSK002", message, path);
+    throw checkpointError(checkpointSnapshotErrorCode(captured.failureKind), message, path);
   }
   return captured.snapshot;
 }
 
-function checkpointComponentCaptureMessage(message: string): string {
-  if (
-    message === "Plan contains a non-finite number." ||
-    message === "Runtime snapshot contains a non-finite number."
-  ) {
-    return "Checkpoint contains a non-finite number.";
+function checkpointExternalDataMessage(
+  kind: RuntimeSnapshotValidationFailureKind | null,
+  fallback: string,
+): string {
+  switch (kind) {
+    case "nonFiniteNumber":
+      return "Checkpoint contains a non-finite number.";
+    case "nonJsonSafeValue":
+      return "Checkpoint contains a non-JSON-safe value.";
+    case "cycle":
+      return "Checkpoint contains a cycle.";
+    case "nonPlainObject":
+      return "Checkpoint contains a non-plain object.";
+    default:
+      return fallback;
   }
-  if (
-    message === "Plan contains a non-JSON-safe value." ||
-    message === "Runtime snapshot contains a non-JSON-safe value."
-  ) {
-    return "Checkpoint contains a non-JSON-safe value.";
-  }
-  if (message === "Plan contains a cycle." || message === "Runtime snapshot contains a cycle.") {
-    return "Checkpoint contains a cycle.";
-  }
-  if (
-    message === "Plan contains a non-plain object." ||
-    message === "Runtime snapshot contains a non-plain object."
-  ) {
-    return "Checkpoint contains a non-plain object.";
-  }
-  return message;
+}
+
+function checkpointSnapshotErrorCode(
+  kind: RuntimeSnapshotValidationFailureKind | null,
+): CheckpointErrorInfo["code"] {
+  return kind === "unsupported" ? "TSK001" : "TSK002";
 }
 
 function checkpointError(

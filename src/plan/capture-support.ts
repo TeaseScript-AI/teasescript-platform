@@ -7,6 +7,7 @@ export interface CapturedPlanData {
 }
 
 export interface PlanCaptureFailure {
+  readonly kind: ExternalDataFailureKind;
   readonly message: string;
   readonly path: string;
 }
@@ -23,6 +24,7 @@ export function capturePlanData(
   const capture = captureExternalData(value, "$", options);
   if (!capture.ok) {
     return Object.freeze({
+      kind: capture.failure.kind,
       message: planExternalDataFailureMessage(capture.failure.kind),
       path: capture.failure.path,
     });

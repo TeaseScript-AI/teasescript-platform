@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import { captureExternalData } from "../src/external-data-capture.js";
+import { captureInstructionPlan } from "../src/plan/capture.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
@@ -22,6 +23,7 @@ import type {
 } from "../src/runtime/serializable-values.js";
 import {
   createFreshRuntimeSnapshot,
+  captureRuntimeSnapshotWithValidatedPlan,
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
@@ -401,6 +403,103 @@ test("accepts current internal format revisions and rejects non-current or malfo
   });
 });
 
+test("checkpoint classification uses structured producer failures and preserves validation order", () => {
+  const compiled = plan("exit");
+  const snapshot = createFreshRuntimeSnapshot(compiled);
+  // EVIDENCE: this live external-plan fixture adds one self-reference to a compiler-produced plan copy.
+  const cyclicPlan = structuredClone(compiled) as InstructionPlan & { self: unknown };
+  cyclicPlan.self = cyclicPlan;
+  const capturedPlan = captureInstructionPlan(cyclicPlan);
+  assert.equal(capturedPlan.failureKind, "cycle");
+  assertCheckpointError(
+    { format: CHECKPOINT_FORMAT, version: CHECKPOINT_VERSION, plan: cyclicPlan, snapshot },
+    { code: "TSK002", message: "Checkpoint contains a cycle.", path: "$.plan.self" },
+  );
+
+  for (const externalFailure of [
+    {
+      value: Number.POSITIVE_INFINITY,
+      kind: "nonFiniteNumber",
+      message: "Checkpoint contains a non-finite number.",
+    },
+    {
+      value: undefined,
+      kind: "nonJsonSafeValue",
+      message: "Checkpoint contains a non-JSON-safe value.",
+    },
+    {
+      value: new Date(0),
+      kind: "nonPlainObject",
+      message: "Checkpoint contains a non-plain object.",
+    },
+  ] as const) {
+    const malformedPlan = { ...structuredClone(compiled), padding: externalFailure.value };
+    const captured = captureInstructionPlan(malformedPlan);
+    assert.equal(captured.failureKind, externalFailure.kind);
+    assertCheckpointError(
+      { format: CHECKPOINT_FORMAT, version: CHECKPOINT_VERSION, plan: malformedPlan, snapshot },
+      { code: "TSK002", message: externalFailure.message, path: "$.plan.padding" },
+    );
+  }
+
+  for (const malformedVersion of [
+    {
+      field: "format",
+      value: "unsupported-snapshot",
+      message: "Unsupported runtime-snapshot format.",
+    },
+    {
+      field: "version",
+      value: snapshot.version + 1,
+      message: "Unsupported runtime-snapshot version.",
+    },
+  ] as const) {
+    // EVIDENCE: the selected format/version field is widened only to exercise unsupported classification.
+    const unsupported = {
+      ...structuredClone(snapshot),
+      [malformedVersion.field]: malformedVersion.value,
+    };
+    const capturedSnapshot = captureRuntimeSnapshotWithValidatedPlan(unsupported, compiled);
+    assert.equal(capturedSnapshot.failureKind, "unsupported");
+    const checkpoint = {
+      format: CHECKPOINT_FORMAT,
+      version: CHECKPOINT_VERSION,
+      plan: compiled,
+      snapshot: unsupported,
+    };
+    const expected = {
+      code: "TSK001",
+      message: malformedVersion.message,
+      path: "$.snapshot",
+    } as const;
+    assertCheckpointError(checkpoint, expected);
+    assertDeserializedCheckpointError(checkpoint, expected);
+  }
+
+  // EVIDENCE: the widened fixture combines an unsupported version with a missing required field.
+  const firstMalformed = { ...structuredClone(snapshot), version: snapshot.version + 1 };
+  Reflect.deleteProperty(firstMalformed, "frames");
+  const capturedMalformed = captureRuntimeSnapshotWithValidatedPlan(firstMalformed, compiled);
+  assert.equal(capturedMalformed.failureKind, "malformed");
+  assert.deepEqual(capturedMalformed.validation.errors.slice(0, 2), [
+    "Runtime snapshot contains unsupported fields or omits required fields.",
+    "Unsupported runtime-snapshot version.",
+  ]);
+  const malformedCheckpoint = {
+    format: CHECKPOINT_FORMAT,
+    version: CHECKPOINT_VERSION,
+    plan: compiled,
+    snapshot: firstMalformed,
+  };
+  const expectedMalformed = {
+    code: "TSK002",
+    message: "Runtime snapshot contains unsupported fields or omits required fields.",
+    path: "$.snapshot",
+  } as const;
+  assertCheckpointError(malformedCheckpoint, expectedMalformed);
+  assertDeserializedCheckpointError(malformedCheckpoint, expectedMalformed);
+});
+
 test("rejects corrupted checkpoint data through structured errors", () => {
   const compiled = plan("exit");
   // EVIDENCE: serialization supplies the canonical envelope before this fixture replaces snapshot frames.
@@ -478,6 +577,20 @@ function assertCheckpointCode(value: unknown, code: string): void {
 function assertCheckpointError(value: unknown, expected: CheckpointError["info"]): void {
   assert.throws(
     () => restoreCheckpoint(value),
+    (error: unknown) => {
+      assert.ok(error instanceof CheckpointError);
+      assert.deepEqual(error.info, expected);
+      return true;
+    },
+  );
+}
+
+function assertDeserializedCheckpointError(
+  value: unknown,
+  expected: CheckpointError["info"],
+): void {
+  assert.throws(
+    () => deserializeCheckpoint(JSON.stringify(value)),
     (error: unknown) => {
       assert.ok(error instanceof CheckpointError);
       assert.deepEqual(error.info, expected);

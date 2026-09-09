@@ -576,6 +576,15 @@ function cloneSettlement(
 export interface CapturedRuntimeSnapshotResult {
   readonly validation: SnapshotValidationResult;
   readonly snapshot: RuntimeSnapshot | null;
+  readonly failureKind: RuntimeSnapshotValidationFailureKind | null;
+}
+
+export type RuntimeSnapshotValidationFailureKind =
+  ExternalDataFailureKind | "unsupported" | "malformed";
+
+export interface ClassifiedSnapshotValidationResult {
+  readonly validation: SnapshotValidationResult;
+  readonly failureKind: RuntimeSnapshotValidationFailureKind | null;
 }
 
 function captureRuntimeSnapshot(
@@ -593,6 +602,7 @@ function captureRuntimeSnapshot(
         ]),
       }),
       snapshot: null,
+      failureKind: "malformed",
     });
   }
   return captureRuntimeSnapshotWithValidatedPlan(value, capturedPlan.plan);
@@ -612,14 +622,16 @@ export function captureRuntimeSnapshotWithValidatedPlan(
         errors: Object.freeze([snapshotExternalDataFailureMessage(snapshotCapture.failure.kind)]),
       }),
       snapshot: null,
+      failureKind: snapshotCapture.failure.kind,
     });
   }
 
-  const validation = validateCapturedRuntimeSnapshot(snapshotCapture.value, plan);
+  const classified = classifyCapturedRuntimeSnapshot(snapshotCapture.value, plan);
   return Object.freeze({
-    validation,
+    validation: classified.validation,
     // EVIDENCE: validation: the preceding snapshot validation accepts this captured graph before it is returned.
-    snapshot: validation.valid ? (snapshotCapture.value as RuntimeSnapshot) : null,
+    snapshot: classified.validation.valid ? (snapshotCapture.value as RuntimeSnapshot) : null,
+    failureKind: classified.failureKind,
   });
 }
 
@@ -634,19 +646,42 @@ export function validateCapturedRuntimeSnapshot(
   value: unknown,
   plan?: InstructionPlan,
 ): SnapshotValidationResult {
+  return validateCapturedRuntimeSnapshotDetails(value, plan).validation;
+}
+
+export function classifyCapturedRuntimeSnapshot(
+  value: unknown,
+  plan?: InstructionPlan,
+): ClassifiedSnapshotValidationResult {
+  return validateCapturedRuntimeSnapshotDetails(value, plan);
+}
+
+function validateCapturedRuntimeSnapshotDetails(
+  value: unknown,
+  plan?: InstructionPlan,
+): ClassifiedSnapshotValidationResult {
   const errors: string[] = [];
   if (!isPlainRecord(value)) {
     return Object.freeze({
-      valid: false,
-      errors: Object.freeze(["Runtime snapshot must be an object."]),
+      validation: Object.freeze({
+        valid: false,
+        errors: Object.freeze(["Runtime snapshot must be an object."]),
+      }),
+      failureKind: "malformed",
     });
   }
   if (!hasExactKeys(value, RUNTIME_SNAPSHOT_KEYS)) {
     errors.push("Runtime snapshot contains unsupported fields or omits required fields.");
   }
-  if (value.format !== RUNTIME_SNAPSHOT_FORMAT) errors.push("Unsupported runtime-snapshot format.");
-  if (value.version !== RUNTIME_SNAPSHOT_VERSION)
+  let failureKind: RuntimeSnapshotValidationFailureKind = "malformed";
+  if (value.format !== RUNTIME_SNAPSHOT_FORMAT) {
+    if (errors.length === 0) failureKind = "unsupported";
+    errors.push("Unsupported runtime-snapshot format.");
+  }
+  if (value.version !== RUNTIME_SNAPSHOT_VERSION) {
+    if (errors.length === 0) failureKind = "unsupported";
     errors.push("Unsupported runtime-snapshot version.");
+  }
   if (!validChatPacingSettings(value.chatPacingSettings)) {
     errors.push("Runtime chatPacingSettings is malformed.");
   }
@@ -802,7 +837,8 @@ export function validateCapturedRuntimeSnapshot(
   validateFailure(value.failure, value.status, errors);
   validateStatusConsistency(value, plan, errors);
   validateRootEndTransition(value, plan, errors);
-  return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
+  const validation = Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
+  return Object.freeze({ validation, failureKind: validation.valid ? null : failureKind });
 }
 
 function validateLoopFrames(
