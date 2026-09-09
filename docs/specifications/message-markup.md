@@ -97,7 +97,8 @@ cannot be whitespace. A delimiter that cannot form such a span remains literal.
 
 Inline code is resolved before other inline constructs. Its content is literal except for the backslash escapes defined
 below: formatting delimiters, tags, and URLs inside it are not interpreted. The first eligible unescaped backtick closes
-the span. An empty or unmatched code span remains literal.
+the candidate. A complete candidate whose content is empty, starts or ends with whitespace, or contains only whitespace
+is one literal atom. An unmatched opening backtick is literal and scanning then continues after it.
 
 Outside inline code, balanced constructs may nest. Delimiters close in last-opened, first-closed order; crossing spans
 are not formatting. At a run of asterisks, active asterisk spans close from the inside out before remaining characters
@@ -150,12 +151,14 @@ backslash, or escaped character. The shared implementation uses the platform URL
 serialization as the activation target. Any other scheme or invalid URL remains non-link literal text.
 
 A labeled link has the exact form `[label](target)`. The label must contain at least one non-whitespace visible
-character. The target cannot contain whitespace, `(`, or `)`. If text has the complete link-shaped delimiters but its
-label or target is invalid, that complete candidate is one literal atom: its target is not reconsidered as a bare link.
+character. Its closing `](` is the first eligible unescaped pair outside an inline-code candidate or a complete valid
+bracket-tag token, allowing those supported forms inside the label. The target cannot contain whitespace, `(`, or `)`.
+If text has the complete link-shaped delimiters but its label or target is invalid, that complete candidate is one
+literal atom: its target is not reconsidered as a bare link.
 
 A bare URL candidate begins with `http://` or `https://` at the start of inline content or after a character that is not
 a Unicode letter, mark, number, or underscore. It continues until whitespace, a control character, or one of
-`` < > \" ' ` * ~ [ ] `` occurs. Terminal `. , ; : ! ?` are excluded from the target. A terminal `)`, `]`, or `}` is
+`` < > \" ' ` * ~ [ ] `` occurs. Terminal `. , ; : ! ?` are excluded from the target. A terminal `)` or `}` is
 excluded while it has no unmatched opener of the same kind inside the candidate. Excluded terminal punctuation remains
 ordinary text after the link.
 
@@ -198,19 +201,25 @@ malformed. The parser scans left to right using these priorities where more than
 
 Only a complete valid construct consumes its syntax. When a candidate cannot complete, its first character is emitted
 literally and scanning continues, allowing later independent constructs to be recognized. The invalid complete
-labeled-link candidate defined above is the one atomic recovery case. Unknown and malformed tag or link text otherwise
-survives exactly, apart from any explicit valid escapes it contains. Static editor tooling may diagnose likely author
-mistakes, but the runtime result remains displayable literal text.
+labeled-link candidate and complete invalid inline-code candidate defined above are the atomic recovery cases. Unknown
+and malformed tag or link text otherwise survives exactly, apart from any explicit valid escapes it contains. Static
+editor tooling may diagnose likely author mistakes, but the runtime result remains displayable literal text.
 
 ## Structured content and visible text
 
-The shared parser produces one immutable, JSON-safe, discriminated message representation. It distinguishes plain text,
-line endings, headings, quote blocks, ordered and unordered lists, inline-code spans, the three Markdown-like text
-styles, the six bracket extensions, and validated links. Text nodes contain text rather than authored HTML. Link nodes
-contain the validated activation target and parsed label content. Style nodes contain only the constrained values above.
+The shared parser produces one immutable, JSON-safe, discriminated message representation. Blocks contain lines of
+visible text and a flat ordered table of typed spans over that text. Span offsets are zero-based half-open UTF-16 code
+unit ranges, matching JavaScript string and DOM range indexing. Each span also records its zero-based nesting depth. An
+outer span precedes its nested spans; spans are properly nested or disjoint and never cross. Empty extension spans have
+equal start and end offsets, with depth preserving the distinction between nested and adjacent empty spans. This flat
+form preserves arbitrary accepted nesting without making JSON serialization recurse through an input-deep object tree.
 
-Exact TypeScript property names and serialized format versions belong to the implementation, but the following semantic
-invariants are required:
+The representation distinguishes line endings, headings, quote blocks, ordered and unordered lists, inline code, the
+three Markdown-like text styles, the six bracket extensions, and validated links. Link spans contain only the validated
+activation target. Style spans contain only the constrained values above. Line text is plain text rather than authored
+HTML. Exact TypeScript property names and serialized format versions belong to the implementation.
+
+The following semantic invariants are required:
 
 - the runtime, pacing logic, transcript adapter, and Player consume the same parsed representation or helpers from its
   owning module;
