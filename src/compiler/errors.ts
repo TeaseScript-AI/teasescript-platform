@@ -5,7 +5,7 @@ export class InstructionCompilationError extends Error {
   readonly span: SourceSpan;
 
   public constructor(
-    readonly code: "TSC001" | "TSC003",
+    readonly code: "TSC003",
     message: string,
     span: SourceSpan,
   ) {
