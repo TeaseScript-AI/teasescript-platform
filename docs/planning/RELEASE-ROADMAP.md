@@ -118,6 +118,16 @@ for broader testing and eventual release.
 behavior, persistence, operational behavior, and integration. Major redesign becomes less desirable, but different
 subsystems may still have different maturity levels.
 
+- [ ] **Reassess the public TypeScript package API**
+  - **Outcome:** Use actual editor, Player, debugger, and integration needs to decide which compiler/runtime/tooling
+    exports belong in the supported package API and which should remain internal. Preserve useful consumer capabilities;
+    reassessment does not presume that exports must be removed or establish a compatibility promise.
+  - **Trigger:** Reconsider when representative integrated authoring, execution, and debugging workflows provide enough
+    evidence of consumer needs, or earlier when preparing a package publication with compatibility commitments. Defer
+    export pruning during the early editor POC.
+  - **Reference:** [`DATA-AND-API.md`](../DATA-AND-API.md), [`ARCHITECTURE.md`](../ARCHITECTURE.md),
+    [`CODE-EDITOR.md`](../CODE-EDITOR.md), and [`DEBUGGER.md`](../DEBUGGER.md).
+
 - [ ] **Complete the custom-view contract**
   - **Outcome:** Complete the parts ADR 0012 leaves open: registration/lifecycle APIs, typed input/events/results,
     reconstructible-state declaration, surface isolation/optional Shadow DOM, remaining keyboard/navigation behavior,
