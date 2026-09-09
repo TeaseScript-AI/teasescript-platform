@@ -169,6 +169,40 @@ test("parses labeled and bare HTTP links with deterministic boundaries", () => {
   assert.deepEqual(spanKinds(markup).slice(0, 2), ["link", "bold"]);
 });
 
+test("bounds malformed bare-link work and recovers a later URL in the same run", () => {
+  const invalidPrefix = "http://?";
+  const validLink = "https://example.com";
+  const source = `${invalidPrefix.repeat(512)}${validLink}`;
+  const nativeUrl = globalThis.URL;
+  let validatedCharacters = 0;
+  class CountingUrl extends nativeUrl {
+    constructor(url: string | URL, base?: string | URL) {
+      if (typeof url === "string") validatedCharacters += url.length;
+      super(url, base);
+    }
+  }
+
+  Object.defineProperty(globalThis, "URL", { configurable: true, value: CountingUrl });
+  let markup: MessageMarkup;
+  try {
+    markup = parseMessageMarkup(source);
+  } finally {
+    Object.defineProperty(globalThis, "URL", { configurable: true, value: nativeUrl });
+  }
+
+  assert.equal(markup.visibleText, source);
+  assert.deepEqual(allSpans(markup), [
+    {
+      kind: "link",
+      start: invalidPrefix.length * 512,
+      end: source.length,
+      depth: 0,
+      target: "https://example.com/",
+    },
+  ]);
+  assert.ok(validatedCharacters <= source.length * 2, `${validatedCharacters} URL characters`);
+});
+
 test("finds labeled-link closers after brackets owned by label markup", () => {
   const markup = parseMessageMarkup(
     "[[u]under[/u]](https://example.com) [label `]` code](https://example.org)",

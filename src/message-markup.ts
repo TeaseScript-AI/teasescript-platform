@@ -351,6 +351,7 @@ function parseInlineSegments(
     ? matchLinkLabelClosers(units, start, end, nextBacktick)
     : null;
   const targetClosers = linksEnabled ? matchClosingParentheses(units, start, end) : null;
+  const bareLinkEnds = linksEnabled ? nextBareLinkEnds(units, start, end) : null;
 
   for (let index = start; index < end;) {
     const unit = units[index]!;
@@ -433,7 +434,7 @@ function parseInlineSegments(
     }
 
     if (linksEnabled) {
-      const bareLink = bareLinkAt(units, index, end);
+      const bareLink = bareLinkAt(units, index, bareLinkEnds![index - start] ?? end);
       if (bareLink !== null) {
         appendSpan(current, "link", bareLink.target, [bareLink.text], true);
         index = bareLink.end;
@@ -622,7 +623,7 @@ function shortBracketToken(units: readonly InputUnit[], index: number, end: numb
 function bareLinkAt(
   units: readonly InputUnit[],
   index: number,
-  end: number,
+  candidateEnd: number,
 ): { readonly target: string; readonly text: string; readonly end: number } | null {
   if (
     (index > 0 && URL_BOUNDARY_CHARACTER.test(units[index - 1]!.character)) ||
@@ -632,12 +633,14 @@ function bareLinkAt(
     return null;
   }
 
-  let targetEnd = index;
-  while (targetEnd < end) {
-    const unit = units[targetEnd]!;
-    if (unit.escaped || unit.character === "\\" || URL_STOP_CHARACTER.test(unit.character)) break;
-    targetEnd += 1;
+  const schemeEnd = index + (unitsMatchCaseInsensitive(units, index, "https://") ? 8 : 7);
+  let authorityEnd = schemeEnd;
+  while (authorityEnd < candidateEnd && !/[/?#]/u.test(units[authorityEnd]!.character)) {
+    authorityEnd += 1;
   }
+  if (validUrl(unitsText(units, index, authorityEnd)) === null) return null;
+
+  let targetEnd = candidateEnd;
   let parenthesisBalance = delimiterBalance(units, index, targetEnd, "(", ")");
   let braceBalance = delimiterBalance(units, index, targetEnd, "{", "}");
   while (targetEnd > index) {
@@ -656,6 +659,23 @@ function bareLinkAt(
   const text = unitsText(units, index, targetEnd);
   const target = validUrl(text);
   return target === null ? null : { target, text, end: targetEnd };
+}
+
+function nextBareLinkEnds(
+  units: readonly InputUnit[],
+  start: number,
+  end: number,
+): readonly number[] {
+  const ends = new Array<number>(end - start + 1).fill(end);
+  let nextEnd = end;
+  for (let index = end - 1; index >= start; index -= 1) {
+    const unit = units[index]!;
+    if (unit.escaped || unit.character === "\\" || URL_STOP_CHARACTER.test(unit.character)) {
+      nextEnd = index;
+    }
+    ends[index - start] = nextEnd;
+  }
+  return ends;
 }
 
 function delimiterBalance(
