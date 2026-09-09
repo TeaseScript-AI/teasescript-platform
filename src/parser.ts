@@ -53,6 +53,8 @@ export interface ParseResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
+type ParenthesisMatchCache = [readonly (number | undefined)[] | null];
+
 const parserDiagnosticCode = {
   expectedStatement: "TSP001",
   expectedStatementEnd: "TSP002",
@@ -102,9 +104,13 @@ export function parse(source: string): ParseResult {
 class Parser {
   readonly #diagnostics: Diagnostic[] = [];
   #current = 0;
+  #skipParenthesisChainScanThroughIndex = -1;
   #recoveredAtStatementBoundary = false;
 
-  public constructor(private readonly tokens: readonly Token[]) {}
+  public constructor(
+    private readonly tokens: readonly Token[],
+    private readonly parenthesisMatchCache: ParenthesisMatchCache = [null],
+  ) {}
 
   public get diagnostics(): readonly Diagnostic[] {
     return this.#diagnostics;
@@ -430,7 +436,7 @@ class Parser {
    * can consume a complete value (and optional pacing) from this position.
    */
   #canParseCompleteSayValue(): boolean {
-    const speculative = new Parser(this.tokens);
+    const speculative = new Parser(this.tokens, this.parenthesisMatchCache);
     speculative.#current = this.#current;
 
     const value = speculative.#parseExpression();
@@ -459,7 +465,7 @@ class Parser {
   /** `instant` remains an identifier unless it fills the entire pacing slot. */
   #canParseInstantPacingAlias(): boolean {
     if (!this.#checkIdentifier("instant")) return false;
-    const speculative = new Parser(this.tokens);
+    const speculative = new Parser(this.tokens, this.parenthesisMatchCache);
     speculative.#current = this.#current;
     speculative.#advance();
     return speculative.#isSayStatementBoundary();
@@ -1470,6 +1476,15 @@ class Parser {
   }
 
   #parseParenthesized(start: Token): ParenthesizedExpression | null {
+    const starts = this.#parenthesisChainStarts(start);
+    if (starts !== null) {
+      for (let index = 1; index < starts.length; index += 1) {
+        this.#skipNewlines();
+        this.#advance();
+      }
+      return this.#parseParenthesizedChain(starts);
+    }
+
     this.#skipNewlines();
     const expression = this.#parseRequiredExpression();
     this.#skipNewlines();
@@ -1487,6 +1502,102 @@ class Parser {
       expression,
       span: spanFrom(start.span, this.#previous().span),
     });
+  }
+
+  #parenthesisChainStarts(start: Token): readonly Token[] | null {
+    if (this.#current - 1 <= this.#skipParenthesisChainScanThroughIndex) return null;
+
+    const starts = [start];
+    const startIndexes = [this.#current - 1];
+    let scan = this.#current;
+    while (true) {
+      while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
+      const token = this.tokens[scan];
+      if (token?.kind !== TokenKind.LeftParenthesis) break;
+      starts.push(token);
+      startIndexes.push(scan);
+      scan += 1;
+    }
+    if (starts.length === 1) return null;
+
+    const matching = this.#getMatchingRightParentheses();
+    let innerClose = matching[startIndexes.at(-1)!];
+    for (let index = startIndexes.length - 2; index >= 0; index -= 1) {
+      const outerClose = matching[startIndexes[index]!];
+      if (innerClose === undefined) {
+        if (outerClose !== undefined) {
+          this.#skipParenthesisChainScanThroughIndex = startIndexes[index]!;
+          return null;
+        }
+      } else {
+        let next = innerClose + 1;
+        while (this.tokens[next]?.kind === TokenKind.Newline) next += 1;
+        if (outerClose === undefined) {
+          if (this.tokens[next]?.kind !== TokenKind.EndOfFile) {
+            this.#skipParenthesisChainScanThroughIndex = startIndexes[index]!;
+            return null;
+          }
+        } else if (outerClose !== next) {
+          this.#skipParenthesisChainScanThroughIndex = startIndexes[index]!;
+          return null;
+        }
+      }
+      innerClose = outerClose;
+    }
+    return starts;
+  }
+
+  #getMatchingRightParentheses(): readonly (number | undefined)[] {
+    const cached = this.parenthesisMatchCache[0];
+    if (cached !== null) return cached;
+
+    const matching: (number | undefined)[] = new Array(this.tokens.length);
+    const open: number[] = [];
+    for (let index = 0; index < this.tokens.length; index += 1) {
+      const kind = this.tokens[index]!.kind;
+      if (kind === TokenKind.LeftParenthesis) open.push(index);
+      else if (kind === TokenKind.RightParenthesis) {
+        const start = open.pop();
+        if (start !== undefined) matching[start] = index;
+      }
+    }
+    this.parenthesisMatchCache[0] = matching;
+    return matching;
+  }
+
+  #parseParenthesizedChain(starts: readonly Token[]): ParenthesizedExpression | null {
+    this.#skipNewlines();
+    const expression = this.#parseRequiredExpression();
+    let parenthesized: ParenthesizedExpression | null = null;
+    this.#skipNewlines();
+    if (expression === null) {
+      for (let index = 1; index < starts.length; index += 1) {
+        this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
+      }
+      return null;
+    }
+    let completed: Expression = expression;
+
+    for (let index = starts.length - 1; index >= 0; index -= 1) {
+      if (!this.#match(TokenKind.RightParenthesis)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedDelimiter,
+          "Expected ')' after the expression.",
+        );
+        for (let outer = index - 1; outer >= 0; outer -= 1) {
+          this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
+        }
+        return null;
+      }
+      parenthesized = Object.freeze({
+        kind: "parenthesizedExpression",
+        expression: completed,
+        span: spanFrom(starts[index]!.span, this.#previous().span),
+      });
+      completed = parenthesized;
+      if (index > 0) this.#skipNewlines();
+    }
+    return parenthesized;
   }
 
   #parseListLiteral(start: Token): Expression {

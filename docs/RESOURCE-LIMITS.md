@@ -61,9 +61,14 @@ the result carries an empty program with the complete source span.
 This is failure containment at the normal compiler boundary, not an input preflight or rejection policy. The compiler
 does not count source depth, impose a numeric nesting limit, or promise that a particular source size will compile on
 every JavaScript host. Flat binary-chain semantic traversal, synchronous plan construction, prepared-reference scanning,
-and plan-expression validation avoid the native stack. Parser nesting, nested statements, and non-binary recursive
-expression shapes may still reach a host-dependent native boundary. The focused regression uses a deliberately
-constrained child-process stack to exercise containment without turning its fixture depth into a CI capacity threshold.
+and plan-expression validation avoid the native stack. The parser also handles direct parenthesis chains iteratively;
+the focused regression compiles 1,024 nested groups with a deliberately constrained child-process stack. Parenthesis
+nesting with expression work between successive closing groups, collection/object/template nesting, nested statements,
+and other recursive expression shapes may still reach a host-dependent native boundary. The regression depth exercises
+the repaired structure without becoming a CI capacity threshold or supported capacity claim. In the same constrained
+child process, 256 nested list literals currently exercise the residual boundary and retain `TSC007`, an empty program,
+and the complete source span; this fixture is diagnostic evidence rather than a list-nesting limit. Issue #400 tracks
+the focused collection-literal repair.
 
 ## Non-rejecting scale diagnostics
 

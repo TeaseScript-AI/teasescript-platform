@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import { parse } from "../src/parser.js";
+import { runValidSource } from "./helpers/run-valid-source.js";
+import { sayTexts } from "./helpers/runtime-events.js";
 
 function nestedTemplate(depth: number): string {
   let expression = "1";
@@ -68,4 +70,12 @@ test("parentheses do not inflate pure expression plans", () => {
   assert.equal(declaration?.kind, "declareSpeaker");
   if (declaration?.kind !== "declareSpeaker") return;
   assert.equal(declaration.properties[0]?.value.kind, "literal");
+});
+
+test("deep parenthesis chains execute through the source-to-runtime path", () => {
+  const depth = 2_000;
+  const expression = `${"(".repeat(depth)}41${")".repeat(depth)}`;
+  const result = runValidSource(`let value = ${expression}\nsay value + 1\nexit`);
+  assert.deepEqual(sayTexts(result), ["42"]);
+  assert.equal(result.snapshot.status, "halted");
 });

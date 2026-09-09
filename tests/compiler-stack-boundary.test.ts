@@ -20,9 +20,10 @@ test("large flat chains complete full compilation with source provenance", () =>
   }
 });
 
-test("flat-chain compilation remains iterative with a constrained host stack", () => {
+test("flat-chain and parenthesis-chain compilation remain iterative with a constrained host stack", () => {
   const source = flatChain(1_024);
-  const nestedSource = `let value = ${"(".repeat(256)}1${")".repeat(256)}`;
+  const nestedSource = `let value = ${"(".repeat(1_024)}1${")".repeat(1_024)}`;
+  const residualNestedSource = `let value = ${"[".repeat(256)}1${"]".repeat(256)}`;
   const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
   const parserUrl = new URL("../src/parser.js", import.meta.url).href;
   const semanticUrl = new URL("../src/semantic.js", import.meta.url).href;
@@ -39,7 +40,8 @@ test("flat-chain compilation remains iterative with a constrained host stack", (
     const semantic = validateSemantics(parsed.program);
     const plan = compileStableProgram(parsed.program);
     const compiledFlat = compileSource(source);
-    const contained = compileSource(process.env.TEASESCRIPT_NESTED_SOURCE);
+    const compiledNested = compileSource(process.env.TEASESCRIPT_NESTED_SOURCE);
+    const containedResidual = compileSource(process.env.TEASESCRIPT_RESIDUAL_NESTED_SOURCE);
     process.stdout.write(JSON.stringify({
       parserDiagnostics: parsed.diagnostics.length,
       semanticDiagnostics: semantic.diagnostics.length,
@@ -47,9 +49,12 @@ test("flat-chain compilation remains iterative with a constrained host stack", (
       expressionKind: plan.instructions[0]?.value?.kind,
       compiledFlatCodes: compiledFlat.diagnostics.map((diagnostic) => diagnostic.code),
       compiledFlatExpressionKind: compiledFlat.plan?.instructions[0]?.value?.kind,
-      boundaryCodes: contained.diagnostics.map((diagnostic) => diagnostic.code),
-      boundaryProgramStatements: contained.program.statements.length,
-      boundarySpan: contained.diagnostics.map((diagnostic) => [
+      compiledNestedCodes: compiledNested.diagnostics.map((diagnostic) => diagnostic.code),
+      compiledNestedProgramStatements: compiledNested.program.statements.length,
+      compiledNestedExpressionKind: compiledNested.plan?.instructions[0]?.value?.kind,
+      residualCodes: containedResidual.diagnostics.map((diagnostic) => diagnostic.code),
+      residualProgramStatements: containedResidual.program.statements.length,
+      residualSpan: containedResidual.diagnostics.map((diagnostic) => [
         diagnostic.span.start.offset,
         diagnostic.span.end.offset,
       ]),
@@ -64,6 +69,7 @@ test("flat-chain compilation remains iterative with a constrained host stack", (
         ...process.env,
         TEASESCRIPT_STACK_SOURCE: source,
         TEASESCRIPT_NESTED_SOURCE: nestedSource,
+        TEASESCRIPT_RESIDUAL_NESTED_SOURCE: residualNestedSource,
       },
     },
   );
@@ -77,9 +83,12 @@ test("flat-chain compilation remains iterative with a constrained host stack", (
     expressionKind: "binary",
     compiledFlatCodes: [],
     compiledFlatExpressionKind: "binary",
-    boundaryCodes: ["TSC007"],
-    boundaryProgramStatements: 0,
-    boundarySpan: [[0, nestedSource.length]],
+    compiledNestedCodes: [],
+    compiledNestedProgramStatements: 1,
+    compiledNestedExpressionKind: "literal",
+    residualCodes: ["TSC007"],
+    residualProgramStatements: 0,
+    residualSpan: [[0, residualNestedSource.length]],
   });
 });
 
