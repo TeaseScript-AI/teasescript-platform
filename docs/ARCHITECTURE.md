@@ -112,6 +112,12 @@ execute instructions without duplicating operation logic. Whole-snapshot
 construction, cloning, validation orchestration, and cross-state coordination
 remain in `src/runtime/state.ts`; the internal `src/runtime/action-validation.ts`
 module owns pending-action, settlement, pacing-gate, and handoff validation.
+`src/runtime/engine.ts` owns execution orchestration and instruction dispatch;
+`src/runtime/evaluator.ts` owns expression evaluation, builtin calls, and the
+binding, speaker, and collection operations used while evaluating. The internal
+`src/runtime/prepared-references.ts` module owns prepared-reference encoding,
+resolution, detachment, and list-mutation rebasing, while
+`src/runtime/value-predicates.ts` supplies the small shared value-narrowing seam.
 
 No `src/standard-library/` shell exists yet because the implemented ADR 0018 POC forms are fully lowered by the
 parser/compiler/runtime; linked reusable Standard Library modules remain future work.
