@@ -132,6 +132,14 @@
         padding-inline-start: 1.4em;
       }
 
+      ul.markup-list {
+        list-style-type: disc;
+      }
+
+      ol.markup-list {
+        list-style-type: decimal;
+      }
+
       .markup-italic {
         font-style: italic;
       }
@@ -177,7 +185,8 @@
         padding: 0 0.2em;
         border: 0;
         border-radius: 0.2em;
-        background: currentColor;
+        background: color-mix(in srgb, var(--speaker-accent) 42%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--speaker-accent) 65%, transparent);
         color: transparent;
         cursor: pointer;
         font: inherit;
