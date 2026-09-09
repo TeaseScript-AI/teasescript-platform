@@ -606,6 +606,7 @@ class SemanticValidator {
         }
         return;
     }
+    expression satisfies never;
   }
 
   #interactionSpeaker(
@@ -937,4 +938,5 @@ function visitExpression(
       expression.options.forEach((option) => visitExpression(option.value, visitor));
       return;
   }
+  expression satisfies never;
 }
