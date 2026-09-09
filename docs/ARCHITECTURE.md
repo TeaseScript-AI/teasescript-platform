@@ -109,8 +109,9 @@ public transitions live in `src/runtime/operations/complete-action.ts` and
 `observe-time.ts`. Their small `model.ts` and `support.ts` companions hold
 shared operation results and common capture/sequence helpers so the engine can
 execute instructions without duplicating operation logic. Whole-snapshot
-construction, cloning, validation, and cross-state invariants remain in
-`src/runtime/state.ts`.
+construction, cloning, validation orchestration, and cross-state coordination
+remain in `src/runtime/state.ts`; the internal `src/runtime/action-validation.ts`
+module owns pending-action, settlement, pacing-gate, and handoff validation.
 
 No `src/standard-library/` shell exists yet because the implemented ADR 0018 POC forms are fully lowered by the
 parser/compiler/runtime; linked reusable Standard Library modules remain future work.
