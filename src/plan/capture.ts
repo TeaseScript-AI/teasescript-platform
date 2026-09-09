@@ -1,4 +1,5 @@
 import type { InstructionPlan } from "./model.js";
+import type { ExternalDataFailureKind } from "../external-data-capture.js";
 import {
   isValidatedImmutableInstructionPlan,
   markValidatedImmutableInstructionPlan,
@@ -13,6 +14,7 @@ import { validateCapturedInstructionPlan, type PlanValidationResult } from "./va
 export interface CapturedInstructionPlanResult {
   readonly validation: PlanValidationResult;
   readonly plan: InstructionPlan | null;
+  readonly failureKind: ExternalDataFailureKind | null;
 }
 
 const validPlanValidation: PlanValidationResult = Object.freeze({
@@ -26,6 +28,7 @@ export function captureInstructionPlan(value: unknown): CapturedInstructionPlanR
     return Object.freeze({
       validation: captureFailureValidation(capture.message, capture.path),
       plan: null,
+      failureKind: capture.kind,
     });
   }
   const validation = validateCapturedInstructionPlan(capture.value);
@@ -37,6 +40,7 @@ export function captureInstructionPlan(value: unknown): CapturedInstructionPlanR
     validation,
     // EVIDENCE: validation: validateCapturedInstructionPlan checked this immutable captured graph above.
     plan,
+    failureKind: null,
   });
 }
 
@@ -47,7 +51,7 @@ export function captureOrReuseInstructionPlan(value: unknown): CapturedInstructi
     const candidate = value as InstructionPlan;
     if (!isValidatedImmutableInstructionPlan(candidate)) return captureInstructionPlan(value);
     // EVIDENCE: only a completely validated InstructionPlan can enter the private identity set.
-    return Object.freeze({ validation: validPlanValidation, plan: candidate });
+    return Object.freeze({ validation: validPlanValidation, plan: candidate, failureKind: null });
   }
   return captureInstructionPlan(value);
 }
