@@ -96,12 +96,15 @@ The cross-origin host protocol, general/background timer actions, Standard Libra
 
 The behavior-neutral Option A refactor is implemented for the code present on
 the starting `main`. `src/plan/model.ts` contains only the serializable plan
-contract; `capture.ts` and `validation.ts` own stable external-data capture and plan
-validation, with the small private capture support seam shared to avoid a
-capture/validation cycle. `src/compiler/compile-program.ts` owns compilation
-orchestration, while `src/compiler/lowering/compiler.ts` owns the cohesive
-stateful lowering pass. `src/static-evaluation.ts` owns the pure AST number and
-visible-text evaluation shared by semantic validation and lowering.
+contract; `capture.ts` owns stable external-data capture, while `validation.ts` remains the plan-validation entry and
+owns envelope, instruction, and expression shape checks. The internal `instruction-stream-analyses.ts` module owns
+cross-instruction loop and prepared-reference invariants, function ranges and prologues, execution-region indexing,
+prepared-say dataflow, interaction-result handoffs, and control-flow targets. The small private capture and validation
+support files, `capture-support.ts` and `validation-support.ts`, hold only helpers shared across those owners.
+`src/compiler/compile-program.ts` owns compilation orchestration, while `src/compiler/lowering/compiler.ts` owns the
+cohesive stateful lowering pass.
+`src/static-evaluation.ts` owns the pure AST number and visible-text evaluation shared by semantic validation and
+lowering.
 
 Serializable pending-action and settlement contracts live in
 `src/runtime/actions/model.ts`; action modules remain pure. The two atomic
