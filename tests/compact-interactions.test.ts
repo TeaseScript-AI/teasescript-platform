@@ -411,6 +411,59 @@ test("choice diagnostics reject mixing and duplicates while labelled visible tex
   );
 });
 
+test("static choice rules align duplicate diagnostics with direct and prepared interaction UI", () => {
+  const duplicate = compileSource('let result = choose "sum 3", `sum ${1 + 2}`');
+  assert.equal(duplicate.plan, null);
+  assert.deepEqual(
+    duplicate.semanticDiagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV030"],
+  );
+
+  const staticPlan = compiled("let result = choose `sum ${1 + 2}`, -0, true, null");
+  const staticInstruction = staticPlan.instructions.find(
+    (instruction) => instruction.kind === "interaction",
+  );
+  assert.ok(staticInstruction?.kind === "interaction" && "ui" in staticInstruction);
+  const staticPending = run(staticPlan, createFreshRuntimeSnapshot(staticPlan));
+  assert.deepEqual(
+    staticPending.snapshot.foregroundAction?.kind === "interaction"
+      ? staticPending.snapshot.foregroundAction.ui
+      : null,
+    {
+      kind: "choice",
+      labelType: "none",
+      options: [
+        { text: "sum 3", label: null },
+        { text: "0", label: null },
+        { text: "true", label: null },
+        { text: "null", label: null },
+      ],
+      accessibleName: { kind: "localizedDefault", key: "chooseOption" },
+    },
+  );
+
+  const dynamicPlan = compiled('let value = 3\nlet result = choose `sum ${value}`, "other"');
+  const dynamicInstruction = dynamicPlan.instructions.find(
+    (instruction) => instruction.kind === "interaction",
+  );
+  assert.ok(dynamicInstruction?.kind === "interaction" && "preparedUi" in dynamicInstruction);
+  const dynamicPending = run(dynamicPlan, createFreshRuntimeSnapshot(dynamicPlan));
+  assert.deepEqual(
+    dynamicPending.snapshot.foregroundAction?.kind === "interaction"
+      ? dynamicPending.snapshot.foregroundAction.ui
+      : null,
+    {
+      kind: "choice",
+      labelType: "none",
+      options: [
+        { text: "sum 3", label: null },
+        { text: "other", label: null },
+      ],
+      accessibleName: { kind: "localizedDefault", key: "chooseOption" },
+    },
+  );
+});
+
 test("interaction result domains participate in existing numeric semantic checks", () => {
   assert.notEqual(compileSource("let values = askNumber..3").plan, null);
 
