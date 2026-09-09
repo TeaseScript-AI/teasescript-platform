@@ -61,14 +61,15 @@ the result carries an empty program with the complete source span.
 This is failure containment at the normal compiler boundary, not an input preflight or rejection policy. The compiler
 does not count source depth, impose a numeric nesting limit, or promise that a particular source size will compile on
 every JavaScript host. Flat binary-chain semantic traversal, synchronous plan construction, prepared-reference scanning,
-and plan-expression validation avoid the native stack. The parser also handles direct parenthesis chains iteratively;
-the focused regression compiles 1,024 nested groups with a deliberately constrained child-process stack. Parenthesis
-nesting with expression work between successive closing groups, collection/object/string nesting, nested statements,
-and other recursive expression shapes may still reach a host-dependent native boundary. The regression depth exercises
-the repaired structure without becoming a CI capacity threshold or supported capacity claim. In the same constrained
-child process, 256 nested list literals currently exercise the residual boundary and retain `TSC007`, an empty program,
-and the complete source span; this fixture is diagnostic evidence rather than a list-nesting limit. Issue #400 tracks
-the focused collection-literal repair.
+and plan-expression validation avoid the native stack. The parser also handles direct parenthesis and list/set chains
+iteratively, and collection-specific semantic, lowering, plan-validation, fresh-state, and runtime paths avoid recursive
+descent through consecutive collections. With a deliberately constrained child-process stack, the focused regression
+compiles 1,024 nested groups, compiles and runs 1,024 nested lists, and produces the normal semantic diagnostics for
+1,024 nested sets. Parenthesis nesting with expression work between successive closing groups, object/string nesting,
+nested statements, and other recursive expression shapes may still reach a host-dependent native boundary. In the same
+constrained child process, 256 nested object literals retain `TSC007`, an empty program, and the complete source span.
+These regression depths exercise the repaired and residual structures without becoming CI capacity thresholds or
+supported capacity claims.
 
 ## Non-rejecting scale diagnostics
 

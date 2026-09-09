@@ -130,21 +130,8 @@ export class Evaluator {
           expression.span,
         );
       case "list":
-        return createCapturedSerializableList(
-          expression.elements.map((item) => this.evaluate(item)),
-        );
-      case "set": {
-        const set = createCapturedSerializableSet([]);
-        const membership = new Set<SerializableRuntimeScalar>();
-        for (const element of expression.elements) {
-          try {
-            addSerializableSetValue(set, this.evaluate(element), membership);
-          } catch (error) {
-            throw this.#translateValueError(error, element.span);
-          }
-        }
-        return set;
-      }
+      case "set":
+        return this.#evaluateCollection(expression);
       case "object": {
         const names = new Set<string>();
         for (const property of expression.properties) {
@@ -208,6 +195,83 @@ export class Evaluator {
         return { kind: "range", start, end, inclusive: expression.inclusive };
       }
     }
+  }
+
+  #evaluateCollection(
+    root: Extract<ExpressionPlan, { kind: "list" | "set" }>,
+  ): SerializableRuntimeValue {
+    interface EvaluatedValue {
+      readonly value: SerializableRuntimeValue;
+      readonly owned: boolean;
+    }
+    type Work =
+      | { readonly kind: "expression"; readonly expression: ExpressionPlan }
+      | {
+          readonly kind: "assembleList";
+          readonly expression: Extract<ExpressionPlan, { kind: "list" }>;
+        }
+      | {
+          readonly kind: "addSetElement";
+          readonly set: SerializableRuntimeSet;
+          readonly membership: Set<SerializableRuntimeScalar>;
+          readonly element: ExpressionPlan;
+        }
+      | { readonly kind: "completeSet"; readonly set: SerializableRuntimeSet };
+    const work: Work[] = [{ kind: "expression", expression: root }];
+    const results: EvaluatedValue[] = [];
+    while (work.length > 0) {
+      const current = work.pop()!;
+      if (current.kind === "assembleList") {
+        const evaluated = results.splice(results.length - current.expression.elements.length);
+        results.push({
+          value: {
+            kind: "list",
+            // Each list captures after all of its own elements have evaluated. Fresh nested
+            // collections can transfer ownership; other results still need an independent copy.
+            items: evaluated.map((item) =>
+              item.owned ? item.value : cloneCapturedSerializableValue(item.value),
+            ),
+          },
+          owned: true,
+        });
+        continue;
+      }
+      if (current.kind === "addSetElement") {
+        const evaluated = results.pop()!;
+        try {
+          addSerializableSetValue(current.set, evaluated.value, current.membership);
+        } catch (error) {
+          throw this.#translateValueError(error, current.element.span);
+        }
+        continue;
+      }
+      if (current.kind === "completeSet") {
+        results.push({ value: current.set, owned: true });
+        continue;
+      }
+
+      if (current.expression.kind !== "list" && current.expression.kind !== "set") {
+        results.push({ value: this.evaluate(current.expression), owned: false });
+        continue;
+      }
+      if (current.expression.kind === "list") {
+        work.push({ kind: "assembleList", expression: current.expression });
+        for (let index = current.expression.elements.length - 1; index >= 0; index -= 1) {
+          work.push({ kind: "expression", expression: current.expression.elements[index]! });
+        }
+        continue;
+      }
+
+      const set = createCapturedSerializableSet([]);
+      const membership = new Set<SerializableRuntimeScalar>();
+      work.push({ kind: "completeSet", set });
+      for (let index = current.expression.elements.length - 1; index >= 0; index -= 1) {
+        const element = current.expression.elements[index]!;
+        work.push({ kind: "addSetElement", set, membership, element });
+        work.push({ kind: "expression", expression: element });
+      }
+    }
+    return results[0]!.value;
   }
 
   public assign(target: AssignmentTargetPlan, value: SerializableRuntimeValue): void {
