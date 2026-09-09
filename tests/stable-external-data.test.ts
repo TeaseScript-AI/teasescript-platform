@@ -5,7 +5,6 @@ import {
   CheckpointError,
   RuntimeDataError,
   cloneSerializableValue,
-  compileSource,
   createCheckpoint,
   createFreshRuntimeSnapshot,
   createSerializableList,
@@ -23,12 +22,10 @@ import {
   validateSerializableValue,
 } from "../src/runtime/serializable-values.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 function plan(source = "exit", builtins: readonly string[] = []): InstructionPlan {
-  const compiled = compileSource(source, { builtins });
-  assert.deepEqual(compiled.diagnostics, []);
-  assert.notEqual(compiled.plan, null);
-  return compiled.plan!;
+  return compileValidPlan(source, { builtins });
 }
 
 function deepList(depth: number): SerializableRuntimeValue {

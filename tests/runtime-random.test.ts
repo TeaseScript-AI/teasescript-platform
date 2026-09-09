@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
-import type { InstructionPlan } from "../src/plan/model.js";
 import { CheckpointError, createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
 import {
   createXorShift32State,
@@ -15,6 +13,7 @@ import {
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { run } from "../src/runtime/engine.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("rejects zero xorshift32 seeds and direct zero-state advancement", () => {
   assert.throws(
@@ -130,10 +129,3 @@ test("distinguishes an absent random hook from invalid and valid hook results", 
     0.25,
   );
 });
-
-function plan(source: string): InstructionPlan {
-  const compiled = compileSource(source);
-  assert.deepEqual(compiled.diagnostics, []);
-  assert.notEqual(compiled.plan, null);
-  return compiled.plan!;
-}

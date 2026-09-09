@@ -20,17 +20,11 @@ import {
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 function delayAction(snapshot: RuntimeSnapshot): RuntimeDelayActionSnapshot {
   assert.ok(snapshot.foregroundAction?.kind === "delay");
   return snapshot.foregroundAction;
-}
-
-function plan(source: string) {
-  const compiled = compileSource(source);
-  assert.deepEqual(compiled.diagnostics, []);
-  assert.notEqual(compiled.plan, null);
-  return compiled.plan!;
 }
 
 function waiting(source = "wait 10 ms\nexit") {

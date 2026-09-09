@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import type { InstructionPlan } from "../src/plan/model.js";
 import { run, type RuntimeBuiltinFunction } from "../src/runtime/engine.js";
 import type {
   SerializableRuntimeList,
@@ -18,6 +17,9 @@ import {
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { runValidSource as runSource } from "./helpers/run-valid-source.js";
+import { sayTexts } from "./helpers/runtime-events.js";
 
 test("executes positional and named function calls with returned values", () => {
   const result = runSource(
@@ -574,22 +576,6 @@ test("break and continue cannot cross function boundaries", () => {
     assert.ok(result.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV008"));
   }
 });
-
-function runSource(source: string) {
-  const compiled = plan(source);
-  return run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
-}
-
-function plan(source: string): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
-}
-
-function sayTexts(result: ReturnType<typeof run>): string[] {
-  return result.events.filter((event) => event.kind === "say").map((event) => event.text);
-}
 
 function rootValue(snapshot: RuntimeSnapshot, name: string): SerializableRuntimeValue {
   const binding = snapshot.frames[0]?.bindings.find((item) => item.name === name);

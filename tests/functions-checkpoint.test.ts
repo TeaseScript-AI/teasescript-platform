@@ -5,7 +5,6 @@ import { compileSource } from "../src/compiler.js";
 import type { Instruction, InstructionPlan } from "../src/plan/model.js";
 import {
   CHECKPOINT_VERSION,
-  CheckpointError,
   createCheckpoint,
   deserializeCheckpoint,
   restoreCheckpoint,
@@ -26,6 +25,8 @@ import {
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("restores every instruction boundary during defaults and nested calls", () => {
   const { boundaries: observations } = assertRuntimeResumeEquivalent(
@@ -910,13 +911,6 @@ function executeUntil(
   return snapshot;
 }
 
-function plan(source: string): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
-}
-
 type MutableCheckpoint = ReturnType<typeof mutableCheckpoint>;
 
 // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: checkpoint fixtures mutate readonly and invalid fields across the checkpoint validation matrix.
@@ -958,11 +952,4 @@ function removeSerializedObjectProperty(value: any, name: string): void {
   const index = value.properties.findIndex((candidate: any) => candidate.name === name); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: serialized property entries are selected by their runtime `name` field.
   assert.ok(index >= 0);
   value.properties.splice(index, 1);
-}
-
-function assertCheckpointRejected(value: unknown, code: string): void {
-  assert.throws(
-    () => restoreCheckpoint(value),
-    (error: unknown) => error instanceof CheckpointError && error.info.code === code,
-  );
 }

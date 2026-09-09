@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   createCheckpoint,
@@ -12,13 +11,7 @@ import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
-
-function plan(source: string) {
-  const compiled = compileSource(source);
-  assert.deepEqual(compiled.diagnostics, []);
-  assert.notEqual(compiled.plan, null);
-  return compiled.plan!;
-}
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("say lowers smart, exact, and instant pacing with explicit skip policy", () => {
   const compiled = plan('say skippable "a"\nsay unskippable "b", 1.5\nsay "c", instant');

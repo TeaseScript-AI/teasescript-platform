@@ -18,6 +18,7 @@ import {
   type RuntimeSnapshot,
 } from "../src/index.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
+import { compileValidPlan as compiledPlan } from "./helpers/compile-valid-plan.js";
 
 const RANGE_ERROR = "Function instruction range is overlapping or impossible.";
 const ROOT_ERROR = "Root execution boundary is invalid.";
@@ -361,13 +362,6 @@ function twoFunctionPlan(): InstructionPlan {
       "exit",
     ].join("\n"),
   );
-}
-
-function compiledPlan(source: string): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
 }
 
 function mutablePlan(plan: InstructionPlan): MutablePlan {

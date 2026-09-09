@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import type { Instruction, InstructionPlan } from "../src/plan/model.js";
 import type { PlanValidationResult } from "../src/plan/validation.js";
 import { CheckpointError, createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 const REGION_ERROR = "Control-flow target leaves the instruction's execution region.";
 
@@ -772,13 +772,6 @@ function functionLoop(): string {
   return ["function looper {", "  repeat 2 {", "    continue", "  }", "}", "looper()", "exit"].join(
     "\n",
   );
-}
-
-function plan(source: string): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
 }
 
 function rootInstructionIndex(plan: InstructionPlan, kind: Instruction["kind"]): number {

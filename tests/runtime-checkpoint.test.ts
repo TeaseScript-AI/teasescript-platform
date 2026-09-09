@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
 import { captureExternalData } from "../src/external-data-capture.js";
 import { captureInstructionPlan } from "../src/plan/capture.js";
 import type { InstructionPlan } from "../src/plan/model.js";
@@ -29,6 +28,7 @@ import {
 } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("runtime snapshots survive JSON stringify and parse validation", () => {
   const compiled = plan("let values = set[3, 1, 2]\nexit");
@@ -545,13 +545,6 @@ test("fails structurally when the configurable instruction budget is exhausted",
     ["runtimeFailure"],
   );
 });
-
-function plan(source: string): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
-}
 
 function rootValue(snapshot: RuntimeSnapshot, name: string): SerializableRuntimeValue {
   const binding = snapshot.frames[0]?.bindings.find((item) => item.name === name);

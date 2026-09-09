@@ -18,13 +18,12 @@ import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { createSerializableList } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 function compiled(source: string, options: Parameters<typeof compileSource>[1] = {}) {
-  const result = compileSource(source, options);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  assert.equal(validateInstructionPlan(result.plan).valid, true);
-  return result.plan!;
+  const plan = compileValidPlan(source, options);
+  assert.equal(validateInstructionPlan(plan).valid, true);
+  return plan;
 }
 
 function completePending(

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   createCheckpoint,
@@ -18,19 +17,13 @@ import {
   type RuntimeTemporarySnapshot,
 } from "../src/runtime/state.js";
 import type { SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 type Mutable<T> = T extends readonly (infer Item)[]
   ? Array<Mutable<Item>>
   : T extends object
     ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
     : T;
-
-function plan(source: string) {
-  const compiled = compileSource(source);
-  assert.deepEqual(compiled.diagnostics, []);
-  assert.notEqual(compiled.plan, null);
-  return compiled.plan!;
-}
 
 function checkpointSnapshot(
   compiled: ReturnType<typeof plan>,

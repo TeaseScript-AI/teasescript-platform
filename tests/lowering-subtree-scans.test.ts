@@ -4,16 +4,15 @@ import test from "node:test";
 import type { Expression, Statement } from "../src/ast.js";
 import { InstructionCompiler } from "../src/compiler/lowering/compiler.js";
 import {
-  compileSource,
   completeAction,
   createCheckpoint,
   createFreshRuntimeSnapshot,
   deserializeCheckpoint,
   run,
   serializeCheckpoint,
-  type InstructionPlan,
 } from "../src/index.js";
 import { createSourcePosition, createSourceSpan } from "../src/source.js";
+import { compileValidPlan as compiled } from "./helpers/compile-valid-plan.js";
 
 const span = createSourceSpan(createSourcePosition(0, 0, 0), createSourcePosition(1, 0, 1));
 
@@ -113,11 +112,4 @@ function compileCountedBinaryChain(binaryCount: number): number {
 
 function numberLiteral(value: number): Expression {
   return { kind: "numberLiteral", raw: String(value), value, numericType: "integer", span };
-}
-
-function compiled(source: string): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
 }

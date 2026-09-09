@@ -9,6 +9,10 @@ import { run, stepToEvent } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { runValidSource } from "./helpers/run-valid-source.js";
+import { sayTexts } from "./helpers/runtime-events.js";
 
 test("executes exclusive and inclusive integer ranges", () => {
   assert.deepEqual(sayTexts(runSource("for value in 1..4 { say value }")), ["1", "2", "3"]);
@@ -294,24 +298,5 @@ test("loop variables deep-copy composite list elements", () => {
 });
 
 function runSource(source: string, seed = 1) {
-  const compiled = plan(source);
-  return run(compiled, createImmediatePacingRuntimeSnapshot(compiled, { seed }));
-}
-
-function sayTexts(result: ReturnType<typeof run>): string[] {
-  return result.events.filter((event) => event.kind === "say").map((event) => event.text);
-}
-
-function plan(source: string): InstructionPlan {
-  const compiled = compileSource(source);
-  assert.deepEqual(compiled.diagnostics, []);
-  assert.notEqual(compiled.plan, null);
-  return compiled.plan!;
-}
-
-function assertCheckpointRejected(value: unknown, code: string): void {
-  assert.throws(
-    () => restoreCheckpoint(value),
-    (error: unknown) => error instanceof CheckpointError && error.info.code === code,
-  );
+  return runValidSource(source, seed);
 }
