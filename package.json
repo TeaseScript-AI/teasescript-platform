@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "npm run build:typescript && npm run typecheck:player && npm run build:player && npm run build:editor",
-    "build:typescript": "tsc",
+    "build:typescript": "node ./tools/clean-compiled-tests.mjs && tsc",
     "build:player": "vite build --config player/vue/vite.config.ts",
     "build:editor": "vite build --config editor/vue/vite.config.ts",
     "typecheck": "tsc --noEmit && npm run typecheck:player && npm run typecheck:editor",
@@ -18,16 +18,17 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,cts,mts,js,jsx,cjs,mjs}\"",
     "test:compiled": "node ./tools/test-output-filter.mjs",
     "test": "npm run build && node ./tools/test-output-filter.mjs",
-    "check": "npm run format:check && npm run lint && npm run test:lint && npm run knip && npm test",
+    "check": "npm run format:check && npm run lint && npm run test:lint && npm run knip && npm run test:build:typescript && npm test",
     "knip": "knip",
     "lint": "node tools/oxlint/run.mjs",
     "test:lint": "tsc -p tools/oxlint/tsconfig.json && node tools/oxlint/test.mjs",
     "playground": "npm run build && node dist/playground/server.js",
     "test:editor-browser": "npm run build:editor && node tools/editor-browser-smoke.mjs",
     "test:property": "npm run build && node dist/tests/property/replay.js",
+    "test:build:typescript": "node ./tools/test-clean-typescript-build.mjs",
     "test:compiled:full-output": "node ./tools/test-output-filter.mjs --full-output",
     "test:full-output": "npm run build && node ./tools/test-output-filter.mjs --full-output",
-    "check:full-output": "npm run format:check && npm run lint && npm run test:lint -- --full-output && npm run knip && npm run test:full-output"
+    "check:full-output": "npm run format:check && npm run lint && npm run test:lint -- --full-output && npm run knip && npm run test:build:typescript && npm run test:full-output"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.81.0",
