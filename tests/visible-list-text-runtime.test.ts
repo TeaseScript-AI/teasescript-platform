@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
-import type { InstructionPlan } from "../src/plan/model.js";
 import { run, type RuntimeOperationResult } from "../src/runtime/engine.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { compileValidPlan as compile } from "./helpers/compile-valid-plan.js";
+import { sayTexts } from "./helpers/runtime-events.js";
 
 test("selects an eligible visible list value exactly once", () => {
   const direct = runSource('say ["left", 2]', 0.75);
@@ -61,15 +61,4 @@ function runSource(
     },
   });
   return { result, randomCalls };
-}
-
-function compile(source: string): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
-}
-
-function sayTexts(result: RuntimeOperationResult): string[] {
-  return result.events.filter((event) => event.kind === "say").map((event) => event.text);
 }

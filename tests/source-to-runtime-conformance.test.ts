@@ -12,6 +12,7 @@ import {
 } from "../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { compileValidPlan as compiled } from "./helpers/compile-valid-plan.js";
 
 test("reports parser and semantic source diagnostics through the package root", () => {
   const parserFailure = compileSource("let = 1");
@@ -193,13 +194,6 @@ test("resumes a blocking wait through public checkpoint and time APIs", () => {
     ["say", "exit"],
   );
 });
-
-function compiled(source: string) {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
-}
 
 function rootBinding(
   bindings: readonly { readonly name: string; readonly value: SerializableRuntimeValue }[],

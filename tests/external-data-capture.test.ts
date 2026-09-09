@@ -27,14 +27,12 @@ import { captureExecutableData } from "../src/runtime/operations/support.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
 import { captureRuntimeSnapshotWithValidatedPlan } from "../src/runtime/state.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 const FAILING_BEFORE_DEPTH = 20_000;
 
 function compiledPlan(source = "exit"): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
+  return compileValidPlan(source);
 }
 
 function mutablePlan(source = "exit"): InstructionPlan & Record<string, unknown> {

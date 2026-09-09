@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import {
   executeInstruction,
@@ -11,6 +10,7 @@ import {
   type RuntimeCapabilityCall,
 } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 test("requires explicit own registration for an inherited builtin name", () => {
   const compiled = inheritedBuiltinPlan("valueOf");
@@ -228,8 +228,5 @@ function bindingCall(
 }
 
 function compile(source: string, builtins: readonly string[]): InstructionPlan {
-  const result = compileSource(source, { builtins });
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
+  return compileValidPlan(source, { builtins });
 }

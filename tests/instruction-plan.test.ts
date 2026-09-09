@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { run } from "../src/runtime/engine.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("compiles deterministically to the same instruction plan", () => {
   const source = "let score = 1\nscore = score + 1\nsay `${score}`\nexit";
@@ -105,13 +105,6 @@ test("compiler-produced plans remain deeply frozen", () => {
   assert.equal(Object.isFrozen(instruction.value.properties[0]), true);
   assert.equal(Object.isFrozen(instruction.value.properties[0]!.value), true);
 });
-
-function plan(source: string): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
-}
 
 function findNonJsonValue(value: unknown, active = new Set<object>()): string | null {
   if (value === null || typeof value === "string" || typeof value === "boolean") return null;

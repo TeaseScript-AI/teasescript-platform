@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  compileSource,
   completeAction,
   createCheckpoint,
   createFreshRuntimeSnapshot,
@@ -11,13 +10,7 @@ import {
   run,
   serializeCheckpoint,
 } from "../src/index.js";
-
-function compiled(source: string) {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
-}
+import { compileValidPlan as compiled } from "./helpers/compile-valid-plan.js";
 
 test("runtime inspection exposes foreground interaction provenance without mutation", () => {
   const plan = compiled(

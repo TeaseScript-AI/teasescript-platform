@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("assigns deterministic function and temporary IDs", () => {
   const source = [
@@ -438,13 +438,6 @@ test("rejects malformed function regions and aliased call temporaries", () => {
   assignment.target.index = { kind: "literal", value: 0, span: assignment.target.index.span };
   assertInvalid(unpreparedAssignment, /indexes must be prepared/u);
 });
-
-function plan(source: string): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
-}
 
 type Mutable<Value> = Value extends readonly (infer Item)[]
   ? Mutable<Item>[]

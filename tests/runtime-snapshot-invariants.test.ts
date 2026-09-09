@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import {
   CheckpointError,
   createCheckpoint,
   deserializeCheckpoint,
-  restoreCheckpoint,
   serializeCheckpoint,
   type RuntimeCheckpoint,
 } from "../src/runtime/checkpoint.js";
@@ -19,6 +17,8 @@ import {
 } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
+import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
 
@@ -277,13 +277,6 @@ function allocatorError(field: string): (error: unknown) => boolean {
     error.message === `Runtime ${field} cannot be advanced safely.`;
 }
 
-function plan(source: string): InstructionPlan {
-  const result = compileSource(source);
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
-  return result.plan!;
-}
-
 function mutableCheckpoint(checkpoint: RuntimeCheckpoint): {
   format: RuntimeCheckpoint["format"];
   version: RuntimeCheckpoint["version"];
@@ -291,13 +284,4 @@ function mutableCheckpoint(checkpoint: RuntimeCheckpoint): {
   snapshot: RuntimeSnapshot;
 } {
   return structuredClone(checkpoint);
-}
-
-function assertCheckpointRejected(value: unknown, code: string): void {
-  assert.throws(
-    () => restoreCheckpoint(value),
-    (error: unknown) => {
-      return error instanceof CheckpointError && error.info.code === code;
-    },
-  );
 }
