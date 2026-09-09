@@ -155,11 +155,15 @@ test("explicit exit cleans released pacing lineage without admitting forged paci
   );
 
   const forgedPacing = checkpointSnapshot(compiled, exited.snapshot);
-  forgedPacing.backgroundActions.push(structuredClone(replacement));
+  // EVIDENCE: the preceding kind assertion establishes the runtime-produced pacing action copied into invalid state.
+  forgedPacing.backgroundActions.push(structuredClone(replacement) as Mutable<typeof replacement>);
   expectInvalidSnapshot("explicit exit cannot retain pacing work", compiled, forgedPacing);
 
   const forgedPreparedOutput = checkpointSnapshot(compiled, exited.snapshot);
-  forgedPreparedOutput.preparedSayOutput = structuredClone(released.snapshot.preparedSayOutput);
+  // EVIDENCE: released is runtime-produced state, and this test deliberately copies its prepared output into halted state.
+  forgedPreparedOutput.preparedSayOutput = structuredClone(
+    released.snapshot.preparedSayOutput,
+  ) as Mutable<typeof released.snapshot.preparedSayOutput>;
   expectInvalidSnapshot(
     "explicit exit cannot retain prepared pacing output",
     compiled,
@@ -192,7 +196,8 @@ test("branch-local and nested explicit exits reject forged retained pacing work"
     assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);
 
     const forged = checkpointSnapshot(compiled, exited.snapshot);
-    forged.backgroundActions.push(structuredClone(pacing));
+    // EVIDENCE: the preceding kind assertion establishes the runtime-produced pacing action copied into invalid state.
+    forged.backgroundActions.push(structuredClone(pacing) as Mutable<typeof pacing>);
     expectInvalidSnapshot("branch-local explicit exit cannot retain pacing work", compiled, forged);
     assert.throws(() => createCheckpoint(compiled, forged));
   }
@@ -444,8 +449,8 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
   assert.equal(compiled.version, 19);
-  assert.equal(snapshot.version, 19);
-  assert.equal(checkpoint.version, 27);
+  assert.equal(snapshot.version, 20);
+  assert.equal(checkpoint.version, 28);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot);

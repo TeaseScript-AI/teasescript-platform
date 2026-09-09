@@ -728,6 +728,49 @@ async function vueRuntimeScenario(cdp, origin) {
   await waitFor(cdp, `document.querySelector('.player') !== null`);
   await selectVueTool(cdp, "runtime-session");
 
+  await navigate(cdp, `${origin}/player/?fixture=runtime-message-markup`);
+  await waitFor(
+    cdp,
+    `document.querySelector('.markup-heading[role="heading"]')?.textContent === 'Heading'`,
+  );
+  assertEqual(
+    await value(cdp, `document.querySelector('.message-body img') === null`),
+    true,
+    "authored HTML-like markup must remain literal text",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelector('.message-markup a')?.getAttribute('href')`),
+    "https://example.com/",
+    "message links must retain their validated destination",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelector('.message-markup a')?.getAttribute('target')`),
+    "_blank",
+    "message links must not replace the active Player session",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelector('.message-markup a')?.getAttribute('rel')`),
+    "noopener noreferrer",
+    "external message links must isolate their opener",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `Number.parseInt(getComputedStyle(document.querySelector('.markup-bold')).fontWeight, 10) >= 700`,
+    ),
+    true,
+    "bold message markup must receive controlled Player styling",
+  );
+  await physicalClick(cdp, ".markup-spoiler");
+  await waitFor(
+    cdp,
+    `document.querySelector('.markup-spoiler-revealed')?.textContent === 'Secret'`,
+  );
+
+  await navigate(cdp, `${origin}/player/`);
+  await waitFor(cdp, `document.querySelector('.player') !== null`);
+  await selectVueTool(cdp, "runtime-session");
+
   await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
   await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
   await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });

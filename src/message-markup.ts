@@ -222,6 +222,80 @@ export function messageMarkupVisibleText(message: MessageMarkup): string {
   return visibleTextFromBlocks(message.blocks);
 }
 
+export function cloneMessageMarkup(message: MessageMarkup): MessageMarkup {
+  const blocks = message.blocks.map((block): MessageMarkupBlock => {
+    switch (block.kind) {
+      case "paragraph":
+      case "quote":
+        return Object.freeze({
+          kind: block.kind,
+          lines: Object.freeze(block.lines.map(cloneMessageMarkupLine)),
+        });
+      case "heading":
+        return Object.freeze({
+          kind: "heading",
+          level: block.level,
+          line: cloneMessageMarkupLine(block.line),
+        });
+      case "list":
+        return Object.freeze({
+          kind: "list",
+          ordered: block.ordered,
+          items: Object.freeze(
+            block.items.map((item) =>
+              Object.freeze({ ordinal: item.ordinal, line: cloneMessageMarkupLine(item.line) }),
+            ),
+          ),
+        });
+    }
+  });
+  return Object.freeze({
+    kind: "messageMarkup",
+    blocks: Object.freeze(blocks),
+    visibleText: message.visibleText,
+  });
+}
+
+export function isMessageMarkup(value: unknown): value is MessageMarkup {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactKeys(value, ["kind", "blocks", "visibleText"]) ||
+    value.kind !== "messageMarkup" ||
+    typeof value.visibleText !== "string" ||
+    !isDenseArray(value.blocks) ||
+    value.blocks.length === 0
+  )
+    return false;
+
+  const lines: MessageMarkupLine[] = [];
+  const blocks: MessageMarkupBlock[] = [];
+  let previous: MessageMarkupBlock | null = null;
+  for (const candidate of value.blocks) {
+    if (!validMessageMarkupBlock(candidate)) return false;
+    if (
+      (candidate.kind === "paragraph" && previous?.kind === "paragraph") ||
+      (candidate.kind === "quote" && previous?.kind === "quote") ||
+      (candidate.kind === "list" &&
+        previous?.kind === "list" &&
+        candidate.ordered === previous.ordered)
+    )
+      return false;
+    if (candidate.kind === "heading") lines.push(candidate.line);
+    else if (candidate.kind === "list") {
+      for (const item of candidate.items) lines.push(item.line);
+    } else {
+      for (const line of candidate.lines) lines.push(line);
+    }
+    blocks.push(candidate);
+    previous = candidate;
+  }
+  if (lines.length === 0 || lines.at(-1)?.ending !== "") return false;
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    if (lines[index]!.ending === "") return false;
+  }
+  return visibleTextFromBlocks(blocks) === value.visibleText;
+}
+
 export function escapeMarkup(text: string): string {
   const escaped: string[] = [];
   for (const character of text) {
@@ -229,6 +303,143 @@ export function escapeMarkup(text: string): string {
     escaped.push(character);
   }
   return escaped.join("");
+}
+
+function cloneMessageMarkupLine(line: MessageMarkupLine): MessageMarkupLine {
+  return Object.freeze({
+    text: line.text,
+    spans: Object.freeze(line.spans.map((span) => Object.freeze({ ...span }))),
+    ending: line.ending,
+  });
+}
+
+function validMessageMarkupBlock(value: unknown): value is MessageMarkupBlock {
+  if (!isPlainRecord(value) || typeof value.kind !== "string") return false;
+  switch (value.kind) {
+    case "paragraph":
+    case "quote":
+      return (
+        hasExactKeys(value, ["kind", "lines"]) &&
+        isDenseArray(value.lines) &&
+        value.lines.length > 0 &&
+        value.lines.every(validMessageMarkupLine)
+      );
+    case "heading":
+      return (
+        hasExactKeys(value, ["kind", "level", "line"]) &&
+        (value.level === 1 || value.level === 2 || value.level === 3) &&
+        validMessageMarkupLine(value.line)
+      );
+    case "list":
+      if (
+        !hasExactKeys(value, ["kind", "ordered", "items"]) ||
+        typeof value.ordered !== "boolean" ||
+        !isDenseArray(value.items) ||
+        value.items.length === 0
+      )
+        return false;
+      const ordered = value.ordered;
+      return value.items.every((item) => validMessageMarkupListItem(item, ordered));
+    default:
+      return false;
+  }
+}
+
+function validMessageMarkupListItem(
+  value: unknown,
+  ordered: boolean,
+): value is MessageMarkupListItem {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ["ordinal", "line"]) &&
+    (ordered
+      ? typeof value.ordinal === "string" && /^[1-9][0-9]*$/u.test(value.ordinal)
+      : value.ordinal === null) &&
+    validMessageMarkupLine(value.line)
+  );
+}
+
+function validMessageMarkupLine(value: unknown): value is MessageMarkupLine {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ["text", "spans", "ending"]) &&
+    typeof value.text === "string" &&
+    (value.ending === "" || value.ending === "\n" || value.ending === "\r\n") &&
+    isDenseArray(value.spans) &&
+    validMessageMarkupSpans(value.spans, value.text.length)
+  );
+}
+
+function validMessageMarkupSpans(spans: readonly unknown[], textLength: number): boolean {
+  const active: Array<{ readonly start: number; readonly end: number }> = [];
+  const previousEnds: number[] = [];
+  for (const candidate of spans) {
+    if (!validMessageMarkupSpan(candidate, textLength)) return false;
+    while (active.length > candidate.depth) active.pop();
+    if (candidate.depth !== active.length) return false;
+    const parent = active.at(-1);
+    if (parent !== undefined && (candidate.start < parent.start || candidate.end > parent.end))
+      return false;
+    if ((previousEnds[candidate.depth] ?? 0) > candidate.start) return false;
+    previousEnds.length = candidate.depth + 1;
+    previousEnds[candidate.depth] = candidate.end;
+    active.push(candidate);
+  }
+  return true;
+}
+
+function validMessageMarkupSpan(value: unknown, textLength: number): value is MessageMarkupSpan {
+  if (
+    !isPlainRecord(value) ||
+    typeof value.kind !== "string" ||
+    typeof value.start !== "number" ||
+    typeof value.end !== "number" ||
+    typeof value.depth !== "number" ||
+    !Number.isSafeInteger(value.start) ||
+    !Number.isSafeInteger(value.end) ||
+    !Number.isSafeInteger(value.depth) ||
+    value.start < 0 ||
+    value.end < value.start ||
+    value.end > textLength ||
+    value.depth < 0
+  )
+    return false;
+  if (["italic", "bold", "strikethrough", "code", "underline", "spoiler"].includes(value.kind))
+    return hasExactKeys(value, ["kind", "start", "end", "depth"]);
+  if (!hasExactKeys(value, ["kind", "value", "start", "end", "depth"])) {
+    if (
+      value.kind !== "link" ||
+      !hasExactKeys(value, ["kind", "target", "start", "end", "depth"]) ||
+      typeof value.target !== "string"
+    )
+      return false;
+    return validUrl(value.target) === value.target;
+  }
+  if (typeof value.value !== "string") return false;
+  if (value.kind === "color" || value.kind === "backgroundColor")
+    return /^#[0-9a-f]{6}$/u.test(value.value);
+  if (value.kind === "weight") return WEIGHTS.has(value.value);
+  if (value.kind === "size") return SIZES.has(value.value);
+  return false;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
+}
+
+function isDenseArray(value: unknown): value is unknown[] {
+  if (!Array.isArray(value) || Object.keys(value).length !== value.length) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index)) return false;
+  }
+  return true;
 }
 
 function splitLines(text: string): SourceLine[] {

@@ -6,6 +6,7 @@ import {
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../interaction-limits.js";
+import { isMessageMarkup } from "../message-markup.js";
 import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js";
 import { requiredActionCompletionEvents } from "./actions/model.js";
 import { recordValidationTestWork } from "../validation-testing.js";
@@ -599,6 +600,7 @@ function isPreparedSayOutputShape(value: unknown): value is Record<string, unkno
       "owningInstruction",
       "continuationInstruction",
       "speaker",
+      "content",
       "text",
       "durationMs",
       "skippable",
@@ -611,7 +613,9 @@ function validPreparedSayOutputDomain(value: Record<string, unknown>): boolean {
     nonNegativeSafeInteger(value.owningInstruction) &&
     nonNegativeSafeInteger(value.continuationInstruction) &&
     value.continuationInstruction === value.owningInstruction + 1 &&
+    isMessageMarkup(value.content) &&
     typeof value.text === "string" &&
+    value.content.visibleText === value.text &&
     validPreparedSayDuration(value.durationMs) &&
     typeof value.skippable === "boolean"
   );

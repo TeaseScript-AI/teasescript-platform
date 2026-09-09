@@ -1,5 +1,22 @@
 export { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 export {
+  cloneMessageMarkup,
+  escapeMarkup,
+  isMessageMarkup,
+  messageMarkupVisibleText,
+  parseMessageMarkup,
+  type MessageMarkup,
+  type MessageMarkupBlock,
+  type MessageMarkupHeading,
+  type MessageMarkupLine,
+  type MessageMarkupLineEnding,
+  type MessageMarkupList,
+  type MessageMarkupListItem,
+  type MessageMarkupParagraph,
+  type MessageMarkupQuote,
+  type MessageMarkupSpan,
+} from "./message-markup.js";
+export {
   INTERACTION_LIMITS_VERSION,
   INTERACTION_WHITESPACE_CLASSIFICATION,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
@@ -11,6 +28,7 @@ export { lex, type LexResult } from "./lexer.js";
 export { parse, type ParseResult } from "./parser.js";
 export {
   CORE_RUNTIME_BUILTINS,
+  PLATFORM_STANDARD_LIBRARY_PRELUDE,
   compileSource,
   type CompilationResult,
   type CompileOptions,
@@ -159,6 +177,7 @@ export type {
   RuntimeDelayActionSettlementSnapshot,
   RuntimeInteractionActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
+  RuntimePreparedSayOutputSnapshot,
 } from "./runtime/actions/model.js";
 export {
   DEFAULT_PLAYGROUND_SEED,

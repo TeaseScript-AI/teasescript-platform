@@ -1,4 +1,5 @@
 import type { SourceSpan } from "../source.js";
+import type { MessageMarkup } from "../message-markup.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
@@ -16,6 +17,7 @@ export interface SayEvent {
   readonly kind: "say";
   readonly sequence: number;
   readonly speaker: OutputSpeaker | null;
+  readonly content: MessageMarkup;
   readonly text: string;
   readonly span: SourceSpan;
 }

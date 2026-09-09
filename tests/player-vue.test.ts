@@ -195,8 +195,10 @@ test("Vue Player route has one component owner and explicit development tool bou
 
 test("Vue transcript uses TanStack's single virtual scroll and anchor owner", async () => {
   const root = process.cwd();
-  const [transcript, styles, app, fixture] = await Promise.all([
+  const [transcript, markupLine, markupMessage, styles, app, fixture] = await Promise.all([
     readFile(resolve(root, "player/vue/src/components/PlayerTranscript.vue"), "utf8"),
+    readFile(resolve(root, "player/vue/src/components/PlayerMarkupLine.vue"), "utf8"),
+    readFile(resolve(root, "player/vue/src/components/PlayerMessageMarkup.vue"), "utf8"),
     readFile(resolve(root, "player/styles/components-transcript.css"), "utf8"),
     readFile(resolve(root, "player/vue/src/App.vue"), "utf8"),
     readFile(resolve(root, "player/vue/src/components/TranscriptStressFixture.vue"), "utf8"),
@@ -212,6 +214,11 @@ test("Vue transcript uses TanStack's single virtual scroll and anchor owner", as
   assert.match(transcript, /setPointerCapture/u);
   assert.match(transcript, /lostpointercapture/u);
   assert.match(transcript, /role="log"/u);
+  assert.match(transcript, /<PlayerMessageMarkup/u);
+  assert.match(markupLine, /aria-label="Reveal spoiler"/u);
+  assert.match(markupLine, /target="_blank"/u);
+  assert.match(markupLine, /rel="noopener noreferrer"/u);
+  assert.doesNotMatch(`${transcript}\n${markupLine}\n${markupMessage}`, /innerHTML|v-html/u);
   assert.doesNotMatch(transcript, /column-reverse|scrollTop\s*\+=|scrollHeight\s*-/u);
   assert.match(styles, /\.transcript-virtualizer\s*\{/u);
   assert.match(styles, /inset-block-start:\s*0/u);

@@ -1,4 +1,5 @@
 import type { InteractionResultDomain, InteractionUiPayload } from "../../plan/model.js";
+import type { MessageMarkup } from "../../message-markup.js";
 
 /** Shared serializable pending-action and settlement contracts. */
 export interface RuntimeDelayActionSnapshot {
@@ -36,6 +37,7 @@ export interface RuntimePreparedSayOutputSnapshot {
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly speaker: import("../events.js").OutputSpeaker | null;
+  readonly content: MessageMarkup;
   readonly text: string;
   readonly durationMs: number;
   readonly skippable: boolean;

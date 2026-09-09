@@ -20,7 +20,7 @@ export interface CompilationResult {
   readonly plan: InstructionPlan | null;
 }
 
-export { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
+export { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
 
 /** Parses, validates, and compiles source without executing it. */
 export function compileSource(source: string, options: CompileOptions = {}): CompilationResult {
