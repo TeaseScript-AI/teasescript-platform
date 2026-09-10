@@ -81,7 +81,13 @@ class SemanticScope {
   public constructor(readonly parent: SemanticScope | null = null) {}
 
   public resolve(name: string): Binding | undefined {
-    return this.bindings.get(name) ?? this.parent?.resolve(name);
+    let scope: SemanticScope | null = this;
+    while (scope !== null) {
+      const binding = scope.bindings.get(name);
+      if (binding !== undefined) return binding;
+      scope = scope.parent;
+    }
+    return undefined;
   }
 
   public declare(name: string, binding: Binding): boolean {
@@ -147,7 +153,7 @@ class SemanticValidator {
     }
     for (const statement of program.statements) {
       if (statement.kind !== "functionDeclaration") {
-        this.#validateStatement(statement, this.#root, 0);
+        runCompileTask(this.#validateStatement(statement, this.#root, 0));
       }
     }
     for (const statement of program.statements) {
@@ -160,17 +166,21 @@ class SemanticValidator {
     }
   }
 
-  #validateStatements(
+  *#validateStatements(
     statements: readonly Statement[],
     scope: SemanticScope,
     loopDepth: number,
-  ): void {
+  ): CompileTask<void> {
     for (const statement of statements) {
-      this.#validateStatement(statement, scope, loopDepth);
+      yield* compileChild(this.#validateStatement(statement, scope, loopDepth));
     }
   }
 
-  #validateStatement(statement: Statement, scope: SemanticScope, loopDepth: number): void {
+  *#validateStatement(
+    statement: Statement,
+    scope: SemanticScope,
+    loopDepth: number,
+  ): CompileTask<void> {
     switch (statement.kind) {
       case "letStatement":
         this.#validateExpression(statement.initializer, scope, null);
@@ -242,12 +252,12 @@ class SemanticValidator {
         return;
       case "ifStatement":
         this.#validateExpression(statement.condition, scope, null);
-        this.#validateBlock(statement.thenBlock, scope, loopDepth);
+        yield* compileChild(this.#validateBlock(statement.thenBlock, scope, loopDepth));
         if (statement.elseBlock !== null) {
           if (statement.elseBlock.kind === "ifStatement") {
-            this.#validateStatement(statement.elseBlock, scope, loopDepth);
+            yield* compileChild(this.#validateStatement(statement.elseBlock, scope, loopDepth));
           } else {
-            this.#validateBlock(statement.elseBlock, scope, loopDepth);
+            yield* compileChild(this.#validateBlock(statement.elseBlock, scope, loopDepth));
           }
         }
         return;
@@ -267,7 +277,7 @@ class SemanticValidator {
             statement.count.span,
           );
         }
-        this.#validateBlock(statement.body, scope, loopDepth + 1);
+        yield* compileChild(this.#validateBlock(statement.body, scope, loopDepth + 1));
         return;
       case "forStatement": {
         this.#validateExpression(statement.iterable, scope, null);
@@ -290,12 +300,14 @@ class SemanticValidator {
         }
         const loopScope = new SemanticScope(scope);
         this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope);
-        this.#validateStatements(statement.body.statements, loopScope, loopDepth + 1);
+        yield* compileChild(
+          this.#validateStatements(statement.body.statements, loopScope, loopDepth + 1),
+        );
         return;
       }
       case "whileStatement":
         this.#validateExpression(statement.condition, scope, null);
-        this.#validateBlock(statement.body, scope, loopDepth + 1);
+        yield* compileChild(this.#validateBlock(statement.body, scope, loopDepth + 1));
         return;
       case "breakStatement":
       case "continueStatement":
@@ -403,14 +415,16 @@ class SemanticValidator {
 
     this.#functionDepth += 1;
     try {
-      this.#validateStatements(declaration.body.statements, bodyScope, 0);
+      runCompileTask(this.#validateStatements(declaration.body.statements, bodyScope, 0));
     } finally {
       this.#functionDepth -= 1;
     }
   }
 
-  #validateBlock(block: Block, parent: SemanticScope, loopDepth: number): void {
-    this.#validateStatements(block.statements, new SemanticScope(parent), loopDepth);
+  *#validateBlock(block: Block, parent: SemanticScope, loopDepth: number): CompileTask<void> {
+    yield* compileChild(
+      this.#validateStatements(block.statements, new SemanticScope(parent), loopDepth),
+    );
   }
 
   #validateAssignmentTarget(target: AssignmentTarget, scope: SemanticScope): void {

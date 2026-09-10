@@ -20,13 +20,13 @@ test("large flat chains complete full compilation with source provenance", () =>
   }
 });
 
-test("flat, parenthesis, collection, and object compilation remain iterative with a constrained host stack", () => {
+test("flat, parenthesis, collection, object, and block compilation remain iterative with a constrained host stack", () => {
   const source = flatChain(1_024);
   const nestedSource = `let value = ${"(".repeat(1_024)}1${")".repeat(1_024)}`;
   const collectionSource = `let value = ${"[".repeat(1_024)}1${"]".repeat(1_024)}\nexit`;
   const setSource = `let value = ${"set[".repeat(1_024)}1${"]".repeat(1_024)}`;
   const objectSource = `let value = ${"{ value: ".repeat(1_024)}1${" }".repeat(1_024)}\nexit`;
-  const residualNestedSource = `${"if true {".repeat(1_024)}exit${"}".repeat(1_024)}`;
+  const blockSource = `${"if true {".repeat(1_024)}exit${"}".repeat(1_024)}`;
   const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
   const parserUrl = new URL("../src/parser.js", import.meta.url).href;
   const semanticUrl = new URL("../src/semantic.js", import.meta.url).href;
@@ -67,7 +67,7 @@ test("flat, parenthesis, collection, and object compilation remain iterative wit
       const compiled = compileSource("let value = " + expression);
       return {codes: compiled.diagnostics.map((diagnostic) => diagnostic.code), status: compiled.plan ? run(compiled.plan, createFreshRuntimeSnapshot(compiled.plan)).snapshot.status : null};
     });
-    const containedResidual = compileSource(process.env.TEASESCRIPT_RESIDUAL_NESTED_SOURCE);
+    const compiledBlock = compileSource(process.env.TEASESCRIPT_BLOCK_SOURCE);
     const runtimeResult = run(
       compiledCollection.plan,
       createFreshRuntimeSnapshot(compiledCollection.plan, {
@@ -126,12 +126,10 @@ test("flat, parenthesis, collection, and object compilation remain iterative wit
       setLastCode: compiledSet.diagnostics.at(-1)?.code,
       setFirstStart: compiledSet.diagnostics[0]?.span.start.offset,
       setLastStart: compiledSet.diagnostics.at(-1)?.span.start.offset,
-      residualCodes: containedResidual.diagnostics.map((diagnostic) => diagnostic.code),
-      residualProgramStatements: containedResidual.program.statements.length,
-      residualSpan: containedResidual.diagnostics.map((diagnostic) => [
-        diagnostic.span.start.offset,
-        diagnostic.span.end.offset,
-      ]),
+      blockCodes: compiledBlock.diagnostics.map((diagnostic) => diagnostic.code),
+      blockProgramStatements: compiledBlock.program.statements.length,
+      blockSpan: [compiledBlock.program.span.start.offset, compiledBlock.program.span.end.offset],
+      blockRuntimeStatus: run(compiledBlock.plan, createFreshRuntimeSnapshot(compiledBlock.plan)).snapshot.status,
     }));
   `;
   const child = spawnSync(
@@ -146,7 +144,7 @@ test("flat, parenthesis, collection, and object compilation remain iterative wit
         TEASESCRIPT_COLLECTION_SOURCE: collectionSource,
         TEASESCRIPT_OBJECT_SOURCE: objectSource,
         TEASESCRIPT_SET_SOURCE: setSource,
-        TEASESCRIPT_RESIDUAL_NESTED_SOURCE: residualNestedSource,
+        TEASESCRIPT_BLOCK_SOURCE: blockSource,
       },
     },
   );
@@ -184,10 +182,44 @@ test("flat, parenthesis, collection, and object compilation remain iterative wit
     setLastCode: "TSV006",
     setFirstStart: 4_104,
     setLastStart: 16,
-    residualCodes: ["TSC007"],
-    residualProgramStatements: 0,
-    residualSpan: [[0, residualNestedSource.length]],
+    blockCodes: [],
+    blockProgramStatements: 1,
+    blockSpan: [0, blockSource.length],
+    blockRuntimeStatus: "halted",
   });
+});
+
+test("compiler containment recognizes native stack failures without relying on a failure depth", () => {
+  const source = "let value = 1";
+  for (const error of [
+    new RangeError("Maximum call stack size exceeded"),
+    new RangeError("Stack overflow"),
+    new SyntaxError("Invalid regular expression: /[.eE]/u: Stack overflow"),
+  ]) {
+    const original = RegExp.prototype.test;
+    let result;
+    RegExp.prototype.test = () => {
+      throw error;
+    };
+    try {
+      result = compileSource(source);
+    } finally {
+      RegExp.prototype.test = original;
+    }
+    assert.equal(result.plan, null);
+    assert.deepEqual(result.program.statements, []);
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => diagnostic.code),
+      ["TSC007"],
+    );
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [[0, source.length]],
+    );
+  }
 });
 
 test("compileSource does not convert unrelated RangeErrors into diagnostics", () => {

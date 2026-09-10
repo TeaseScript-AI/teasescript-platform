@@ -117,7 +117,7 @@ class Parser {
     this.#skipNewlines();
     while (!this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
-      const statement = this.#parseStatement();
+      const statement = runParse(this.#parseStatement());
       if (statement !== null) statements.push(statement);
       if (this.#current === startIndex) this.#advance();
 
@@ -136,7 +136,7 @@ class Parser {
     });
   }
 
-  #parseStatement(): Statement | null {
+  *#parseStatement(): ParseTask<Statement | null> {
     if (this.#checkIdentifier("showButton")) {
       return this.#parseShowButtonStatement();
     }
@@ -159,19 +159,19 @@ class Parser {
       case TokenKind.KeywordLet:
         return this.#parseLetStatement();
       case TokenKind.KeywordIf:
-        return this.#parseIfStatement();
+        return yield* parseChild(this.#parseIfStatement());
       case TokenKind.KeywordRepeat:
-        return this.#parseRepeatStatement();
+        return yield* parseChild(this.#parseRepeatStatement());
       case TokenKind.KeywordFor:
-        return this.#parseForStatement();
+        return yield* parseChild(this.#parseForStatement());
       case TokenKind.KeywordWhile:
-        return this.#parseWhileStatement();
+        return yield* parseChild(this.#parseWhileStatement());
       case TokenKind.KeywordBreak:
         return this.#parseLoopControl("breakStatement");
       case TokenKind.KeywordContinue:
         return this.#parseLoopControl("continueStatement");
       case TokenKind.KeywordFunction:
-        return this.#parseFunctionDeclaration();
+        return yield* parseChild(this.#parseFunctionDeclaration());
       case TokenKind.KeywordReturn:
         return this.#parseReturnStatement();
       default:
@@ -601,7 +601,7 @@ class Parser {
     });
   }
 
-  #parseIfStatement(): IfStatement | null {
+  *#parseIfStatement(): ParseTask<IfStatement | null> {
     const keyword = this.#advance();
     const condition = this.#parseRequiredExpression();
     if (condition === null) {
@@ -609,7 +609,7 @@ class Parser {
       return null;
     }
     this.#skipContinuationNewlines();
-    const thenBlock = this.#parseBlock();
+    const thenBlock = yield* parseChild(this.#parseBlock());
     if (thenBlock === null) return null;
 
     const beforePotentialElse = this.#current;
@@ -617,7 +617,9 @@ class Parser {
     let elseBlock: Block | IfStatement | null = null;
     if (this.#match(TokenKind.KeywordElse)) {
       this.#skipContinuationNewlines();
-      elseBlock = this.#check(TokenKind.KeywordIf) ? this.#parseIfStatement() : this.#parseBlock();
+      elseBlock = this.#check(TokenKind.KeywordIf)
+        ? yield* parseChild(this.#parseIfStatement())
+        : yield* parseChild(this.#parseBlock());
       if (elseBlock === null) return null;
     } else {
       this.#current = beforePotentialElse;
@@ -631,7 +633,7 @@ class Parser {
     });
   }
 
-  #parseRepeatStatement(): RepeatStatement | null {
+  *#parseRepeatStatement(): ParseTask<RepeatStatement | null> {
     const keyword = this.#advance();
     const count = this.#parseRequiredExpression();
     if (count === null) {
@@ -639,7 +641,7 @@ class Parser {
       return null;
     }
     this.#skipContinuationNewlines();
-    const body = this.#parseBlock();
+    const body = yield* parseChild(this.#parseBlock());
     if (body === null) return null;
     return Object.freeze({
       kind: "repeatStatement",
@@ -649,7 +651,7 @@ class Parser {
     });
   }
 
-  #parseForStatement(): ForStatement | null {
+  *#parseForStatement(): ParseTask<ForStatement | null> {
     const keyword = this.#advance();
     if (!this.#check(TokenKind.Identifier)) {
       this.#reportInsertion(
@@ -674,7 +676,7 @@ class Parser {
       return null;
     }
     this.#skipContinuationNewlines();
-    const body = this.#parseBlock();
+    const body = yield* parseChild(this.#parseBlock());
     if (body === null) return null;
     return Object.freeze({
       kind: "forStatement",
@@ -685,7 +687,7 @@ class Parser {
     });
   }
 
-  #parseWhileStatement(): WhileStatement | null {
+  *#parseWhileStatement(): ParseTask<WhileStatement | null> {
     const keyword = this.#advance();
     const condition = this.#parseRequiredExpression();
     if (condition === null) {
@@ -693,7 +695,7 @@ class Parser {
       return null;
     }
     this.#skipContinuationNewlines();
-    const body = this.#parseBlock();
+    const body = yield* parseChild(this.#parseBlock());
     if (body === null) return null;
     return Object.freeze({
       kind: "whileStatement",
@@ -710,7 +712,7 @@ class Parser {
     return Object.freeze({ kind, span: copySpan(keyword.span) });
   }
 
-  #parseFunctionDeclaration(): FunctionDeclaration | null {
+  *#parseFunctionDeclaration(): ParseTask<FunctionDeclaration | null> {
     const keyword = this.#advance();
     if (!this.#check(TokenKind.Identifier) && !this.#check(TokenKind.KeywordWait)) {
       this.#reportInsertion(
@@ -764,7 +766,7 @@ class Parser {
       }
     }
     this.#skipContinuationNewlines();
-    const body = this.#parseBlock();
+    const body = yield* parseChild(this.#parseBlock());
     if (body === null) return null;
     return Object.freeze({
       kind: "functionDeclaration",
@@ -836,7 +838,7 @@ class Parser {
     });
   }
 
-  #parseBlock(): Block | null {
+  *#parseBlock(): ParseTask<Block | null> {
     if (!this.#match(TokenKind.LeftBrace)) {
       this.#reportInsertion(parserDiagnosticCode.expectedBlock, "Expected '{' to start the block.");
       return null;
@@ -846,7 +848,7 @@ class Parser {
     this.#skipNewlines();
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
       const startIndex = this.#current;
-      const statement = this.#parseStatement();
+      const statement = yield* parseChild(this.#parseStatement());
       if (statement !== null) statements.push(statement);
       if (this.#current === startIndex) this.#advance();
       if (this.#recoveredAtStatementBoundary) {

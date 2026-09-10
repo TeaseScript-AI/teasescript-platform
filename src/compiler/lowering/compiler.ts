@@ -77,10 +77,14 @@ export class InstructionCompiler {
   }
 
   public compileStatements(statements: readonly Statement[]): void {
-    for (const statement of statements) this.#compileStatement(statement);
+    runCompileTask(this.#compileStatements(statements));
   }
 
-  #compileStatement(statement: Statement): void {
+  *#compileStatements(statements: readonly Statement[]): CompileTask<void> {
+    for (const statement of statements) yield* compileChild(this.#compileStatement(statement));
+  }
+
+  *#compileStatement(statement: Statement): CompileTask<void> {
     switch (statement.kind) {
       case "speakerDeclaration":
         if (statement.properties.some((property) => this.#containsUserCall(property.value))) {
@@ -291,22 +295,28 @@ export class InstructionCompiler {
         return;
       }
       case "ifStatement":
-        this.#compileIf(statement);
+        yield* compileChild(this.#compileIf(statement));
         return;
       case "repeatStatement":
-        this.#compileLoop("repeat", statement.count, statement.body, null, statement.span);
+        yield* compileChild(
+          this.#compileLoop("repeat", statement.count, statement.body, null, statement.span),
+        );
         return;
       case "forStatement":
-        this.#compileLoop(
-          "for",
-          statement.iterable,
-          statement.body,
-          statement.variable.name,
-          statement.span,
+        yield* compileChild(
+          this.#compileLoop(
+            "for",
+            statement.iterable,
+            statement.body,
+            statement.variable.name,
+            statement.span,
+          ),
         );
         return;
       case "whileStatement":
-        this.#compileLoop("while", statement.condition, statement.body, null, statement.span);
+        yield* compileChild(
+          this.#compileLoop("while", statement.condition, statement.body, null, statement.span),
+        );
         return;
       case "breakStatement":
       case "continueStatement": {
@@ -344,7 +354,7 @@ export class InstructionCompiler {
     statement satisfies never;
   }
 
-  #compileIf(statement: Extract<Statement, { kind: "ifStatement" }>): void {
+  *#compileIf(statement: Extract<Statement, { kind: "ifStatement" }>): CompileTask<void> {
     const lowered = this.#lowerExpression(statement.condition);
     const conditional = this.instructions.length;
     const conditionalInstruction: JumpIfFalseInstruction = {
@@ -355,7 +365,7 @@ export class InstructionCompiler {
     };
     this.instructions.push(conditionalInstruction);
     this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
-    this.#compileBlock(statement.thenBlock);
+    yield* compileChild(this.#compileBlock(statement.thenBlock));
     if (statement.elseBlock === null) {
       const falseCleanup = this.instructions.length;
       this.instructions[conditional] = { ...conditionalInstruction, target: falseCleanup };
@@ -374,26 +384,26 @@ export class InstructionCompiler {
     this.instructions[conditional] = { ...conditionalInstruction, target: falseCleanup };
     this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
     if (statement.elseBlock.kind === "ifStatement") {
-      this.#compileIf(statement.elseBlock);
+      yield* compileChild(this.#compileIf(statement.elseBlock));
     } else {
-      this.#compileBlock(statement.elseBlock);
+      yield* compileChild(this.#compileBlock(statement.elseBlock));
     }
     this.instructions[jump] = { ...jumpInstruction, target: this.instructions.length };
   }
 
-  #compileBlock(block: Block): void {
+  *#compileBlock(block: Block): CompileTask<void> {
     this.instructions.push({ kind: "enterScope", span: copySpan(block.span) });
-    this.compileStatements(block.statements);
+    yield* compileChild(this.#compileStatements(block.statements));
     this.instructions.push({ kind: "leaveScope", span: copySpan(block.span) });
   }
 
-  #compileLoop(
+  *#compileLoop(
     loopKind: "repeat" | "for" | "while",
     expression: Expression,
     body: Block,
     variable: string | null,
     span: SourceSpan,
-  ): void {
+  ): CompileTask<void> {
     const loopId = this.#nextLoopId;
     this.#nextLoopId += 1;
     const continueTarget = this.instructions.length;
@@ -426,7 +436,7 @@ export class InstructionCompiler {
     const breaks: number[] = [];
     const context = { loopId, continueTarget: instruction.continueTarget, breaks };
     this.#loops.push(context);
-    this.compileStatements(body.statements);
+    yield* compileChild(this.#compileStatements(body.statements));
     this.instructions.push({
       kind: "loopControl",
       action: "continue",
