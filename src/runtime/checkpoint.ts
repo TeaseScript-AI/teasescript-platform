@@ -91,8 +91,9 @@ function serializeJsonIterative(value: unknown): string {
     for (let i = keys.length - 1; i >= 0; i--) {
       const key = keys[i]!;
       if (i < keys.length - 1) stack.push({ value: ",", state: "close" });
-      // EVIDENCE: key comes from Object.keys(current), so it is an own string property.
-      stack.push({ value: (current as Record<string, unknown>)[key], state: "value" });
+      // EVIDENCE: validated checkpoint containers are plain JSON objects at this boundary.
+      const entry = (current as Record<string, unknown>)[key];
+      stack.push({ value: entry, state: "value" });
       stack.push({ value: ":", state: "close" });
       stack.push({ value: JSON.stringify(key), state: "close" });
     }
