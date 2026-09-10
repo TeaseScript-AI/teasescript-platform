@@ -61,17 +61,15 @@ the result carries an empty program with the complete source span.
 This is failure containment at the normal compiler boundary, not an input preflight or rejection policy. The compiler
 does not count source depth, impose a numeric nesting limit, or promise that a particular source size will compile on
 every JavaScript host. Flat binary-chain semantic traversal, synchronous plan construction, prepared-reference scanning,
-and plan-expression validation avoid the native stack. The parser also handles direct parenthesis and list/set chains
-and pure single-property object-wrapper chains iteratively, including ordinary innermost object expressions and deep
-children beside siblings. Collection/object semantic, lowering, plan-validation, fresh-state, and runtime paths avoid
-recursive descent through consecutive collections and objects. With a deliberately constrained child-process stack,
-focused regressions compile 1,024 nested groups, compile and run 1,024 nested lists and objects, restore the nested
-object checkpoint in memory, and produce normal semantic diagnostics for 1,024 nested sets. Parenthesis nesting with
-expression work between successive closing groups, repeated sibling or mixed object/list nesting at each level,
-intervening expression work, string nesting, nested statements, and other recursive shapes may reach a host-dependent
-native boundary. Issue #410 tracks repeated sibling and mixed object/list parser work. The constrained child process
-retains `TSC007`, an empty program, and the complete source span for nested statements. These regression depths exercise
-repaired and residual structures without becoming CI capacity thresholds or supported capacity claims.
+and plan-expression validation avoid the native stack. General expression parsing and the nested string/interpolation
+lexer cycle use an explicit continuation stack, including repeated siblings, mixed objects/collections, parenthesized
+work, calls, indexing, and interaction expressions. These paths retain ordinary delimiter and diagnostic recovery
+without wrapper lookahead or subtree reparsing. Collection/object semantic, lowering, plan-validation, fresh-state,
+and runtime paths avoid recursive descent through consecutive collections and objects. Downstream expression work
+and nested statements may still reach a host-dependent native boundary; issues #412 and #411 track those remaining
+mechanisms. Constrained-stack regressions distinguish successful parsing from downstream compilation and execution,
+and retain compiler containment for residual statement nesting. Fixture depths exercise repaired and residual
+structures without becoming supported-capacity claims or language limits.
 
 Checkpoint capture, restore, and the public `serializeCheckpoint` path use iterative traversal for validated
 checkpoint data, preserving JSON wire ordering and scalar representation without introducing a depth rejection
