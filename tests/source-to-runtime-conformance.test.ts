@@ -207,3 +207,13 @@ function rootBinding(
 ): SerializableRuntimeValue | undefined {
   return bindings.find((binding) => binding.name === name)?.value;
 }
+
+test("serializes and resumes source-produced nested collections through the public JSON route", () => {
+  const source = `let value = ${"[".repeat(96)}1${"]".repeat(96)}\nexit`;
+  const plan = compiled(source);
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  const checkpoint = createCheckpoint(plan, result.snapshot);
+  const encoded = serializeCheckpoint(checkpoint);
+  const restored = deserializeCheckpoint(encoded);
+  assert.deepEqual(restored.snapshot, checkpoint.snapshot);
+});
