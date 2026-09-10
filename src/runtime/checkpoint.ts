@@ -49,7 +49,52 @@ export function createCheckpoint(
 
 export function serializeCheckpoint(checkpoint: RuntimeCheckpoint): string {
   const restored = restoreCheckpoint(checkpoint);
-  return JSON.stringify(restored);
+  return serializeJsonIterative(restored);
+}
+
+function serializeJsonIterative(value: unknown): string {
+  const out: string[] = [];
+  const stack: Array<{ value: unknown; state: "value" } | { value: string; state: "close" }> = [
+    { value, state: "value" },
+  ];
+  while (stack.length > 0) {
+    // EVIDENCE: stack is non-empty because the loop condition was checked immediately before pop.
+    const frame = stack.pop()!;
+    if (frame.state === "close") {
+      out.push(frame.value);
+      continue;
+    }
+    const current = frame.value;
+    if (current === null || typeof current !== "object") {
+      const encoded = JSON.stringify(current);
+      if (encoded === undefined) throw new TypeError("Checkpoint contains a non-JSON-safe value.");
+      out.push(encoded);
+      continue;
+    }
+    if (Array.isArray(current)) {
+      out.push("[");
+      stack.push({ value: "]", state: "close" });
+      for (let i = current.length - 1; i >= 0; i--) {
+        if (i < current.length - 1) stack.push({ value: ",", state: "close" });
+        stack.push({ value: current[i], state: "value" });
+      }
+      continue;
+    }
+    // EVIDENCE: validated checkpoint containers are plain JSON objects at this boundary.
+    const keys = Object.keys(current as Record<string, unknown>);
+    out.push("{");
+    stack.push({ value: "}", state: "close" });
+    for (let i = keys.length - 1; i >= 0; i--) {
+      const key = keys[i]!;
+      if (i < keys.length - 1) stack.push({ value: ",", state: "close" });
+      // EVIDENCE: validated checkpoint containers are plain JSON objects at this boundary.
+      const entry = (current as Record<string, unknown>)[key];
+      stack.push({ value: entry, state: "value" });
+      stack.push({ value: ":", state: "close" });
+      stack.push({ value: JSON.stringify(key), state: "close" });
+    }
+  }
+  return out.join("");
 }
 
 export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {

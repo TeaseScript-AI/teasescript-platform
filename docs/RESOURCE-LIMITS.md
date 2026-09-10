@@ -73,10 +73,10 @@ native boundary. Issue #410 tracks repeated sibling and mixed object/list parser
 retains `TSC007`, an empty program, and the complete source span for nested statements. These regression depths exercise
 repaired and residual structures without becoming CI capacity thresholds or supported capacity claims.
 
-Checkpoint capture and restore use iterative traversal for these nested values, but `serializeCheckpoint` and callers
-using native `JSON.stringify` can still exhaust the host stack while serializing deep plan or runtime data. Issue #408
-tracks the shared checkpoint serializer repair; this boundary also exists for nested lists and is not an object-depth
-rejection policy. Smaller nested-object regressions verify the complete JSON checkpoint/resume route.
+Checkpoint capture, restore, and the public `serializeCheckpoint` path use iterative traversal for validated
+checkpoint data, preserving JSON wire ordering and scalar representation without introducing a depth rejection
+policy. Callers using native `JSON.stringify` remain outside that guarantee. Constrained-stack list and object
+regressions verify the complete public JSON checkpoint/resume route.
 
 ## Non-rejecting scale diagnostics
 
