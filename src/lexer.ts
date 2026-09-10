@@ -1,3 +1,4 @@
+import { parseChild, runParse, type ParseTask } from "./parse-continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { createSourcePosition, createSourceSpan, type SourcePosition } from "./source.js";
 import { createToken, TokenKind, type Token } from "./token.js";
@@ -65,7 +66,7 @@ class Lexer {
 
   public scan(): LexResult {
     while (!this.#isAtEnd()) {
-      this.#scanNormalToken();
+      runParse(this.#scanNormalToken());
     }
 
     const position = this.#position();
@@ -77,7 +78,7 @@ class Lexer {
     });
   }
 
-  #scanNormalToken(): void {
+  *#scanNormalToken(): ParseTask<void> {
     const character = this.#peek();
 
     if (isHorizontalWhitespace(character)) {
@@ -134,7 +135,7 @@ class Lexer {
         this.#scanOptionalEqual(TokenKind.Greater, TokenKind.GreaterEqual);
         return;
       case '"':
-        this.#scanString();
+        yield* parseChild(this.#scanString());
         return;
       default:
         this.#scanInvalidCharacter();
@@ -266,7 +267,7 @@ class Lexer {
     this.#emitToken(TokenKind.Newline, startOffset, start, this.#position());
   }
 
-  #scanString(): void {
+  *#scanString(): ParseTask<void> {
     const stringOffset = this.#offset;
     const stringStart = this.#position();
     const block = this.#peek(1) === '"' && this.#peek(2) === '"';
@@ -304,7 +305,7 @@ class Lexer {
           interpolationStart,
           this.#position(),
         );
-        if (this.#scanInterpolation(interpolationStart, block) === "eof") {
+        if ((yield* parseChild(this.#scanInterpolation(interpolationStart, block))) === "eof") {
           if (block) this.#normalizeBlockText(stringParts);
           if (!block) this.#singleLineStringDepth -= 1;
           this.#report(
@@ -356,10 +357,10 @@ class Lexer {
     return this.#peek() === '"' && (!block || (this.#peek(1) === '"' && this.#peek(2) === '"'));
   }
 
-  #scanInterpolation(
+  *#scanInterpolation(
     interpolationStart: SourcePosition,
     outerBlock: boolean,
-  ): "closed" | "stringEnd" | "eof" {
+  ): ParseTask<"closed" | "stringEnd" | "eof"> {
     let braceDepth = 0;
     while (!this.#isAtEnd()) {
       if (this.#peek() === "}" && braceDepth === 0) {
@@ -381,7 +382,7 @@ class Lexer {
 
       if (this.#peek() === "{") braceDepth += 1;
       else if (this.#peek() === "}") braceDepth -= 1;
-      this.#scanNormalToken();
+      yield* parseChild(this.#scanNormalToken());
     }
 
     this.#report(

@@ -1,3 +1,4 @@
+import { parseChild, runParse, type ParseTask } from "./parse-continuation.js";
 import type {
   AssignmentStatement,
   AssignmentTarget,
@@ -54,17 +55,6 @@ export interface ParseResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
-interface DelimiterMatchCache {
-  parentheses: readonly (number | undefined)[] | null;
-  brackets: readonly (number | undefined)[] | null;
-}
-
-interface CollectionStart {
-  readonly kind: "listLiteral" | "setLiteral";
-  readonly token: Token;
-  readonly bracketIndex: number;
-}
-
 const parserDiagnosticCode = {
   expectedStatement: "TSP001",
   expectedStatementEnd: "TSP002",
@@ -114,19 +104,9 @@ export function parse(source: string): ParseResult {
 class Parser {
   readonly #diagnostics: Diagnostic[] = [];
   #current = 0;
-  #skipParenthesisChainScanThroughIndex = -1;
-  readonly #skipCollectionChainScanIndexes = new Set<number>();
-  #collectionRecoveryVersion = 0;
-  readonly #skipObjectChainScanIndexes = new Set<number>();
   #recoveredAtStatementBoundary = false;
 
-  public constructor(
-    private readonly tokens: readonly Token[],
-    private readonly delimiterMatchCache: DelimiterMatchCache = {
-      parentheses: null,
-      brackets: null,
-    },
-  ) {}
+  public constructor(private readonly tokens: readonly Token[]) {}
 
   public get diagnostics(): readonly Diagnostic[] {
     return this.#diagnostics;
@@ -449,7 +429,7 @@ class Parser {
    * can consume a complete value (and optional pacing) from this position.
    */
   #canParseCompleteSayValue(): boolean {
-    const speculative = new Parser(this.tokens, this.delimiterMatchCache);
+    const speculative = new Parser(this.tokens);
     speculative.#current = this.#current;
 
     const value = speculative.#parseExpression();
@@ -478,7 +458,7 @@ class Parser {
   /** `instant` remains an identifier unless it fills the entire pacing slot. */
   #canParseInstantPacingAlias(): boolean {
     if (!this.#checkIdentifier("instant")) return false;
-    const speculative = new Parser(this.tokens, this.delimiterMatchCache);
+    const speculative = new Parser(this.tokens);
     speculative.#current = this.#current;
     speculative.#advance();
     return speculative.#isSayStatementBoundary();
@@ -943,22 +923,26 @@ class Parser {
   }
 
   #parseRequiredExpression(): Expression | null {
-    const expression = this.#parseExpression();
+    return runParse(this.#parseRequiredExpressionTask());
+  }
+
+  #parseExpression(): Expression | null {
+    return runParse(this.#parseOr());
+  }
+
+  *#parseRequiredExpressionTask(): ParseTask<Expression | null> {
+    const expression = yield* parseChild(this.#parseOr());
     if (expression === null) {
       this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
     }
     return expression;
   }
 
-  #parseExpression(): Expression | null {
-    return this.#parseOr();
-  }
-
-  #parseOr(): Expression | null {
-    let expression = this.#parseAnd();
+  *#parseOr(): ParseTask<Expression | null> {
+    let expression = yield* parseChild(this.#parseAnd());
     while (expression !== null && this.#match(TokenKind.KeywordOr)) {
       this.#skipContinuationNewlines();
-      const right = this.#parseAnd();
+      const right = yield* parseChild(this.#parseAnd());
       if (right === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -971,11 +955,11 @@ class Parser {
     return expression;
   }
 
-  #parseAnd(): Expression | null {
-    let expression = this.#parseNot();
+  *#parseAnd(): ParseTask<Expression | null> {
+    let expression = yield* parseChild(this.#parseNot());
     while (expression !== null && this.#match(TokenKind.KeywordAnd)) {
       this.#skipContinuationNewlines();
-      const right = this.#parseNot();
+      const right = yield* parseChild(this.#parseNot());
       if (right === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -988,13 +972,13 @@ class Parser {
     return expression;
   }
 
-  #parseNot(): Expression | null {
+  *#parseNot(): ParseTask<Expression | null> {
     const operators: Token[] = [];
     while (this.#match(TokenKind.KeywordNot)) {
       operators.push(this.#previous());
       this.#skipContinuationNewlines();
     }
-    let expression = this.#parseComparison();
+    let expression = yield* parseChild(this.#parseComparison());
     if (expression === null) {
       for (let index = 0; index < operators.length; index += 1) {
         this.#reportInsertion(
@@ -1010,12 +994,12 @@ class Parser {
     return expression;
   }
 
-  #parseComparison(): Expression | null {
-    const left = this.#parseRange();
+  *#parseComparison(): ParseTask<Expression | null> {
+    const left = yield* parseChild(this.#parseRange());
     if (left === null || !isComparisonKind(this.#peek().kind)) return left;
     const operator = this.#advance();
     this.#skipContinuationNewlines();
-    const right = this.#parseRange();
+    const right = yield* parseChild(this.#parseRange());
     if (right === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedExpression,
@@ -1033,14 +1017,14 @@ class Parser {
       while (isComparisonKind(this.#peek().kind)) {
         this.#advance();
         this.#skipContinuationNewlines();
-        this.#parseRange();
+        yield* parseChild(this.#parseRange());
       }
     }
     return expression;
   }
 
-  #parseRange(): Expression | null {
-    const left = this.#parseAdditive();
+  *#parseRange(): ParseTask<Expression | null> {
+    const left = yield* parseChild(this.#parseAdditive());
     if (
       left === null ||
       (!this.#check(TokenKind.RangeExclusive) && !this.#check(TokenKind.RangeInclusive))
@@ -1049,7 +1033,7 @@ class Parser {
     }
     const operator = this.#advance();
     this.#skipContinuationNewlines();
-    const right = this.#parseAdditive();
+    const right = yield* parseChild(this.#parseAdditive());
     if (right === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedExpression,
@@ -1073,18 +1057,18 @@ class Parser {
       while (this.#check(TokenKind.RangeExclusive) || this.#check(TokenKind.RangeInclusive)) {
         this.#advance();
         this.#skipContinuationNewlines();
-        this.#parseAdditive();
+        yield* parseChild(this.#parseAdditive());
       }
     }
     return expression;
   }
 
-  #parseAdditive(): Expression | null {
-    let expression = this.#parseMultiplicative();
+  *#parseAdditive(): ParseTask<Expression | null> {
+    let expression = yield* parseChild(this.#parseMultiplicative());
     while (expression !== null && (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus))) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = this.#parseMultiplicative();
+      const right = yield* parseChild(this.#parseMultiplicative());
       if (right === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -1097,8 +1081,8 @@ class Parser {
     return expression;
   }
 
-  #parseMultiplicative(): Expression | null {
-    let expression = this.#parseUnaryArithmetic();
+  *#parseMultiplicative(): ParseTask<Expression | null> {
+    let expression = yield* parseChild(this.#parseUnaryArithmetic());
     while (
       expression !== null &&
       (this.#check(TokenKind.Star) ||
@@ -1107,7 +1091,7 @@ class Parser {
     ) {
       const operator = this.#advance();
       this.#skipContinuationNewlines();
-      const right = this.#parseUnaryArithmetic();
+      const right = yield* parseChild(this.#parseUnaryArithmetic());
       if (right === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -1120,13 +1104,13 @@ class Parser {
     return expression;
   }
 
-  #parseUnaryArithmetic(): Expression | null {
+  *#parseUnaryArithmetic(): ParseTask<Expression | null> {
     const operators: Token[] = [];
     while (this.#check(TokenKind.Plus) || this.#check(TokenKind.Minus)) {
       operators.push(this.#advance());
       this.#skipContinuationNewlines();
     }
-    let expression = this.#parsePostfix();
+    let expression = yield* parseChild(this.#parsePostfix());
     if (expression === null) {
       for (let index = 0; index < operators.length; index += 1) {
         this.#reportInsertion(
@@ -1144,8 +1128,8 @@ class Parser {
     return expression;
   }
 
-  #parsePostfix(): Expression | null {
-    let expression = this.#parsePrimary();
+  *#parsePostfix(): ParseTask<Expression | null> {
+    let expression = yield* parseChild(this.#parsePrimary());
     while (expression !== null) {
       if (this.#match(TokenKind.Dot)) {
         if (!isPropertyName(this.#peek())) {
@@ -1167,7 +1151,7 @@ class Parser {
       if (this.#match(TokenKind.LeftBracket)) {
         const start = expression;
         this.#skipNewlines();
-        const index = this.#parseRequiredExpression();
+        const index = yield* parseChild(this.#parseRequiredExpressionTask());
         this.#skipNewlines();
         if (index === null || !this.#match(TokenKind.RightBracket)) {
           if (index !== null) {
@@ -1187,7 +1171,7 @@ class Parser {
         continue;
       }
       if (this.#match(TokenKind.LeftParenthesis)) {
-        expression = this.#finishCall(expression, this.#previous());
+        expression = yield* parseChild(this.#finishCall(expression, this.#previous()));
         continue;
       }
       break;
@@ -1195,7 +1179,7 @@ class Parser {
     return expression;
   }
 
-  #finishCall(callee: Expression, left: Token): CallExpression {
+  *#finishCall(callee: Expression, left: Token): ParseTask<CallExpression> {
     const argumentsList: CallArgument[] = [];
     let style: "none" | "positional" | "named" = "none";
     this.#skipNewlines();
@@ -1205,7 +1189,7 @@ class Parser {
         const name = this.#identifier(this.#advance());
         this.#advance();
         this.#skipContinuationNewlines();
-        const value = this.#parseRequiredExpression();
+        const value = yield* parseChild(this.#parseRequiredExpressionTask());
         if (value !== null) {
           argument = Object.freeze({
             kind: "namedArgument",
@@ -1217,7 +1201,7 @@ class Parser {
         if (style === "positional") this.#reportMixedArguments(name.span);
         style = "named";
       } else {
-        const value = this.#parseRequiredExpression();
+        const value = yield* parseChild(this.#parseRequiredExpressionTask());
         if (value !== null) {
           argument = Object.freeze({
             kind: "positionalArgument",
@@ -1261,14 +1245,14 @@ class Parser {
     });
   }
 
-  #parsePrimary(): Expression | null {
+  *#parsePrimary(): ParseTask<Expression | null> {
     const token = this.#peek();
     if (
       this.#checkIdentifier("askText") ||
       this.#checkIdentifier("askNumber") ||
       this.#checkIdentifier("choose")
     ) {
-      return this.#parseInteractionExpression();
+      return yield* parseChild(this.#parseInteractionExpression());
     }
     if (this.#match(TokenKind.NumberLiteral)) {
       return Object.freeze({
@@ -1296,28 +1280,28 @@ class Parser {
       return this.#identifier(token);
     }
     if (this.#match(TokenKind.StringStart)) {
-      return this.#parseStringLiteral(token);
+      return yield* parseChild(this.#parseStringLiteral(token));
     }
     if (this.#match(TokenKind.LeftParenthesis)) {
-      return this.#parseParenthesized(token);
+      return yield* parseChild(this.#parseParenthesized(token));
     }
     if (this.#match(TokenKind.LeftBracket)) {
-      return this.#parseListLiteral(token);
+      return yield* parseChild(this.#parseCollectionLiteralElements(token, "listLiteral"));
     }
     if (this.#match(TokenKind.LeftBrace)) {
-      return this.#parseObjectLiteral(token);
+      return yield* parseChild(this.#parseObjectLiteral(token));
     }
     if (this.#match(TokenKind.KeywordSet)) {
       if (!this.#match(TokenKind.LeftBracket)) {
         this.#reportInsertion(parserDiagnosticCode.expectedDelimiter, "Expected '[' after 'set'.");
         return null;
       }
-      return this.#parseSetLiteral(token);
+      return yield* parseChild(this.#parseCollectionLiteralElements(token, "setLiteral"));
     }
     return null;
   }
 
-  #parseInteractionExpression(): InteractionExpression | null {
+  *#parseInteractionExpression(): ParseTask<InteractionExpression | null> {
     const command = this.#advance();
     if (this.#check(TokenKind.LeftParenthesis)) {
       this.#reportSpan(
@@ -1354,7 +1338,7 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
-      const hint = isExpressionStart(this.#peek()) ? this.#parseExpression() : null;
+      const hint = isExpressionStart(this.#peek()) ? yield* parseChild(this.#parseOr()) : null;
       if (this.#check(TokenKind.KeywordAs)) {
         this.#reportSpan(
           parserDiagnosticCode.unsupportedInteractionForm,
@@ -1389,7 +1373,7 @@ class Parser {
         this.#advance();
         colonSpan = copySpan(this.#previous().span);
       }
-      const value = this.#parseExpression();
+      const value = yield* parseChild(this.#parseOr());
       if (value === null) {
         missingChoiceOptionWasReported = true;
         this.#reportInsertion(
@@ -1487,18 +1471,9 @@ class Parser {
     });
   }
 
-  #parseParenthesized(start: Token): ParenthesizedExpression | null {
-    const starts = this.#parenthesisChainStarts(start);
-    if (starts !== null) {
-      for (let index = 1; index < starts.length; index += 1) {
-        this.#skipNewlines();
-        this.#advance();
-      }
-      return this.#parseParenthesizedChain(starts);
-    }
-
+  *#parseParenthesized(start: Token): ParseTask<ParenthesizedExpression | null> {
     this.#skipNewlines();
-    const expression = this.#parseRequiredExpression();
+    const expression = yield* parseChild(this.#parseRequiredExpressionTask());
     this.#skipNewlines();
     if (expression === null || !this.#match(TokenKind.RightParenthesis)) {
       if (expression !== null) {
@@ -1516,318 +1491,11 @@ class Parser {
     });
   }
 
-  #parenthesisChainStarts(start: Token): readonly Token[] | null {
-    if (this.#current - 1 <= this.#skipParenthesisChainScanThroughIndex) return null;
-
-    const starts = [start];
-    const startIndexes = [this.#current - 1];
-    let scan = this.#current;
-    while (true) {
-      while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
-      const token = this.tokens[scan];
-      if (token?.kind !== TokenKind.LeftParenthesis) break;
-      starts.push(token);
-      startIndexes.push(scan);
-      scan += 1;
-    }
-    if (starts.length === 1) return null;
-
-    const matching = this.#getMatchingRightParentheses();
-    let innerClose = matching[startIndexes.at(-1)!];
-    for (let index = startIndexes.length - 2; index >= 0; index -= 1) {
-      const outerClose = matching[startIndexes[index]!];
-      if (innerClose === undefined) {
-        if (outerClose !== undefined) {
-          this.#skipParenthesisChainScanThroughIndex = startIndexes[index]!;
-          return null;
-        }
-      } else {
-        let next = innerClose + 1;
-        while (this.tokens[next]?.kind === TokenKind.Newline) next += 1;
-        if (outerClose === undefined) {
-          if (this.tokens[next]?.kind !== TokenKind.EndOfFile) {
-            this.#skipParenthesisChainScanThroughIndex = startIndexes[index]!;
-            return null;
-          }
-        } else if (outerClose !== next) {
-          this.#skipParenthesisChainScanThroughIndex = startIndexes[index]!;
-          return null;
-        }
-      }
-      innerClose = outerClose;
-    }
-    return starts;
-  }
-
-  #getMatchingRightParentheses(): readonly (number | undefined)[] {
-    const cached = this.delimiterMatchCache.parentheses;
-    if (cached !== null) return cached;
-
-    const matching: (number | undefined)[] = new Array(this.tokens.length);
-    const open: number[] = [];
-    for (let index = 0; index < this.tokens.length; index += 1) {
-      const kind = this.tokens[index]!.kind;
-      if (kind === TokenKind.LeftParenthesis) open.push(index);
-      else if (kind === TokenKind.RightParenthesis) {
-        const start = open.pop();
-        if (start !== undefined) matching[start] = index;
-      }
-    }
-    this.delimiterMatchCache.parentheses = matching;
-    return matching;
-  }
-
-  #parseParenthesizedChain(starts: readonly Token[]): ParenthesizedExpression | null {
-    this.#skipNewlines();
-    const expression = this.#parseRequiredExpression();
-    let parenthesized: ParenthesizedExpression | null = null;
-    this.#skipNewlines();
-    if (expression === null) {
-      for (let index = 1; index < starts.length; index += 1) {
-        this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
-      }
-      return null;
-    }
-    let completed: Expression = expression;
-
-    for (let index = starts.length - 1; index >= 0; index -= 1) {
-      if (!this.#match(TokenKind.RightParenthesis)) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedDelimiter,
-          "Expected ')' after the expression.",
-        );
-        for (let outer = index - 1; outer >= 0; outer -= 1) {
-          this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
-        }
-        return null;
-      }
-      parenthesized = Object.freeze({
-        kind: "parenthesizedExpression",
-        expression: completed,
-        span: spanFrom(starts[index]!.span, this.#previous().span),
-      });
-      completed = parenthesized;
-      if (index > 0) this.#skipNewlines();
-    }
-    return parenthesized;
-  }
-
-  #parseListLiteral(start: Token): ListLiteral {
-    return this.#parseCollectionLiteral(start, "listLiteral");
-  }
-
-  #parseSetLiteral(start: Token): SetLiteral {
-    return this.#parseCollectionLiteral(start, "setLiteral");
-  }
-
-  #parseCollectionLiteral(start: Token, kind: "listLiteral"): ListLiteral;
-  #parseCollectionLiteral(start: Token, kind: "setLiteral"): SetLiteral;
-  #parseCollectionLiteral(start: Token, kind: CollectionStart["kind"]): ListLiteral | SetLiteral {
-    const starts = this.#collectionChainStarts({
-      kind,
-      token: start,
-      bracketIndex: this.#current - 1,
-    });
-    if (starts === null) return this.#parseCollectionLiteralElements(start, kind);
-
-    const originalState = {
-      current: this.#current,
-      diagnosticsLength: this.#diagnostics.length,
-      recoveredAtStatementBoundary: this.#recoveredAtStatementBoundary,
-      skipParenthesisChainScanThroughIndex: this.#skipParenthesisChainScanThroughIndex,
-      collectionRecoveryVersion: this.#collectionRecoveryVersion,
-    };
-    const parseWithBaselineRecovery = (): ListLiteral | SetLiteral => {
-      this.#current = originalState.current;
-      this.#diagnostics.length = originalState.diagnosticsLength;
-      this.#recoveredAtStatementBoundary = originalState.recoveredAtStatementBoundary;
-      this.#skipParenthesisChainScanThroughIndex =
-        originalState.skipParenthesisChainScanThroughIndex;
-      this.#skipCollectionChainScans(starts);
-      // Keep every failed opener disabled so an ancestor recovery cannot make the same
-      // malformed subtree retry this optimized path.
-      this.#collectionRecoveryVersion += 1;
-      return this.#parseCollectionLiteralElements(start, kind);
-    };
-    const unclosedChain =
-      this.#getMatchingRightBrackets()[starts.at(-1)!.bracketIndex] === undefined;
-    for (let index = 1; index < starts.length; index += 1) {
-      this.#skipNewlines();
-      if (starts[index]!.kind === "setLiteral") this.#advance();
-      this.#advance();
-    }
-
-    const inner = starts.at(-1)!;
-    let completed: ListLiteral | SetLiteral = this.#parseCollectionLiteralElements(
-      inner.token,
-      inner.kind,
-    );
-    if (
-      !unclosedChain &&
-      this.#diagnostics.length > originalState.diagnosticsLength &&
-      this.#collectionRecoveryVersion === originalState.collectionRecoveryVersion
-    ) {
-      // Recovery inside the innermost expression may consume a token that would otherwise
-      // close a wrapper. Reparse this chain once through the ordinary recovery path.
-      return parseWithBaselineRecovery();
-    }
-    const diagnosticsAfterInner = this.#diagnostics.length;
-    for (let index = starts.length - 2; index >= 0; index -= 1) {
-      const collection = starts[index]!;
-      const end = this.#consumeClosingDelimiter(
-        TokenKind.RightBracket,
-        collection.kind === "listLiteral"
-          ? "Expected ']' after the list literal."
-          : "Expected ']' after the set literal.",
-      );
-      completed = Object.freeze({
-        kind: collection.kind,
-        elements: Object.freeze([completed]),
-        span: spanFrom(collection.token.span, end),
-      });
-    }
-    if (!unclosedChain && this.#diagnostics.length > diagnosticsAfterInner) {
-      return parseWithBaselineRecovery();
-    }
-    return completed;
-  }
-
-  #collectionChainStarts(first: CollectionStart): readonly CollectionStart[] | null {
-    if (this.#skipCollectionChainScanIndexes.has(first.bracketIndex)) return null;
-
-    const starts = [first];
-    let scan = this.#current;
-    while (true) {
-      while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
-      const token = this.tokens[scan];
-      if (token?.kind === TokenKind.LeftBracket) {
-        starts.push({ kind: "listLiteral", token, bracketIndex: scan });
-        scan += 1;
-        continue;
-      }
-      if (
-        token?.kind === TokenKind.KeywordSet &&
-        this.tokens[scan + 1]?.kind === TokenKind.LeftBracket
-      ) {
-        starts.push({ kind: "setLiteral", token, bracketIndex: scan + 1 });
-        scan += 2;
-        continue;
-      }
-      break;
-    }
-    if (starts.length === 1) return null;
-
-    const matching = this.#getMatchingRightBrackets();
-    let innerClose = matching[starts.at(-1)!.bracketIndex];
-    if (
-      innerClose === undefined &&
-      !this.#isSimpleUnclosedCollectionContent(scan, this.tokens.length - 1)
-    ) {
-      this.#skipCollectionChainScans(starts);
-      return null;
-    }
-    for (let index = starts.length - 2; index >= 0; index -= 1) {
-      const outerClose = matching[starts[index]!.bracketIndex];
-      if (innerClose === undefined) {
-        if (outerClose !== undefined) {
-          this.#skipCollectionChainScans(starts);
-          return null;
-        }
-      } else {
-        let next = innerClose + 1;
-        while (this.tokens[next]?.kind === TokenKind.Newline) next += 1;
-        if (outerClose === undefined) {
-          if (this.tokens[next]?.kind !== TokenKind.EndOfFile) {
-            this.#skipCollectionChainScans(starts);
-            return null;
-          }
-        } else if (outerClose !== next) {
-          this.#skipCollectionChainScans(starts);
-          return null;
-        }
-      }
-      innerClose = outerClose;
-    }
-    return starts;
-  }
-
-  #skipCollectionChainScans(starts: readonly CollectionStart[]): void {
-    for (const start of starts) this.#skipCollectionChainScanIndexes.add(start.bracketIndex);
-  }
-
-  #isSimpleUnclosedCollectionContent(scan: number, end: number): boolean {
-    while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
-    if (scan === end) return true;
-    switch (this.tokens[scan]!.kind) {
-      case TokenKind.NumberLiteral:
-      case TokenKind.Identifier:
-      case TokenKind.KeywordTrue:
-      case TokenKind.KeywordFalse:
-      case TokenKind.KeywordNull:
-      case TokenKind.KeywordSpeaker:
-      case TokenKind.KeywordWait:
-        break;
-      default:
-        return false;
-    }
-    scan += 1;
-    while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
-    return scan === end;
-  }
-
-  #getMatchingRightBrackets(): readonly (number | undefined)[] {
-    const cached = this.delimiterMatchCache.brackets;
-    if (cached !== null) return cached;
-
-    const matching: (number | undefined)[] = new Array(this.tokens.length);
-    const open: { readonly kind: Token["kind"]; readonly index: number }[] = [];
-    const openCounts = new Map<Token["kind"], number>();
-    for (let index = 0; index < this.tokens.length; index += 1) {
-      const kind = this.tokens[index]!.kind;
-      if (
-        kind === TokenKind.LeftBracket ||
-        kind === TokenKind.LeftBrace ||
-        kind === TokenKind.LeftParenthesis ||
-        kind === TokenKind.StringStart ||
-        kind === TokenKind.InterpolationStart
-      ) {
-        open.push({ kind, index });
-        openCounts.set(kind, (openCounts.get(kind) ?? 0) + 1);
-        continue;
-      }
-
-      const expectedOpen =
-        kind === TokenKind.RightBracket
-          ? TokenKind.LeftBracket
-          : kind === TokenKind.RightBrace
-            ? TokenKind.LeftBrace
-            : kind === TokenKind.RightParenthesis
-              ? TokenKind.LeftParenthesis
-              : kind === TokenKind.StringEnd
-                ? TokenKind.StringStart
-                : kind === TokenKind.InterpolationEnd
-                  ? TokenKind.InterpolationStart
-                  : null;
-      if (expectedOpen === null || (openCounts.get(expectedOpen) ?? 0) === 0) continue;
-
-      let start = open.pop()!;
-      openCounts.set(start.kind, openCounts.get(start.kind)! - 1);
-      while (start.kind !== expectedOpen) {
-        start = open.pop()!;
-        openCounts.set(start.kind, openCounts.get(start.kind)! - 1);
-      }
-      if (expectedOpen === TokenKind.LeftBracket || expectedOpen === TokenKind.LeftBrace)
-        matching[start.index] = index;
-    }
-    this.delimiterMatchCache.brackets = matching;
-    return matching;
-  }
-
-  #parseCollectionLiteralElements(
+  *#parseCollectionLiteralElements(
     start: Token,
-    kind: CollectionStart["kind"],
-  ): ListLiteral | SetLiteral {
-    const elements = this.#parseDelimitedElements(TokenKind.RightBracket);
+    kind: "listLiteral" | "setLiteral",
+  ): ParseTask<ListLiteral | SetLiteral> {
+    const elements = yield* parseChild(this.#parseDelimitedElements(TokenKind.RightBracket));
     const end = this.#consumeClosingDelimiter(
       TokenKind.RightBracket,
       kind === "listLiteral"
@@ -1841,11 +1509,11 @@ class Parser {
     });
   }
 
-  #parseDelimitedElements(closing: TokenKind): Expression[] {
+  *#parseDelimitedElements(closing: TokenKind): ParseTask<Expression[]> {
     const elements: Expression[] = [];
     this.#skipNewlines();
     while (!this.#check(closing) && !this.#check(TokenKind.EndOfFile)) {
-      const value = this.#parseRequiredExpression();
+      const value = yield* parseChild(this.#parseRequiredExpressionTask());
       if (value === null) {
         this.#synchronizeDelimited(closing);
       } else {
@@ -1865,82 +1533,7 @@ class Parser {
     return elements;
   }
 
-  #parseObjectLiteral(start: Token): ObjectLiteral {
-    const firstIndex = this.#current - 1;
-    if (this.#skipObjectChainScanIndexes.has(firstIndex)) return this.#parseObjectProperties(start);
-    const starts: { token: Token; name: Token; openIndex: number }[] = [];
-    let openIndex = firstIndex;
-    let scan = this.#current;
-    let token = start;
-    while (!this.#skipObjectChainScanIndexes.has(openIndex)) {
-      while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
-      const name = this.tokens[scan];
-      if (
-        name === undefined ||
-        !isPropertyName(name) ||
-        this.tokens[scan + 1]?.kind !== TokenKind.Colon
-      )
-        break;
-      scan += 2;
-      while (this.tokens[scan]?.kind === TokenKind.Newline) scan += 1;
-      if (this.tokens[scan]?.kind !== TokenKind.LeftBrace) break;
-      // Flatten one contiguous run of pure wrappers. Siblings or expression work
-      // end the run at an ordinary inner object; they do not invalidate ancestors.
-      const matching = this.#getMatchingRightBrackets();
-      const childClose = matching[scan];
-      if (childClose === undefined) break;
-      let next = childClose + 1;
-      while (this.tokens[next]?.kind === TokenKind.Newline) next += 1;
-      if (next !== matching[openIndex]) break;
-      starts.push({ token, name, openIndex });
-      openIndex = scan;
-      token = this.tokens[scan++]!;
-    }
-    if (starts.length === 0) return this.#parseObjectProperties(start);
-    const original = this.#current;
-    const diagnosticCount = this.#diagnostics.length;
-    const recovered = this.#recoveredAtStatementBoundary;
-    const parenthesisScan = this.#skipParenthesisChainScanThroughIndex;
-    const parseWithBaselineRecovery = (): ObjectLiteral => {
-      this.#current = original;
-      this.#diagnostics.length = diagnosticCount;
-      this.#recoveredAtStatementBoundary = recovered;
-      this.#skipParenthesisChainScanThroughIndex = parenthesisScan;
-      for (const wrapper of starts) this.#skipObjectChainScanIndexes.add(wrapper.openIndex);
-      return this.#parseObjectProperties(start);
-    };
-    this.#current = openIndex + 1;
-    let completed = this.#parseObjectProperties(token);
-    for (let index = starts.length - 1; index >= 0; index -= 1) {
-      const wrapper = starts[index]!;
-      // A recovered child still ends an ordinary expression unless a postfix or
-      // infix token follows. Missing closers can therefore use normal insertion
-      // recovery without reparsing every ancestor of the same malformed subtree.
-      if (isExpressionContinuation(this.#peek().kind)) return parseWithBaselineRecovery();
-      this.#skipNewlines();
-      if (this.#check(TokenKind.Comma)) return parseWithBaselineRecovery();
-      const end = this.#consumeClosingDelimiter(
-        TokenKind.RightBrace,
-        "Expected '}' after the object literal.",
-      );
-      const name = this.#identifier(wrapper.name);
-      completed = Object.freeze({
-        kind: "objectLiteral",
-        properties: Object.freeze([
-          Object.freeze({
-            kind: "objectProperty",
-            name,
-            value: completed,
-            span: spanFrom(name.span, completed.span),
-          }),
-        ]),
-        span: spanFrom(wrapper.token.span, end),
-      });
-    }
-    return completed;
-  }
-
-  #parseObjectProperties(start: Token): ObjectLiteral {
+  *#parseObjectLiteral(start: Token): ParseTask<ObjectLiteral> {
     const properties: ObjectProperty[] = [];
     this.#skipNewlines();
     while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
@@ -1962,7 +1555,7 @@ class Parser {
         break;
       }
       this.#skipContinuationNewlines();
-      const value = this.#parseRequiredExpression();
+      const value = yield* parseChild(this.#parseRequiredExpressionTask());
       if (value === null) break;
       properties.push(
         Object.freeze({
@@ -1994,7 +1587,7 @@ class Parser {
     });
   }
 
-  #parseStringLiteral(start: Token): StringLiteral | null {
+  *#parseStringLiteral(start: Token): ParseTask<StringLiteral | null> {
     const parts: StringPart[] = [];
     let valid = true;
     while (!this.#check(TokenKind.StringEnd) && !this.#check(TokenKind.EndOfFile)) {
@@ -2003,7 +1596,7 @@ class Parser {
         continue;
       }
       if (this.#match(TokenKind.InterpolationStart)) {
-        const interpolation = this.#parseStringInterpolation(this.#previous());
+        const interpolation = yield* parseChild(this.#parseStringInterpolation(this.#previous()));
         if (interpolation === null) valid = false;
         else parts.push(interpolation);
         continue;
@@ -2026,7 +1619,7 @@ class Parser {
     });
   }
 
-  #parseStringInterpolation(start: Token): StringInterpolation | null {
+  *#parseStringInterpolation(start: Token): ParseTask<StringInterpolation | null> {
     this.#skipNewlines();
     if (this.#check(TokenKind.InterpolationEnd)) {
       this.#reportInsertion(
@@ -2040,7 +1633,7 @@ class Parser {
       return null;
     }
     const diagnosticCount = this.#diagnostics.length;
-    const expression = this.#parseExpression();
+    const expression = yield* parseChild(this.#parseOr());
     if (expression === null) {
       this.#reportToken(
         parserDiagnosticCode.unsupportedStringExpression,
@@ -2339,24 +1932,6 @@ const propertyNameKinds: ReadonlySet<TokenKind> = new Set([
 
 function isPropertyName(token: Token): boolean {
   return propertyNameKinds.has(token.kind);
-}
-
-function isExpressionContinuation(kind: TokenKind): boolean {
-  return (
-    kind === TokenKind.Dot ||
-    kind === TokenKind.LeftBracket ||
-    kind === TokenKind.LeftParenthesis ||
-    kind === TokenKind.Plus ||
-    kind === TokenKind.Minus ||
-    kind === TokenKind.Star ||
-    kind === TokenKind.Slash ||
-    kind === TokenKind.Percent ||
-    kind === TokenKind.RangeExclusive ||
-    kind === TokenKind.RangeInclusive ||
-    kind === TokenKind.KeywordAnd ||
-    kind === TokenKind.KeywordOr ||
-    isComparisonKind(kind)
-  );
 }
 
 function isExpressionStart(token: Token): boolean {
